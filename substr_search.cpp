@@ -62,8 +62,8 @@ void search(bm::State &state) {
             bm::DoNotOptimize(i);
         }));
 
-    if (state.thread_index == 0) {
-        size_t bytes_scanned = state.iterations() * haystack.size() * state.threads;
+    if (state.thread_index() == 0) {
+        size_t bytes_scanned = state.iterations() * haystack.size() * state.threads();
         state.counters["bytes/s/core"] = bm::Counter(bytes_scanned, bm::Counter::kAvgThreadsRate);
         state.counters["bytes/s"] = bm::Counter(bytes_scanned, bm::Counter::kIsRate);
     }
