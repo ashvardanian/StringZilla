@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.7.2)
-project(CppBenchSubstrSearch)
+project(SubstringSearchBenchmark)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS OFF)
@@ -19,20 +19,21 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -fstrict-vtable-pointers")
 endif()
 
-# Supported CPU architecture flags: 
+# Supported CPU architecture flags:
 # https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8-a+simd")
 
 # Optimizations for common x86 CPUs.
 if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse4.2 -mavx2") # -march=native
+
   if(UNIX AND NOT APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx512f")
   endif()
 endif()
 
 # Optimizations for ARM CPUs.
-if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm") 
+if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mfloat-abi=softfp -mfpu=neon -march=armv8-a+simd")
 endif()
 
@@ -51,6 +52,20 @@ set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -DNDEBUG -O3")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -DDEBUG_SAFE_MODE -g")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -DNDEBUG -O3")
 
-find_package(benchmark REQUIRED)
+include(FetchContent)
+set(BENCHMARK_ENABLE_TESTING OFF)
+set(BENCHMARK_ENABLE_INSTALL OFF)
+set(BENCHMARK_ENABLE_DOXYGEN OFF)
+set(BENCHMARK_INSTALL_DOCS OFF)
+set(BENCHMARK_DOWNLOAD_DEPENDENCIES ON)
+set(BENCHMARK_ENABLE_GTEST_TESTS OFF)
+set(BENCHMARK_USE_BUNDLED_GTEST ON)
+FetchContent_Declare(
+  benchmark
+  GIT_REPOSITORY https://github.com/google/benchmark.git
+  GIT_TAG v1.7.0
+)
+FetchContent_MakeAvailable(benchmark)
+
 add_executable(substr_search_cpp substr_search.cpp)
 target_link_libraries(substr_search_cpp benchmark::benchmark)
