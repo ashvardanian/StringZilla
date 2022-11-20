@@ -30,7 +30,7 @@ span_t random_part(std::vector<uint8_t> &haystack, size_t digits) {
 void fill_buffer() {
     std::random_device rd;
     std::mt19937 rng(rd());
-    constexpr size_t buffer_size = 1 << 29; // 512 MB of random bytes.
+    constexpr size_t buffer_size = 32ull * 1024ull * 1024ull * 1024ull; // 32 GB
 
     haystack_rich.resize(buffer_size);
     needles_rich.resize(200);
