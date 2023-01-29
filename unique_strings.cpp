@@ -13,17 +13,20 @@
 
 namespace bm = benchmark;
 static constexpr char alphabet[] = "abcdefghijklmnopABCDEFGHIJKLMNOP";
+static constexpr std::size_t alphabet_size_k = 32;
+static constexpr std::size_t string_length_k = 5;
+static constexpr std::size_t strings_count_k = 1'000'000;
 
-std::string random_string(std::size_t length) {
+std::string random_string(std::size_t length = string_length_k) {
     static std::random_device r;
     static std::default_random_engine e(r());
     std::string result(length, 'a');
     for (auto &c : result)
-        c = alphabet[e() % 32];
+        c = alphabet[e() % alphabet_size_k];
     return result;
 }
 
-std::vector<std::string> random_strings(std::size_t n, std::size_t length = 3) {
+std::vector<std::string> random_strings(std::size_t n, std::size_t length = string_length_k) {
     std::vector<std::string> result(n);
     for (auto &s : result)
         s = random_string(length);
@@ -49,7 +52,7 @@ std::unordered_map<std::string, std::size_t> first_offsets_middle(std::vector<st
 std::unordered_map<std::string_view, std::size_t> first_offsets_senior(std::span<std::string> strings) {
     std::unordered_map<std::string_view, std::size_t> offsets;
     for (std::size_t idx = 0; idx != strings.size(); ++idx)
-        offsets.try_emplace(strings[idx], idx);
+        offsets.try_emplace(std::string_view(strings[idx]), idx);
     return offsets;
 }
 
@@ -94,12 +97,11 @@ catch (...) {
 
 template <typename functor_at>
 static void bench(bm::State &state, functor_at &&functor) {
-    auto count = 1'000'000;
-    auto strings = random_strings(count);
+    auto strings = random_strings(strings_count_k);
     for (auto _ : state) {
         bm::DoNotOptimize(functor(strings));
     }
-    state.counters["strings/s"] = bm::Counter(count * state.iterations(), bm::Counter::kIsRate);
+    state.counters["strings/s"] = bm::Counter(strings_count_k * state.iterations(), bm::Counter::kIsRate);
 }
 
 BENCHMARK_CAPTURE(bench, junior, first_offsets_junior)->MinTime(10);
