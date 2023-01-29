@@ -100,7 +100,20 @@
     "stack": "cpp",
     "thread": "cpp",
     "typeindex": "cpp",
-    "cinttypes": "cpp"
+    "cinttypes": "cpp",
+    "__bits": "cpp",
+    "any": "cpp",
+    "compare": "cpp",
+    "concepts": "cpp",
+    "csignal": "cpp",
+    "future": "cpp",
+    "list": "cpp",
+    "numbers": "cpp",
+    "semaphore": "cpp",
+    "span": "cpp",
+    "variant": "cpp",
+    "source_location": "cpp",
+    "stop_token": "cpp"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
 }

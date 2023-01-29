@@ -1,6 +1,12 @@
 # Substring Search Benchmark
 
-A collection of different substring search algorithms implemented using SIMD compiler intrinsics (on x86 and ARM). They have similar asymptotic complexity, but vary a lot in terms of real world results. The solutions may not be very elegant, but they are very short and were published for educational purposes.
+A collection of different substring search algorithms implemented using SIMD compiler intrinsics (on x86 and ARM).
+They have similar asymptotic complexity, but vary a lot in terms of real world results.
+The solutions may not be very elegant, but they are very short and were published for educational purposes.
+
+```sh
+cmake -DCMAKE_BUILD_TYPE=Release -B ./build_release && make -j 12 --silent -C ./build_release && ./build_release/unique_strings_cpp
+```
 
 ## Algorithms
 

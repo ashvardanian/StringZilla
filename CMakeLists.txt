@@ -3,7 +3,7 @@ project(SubstringSearchBenchmark)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS OFF)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
@@ -69,3 +69,7 @@ FetchContent_MakeAvailable(benchmark)
 
 add_executable(substr_search_cpp substr_search.cpp)
 target_link_libraries(substr_search_cpp benchmark::benchmark)
+
+
+add_executable(unique_strings_cpp unique_strings.cpp)
+target_link_libraries(unique_strings_cpp benchmark::benchmark)

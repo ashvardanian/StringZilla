@@ -1,7 +1,10 @@
 #pragma once
 #include <stdint.h> // `uint8_t`
 #include <stddef.h> // `size_t`
-#include <omp.h>    // pragmas
+
+#ifndef __APPLE__
+#include <omp.h> // pragmas
+#endif
 #ifdef __AVX2__
 #include <immintrin.h> // `__m256i`
 #endif
@@ -10,6 +13,7 @@
 #endif
 #include <limits>      // `numeric_limits`
 #include <string_view> // `basic_string_view`
+
 #include "substr_seach_macros.hpp"
 
 namespace av {
