@@ -1,4 +1,3 @@
-from typing import Optional
 import random
 import time
 import string
@@ -8,14 +7,13 @@ needle_size = 10
 
 
 def yield_matches(haystack: str, needle: str):
-
     needle_len = len(needle)
     haystack_len = len(haystack)
     if needle_len > haystack_len:
         return
 
-    for off in range(haystack_len-needle_len):
-        if haystack[off: needle_len] == needle:
+    for off in range(haystack_len - needle_len):
+        if haystack[off:needle_len] == needle:
             yield off
 
 
@@ -25,7 +23,7 @@ def random_str(n: int, rich: bool) -> str:
     # return [random.randint(1, 255) for _ in range(n)]
     poor_ascii = string.ascii_lowercase
     rich_ascii = string.ascii_lowercase + string.ascii_uppercase
-    return ''.join(random.choice(rich_ascii if rich else poor_ascii) for _ in range(n))
+    return "".join(random.choice(rich_ascii if rich else poor_ascii) for _ in range(n))
 
 
 def benchmark(rich: bool):
@@ -41,15 +39,15 @@ def benchmark(rich: bool):
     total_bytes = haystack_size * len(needles)
     duration = end - start
 
-    print(f'- bytes/s: {int(total_bytes/duration):,}')
-    print(f'- matches/s: {int(cnt_matches/duration):,}')
+    print(f"- bytes/s: {int(total_bytes/duration):,}")
+    print(f"- matches/s: {int(cnt_matches/duration):,}")
 
 
 if __name__ == "__main__":
-    print('----------------------------------------------------------------------------------------------------------------')
-    print('Python Benchmark')
-    print('----------------------------------------------------------------------------------------------------------------')
-    print('Poor Strings: [a-z]')
+    print("--------------------------------------------")
+    print("Python Benchmark")
+    print("--------------------------------------------")
+    print("Poor Strings: [a-z]")
     benchmark(False)
-    print('Rich Strings: [A-Za-z]')
+    print("Rich Strings: [A-Za-z]")
     benchmark(True)
