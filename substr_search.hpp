@@ -1,40 +1,76 @@
 #pragma once
-#include <stdint.h> // `uint8_t`
+#include <stdint.h> // `byte_t`
 #include <stddef.h> // `size_t`
 
-#ifndef __APPLE__
+#if !defined(__APPLE__)
 #include <omp.h> // pragmas
 #endif
-#ifdef __AVX2__
-#include <immintrin.h> // `__m256i`
+#if defined(__AVX2__)
+#include <x86intrin.h>
 #endif
-#ifdef __ARM_NEON
+#if defined(__ARM_NEON)
 #include <arm_neon.h>
 #endif
-#include <limits>      // `numeric_limits`
-#include <string_view> // `basic_string_view`
 
-#include "substr_seach_macros.hpp"
+#include <limits>    // `std::numeric_limits`
+#include <algorithm> // `std::search`
 
-namespace av {
+#pragma once
+#if defined(__clang__)
+#define stringzilla_compiler_is_gcc_m 0
+#define stringzilla_compiler_is_clang_m 1
+#define stringzilla_compiler_is_msvc_m 0
+#define stringzilla_compiler_is_llvm_m 0
+#define stringzilla_compiler_is_intel_m 0
+#elif defined(__GNUC__) || defined(__GNUG__)
+#define stringzilla_compiler_is_gcc_m 1
+#define stringzilla_compiler_is_clang_m 0
+#define stringzilla_compiler_is_msvc_m 0
+#define stringzilla_compiler_is_llvm_m 0
+#define stringzilla_compiler_is_intel_m 0
+#elif defined(_MSC_VER)
+#define stringzilla_compiler_is_gcc_m 0
+#define stringzilla_compiler_is_clang_m 0
+#define stringzilla_compiler_is_msvc_m 1
+#define stringzilla_compiler_is_llvm_m 0
+#define stringzilla_compiler_is_intel_m 0
+#elif defined(__llvm__)
+#define stringzilla_compiler_is_gcc_m 0
+#define stringzilla_compiler_is_clang_m 0
+#define stringzilla_compiler_is_msvc_m 0
+#define stringzilla_compiler_is_llvm_m 1
+#define stringzilla_compiler_is_intel_m 0
+#elif defined(__INTEL_COMPILER)
+#define stringzilla_compiler_is_gcc_m 0
+#define stringzilla_compiler_is_clang_m 0
+#define stringzilla_compiler_is_msvc_m 0
+#define stringzilla_compiler_is_llvm_m 0
+#define stringzilla_compiler_is_intel_m 1
+#endif
+
+namespace av::stringzilla {
 
     static constexpr size_t not_found_k = std::numeric_limits<size_t>::max();
+    using byte_t = uint8_t;
+    using byte8x_t = uint32_t;
 
     struct span_t {
-        uint8_t *data = nullptr;
-        size_t len = 0;
+        byte_t *data_ = nullptr;
+        size_t len_ = 0;
 
+        inline byte_t *begin() const noexcept { return data_; }
+        inline byte_t *end() const noexcept { return data_ + len_; }
         inline span_t after_n(size_t offset) const noexcept {
-            return (offset < len) ? span_t {data + offset, len - offset} : span_t {};
+            return (offset < len_) ? span_t {data_ + offset, len_ - offset} : span_t {};
         }
     };
 
     /**
-     * \brief This is a faster alternative to `strncmp(a, b, len) == 0`.
+     *  @brief This is a faster alternative to `strncmp(a, b, len_) == 0`.
      */
     template <typename int_at>
-    inline bool are_equal(int_at const *a, int_at const *b, size_t len) noexcept {
-        int_at const *const a_end = a + len;
+    inline bool are_equal(int_at const *a, int_at const *b, size_t len_) noexcept {
+        int_at const *const a_end = a + len_;
         for (; a != a_end && *a == *b; a++, b++)
             ;
         return a_end == a;
@@ -42,143 +78,171 @@ namespace av {
 
     struct stl_t {
 
-        size_t next_offset(span_t haystack, span_t needle) noexcept {
-            using str_view_t = std::basic_string_view<uint8_t>;
-            str_view_t h_stl {haystack.data, haystack.len};
-            str_view_t n_stl {needle.data, needle.len};
-            size_t off = h_stl.find(n_stl);
-            return off == str_view_t::npos ? not_found_k : off;
+        size_t count(span_t haystack, byte_t needle) const noexcept {
+            return std::count(haystack.begin(), haystack.end(), needle);
+        }
+
+        size_t next_offset(span_t haystack, byte_t needle) const noexcept {
+            return std::find(haystack.begin(), haystack.end(), needle) - haystack.begin();
+        }
+
+        size_t next_offset(span_t haystack, span_t needle) const noexcept {
+            return std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end()) - haystack.begin();
         }
     };
 
     /**
-     * \brief A naive subtring matching algorithm with O(|haystack|*|needle|) comparisons.
-     * Matching performance fluctuates between 200 MB/s and 2 GB/s.
+     *  @brief A naive subtring matching algorithm with O(|haystack|*|needle|) comparisons.
+     *  Matching performance fluctuates between 200 MB/s and 2 GB/s.
      */
     struct naive_t {
 
-        size_t next_offset(span_t haystack, span_t needle) noexcept {
+        size_t count(span_t haystack, byte_t needle) const noexcept {
+            size_t result = 0;
+            for (byte_t byte : haystack)
+                result += byte == needle;
+            return result;
+        }
 
-            if (haystack.len < needle.len)
-                return not_found_k;
+        size_t next_offset(span_t haystack, byte_t needle) const noexcept {
+            for (byte_t const &byte : haystack)
+                if (byte == needle)
+                    return &byte - haystack.data_;
+            return haystack.len_;
+        }
 
-            for (size_t off = 0; off <= haystack.len - needle.len; off++) {
-                if (are_equal(haystack.data + off, needle.data, needle.len))
+        size_t next_offset(span_t haystack, span_t needle) const noexcept {
+
+            if (haystack.len_ < needle.len_)
+                return haystack.len_;
+
+            for (size_t off = 0; off <= haystack.len_ - needle.len_; off++) {
+                if (are_equal(haystack.data_ + off, needle.data_, needle.len_))
                     return off;
             }
 
-            return not_found_k;
+            return haystack.len_;
         }
     };
 
     /**
-     * \brief Modified version inspired by Rabin-Karp algorithm.
-     * Matching performance fluctuates between 1 GB/s and 3,5 GB/s.
+     *  @brief Modified version inspired by Rabin-Karp algorithm.
+     *  Matching performance fluctuates between 1 GB/s and 3,5 GB/s.
      *
-     * Similar to Rabin-Karp Algorithm, instead of comparing variable length
-     * strings - we can compare some fixed size fingerprints, which can make
-     * the number of nested loops smaller. But preprocessing text to generate
-     * hashes is very expensive.
-     * Instead - we compare the first 4 bytes of the `needle` to every 4 byte
-     * substring in the `haystack`. If those match - compare the rest.
+     *  Similar to Rabin-Karp Algorithm, instead of comparing variable length
+     *  strings - we can compare some fixed size fingerprints, which can make
+     *  the number of nested loops smaller. But preprocessing text to generate
+     *  hashes is very expensive.
+     *  Instead - we compare the first 4 bytes of the `needle` to every 4 byte
+     *  substring in the `haystack`. If those match - compare the rest.
      */
     struct prefixed_t {
 
+        size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
+        size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+
         size_t next_offset(span_t haystack, span_t needle) noexcept {
 
-            if (needle.len < 5)
+            if (needle.len_ < 5)
                 return naive_t {}.next_offset(haystack, needle);
 
             // Precomputed constants.
-            uint8_t const *h_ptr = haystack.data;
-            uint8_t const *const h_end = haystack.data + haystack.len - needle.len;
-            size_t const n_suffix_len = needle.len - 4;
-            uint32_t const n_prefix = *reinterpret_cast<uint32_t const *>(needle.data);
-            uint8_t const *n_suffix_ptr = needle.data + 4;
+            byte_t const *h_ptr = haystack.data_;
+            byte_t const *const h_end = haystack.end() - needle.len_;
+            size_t const n_suffix_len = needle.len_ - 4;
+            byte8x_t const n_prefix = *reinterpret_cast<byte8x_t const *>(needle.data_);
+            byte_t const *n_suffix_ptr = needle.data_ + 4;
 
             for (; h_ptr <= h_end; h_ptr++) {
-                if (n_prefix == *reinterpret_cast<uint32_t const *>(h_ptr))
+                if (n_prefix == *reinterpret_cast<byte8x_t const *>(h_ptr))
                     if (are_equal(h_ptr + 4, n_suffix_ptr, n_suffix_len))
-                        return h_ptr - haystack.data;
+                        return h_ptr - haystack.data_;
             }
 
-            return not_found_k;
+            return haystack.len_;
         }
     };
 
     struct prefixed_autovec_t {
 
+        size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
+        size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+
         size_t next_offset(span_t haystack, span_t needle) noexcept {
 
-            if (needle.len < 5)
+            if (needle.len_ < 5)
                 return naive_t {}.next_offset(haystack, needle);
 
-            uint8_t const *h_ptr = haystack.data;
-            uint8_t const *const h_end = haystack.data + haystack.len - needle.len;
-            uint32_t const n_prefix = *reinterpret_cast<uint32_t const *>(needle.data);
+            byte_t const *h_ptr = haystack.data_;
+            byte_t const *const h_end = haystack.end() - needle.len_;
+            byte8x_t const n_prefix = *reinterpret_cast<byte8x_t const *>(needle.data_);
 
             for (; (h_ptr + 32) <= h_end; h_ptr += 32) {
 
                 int count_matches = 0;
 
-#if compiler_is_clang_m
+#if stringzilla_compiler_is_clang_m
 #pragma clang loop vectorize(enable)
                 for (size_t i = 0; i < 32; i++)
-                    count_matches += (n_prefix == *reinterpret_cast<uint32_t const *>(h_ptr + i));
-#elif compiler_is_intel_m
+                    count_matches += (n_prefix == *reinterpret_cast<byte8x_t const *>(h_ptr + i));
+#elif stringzilla_compiler_is_intel_m
 #pragma vector always
 #pragma ivdep
                 for (size_t i = 0; i < 32; i++)
-                    count_matches += (n_prefix == *reinterpret_cast<uint32_t const *>(h_ptr + i));
-#elif compiler_is_gcc_m
+                    count_matches += (n_prefix == *reinterpret_cast<byte8x_t const *>(h_ptr + i));
+#elif stringzilla_compiler_is_gcc_m
 #pragma GCC ivdep
                 for (size_t i = 0; i < 32; i++)
-                    count_matches += (n_prefix == *reinterpret_cast<uint32_t const *>(h_ptr + i));
+                    count_matches += (n_prefix == *reinterpret_cast<byte8x_t const *>(h_ptr + i));
 #else
 #pragma omp for simd reduction(+ : count_matches)
                 for (size_t i = 0; i < 32; i++)
-                    count_matches += (n_prefix == *reinterpret_cast<uint32_t const *>(h_ptr + i));
+                    count_matches += (n_prefix == *reinterpret_cast<byte8x_t const *>(h_ptr + i));
 #endif
 
                 if (count_matches) {
                     for (size_t i = 0; i < 32; i++) {
-                        if (are_equal(h_ptr + i, needle.data, needle.len))
-                            return i + (h_ptr - haystack.data);
+                        if (are_equal(h_ptr + i, needle.data_, needle.len_))
+                            return i + (h_ptr - haystack.data_);
                     }
                 }
             }
 
             // Don't forget the last (up to 35) characters.
-            size_t last_match = prefixed_t {}.next_offset(haystack.after_n(h_ptr - haystack.data), needle);
-            return (last_match != not_found_k) ? last_match + (h_ptr - haystack.data) : not_found_k;
+            size_t tail_start = h_ptr - haystack.data_;
+            size_t tail_match = prefixed_t {}.next_offset(haystack.after_n(tail_start), needle);
+            return tail_match + tail_start;
         }
     };
 
-#ifdef __AVX2__
+#if defined(__AVX2__)
 
     /**
-     * \brief A SIMD vectorized version for AVX2 instruction set.
-     * Matching performance is ~ 9 GB/s.
+     *  @brief A SIMD vectorized version for AVX2 instruction set.
+     *  Matching performance is ~ 9 GB/s.
      *
-     * This version processes 32 `haystack` substrings per iteration,
-     * so the number of instructions is only:
+     *  This version processes 32 `haystack` substrings per iteration,
+     *  so the number of instructions is only:
      *  + 4 loads
      *  + 4 comparisons
      *  + 3 bitwise ORs
      *  + 1 masking
-     * for every 32 consecutive substrings.
+     *  for every 32 consecutive substrings.
      */
     struct prefixed_avx2_t {
 
+        size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
+        size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+
         size_t next_offset(span_t haystack, span_t needle) noexcept {
 
-            if (needle.len < 5)
+            if (needle.len_ < 5)
                 return naive_t {}.next_offset(haystack, needle);
 
-            uint8_t const *const h_end = haystack.data + haystack.len - needle.len;
-            __m256i const n_prefix = _mm256_set1_epi32(*(uint32_t const *)(needle.data));
+            byte_t const *const h_end = haystack.end() - needle.len_;
+            __m256i const n_prefix = _mm256_set1_epi32(*(byte8x_t const *)(needle.data_));
 
-            uint8_t const *h_ptr = haystack.data;
+            byte_t const *h_ptr = haystack.data_;
             for (; (h_ptr + 32) <= h_end; h_ptr += 32) {
 
                 __m256i h0 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(h_ptr)), n_prefix);
@@ -190,37 +254,41 @@ namespace av {
 
                 if (mask) {
                     for (size_t i = 0; i < 32; i++) {
-                        if (are_equal(h_ptr + i, needle.data, needle.len))
-                            return i + (h_ptr - haystack.data);
+                        if (are_equal(h_ptr + i, needle.data_, needle.len_))
+                            return i + (h_ptr - haystack.data_);
                     }
                 }
             }
 
             // Don't forget the last (up to 35) characters.
-            size_t last_match = prefixed_t {}.next_offset(haystack.after_n(h_ptr - haystack.data), needle);
-            return (last_match != not_found_k) ? last_match + (h_ptr - haystack.data) : not_found_k;
+            size_t tail_start = h_ptr - haystack.data_;
+            size_t tail_match = prefixed_t {}.next_offset(haystack.after_n(tail_start), needle);
+            return tail_match + tail_start;
         }
     };
 
     /**
-     * \brief Speculative SIMD version for AVX2 instruction set.
-     * Matching performance is ~ 12 GB/s.
+     *  @brief Speculative SIMD version for AVX2 instruction set.
+     *  Matching performance is ~ 12 GB/s.
      *
-     * Up to 40% of performance in modern CPUs comes from speculative
-     * out-of-order execution. The `prefixed_avx2_t` version has
-     * 4 explicit local memory  barries: 3 ORs and 1 IF branch.
-     * This has only 1 IF branch in the main loop.
+     *  Up to 40% of performance in modern CPUs comes from speculative
+     *  out-of-order execution. The `prefixed_avx2_t` version has
+     *  4 explicit local memory  barries: 3 ORs and 1 IF branch.
+     *  This has only 1 IF branch in the main loop.
      */
     struct speculative_avx2_t {
 
+        size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
+        size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+
         size_t next_offset(span_t haystack, span_t needle) noexcept {
 
-            if (needle.len < 5)
+            if (needle.len_ < 5)
                 return naive_t {}.next_offset(haystack, needle);
 
             // Precomputed constants.
-            uint8_t const *const h_end = haystack.data + haystack.len - needle.len;
-            __m256i const n_prefix = _mm256_set1_epi32(*(uint32_t const *)(needle.data));
+            byte_t const *const h_end = haystack.end() - needle.len_;
+            __m256i const n_prefix = _mm256_set1_epi32(*(byte8x_t const *)(needle.data_));
 
             // Top level for-loop changes dramatically.
             // In sequentail computing model for 32 offsets we would do:
@@ -231,7 +299,7 @@ namespace av {
             //  + 4 movemasks.
             //  + 3 bitwise ANDs.
             //  + 1 heavy (but very unlikely) branch.
-            uint8_t const *h_ptr = haystack.data;
+            byte_t const *h_ptr = haystack.data_;
             for (; (h_ptr + 32) <= h_end; h_ptr += 32) {
 
                 __m256i h0_prefixes = _mm256_loadu_si256((__m256i const *)(h_ptr));
@@ -245,34 +313,38 @@ namespace av {
 
                 if (masks0 | masks1 | masks2 | masks3) {
                     for (size_t i = 0; i < 32; i++) {
-                        if (are_equal(h_ptr + i, needle.data, needle.len))
-                            return i + (h_ptr - haystack.data);
+                        if (are_equal(h_ptr + i, needle.data_, needle.len_))
+                            return i + (h_ptr - haystack.data_);
                     }
                 }
             }
 
             // Don't forget the last (up to 35) characters.
-            size_t last_match = prefixed_t {}.next_offset(haystack.after_n(h_ptr - haystack.data), needle);
-            return (last_match != not_found_k) ? last_match + (h_ptr - haystack.data) : not_found_k;
+            size_t tail_start = h_ptr - haystack.data_;
+            size_t tail_match = prefixed_t {}.next_offset(haystack.after_n(tail_start), needle);
+            return tail_match + tail_start;
         }
     };
 
     /**
-     * \brief A hybrid of `prefixed_avx2_t` and `speculative_avx2_t`.
-     * It demonstrates the current inability of scheduler to optimize
-     * the execution flow better, than a human.
+     *  @brief A hybrid of `prefixed_avx2_t` and `speculative_avx2_t`.
+     *  It demonstrates the current inability of scheduler to optimize
+     *  the execution flow better, than a human.
      */
     struct hybrid_avx2_t {
 
+        size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
+        size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+
         size_t next_offset(span_t haystack, span_t needle) noexcept {
 
-            if (needle.len < 5)
+            if (needle.len_ < 5)
                 return naive_t {}.next_offset(haystack, needle);
 
-            uint8_t const *const h_end = haystack.data + haystack.len - needle.len;
-            __m256i const n_prefix = _mm256_set1_epi32(*(uint32_t const *)(needle.data));
+            byte_t const *const h_end = haystack.end() - needle.len_;
+            __m256i const n_prefix = _mm256_set1_epi32(*(byte8x_t const *)(needle.data_));
 
-            uint8_t const *h_ptr = haystack.data;
+            byte_t const *h_ptr = haystack.data_;
             for (; (h_ptr + 64) <= h_end; h_ptr += 64) {
 
                 __m256i h0 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(h_ptr)), n_prefix);
@@ -289,34 +361,38 @@ namespace av {
 
                 if (mask03 | mask47) {
                     for (size_t i = 0; i < 64; i++) {
-                        if (are_equal(h_ptr + i, needle.data, needle.len))
-                            return i + (h_ptr - haystack.data);
+                        if (are_equal(h_ptr + i, needle.data_, needle.len_))
+                            return i + (h_ptr - haystack.data_);
                     }
                 }
             }
 
             // Don't forget the last (up to 67) characters.
-            size_t last_match = prefixed_t {}.next_offset(haystack.after_n(h_ptr - haystack.data), needle);
-            return (last_match != not_found_k) ? last_match + (h_ptr - haystack.data) : not_found_k;
+            size_t tail_start = h_ptr - haystack.data_;
+            size_t tail_match = prefixed_t {}.next_offset(haystack.after_n(tail_start), needle);
+            return tail_match + tail_start;
         }
     };
 
 #endif
 
-#ifdef __AVX512F__
+#if defined(__AVX512F__)
 
     struct speculative_avx512_t {
 
+        size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
+        size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+
         size_t next_offset(span_t haystack, span_t needle) noexcept {
 
-            if (needle.len < 5)
+            if (needle.len_ < 5)
                 return naive_t {}.next_offset(haystack, needle);
 
             // Precomputed constants.
-            uint8_t const *const h_end = haystack.data + haystack.len - needle.len;
-            __m512i const n_prefix = _mm512_set1_epi32(*(uint32_t const *)(needle.data));
+            byte_t const *const h_end = haystack.end() - needle.len_;
+            __m512i const n_prefix = _mm512_set1_epi32(*(byte8x_t const *)(needle.data_));
 
-            uint8_t const *h_ptr = haystack.data;
+            byte_t const *h_ptr = haystack.data_;
             for (; (h_ptr + 64) <= h_end; h_ptr += 64) {
 
                 __m512i h0_prefixes = _mm512_loadu_si512((__m512i const *)(h_ptr));
@@ -330,47 +406,51 @@ namespace av {
 
                 if (masks0 | masks1 | masks2 | masks3) {
                     for (size_t i = 0; i < 64; i++) {
-                        if (are_equal(h_ptr + i, needle.data, needle.len))
-                            return i + (h_ptr - haystack.data);
+                        if (are_equal(h_ptr + i, needle.data_, needle.len_))
+                            return i + (h_ptr - haystack.data_);
                     }
                 }
             }
 
             // Don't forget the last (up to 64+3=67) characters.
-            size_t last_match = prefixed_t {}.next_offset(haystack.after_n(h_ptr - haystack.data), needle);
-            return (last_match != not_found_k) ? last_match + (h_ptr - haystack.data) : not_found_k;
+            size_t tail_start = h_ptr - haystack.data_;
+            size_t tail_match = prefixed_t {}.next_offset(haystack.after_n(tail_start), needle);
+            return tail_match + tail_start;
         }
     };
 
 #endif
 
-#ifdef __ARM_NEON
+#if defined(__ARM_NEON)
     /**
-     *  \brief 128-bit implementation for ARM Neon.
+     *  @brief 128-bit implementation for ARM Neon.
      *
      *  https://developer.arm.com/architectures/instruction-sets/simd-isas/neon/
-     *  https://developer.arm.com/documentation/dui0473/m/neon-programming/neon-data-types
+     *  https://developer.arm.com/documentation/dui0473/m/neon-programming/neon-data_-types
      *  https://developer.arm.com/documentation/dui0473/m/neon-programming/neon-vectors
      *  https://blog.cloudflare.com/neon-is-the-new-black/
      */
     struct speculative_neon_t {
 
+        size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
+        size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+
         size_t next_offset(span_t haystack, span_t needle) noexcept {
 
-            if (needle.len < 5)
+            if (needle.len_ < 5)
                 return naive_t {}.next_offset(haystack, needle);
 
             // Precomputed constants.
-            uint8_t const *const h_end = haystack.data + haystack.len - needle.len;
-            uint32x4_t const n_prefix = vld1q_dup_u32((uint32_t const *)(needle.data));
+            byte_t const *const h_end = haystack.end() - needle.len_;
+            uint32x4_t const n_prefix = vld1q_dup_u32((byte8x_t const *)(needle.data_));
 
-            uint8_t const *h_ptr = haystack.data;
+            byte_t const *h_ptr = haystack.data_;
             for (; (h_ptr + 16) <= h_end; h_ptr += 16) {
 
-                uint32x4_t masks0 = vceqq_u32(vld1q_u32((uint32_t const *)(h_ptr)), n_prefix);
-                uint32x4_t masks1 = vceqq_u32(vld1q_u32((uint32_t const *)(h_ptr + 1)), n_prefix);
-                uint32x4_t masks2 = vceqq_u32(vld1q_u32((uint32_t const *)(h_ptr + 2)), n_prefix);
-                uint32x4_t masks3 = vceqq_u32(vld1q_u32((uint32_t const *)(h_ptr + 3)), n_prefix);
+                uint32x4_t masks0 = vceqq_u32(vld1q_u32((byte8x_t const *)(h_ptr)), n_prefix);
+                uint32x4_t masks1 = vceqq_u32(vld1q_u32((byte8x_t const *)(h_ptr + 1)), n_prefix);
+                uint32x4_t masks2 = vceqq_u32(vld1q_u32((byte8x_t const *)(h_ptr + 2)), n_prefix);
+                uint32x4_t masks3 = vceqq_u32(vld1q_u32((byte8x_t const *)(h_ptr + 3)), n_prefix);
 
                 // Extracting matches from masks:
                 // vmaxvq_u32 (only a64)
@@ -382,22 +462,24 @@ namespace av {
 
                 if (has_match) {
                     for (size_t i = 0; i < 16; i++) {
-                        if (are_equal(h_ptr + i, needle.data, needle.len))
-                            return i + (h_ptr - haystack.data);
+                        if (are_equal(h_ptr + i, needle.data_, needle.len_))
+                            return i + (h_ptr - haystack.data_);
                     }
                 }
             }
 
             // Don't forget the last (up to 16+3=19) characters.
-            size_t last_match = prefixed_t {}.next_offset(haystack.after_n(h_ptr - haystack.data), needle);
-            return (last_match != not_found_k) ? last_match + (h_ptr - haystack.data) : not_found_k;
+            size_t tail_start = h_ptr - haystack.data_;
+            size_t tail_match = prefixed_t {}.next_offset(haystack.after_n(tail_start), needle);
+            return tail_match + tail_start;
         }
     };
 
 #endif
 
     /**
-     * \return Total number of matches.
+     *  @brief  Iterates through every match with a callback.
+     *  @return Total number of matches.
      */
     template <typename engine_at, typename callback_at>
     size_t find_all(span_t haystack, span_t needle, engine_at &&engine, callback_at &&callback) {
@@ -412,4 +494,4 @@ namespace av {
         return count_matches;
     }
 
-} // namespace av
+} // namespace av::stringzilla
