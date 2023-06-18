@@ -1,3 +1,6 @@
+
+
+
 # Substring Search Benchmark
 
 A collection of different substring search algorithms implemented using SIMD compiler intrinsics (on x86 and ARM).
