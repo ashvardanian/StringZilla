@@ -9,15 +9,20 @@ compile_args = ["-std=c++17", "-O3"]
 link_args = []
 macros_args = []
 
-compile_args.append("-fopenmp")
-link_args.append("-lgomp")
+if sys.platform == "linux":
+    compile_args.append("-fopenmp")
+    link_args.append("-lgomp")
+if sys.platform == "darwin":
+    compile_args.append("-Xpreprocessor -fopenmp")
+    link_args.append("-Xpreprocessor -lomp")
+
 compile_args.append("-Wno-unknown-pragmas")
 
 
 ext_modules = [
     Pybind11Extension(
         "stringzilla.compiled",
-        ["stringzilla.cpp"],
+        ["stringzilla/stringzilla.cpp"],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         define_macros=macros_args,
@@ -37,7 +42,6 @@ setup(
     name=__lib_name__,
     version=__version__,
     packages=["stringzilla"],
-    package_dir={"stringzilla": "python/stringzilla"},
     description="Smaller & Faster Single-File Vector Search Engine from Unum",
     long_description=long_description,
     long_description_content_type="text/markdown",

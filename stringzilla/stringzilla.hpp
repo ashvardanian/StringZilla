@@ -59,13 +59,17 @@ namespace av::stringzilla {
     }
 
     struct span_t {
-        byte_t *data_ = nullptr;
+        byte_t const *data_ = nullptr;
         size_t len_ = 0;
 
-        inline byte_t *begin() const noexcept { return data_; }
-        inline byte_t *end() const noexcept { return data_ + len_; }
+        inline size_t size() const noexcept { return len_; }
+        inline byte_t const *begin() const noexcept { return data_; }
+        inline byte_t const *end() const noexcept { return data_ + len_; }
         inline span_t after_n(size_t offset) const noexcept {
             return (offset < len_) ? span_t {data_ + offset, len_ - offset} : span_t {};
+        }
+        inline span_t before_n(size_t tail) const noexcept {
+            return (tail < len_) ? span_t {data_ + len_ - tail, len_ - tail} : span_t {};
         }
     };
 
@@ -80,6 +84,23 @@ namespace av::stringzilla {
         return a_end == a;
     }
 
+    /**
+     *  @brief  Iterates through every match with a callback.
+     *  @return Total number of matches.
+     */
+    template <typename engine_at, typename callback_at>
+    size_t find_all(span_t haystack, span_t needle, engine_at &&engine, callback_at &&callback) {
+
+        size_t last_match = 0;
+        size_t next_offset = 0;
+        size_t count_matches = 0;
+        while ((last_match = engine.next_offset(haystack.after_n(next_offset), needle)) !=
+               (haystack.size() - next_offset))
+            callback(last_match), count_matches++, next_offset = last_match + 1;
+
+        return count_matches;
+    }
+
     struct stl_t {
 
         size_t count(span_t haystack, byte_t needle) const noexcept {
@@ -88,6 +109,10 @@ namespace av::stringzilla {
 
         size_t next_offset(span_t haystack, byte_t needle) const noexcept {
             return std::find(haystack.begin(), haystack.end(), needle) - haystack.begin();
+        }
+
+        size_t count(span_t haystack, span_t needle) const noexcept {
+            return find_all(haystack, needle, *this, [](size_t) {});
         }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
@@ -113,6 +138,18 @@ namespace av::stringzilla {
                 if (byte == needle)
                     return &byte - haystack.data_;
             return haystack.len_;
+        }
+
+        size_t count(span_t haystack, span_t needle) const noexcept {
+
+            if (haystack.len_ < needle.len_)
+                return 0;
+
+            size_t result = 0;
+            for (size_t off = 0; off <= haystack.len_ - needle.len_; off++)
+                result += are_equal(haystack.data_ + off, needle.data_, needle.len_);
+
+            return result;
         }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
@@ -144,6 +181,7 @@ namespace av::stringzilla {
 
         size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
         size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+        size_t count(span_t h, span_t n) const noexcept { return naive_t {}.count(h, n); }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
 
@@ -171,6 +209,7 @@ namespace av::stringzilla {
 
         size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
         size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+        size_t count(span_t h, span_t n) const noexcept { return naive_t {}.count(h, n); }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
 
@@ -237,6 +276,7 @@ namespace av::stringzilla {
 
         size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
         size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+        size_t count(span_t h, span_t n) const noexcept { return naive_t {}.count(h, n); }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
 
@@ -284,6 +324,7 @@ namespace av::stringzilla {
 
         size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
         size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+        size_t count(span_t h, span_t n) const noexcept { return naive_t {}.count(h, n); }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
 
@@ -339,6 +380,7 @@ namespace av::stringzilla {
 
         size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
         size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+        size_t count(span_t h, span_t n) const noexcept { return naive_t {}.count(h, n); }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
 
@@ -386,6 +428,7 @@ namespace av::stringzilla {
 
         size_t count(span_t h, byte_t n) const noexcept { return naive_t {}.count(h, n); }
         size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+        size_t count(span_t h, span_t n) const noexcept { return naive_t {}.count(h, n); }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
 
@@ -438,14 +481,16 @@ namespace av::stringzilla {
 
         size_t count(span_t h, byte_t n) const noexcept {
             // The plan is simple, skim through the misaligned part of the string.
-            byte_t const *aligned_start = (byte_t *)divide_round_up((std::uintptr_t)h.data_, 16);
-            size_t result = naive_t {}.count({h.data_, aligned_start - h.data_}, n);
+            byte_t const *aligned_start = (byte_t *)divide_round_up<size_t>((uintptr_t)h.data_, 16);
+            size_t misaligned_len = static_cast<size_t>(aligned_start - h.data_);
+            size_t result = naive_t {}.count({h.data_, misaligned_len}, n);
 
             // Count matches in the aligned part.
             byte_t const *h_ptr = aligned_start;
-            uint8x16_t n_vector = vld1q_dup_u32(n);
+            byte_t const *const h_end = h.end();
+            uint8x16_t n_vector = vld1q_dup_u8((uint8_t const *)&n);
             for (; (h_ptr + 16) <= h_end; h_ptr += 16) {
-                uint8x16_t masks = vceqq_u8(vld1q_u8((byte8x_t const *)(h_ptr)), n_vector);
+                uint8x16_t masks = vceqq_u8(vld1q_u8((uint8_t const *)h_ptr), n_vector);
                 uint64x2_t masks64x2 = vreinterpretq_u64_u8(masks);
                 result += __builtin_popcountll(vgetq_lane_u64(masks64x2, 0));
                 result += __builtin_popcountll(vgetq_lane_u64(masks64x2, 1));
@@ -458,6 +503,7 @@ namespace av::stringzilla {
         }
 
         size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
+        size_t count(span_t h, span_t n) const noexcept { return naive_t {}.count(h, n); }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
 
@@ -500,21 +546,5 @@ namespace av::stringzilla {
     };
 
 #endif
-
-    /**
-     *  @brief  Iterates through every match with a callback.
-     *  @return Total number of matches.
-     */
-    template <typename engine_at, typename callback_at>
-    size_t find_all(span_t haystack, span_t needle, engine_at &&engine, callback_at &&callback) {
-
-        size_t last_match = 0;
-        size_t next_offset = 0;
-        size_t count_matches = 0;
-        while (last_match = engine.next_offset(haystack.after_n(next_offset), needle)) != (haystack.len_ - next_offset))
-            callback(last_match), count_matches++, next_offset = last_match + 1;
-
-        return count_matches;
-    }
 
 } // namespace av::stringzilla

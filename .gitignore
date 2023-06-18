@@ -10,3 +10,5 @@ cmake_install.cmake
 CMakeFiles
 CMakeLists.txt~
 substr_search_cpp
+*.so
+*egg-info
