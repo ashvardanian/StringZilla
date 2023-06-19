@@ -91,18 +91,16 @@ namespace av::stringzilla {
     template <typename engine_at, typename callback_at>
     size_t find_all(span_t haystack, span_t needle, bool overlaps, engine_at &&engine, callback_at &&callback) {
 
-        size_t last_match = 0;
-        size_t next_offset = 0;
+        size_t match = 0;
+        size_t progress = 0;
         size_t count_matches = 0;
 
         if (overlaps)
-            while ((last_match = engine.next_offset(haystack.after_n(next_offset), needle)) !=
-                   (haystack.size() - next_offset))
-                callback(last_match), count_matches++, next_offset = last_match + 1;
+            while ((match = engine.next_offset(haystack.after_n(progress), needle)) != (haystack.size() - progress))
+                callback(progress + match), count_matches++, progress += match + 1;
         else
-            while ((last_match = engine.next_offset(haystack.after_n(next_offset), needle)) !=
-                   (haystack.size() - next_offset))
-                callback(last_match), count_matches++, next_offset = last_match + needle.len_;
+            while ((match = engine.next_offset(haystack.after_n(progress), needle)) != (haystack.size() - progress))
+                callback(progress + match), count_matches++, progress += match + needle.len_;
 
         return count_matches;
     }
@@ -172,7 +170,7 @@ namespace av::stringzilla {
             if (haystack.len_ < needle.len_)
                 return haystack.len_;
 
-            for (size_t off = 0; off <= haystack.len_ - needle.len_; off++) {
+            for (size_t off = 0; off + needle.len_ <= haystack.len_; off++) {
                 if (are_equal(haystack.data_ + off, needle.data_, needle.len_))
                     return off;
             }
@@ -205,12 +203,12 @@ namespace av::stringzilla {
 
             // Precomputed constants.
             byte_t const *h_ptr = haystack.data_;
-            byte_t const *const h_end = haystack.end() - needle.len_;
+            byte_t const *const h_end = haystack.end();
             size_t const n_suffix_len = needle.len_ - 4;
             byte8x_t const n_prefix = *reinterpret_cast<byte8x_t const *>(needle.data_);
             byte_t const *n_suffix_ptr = needle.data_ + 4;
 
-            for (; h_ptr <= h_end; h_ptr++) {
+            for (; h_ptr + needle.len_ <= h_end; h_ptr++) {
                 if (n_prefix == *reinterpret_cast<byte8x_t const *>(h_ptr))
                     if (are_equal(h_ptr + 4, n_suffix_ptr, n_suffix_len))
                         return h_ptr - haystack.data_;
@@ -232,10 +230,10 @@ namespace av::stringzilla {
                 return naive_t {}.next_offset(haystack, needle);
 
             byte_t const *h_ptr = haystack.data_;
-            byte_t const *const h_end = haystack.end() - needle.len_;
+            byte_t const *const h_end = haystack.end();
             byte8x_t const n_prefix = *reinterpret_cast<byte8x_t const *>(needle.data_);
 
-            for (; (h_ptr + 32) <= h_end; h_ptr += 32) {
+            for (; (h_ptr + needle.len_ + 32) <= h_end; h_ptr += 32) {
 
                 int count_matches = 0;
 
@@ -298,11 +296,11 @@ namespace av::stringzilla {
             if (needle.len_ < 5)
                 return naive_t {}.next_offset(haystack, needle);
 
-            byte_t const *const h_end = haystack.end() - needle.len_;
+            byte_t const *const h_end = haystack.end();
             __m256i const n_prefix = _mm256_set1_epi32(*(byte8x_t const *)(needle.data_));
 
             byte_t const *h_ptr = haystack.data_;
-            for (; (h_ptr + 32) <= h_end; h_ptr += 32) {
+            for (; (h_ptr + needle.len_ + 32) <= h_end; h_ptr += 32) {
 
                 __m256i h0 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(h_ptr)), n_prefix);
                 __m256i h1 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(h_ptr + 1)), n_prefix);
@@ -347,7 +345,7 @@ namespace av::stringzilla {
                 return naive_t {}.next_offset(haystack, needle);
 
             // Precomputed constants.
-            byte_t const *const h_end = haystack.end() - needle.len_;
+            byte_t const *const h_end = haystack.end();
             __m256i const n_prefix = _mm256_set1_epi32(*(byte8x_t const *)(needle.data_));
 
             // Top level for-loop changes dramatically.
@@ -360,7 +358,7 @@ namespace av::stringzilla {
             //  + 3 bitwise ANDs.
             //  + 1 heavy (but very unlikely) branch.
             byte_t const *h_ptr = haystack.data_;
-            for (; (h_ptr + 32) <= h_end; h_ptr += 32) {
+            for (; (h_ptr + needle.len_ + 32) <= h_end; h_ptr += 32) {
 
                 __m256i h0_prefixes = _mm256_loadu_si256((__m256i const *)(h_ptr));
                 int masks0 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(h0_prefixes, n_prefix));
@@ -402,11 +400,11 @@ namespace av::stringzilla {
             if (needle.len_ < 5)
                 return naive_t {}.next_offset(haystack, needle);
 
-            byte_t const *const h_end = haystack.end() - needle.len_;
+            byte_t const *const h_end = haystack.end();
             __m256i const n_prefix = _mm256_set1_epi32(*(byte8x_t const *)(needle.data_));
 
             byte_t const *h_ptr = haystack.data_;
-            for (; (h_ptr + 64) <= h_end; h_ptr += 64) {
+            for (; (h_ptr + needle.len_ + 64) <= h_end; h_ptr += 64) {
 
                 __m256i h0 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(h_ptr)), n_prefix);
                 __m256i h1 = _mm256_cmpeq_epi32(_mm256_loadu_si256((__m256i const *)(h_ptr + 1)), n_prefix);
@@ -451,11 +449,11 @@ namespace av::stringzilla {
                 return naive_t {}.next_offset(haystack, needle);
 
             // Precomputed constants.
-            byte_t const *const h_end = haystack.end() - needle.len_;
+            byte_t const *const h_end = haystack.end();
             __m512i const n_prefix = _mm512_set1_epi32(*(byte8x_t const *)(needle.data_));
 
             byte_t const *h_ptr = haystack.data_;
-            for (; (h_ptr + 64) <= h_end; h_ptr += 64) {
+            for (; (h_ptr + needle.len_ + 64) <= h_end; h_ptr += 64) {
 
                 __m512i h0_prefixes = _mm512_loadu_si512((__m512i const *)(h_ptr));
                 int masks0 = _mm512_cmpeq_epi32_mask(h0_prefixes, n_prefix);
@@ -496,8 +494,8 @@ namespace av::stringzilla {
 
         size_t count(span_t h, byte_t n) const noexcept {
             // The plan is simple, skim through the misaligned part of the string.
-            byte_t const *aligned_start = (byte_t *)divide_round_up<size_t>((uintptr_t)h.data_, 16);
-            size_t misaligned_len = static_cast<size_t>(aligned_start - h.data_);
+            byte_t const *aligned_start = (byte_t const *)(divide_round_up<size_t>((uintptr_t)h.data_, 16) * 16);
+            size_t misaligned_len = std::min(static_cast<size_t>(aligned_start - h.data_), h.len_);
             size_t result = naive_t {}.count({h.data_, misaligned_len}, n);
 
             // Count matches in the aligned part.
@@ -507,30 +505,33 @@ namespace av::stringzilla {
             for (; (h_ptr + 16) <= h_end; h_ptr += 16) {
                 uint8x16_t masks = vceqq_u8(vld1q_u8((uint8_t const *)h_ptr), n_vector);
                 uint64x2_t masks64x2 = vreinterpretq_u64_u8(masks);
-                result += __builtin_popcountll(vgetq_lane_u64(masks64x2, 0));
-                result += __builtin_popcountll(vgetq_lane_u64(masks64x2, 1));
+                result += __builtin_popcountll(vgetq_lane_u64(masks64x2, 0)) / 8;
+                result += __builtin_popcountll(vgetq_lane_u64(masks64x2, 1)) / 8;
             }
 
             // Count matches in the misaligned tail.
-            size_t tail_len = h.end() - h_ptr;
+            size_t tail_len = h_end - h_ptr;
             result += naive_t {}.count({h_ptr, tail_len}, n);
             return result;
         }
 
         size_t next_offset(span_t h, byte_t n) const noexcept { return naive_t {}.next_offset(h, n); }
-        size_t count(span_t h, span_t n, bool o) const noexcept { return naive_t {}.count(h, n, o); }
+
+        size_t count(span_t h, span_t n, bool o) const noexcept {
+            return find_all(h, n, o, *this, [](size_t) {});
+        }
 
         size_t next_offset(span_t haystack, span_t needle) const noexcept {
 
-            if (needle.len_ < 5)
+            if (needle.len_ < 4)
                 return naive_t {}.next_offset(haystack, needle);
 
             // Precomputed constants.
-            byte_t const *const h_end = haystack.end() - needle.len_;
+            byte_t const *const h_end = haystack.end();
             uint32x4_t const n_prefix = vld1q_dup_u32((byte8x_t const *)(needle.data_));
 
             byte_t const *h_ptr = haystack.data_;
-            for (; (h_ptr + 16) <= h_end; h_ptr += 16) {
+            for (; (h_ptr + needle.len_ + 16) <= h_end; h_ptr += 16) {
 
                 uint32x4_t masks0 = vceqq_u32(vld1q_u32((byte8x_t const *)(h_ptr)), n_prefix);
                 uint32x4_t masks1 = vceqq_u32(vld1q_u32((byte8x_t const *)(h_ptr + 1)), n_prefix);

@@ -113,11 +113,16 @@ class file_t : public str_view_t {
 };
 
 class slices_t : public std::enable_shared_from_this<slices_t> {
-    std::shared_ptr<str_view_t const> whole_;
+    std::weak_ptr<str_view_t const> whole_;
     std::vector<span_t> parts_;
 
   public:
-    slices_t(std::shared_ptr<str_view_t const> whole, std::vector<span_t> parts) : whole_(whole), parts_(parts) {}
+    slices_t() = default;
+    slices_t(slices_t &&) = default;
+    slices_t &operator=(slices_t &&) = default;
+    slices_t(std::shared_ptr<str_view_t const> whole, std::vector<span_t> parts)
+        : whole_(std::move(whole)), parts_(std::move(parts)) {}
+
     ssize_t size() const { return static_cast<ssize_t>(parts_.size()); }
     std::string_view operator[](ssize_t i) const {
         return to_stl(i < 0 ? parts_[static_cast<size_t>(size() + i)] : parts_[static_cast<size_t>(i)]);
@@ -125,14 +130,13 @@ class slices_t : public std::enable_shared_from_this<slices_t> {
 };
 
 bool str_view_t::contains(std::string_view needle, ssize_t start, ssize_t end) const {
+
     if (needle.size() == 0)
         return true;
     span_t part = slice(view_, start, end);
-    // std::printf("start end %zd %zd %zu %s \n", start, end, part.size(), part.data_);
     size_t offset = needle.size() == 1 //
                         ? backend_t {}.next_offset(part, static_cast<byte_t>(needle.front()))
                         : backend_t {}.next_offset(part, to_span(needle));
-    // std::printf("off: %zu \n", offset);
     return offset != part.size();
 }
 
@@ -150,21 +154,26 @@ ssize_t str_view_t::count(std::string_view needle, ssize_t start, ssize_t end, b
     if (needle.size() == 0)
         return 0;
     span_t part = slice(view_, start, end);
-    return needle.size() == 1 //
-               ? backend_t {}.count(part, static_cast<byte_t>(needle.front()))
-               : backend_t {}.count(part, to_span(needle), allowoverlap);
+    auto result = needle.size() == 1 //
+                      ? backend_t {}.count(part, static_cast<byte_t>(needle.front()))
+                      : backend_t {}.count(part, to_span(needle), allowoverlap);
+
+    return result;
 }
 
 std::shared_ptr<slices_t> str_view_t::splitlines(bool keeplinebreaks, char separator) const {
-    size_t count_lines = backend_t {}.count(view_, separator) + 1;
-    std::vector<span_t> parts(count_lines);
+
+    size_t count_separators = backend_t {}.count(view_, separator);
+    std::vector<span_t> parts(count_separators + 1);
     size_t last_start = 0;
-    for (size_t i = 0; i != count_lines; ++i) {
-        size_t last_end = backend_t {}.next_offset(view_.after_n(last_start), separator);
-        parts[i] = span_t {view_.data_ + last_start, last_end - last_start + keeplinebreaks};
+    for (size_t i = 0; i != count_separators; ++i) {
+        span_t remaining = view_.after_n(last_start);
+        size_t offset_in_remaining = backend_t {}.next_offset(remaining, separator);
+        parts[i] = span_t {view_.data_ + last_start, offset_in_remaining + keeplinebreaks};
+        last_start += offset_in_remaining + 1;
     }
-    parts[count_lines] = span_t {view_.data_ + last_start, view_.len_ - last_start};
-    return std::make_shared<slices_t>(shared_from_this(), parts);
+    parts[count_separators] = view_.after_n(last_start);
+    return std::make_shared<slices_t>(shared_from_this(), std::move(parts));
 }
 
 std::shared_ptr<slices_t> str_view_t::split(std::string_view separator, ssize_t maxsplit, bool keepseparator) const {
@@ -174,15 +183,19 @@ std::shared_ptr<slices_t> str_view_t::split(std::string_view separator, ssize_t 
 
     std::vector<span_t> parts;
     size_t last_start = 0;
+    bool will_continue = true;
     while (last_start < view_.size()) {
         span_t remaining = view_.after_n(last_start);
         size_t offset_in_remaining = backend_t {}.next_offset(remaining, to_span(separator));
-        bool will_continue = offset_in_remaining != remaining.size();
-        parts.emplace_back(
-            span_t {remaining.begin(), offset_in_remaining + separator.size() * keepseparator * will_continue});
-        last_start += offset_in_remaining;
+        will_continue = offset_in_remaining != remaining.size();
+        size_t part_len = offset_in_remaining + separator.size() * keepseparator * will_continue;
+        parts.emplace_back(span_t {remaining.begin(), part_len});
+        last_start += offset_in_remaining + separator.size();
     }
-    return std::make_shared<slices_t>(shared_from_this(), parts);
+    // Python marks includes empy ending as well
+    if (will_continue)
+        parts.emplace_back(span_t {});
+    return std::make_shared<slices_t>(shared_from_this(), std::move(parts));
 }
 
 std::shared_ptr<str_view_t> str_view_t::strip(std::string_view characters) const { return {}; }
@@ -240,6 +253,7 @@ PYBIND11_MODULE(compiled, m) {
     define_str_view_ops(file_class);
 
     auto slices_class = py::class_<slices_t, std::shared_ptr<slices_t>>(m, "Slices");
+    slices_class.def(py::init([]() { return std::make_shared<slices_t>(); }));
     slices_class.def("__len__", &slices_t::size);
     slices_class.def("__getitem__", &slices_t::operator[], py::arg("index"));
 }

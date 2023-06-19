@@ -26,5 +26,11 @@ So I took my SIMD tutorial and transformed into a Python package.
 ## Development
 
 ```sh
-pip install -e . && pytest test.py -s -x
+rm -rf build && pip install -e . && pytest test.py -s -x
+```
+
+To benchmark on some custom file and pattern combination:
+
+```sh
+python bench.py --path "your file" --pattern "your pattern"
 ```

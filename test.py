@@ -29,16 +29,23 @@ def check_identical(native: str, big: Union[Str, File], needle: Optional[str] = 
     assert native.find(needle) == big.find(needle)
     assert native.count(needle) == big.count(needle)
 
+    native_slices = native.split(needle)
+    big_slices = big.split(needle)
+    assert len(native_slices) == len(big_slices)
+
 
 def test_basic():
-    pattern = "abc"
-    native = "abcabcabc"
-    big = Str("abcabcabc")
+    native = "abcd" * 10
+    big = Str(native)
 
-    check_identical(native, big, pattern)
+    check_identical(native, big, "a")
+    check_identical(native, big, "ab")
+    check_identical(native, big, "abc")
+    check_identical(native, big, "abcd")
+    check_identical(native, big, "abcde")
 
 
-@pytest.mark.parametrize("pattern_length", [4, 5])
+@pytest.mark.parametrize("pattern_length", [1, 4, 5])
 @pytest.mark.parametrize("haystack_length", range(1, 200))
 def test_fuzzy(pattern_length: int, haystack_length: int):
     native = get_random_string(variability=3, length=haystack_length)
