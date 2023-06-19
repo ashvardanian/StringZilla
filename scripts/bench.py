@@ -2,7 +2,7 @@ import time
 
 import fire
 
-from stringzilla.compiled import Str, File
+from stringzilla import Str, File
 
 
 def log_duration(name: str, func: callable):

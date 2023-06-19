@@ -4,7 +4,7 @@ from string import ascii_lowercase
 
 import pytest
 
-from stringzilla.compiled import Str, File, Slices
+from stringzilla import Str, File, Slices
 
 
 def get_random_string(
@@ -17,7 +17,12 @@ def get_random_string(
     return "".join(choice(ascii_lowercase[:variability]) for _ in range(length))
 
 
-def check_identical(native: str, big: Union[Str, File], needle: Optional[str] = None):
+def check_identical(
+    native: str,
+    big: Union[Str, File],
+    needle: Optional[str] = None,
+    check_iterators: bool = False,
+):
     if needle is None:
         part_offset = randint(0, len(native) - 1)
         part_length = randint(1, len(native) - part_offset)
@@ -33,16 +38,25 @@ def check_identical(native: str, big: Union[Str, File], needle: Optional[str] = 
     big_slices: Slices = big.split(needle)
     assert len(native_slices) == len(big_slices)
 
+    if check_iterators:
+        for i in range(len(native_slices)):
+            assert len(native_slices[i]) == len(big_slices[i])
+            assert native_slices[i] == str(big_slices[i])
+            assert [c for c in native_slices[i]] == [c for c in big_slices[i]]
+
+        for native_slice, big_slice in zip(native_slices, big_slices):
+            assert native_slice == str(big_slice)
+
 
 def test_basic():
     native = "abcd" * 10
     big = Str(native)
 
-    check_identical(native, big, "a")
-    check_identical(native, big, "ab")
-    check_identical(native, big, "abc")
-    check_identical(native, big, "abcd")
-    check_identical(native, big, "abcde")
+    check_identical(native, big, "a", True)
+    check_identical(native, big, "ab", True)
+    check_identical(native, big, "abc", True)
+    check_identical(native, big, "abcd", True)
+    check_identical(native, big, "abcde", True)
 
 
 @pytest.mark.parametrize("pattern_length", [1, 4, 5])

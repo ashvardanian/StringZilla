@@ -1,5 +1,5 @@
 import argparse
-from stringzilla.compiled import Str, File, Slices
+from stringzilla import Str, File, Slices
 
 
 if __name__ == "__main__":

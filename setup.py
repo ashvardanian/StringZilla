@@ -21,7 +21,7 @@ compile_args.append("-Wno-unknown-pragmas")
 
 ext_modules = [
     Pybind11Extension(
-        "stringzilla.compiled",
+        "stringzilla",
         ["stringzilla/stringzilla.cpp"],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
@@ -41,7 +41,6 @@ with open(os.path.join(this_directory, "README.md")) as f:
 setup(
     name=__lib_name__,
     version=__version__,
-    packages=["stringzilla"],
     description="Crunch 100+ GB Strings in Python with ease",
     long_description=long_description,
     long_description_content_type="text/markdown",
