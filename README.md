@@ -14,12 +14,11 @@ It's designed to replace `open(...).readlines()`, `str().splitlines()` and many 
 
 [tutorial]: https://youtu.be/6Sh9QWdzo58
 
-## Installation
-
-- For Python: `pip install stringzilla`
-- For Conan C++ users.
-
 ## Usage
+
+```sh
+pip install stringzilla
+```
 
 There are two classes you can use interchangibly:
 
@@ -36,6 +35,7 @@ Once constructed, following interfaces are supported:
 ```python
 len(text) -> int
 'substring' in text -> bool
+text[42] -> str
 
 text.contains(
     'subtring',
@@ -81,4 +81,10 @@ To benchmark on some custom file and pattern combination:
 
 ```sh
 python scripts/bench.py --path "your file" --pattern "your pattern"
+```
+
+To validate packaging:
+
+```sh
+cibuildwheel --platform linux
 ```

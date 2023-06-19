@@ -261,7 +261,7 @@ std::shared_ptr<py_spans_t> py_span_t::split(std::string_view separator, size_t 
 
 std::shared_ptr<py_subspan_t> py_span_t::sub(ssize_t start, ssize_t end) const {
     index_span_t index_span = unsigned_slice(size(), start, end);
-    return std::make_shared<py_subspan_t>(shared_from_this(), span_t {data_ + index_span.offset, index_span.le});
+    return std::make_shared<py_subspan_t>(shared_from_this(), span_t {data_ + index_span.offset, index_span.length});
 }
 
 template <typename at>
