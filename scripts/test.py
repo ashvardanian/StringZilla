@@ -48,8 +48,9 @@ def check_identical(
             assert native_slice == str(big_slice)
 
 
-def test_basic():
-    native = "abcd" * 10
+@pytest.mark.parametrize("repetitions", range(1, 10))
+def test_basic(repetitions: int):
+    native = "abcd" * repetitions
     big = Str(native)
 
     check_identical(native, big, "a", True)
@@ -59,12 +60,13 @@ def test_basic():
     check_identical(native, big, "abcde", True)
 
 
-@pytest.mark.parametrize("pattern_length", [1, 4, 5])
-@pytest.mark.parametrize("haystack_length", range(1, 200))
-def test_fuzzy(pattern_length: int, haystack_length: int):
-    native = get_random_string(variability=3, length=haystack_length)
+@pytest.mark.parametrize("pattern_length", [1, 2, 4, 5])
+@pytest.mark.parametrize("haystack_length", range(1, 65))
+@pytest.mark.parametrize("variability", [2, 25])
+def test_fuzzy(pattern_length: int, haystack_length: int, variability: int):
+    native = get_random_string(variability=variability, length=haystack_length)
     big = Str(native)
 
     for _ in range(haystack_length // pattern_length):
-        pattern = get_random_string(variability=3, length=pattern_length)
+        pattern = get_random_string(variability=variability, length=pattern_length)
         check_identical(native, big, pattern)

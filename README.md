@@ -6,11 +6,47 @@ Stringzilla was born many years ago as a [tutorial for SIMD accelerated string-p
 But one day, processing 100+ GB Chemistry and AI datasets, I decided to transform it into a library.
 It's designed to replace `open(...).readlines()`, `str().splitlines()` and many other common workloads with very long strings.
 
-| Benchmark                |   IoT    | Arm Laptop | x86 Server |
-| :----------------------- | :------: | :--------: | :--------: |
-| Python: `str.find`       |  4 MB/s  |  14 MB/s   |  11 MB/s   |
-| C++: `std::string::find` | 560 MB/s |  1,2 GB/s  |  1,3 GB/s  |
-| Stringzilla              | 4,3 Gb/s |  12 GB/s   | 12,1 GB/s  |
+<table>
+<tr>
+<td>
+
+<table>
+<thead>
+<tr>
+<th style="text-align:left">Benchmark</th>
+<th style="text-align:center">IoT</th>
+<th style="text-align:center">Arm Laptop</th>
+<th style="text-align:center">x86 Server</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left">Python: <code>str.find</code></td>
+<td style="text-align:center">4 MB/s</td>
+<td style="text-align:center">14 MB/s</td>
+<td style="text-align:center">11 MB/s</td>
+</tr>
+<tr>
+<td style="text-align:left">C++: <code>std::string::find</code></td>
+<td style="text-align:center">560 MB/s</td>
+<td style="text-align:center">1,2 GB/s</td>
+<td style="text-align:center">1,3 GB/s</td>
+</tr>
+<tr>
+<td style="text-align:left">Stringzilla</td>
+<td style="text-align:center">4,3 Gb/s</td>
+<td style="text-align:center">12 GB/s</td>
+<td style="text-align:center">12,1 GB/s</td>
+</tr>
+</tbody>
+</table>
+
+</td>
+<td>
+<img src="stringzilla.jpeg" height=150px>
+</td>
+<tr>
+</table>
 
 [tutorial]: https://youtu.be/6Sh9QWdzo58
 

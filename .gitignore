@@ -11,4 +11,5 @@ CMakeFiles
 CMakeLists.txt~
 substr_search_cpp
 *.so
-*egg-info
+*.egg-info
+*.whl
