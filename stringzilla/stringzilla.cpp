@@ -65,7 +65,7 @@ class str_view_t : public std::enable_shared_from_this<str_view_t> {
     ssize_t size() const { return static_cast<ssize_t>(view_.size()); }
     bool contains(std::string_view needle, ssize_t start, ssize_t end) const;
     ssize_t find(std::string_view, ssize_t start, ssize_t end) const;
-    ssize_t count(std::string_view, ssize_t start, ssize_t end) const;
+    ssize_t count(std::string_view, ssize_t start, ssize_t end, bool allowoverlap) const;
     std::shared_ptr<slices_t> splitlines(bool keeplinebreaks, char separator) const;
     std::shared_ptr<slices_t> split(std::string_view separator, ssize_t maxsplit, bool keepseparator) const;
     std::shared_ptr<str_view_t> strip(std::string_view characters) const;
@@ -146,13 +146,13 @@ ssize_t str_view_t::find(std::string_view needle, ssize_t start, ssize_t end) co
     return offset != part.size() ? offset : -1;
 }
 
-ssize_t str_view_t::count(std::string_view needle, ssize_t start, ssize_t end) const {
+ssize_t str_view_t::count(std::string_view needle, ssize_t start, ssize_t end, bool allowoverlap) const {
     if (needle.size() == 0)
         return 0;
     span_t part = slice(view_, start, end);
     return needle.size() == 1 //
                ? backend_t {}.count(part, static_cast<byte_t>(needle.front()))
-               : backend_t {}.count(part, to_span(needle));
+               : backend_t {}.count(part, to_span(needle), allowoverlap);
 }
 
 std::shared_ptr<slices_t> str_view_t::splitlines(bool keeplinebreaks, char separator) const {
@@ -207,7 +207,8 @@ void define_str_view_ops(py::class_<at, std::shared_ptr<at>> &str_view_class) {
         &at::count,
         py::arg("needle"),
         py::arg("start") = 0,
-        py::arg("end") = ssize_max_k);
+        py::arg("end") = ssize_max_k,
+        py::arg("allowoverlap") = false);
     str_view_class.def( //
         "splitlines",
         &at::splitlines,
