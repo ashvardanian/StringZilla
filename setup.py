@@ -42,7 +42,7 @@ setup(
     name=__lib_name__,
     version=__version__,
     packages=["stringzilla"],
-    description="Smaller & Faster Single-File Vector Search Engine from Unum",
+    description="Crunch 100+ GB Strings in Python with ease",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="Apache-2.0",

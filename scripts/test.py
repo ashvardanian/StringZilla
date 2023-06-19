@@ -30,7 +30,7 @@ def check_identical(native: str, big: Union[Str, File], needle: Optional[str] = 
     assert native.count(needle) == big.count(needle)
 
     native_slices = native.split(needle)
-    big_slices = big.split(needle)
+    big_slices: Slices = big.split(needle)
     assert len(native_slices) == len(big_slices)
 
 

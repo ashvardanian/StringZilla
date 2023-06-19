@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=42", "wheel", "cmake>=3.22", "pybind11"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
+xfail_strict = true
+filterwarnings = ["error"]
+
+[tool.cibuildwheel]
+test-requires = ["pytest"]
+test-command = "pytest {project}/scripts/test.py"
+build-verbosity = 0
+skip = ["*musllinux*", "*i686*", "pp*", "cp36-*"]
+
+[tool.cibuildwheel.linux]
+before-build = [
+    "rm -rf {project}/build",
+]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+
+archs = ["x86_64", "aarch64"]
+before-all = [
+    "yum install -y glibc-devel wget python3-devel"
+]
+repair-wheel-command = "auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos]
+before-build = [
+    "rm -rf {project}/build",
+]
+archs = ["x86_64", "universal2", "arm64"]
+repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
+
+# TODO: Windows support
+# [tool.cibuildwheel.windows]
+# before-build = [
+#    "rm -rf {project}/build",
+# ]
+# archs = ["x86", "AMD64"]
+# skip = ["*win32*", "pp*", "cp36-*"]
