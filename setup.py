@@ -22,7 +22,7 @@ compile_args.append("-Wno-unknown-pragmas")
 ext_modules = [
     Pybind11Extension(
         "stringzilla",
-        ["stringzilla/stringzilla.cpp"],
+        ["stringzilla/pybind11.cpp"],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         define_macros=macros_args,
