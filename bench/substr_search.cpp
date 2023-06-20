@@ -7,7 +7,7 @@
 
 #include <benchmark/benchmark.h>
 
-#include "stringzilla.hpp"
+#include "substr_search.hpp"
 
 using namespace av;
 namespace bm = benchmark;
