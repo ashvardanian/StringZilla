@@ -57,7 +57,7 @@ def test_basic(repetitions: int):
     check_identical(native, big, "ab", True)
     check_identical(native, big, "abc", True)
     check_identical(native, big, "abcd", True)
-    check_identical(native, big, "abcde", True)
+    check_identical(native, big, "abcde", True)  # Missing pattern
 
 
 @pytest.mark.parametrize("pattern_length", [1, 2, 4, 5])

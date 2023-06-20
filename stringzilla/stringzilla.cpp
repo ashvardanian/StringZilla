@@ -111,7 +111,7 @@ struct py_file_t : public py_span_t {
         if (fstat(fd, &sb) != 0)
             throw std::runtime_error("Can't retrieve file size!");
         size_t file_size = sb.st_size;
-        void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
         if (map == MAP_FAILED)
             throw std::runtime_error("Couldn't map the file!");
         data_ = reinterpret_cast<byte_t const *>(map);
