@@ -43,7 +43,7 @@ It's designed to replace `open(...).readlines()`, `str().splitlines()` and many 
 
 </td>
 <td>
-<img src="stringzilla.jpeg" height=150px>
+<img src="https://github.com/ashvardanian/Stringzilla/blob/main/stringzilla.jpeg?raw=true" height=150px>
 </td>
 <tr>
 </table>
