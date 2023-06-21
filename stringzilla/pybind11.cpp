@@ -7,18 +7,9 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "stringzilla.hpp"
+#include "stringzilla.h"
 
 namespace py = pybind11;
-using namespace av::stringzilla;
-
-#if defined(__AVX2__)
-using backend_t = speculative_avx2_t;
-#elif defined(__ARM_NEON)
-using backend_t = speculative_neon_t;
-#else
-using backend_t = naive_t;
-#endif
 
 struct py_span_t;
 struct py_str_t;
@@ -26,11 +17,55 @@ struct py_file_t;
 struct py_subspan_t;
 struct py_spans_t;
 
+struct span_t {
+    char const *ptr;
+    size_t len;
+
+    char const *data() const noexcept { return ptr; }
+    size_t size() const noexcept { return len; }
+};
+
 static constexpr ssize_t ssize_max_k = std::numeric_limits<ssize_t>::max();
 static constexpr size_t size_max_k = std::numeric_limits<size_t>::max();
 
-span_t to_span(std::string_view s) { return {reinterpret_cast<byte_t const *>(s.data()), s.size()}; }
-std::string_view to_stl(span_t s) { return {reinterpret_cast<char const *>(s.begin()), s.size()}; }
+inline size_t count_substr(span_t h_span, char n) noexcept {
+    strzl_haystack_t h {h_span.ptr, h_span.len};
+
+#if defined(__AVX2__)
+    return strzl_avx2_count_char(h, n);
+#elif defined(__ARM_NEON)
+    return strzl_neon_count_char(h, n);
+#else
+    return strzl_naive_count_char(h, n);
+#endif
+}
+
+inline size_t count_substr(span_t h_span, span_t n_span, bool overlap) noexcept {
+    strzl_haystack_t h {h_span.ptr, h_span.len};
+    strzl_needle_t n {n_span.ptr, n_span.len, 0};
+    return strzl_naive_count_substr(h, n, overlap);
+}
+
+inline size_t find_substr(span_t h_span, char n) noexcept {
+    strzl_haystack_t h {h_span.ptr, h_span.len};
+    return strzl_naive_find_char(h, n);
+}
+
+inline size_t find_substr(span_t h_span, span_t n_span) noexcept {
+    strzl_haystack_t h {h_span.ptr, h_span.len};
+    strzl_needle_t n {n_span.ptr, n_span.len, 0};
+
+#if defined(__AVX2__)
+    return strzl_avx2_find_substr(h, n);
+#elif defined(__ARM_NEON)
+    return strzl_neon_find_substr(h, n);
+#else
+    return strzl_naive_find_substr(h, n);
+#endif
+}
+
+span_t to_span(std::string_view s) { return {s.data(), s.size()}; }
+std::string_view to_stl(span_t s) { return {s.data(), s.size()}; }
 
 struct index_span_t {
     size_t offset;
@@ -61,7 +96,7 @@ size_t unsigned_offset(size_t length, ssize_t idx) {
 
 span_t subspan(span_t span, ssize_t start, ssize_t end = ssize_max_k) {
     index_span_t index_span = unsigned_slice(span.size(), start, end);
-    return {span.data_ + index_span.offset, index_span.length};
+    return {span.ptr + index_span.offset, index_span.length};
 }
 
 struct py_span_t : public span_t, public std::enable_shared_from_this<py_span_t> {
@@ -69,13 +104,11 @@ struct py_span_t : public span_t, public std::enable_shared_from_this<py_span_t>
     py_span_t(span_t view = {}) : span_t(view) {}
     virtual ~py_span_t() {}
 
-    using span_t::after_n;
-    using span_t::before_n;
-    using span_t::data_;
-    using span_t::len_;
+    using span_t::len;
+    using span_t::ptr;
 
-    span_t span() const { return {data_, len_}; }
-    ssize_t size() const { return static_cast<ssize_t>(len_); }
+    span_t span() const { return {ptr, len}; }
+    ssize_t size() const { return static_cast<ssize_t>(len); }
     bool contains(std::string_view needle, ssize_t start, ssize_t end) const;
     ssize_t find(std::string_view, ssize_t start, ssize_t end) const;
     ssize_t count(std::string_view, ssize_t start, ssize_t end, bool allowoverlap) const;
@@ -83,16 +116,23 @@ struct py_span_t : public span_t, public std::enable_shared_from_this<py_span_t>
     std::shared_ptr<py_spans_t> split(std::string_view separator, size_t maxsplit, bool keepseparator) const;
     std::shared_ptr<py_subspan_t> sub(ssize_t start, ssize_t end) const;
 
-    char const *begin() const { return reinterpret_cast<char const *>(data_); }
-    char const *end() const { return begin() + len_; }
-    char at(ssize_t offset) const { return begin()[unsigned_offset(len_, offset)]; }
-    py::str to_python() const { return {begin(), len_}; }
+    char const *begin() const { return reinterpret_cast<char const *>(ptr); }
+    char const *end() const { return begin() + len; }
+    char at(ssize_t offset) const { return begin()[unsigned_offset(len, offset)]; }
+    py::str to_python() const { return {begin(), len}; }
+
+    span_t after_n(size_t offset) const noexcept {
+        return (offset < len) ? span_t {ptr + offset, len - offset} : span_t {};
+    }
+    span_t before_n(size_t tail) const noexcept {
+        return (tail < len) ? span_t {ptr + len - tail, len - tail} : span_t {};
+    }
 };
 
 struct py_str_t : public py_span_t {
     std::string copy_;
 
-    py_str_t(std::string string = "") : copy_(string) { data_ = to_span(copy_).data_, len_ = to_span(copy_).len_; }
+    py_str_t(std::string string = "") : copy_(string) { ptr = to_span(copy_).ptr, len = to_span(copy_).len; }
     ~py_str_t() {}
 
     using py_span_t::contains;
@@ -114,11 +154,11 @@ struct py_file_t : public py_span_t {
         void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
         if (map == MAP_FAILED)
             throw std::runtime_error("Couldn't map the file!");
-        data_ = reinterpret_cast<byte_t const *>(map);
-        len_ = file_size;
+        ptr = reinterpret_cast<char const *>(map);
+        len = file_size;
     }
 
-    ~py_file_t() { munmap((void *)data_, len_); }
+    ~py_file_t() { munmap((void *)ptr, len); }
 
     using py_span_t::contains;
     using py_span_t::count;
@@ -136,7 +176,7 @@ struct py_subspan_t : public py_span_t {
     py_subspan_t(py_subspan_t &&) = default;
     py_subspan_t &operator=(py_subspan_t &&) = default;
     py_subspan_t(std::shared_ptr<py_span_t const> parent, span_t str) : parent_(std::move(parent)) {
-        data_ = str.data_, len_ = str.len_;
+        ptr = str.ptr, len = str.len;
     }
 
     using py_span_t::contains;
@@ -197,9 +237,9 @@ bool py_span_t::contains(std::string_view needle, ssize_t start, ssize_t end) co
         return true;
     span_t part = subspan(span(), start, end);
     size_t offset = needle.size() == 1 //
-                        ? backend_t {}.next_offset(part, static_cast<byte_t>(needle.front()))
-                        : backend_t {}.next_offset(part, to_span(needle));
-    return offset != part.size();
+                        ? find_substr(part, needle.front())
+                        : find_substr(part, to_span(needle));
+    return offset != part.len;
 }
 
 ssize_t py_span_t::find(std::string_view needle, ssize_t start, ssize_t end) const {
@@ -207,9 +247,9 @@ ssize_t py_span_t::find(std::string_view needle, ssize_t start, ssize_t end) con
         return 0;
     span_t part = subspan(span(), start, end);
     size_t offset = needle.size() == 1 //
-                        ? backend_t {}.next_offset(part, static_cast<byte_t>(needle.front()))
-                        : backend_t {}.next_offset(part, to_span(needle));
-    return offset != part.size() ? offset : -1;
+                        ? find_substr(part, needle.front())
+                        : find_substr(part, to_span(needle));
+    return offset != part.len ? offset : -1;
 }
 
 ssize_t py_span_t::count(std::string_view needle, ssize_t start, ssize_t end, bool allowoverlap) const {
@@ -217,20 +257,20 @@ ssize_t py_span_t::count(std::string_view needle, ssize_t start, ssize_t end, bo
         return 0;
     span_t part = subspan(span(), start, end);
     auto result = needle.size() == 1 //
-                      ? backend_t {}.count(part, static_cast<byte_t>(needle.front()))
-                      : backend_t {}.count(part, to_span(needle), allowoverlap);
+                      ? count_substr(part, needle.front())
+                      : count_substr(part, to_span(needle), allowoverlap);
     return result;
 }
 
 std::shared_ptr<py_spans_t> py_span_t::splitlines(bool keeplinebreaks, char separator, size_t maxsplit) const {
 
-    size_t count_separators = backend_t {}.count(span(), separator);
+    size_t count_separators = count_substr(span(), separator);
     std::vector<span_t> parts(std::min(count_separators + 1, maxsplit));
     size_t last_start = 0;
     for (size_t i = 0; i + 1 < parts.size(); ++i) {
         span_t remaining = after_n(last_start);
-        size_t offset_in_remaining = backend_t {}.next_offset(remaining, separator);
-        parts[i] = span_t {data_ + last_start, offset_in_remaining + keeplinebreaks};
+        size_t offset_in_remaining = find_substr(remaining, separator);
+        parts[i] = span_t {ptr + last_start, offset_in_remaining + keeplinebreaks};
         last_start += offset_in_remaining + 1;
     }
     parts[count_separators] = after_n(last_start);
@@ -245,12 +285,12 @@ std::shared_ptr<py_spans_t> py_span_t::split(std::string_view separator, size_t 
     std::vector<span_t> parts;
     size_t last_start = 0;
     bool will_continue = true;
-    while (last_start < len_ && parts.size() + 1 < maxsplit) {
+    while (last_start < len && parts.size() + 1 < maxsplit) {
         span_t remaining = after_n(last_start);
-        size_t offset_in_remaining = backend_t {}.next_offset(remaining, to_span(separator));
+        size_t offset_in_remaining = find_substr(remaining, to_span(separator));
         will_continue = offset_in_remaining != remaining.size();
         size_t part_len = offset_in_remaining + separator.size() * keepseparator * will_continue;
-        parts.emplace_back(span_t {remaining.begin(), part_len});
+        parts.emplace_back(span_t {remaining.data(), part_len});
         last_start += offset_in_remaining + separator.size();
     }
     // Python marks includes empy ending as well
@@ -261,7 +301,7 @@ std::shared_ptr<py_spans_t> py_span_t::split(std::string_view separator, size_t 
 
 std::shared_ptr<py_subspan_t> py_span_t::sub(ssize_t start, ssize_t end) const {
     index_span_t index_span = unsigned_slice(size(), start, end);
-    return std::make_shared<py_subspan_t>(shared_from_this(), span_t {data_ + index_span.offset, index_span.length});
+    return std::make_shared<py_subspan_t>(shared_from_this(), span_t {ptr + index_span.offset, index_span.length});
 }
 
 template <typename at>
