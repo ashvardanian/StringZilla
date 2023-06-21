@@ -46,52 +46,217 @@ typedef struct strzl_needle_t {
  *          Matching performance fluctuates between 200 MB/s and 2 GB/s.
  */
 inline static size_t strzl_naive_count_char(strzl_haystack_t h, char n) {
+
     size_t result = 0;
     char const *h_ptr = h.ptr;
     char const *h_end = h.ptr + h.len;
-    for (; h_ptr != h_end; ++h_ptr)
+
+    for (; (uint64_t)h_ptr % 8 != 0 && h_ptr < h_end; ++h_ptr)
+        result += *h_ptr == n;
+
+    // This code simulates hyperscalar execution, comparing 8 characters at a time.
+    uint64_t nnnnnnnn = n;
+    nnnnnnnn |= nnnnnnnn << 8;
+    nnnnnnnn |= nnnnnnnn << 16;
+    nnnnnnnn |= nnnnnnnn << 32;
+    for (; h_ptr + 8 <= h_end; h_ptr += 8) {
+        uint64_t h_slice = *(uint64_t const *)h_ptr;
+        uint64_t match_indicators = ~(h_slice ^ nnnnnnnn);
+        match_indicators &= match_indicators >> 1;
+        match_indicators &= match_indicators >> 2;
+        match_indicators &= match_indicators >> 4;
+        match_indicators &= 0x0101010101010101;
+        result += __builtin_popcountll(match_indicators);
+    }
+
+    for (; h_ptr < h_end; ++h_ptr)
         result += *h_ptr == n;
     return result;
 }
 
 inline static size_t strzl_naive_find_char(strzl_haystack_t h, char n) {
+
     char const *h_ptr = h.ptr;
     char const *h_end = h.ptr + h.len;
-    for (; h_ptr != h_end; ++h_ptr)
+
+    for (; (uint64_t)h_ptr % 8 != 0 && h_ptr < h_end; ++h_ptr)
+        if (*h_ptr == n)
+            return h_ptr - h.ptr;
+
+    // This code simulates hyperscalar execution, analyzing 8 offsets at a time.
+    uint64_t nnnnnnnn = n;
+    nnnnnnnn |= nnnnnnnn << 8;
+    nnnnnnnn |= nnnnnnnn << 16;
+    nnnnnnnn |= nnnnnnnn << 32;
+    for (; h_ptr + 8 <= h_end; h_ptr += 8) {
+        uint64_t h_slice = *(uint64_t const *)h_ptr;
+        uint64_t match_indicators = ~(h_slice ^ nnnnnnnn);
+        match_indicators &= match_indicators >> 1;
+        match_indicators &= match_indicators >> 2;
+        match_indicators &= match_indicators >> 4;
+        match_indicators &= 0x0101010101010101;
+
+        if (match_indicators != 0)
+            return h_ptr - h.ptr + __builtin_ctzll(match_indicators) / 8;
+    }
+
+    for (; h_ptr < h_end; ++h_ptr)
         if (*h_ptr == n)
             return h_ptr - h.ptr;
     return h.len;
 }
 
-inline static size_t strzl_naive_rfind_char(strzl_haystack_t h, char n) {
+inline static size_t strzl_naive_find_2chars(strzl_haystack_t h, char const *n) {
+
+    char const *h_ptr = h.ptr;
     char const *h_end = h.ptr + h.len;
-    for (char const *h_ptr = h_end; h_ptr != h_end; --h_ptr)
-        if (*(h_ptr - 1) == n)
-            return h_ptr - h.ptr - 1;
+
+    // This code simulates hyperscalar execution, analyzing 7 offsets at a time.
+    uint64_t nnnn = (uint64_t(n[0]) << 0) | (uint64_t(n[1]) << 8);
+    nnnn |= nnnn << 16;
+    nnnn |= nnnn << 32;
+    uint64_t h_slice;
+    for (; h_ptr + 8 <= h_end; h_ptr += 7) {
+        memcpy(&h_slice, h_ptr, 8);
+        uint64_t even_indicators = ~(h_slice ^ nnnn);
+        uint64_t odd_indicators = ~((h_slice << 8) ^ nnnn);
+        // For every even match - 2 char (16 bits) must be identical.
+        even_indicators &= even_indicators >> 1;
+        even_indicators &= even_indicators >> 2;
+        even_indicators &= even_indicators >> 4;
+        even_indicators &= even_indicators >> 8;
+        even_indicators &= 0x0001000100010001;
+        // For every odd match - 2 char (16 bits) must be identical.
+        odd_indicators &= odd_indicators >> 1;
+        odd_indicators &= odd_indicators >> 2;
+        odd_indicators &= odd_indicators >> 4;
+        odd_indicators &= odd_indicators >> 8;
+        odd_indicators &= 0x0001000100010000;
+
+        if (even_indicators + odd_indicators) {
+            uint64_t match_indicators = even_indicators | (odd_indicators >> 8);
+            return h_ptr - h.ptr + __builtin_ctzll(match_indicators) / 8;
+        }
+    }
+
+    for (; h_ptr + 2 <= h_end; ++h_ptr)
+        if (h_ptr[0] == n[0] && h_ptr[1] == n[1])
+            return h_ptr - h.ptr;
     return h.len;
 }
 
-inline static size_t strzl_naive_count_substr(strzl_haystack_t h, strzl_needle_t n, bool overlap = false) {
+inline static size_t strzl_naive_find_3chars(strzl_haystack_t h, char const *n) {
 
-    if (n.len == 1)
-        return strzl_naive_count_char(h, *n.ptr);
-    if (h.len < n.len)
-        return 0;
+    char const *h_ptr = h.ptr;
+    char const *h_end = h.ptr + h.len;
 
-    size_t result = 0;
-    if (!overlap)
+    // This code simulates hyperscalar execution, analyzing 6 offsets at a time.
+    // We have two unused bytes at the end.
+    uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16);
+    nn |= nn << 24;
+    nn <<= 16;
 
-        for (size_t off = 0; off <= h.len - n.len;)
-            if (strzl_equal(h.ptr + off, n.ptr, n.len))
-                off += n.len, result++;
-            else
-                off++;
+    for (; h_ptr + 8 <= h_end; h_ptr += 6) {
+        uint64_t h_slice;
+        memcpy(&h_slice, h_ptr, 8);
+        uint64_t first_indicators = ~(h_slice ^ nn);
+        uint64_t second_indicators = ~((h_slice << 8) ^ nn);
+        uint64_t third_indicators = ~((h_slice << 16) ^ nn);
+        // For every first match - 3 chars (24 bits) must be identical.
+        // For that merge every byte state and then combine those three-way.
+        first_indicators &= first_indicators >> 1;
+        first_indicators &= first_indicators >> 2;
+        first_indicators &= first_indicators >> 4;
+        first_indicators =
+            (first_indicators >> 16) & (first_indicators >> 8) & (first_indicators >> 0) & 0x0000010000010000;
 
-    else
-        for (size_t off = 0; off <= h.len - n.len; off++)
-            result += strzl_equal(h.ptr + off, n.ptr, n.len);
+        // For every second match - 3 chars (24 bits) must be identical.
+        // For that merge every byte state and then combine those three-way.
+        second_indicators &= second_indicators >> 1;
+        second_indicators &= second_indicators >> 2;
+        second_indicators &= second_indicators >> 4;
+        second_indicators =
+            (second_indicators >> 16) & (second_indicators >> 8) & (second_indicators >> 0) & 0x0000010000010000;
 
-    return result;
+        // For every third match - 3 chars (24 bits) must be identical.
+        // For that merge every byte state and then combine those three-way.
+        third_indicators &= third_indicators >> 1;
+        third_indicators &= third_indicators >> 2;
+        third_indicators &= third_indicators >> 4;
+        third_indicators =
+            (third_indicators >> 16) & (third_indicators >> 8) & (third_indicators >> 0) & 0x0000010000010000;
+
+        uint64_t match_indicators = first_indicators | (second_indicators >> 8) | (third_indicators >> 16);
+        if (match_indicators != 0)
+            return h_ptr - h.ptr + __builtin_ctzll(match_indicators) / 8;
+    }
+
+    for (; h_ptr + 3 <= h_end; ++h_ptr)
+        if (h_ptr[0] == n[0] && h_ptr[1] == n[1] && h_ptr[2] == n[2])
+            return h_ptr - h.ptr;
+    return h.len;
+}
+
+inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) {
+
+    char const *h_ptr = h.ptr;
+    char const *h_end = h.ptr + h.len;
+
+    // Skip poorly aligned part
+    for (; (uint64_t)h_ptr % 8 != 0 && h_ptr + 4 <= h_end; ++h_ptr)
+        if (h_ptr[0] == n[0] && h_ptr[1] == n[1] && h_ptr[2] == n[2] && h_ptr[3] == n[3])
+            return h_ptr - h.ptr;
+
+    // This code simulates hyperscalar execution, analyzing 4 offsets at a time.
+    uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16) | (uint64_t(n[3]) << 24);
+    nn |= nn << 32;
+    nn = nn;
+
+    //
+    uint8_t lookup[16] = {0};
+    lookup[0b0010] = lookup[0b0110] = lookup[0b1010] = lookup[0b1110] = 1;
+    lookup[0b0100] = lookup[0b1100] = 2;
+    lookup[0b1000] = 3;
+
+    // We can perform 5 comparisons per load, but it's easir to perform 4, minimize split loads,
+    // and perfom cheaper comparison across both 32-bit lanes of a 64-bit slice.
+    for (; h_ptr + 8 <= h_end; h_ptr += 4) {
+        uint64_t h_slice;
+        memcpy(&h_slice, h_ptr, 8);
+        uint64_t h01 = (h_slice & 0x00000000FFFFFFFF) | ((h_slice & 0x000000FFFFFFFF00) << 24);
+        uint64_t h23 = ((h_slice & 0x0000FFFFFFFF0000) >> 16) | ((h_slice & 0x00FFFFFFFF000000) << 8);
+        uint64_t h01_indicators = ~(h01 ^ nn);
+        uint64_t h23_indicators = ~(h23 ^ nn);
+
+        // For every first match - 4 chars (32 bits) must be identical.
+        h01_indicators &= h01_indicators >> 1;
+        h01_indicators &= h01_indicators >> 2;
+        h01_indicators &= h01_indicators >> 4;
+        h01_indicators &= h01_indicators >> 8;
+        h01_indicators &= h01_indicators >> 16;
+        h01_indicators &= 0x0000000100000001;
+
+        // For every first match - 4 chars (32 bits) must be identical.
+        h23_indicators &= h23_indicators >> 1;
+        h23_indicators &= h23_indicators >> 2;
+        h23_indicators &= h23_indicators >> 4;
+        h23_indicators &= h23_indicators >> 8;
+        h23_indicators &= h23_indicators >> 16;
+        h23_indicators &= 0x0000000100000001;
+
+        if (h01_indicators + h23_indicators) {
+            // Assuming we have performed 4 comparisons, we can only have 2^4=16 outcomes.
+            // Which is small enought for a lookup table.
+            uint8_t match_indicators =
+                (h01_indicators >> 31) | (h01_indicators << 0) | (h23_indicators >> 29) | (h23_indicators << 2);
+            return h_ptr - h.ptr + lookup[match_indicators];
+        }
+    }
+
+    for (; h_ptr + 4 <= h_end; ++h_ptr)
+        if (h_ptr[0] == n[0] && h_ptr[1] == n[1] && h_ptr[2] == n[2] && h_ptr[3] == n[3])
+            return h_ptr - h.ptr;
+    return h.len;
 }
 
 /**
@@ -109,39 +274,9 @@ inline static size_t strzl_naive_find_substr(strzl_haystack_t h, strzl_needle_t 
     switch (n.len) {
     case 0: return 0;
     case 1: return strzl_naive_find_char(h, *n.ptr);
-    case 2: {
-        // On very short patterns, it's easier to manually unroll the loop, even if we keep the scalar code.
-        uint16_t word, needle;
-        memcpy(&needle, n.ptr, 2);
-        for (; h_ptr + 2 <= h_end; h_ptr++) {
-            memcpy(&word, h_ptr, 2);
-            if (word == needle)
-                return h_ptr - h.ptr;
-        }
-        return h.len;
-    }
-    case 3: {
-        // On very short patterns, it's easier to manually unroll the loop, even if we keep the scalar code.
-        uint32_t word = 0, needle = 0; // Initialize for the last byte to deterministically match.
-        memcpy(&needle, n.ptr, 3);
-        for (; h_ptr + 3 <= h_end; h_ptr++) {
-            memcpy(&word, h_ptr, 3);
-            if (word == needle)
-                return h_ptr - h.ptr;
-        }
-        return h.len;
-    }
-    case 4: {
-        // On very short patterns, it's easier to manually unroll the loop, even if we keep the scalar code.
-        uint32_t word, needle;
-        memcpy(&needle, n.ptr, 4);
-        for (; h_ptr + 4 <= h_end; h_ptr++) {
-            memcpy(&word, h_ptr, 4);
-            if (word == needle)
-                return h_ptr - h.ptr;
-        }
-        return h.len;
-    }
+    case 2: return strzl_naive_find_2chars(h, n.ptr);
+    case 3: return strzl_naive_find_3chars(h, n.ptr);
+    case 4: return strzl_naive_find_4chars(h, n.ptr);
     default: {
         strzl_anomaly_t n_anomaly, h_anomaly;
         size_t const n_suffix_len = n.len - 4 - n.anomaly_offset;
@@ -209,9 +344,9 @@ size_t strzl_avx2_find_substr(strzl_haystack_t h, strzl_needle_t n) {
     }
 
     // Don't forget the last (up to 35) characters.
-    size_t tail_start = h_ptr - h.ptr;
-    size_t tail_match = prefixed_t {}.find_offset(h.after_n(tail_start), n);
-    return tail_match + tail_start;
+    size_t tail_len = h_end - h_ptr;
+    size_t tail_match = strzl_naive_find_substr({h_ptr, tail_len}, n);
+    return h_ptr + tail_match - h.ptr;
 }
 
 #endif // x86 AVX2
@@ -219,7 +354,7 @@ size_t strzl_avx2_find_substr(strzl_haystack_t h, strzl_needle_t n) {
 #if defined(__ARM_NEON)
 
 /**
- *  @brief  Character-counting routing, leveraging Arm Neon instrinsics and checking 16 characters at once.
+ *  @brief  Character-counting routine, leveraging Arm Neon instrinsics and checking 16 characters at once.
  */
 inline static size_t strzl_neon_count_char(strzl_haystack_t h, char n) {
     char const *const h_end = h.ptr + h.len;

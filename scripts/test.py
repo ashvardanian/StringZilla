@@ -62,11 +62,16 @@ def test_basic(repetitions: int):
 
 @pytest.mark.parametrize("pattern_length", [1, 2, 4, 5])
 @pytest.mark.parametrize("haystack_length", range(1, 65))
-@pytest.mark.parametrize("variability", [2, 25])
+@pytest.mark.parametrize("variability", range(1, 25))
 def test_fuzzy(pattern_length: int, haystack_length: int, variability: int):
     native = get_random_string(variability=variability, length=haystack_length)
     big = Str(native)
 
+    # Start by matching the prefix and the suffix
+    check_identical(native, big, native[:pattern_length])
+    check_identical(native, big, native[-pattern_length:])
+
+    # Continue with random slices
     for _ in range(haystack_length // pattern_length):
         pattern = get_random_string(variability=variability, length=pattern_length)
         check_identical(native, big, pattern)

@@ -43,24 +43,6 @@ struct span_t {
 static constexpr ssize_t ssize_max_k = std::numeric_limits<ssize_t>::max();
 static constexpr size_t size_max_k = std::numeric_limits<size_t>::max();
 
-inline size_t count_substr(span_t h_span, char n) noexcept {
-    strzl_haystack_t h {h_span.ptr, h_span.len};
-
-#if defined(__AVX2__)
-    return strzl_avx2_count_char(h, n);
-#elif defined(__ARM_NEON)
-    return strzl_neon_count_char(h, n);
-#else
-    return strzl_naive_count_char(h, n);
-#endif
-}
-
-inline size_t count_substr(span_t h_span, span_t n_span, bool overlap) noexcept {
-    strzl_haystack_t h {h_span.ptr, h_span.len};
-    strzl_needle_t n {n_span.ptr, n_span.len, 0};
-    return strzl_naive_count_substr(h, n, overlap);
-}
-
 inline size_t find_substr(span_t h_span, char n) noexcept {
     strzl_haystack_t h {h_span.ptr, h_span.len};
     return strzl_naive_find_char(h, n);
@@ -73,10 +55,50 @@ inline size_t find_substr(span_t h_span, span_t n_span) noexcept {
 #if defined(__AVX2__)
     return strzl_avx2_find_substr(h, n);
 #elif defined(__ARM_NEON)
-    return strzl_neon_find_substr(h, n);
+    return strzl_naive_find_substr(h, n);
 #else
     return strzl_naive_find_substr(h, n);
 #endif
+}
+
+inline size_t count_substr(span_t h_span, char n) noexcept {
+    strzl_haystack_t h {h_span.ptr, h_span.len};
+
+#if defined(__ARM_NEON)
+    return strzl_neon_count_char(h, n);
+#else
+    return strzl_naive_count_char(h, n);
+#endif
+}
+
+inline size_t count_substr(span_t h, span_t n, bool overlap = false) noexcept {
+
+    if (n.len == 1)
+        return count_substr(h, *n.ptr);
+    if (h.len < n.len)
+        return 0;
+
+    size_t result = 0;
+    if (overlap) {
+        while (h.len) {
+            size_t offset = find_substr(h, n);
+            result += offset != h.len;
+            h.ptr += offset;
+            h.len -= offset;
+        }
+    }
+
+    else {
+        while (h.len) {
+            size_t offset = find_substr(h, n);
+            result += offset != h.len;
+            h.ptr += offset + n.len;
+            h.len -= offset;
+            h.len -= n.len * bool(h.len);
+        }
+    }
+
+    return result;
 }
 
 span_t to_span(std::string_view s) { return {s.data(), s.size()}; }
