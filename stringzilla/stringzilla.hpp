@@ -495,7 +495,7 @@ namespace av::stringzilla {
         size_t count(span_t h, byte_t n) const noexcept {
             // The plan is simple, skim through the misaligned part of the string.
             byte_t const *aligned_start = (byte_t const *)(divide_round_up<size_t>((uintptr_t)h.data_, 16) * 16);
-            size_t misaligned_len = static_cast<size_t>(aligned_start - h.data_);
+            size_t misaligned_len = std::min(static_cast<size_t>(aligned_start - h.data_), h.len_);
             size_t result = naive_t {}.count({h.data_, misaligned_len}, n);
 
             if (h.len_ < misaligned_len)
