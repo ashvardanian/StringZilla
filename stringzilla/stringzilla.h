@@ -1,5 +1,5 @@
-#if !defined(STRINGZILLA_H)
-#define STRINGZILLA_H
+#ifndef STRINGZILLA_H_
+#define STRINGZILLA_H_
 
 #include <stdint.h> // `uint8_t`
 #include <stddef.h> // `size_t`
@@ -12,9 +12,11 @@
 #include <arm_neon.h>
 #endif
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
-using strzl_anomaly_t = uint32_t;
+typedef uint32_t strzl_anomaly_t;
 
 inline static size_t strzl_divide_round_up(size_t x, size_t divisor) { return (x + (divisor - 1)) / divisor; }
 
@@ -226,7 +228,7 @@ inline static size_t strzl_neon_count_char(strzl_haystack_t h, char n) {
     char const *aligned_start = (char const *)(strzl_divide_round_up((size_t)h.ptr, 16) * 16);
     size_t misaligned_len = (size_t)(aligned_start - h.ptr) < h.len ? (size_t)(aligned_start - h.ptr) : h.len;
     size_t result = strzl_naive_count_char({h.ptr, misaligned_len}, n);
-    if (aligned_start + misaligned_len >= h_end)
+    if (h.ptr + misaligned_len >= h_end)
         return result;
 
     // Count matches in the aligned part.
@@ -291,6 +293,9 @@ inline static size_t strzl_neon_find_substr(strzl_haystack_t h, strzl_needle_t n
 }
 
 #endif // Arm Neon
-}
 
-#endif // STRINGZILLA_H
+#ifdef __cplusplus
+}
+#endif
+
+#endif // STRINGZILLA_H_

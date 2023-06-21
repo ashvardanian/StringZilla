@@ -5,7 +5,7 @@ from setuptools import setup
 from pybind11.setup_helpers import Pybind11Extension
 
 
-compile_args = ["-std=c++17", "-O3"]
+compile_args = ["-std=c++17", "-O3", "-pedantic"]
 link_args = []
 macros_args = []
 
