@@ -5,18 +5,29 @@ from setuptools import setup
 from pybind11.setup_helpers import Pybind11Extension
 
 
-compile_args = ["-std=c++17", "-O3", "-pedantic"]
+compile_args = []
 link_args = []
 macros_args = []
 
 if sys.platform == "linux":
+    compile_args.append("-std=c++17")
+    compile_args.append("-O3")
+    compile_args.append("-pedantic")
+    compile_args.append("-Wno-unknown-pragmas")
     compile_args.append("-fopenmp")
     link_args.append("-lgomp")
+
 if sys.platform == "darwin":
+    compile_args.append("-std=c++17")
+    compile_args.append("-O3")
+    compile_args.append("-pedantic")
+    compile_args.append("-Wno-unknown-pragmas")
     compile_args.append("-Xpreprocessor -fopenmp")
     link_args.append("-Xpreprocessor -lomp")
 
-compile_args.append("-Wno-unknown-pragmas")
+if sys.platform == "win32":
+    compile_args.append("/std:c++17")
+    compile_args.append("/O2")
 
 
 ext_modules = [
