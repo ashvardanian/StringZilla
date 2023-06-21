@@ -498,6 +498,9 @@ namespace av::stringzilla {
             size_t misaligned_len = std::min(static_cast<size_t>(aligned_start - h.data_), h.len_);
             size_t result = naive_t {}.count({h.data_, misaligned_len}, n);
 
+            if (h.len_ < misaligned_len)
+                return result;
+
             // Count matches in the aligned part.
             byte_t const *h_ptr = aligned_start;
             byte_t const *const h_end = h.end();
