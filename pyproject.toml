@@ -12,7 +12,7 @@ filterwarnings = ["error"]
 test-requires = ["pytest"]
 test-command = "pytest {project}/scripts/test.py -x"
 build-verbosity = 0
-skip = ["*musllinux*", "*i686*", "pp*", "cp36-*"]
+skip = ["*musllinux*", "*i686*", "pp*"]
 
 [tool.cibuildwheel.linux]
 before-build = [
@@ -34,10 +34,9 @@ before-build = [
 archs = ["x86_64", "universal2", "arm64"]
 repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
 
-# TODO: Windows support
-# [tool.cibuildwheel.windows]
-# before-build = [
-#    "rm -rf {project}/build",
-# ]
-# archs = ["x86", "AMD64"]
-# skip = ["*win32*", "pp*", "cp36-*"]
+[tool.cibuildwheel.windows]
+before-build = [
+   "rm -rf {project}/build",
+]
+archs = ["x86", "AMD64"]
+skip = ["*win32*", "pp*"]

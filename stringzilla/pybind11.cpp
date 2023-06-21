@@ -1,8 +1,23 @@
+
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+#define NOMINMAX
+#include <windows.h>
+#else
 #include <sys/types.h>
-#include <sys/stat.h>
+#include <sys/stat.h> // `stat`
 #include <sys/mman.h> // `mmap`
-#include <unistd.h>
-#include <fcntl.h>    // `O_RDNNLY`
+#include <fcntl.h>    // `O_RDNLY`
+#endif
+
+#ifdef _MSC_VER
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#else
+#include <unistd.h> // `ssize_t`
+#endif
+
+#include <utility> // `std::exchange`
+#include <limits>  // `std::numeric_limits`
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -144,21 +159,79 @@ struct py_str_t : public py_span_t {
 };
 
 struct py_file_t : public py_span_t {
+    std::string path;
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+    HANDLE file_handle = nullptr;
+    HANDLE mapping_handle = nullptr;
+#else
+    int file_descriptor = 0;
+#endif
+
   public:
-    py_file_t(std::string path) {
-        struct stat sb;
-        int fd = open(path.c_str(), O_RDONLY);
-        if (fstat(fd, &sb) != 0)
-            throw std::runtime_error("Can't retrieve file size!");
-        size_t file_size = sb.st_size;
-        void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
-        if (map == MAP_FAILED)
+    py_file_t(std::string const &path) { open(path); }
+    ~py_file_t() { close(); }
+
+    void reopen() { open(path); }
+    void open(std::string const &p) {
+        close();
+        path = p;
+
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+
+        file_handle =
+            CreateFile(path.c_str(), GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+        if (file_handle == INVALID_HANDLE_VALUE)
             throw std::runtime_error("Couldn't map the file!");
+
+        mapping_handle = CreateFileMapping(file_handle, 0, PAGE_READONLY, 0, 0, 0);
+        if (mapping_handle == 0) {
+            CloseHandle(std::exchange(file_handle, nullptr));
+            throw std::runtime_error("Couldn't map the file!");
+        }
+
+        char *file = (char *)MapViewOfFile(mapping_handle, FILE_MAP_READ, 0, 0, 0);
+        if (file == 0) {
+            CloseHandle(std::exchange(mapping_handle, nullptr));
+            CloseHandle(std::exchange(file_handle, nullptr));
+            throw std::runtime_error("Couldn't map the file!");
+        }
+        ptr = file;
+        len = GetFileSize(file_handle, 0);
+#else
+        struct stat sb;
+        file_descriptor = ::open(path.c_str(), O_RDONLY);
+        if (fstat(file_descriptor, &sb) != 0) {
+            ::close(std::exchange(file_descriptor, 0));
+            throw std::runtime_error("Can't retrieve file size!");
+        }
+        size_t file_size = sb.st_size;
+        void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, file_descriptor, 0);
+        if (map == MAP_FAILED) {
+            ::close(std::exchange(file_descriptor, 0));
+            throw std::runtime_error("Couldn't map the file!");
+        }
         ptr = reinterpret_cast<char const *>(map);
         len = file_size;
+#endif
     }
 
-    ~py_file_t() { munmap((void *)ptr, len); }
+    void close() {
+
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+        if (ptr)
+            UnmapViewOfFile(std::exchange(ptr, nullptr)), len = 0;
+        if (mapping_handle)
+            CloseHandle(std::exchange(mapping_handle, nullptr));
+        if (file_handle)
+            CloseHandle(std::exchange(file_handle, nullptr));
+
+#else
+        if (ptr)
+            munmap((void *)std::exchange(ptr, nullptr), std::exchange(len, 0));
+        if (file_descriptor != 0)
+            ::close(std::exchange(file_descriptor, 0));
+#endif
+    }
 
     using py_span_t::contains;
     using py_span_t::count;
@@ -373,6 +446,9 @@ PYBIND11_MODULE(stringzilla, m) {
         py::init([](std::string path) { return std::make_shared<py_file_t>(std::move(path)); }),
         py::arg("path"));
     define_slice_ops(py_file);
+    py_file.def("open", &py_file_t::open, py::arg("path"));
+    py_file.def("open", &py_file_t::reopen);
+    py_file.def("close", &py_file_t::close);
 
     auto py_slices = py::class_<py_spans_t, std::shared_ptr<py_spans_t>>(m, "Slices");
     py_slices.def(py::init([]() { return std::make_shared<py_spans_t>(); }));
