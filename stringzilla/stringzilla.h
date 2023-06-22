@@ -12,6 +12,15 @@
 #include <arm_neon.h>
 #endif
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#define popcount64 __popcnt64
+#define ctz64 _tzcnt_u64
+#else
+#define popcount64 __builtin_popcountll
+#define ctz64 __builtin_ctzll
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -66,7 +75,7 @@ inline static size_t strzl_naive_count_char(strzl_haystack_t h, char n) {
         match_indicators &= match_indicators >> 2;
         match_indicators &= match_indicators >> 4;
         match_indicators &= 0x0101010101010101;
-        result += __builtin_popcountll(match_indicators);
+        result += popcount64(match_indicators);
     }
 
     for (; h_ptr < h_end; ++h_ptr)
@@ -97,7 +106,7 @@ inline static size_t strzl_naive_find_char(strzl_haystack_t h, char n) {
         match_indicators &= 0x0101010101010101;
 
         if (match_indicators != 0)
-            return h_ptr - h.ptr + __builtin_ctzll(match_indicators) / 8;
+            return h_ptr - h.ptr + ctz64(match_indicators) / 8;
     }
 
     for (; h_ptr < h_end; ++h_ptr)
@@ -135,7 +144,7 @@ inline static size_t strzl_naive_find_2chars(strzl_haystack_t h, char const *n) 
 
         if (even_indicators + odd_indicators) {
             uint64_t match_indicators = even_indicators | (odd_indicators >> 8);
-            return h_ptr - h.ptr + __builtin_ctzll(match_indicators) / 8;
+            return h_ptr - h.ptr + ctz64(match_indicators) / 8;
         }
     }
 
@@ -188,7 +197,7 @@ inline static size_t strzl_naive_find_3chars(strzl_haystack_t h, char const *n) 
 
         uint64_t match_indicators = first_indicators | (second_indicators >> 8) | (third_indicators >> 16);
         if (match_indicators != 0)
-            return h_ptr - h.ptr + __builtin_ctzll(match_indicators) / 8;
+            return h_ptr - h.ptr + ctz64(match_indicators) / 8;
     }
 
     for (; h_ptr + 3 <= h_end; ++h_ptr)
@@ -372,8 +381,8 @@ inline static size_t strzl_neon_count_char(strzl_haystack_t h, char n) {
     for (; (h_ptr + 16) <= h_end; h_ptr += 16) {
         uint8x16_t masks = vceqq_u8(vld1q_u8((uint8_t const *)h_ptr), n_vector);
         uint64x2_t masks64x2 = vreinterpretq_u64_u8(masks);
-        result += __builtin_popcountll(vgetq_lane_u64(masks64x2, 0)) / 8;
-        result += __builtin_popcountll(vgetq_lane_u64(masks64x2, 1)) / 8;
+        result += popcount64(vgetq_lane_u64(masks64x2, 0)) / 8;
+        result += popcount64(vgetq_lane_u64(masks64x2, 1)) / 8;
     }
 
     // Count matches in the misaligned tail.
@@ -432,5 +441,8 @@ inline static size_t strzl_neon_find_substr(strzl_haystack_t h, strzl_needle_t n
 #ifdef __cplusplus
 }
 #endif
+
+#undef popcount64
+#undef ctz64
 
 #endif // STRINGZILLA_H_
