@@ -114,7 +114,8 @@
     "variant": "cpp",
     "source_location": "cpp",
     "stop_token": "cpp",
-    "__verbose_abort": "cpp"
+    "__verbose_abort": "cpp",
+    "strstream": "cpp"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
 }

@@ -1,0 +1,35 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Linux Build C++ Test Debug",
+            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_BUILD_TYPE=Debug -B ./build_debug && make -C ./build_debug",
+            "args": [],
+            "type": "shell",
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "Linux Build C++ Test Release",
+            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_BUILD_TYPE=RelWithDebInfo -B ./build_release && make -C ./build_release",
+            "args": [],
+            "type": "shell",
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "MacOS Build C++ Test Debug",
+            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ -DCMAKE_BUILD_TYPE=Debug -B ./build_debug && make -C ./build_debug",
+            "args": [],
+            "type": "shell",
+        },
+        {
+            "label": "MacOS Build C++ Test Release",
+            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo -B ./build_release && make -C ./build_release",
+            "args": [],
+            "type": "shell"
+        }
+    ]
+}
