@@ -111,6 +111,8 @@ text.split(
 
 ```sh
 rm -rf build && pip install -e . && pytest scripts/test.py -s -x
+
+pip install -e . --no-index --no-deps
 ```
 
 To benchmark on some custom file and pattern combination:
@@ -123,4 +125,18 @@ To validate packaging:
 
 ```sh
 cibuildwheel --platform linux
+```
+
+Compilin C++ tests:
+
+
+```sh
+brew install libomp llvm
+cmake -B ./build_release \
+    -DCMAKE_C_COMPILER="/opt/homebrew/opt/llvm/bin/clang" \
+    -DCMAKE_CXX_COMPILER="/opt/homebrew/opt/llvm/bin/clang++" \
+    -DSTRINGZILLA_USE_OPENMP=1 \
+    -DSTRINGZILLA_BUILD_TEST=1 \
+    && \
+    make -C ./build_release -j
 ```

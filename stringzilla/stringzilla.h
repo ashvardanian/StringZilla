@@ -211,11 +211,6 @@ inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) 
     char const *h_ptr = h.ptr;
     char const *h_end = h.ptr + h.len;
 
-    // Skip poorly aligned part
-    for (; (uint64_t)h_ptr % 8 != 0 && h_ptr + 4 <= h_end; ++h_ptr)
-        if (h_ptr[0] == n[0] && h_ptr[1] == n[1] && h_ptr[2] == n[2] && h_ptr[3] == n[3])
-            return h_ptr - h.ptr;
-
     // This code simulates hyperscalar execution, analyzing 4 offsets at a time.
     uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16) | (uint64_t(n[3]) << 24);
     nn |= nn << 32;
@@ -227,8 +222,7 @@ inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) 
     lookup[0b0100] = lookup[0b1100] = 2;
     lookup[0b1000] = 3;
 
-    // We can perform 5 comparisons per load, but it's easir to perform 4, minimize split loads,
-    // and perfom cheaper comparison across both 32-bit lanes of a 64-bit slice.
+    // We can perform 5 comparisons per load, but it's easir to perform 4, minimizing the size of the lookup table.
     for (; h_ptr + 8 <= h_end; h_ptr += 4) {
         uint64_t h_slice;
         memcpy(&h_slice, h_ptr, 8);
@@ -437,6 +431,207 @@ inline static size_t strzl_neon_find_substr(strzl_haystack_t h, strzl_needle_t n
 }
 
 #endif // Arm Neon
+
+typedef char const *(*stringzilla_array_get_start_t)(void const *, size_t);
+typedef size_t (*stringzilla_array_get_length_t)(void const *, size_t);
+typedef bool (*stringzilla_array_predicate_t)(char const *, size_t);
+
+inline static bool strzl_has_under_one_char(char const *, size_t len) { return len < 1; }
+inline static bool strzl_has_under_two_chars(char const *, size_t len) { return len < 2; }
+inline static bool strzl_has_under_three_chars(char const *, size_t len) { return len < 3; }
+inline static bool strzl_has_under_four_chars(char const *, size_t len) { return len < 4; }
+
+inline static bool strzl_less_one_char(char const *a, size_t, char const *b, size_t) { return *a < *b; }
+
+inline static bool strzl_less_two_chars(char const *a, size_t, char const *b, size_t) {
+    uint16_t aa, bb;
+    memcpy(&aa, a, 2);
+    memcpy(&bb, b, 2);
+    return aa < bb;
+}
+
+inline static bool strzl_less_three_chars(char const *a, size_t, char const *b, size_t) {
+    uint32_t aaa = 0, bbb = 0;
+    memcpy(&aaa, a, 3);
+    memcpy(&bbb, b, 3);
+    return aaa < bbb;
+}
+
+inline static bool strzl_less_four_chars(char const *a, size_t, char const *b, size_t) {
+    uint32_t aaaa, bbbb;
+    memcpy(&aaaa, a, 4);
+    memcpy(&bbbb, b, 4);
+    return aaaa < bbbb;
+}
+
+inline static bool strzl_less_entire(char const *a, size_t an, char const *b, size_t bn) {
+    size_t n = an < bn ? an : bn;
+    char const *end = a + an;
+    while (a != end && *a == *b)
+        ++a, ++b;
+    if (a == end)
+        return an < bn;
+    return *a < *b;
+}
+
+inline static void strzl_swap(size_t *a, size_t *b) {
+    *a ^= *b;
+    *b ^= *a;
+    *a ^= *b;
+}
+
+inline static size_t strzl_partition( //
+    void const *array,
+    size_t count,
+    stringzilla_array_get_start_t get_start,
+    stringzilla_array_get_length_t get_length,
+    stringzilla_array_predicate_t predicate,
+    size_t *order) {
+
+    size_t split = 0;
+    while (split != count && predicate(get_start(array, order[split]), get_length(array, order[split])))
+        ++split;
+
+    if (split != count)
+        for (size_t i = split + 1; i != count; ++i)
+            if (predicate(get_start(array, order[i]), get_length(array, order[i])))
+                strzl_swap(order + i, order + split), ++split;
+
+    return split;
+}
+
+void strzl_merge_parts( //
+    void const *array,
+    size_t count,
+    stringzilla_array_get_start_t begin,
+    stringzilla_array_get_length_t length,
+    bool (*less)(char const *, size_t, char const *, size_t),
+    size_t *order,
+    size_t start,
+    size_t mid,
+    size_t end) {
+
+    size_t start2 = mid + 1;
+
+    // If the direct merge is already sorted
+    if (!less( //
+            begin(array, order[start2]),
+            length(array, order[start2]),
+            begin(array, order[mid]),
+            length(array, order[mid])))
+        return;
+
+    // Two pointers to maintain start
+    // of both arrays to merge
+    while (start <= mid && start2 <= end) {
+
+        // If element 1 is in right place
+        if (!less( //
+                begin(array, order[start2]),
+                length(array, order[start2]),
+                begin(array, order[start]),
+                length(array, order[start]))) {
+            start++;
+        }
+        else {
+            size_t value = order[start2];
+            size_t index = start2;
+            while (index != start) {
+                order[index] = order[index - 1];
+                index--;
+            }
+            order[start] = value;
+            start++;
+            mid++;
+            start2++;
+        }
+    }
+}
+
+void strzl_merge_sort_halves( //
+    void const *array,
+    size_t count,
+    stringzilla_array_get_start_t begin,
+    stringzilla_array_get_length_t length,
+    bool (*less)(char const *, size_t, char const *, size_t),
+    size_t *order,
+    size_t l,
+    size_t r) {
+
+    if (l >= r)
+        return;
+
+    // Same as (l + r) / 2, but avoids overflow for large l and r
+    size_t m = l + (r - l) / 2;
+
+    // Sort first and second halves
+    strzl_merge_sort_halves(array, count, begin, length, less, order, l, m);
+    strzl_merge_sort_halves(array, count, begin, length, less, order, m + 1, r);
+    strzl_merge_parts(array, count, begin, length, less, order, l, m, r);
+}
+
+inline static void strzl_merge_sort( //
+    void const *array,
+    size_t count,
+    stringzilla_array_get_start_t begin,
+    stringzilla_array_get_length_t length,
+    bool (*less)(char const *, size_t, char const *, size_t),
+    size_t *order,
+    bool deduplicate) {
+    //
+
+    strzl_merge_sort_halves(array, count, begin, length, less, order, 0, count - 1);
+}
+
+/**
+ *  @brief  Sorting algorithm, built as a combo of quick-sorts for different length prefixes, and inplace merge-sort
+ *          over partial results. Outputs the sorted order of the original elements instead of changing inplace.
+ *  @return Number of sorted elements, potentially smaller than overall @ref count, if deduplication is requested.
+ *
+ *  @param deduplicate  A common scenarie is to follow-up sorting with deduplication. When `true`, that will be done
+ *                      automatically, simultaneously accelerating sorting, assuming less elements will have to be
+ *                      compared.
+ */
+inline static size_t strzl_sort( //
+    void const *array,
+    size_t count,
+    stringzilla_array_get_start_t begin,
+    stringzilla_array_get_length_t length,
+    size_t *order,
+    bool deduplicate) {
+
+    // Partition strings by length. 77h
+    size_t count01234 = count;
+    size_t count0123 = strzl_partition(array, count01234, begin, length, &strzl_has_under_four_chars, order);
+    size_t count012 = strzl_partition(array, count0123, begin, length, &strzl_has_under_three_chars, order);
+    size_t count01 = strzl_partition(array, count012, begin, length, &strzl_has_under_two_chars, order);
+    size_t count0 = strzl_partition(array, count01, begin, length, &strzl_has_under_one_char, order);
+    size_t count1 = count01 - count0;
+    size_t count2 = count012 - count01;
+    size_t count3 = count0123 - count012;
+    size_t count4 = count01234 - count0123;
+
+    // Run a specialized sort version on every part.
+    strzl_merge_sort(array, count1, begin, length, &strzl_less_one_char, order + count0, deduplicate);
+    strzl_merge_sort(array, count2, begin, length, &strzl_less_two_chars, order + count01, deduplicate);
+    strzl_merge_sort(array, count3, begin, length, &strzl_less_three_chars, order + count012, deduplicate);
+    strzl_merge_sort(array, count4, begin, length, &strzl_less_four_chars, order + count0123, deduplicate);
+    strzl_merge_sort(array, count4, begin, length, &strzl_less_entire, order + count0123, deduplicate);
+
+    // As an optimization, we can manually specify the merge tasks.
+
+    // Now inplace-merge the results.
+    strzl_merge_sort(array, count01234, begin, length, &strzl_less_entire, order, deduplicate);
+    return count;
+}
+
+inline static void strzl_naive_join( //
+    void const *array,
+    size_t count,
+    stringzilla_array_get_start_t begin,
+    stringzilla_array_get_length_t length,
+    size_t *order) { //
+}
 
 #ifdef __cplusplus
 }
