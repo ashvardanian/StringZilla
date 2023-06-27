@@ -18,6 +18,7 @@ typedef SSIZE_T ssize_t;
 
 #include <utility> // `std::exchange`
 #include <limits>  // `std::numeric_limits`
+#include <cmath>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -110,11 +111,73 @@ struct index_span_t {
 };
 
 index_span_t unsigned_slice(size_t length, ssize_t start, ssize_t end) {
-    if (start < 0 || end < 0) // TODO:
-        throw std::invalid_argument("Negative slices aren't supported yet!");
-
-    start = std::min(start, static_cast<ssize_t>(length));
-    end = std::min(end, static_cast<ssize_t>(length));
+    ssize_t len = static_cast<ssize_t>(length);
+    if (start > end)
+        throw std::invalid_argument("Input is in wrong order!");
+    ssize_t abs_start = std::abs(start);
+    ssize_t abs_end = std::abs(end);
+    if (start < 0 && end < 0) {
+        if (len == 0) {
+            end = abs_start + end;
+            start = 0;
+        }
+        else if (abs_start <= len && abs_end <= len) {
+            start = len + start;
+            end = len + end;
+        }
+        else if (abs_start > len && abs_end <= len) {
+            start = 0;
+            end = len + end;
+        }
+        else if (abs_start <= len && abs_end > len) {
+            start = len + start;
+            end = len;
+        }
+        else if (abs_start > len && abs_end > len) {
+            start = 0;
+            end = len;
+        }
+    }
+    else if (start < 0 && end >= 0) {
+        end = len > 0 ? std::min(end, len) : end;
+        if (abs_start <= end) {
+            if (len > end && (len + start) <= end)
+                start = len + start;
+            else
+                start = end + start;
+        }
+        else {
+            if ((len + start) > 0 && (len + start) <= end)
+                start = len + start;
+            else
+                start = 0;
+        }
+    }
+    else if (start >= 0 && end < 0) {
+        if (len == 0) {
+            if (abs_end < start) {
+                start = abs_end;
+                end = abs_start;
+            }
+            else {
+                start = 0;
+                end = abs_start;
+            }
+        }
+        else if (len >= start) {
+            if ((len + end) >= start)
+                end = len + end;
+            else
+                end = len;
+        }
+        else {
+            end = start;
+        }
+    }
+    else {
+        start = std::min(start, len);
+        end = std::min(end, len);
+    }
     return {static_cast<size_t>(start), static_cast<size_t>(end - start)};
 }
 
