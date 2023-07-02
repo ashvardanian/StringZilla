@@ -16,8 +16,6 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h> // `ssize_t`
 #endif
 
-#include <iostream>
-
 #include <utility> // `std::exchange`
 #include <limits>  // `std::numeric_limits`
 #include <cmath>   // `std::abs`
