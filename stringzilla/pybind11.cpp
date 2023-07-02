@@ -18,6 +18,7 @@ typedef SSIZE_T ssize_t;
 
 #include <utility> // `std::exchange`
 #include <limits>  // `std::numeric_limits`
+#include <cmath>   // `std::abs`
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -109,12 +110,56 @@ struct index_span_t {
     size_t length;
 };
 
-index_span_t unsigned_slice(size_t length, ssize_t start, ssize_t end) {
-    if (start < 0 || end < 0) // TODO:
-        throw std::invalid_argument("Negative slices aren't supported yet!");
+index_span_t slice(size_t length, ssize_t start, ssize_t end) {
+    ssize_t len = static_cast<ssize_t>(length);
+    ssize_t abs_start = std::abs(start);
+    ssize_t abs_end = std::abs(end);
 
-    start = std::min(start, static_cast<ssize_t>(length));
-    end = std::min(end, static_cast<ssize_t>(length));
+    if (len == 0)
+        return {0ul, 0ul};
+
+    if (start > end) {
+        if ((start < 0 && end < 0) || (start >= 0 && end > 0) || len - abs_end < start)
+            return {0ul, 0ul};
+        end = len - abs_end;
+    }
+    else if (start < 0 && end < 0) {
+        if (abs_start <= len && abs_end <= len) {
+            start = len + start;
+            end = len + end;
+        }
+        else if (abs_start > len && abs_end <= len) {
+            start = 0;
+            end = len + end;
+        }
+        else if (abs_start <= len && abs_end > len) {
+            start = len + start;
+            end = len;
+        }
+        else if (abs_start > len && abs_end > len) {
+            start = 0;
+            end = len;
+        }
+    }
+    else if (start < 0 && end >= 0) {
+        end = end == 0 ? len : std::min(end, len);
+        if (!((start = len - abs_start) < end && start >= 0))
+            start = end = 0;
+    }
+    else if (start >= 0 && end < 0) {
+        if (len >= start) {
+            if ((len + end) >= start)
+                end = len + end;
+            else
+                end = len;
+        }
+        else
+            end = start;
+    }
+    else {
+        start = std::min(start, len);
+        end = end == 0 ? len : std::min(end, len);
+    }
     return {static_cast<size_t>(start), static_cast<size_t>(end - start)};
 }
 
@@ -132,7 +177,7 @@ size_t unsigned_offset(size_t length, ssize_t idx) {
 }
 
 span_t subspan(span_t span, ssize_t start, ssize_t end = ssize_max_k) {
-    index_span_t index_span = unsigned_slice(span.size(), start, end);
+    index_span_t index_span = slice(span.size(), start, end);
     return {span.ptr + index_span.offset, index_span.length};
 }
 
@@ -316,7 +361,7 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
     }
 
     std::shared_ptr<py_spans_t> sub(ssize_t start, ssize_t end) const {
-        index_span_t index_span = unsigned_slice(parts_.size(), start, end);
+        index_span_t index_span = slice(parts_.size(), start, end);
         auto first_part_it = parts_.begin() + index_span.offset;
         std::vector<span_t> sub_parts(first_part_it, first_part_it + index_span.length);
         return std::make_shared<py_spans_t>(whole_, sub_parts);
@@ -395,7 +440,7 @@ std::shared_ptr<py_spans_t> py_span_t::split(std::string_view separator, size_t 
 }
 
 std::shared_ptr<py_subspan_t> py_span_t::sub(ssize_t start, ssize_t end) const {
-    index_span_t index_span = unsigned_slice(size(), start, end);
+    index_span_t index_span = slice(size(), start, end);
     return std::make_shared<py_subspan_t>(shared_from_this(), span_t {ptr + index_span.offset, index_span.length});
 }
 
@@ -435,6 +480,11 @@ void define_slice_ops(py::class_<at, std::shared_ptr<at>> &str_view_struct) {
         py::arg("maxsplit") = size_max_k,
         py::kw_only(),
         py::arg("keepseparator") = false);
+    str_view_struct.def( //
+        "sub",
+        &at::sub,
+        py::arg("start") = 0,
+        py::arg("end") = 0);
 
     // Substring presence operator
     str_view_struct.def("__contains__",
@@ -474,6 +524,7 @@ PYBIND11_MODULE(stringzilla, m) {
 
     auto py_slices = py::class_<py_spans_t, std::shared_ptr<py_spans_t>>(m, "Slices");
     py_slices.def(py::init([]() { return std::make_shared<py_spans_t>(); }));
+    py_slices.def("sub", &py_spans_t::sub, py::arg("start") = 0, py::arg("end") = 0);
     py_slices.def("__len__", &py_spans_t::size);
     py_slices.def("__getitem__", &py_spans_t::at, py::arg("index"));
     py_slices.def(
