@@ -75,3 +75,32 @@ def test_fuzzy(pattern_length: int, haystack_length: int, variability: int):
     for _ in range(haystack_length // pattern_length):
         pattern = get_random_string(variability=variability, length=pattern_length)
         check_identical(native, big, pattern)
+
+
+def test_slices():
+    native = get_random_string(length=10)
+    big = Str(native)
+    assert native[0:5] == str(big.sub(0, 5))
+    assert native[5:10] == str(big.sub(5, 10))
+
+    assert native[5:5] == str(big.sub(5, 5))
+    assert native[-5:-5] == str(big.sub(-5, -5))
+    assert native[2:-2] == str(big.sub(2, -2))
+    assert native[7:-7] == str(big.sub(7, -7))
+
+    assert native[5:3] == str(big.sub(5, 3))
+    assert native[5:7] == str(big.sub(5, 7))
+    assert native[5:-3] == str(big.sub(5, -3))
+    assert native[5:-7] == str(big.sub(5, -7))
+
+    assert native[-5:3] == str(big.sub(-5, 3))
+    assert native[-5:7] == str(big.sub(-5, 7))
+    assert native[-5:-3] == str(big.sub(-5, -3))
+    assert native[-5:-7] == str(big.sub(-5, -7))
+
+    assert native[2:] == str(big.sub(2))
+    assert native[:7] == str(big.sub(end=7))
+    assert native[-2:] == str(big.sub(-2))
+    assert native[:-7] == str(big.sub(end=-7))
+    assert native[:-10] == str(big.sub(end=-10))
+    assert native[:-1] == str(big.sub(end=-1))
