@@ -115,7 +115,7 @@ index_span_t slice(size_t length, ssize_t start, ssize_t end) {
     ssize_t abs_start = std::abs(start);
     ssize_t abs_end = std::abs(end);
 
-    if (len == 0)
+    if (len == 0 || (start == 0 && end == 0))
         return {0ul, 0ul};
 
     if (start > end) {
@@ -360,10 +360,17 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
         return std::make_shared<py_subspan_t>(whole_, parts_[unsigned_offset(size(), i)]);
     }
 
-    std::shared_ptr<py_spans_t> sub(ssize_t start, ssize_t end) const {
+    std::shared_ptr<py_spans_t> sub(ssize_t start, ssize_t end, ssize_t step) const {
         index_span_t index_span = slice(parts_.size(), start, end);
-        auto first_part_it = parts_.begin() + index_span.offset;
-        std::vector<span_t> sub_parts(first_part_it, first_part_it + index_span.length);
+        if (step == 0) {
+            auto first_part_it = parts_.begin() + index_span.offset;
+            std::vector<span_t> sub_parts(first_part_it, first_part_it + index_span.length);
+            return std::make_shared<py_spans_t>(whole_, sub_parts);
+        }
+        std::vector<span_t> sub_parts(index_span.length / step);
+        for (size_t parts_idx = index_span.offset, sub_idx = 0; parts_idx < index_span.offset + index_span.length;
+             parts_idx += step, ++sub_idx)
+            sub_parts[sub_idx] = parts_[parts_idx];
         return std::make_shared<py_spans_t>(whole_, sub_parts);
     }
 
@@ -512,6 +519,11 @@ PYBIND11_MODULE(stringzilla, m) {
     auto py_str = py::class_<py_str_t, std::shared_ptr<py_str_t>>(m, "Str");
     py_str.def(py::init([](std::string arg) { return std::make_shared<py_str_t>(std::move(arg)); }), py::arg("str"));
     define_slice_ops(py_str);
+    py_str.def("__getitem__", [](py_str_t &s, py::slice slice) {
+        py::ssize_t start, stop, step, slice_length;
+        slice.compute(s.size(), &start, &stop, &step, &slice_length);
+        return s.sub(start, stop);
+    });
 
     auto py_file = py::class_<py_file_t, std::shared_ptr<py_file_t>>(m, "File");
     py_file.def( //
@@ -521,12 +533,22 @@ PYBIND11_MODULE(stringzilla, m) {
     py_file.def("open", &py_file_t::open, py::arg("path"));
     py_file.def("open", &py_file_t::reopen);
     py_file.def("close", &py_file_t::close);
+    py_file.def("__getitem__", [](py_file_t &s, py::slice slice) {
+        py::ssize_t start, stop, step, slice_length;
+        slice.compute(s.size(), &start, &stop, &step, &slice_length);
+        return s.sub(start, stop);
+    });
 
     auto py_slices = py::class_<py_spans_t, std::shared_ptr<py_spans_t>>(m, "Slices");
     py_slices.def(py::init([]() { return std::make_shared<py_spans_t>(); }));
-    py_slices.def("sub", &py_spans_t::sub, py::arg("start") = 0, py::arg("end") = 0);
+    py_slices.def("sub", &py_spans_t::sub, py::arg("start") = 0, py::arg("end") = 0, py::arg("step") = 0);
     py_slices.def("__len__", &py_spans_t::size);
     py_slices.def("__getitem__", &py_spans_t::at, py::arg("index"));
+    py_slices.def("__getitem__", [](py_spans_t &s, py::slice slice) {
+        py::ssize_t start, stop, step, slice_length;
+        slice.compute(s.size(), &start, &stop, &step, &slice_length);
+        return s.sub(start, stop, step);
+    });
     py_slices.def(
         "__iter__",
         [](py_spans_t const &s) { return py::make_iterator(s.begin(), s.end()); },
