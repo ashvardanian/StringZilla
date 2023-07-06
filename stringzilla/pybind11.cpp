@@ -116,7 +116,7 @@ index_span_t slice(size_t length, ssize_t start, ssize_t end) {
     ssize_t abs_start = std::abs(start);
     ssize_t abs_end = std::abs(end);
 
-    if (len == 0 || (start == 0 && end == 0))
+    if (len == 0 || start == end)
         return {0ul, 0ul};
 
     if (start > end) {
