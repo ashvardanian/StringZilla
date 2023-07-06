@@ -19,6 +19,7 @@ typedef SSIZE_T ssize_t;
 #include <utility> // `std::exchange`
 #include <limits>  // `std::numeric_limits`
 #include <cmath>   // `std::abs`
+#include <cstring> // `std::abs`
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -202,6 +203,15 @@ struct py_span_t : public span_t, public std::enable_shared_from_this<py_span_t>
     char const *end() const { return begin() + len; }
     char at(ssize_t offset) const { return begin()[unsigned_offset(len, offset)]; }
     py::str to_python() const { return {begin(), len}; }
+
+    bool operator==(std::string const &str) const {
+        return (str.size() == len && std::strncmp(str.c_str(), ptr, len) == 0);
+    }
+    bool operator!=(std::string const &str) const { return !(*this == str); }
+    bool operator==(py_span_t const &other) const {
+        return (other.size() == len && std::strncmp(other.data(), ptr, len) == 0);
+    }
+    bool operator!=(py_span_t const &other) const { return !(*this == other); }
 
     span_t after_n(size_t offset) const noexcept {
         return (offset < len) ? span_t {ptr + offset, len - offset} : span_t {};
@@ -452,6 +462,14 @@ std::shared_ptr<py_subspan_t> py_span_t::sub(ssize_t start, ssize_t end) const {
 }
 
 template <typename at>
+void define_comparsion_ops(py::class_<at, std::shared_ptr<at>> &str_view_struct) {
+    str_view_struct.def("__eq__", [](at const &self, std::string const &str) { return self == str; });
+    str_view_struct.def("__ne__", [](at const &self, std::string const &str) { return self != str; });
+    str_view_struct.def("__eq__", [](at const &self, at const &other) { return self == other; });
+    str_view_struct.def("__ne__", [](at const &self, at const &other) { return self != other; });
+}
+
+template <typename at>
 void define_slice_ops(py::class_<at, std::shared_ptr<at>> &str_view_struct) {
 
     str_view_struct.def( //
@@ -511,19 +529,22 @@ PYBIND11_MODULE(stringzilla, m) {
     m.doc() = "Crunch 100+ GB Strings in Python with ease";
 
     auto py_span = py::class_<py_span_t, std::shared_ptr<py_span_t>>(m, "Span");
+    define_comparsion_ops(py_span);
     define_slice_ops(py_span);
 
     auto py_subspan = py::class_<py_subspan_t, std::shared_ptr<py_subspan_t>>(m, "SubSpan");
+    define_comparsion_ops(py_subspan);
     define_slice_ops(py_subspan);
 
     auto py_str = py::class_<py_str_t, std::shared_ptr<py_str_t>>(m, "Str");
     py_str.def(py::init([](std::string arg) { return std::make_shared<py_str_t>(std::move(arg)); }), py::arg("str"));
-    define_slice_ops(py_str);
     py_str.def("__getitem__", [](py_str_t &s, py::slice slice) {
         py::ssize_t start, stop, step, slice_length;
         slice.compute(s.size(), &start, &stop, &step, &slice_length);
         return s.sub(start, stop);
     });
+    define_comparsion_ops(py_str);
+    define_slice_ops(py_str);
 
     auto py_file = py::class_<py_file_t, std::shared_ptr<py_file_t>>(m, "File");
     py_file.def( //
