@@ -19,7 +19,7 @@ typedef SSIZE_T ssize_t;
 #include <utility> // `std::exchange`
 #include <limits>  // `std::numeric_limits`
 #include <cmath>   // `std::abs`
-#include <cstring> // `std::abs`
+#include <cstring> // `std::strncmp`
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -370,18 +370,16 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
         return std::make_shared<py_subspan_t>(whole_, parts_[unsigned_offset(size(), i)]);
     }
 
-    std::shared_ptr<py_spans_t> sub(ssize_t start, ssize_t end, ssize_t step) const {
-        index_span_t index_span = slice(parts_.size(), start, end);
-        if (step == 0) {
-            auto first_part_it = parts_.begin() + index_span.offset;
-            std::vector<span_t> sub_parts(first_part_it, first_part_it + index_span.length);
-            return std::make_shared<py_spans_t>(whole_, sub_parts);
+    std::shared_ptr<py_spans_t> sub(ssize_t start, ssize_t end, ssize_t step, ssize_t length) const {
+        if (step == 1) {
+            auto first_part_it = parts_.begin() + start;
+            std::vector<span_t> sub_parts(first_part_it, first_part_it + length);
+            return std::make_shared<py_spans_t>(whole_, std::move(sub_parts));
         }
-        std::vector<span_t> sub_parts(index_span.length / step);
-        for (size_t parts_idx = index_span.offset, sub_idx = 0; parts_idx < index_span.offset + index_span.length;
-             parts_idx += step, ++sub_idx)
+        std::vector<span_t> sub_parts(length);
+        for (size_t parts_idx = start, sub_idx = 0; sub_idx < length; parts_idx += step, ++sub_idx)
             sub_parts[sub_idx] = parts_[parts_idx];
-        return std::make_shared<py_spans_t>(whole_, sub_parts);
+        return std::make_shared<py_spans_t>(whole_, std::move(sub_parts));
     }
 
     iterator_t begin() const { return {this, 0}; }
@@ -539,8 +537,9 @@ PYBIND11_MODULE(stringzilla, m) {
     auto py_str = py::class_<py_str_t, std::shared_ptr<py_str_t>>(m, "Str");
     py_str.def(py::init([](std::string arg) { return std::make_shared<py_str_t>(std::move(arg)); }), py::arg("str"));
     py_str.def("__getitem__", [](py_str_t &s, py::slice slice) {
-        py::ssize_t start, stop, step, slice_length;
-        slice.compute(s.size(), &start, &stop, &step, &slice_length);
+        ssize_t start, stop, step, length;
+        if (!slice.compute(s.size(), &start, &stop, &step, &length))
+            throw py::error_already_set();
         return s.sub(start, stop);
     });
     define_comparsion_ops(py_str);
@@ -555,23 +554,32 @@ PYBIND11_MODULE(stringzilla, m) {
     py_file.def("open", &py_file_t::reopen);
     py_file.def("close", &py_file_t::close);
     py_file.def("__getitem__", [](py_file_t &s, py::slice slice) {
-        py::ssize_t start, stop, step, slice_length;
-        slice.compute(s.size(), &start, &stop, &step, &slice_length);
+        ssize_t start, stop, step, length;
+        if (!slice.compute(s.size(), &start, &stop, &step, &length))
+            throw py::error_already_set();
         return s.sub(start, stop);
     });
 
     auto py_slices = py::class_<py_spans_t, std::shared_ptr<py_spans_t>>(m, "Slices");
     py_slices.def(py::init([]() { return std::make_shared<py_spans_t>(); }));
-    py_slices.def("sub", &py_spans_t::sub, py::arg("start") = 0, py::arg("end") = 0, py::arg("step") = 0);
     py_slices.def("__len__", &py_spans_t::size);
     py_slices.def("__getitem__", &py_spans_t::at, py::arg("index"));
-    py_slices.def("__getitem__", [](py_spans_t &s, py::slice slice) {
-        py::ssize_t start, stop, step, slice_length;
-        slice.compute(s.size(), &start, &stop, &step, &slice_length);
-        return s.sub(start, stop, step);
-    });
     py_slices.def(
         "__iter__",
         [](py_spans_t const &s) { return py::make_iterator(s.begin(), s.end()); },
         py::keep_alive<0, 1>());
+    py_slices.def("__getitem__", [](py_spans_t &s, py::slice slice) {
+        ssize_t start, stop, step, length;
+        if (!slice.compute(s.size(), &start, &stop, &step, &length))
+            throw py::error_already_set();
+        return s.sub(start, stop, step, length);
+    });
+    py_slices.def( //
+        "sub",
+        [](py_spans_t &s, ssize_t start, ssize_t stop, ssize_t step = 1) {
+            auto index_span = slice(s.size(), start, stop);
+            ssize_t length = stop = index_span.length;
+            start = index_span.offset;
+            return s.sub(start, stop, step, length);
+        });
 }
