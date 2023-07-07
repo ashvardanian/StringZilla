@@ -19,7 +19,7 @@ typedef SSIZE_T ssize_t;
 #include <utility> // `std::exchange`
 #include <limits>  // `std::numeric_limits`
 #include <cmath>   // `std::abs`
-#include <cstring> // `std::strncmp`
+#include <string_view>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -204,14 +204,14 @@ struct py_span_t : public span_t, public std::enable_shared_from_this<py_span_t>
     char at(ssize_t offset) const { return begin()[unsigned_offset(len, offset)]; }
     py::str to_python() const { return {begin(), len}; }
 
-    bool operator==(std::string const &str) const {
-        return (str.size() == len && std::strncmp(str.c_str(), ptr, len) == 0);
-    }
-    bool operator!=(std::string const &str) const { return !(*this == str); }
-    bool operator==(py_span_t const &other) const {
-        return (other.size() == len && std::strncmp(other.data(), ptr, len) == 0);
-    }
+    bool operator==(py::str const &str) const { return to_stl({ptr, len}) == str.cast<std::string_view>(); }
+    bool operator!=(py::str const &str) const { return !(*this == str); }
+    bool operator==(py_span_t const &other) const { return to_stl({ptr, len}) == to_stl({other.ptr, other.len}); }
     bool operator!=(py_span_t const &other) const { return !(*this == other); }
+    bool operator>(py::str const &str) const { return to_stl({ptr, len}) > str.cast<std::string_view>(); }
+    bool operator<(py::str const &str) const { return to_stl({ptr, len}) < str.cast<std::string_view>(); }
+    bool operator>(py_span_t const &other) const { return to_stl({ptr, len}) > to_stl({other.ptr, other.len}); }
+    bool operator<(py_span_t const &other) const { return to_stl({ptr, len}) < to_stl({other.ptr, other.len}); }
 
     span_t after_n(size_t offset) const noexcept {
         return (offset < len) ? span_t {ptr + offset, len - offset} : span_t {};
@@ -461,10 +461,14 @@ std::shared_ptr<py_subspan_t> py_span_t::sub(ssize_t start, ssize_t end) const {
 
 template <typename at>
 void define_comparsion_ops(py::class_<at, std::shared_ptr<at>> &str_view_struct) {
-    str_view_struct.def("__eq__", [](at const &self, std::string const &str) { return self == str; });
-    str_view_struct.def("__ne__", [](at const &self, std::string const &str) { return self != str; });
+    str_view_struct.def("__eq__", [](at const &self, py::str const &str) { return self == str; });
+    str_view_struct.def("__ne__", [](at const &self, py::str const &str) { return self != str; });
     str_view_struct.def("__eq__", [](at const &self, at const &other) { return self == other; });
     str_view_struct.def("__ne__", [](at const &self, at const &other) { return self != other; });
+    str_view_struct.def("__gt__", [](at const &self, py::str const &str) { return self > str; });
+    str_view_struct.def("__lt__", [](at const &self, py::str const &str) { return self < str; });
+    str_view_struct.def("__gt__", [](at const &self, at const &other) { return self > other; });
+    str_view_struct.def("__lt__", [](at const &self, at const &other) { return self < other; });
 }
 
 template <typename at>
