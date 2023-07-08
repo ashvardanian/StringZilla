@@ -488,149 +488,153 @@ inline static size_t strzl_partition( //
     stringzilla_array_predicate_t predicate,
     size_t *order) {
 
-    size_t split = 0;
-    while (split != count && predicate(get_start(array, order[split]), get_length(array, order[split])))
-        ++split;
+    size_t matches = 0;
+    while (matches != count && predicate(get_start(array, order[matches]), get_length(array, order[matches])))
+        ++matches;
 
-    if (split != count)
-        for (size_t i = split + 1; i != count; ++i)
+    for (size_t i = matches + 1; i < count; ++i)
             if (predicate(get_start(array, order[i]), get_length(array, order[i])))
-                strzl_swap(order + i, order + split), ++split;
+            strzl_swap(order + i, order + matches), ++matches;
 
-    return split;
+    return matches;
 }
 
-void strzl_merge_parts( //
+inline static void strzl_qsort( //
     void const *array,
     size_t count,
     stringzilla_array_get_start_t begin,
     stringzilla_array_get_length_t length,
     bool (*less)(char const *, size_t, char const *, size_t),
     size_t *order,
-    size_t start,
-    size_t mid,
-    size_t end) {
+    ssize_t const l,
+    ssize_t const h) {
 
-    size_t start2 = mid + 1;
-
-    // If the direct merge is already sorted
-    if (!less( //
-            begin(array, order[start2]),
-            length(array, order[start2]),
-            begin(array, order[mid]),
-            length(array, order[mid])))
+    if (l >= h)
         return;
 
-    // Two pointers to maintain start
-    // of both arrays to merge
-    while (start <= mid && start2 <= end) {
+    ssize_t i = (l - 1);
+    for (ssize_t j = l; j < h; j++) {
+        if (less( //
+                begin(array, order[j]),
+                length(array, order[j]),
+                begin(array, order[h]),
+                length(array, order[h]))) {
+            i++;
+            strzl_swap(order + i, order + j);
+        }
+    }
+    strzl_swap(order + i + 1, order + h);
+    ssize_t p = i + 1;
 
-        // If element 1 is in right place
-        if (!less( //
-                begin(array, order[start2]),
-                length(array, order[start2]),
-                begin(array, order[start]),
-                length(array, order[start]))) {
-            start++;
+    strzl_qsort(array, count, begin, length, less, order, l, p - 1);
+    strzl_qsort(array, count, begin, length, less, order, p + 1, h);
         }
-        else {
-            size_t value = order[start2];
-            size_t index = start2;
-            while (index != start) {
-                order[index] = order[index - 1];
-                index--;
+
+inline static size_t _strzl_integers_partition(size_t *array, size_t count, size_t bit_idx) {
+
+    size_t split = 0;
+    size_t mask = (1ul << 63) >> bit_idx;
+    while (split != count && (array[split] & mask))
+        ++split;
+
+    for (size_t i = split + 1; i < count; ++i)
+        if (array[i] & mask)
+            strzl_swap(array + i, array + split), ++split;
+
+    return split;
             }
-            order[start] = value;
-            start++;
-            mid++;
-            start2++;
+
+void _strzl_integers_qsort(size_t *array, ssize_t count) {
+
+    ssize_t l = 0;
+    ssize_t h = count;
+    if (h <= 0)
+        return;
+
+    ssize_t i = (l - 1);
+    for (ssize_t j = l; j < h; j++) {
+        if (*(uint32_t *)(array + j) < *(uint32_t *)(array + h)) {
+            i++;
+            strzl_swap(array + i, array + j);
         }
+    }
+    strzl_swap(array + i + 1, array + h);
+    ssize_t p = i + 1;
+
+    _strzl_integers_qsort(array + l, p - 1);
+    _strzl_integers_qsort(array + p + 1, h);
+}
+
+inline static void _strzl_sort_radix_recursion( //
+    void const *array,
+    size_t array_size,
+    stringzilla_array_get_start_t get_begin,
+    stringzilla_array_get_length_t get_length,
+    size_t *order,
+    size_t order_size,
+    size_t bit_idx,
+    size_t bit_max) {
+
+    if (!order_size)
+        return;
+
+    size_t split = _strzl_integers_partition(order, order_size, bit_idx);
+    if (bit_idx < bit_max) {
+        _strzl_sort_radix_recursion( //
+            array,
+            array_size,
+            get_begin,
+            get_length,
+            order,
+            split,
+            bit_idx + 1,
+            bit_max);
+        _strzl_sort_radix_recursion( //
+            array,
+            array_size,
+            get_begin,
+            get_length,
+            order + split,
+            order_size - split,
+            bit_idx + 1,
+            bit_max);
+}
+    else {
+        // Discard the prefixes
+        for (size_t i = 0; i != order_size; ++i)
+            memset(&order[i], 0, 4ul);
+
+        // Perform sorts on smaller chunks instead of the whole array
+        auto sorter = [=](size_t i, size_t j) {
+            auto a = std::string_view(get_begin(array, i), get_length(array, i));
+            auto b = std::string_view(get_begin(array, j), get_length(array, j));
+            return a < b;
+        };
+        std::sort(order, order + split, sorter);
+        std::sort(order + split, order + order_size, sorter);
     }
 }
 
-void strzl_merge_sort_halves( //
-    void const *array,
-    size_t count,
-    stringzilla_array_get_start_t begin,
-    stringzilla_array_get_length_t length,
-    bool (*less)(char const *, size_t, char const *, size_t),
-    size_t *order,
-    size_t l,
-    size_t r) {
-
-    if (l >= r)
-        return;
-
-    // Same as (l + r) / 2, but avoids overflow for large l and r
-    size_t m = l + (r - l) / 2;
-
-    // Sort first and second halves
-    strzl_merge_sort_halves(array, count, begin, length, less, order, l, m);
-    strzl_merge_sort_halves(array, count, begin, length, less, order, m + 1, r);
-    strzl_merge_parts(array, count, begin, length, less, order, l, m, r);
-}
-
-inline static void strzl_merge_sort( //
-    void const *array,
-    size_t count,
-    stringzilla_array_get_start_t begin,
-    stringzilla_array_get_length_t length,
-    bool (*less)(char const *, size_t, char const *, size_t),
-    size_t *order,
-    bool deduplicate) {
-    //
-
-    strzl_merge_sort_halves(array, count, begin, length, less, order, 0, count - 1);
-}
-
 /**
- *  @brief  Sorting algorithm, built as a combo of quick-sorts for different length prefixes, and inplace merge-sort
- *          over partial results. Outputs the sorted order of the original elements instead of changing inplace.
- *  @return Number of sorted elements, potentially smaller than overall @ref count, if deduplication is requested.
- *
- *  @param deduplicate  A common scenarie is to follow-up sorting with deduplication. When `true`, that will be done
- *                      automatically, simultaneously accelerating sorting, assuming less elements will have to be
- *                      compared.
+ *  @brief  Sorting algorithm, combining Radix Sort for the first 32 bits of every word
+ *          and a follow-up Quick Sort on resulting structure.
  */
-inline static size_t strzl_sort( //
+inline static void strzl_sort( //
     void const *array,
-    size_t count,
-    stringzilla_array_get_start_t begin,
-    stringzilla_array_get_length_t length,
-    size_t *order,
-    bool deduplicate) {
+    size_t array_size,
+    stringzilla_array_get_start_t get_begin,
+    stringzilla_array_get_length_t get_length,
+    size_t *order) {
 
-    // Partition strings by length. 77h
-    size_t count01234 = count;
-    size_t count0123 = strzl_partition(array, count01234, begin, length, &strzl_has_under_four_chars, order);
-    size_t count012 = strzl_partition(array, count0123, begin, length, &strzl_has_under_three_chars, order);
-    size_t count01 = strzl_partition(array, count012, begin, length, &strzl_has_under_two_chars, order);
-    size_t count0 = strzl_partition(array, count01, begin, length, &strzl_has_under_one_char, order);
-    size_t count1 = count01 - count0;
-    size_t count2 = count012 - count01;
-    size_t count3 = count0123 - count012;
-    size_t count4 = count01234 - count0123;
+    // Export up to 4 bytes into the `order` bits themselves
+    for (size_t i = 0; i != array_size; ++i)
+        memcpy( //
+            &order[i],
+            get_begin(array, order[i]),
+            get_length(array, order[i]) > 4ul ? 4ul : get_length(array, order[i]));
 
-    // Run a specialized sort version on every part.
-    strzl_merge_sort(array, count1, begin, length, &strzl_less_one_char, order + count0, deduplicate);
-    strzl_merge_sort(array, count2, begin, length, &strzl_less_two_chars, order + count01, deduplicate);
-    strzl_merge_sort(array, count3, begin, length, &strzl_less_three_chars, order + count012, deduplicate);
-    strzl_merge_sort(array, count4, begin, length, &strzl_less_four_chars, order + count0123, deduplicate);
-    strzl_merge_sort(array, count4, begin, length, &strzl_less_entire, order + count0123, deduplicate);
-
-    // As an optimization, we can manually specify the merge tasks.
-
-    // Now inplace-merge the results.
-    strzl_merge_sort(array, count01234, begin, length, &strzl_less_entire, order, deduplicate);
-    return count;
-}
-
-inline static void strzl_naive_join( //
-    void const *array,
-    size_t count,
-    stringzilla_array_get_start_t begin,
-    stringzilla_array_get_length_t length,
-    size_t *order) { //
+    // Perform optionally-parallel radix sort on them
+    _strzl_sort_radix_recursion(array, array_size, get_begin, get_length, order, array_size, 0, 32);
 }
 
 #ifdef __cplusplus

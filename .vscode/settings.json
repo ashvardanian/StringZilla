@@ -115,7 +115,8 @@
     "source_location": "cpp",
     "stop_token": "cpp",
     "__verbose_abort": "cpp",
-    "strstream": "cpp"
+    "strstream": "cpp",
+    "filesystem": "cpp"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
 }
