@@ -117,9 +117,10 @@ void expect_same(permute_t const &permute_base, permute_t const &permute_new) {
 }
 
 template <typename algo_at>
-void benchmark(char const *name, strings_t &strings, permute_t &permute, std::size_t iterations, algo_at &&algo) {
+void bench_permute(char const *name, strings_t &strings, permute_t &permute, algo_at &&algo) {
     namespace stdc = std::chrono;
     using stdcc = stdc::high_resolution_clock;
+    constexpr std::size_t iterations = 3;
     stdcc::time_point t1 = stdcc::now();
 
     // Run multiple iterations
@@ -135,46 +136,79 @@ void benchmark(char const *name, strings_t &strings, permute_t &permute, std::si
     std::printf("Elapsed time is %.2lf miliseconds/iteration for %s.\n", milisecs, name);
 }
 
+template <typename algo_at>
+void bench_search(char const *name, std::string_view full_text, algo_at &&algo) {
+    namespace stdc = std::chrono;
+    using stdcc = stdc::high_resolution_clock;
+    constexpr std::size_t iterations = 3000;
+    stdcc::time_point t1 = stdcc::now();
+
+    // Run multiple iterations
+    for (std::size_t i = 0; i != iterations; ++i) {
+        std::size_t length = std::rand() % 6 + 2;
+        std::size_t offset = std::rand() % (full_text.size() - length);
+        algo(full_text, full_text.substr(offset, length));
+    }
+
+    // Measure elapsed time
+    stdcc::time_point t2 = stdcc::now();
+    double dif = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count();
+    double milisecs = dif / (iterations * 1e6);
+    std::printf("Elapsed time is %.2lf miliseconds/iteration for %s.\n", milisecs, name);
+}
+
 int main(int, char const **) {
     std::printf("Hey, Ash!\n");
 
     strings_t strings;
-    permute_t permute_base, permute_new;
     populate_from_file("leipzig1M.txt", strings, 1000000);
     std::size_t mean_bytes = 0;
     for (std::string const &str : strings)
         mean_bytes += str.size();
     mean_bytes /= strings.size();
     std::printf("Parsed the file with %zu words of %zu mean length!\n", strings.size(), mean_bytes);
-    permute_base.resize(strings.size());
-    permute_new.resize(strings.size());
+
+    std::string full_text;
+    full_text.reserve(mean_bytes + strings.size() * 2);
+    for (std::string const &str : strings)
+        full_text.append(str), full_text.push_back(' ');
+
+    // Search substring
+    bench_search("strzl_naive_find_substr", full_text, [](std::string_view haystack, std::string_view needle) {
+        strzl_haystack_t h {};
+        strzl_needle_t n {};
+        h.ptr = haystack.data();
+        h.len = haystack.size();
+        n.ptr = needle.data();
+        n.len = needle.size();
+        strzl_naive_find_substr(h, n);
+    });
+    bench_search("std::search", full_text, [](std::string_view haystack, std::string_view needle) {
+        return std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end());
+    });
 
     // Partitioning
-    benchmark("std::partition", strings, permute_base, 3, [](strings_t const &strings, permute_t &permute) {
+    permute_t permute_base, permute_new;
+    permute_base.resize(strings.size());
+    permute_new.resize(strings.size());
+    bench_permute("std::partition", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
         std::partition(permute.begin(), permute.end(), [&](size_t i) { return strings[i].size() < 4; });
     });
     expect_partitioned_by_length(strings, permute_base);
 
-    benchmark("std::stable_partition", strings, permute_base, 3, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("std::stable_partition", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
         std::stable_partition(permute.begin(), permute.end(), [&](size_t i) { return strings[i].size() < 4; });
     });
     expect_partitioned_by_length(strings, permute_base);
 
-    benchmark("strzl_partition", strings, permute_new, 3, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("strzl_partition", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
         strzl_partition(&strings, strings.size(), &get_begin, &get_length, &has_under_four_chars, permute.data());
     });
     expect_partitioned_by_length(strings, permute_new);
     // TODO: expect_same(permute_base, permute_new);
 
-    // Search substring
-    // benchmark("strzl_naive_find_substr", strings, permute_new, 3, [](strings_t const &strings, permute_t &permute) {
-    //     strzl_haystack_t haystack;
-    //     strzl_needle_t needle;
-    //     strzl_naive_find_substr(haystack, needle);
-    // });
-
     // Sorting
-    // benchmark("strzl_qsort", strings, permute_new, 3, [](strings_t const &strings, permute_t &permute) {
+    // bench_permute("strzl_qsort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
     //     strzl_qsort(&strings,
     //                 strings.size(),
     //                 get_begin,
@@ -186,28 +220,28 @@ int main(int, char const **) {
     // });
     // expect_sorted(strings, permute_new);
 
-    benchmark("strzl_sort", strings, permute_new, 3, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("strzl_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
         strzl_sort(&strings, strings.size(), get_begin, get_length, permute.data());
     });
     expect_sorted(strings, permute_new);
 
-    benchmark("std::sort", strings, permute_base, 3, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("std::sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
         std::sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
     });
     expect_sorted(strings, permute_base);
 
-    benchmark("hybrid_sort", strings, permute_new, 3, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("hybrid_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
         hybrid_sort(strings, permute.data());
     });
     expect_sorted(strings, permute_new);
 
     // Stable-sorting
-    benchmark("std::stable_sort", strings, permute_base, 3, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("std::stable_sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
         std::stable_sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
     });
     expect_sorted(strings, permute_base);
 
-    benchmark("hybrid_stable_sort", strings, permute_base, 3, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("hybrid_stable_sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
         hybrid_stable_sort(strings, permute.data());
     });
     expect_sorted(strings, permute_new);
