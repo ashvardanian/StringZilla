@@ -55,7 +55,7 @@ inline size_t find_substr(span_t h_span, span_t n_span) noexcept {
 #if defined(__AVX2__)
     return strzl_avx2_find_substr(h, n);
 #elif defined(__ARM_NEON)
-    return strzl_naive_find_substr(h, n);
+    return strzl_neon_find_substr(h, n);
 #else
     return strzl_naive_find_substr(h, n);
 #endif
