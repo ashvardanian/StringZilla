@@ -118,8 +118,15 @@ pip install -e . --no-index --no-deps
 To benchmark on some custom file and pattern combination:
 
 ```sh
-python scripts/bench.py --path "your file" --pattern "your pattern"
+python scripts/bench.py --haystack_path "your file" --needle "your pattern"
 ```
+
+To benchmark on syntetic data:
+
+```sh
+python scripts/bench.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce"
+```
+
 
 To validate packaging:
 
@@ -138,5 +145,5 @@ cmake -B ./build_release \
     -DSTRINGZILLA_USE_OPENMP=1 \
     -DSTRINGZILLA_BUILD_TEST=1 \
     && \
-    make -C ./build_release -j
+    make -C ./build_release -j && ./build_release/stringzilla_test
 ```

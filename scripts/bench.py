@@ -23,24 +23,39 @@ def log_functionality(
 ):
     log("str.contains", bytes_length, lambda: pattern in pythonic_str)
     log("Str.contains", bytes_length, lambda: pattern in stringzilla_str)
-    log("File.contains", bytes_length, lambda: pattern in stringzilla_file)
+    if stringzilla_file:
+        log("File.contains", bytes_length, lambda: pattern in stringzilla_file)
 
     log("str.count", bytes_length, lambda: pythonic_str.count(pattern))
     log("Str.count", bytes_length, lambda: stringzilla_str.count(pattern))
-    log("File.count", bytes_length, lambda: stringzilla_file.count(pattern))
+    if stringzilla_file:
+        log("File.count", bytes_length, lambda: stringzilla_file.count(pattern))
 
     log("str.split", bytes_length, lambda: pythonic_str.split(pattern))
     log("Str.split", bytes_length, lambda: stringzilla_str.split(pattern))
-    log("File.split", bytes_length, lambda: stringzilla_file.split(pattern))
+    if stringzilla_file:
+        log("File.split", bytes_length, lambda: stringzilla_file.split(pattern))
 
 
-def bench(path: str, pattern: str):
-    pythonic_str: str = open(path, "r").read()
+def bench(
+    needle: str,
+    haystack_path: str = None,
+    haystack_pattern: str = None,
+    haystack_length: int = None,
+):
+    if haystack_path:
+        pythonic_str: str = open(haystack_path, "r").read()
+        stringzilla_file = File(haystack_path)
+    else:
+        haystack_length = int(haystack_length)
+        repretitions = haystack_length // len(haystack_pattern)
+        pythonic_str: str = haystack_pattern * repretitions
+        stringzilla_file = None
+
     stringzilla_str = Str(pythonic_str)
-    stringzilla_file = File(path)
 
     log_functionality(
-        pattern, len(stringzilla_str), pythonic_str, stringzilla_str, stringzilla_file
+        needle, len(stringzilla_str), pythonic_str, stringzilla_str, stringzilla_file
     )
 
 
