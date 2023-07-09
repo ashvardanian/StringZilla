@@ -59,7 +59,7 @@ pip install stringzilla
 There are two classes you can use interchangibly:
 
 ```python
-from stringzilla import Str, File, Slices
+from stringzilla import Str, File, Strs
 
 text: str = 'some-string'
 text: Str = Str('some-string')
@@ -97,14 +97,14 @@ text.splitlines(
     keeplinebreaks=False, # optional
     **, # non-traditional arguments:
     separator='\n', # optional
-) -> Slices # similar to list[str]
+) -> Strs # similar to list[str]
 
 text.split(
     separator=' ', # optional
     maxsplit=9223372036854775807, # optional
     **, # non-traditional arguments:
     keepseparator=False, # optional
-) -> Slices # similar to list[str]
+) -> Strs # similar to list[str]
 ```
 
 ## Development

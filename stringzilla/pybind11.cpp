@@ -579,22 +579,22 @@ PYBIND11_MODULE(stringzilla, m) {
         return s.sub(start, stop);
     });
 
-    auto py_slices = py::class_<py_spans_t, std::shared_ptr<py_spans_t>>(m, "Slices");
-    py_slices.def(py::init([]() { return std::make_shared<py_spans_t>(); }));
-    py_slices.def("__len__", &py_spans_t::size);
-    py_slices.def("__getitem__", &py_spans_t::at, py::arg("index"));
-    py_slices.def(
+    auto py_strs = py::class_<py_spans_t, std::shared_ptr<py_spans_t>>(m, "Strs");
+    py_strs.def(py::init([]() { return std::make_shared<py_spans_t>(); }));
+    py_strs.def("__len__", &py_spans_t::size);
+    py_strs.def("__getitem__", &py_spans_t::at, py::arg("index"));
+    py_strs.def(
         "__iter__",
         [](py_spans_t const &s) { return py::make_iterator(s.begin(), s.end()); },
         py::keep_alive<0, 1>());
-    py_slices.def("sort", &py_spans_t::sort);
-    py_slices.def("__getitem__", [](py_spans_t &s, py::slice slice) {
+    py_strs.def("sort", &py_spans_t::sort);
+    py_strs.def("__getitem__", [](py_spans_t &s, py::slice slice) {
         ssize_t start, stop, step, length;
         if (!slice.compute(s.size(), &start, &stop, &step, &length))
             throw py::error_already_set();
         return s.sub(start, stop, step, length);
     });
-    py_slices.def( //
+    py_strs.def( //
         "sub",
         [](py_spans_t &s, ssize_t start, ssize_t stop, ssize_t step = 1) {
             auto index_span = slice(s.size(), start, stop);
