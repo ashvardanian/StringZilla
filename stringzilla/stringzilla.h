@@ -418,7 +418,7 @@ inline static size_t strzl_neon_find_substr(strzl_haystack_t h, strzl_needle_t n
 
 #endif // Arm Neon
 
-typedef char const *(*stringzilla_array_get_start_t)(void const *, size_t);
+typedef char const *(*stringzilla_array_get_begin_t)(void const *, size_t);
 typedef size_t (*stringzilla_array_get_length_t)(void const *, size_t);
 typedef bool (*stringzilla_array_predicate_t)(char const *, size_t);
 
@@ -429,37 +429,20 @@ inline static void strzl_swap(size_t *a, size_t *b) {
 }
 
 inline static size_t strzl_partition( //
-    void const *handle,
+    size_t *array,
     size_t array_size,
     bool (*predicate)(void const *, size_t),
-    size_t *order) {
+    void const *handle) {
 
     size_t matches = 0;
-    while (matches != array_size && predicate(handle, order[matches]))
+    while (matches != array_size && predicate(handle, array[matches]))
         ++matches;
 
     for (size_t i = matches + 1; i < array_size; ++i)
-        if (predicate(handle, order[i]))
-            strzl_swap(order + i, order + matches), ++matches;
+        if (predicate(handle, array[i]))
+            strzl_swap(array + i, array + matches), ++matches;
 
     return matches;
-}
-
-inline static void strzl_insertion_sort( //
-    void const *handle,
-    size_t array_size,
-    bool (*less)(void const *, size_t, size_t),
-    size_t *order) {
-
-    for (size_t i = 1; i < array_size + 1; i++) {
-        size_t val = order[i];
-        size_t j = i;
-        while (j > 0 && less(handle, val, order[j - 1])) {
-            order[j] = order[j - 1];
-            j -= 1;
-        }
-        order[j] = val;
-    }
 }
 
 /**
@@ -467,7 +450,7 @@ inline static void strzl_insertion_sort( //
  *          the same continuous array.
  */
 inline static void strzl_merge( //
-    size_t *order,
+    size_t *array,
     size_t array_size,
     size_t partition,
     bool (*less)(void const *, size_t, size_t),
@@ -476,27 +459,27 @@ inline static void strzl_merge( //
     size_t start_b = partition + 1;
 
     // If the direct merge is already sorted
-    if (!less(handle, order[start_b], order[partition]))
+    if (!less(handle, array[start_b], array[partition]))
         return;
 
     size_t start_a = 0;
     while (start_a <= partition && start_b <= array_size) {
 
         // If element 1 is in right place
-        if (!less(handle, order[start_b], order[start_a])) {
+        if (!less(handle, array[start_b], array[start_a])) {
             start_a++;
         }
         else {
-            size_t value = order[start_b];
+            size_t value = array[start_b];
             size_t index = start_b;
 
             // Shift all the elements between element 1
             // element 2, right by 1.
             while (index != start_a) {
-                order[index] = order[index - 1];
+                array[index] = array[index - 1];
                 index--;
             }
-            order[start_a] = value;
+            array[start_a] = value;
 
             // Update all the pointers
             start_a++;
@@ -506,86 +489,30 @@ inline static void strzl_merge( //
     }
 }
 
-inline static void _strzl_merge_sort_recursive( //
-    void const *handle,
-    bool (*less)(void const *, size_t, size_t),
-    size_t *order,
-    size_t low,
-    size_t high) {
+// template <typename ForwardIt, typename UnaryPredicate>
+// ForwardIt stable_partition(ForwardIt first, ForwardIt last, UnaryPredicate p) {
+//     first = std::find_if_not(first, last, p);
+//     if (first == last)
+//         return first;
+//     auto mid = std::next(first);
+//     while ((mid = std::find_if(mid, last, p)) != last) {
+//         std::rotate(first, mid, std::next(mid));
+//         std::advance(first, std::distance(first, mid));
+//         ++mid;
+//     }
+//     return first;
+// }
 
-    if (low >= high)
-        return;
-
-    size_t mid = low + (high - low) / 2;
-    _strzl_merge_sort_recursive(handle, less, order, low, mid);
-    _strzl_merge_sort_recursive(handle, less, order, mid + 1, high);
-    strzl_merge(order + low, high - low, mid - low, less, handle);
-}
-
-inline static void strzl_merge_sort( //
-    void const *handle,
-    size_t array_size,
-    bool (*less)(void const *, size_t, size_t),
-    size_t *order) {
-    return _strzl_merge_sort_recursive(handle, less, order, 0, array_size - 1);
-}
-
-inline static void _strzl_qsort_recursive( //
-    void const *handle,
-    bool (*less)(void const *, size_t, size_t),
-    size_t *order,
-    ssize_t low,
-    ssize_t high) {
-
-_strzl_qsort_recursive_cycle:
-    if (low < high) {
-        // Index of smaller element and indicates
-        // the right position of pivot found so far
-        ssize_t i = (low - 1);
-        for (ssize_t j = low; j <= high - 1; j++) {
-            // If current element is smaller than the pivot
-            if (less(handle, order[j], order[high])) {
-                i++; // Increment index of smaller element
-                strzl_swap(order + i, order + j);
-            }
-        }
-        strzl_swap(order + i + 1, order + high);
-        ssize_t partition = i + 1;
-
-        // The trivial QuickSort implementation would continue as follows:
-        // _strzl_qsort_recursive(handle, less, order, low, partition - 1);
-        // _strzl_qsort_recursive(handle, less, order, partition + 1, high);
-        if (partition - low < high - partition) {
-            _strzl_qsort_recursive(handle, less, order, low, partition - 1);
-            low = partition + 1;
-        }
-        // Else recur for right part
-        else {
-            _strzl_qsort_recursive(handle, less, order, partition + 1, high);
-            high = partition - 1;
-        }
-        goto _strzl_qsort_recursive_cycle;
-    }
-}
-
-inline static void strzl_qsort( //
-    void const *handle,
-    size_t array_size,
-    bool (*less)(void const *, size_t, size_t),
-    size_t *order) {
-    _strzl_qsort_recursive(handle, less, order, 0, array_size - 1);
-}
-
-struct strzl_sort_context_t {
+struct _strzl_sort_context_t {
     void const *handle;
-    stringzilla_array_get_start_t get_begin;
+    stringzilla_array_get_begin_t get_begin;
     stringzilla_array_get_length_t get_length;
 };
 
-int _strzl_sort_context_qsort_compare(void *context_raw, void const *a_raw, void const *b_raw) {
+inline static int _strzl_sort_context_qsort_compare(void *context_raw, void const *a_raw, void const *b_raw) {
     // https://man.freebsd.org/cgi/man.cgi?query=qsort_s&sektion=3&n=1
     // https://www.man7.org/linux/man-pages/man3/strcmp.3.html
-    strzl_sort_context_t *context = (strzl_sort_context_t *)context_raw;
+    _strzl_sort_context_t *context = (_strzl_sort_context_t *)context_raw;
     size_t a = *(size_t *)a_raw;
     size_t b = *(size_t *)b_raw;
     size_t a_len = context->get_length(context->handle, a);
@@ -596,56 +523,53 @@ int _strzl_sort_context_qsort_compare(void *context_raw, void const *a_raw, void
         a_len > b_len ? b_len : a_len);
 }
 
-inline static void _strzl_sort_radix_recursion( //
-    void const *handle,
+inline static void _strzl_sort_recursion( //
+    size_t *array,
     size_t array_size,
-    stringzilla_array_get_start_t get_begin,
+    stringzilla_array_get_begin_t get_begin,
     stringzilla_array_get_length_t get_length,
-    size_t *order,
-    size_t order_size,
+    void const *handle,
     size_t bit_idx,
     size_t bit_max) {
 
-    if (!order_size)
+    if (!array_size)
         return;
 
     // Partition a range of integers according to a specific bit value
     size_t split = 0;
     {
         size_t mask = (1ul << 63) >> bit_idx;
-        while (split != order_size && (order[split] & mask))
+        while (split != array_size && (array[split] & mask))
             ++split;
 
-        for (size_t i = split + 1; i < order_size; ++i)
-            if (order[i] & mask)
-                strzl_swap(order + i, order + split), ++split;
+        for (size_t i = split + 1; i < array_size; ++i)
+            if (array[i] & mask)
+                strzl_swap(array + i, array + split), ++split;
     }
 
     // Go down recursively
     if (bit_idx < bit_max) {
-        _strzl_sort_radix_recursion( //
-            handle,
-            array_size,
+        _strzl_sort_recursion( //
+            array,
+            split,
             get_begin,
             get_length,
-            order,
-            split,
+            handle,
             bit_idx + 1,
             bit_max);
-        _strzl_sort_radix_recursion( //
-            handle,
-            array_size,
+        _strzl_sort_recursion( //
+            array + split,
+            array_size - split,
             get_begin,
             get_length,
-            order + split,
-            order_size - split,
+            handle,
             bit_idx + 1,
             bit_max);
     }
     else {
         // Discard the prefixes
-        for (size_t i = 0; i != order_size; ++i)
-            memset(&order[i], 0, 4ul);
+        for (size_t i = 0; i != array_size; ++i)
+            memset(&array[i], 0, 4ul);
 
         // Perform sorts on smaller chunks instead of the whole handle
         // auto sorter = [=](size_t i, size_t j) {
@@ -653,14 +577,14 @@ inline static void _strzl_sort_radix_recursion( //
         //     auto b = std::string_view(get_begin(handle, j), get_length(handle, j));
         //     return a < b;
         // };
-        // std::sort(order, order + split, sorter);
-        // std::sort(order + split, order + order_size, sorter);
-        strzl_sort_context_t context;
+        // std::sort(array, array + split, sorter);
+        // std::sort(array + split, array + array_size, sorter);
+        _strzl_sort_context_t context;
         context.get_begin = get_begin;
         context.get_length = get_length;
         context.handle = handle;
-        qsort_r(order, split, sizeof(size_t), &context, &_strzl_sort_context_qsort_compare);
-        qsort_r(order + split, order_size - split, sizeof(size_t), &context, &_strzl_sort_context_qsort_compare);
+        qsort_r(array, split, sizeof(size_t), &context, &_strzl_sort_context_qsort_compare);
+        qsort_r(array + split, array_size - split, sizeof(size_t), &context, &_strzl_sort_context_qsort_compare);
     }
 }
 
@@ -669,21 +593,21 @@ inline static void _strzl_sort_radix_recursion( //
  *          and a follow-up Quick Sort on resulting structure.
  */
 inline static void strzl_sort( //
-    void const *handle,
+    size_t *array,
     size_t array_size,
-    stringzilla_array_get_start_t get_begin,
+    stringzilla_array_get_begin_t get_begin,
     stringzilla_array_get_length_t get_length,
-    size_t *order) {
+    void const *handle) {
 
-    // Export up to 4 bytes into the `order` bits themselves
+    // Export up to 4 bytes into the `array` bits themselves
     for (size_t i = 0; i != array_size; ++i)
         memcpy( //
-            &order[i],
-            get_begin(handle, order[i]),
-            get_length(handle, order[i]) > 4ul ? 4ul : get_length(handle, order[i]));
+            &array[i],
+            get_begin(handle, array[i]),
+            get_length(handle, array[i]) > 4ul ? 4ul : get_length(handle, array[i]));
 
     // Perform optionally-parallel radix sort on them
-    _strzl_sort_radix_recursion(handle, array_size, get_begin, get_length, order, array_size, 0, 32);
+    _strzl_sort_recursion(array, array_size, get_begin, get_length, handle, 0, 32);
 }
 
 #ifdef __cplusplus

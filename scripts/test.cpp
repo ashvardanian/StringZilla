@@ -232,7 +232,7 @@ int main(int, char const **) {
         expect_partitioned_by_length(strings, permute_base);
 
         bench_permute("strzl_partition", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            strzl_partition(&strings, strings.size(), &has_under_four_chars, permute.data());
+            strzl_partition(permute.data(), strings.size(), &has_under_four_chars, &strings);
         });
         expect_partitioned_by_length(strings, permute_new);
         // TODO: expect_same(permute_base, permute_new);
@@ -247,27 +247,12 @@ int main(int, char const **) {
         expect_sorted(strings, permute_base);
 
         bench_permute("strzl_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            strzl_sort(&strings, strings.size(), get_begin, get_length, permute.data());
+            strzl_sort(permute.data(), strings.size(), get_begin, get_length, &strings);
         });
         expect_sorted(strings, permute_new);
 
         bench_permute("hybrid_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
             hybrid_sort(strings, permute.data());
-        });
-        expect_sorted(strings, permute_new);
-
-        bench_permute("strzl_merge_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            strzl_merge_sort(&strings, strings.size(), &is_less, permute.data());
-        });
-        expect_sorted(strings, permute_new);
-
-        bench_permute("strzl_insertion_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            strzl_insertion_sort(&strings, strings.size(), &is_less, permute.data());
-        });
-        expect_sorted(strings, permute_new);
-
-        bench_permute("strzl_qsort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            strzl_qsort(&strings, strings.size(), &is_less, permute.data());
         });
         expect_sorted(strings, permute_new);
 
