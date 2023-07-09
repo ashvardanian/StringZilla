@@ -87,6 +87,9 @@ endif()
 
 if(${STRINGZILLA_BUILD_TEST} OR ${STRINGZILLA_BUILD_BENCHMARK})
   add_executable(stringzilla_test scripts/test.cpp)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+
   target_include_directories(stringzilla_test PRIVATE stringzilla)
   set_target_properties(stringzilla_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
