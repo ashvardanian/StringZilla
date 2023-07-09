@@ -1,6 +1,7 @@
 from typing import Union, Optional
 from random import choice, randint
 from string import ascii_lowercase
+import math
 
 import pytest
 
@@ -15,6 +16,11 @@ def get_random_string(
     if variability is None:
         variability = len(ascii_lowercase)
     return "".join(choice(ascii_lowercase[:variability]) for _ in range(length))
+
+
+def is_equal_slices(native_slices, big_slices):
+    for native_slice, big_slice in zip(native_slices, big_slices):
+        assert native_slice == big_slice
 
 
 def check_identical(
@@ -41,11 +47,10 @@ def check_identical(
     if check_iterators:
         for i in range(len(native_slices)):
             assert len(native_slices[i]) == len(big_slices[i])
-            assert native_slices[i] == str(big_slices[i])
+            assert native_slices[i] == big_slices[i]
             assert [c for c in native_slices[i]] == [c for c in big_slices[i]]
 
-        for native_slice, big_slice in zip(native_slices, big_slices):
-            assert native_slice == str(big_slice)
+    is_equal_slices(native_slices, big_slices)
 
 
 @pytest.mark.parametrize("repetitions", range(1, 10))
@@ -75,3 +80,55 @@ def test_fuzzy(pattern_length: int, haystack_length: int, variability: int):
     for _ in range(haystack_length // pattern_length):
         pattern = get_random_string(variability=variability, length=pattern_length)
         check_identical(native, big, pattern)
+
+
+def test_slices():
+    native = get_random_string(length=10)
+    big = Str(native)
+
+    assert native[0:5] == big.sub(0, 5) and native[0:5] == big[0:5]
+    assert native[5:10] == big.sub(5, 10) and native[5:10] == big[5:10]
+
+    assert native[5:5] == big.sub(5, 5) and native[5:5] == big[5:5]
+    assert native[-5:-5] == big.sub(-5, -5) and native[-5:-5] == big[-5:-5]
+    assert native[2:-2] == big.sub(2, -2) and native[2:-2] == big[2:-2]
+    assert native[7:-7] == big.sub(7, -7) and native[7:-7] == big[7:-7]
+
+    assert native[5:3] == big.sub(5, 3) and native[5:3] == big[5:3]
+    assert native[5:7] == big.sub(5, 7) and native[5:7] == big[5:7]
+    assert native[5:-3] == big.sub(5, -3) and native[5:-3] == big[5:-3]
+    assert native[5:-7] == big.sub(5, -7) and native[5:-7] == big[5:-7]
+
+    assert native[-5:3] == big.sub(-5, 3) and native[-5:3] == big[-5:3]
+    assert native[-5:7] == big.sub(-5, 7) and native[-5:7] == big[-5:7]
+    assert native[-5:-3] == big.sub(-5, -3) and native[-5:-3] == big[-5:-3]
+    assert native[-5:-7] == big.sub(-5, -7) and native[-5:-7] == big[-5:-7]
+
+    assert native[2:] == big.sub(2) and native[2:] == big[2:]
+    assert native[:7] == big.sub(end=7) and native[:7] == big[:7]
+    assert native[-2:] == big.sub(-2) and native[-2:] == big[-2:]
+    assert native[:-7] == big.sub(end=-7) and native[:-7] == big[:-7]
+    assert native[:-10] == big.sub(end=-10) and native[:-10] == big[:-10]
+    assert native[:-1] == big.sub(end=-1) and native[:-1] == big[:-1]
+
+    length = 10000
+    native = get_random_string(length=length)
+    big = Str(native)
+
+    needle = native[0 : randint(2, 5)]
+    native_slices = native.split(needle)
+    big_slices: Slices = big.split(needle)
+
+    length = len(native_slices)
+    for i in range(length):
+        start = randint(1 - length, length - 1)
+        stop = randint(1 - length, length - 1)
+        step = 0
+        while step == 0:
+            step = randint(-int(math.sqrt(length)), int(math.sqrt(length)))
+
+        is_equal_slices(native_slices[start:stop:step], big_slices[start:stop:step])
+        is_equal_slices(
+            native_slices[start:stop:step],
+            big_slices.sub(start, stop, step),
+        )
