@@ -168,7 +168,7 @@ int main(int, char const **) {
     std::printf("Hey, Ash!\n");
 
     strings_t strings;
-    populate_from_file("leipzig1M.txt", strings, 1000000);
+    populate_from_file("leipzig1M.txt", strings, 10000000);
     std::size_t mean_bytes = 0;
     for (std::string const &str : strings)
         mean_bytes += str.size();
@@ -232,7 +232,11 @@ int main(int, char const **) {
         expect_partitioned_by_length(strings, permute_base);
 
         bench_permute("strzl_partition", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            strzl_partition(permute.data(), strings.size(), &has_under_four_chars, &strings);
+            strzl_array_t array;
+            array.order = permute.data();
+            array.count = strings.size();
+            array.handle = &strings;
+            strzl_partition(&array, &has_under_four_chars);
         });
         expect_partitioned_by_length(strings, permute_new);
         // TODO: expect_same(permute_base, permute_new);
@@ -247,7 +251,13 @@ int main(int, char const **) {
         expect_sorted(strings, permute_base);
 
         bench_permute("strzl_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            strzl_sort(permute.data(), strings.size(), get_begin, get_length, &strings);
+            strzl_array_t array;
+            array.order = permute.data();
+            array.count = strings.size();
+            array.handle = &strings;
+            array.get_begin = get_begin;
+            array.get_length = get_length;
+            strzl_sort(&array, nullptr);
         });
         expect_sorted(strings, permute_new);
 
