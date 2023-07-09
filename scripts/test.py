@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from stringzilla import Str, File, Slices
+from stringzilla import Str, File, Strs
 
 
 def get_random_string(
@@ -18,8 +18,8 @@ def get_random_string(
     return "".join(choice(ascii_lowercase[:variability]) for _ in range(length))
 
 
-def is_equal_slices(native_slices, big_slices):
-    for native_slice, big_slice in zip(native_slices, big_slices):
+def is_equal_strings(native_strings, big_strings):
+    for native_slice, big_slice in zip(native_strings, big_strings):
         assert native_slice == big_slice
 
 
@@ -40,17 +40,17 @@ def check_identical(
     assert native.find(needle) == big.find(needle)
     assert native.count(needle) == big.count(needle)
 
-    native_slices = native.split(needle)
-    big_slices: Slices = big.split(needle)
-    assert len(native_slices) == len(big_slices)
+    native_strings = native.split(needle)
+    big_strings: Strs = big.split(needle)
+    assert len(native_strings) == len(big_strings)
 
     if check_iterators:
-        for i in range(len(native_slices)):
-            assert len(native_slices[i]) == len(big_slices[i])
-            assert native_slices[i] == big_slices[i]
-            assert [c for c in native_slices[i]] == [c for c in big_slices[i]]
+        for i in range(len(native_strings)):
+            assert len(native_strings[i]) == len(big_strings[i])
+            assert native_strings[i] == big_strings[i]
+            assert [c for c in native_strings[i]] == [c for c in big_strings[i]]
 
-    is_equal_slices(native_slices, big_slices)
+    is_equal_strings(native_strings, big_strings)
 
 
 @pytest.mark.parametrize("repetitions", range(1, 10))
@@ -76,13 +76,13 @@ def test_fuzzy(pattern_length: int, haystack_length: int, variability: int):
     check_identical(native, big, native[:pattern_length])
     check_identical(native, big, native[-pattern_length:])
 
-    # Continue with random slices
+    # Continue with random strs
     for _ in range(haystack_length // pattern_length):
         pattern = get_random_string(variability=variability, length=pattern_length)
         check_identical(native, big, pattern)
 
 
-def test_slices():
+def test_strs():
     native = get_random_string(length=10)
     big = Str(native)
 
@@ -116,10 +116,10 @@ def test_slices():
     big = Str(native)
 
     needle = native[0 : randint(2, 5)]
-    native_slices = native.split(needle)
-    big_slices: Slices = big.split(needle)
+    native_strings = native.split(needle)
+    big_strings: Strs = big.split(needle)
 
-    length = len(native_slices)
+    length = len(native_strings)
     for i in range(length):
         start = randint(1 - length, length - 1)
         stop = randint(1 - length, length - 1)
@@ -127,8 +127,8 @@ def test_slices():
         while step == 0:
             step = randint(-int(math.sqrt(length)), int(math.sqrt(length)))
 
-        is_equal_slices(native_slices[start:stop:step], big_slices[start:stop:step])
-        is_equal_slices(
-            native_slices[start:stop:step],
-            big_slices.sub(start, stop, step),
+        is_equal_strings(native_strings[start:stop:step], big_strings[start:stop:step])
+        is_equal_strings(
+            native_strings[start:stop:step],
+            big_strings.sub(start, stop, step),
         )

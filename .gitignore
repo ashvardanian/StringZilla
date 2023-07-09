@@ -13,3 +13,5 @@ substr_search_cpp
 *.so
 *.egg-info
 *.whl
+
+leipzig1M.txt
