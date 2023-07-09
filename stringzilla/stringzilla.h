@@ -498,7 +498,12 @@ inline static void _strzl_sort_recursion( //
     strzl_array_t *array,
     size_t bit_idx,
     size_t bit_max,
-    int (*libc_comparator)(void *context, void const *, void const *)) {
+#if defined(__WIN32__) || __APPLE__
+    int (*libc_comparator)(void *, void const *, void const *)
+#else
+    int (*libc_comparator)(void const *, void const *, void *)
+#endif
+) {
 
     if (!array->count)
         return;
@@ -532,19 +537,30 @@ inline static void _strzl_sort_recursion( //
         for (size_t i = 0; i != array->count; ++i)
             memset(&array->order[i], 0, 4ul);
 
-#if __APPLE__
+#if defined(__WIN32__)
         // Perform sorts on smaller chunks instead of the whole handle
         // https://stackoverflow.com/a/39561369
+        // https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/qsort-s?view=msvc-170
+        qsort_s(array->order, split, sizeof(size_t), libc_comparator, (void *)array);
+        qsort_s(array->order + split, array->count - split, sizeof(size_t), libc_comparator, (void *)array);
+#elif __APPLE__
         qsort_r(array->order, split, sizeof(size_t), (void *)array, libc_comparator);
         qsort_r(array->order + split, array->count - split, sizeof(size_t), (void *)array, libc_comparator);
 #else
-        qsort_s(array->order, split, sizeof(size_t), libc_comparator, (void *)array);
-        qsort_s(array->order + split, array->count - split, sizeof(size_t), libc_comparator, (void *)array);
+        // https://linux.die.net/man/3/qsort_r
+        qsort_r(array->order, split, sizeof(size_t), libc_comparator, (void *)array);
+        qsort_r(array->order + split, array->count - split, sizeof(size_t), libc_comparator, (void *)array);
 #endif
     }
 }
 
-inline static int _strzl_sort_array_strncmp(void *array_raw, void const *a_raw, void const *b_raw) {
+inline static int _strzl_sort_array_strncmp(
+#if defined(__WIN32__) || __APPLE__
+    void *array_raw, void const *a_raw, void const *b_raw
+#else
+    void const *a_raw, void const *b_raw, void *array_raw
+#endif
+) {
     // https://man.freebsd.org/cgi/man.cgi?query=qsort_s&sektion=3&n=1
     // https://www.man7.org/linux/man-pages/man3/strcmp.3.html
     strzl_array_t *array = (strzl_array_t *)array_raw;
@@ -558,7 +574,13 @@ inline static int _strzl_sort_array_strncmp(void *array_raw, void const *a_raw, 
         a_len > b_len ? b_len : a_len);
 }
 
-inline static int _strzl_sort_array_strncasecmp(void *array_raw, void const *a_raw, void const *b_raw) {
+inline static int _strzl_sort_array_strncasecmp(
+#if defined(__WIN32__) || __APPLE__
+    void *array_raw, void const *a_raw, void const *b_raw
+#else
+    void const *a_raw, void const *b_raw, void *array_raw
+#endif
+) {
     // https://man.freebsd.org/cgi/man.cgi?query=qsort_s&sektion=3&n=1
     // https://www.man7.org/linux/man-pages/man3/strcmp.3.html
     strzl_array_t *array = (strzl_array_t *)array_raw;
