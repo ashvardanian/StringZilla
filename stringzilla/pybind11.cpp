@@ -18,6 +18,7 @@ typedef SSIZE_T ssize_t;
 
 #include <utility> // `std::exchange`
 #include <limits>  // `std::numeric_limits`
+#include <numeric> // `std::iota`
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -61,20 +62,15 @@ inline size_t find_substr(span_t h_span, span_t n_span) noexcept {
 #endif
 }
 
-inline size_t count_substr(span_t h_span, char n) noexcept {
+inline size_t count_char(span_t h_span, char n) noexcept {
     strzl_haystack_t h {h_span.ptr, h_span.len};
-
-#if defined(__ARM_NEON)
-    return strzl_neon_count_char(h, n);
-#else
     return strzl_naive_count_char(h, n);
-#endif
 }
 
 inline size_t count_substr(span_t h, span_t n, bool overlap = false) noexcept {
 
     if (n.len == 1)
-        return count_substr(h, *n.ptr);
+        return count_char(h, *n.ptr);
     if (h.len < n.len)
         return 0;
 
@@ -286,6 +282,9 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
     std::shared_ptr<py_span_t const> whole_;
     std::vector<span_t> parts_;
 
+    static char const *strzl_array_get_begin(void const *raw, size_t i) { return ((span_t *)raw)[i].ptr; }
+    static size_t strzl_array_get_length(void const *raw, size_t i) { return ((span_t *)raw)[i].len; }
+
   public:
     py_spans_t() = default;
     py_spans_t(py_spans_t &&) = default;
@@ -325,6 +324,22 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
     iterator_t begin() const { return {this, 0}; }
     iterator_t end() const { return {this, parts_.size()}; }
     ssize_t size() const { return static_cast<ssize_t>(parts_.size()); }
+
+    void sort() {
+        std::vector<std::size_t> permute(parts_.size());
+        std::iota(permute.begin(), permute.end(), 0ul);
+        strzl_array_t array;
+        array.order = permute.data();
+        array.count = permute.size();
+        array.handle = parts_.data();
+        array.get_begin = strzl_array_get_begin;
+        array.get_length = strzl_array_get_length;
+        strzl_sort(&array, nullptr);
+        std::vector<span_t> new_parts(parts_.size());
+        for (std::size_t i = 0; i != parts_.size(); ++i)
+            new_parts[permute[i]] = parts_[i];
+        parts_ = new_parts;
+    }
 };
 
 bool py_span_t::contains(std::string_view needle, ssize_t start, ssize_t end) const {
@@ -352,14 +367,14 @@ ssize_t py_span_t::count(std::string_view needle, ssize_t start, ssize_t end, bo
         return 0;
     span_t part = subspan(span(), start, end);
     auto result = needle.size() == 1 //
-                      ? count_substr(part, needle.front())
+                      ? count_char(part, needle.front())
                       : count_substr(part, to_span(needle), allowoverlap);
     return result;
 }
 
 std::shared_ptr<py_spans_t> py_span_t::splitlines(bool keeplinebreaks, char separator, size_t maxsplit) const {
 
-    size_t count_separators = count_substr(span(), separator);
+    size_t count_separators = count_char(span(), separator);
     std::vector<span_t> parts(std::min(count_separators + 1, maxsplit));
     size_t last_start = 0;
     for (size_t i = 0; i + 1 < parts.size(); ++i) {
@@ -480,4 +495,5 @@ PYBIND11_MODULE(stringzilla, m) {
         "__iter__",
         [](py_spans_t const &s) { return py::make_iterator(s.begin(), s.end()); },
         py::keep_alive<0, 1>());
+    py_slices.def("sort", &py_spans_t::sort);
 }
