@@ -59,7 +59,7 @@ pip install stringzilla
 There are two classes you can use interchangibly:
 
 ```python
-from stringzilla import Str, File, Slices
+from stringzilla import Str, File, Strs
 
 text: str = 'some-string'
 text: Str = Str('some-string')
@@ -97,30 +97,52 @@ text.splitlines(
     keeplinebreaks=False, # optional
     **, # non-traditional arguments:
     separator='\n', # optional
-) -> Slices # similar to list[str]
+) -> Strs # similar to list[str]
 
 text.split(
     separator=' ', # optional
     maxsplit=9223372036854775807, # optional
     **, # non-traditional arguments:
     keepseparator=False, # optional
-) -> Slices # similar to list[str]
+) -> Strs # similar to list[str]
 ```
 
 ## Development
 
 ```sh
 rm -rf build && pip install -e . && pytest scripts/test.py -s -x
+
+pip install -e . --no-index --no-deps
 ```
 
 To benchmark on some custom file and pattern combination:
 
 ```sh
-python scripts/bench.py --path "your file" --pattern "your pattern"
+python scripts/bench.py --haystack_path "your file" --needle "your pattern"
+```
+
+To benchmark on syntetic data:
+
+```sh
+python scripts/bench.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce"
 ```
 
 To validate packaging:
 
 ```sh
 cibuildwheel --platform linux
+```
+
+Compilin C++ tests:
+
+
+```sh
+brew install libomp llvm
+cmake -B ./build_release \
+    -DCMAKE_C_COMPILER="/opt/homebrew/opt/llvm/bin/clang" \
+    -DCMAKE_CXX_COMPILER="/opt/homebrew/opt/llvm/bin/clang++" \
+    -DSTRINGZILLA_USE_OPENMP=1 \
+    -DSTRINGZILLA_BUILD_TEST=1 \
+    && \
+    make -C ./build_release -j && ./build_release/stringzilla_test
 ```
