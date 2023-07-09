@@ -1,7 +1,10 @@
 # This CMake file is heavily inspired by following `stringzilla` CMake:
 # https://github.com/nlohmann/json/blob/develop/CMakeLists.txt
 cmake_minimum_required(VERSION 3.1)
-project(stringzilla VERSION 0.1.0 LANGUAGES CXX)
+project(stringzilla VERSION 0.1.0 LANGUAGES C CXX)
+
+set (CMAKE_C_STANDARD 11)
+set (CMAKE_CXX_STANDARD 11)
 
 # Determine if USearch is built as a subproject (using `add_subdirectory`) or if it is the main project
 set(STRINGZILLA_IS_MAIN_PROJECT OFF)

@@ -4,6 +4,7 @@
 #include <stdint.h> // `uint8_t`
 #include <stddef.h> // `size_t`
 #include <string.h> // `memcpy`
+#include <stdlib.h> // `qsort_s`
 
 #if defined(__AVX2__)
 #include <x86intrin.h>
@@ -531,9 +532,15 @@ inline static void _strzl_sort_recursion( //
         for (size_t i = 0; i != array->count; ++i)
             memset(&array->order[i], 0, 4ul);
 
+#if __APPLE__
         // Perform sorts on smaller chunks instead of the whole handle
+        // https://stackoverflow.com/a/39561369
         qsort_r(array->order, split, sizeof(size_t), (void *)array, libc_comparator);
         qsort_r(array->order + split, array->count - split, sizeof(size_t), (void *)array, libc_comparator);
+#else
+        qsort_s(array->order, split, sizeof(size_t), libc_comparator, (void *)array);
+        qsort_s(array->order + split, array->count - split, sizeof(size_t), libc_comparator, (void *)array);
+#endif
     }
 }
 
