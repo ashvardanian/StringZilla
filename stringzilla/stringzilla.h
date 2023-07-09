@@ -4,7 +4,8 @@
 #include <stdint.h> // `uint8_t`
 #include <stddef.h> // `size_t`
 #include <string.h> // `memcpy`
-#include <stdlib.h> // `qsort_s`
+#include <stdlib.h> // `qsort_r`
+#include <search.h> // `qsort_s`
 
 #if defined(__AVX2__)
 #include <x86intrin.h>
@@ -17,6 +18,8 @@
 #include <intrin.h>
 #define popcount64 __popcnt64
 #define ctz64 _tzcnt_u64
+#define strncasecmp _strnicmp
+#define strcasecmp _stricmp
 #else
 #define popcount64 __builtin_popcountll
 #define ctz64 __builtin_ctzll
@@ -251,9 +254,9 @@ inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) 
         if (text01_indicators + text23_indicators) {
             // Assuming we have performed 4 comparisons, we can only have 2^4=16 outcomes.
             // Which is small enought for a lookup table.
-            uint8_t match_indicators =                                 //
+            uint8_t match_indicators = uint8_t(                        //
                 (text01_indicators >> 31) | (text01_indicators << 0) | //
-                (text23_indicators >> 29) | (text23_indicators << 2);
+                (text23_indicators >> 29) | (text23_indicators << 2));
             return text - h.ptr + lookup[match_indicators];
         }
     }
@@ -498,7 +501,7 @@ inline static void _strzl_sort_recursion( //
     strzl_array_t *array,
     size_t bit_idx,
     size_t bit_max,
-#if defined(__WIN32__) || __APPLE__
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || __APPLE__
     int (*libc_comparator)(void *, void const *, void const *)
 #else
     int (*libc_comparator)(void const *, void const *, void *)
@@ -537,7 +540,7 @@ inline static void _strzl_sort_recursion( //
         for (size_t i = 0; i != array->count; ++i)
             memset(&array->order[i], 0, 4ul);
 
-#if defined(__WIN32__)
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
         // Perform sorts on smaller chunks instead of the whole handle
         // https://stackoverflow.com/a/39561369
         // https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/qsort-s?view=msvc-170
@@ -555,7 +558,7 @@ inline static void _strzl_sort_recursion( //
 }
 
 inline static int _strzl_sort_array_strncmp(
-#if defined(__WIN32__) || __APPLE__
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || __APPLE__
     void *array_raw, void const *a_raw, void const *b_raw
 #else
     void const *a_raw, void const *b_raw, void *array_raw
@@ -575,7 +578,7 @@ inline static int _strzl_sort_array_strncmp(
 }
 
 inline static int _strzl_sort_array_strncasecmp(
-#if defined(__WIN32__) || __APPLE__
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || __APPLE__
     void *array_raw, void const *a_raw, void const *b_raw
 #else
     void const *a_raw, void const *b_raw, void *array_raw
@@ -620,7 +623,11 @@ inline static void strzl_sort(strzl_array_t *array, strzl_sort_config_t const *c
         }
     }
 
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || __APPLE__
     int (*comparator)(void *, void const *, void const *);
+#else
+    int (*comparator)(void const *, void const *, void *);
+#endif
     comparator = _strzl_sort_array_strncmp;
     if (case_insensitive)
         comparator = _strzl_sort_array_strncasecmp;
@@ -633,6 +640,10 @@ inline static void strzl_sort(strzl_array_t *array, strzl_sort_config_t const *c
 }
 #endif
 
+#ifdef _MSC_VER
+#undef strncasecmp
+#undef strcasecmp
+#endif
 #undef popcount64
 #undef ctz64
 
