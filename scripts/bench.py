@@ -36,6 +36,11 @@ def log_functionality(
     if stringzilla_file:
         log("File.split", bytes_length, lambda: stringzilla_file.split(pattern))
 
+    log("str.split.sort", bytes_length, lambda: pythonic_str.split(pattern).sort())
+    log("Str.split.sort", bytes_length, lambda: stringzilla_str.split(pattern).sort())
+    if stringzilla_file:
+        log("File.split", bytes_length, lambda: stringzilla_file.split(pattern).sort())
+
 
 def bench(
     needle: str,

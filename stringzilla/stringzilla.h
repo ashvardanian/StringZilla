@@ -493,40 +493,6 @@ inline static void strzl_merge(strzl_array_t *array, size_t partition, strzl_arr
     }
 }
 
-// template <typename ForwardIt, typename UnaryPredicate>
-// ForwardIt stable_partition(ForwardIt first, ForwardIt last, UnaryPredicate p) {
-//     first = std::find_if_not(first, last, p);
-//     if (first == last)
-//         return first;
-//     auto mid = std::next(first);
-//     while ((mid = std::find_if(mid, last, p)) != last) {
-//         std::rotate(first, mid, std::next(mid));
-//         std::advance(first, std::distance(first, mid));
-//         ++mid;
-//     }
-//     return first;
-// }
-
-struct _strzl_sort_context_t {
-    void const *handle;
-    stringzilla_array_get_begin_t get_begin;
-    stringzilla_array_get_length_t get_length;
-};
-
-inline static int _strzl_sort_context_qsort_compare(void *context_raw, void const *a_raw, void const *b_raw) {
-    // https://man.freebsd.org/cgi/man.cgi?query=qsort_s&sektion=3&n=1
-    // https://www.man7.org/linux/man-pages/man3/strcmp.3.html
-    _strzl_sort_context_t *context = (_strzl_sort_context_t *)context_raw;
-    size_t a = *(size_t *)a_raw;
-    size_t b = *(size_t *)b_raw;
-    size_t a_len = context->get_length(context->handle, a);
-    size_t b_len = context->get_length(context->handle, b);
-    return strncmp( //
-        context->get_begin(context->handle, a),
-        context->get_begin(context->handle, b),
-        a_len > b_len ? b_len : a_len);
-}
-
 inline static void _strzl_sort_recursion( //
     strzl_array_t *array,
     size_t bit_idx,

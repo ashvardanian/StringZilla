@@ -127,7 +127,6 @@ To benchmark on syntetic data:
 python scripts/bench.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce"
 ```
 
-
 To validate packaging:
 
 ```sh
