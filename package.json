@@ -1,0 +1,8 @@
+{
+  "devDependencies": {
+    "@semantic-release/exec": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "conventional-changelog-eslint": "^4.0.0",
+    "semantic-release": "^21.0.7"
+  }
+}
