@@ -559,6 +559,8 @@ PYBIND11_MODULE(stringzilla, m) {
         ssize_t start, stop, step, length;
         if (!slice.compute(s.size(), &start, &stop, &step, &length))
             throw py::error_already_set();
+        if (step != 1)
+            throw std::invalid_argument("Step argument is not supported for Str");
         return s.sub(start, stop);
     });
     define_comparsion_ops(py_str);
@@ -576,6 +578,8 @@ PYBIND11_MODULE(stringzilla, m) {
         ssize_t start, stop, step, length;
         if (!slice.compute(s.size(), &start, &stop, &step, &length))
             throw py::error_already_set();
+        if (step != 1)
+            throw std::invalid_argument("Step argument is not supported for File");
         return s.sub(start, stop);
     });
 
