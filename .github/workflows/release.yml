@@ -6,6 +6,7 @@ on:
 
 env:
   BUILD_TYPE: Release
+  GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
   PYTHONUTF8: 1
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -16,9 +17,44 @@ permissions:
 
 jobs:
 
+  versioning:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        persist-credentials: false
+    - uses: actions/setup-node@v3
+    - run: npm install --save-dev @semantic-release/exec @semantic-release/git conventional-changelog-eslint semantic-release && npx semantic-release
+
+
+  rebase:
+    name: Rebase Development Branch
+    needs: versioning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the latest code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Perform rebase
+        run: |
+          git checkout main-dev
+          git rebase main
+          
+      - name: Push changes
+        uses: CasperWA/push-protected@v2
+        with:
+          token: ${{ secrets.SEMANTIC_REBASE_TOKEN }}
+          branch: main-dev
+          unprotect_reviews: True
+          force: True
+
   build_wheels:
     name: Build Wheels for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    needs: versioning
     strategy:
       matrix:
         os: [ubuntu-20.04, macOS-11, windows-2022]
