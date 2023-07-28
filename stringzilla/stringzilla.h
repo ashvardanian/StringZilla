@@ -538,7 +538,7 @@ inline static void _strzl_sort_recursion( //
     else {
         // Discard the prefixes
         for (size_t i = 0; i != array->count; ++i)
-            memset(&array->order[i], 0, 4ul);
+            memset((char *)(&array->order[i]) + 4, 0, 4ul);
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
         // Perform sorts on smaller chunks instead of the whole handle
@@ -613,8 +613,10 @@ inline static void strzl_sort(strzl_array_t *array, strzl_sort_config_t const *c
     for (size_t i = 0; i != array->count; ++i) {
         char const *begin = array->get_begin(array->handle, array->order[i]);
         size_t length = array->get_length(array->handle, array->order[i]);
+        length = length > 4ul ? 4ul : length;
         char *prefix = (char *)&array->order[i];
-        memcpy(prefix, begin, length > 4ul ? 4ul : length);
+        for (size_t j = 0; j != length; ++j)
+            prefix[7 - j] = begin[j];
         if (case_insensitive) {
             prefix[0] = tolower(prefix[0]);
             prefix[1] = tolower(prefix[1]);
