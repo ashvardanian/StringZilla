@@ -341,13 +341,13 @@ size_t strzl_avx2_find_substr(strzl_haystack_t h, strzl_needle_t n) {
     for (; (text + n.len + 32) <= end; text += 32) {
 
         // Performing many unaligned loads ends up being faster than loading once and shuffling around.
-        __m256i texts0 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 0), masks));
+        __m256i texts0 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 0)), masks);
         int matches0 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts0, anomalies));
-        __m256i texts1 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 1), masks));
+        __m256i texts1 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 1)), masks);
         int matches1 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts1, anomalies));
-        __m256i text2 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 2), masks));
+        __m256i text2 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 2)), masks);
         int matches2 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(text2, anomalies));
-        __m256i texts3 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 3), masks));
+        __m256i texts3 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 3)), masks);
         int matches3 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts3, anomalies));
 
         if (matches0 | matches1 | matches2 | matches3) {
