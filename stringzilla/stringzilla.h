@@ -515,11 +515,11 @@ inline static void _strzl_sort_recursion( //
     size_t split = 0;
     {
         size_t mask = (1ul << 63) >> bit_idx;
-        while (split != array->count && (array->order[split] & mask))
+        while (split != array->count && !(array->order[split] & mask))
             ++split;
 
         for (size_t i = split + 1; i < array->count; ++i)
-            if (array->order[i] & mask)
+            if (!(array->order[i] & mask))
                 strzl_swap(array->order + i, array->order + split), ++split;
     }
 
@@ -572,10 +572,10 @@ inline static int _strzl_sort_array_strncmp(
     size_t a_len = array->get_length(array->handle, a);
     size_t b_len = array->get_length(array->handle, b);
     int res = strncmp( //
-        array->get_begin(array->handle, b),
         array->get_begin(array->handle, a),
+        array->get_begin(array->handle, b),
         a_len > b_len ? b_len : a_len);
-    return res ? res : b_len - a_len;
+    return res ? res : a_len - b_len;
 }
 
 inline static int _strzl_sort_array_strncasecmp(
@@ -592,10 +592,11 @@ inline static int _strzl_sort_array_strncasecmp(
     size_t b = *(size_t *)b_raw;
     size_t a_len = array->get_length(array->handle, a);
     size_t b_len = array->get_length(array->handle, b);
-    return strncasecmp( //
+    int res = strncasecmp( //
         array->get_begin(array->handle, a),
         array->get_begin(array->handle, b),
         a_len > b_len ? b_len : a_len);
+    return res ? res : a_len - b_len;
 }
 
 struct strzl_sort_config_t {
