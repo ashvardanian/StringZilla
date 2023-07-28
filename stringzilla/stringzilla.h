@@ -571,10 +571,11 @@ inline static int _strzl_sort_array_strncmp(
     size_t b = *(size_t *)b_raw;
     size_t a_len = array->get_length(array->handle, a);
     size_t b_len = array->get_length(array->handle, b);
-    return strncmp( //
-        array->get_begin(array->handle, a),
+    int res = strncmp( //
         array->get_begin(array->handle, b),
+        array->get_begin(array->handle, a),
         a_len > b_len ? b_len : a_len);
+    return res ? res : b_len - a_len;
 }
 
 inline static int _strzl_sort_array_strncasecmp(
