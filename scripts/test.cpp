@@ -116,7 +116,7 @@ void expect_partitioned_by_length(strings_t const &strings, permute_t const &per
 
 void expect_sorted(strings_t const &strings, permute_t const &permute) {
     if (!std::is_sorted(permute.begin(), permute.end(), [&](std::size_t i, std::size_t j) {
-            return strings[i] < strings[j];
+            return strings[i] > strings[j];
         }))
         throw std::runtime_error("Sorting failed!");
 }
@@ -248,7 +248,7 @@ int main(int, char const **) {
     if (true) {
         std::printf("---- Sorting:\n");
         bench_permute("std::sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
+            std::sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] > strings[j]; });
         });
         expect_sorted(strings, permute_base);
 
@@ -270,7 +270,7 @@ int main(int, char const **) {
 
         std::printf("---- Stable Sorting:\n");
         bench_permute("std::stable_sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::stable_sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
+            std::stable_sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] > strings[j]; });
         });
         expect_sorted(strings, permute_base);
 
