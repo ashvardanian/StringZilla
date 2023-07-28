@@ -397,7 +397,7 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
         strzl_sort(&array, nullptr);
         std::vector<span_t> new_parts(parts_.size());
         for (std::size_t i = 0; i != parts_.size(); ++i)
-            new_parts[permute[i]] = parts_[i];
+            new_parts[i] = parts_[permute[i]];
         parts_ = new_parts;
     }
 };
