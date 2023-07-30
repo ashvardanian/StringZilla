@@ -341,13 +341,13 @@ size_t strzl_avx2_find_substr(strzl_haystack_t h, strzl_needle_t n) {
     for (; (text + n.len + 32) <= end; text += 32) {
 
         // Performing many unaligned loads ends up being faster than loading once and shuffling around.
-        __m256i texts0 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 0), masks));
+        __m256i texts0 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 0)), masks);
         int matches0 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts0, anomalies));
-        __m256i texts1 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 1), masks));
+        __m256i texts1 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 1)), masks);
         int matches1 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts1, anomalies));
-        __m256i text2 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 2), masks));
+        __m256i text2 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 2)), masks);
         int matches2 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(text2, anomalies));
-        __m256i texts3 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 3), masks));
+        __m256i texts3 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 3)), masks);
         int matches3 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts3, anomalies));
 
         if (matches0 | matches1 | matches2 | matches3) {
@@ -515,11 +515,11 @@ inline static void _strzl_sort_recursion( //
     size_t split = 0;
     {
         size_t mask = (1ul << 63) >> bit_idx;
-        while (split != array->count && (array->order[split] & mask))
+        while (split != array->count && !(array->order[split] & mask))
             ++split;
 
         for (size_t i = split + 1; i < array->count; ++i)
-            if (array->order[i] & mask)
+            if (!(array->order[i] & mask))
                 strzl_swap(array->order + i, array->order + split), ++split;
     }
 
@@ -538,7 +538,7 @@ inline static void _strzl_sort_recursion( //
     else {
         // Discard the prefixes
         for (size_t i = 0; i != array->count; ++i)
-            memset(&array->order[i], 0, 4ul);
+            memset((char *)(&array->order[i]) + 4, 0, 4ul);
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
         // Perform sorts on smaller chunks instead of the whole handle
@@ -571,10 +571,11 @@ inline static int _strzl_sort_array_strncmp(
     size_t b = *(size_t *)b_raw;
     size_t a_len = array->get_length(array->handle, a);
     size_t b_len = array->get_length(array->handle, b);
-    return strncmp( //
+    int res = strncmp( //
         array->get_begin(array->handle, a),
         array->get_begin(array->handle, b),
         a_len > b_len ? b_len : a_len);
+    return res ? res : a_len - b_len;
 }
 
 inline static int _strzl_sort_array_strncasecmp(
@@ -591,10 +592,11 @@ inline static int _strzl_sort_array_strncasecmp(
     size_t b = *(size_t *)b_raw;
     size_t a_len = array->get_length(array->handle, a);
     size_t b_len = array->get_length(array->handle, b);
-    return strncasecmp( //
+    int res = strncasecmp( //
         array->get_begin(array->handle, a),
         array->get_begin(array->handle, b),
         a_len > b_len ? b_len : a_len);
+    return res ? res : a_len - b_len;
 }
 
 struct strzl_sort_config_t {
@@ -613,8 +615,10 @@ inline static void strzl_sort(strzl_array_t *array, strzl_sort_config_t const *c
     for (size_t i = 0; i != array->count; ++i) {
         char const *begin = array->get_begin(array->handle, array->order[i]);
         size_t length = array->get_length(array->handle, array->order[i]);
+        length = length > 4ul ? 4ul : length;
         char *prefix = (char *)&array->order[i];
-        memcpy(prefix, begin, length > 4ul ? 4ul : length);
+        for (size_t j = 0; j != length; ++j)
+            prefix[7 - j] = begin[j];
         if (case_insensitive) {
             prefix[0] = tolower(prefix[0]);
             prefix[1] = tolower(prefix[1]);
