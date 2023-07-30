@@ -1,10 +1,10 @@
-# Stringzilla
+# Stringzilla 🦖
 
 ## Crunch 100+ GB Strings in Python with ease, leveraging SIMD Assembly
 
 Stringzilla was born many years ago as a [tutorial for SIMD accelerated string-processing][tutorial].
-But one day, processing 100+ GB Chemistry and AI datasets, I decided to transform it into a library.
-It's designed to replace `open(...).readlines()`, `str().splitlines()` and many other common workloads with very long strings.
+But one day, processing 100+ GB of Chemistry and AI datasets, I transformed it into a library.
+It's designed to replace `open(...).readlines()`, `str().splitlines()`, and many other typical workloads with very long strings.
 
 <table>
 <tr>
@@ -56,7 +56,7 @@ It's designed to replace `open(...).readlines()`, `str().splitlines()` and many 
 pip install stringzilla
 ```
 
-There are two classes you can use interchangibly:
+There are two classes you can use interchangeably:
 
 ```python
 from stringzilla import Str, File, Strs
@@ -66,7 +66,7 @@ text: Str = Str('some-string')
 text: File = File('some-file.txt')
 ```
 
-Once constructed, following interfaces are supported:
+Once constructed, the following interfaces are supported:
 
 ```python
 len(text) -> int
@@ -115,13 +115,13 @@ rm -rf build && pip install -e . && pytest scripts/test.py -s -x
 pip install -e . --no-index --no-deps
 ```
 
-To benchmark on some custom file and pattern combination:
+To benchmark on some custom file and pattern combinations:
 
 ```sh
 python scripts/bench.py --haystack_path "your file" --needle "your pattern"
 ```
 
-To benchmark on syntetic data:
+To benchmark on synthetic data:
 
 ```sh
 python scripts/bench.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce"
@@ -133,7 +133,7 @@ To validate packaging:
 cibuildwheel --platform linux
 ```
 
-Compilin C++ tests:
+Compiling C++ tests:
 
 
 ```sh
