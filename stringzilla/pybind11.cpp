@@ -397,7 +397,7 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
         strzl_sort(&array, nullptr);
         std::vector<span_t> new_parts(parts_.size());
         for (std::size_t i = 0; i != parts_.size(); ++i)
-            new_parts[permute[i]] = parts_[i];
+            new_parts[i] = parts_[permute[i]];
         parts_ = new_parts;
     }
 };
@@ -494,34 +494,39 @@ void define_slice_ops(py::class_<at, std::shared_ptr<at>> &str_view_struct) {
         &at::contains,
         py::arg("needle"),
         py::arg("start") = 0,
-        py::arg("end") = ssize_max_k);
+        py::arg("end") = ssize_max_k,
+        py::call_guard<py::gil_scoped_release>());
     str_view_struct.def( //
         "find",
         &at::find,
         py::arg("needle"),
         py::arg("start") = 0,
-        py::arg("end") = ssize_max_k);
+        py::arg("end") = ssize_max_k,
+        py::call_guard<py::gil_scoped_release>());
     str_view_struct.def( //
         "count",
         &at::count,
         py::arg("needle"),
         py::arg("start") = 0,
         py::arg("end") = ssize_max_k,
-        py::arg("allowoverlap") = false);
+        py::arg("allowoverlap") = false,
+        py::call_guard<py::gil_scoped_release>());
     str_view_struct.def( //
         "splitlines",
         &at::splitlines,
         py::arg("keeplinebreaks") = false,
         py::arg("separator") = '\n',
         py::kw_only(),
-        py::arg("maxsplit") = size_max_k);
+        py::arg("maxsplit") = size_max_k,
+        py::call_guard<py::gil_scoped_release>());
     str_view_struct.def( //
         "split",
         &at::split,
         py::arg("separator") = " ",
         py::arg("maxsplit") = size_max_k,
         py::kw_only(),
-        py::arg("keepseparator") = false);
+        py::arg("keepseparator") = false,
+        py::call_guard<py::gil_scoped_release>());
     str_view_struct.def( //
         "sub",
         &at::sub,
@@ -591,7 +596,7 @@ PYBIND11_MODULE(stringzilla, m) {
         "__iter__",
         [](py_spans_t const &s) { return py::make_iterator(s.begin(), s.end()); },
         py::keep_alive<0, 1>());
-    py_strs.def("sort", &py_spans_t::sort);
+    py_strs.def("sort", &py_spans_t::sort, py::call_guard<py::gil_scoped_release>());
     py_strs.def("__getitem__", [](py_spans_t &s, py::slice slice) {
         ssize_t start, stop, step, length;
         if (!slice.compute(s.size(), &start, &stop, &step, &length))
