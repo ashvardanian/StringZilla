@@ -28,13 +28,11 @@ if sys.platform == "linux":
 
     arch = platform.machine()
     if arch == "x86_64" or arch == "i386":
-        compile_args.append("-march=native")
-        if compiler == "gcc":
-            compile_args.append("-mtune=generic")
+        compile_args.append("-march=haswell")
     elif arch.startswith("arm"):
         compile_args.append("-march=armv8-a+simd")
         if compiler == "gcc":
-            compile_args.extend(["-mtune=native", "-mfpu=neon", "-mfloat-abi=hard"])
+            compile_args.extend(["-mfpu=neon", "-mfloat-abi=hard"])
 
 
 if sys.platform == "darwin":
