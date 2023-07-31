@@ -1,6 +1,7 @@
 import os
 import sys
 from setuptools import setup
+import platform
 
 from pybind11.setup_helpers import Pybind11Extension
 
@@ -16,6 +17,23 @@ if sys.platform == "linux":
     compile_args.append("-Wno-unknown-pragmas")
     compile_args.append("-fopenmp")
     link_args.append("-lgomp")
+
+    compiler = ""
+    if platform.python_implementation() == "CPython":
+        compiler = platform.python_compiler().lower()
+        if "gcc" in compiler:
+            compiler = "gcc"
+        elif "clang" in compiler:
+            compiler = "llvm"
+
+    arch = platform.machine()
+    if arch == "x86_64" or arch == "i386":
+        compile_args.append("-march=haswell")
+    elif arch.startswith("arm"):
+        compile_args.append("-march=armv8-a+simd")
+        if compiler == "gcc":
+            compile_args.extend(["-mfpu=neon", "-mfloat-abi=hard"])
+
 
 if sys.platform == "darwin":
     compile_args.append("-std=c++17")
