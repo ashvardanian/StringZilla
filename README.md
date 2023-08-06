@@ -72,6 +72,7 @@ Once constructed, the following interfaces are supported:
 len(text) -> int
 'substring' in text -> bool
 text[42] -> str
+text[42:46] -> str
 
 text.contains(
     'subtring',
@@ -105,6 +106,21 @@ text.split(
     **, # non-traditional arguments:
     keepseparator=False, # optional
 ) -> Strs # similar to list[str]
+```
+
+Once split, you can sort, shuffle, and perform other collection-level operations on strings:
+
+```py
+lines: Strs = text.split(separator='\n')
+lines.sort()
+lines.shuffle(seed=42)
+
+sorted_copy: Strs = lines.sorted()
+shuffled_copy: Strs = lines.shuffled(seed=42)
+
+lines.append(shuffled_copy.pop(0))
+lines.append('Pythonic string')
+lines.extend(shuffled_copy)
 ```
 
 ## Development
