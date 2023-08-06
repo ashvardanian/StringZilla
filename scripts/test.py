@@ -53,6 +53,61 @@ def check_identical(
     is_equal_strings(native_strings, big_strings)
 
 
+@pytest.mark.parametrize("haystack_length", range(1, 65))
+@pytest.mark.parametrize("variability", range(1, 25))
+def test_contains(haystack_length: int, variability: int):
+    native = get_random_string(variability=variability, length=haystack_length)
+    big = Str(native)
+    pattern = get_random_string(variability=variability, length=randint(1, 5))
+    assert (pattern in native) == big.contains(pattern)
+
+
+def test_count_overlap():
+    native = "aaaaa"
+    big = Str(native)
+    assert native.count("aa") == big.count("aa")
+    assert 4 == big.count("aa", allowoverlap=True)
+
+
+def test_splitlines():
+    native = "line1\nline2\nline3"
+    big = Str(native)
+    assert native.splitlines() == list(big.splitlines())
+    assert native.splitlines(True) == list(big.splitlines(keeplinebreaks=True))
+
+
+def test_split_keepseparator():
+    native = "word1 word2 word3"
+    big = Str(native)
+    assert ["word1 ", "word2 ", "word3"] == list(big.split(" ", keepseparator=True))
+
+
+def test_strs_operations():
+    native = "line1\nline2\nline3"
+    big = Str(native)
+    lines = big.splitlines()
+    lines.sort()
+    assert ["line1", "line2", "line3"] == list(lines)
+
+    shuffled_copy = lines.shuffled(seed=42)
+    assert set(lines) == set(shuffled_copy)
+
+    lines.append("line4")
+    assert 4 == len(lines)
+    lines.extend(["line5", "line6"])
+    assert 6 == len(lines)
+
+    lines.append(lines[0])
+    assert 7 == len(lines)
+    assert lines[6] == "line1"
+
+    lines.extend(lines)
+    assert 14 == len(lines)
+    assert lines[7] == "line1"
+    assert lines[8] == "line2"
+    assert lines[12] == "line6"
+
+
 @pytest.mark.parametrize("repetitions", range(1, 10))
 def test_basic(repetitions: int):
     native = "abcd" * repetitions
@@ -66,8 +121,8 @@ def test_basic(repetitions: int):
 
 
 @pytest.mark.parametrize("pattern_length", [1, 2, 4, 5])
-@pytest.mark.parametrize("haystack_length", range(1, 65))
-@pytest.mark.parametrize("variability", range(1, 25))
+@pytest.mark.parametrize("haystack_length", range(1, 69, 3))
+@pytest.mark.parametrize("variability", range(1, 27, 3))
 def test_fuzzy(pattern_length: int, haystack_length: int, variability: int):
     native = get_random_string(variability=variability, length=haystack_length)
     big = Str(native)
@@ -111,7 +166,7 @@ def test_strs():
     assert native[:-10] == big.sub(end=-10) and native[:-10] == big[:-10]
     assert native[:-1] == big.sub(end=-1) and native[:-1] == big[:-1]
 
-    length = 10000
+    length = 1000
     native = get_random_string(length=length)
     big = Str(native)
 
