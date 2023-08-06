@@ -16,11 +16,14 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h> // `ssize_t`
 #endif
 
-#include <utility> // `std::exchange`
-#include <limits>  // `std::numeric_limits`
-#include <numeric> // `std::iota`
-#include <cmath>   // `std::abs`
-#include <string_view>
+#include <random>      // `std::random_device`
+#include <utility>     // `std::exchange`
+#include <limits>      // `std::numeric_limits`
+#include <numeric>     // `std::iota`
+#include <cmath>       // `std::abs`
+#include <algorithm>   // `std::shuffle`
+#include <string>      // `std::string`
+#include <string_view> // `std::string_view`
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -39,8 +42,10 @@ struct span_t {
     char const *ptr;
     size_t len;
 
+    explicit operator bool() const noexcept { return ptr; }
     char const *data() const noexcept { return ptr; }
     size_t size() const noexcept { return len; }
+    bool contains(char const *fragment) const noexcept { return ptr <= fragment && fragment < (ptr + len); }
 };
 
 static constexpr ssize_t ssize_max_k = std::numeric_limits<ssize_t>::max();
@@ -80,19 +85,20 @@ inline size_t count_substr(span_t h, span_t n, bool overlap = false) noexcept {
     if (overlap) {
         while (h.len) {
             size_t offset = find_substr(h, n);
-            result += offset != h.len;
-            h.ptr += offset;
-            h.len -= offset;
+            bool found = offset != h.len;
+            result += found;
+            h.ptr += offset + found;
+            h.len -= offset + found;
         }
     }
 
     else {
         while (h.len) {
             size_t offset = find_substr(h, n);
-            result += offset != h.len;
+            bool found = offset != h.len;
+            result += found;
             h.ptr += offset + n.len;
-            h.len -= offset;
-            h.len -= n.len * bool(h.len);
+            h.len -= offset + n.len * found;
         }
     }
 
@@ -199,6 +205,7 @@ struct py_span_t : public span_t, public std::enable_shared_from_this<py_span_t>
     char const *end() const { return begin() + len; }
     char at(ssize_t offset) const { return begin()[unsigned_offset(len, offset)]; }
     py::str to_python() const { return {begin(), len}; }
+    std::size_t hash() const { return std::hash<std::string_view> {}({ptr, len}); }
 
     bool operator==(py::str const &str) const { return to_stl({ptr, len}) == str.cast<std::string_view>(); }
     bool operator!=(py::str const &str) const { return !(*this == str); }
@@ -220,7 +227,7 @@ struct py_span_t : public span_t, public std::enable_shared_from_this<py_span_t>
 struct py_str_t : public py_span_t {
     std::string copy_;
 
-    py_str_t(std::string string = "") : copy_(string) { ptr = to_span(copy_).ptr, len = to_span(copy_).len; }
+    py_str_t(std::string_view string = "") : copy_(string) { ptr = to_span(copy_).ptr, len = to_span(copy_).len; }
     ~py_str_t() {}
 
     using py_span_t::contains;
@@ -333,9 +340,36 @@ struct py_subspan_t : public py_span_t {
     using py_span_t::splitlines;
 };
 
+static std::shared_ptr<py_subspan_t> empty_subspan = std::make_shared<py_subspan_t>();
+
 struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
-    std::shared_ptr<py_span_t const> whole_;
-    std::vector<span_t> parts_;
+
+    using parent_t = std::shared_ptr<py_span_t const>;
+
+    struct less_address_t {
+        using is_transparent = void;
+        bool operator()(py_span_t const &a, py_span_t const &b) const noexcept { return a.data() < b.data(); }
+        bool operator()(parent_t const &a, parent_t const &b) const noexcept { return a->data() < b->data(); }
+        bool operator()(py_span_t const &a, char const *b) const noexcept {
+            return a.span().contains(b) ? false : a.data() < b;
+        }
+        bool operator()(parent_t const &a, char const *b) const noexcept {
+            return a->span().contains(b) ? false : a->data() < b;
+        }
+        bool operator()(char const *a, py_span_t const &b) const noexcept {
+            return b.span().contains(a) ? false : a < b.data();
+        }
+        bool operator()(char const *a, parent_t const &b) const noexcept {
+            return b->span().contains(a) ? false : a < b->data();
+        }
+    };
+
+    using parents_t = std::set<parent_t, less_address_t>;
+    using parts_t = std::vector<span_t>;
+
+  private:
+    parents_t parents_;
+    parts_t parts_;
 
     static char const *strzl_array_get_begin(void const *raw, size_t i) { return ((span_t *)raw)[i].ptr; }
     static size_t strzl_array_get_length(void const *raw, size_t i) { return ((span_t *)raw)[i].len; }
@@ -344,8 +378,7 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
     py_spans_t() = default;
     py_spans_t(py_spans_t &&) = default;
     py_spans_t &operator=(py_spans_t &&) = default;
-    py_spans_t(std::shared_ptr<py_span_t const> whole, std::vector<span_t> parts)
-        : whole_(std::move(whole)), parts_(std::move(parts)) {}
+    py_spans_t(parents_t parents, parts_t parts) : parents_(std::move(parents)), parts_(std::move(parts)) {}
 
     struct iterator_t {
         py_spans_t const *py_spans_ = nullptr;
@@ -365,20 +398,39 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
         }
     };
 
+    std::shared_ptr<py_subspan_t> pop(ssize_t i) {
+        std::size_t offset = unsigned_offset(size(), i);
+        span_t part = parts_[offset];
+        if (!part) {
+            parts_.erase(parts_.begin() + offset);
+            return empty_subspan;
+        }
+        auto parent_iterator = parents_.find(part.data());
+        auto popped = std::make_shared<py_subspan_t>(*parent_iterator, part);
+        parts_.erase(parts_.begin() + offset);
+        return popped;
+    }
+
     std::shared_ptr<py_subspan_t> at(ssize_t i) const {
-        return std::make_shared<py_subspan_t>(whole_, parts_[unsigned_offset(size(), i)]);
+        std::size_t offset = unsigned_offset(size(), i);
+        span_t part = parts_[offset];
+        if (!part)
+            return empty_subspan;
+        auto parent_iterator = parents_.find(part.data());
+        auto popped = std::make_shared<py_subspan_t>(*parent_iterator, part);
+        return popped;
     }
 
     std::shared_ptr<py_spans_t> sub(ssize_t start, ssize_t end, ssize_t step, ssize_t length) const {
         if (step == 1) {
             auto first_part_it = parts_.begin() + start;
             std::vector<span_t> sub_parts(first_part_it, first_part_it + length);
-            return std::make_shared<py_spans_t>(whole_, std::move(sub_parts));
+            return std::make_shared<py_spans_t>(parents_, std::move(sub_parts));
         }
         std::vector<span_t> sub_parts(length);
         for (ssize_t parts_idx = start, sub_idx = 0; sub_idx < length; parts_idx += step, ++sub_idx)
             sub_parts[sub_idx] = parts_[parts_idx];
-        return std::make_shared<py_spans_t>(whole_, std::move(sub_parts));
+        return std::make_shared<py_spans_t>(parents_, std::move(sub_parts));
     }
 
     iterator_t begin() const { return {this, 0}; }
@@ -399,6 +451,49 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
         for (std::size_t i = 0; i != parts_.size(); ++i)
             new_parts[i] = parts_[permute[i]];
         parts_ = new_parts;
+    }
+
+    void shuffle(std::optional<std::size_t> maybe_seed) {
+        std::random_device device;
+        std::size_t seed = maybe_seed ? *maybe_seed : device();
+        using seed_t = typename std::mt19937::result_type;
+        std::mt19937 generator {static_cast<seed_t>(seed)};
+        std::shuffle(parts_.begin(), parts_.end(), generator);
+    }
+
+    void reverse() { std::reverse(parts_.begin(), parts_.end()); }
+
+    void extend(py_spans_t const &other) {
+        parents_.insert(other.parents_.begin(), other.parents_.end());
+        parts_.insert(parts_.end(), other.parts_.begin(), other.parts_.end());
+    }
+
+    template <typename py_span_or_derived_at>
+    void append(std::shared_ptr<py_span_or_derived_at> const &other) {
+        parents_.insert(std::dynamic_pointer_cast<py_span_t>(other));
+        parts_.push_back(other->span());
+    }
+
+    void append_copy(std::string_view other) { append(std::make_shared<py_str_t>(other)); }
+
+    void extend_copy(std::vector<std::string_view> const &others) {
+        // `std::set` doesn't ahve such an interface:
+        // parents_.reserve(parents_.size() + others.size());
+        parts_.reserve(parts_.size() + others.size());
+        for (std::string_view other : others)
+            append_copy(other);
+    }
+
+    std::shared_ptr<py_spans_t> sorted() const {
+        auto copy = std::make_shared<py_spans_t>(parents_, parts_);
+        copy->sort();
+        return copy;
+    }
+
+    std::shared_ptr<py_spans_t> shuffled(std::optional<std::size_t> maybe_seed) const {
+        auto copy = std::make_shared<py_spans_t>(parents_, parts_);
+        copy->shuffle(maybe_seed);
+        return copy;
     }
 };
 
@@ -444,7 +539,8 @@ std::shared_ptr<py_spans_t> py_span_t::splitlines(bool keeplinebreaks, char sepa
         last_start += offset_in_remaining + 1;
     }
     parts[count_separators] = after_n(last_start);
-    return std::make_shared<py_spans_t>(shared_from_this(), std::move(parts));
+    py_spans_t::parent_t parent = shared_from_this();
+    return std::make_shared<py_spans_t>(py_spans_t::parents_t {std::move(parent)}, std::move(parts));
 }
 
 std::shared_ptr<py_spans_t> py_span_t::split(std::string_view separator, size_t maxsplit, bool keepseparator) const {
@@ -466,7 +562,8 @@ std::shared_ptr<py_spans_t> py_span_t::split(std::string_view separator, size_t 
     // Python marks includes empy ending as well
     if (will_continue)
         parts.emplace_back(after_n(last_start));
-    return std::make_shared<py_spans_t>(shared_from_this(), std::move(parts));
+    py_spans_t::parent_t parent = shared_from_this();
+    return std::make_shared<py_spans_t>(py_spans_t::parents_t {std::move(parent)}, std::move(parts));
 }
 
 std::shared_ptr<py_subspan_t> py_span_t::sub(ssize_t start, ssize_t end) const {
@@ -476,6 +573,7 @@ std::shared_ptr<py_subspan_t> py_span_t::sub(ssize_t start, ssize_t end) const {
 
 template <typename at>
 void define_comparsion_ops(py::class_<at, std::shared_ptr<at>> &str_view_struct) {
+    str_view_struct.def("__hash__", [](at const &self) { return self.hash(); });
     str_view_struct.def("__eq__", [](at const &self, py::str const &str) { return self == str; });
     str_view_struct.def("__ne__", [](at const &self, py::str const &str) { return self != str; });
     str_view_struct.def("__eq__", [](at const &self, at const &other) { return self == other; });
@@ -596,7 +694,13 @@ PYBIND11_MODULE(stringzilla, m) {
         "__iter__",
         [](py_spans_t const &s) { return py::make_iterator(s.begin(), s.end()); },
         py::keep_alive<0, 1>());
+    py_strs.def("pop", &py_spans_t::pop, py::call_guard<py::gil_scoped_release>());
     py_strs.def("sort", &py_spans_t::sort, py::call_guard<py::gil_scoped_release>());
+    py_strs.def("reverse", &py_spans_t::reverse, py::call_guard<py::gil_scoped_release>());
+    py_strs.def("shuffle",
+                &py_spans_t::shuffle,
+                py::arg("seed") = std::nullopt,
+                py::call_guard<py::gil_scoped_release>());
     py_strs.def("__getitem__", [](py_spans_t &s, py::slice slice) {
         ssize_t start, stop, step, length;
         if (!slice.compute(s.size(), &start, &stop, &step, &length))
@@ -611,4 +715,18 @@ PYBIND11_MODULE(stringzilla, m) {
             start = index_span.offset;
             return s.sub(start, stop, step, length);
         });
+
+    py_strs.def("shuffled",
+                &py_spans_t::shuffled,
+                py::arg("seed") = std::nullopt,
+                py::call_guard<py::gil_scoped_release>());
+    py_strs.def("sorted", &py_spans_t::sorted, py::call_guard<py::gil_scoped_release>());
+
+    py_strs.def("extend", &py_spans_t::extend, py::call_guard<py::gil_scoped_release>());
+    py_strs.def("append", &py_spans_t::append<py_span_t>, py::call_guard<py::gil_scoped_release>());
+    py_strs.def("append", &py_spans_t::append<py_str_t>, py::call_guard<py::gil_scoped_release>());
+    py_strs.def("append", &py_spans_t::append<py_file_t>, py::call_guard<py::gil_scoped_release>());
+    py_strs.def("append", &py_spans_t::append<py_subspan_t>, py::call_guard<py::gil_scoped_release>());
+    py_strs.def("append", &py_spans_t::append_copy);
+    py_strs.def("extend", &py_spans_t::extend_copy);
 }
