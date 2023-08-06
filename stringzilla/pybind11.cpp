@@ -456,7 +456,8 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
     void shuffle(std::optional<std::size_t> maybe_seed) {
         std::random_device device;
         std::size_t seed = maybe_seed ? *maybe_seed : device();
-        std::mt19937 generator {seed};
+        using seed_t = typename std::mt19937::result_type;
+        std::mt19937 generator {static_cast<seed_t>(seed)};
         std::shuffle(parts_.begin(), parts_.end(), generator);
     }
 
