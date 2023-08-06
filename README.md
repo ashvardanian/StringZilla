@@ -107,6 +107,14 @@ text.split(
 ) -> Strs # similar to list[str]
 ```
 
+Once split, you can sort, shuffle, and perform other collection-level operations on strings:
+
+```py
+lines: Strs = text.split(separator='\n')
+lines.sort()
+lines.shuffle(seed=42)
+```
+
 ## Development
 
 ```sh

@@ -16,11 +16,13 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h> // `ssize_t`
 #endif
 
-#include <utility> // `std::exchange`
-#include <limits>  // `std::numeric_limits`
-#include <numeric> // `std::iota`
-#include <cmath>   // `std::abs`
-#include <string_view>
+#include <random>      // `std::random_device`
+#include <utility>     // `std::exchange`
+#include <limits>      // `std::numeric_limits`
+#include <numeric>     // `std::iota`
+#include <cmath>       // `std::abs`
+#include <algorithm>   // `std::shuffle`
+#include <string_view> // `std::string_view`
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -400,6 +402,13 @@ struct py_spans_t : public std::enable_shared_from_this<py_spans_t> {
             new_parts[i] = parts_[permute[i]];
         parts_ = new_parts;
     }
+
+    void shuffle(std::optional<std::size_t> maybe_seed) {
+        std::random_device device;
+        std::size_t seed = maybe_seed ? *maybe_seed : device();
+        std::mt19937 generator {seed};
+        std::shuffle(parts_.begin(), parts_.end(), generator);
+    }
 };
 
 bool py_span_t::contains(std::string_view needle, ssize_t start, ssize_t end) const {
@@ -597,6 +606,10 @@ PYBIND11_MODULE(stringzilla, m) {
         [](py_spans_t const &s) { return py::make_iterator(s.begin(), s.end()); },
         py::keep_alive<0, 1>());
     py_strs.def("sort", &py_spans_t::sort, py::call_guard<py::gil_scoped_release>());
+    py_strs.def("shuffle",
+                &py_spans_t::shuffle,
+                py::arg("seed") = std::nullopt,
+                py::call_guard<py::gil_scoped_release>());
     py_strs.def("__getitem__", [](py_spans_t &s, py::slice slice) {
         ssize_t start, stop, step, length;
         if (!slice.compute(s.size(), &start, &stop, &step, &length))
