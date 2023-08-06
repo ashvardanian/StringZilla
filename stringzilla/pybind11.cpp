@@ -82,19 +82,20 @@ inline size_t count_substr(span_t h, span_t n, bool overlap = false) noexcept {
     if (overlap) {
         while (h.len) {
             size_t offset = find_substr(h, n);
-            result += offset != h.len;
-            h.ptr += offset;
-            h.len -= offset;
+            bool found = offset != h.len;
+            result += found;
+            h.ptr += offset + found;
+            h.len -= offset + found;
         }
     }
 
     else {
         while (h.len) {
             size_t offset = find_substr(h, n);
-            result += offset != h.len;
+            bool found = offset != h.len;
+            result += found;
             h.ptr += offset + n.len;
-            h.len -= offset;
-            h.len -= n.len * bool(h.len);
+            h.len -= offset + n.len * found;
         }
     }
 
