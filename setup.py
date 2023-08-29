@@ -51,7 +51,8 @@ if sys.platform == "win32":
 ext_modules = [
     Pybind11Extension(
         "stringzilla",
-        ["stringzilla/pybind11.cpp"],
+        ["python/lib.cpp"],
+        include_dirs=["stringzilla"],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         define_macros=macros_args,

@@ -313,6 +313,8 @@ struct py_file_t : public py_span_t {
 #endif
     }
 
+    std::shared_ptr<py_str_t> load() const { return std::make_shared<py_str_t>(to_stl(*this)); }
+
     using py_span_t::contains;
     using py_span_t::count;
     using py_span_t::find;
@@ -676,6 +678,7 @@ PYBIND11_MODULE(stringzilla, m) {
     define_slice_ops(py_file);
     py_file.def("open", &py_file_t::open, py::arg("path"));
     py_file.def("open", &py_file_t::reopen);
+    py_file.def("load", &py_file_t::load);
     py_file.def("close", &py_file_t::close);
     py_file.def("__getitem__", [](py_file_t &s, py::slice slice) {
         ssize_t start, stop, step, length;
