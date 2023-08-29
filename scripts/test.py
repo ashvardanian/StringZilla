@@ -107,6 +107,11 @@ def test_strs_operations():
     assert lines[8] == "line2"
     assert lines[12] == "line6"
 
+    # Test that shuffles are reproducible with the same `seed`
+    a = [str(s) for s in lines.shuffled(seed=42)]
+    b = [str(s) for s in lines.shuffled(seed=42)]
+    assert a == b
+
 
 @pytest.mark.parametrize("repetitions", range(1, 10))
 def test_basic(repetitions: int):
