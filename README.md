@@ -8,15 +8,16 @@ StringZilla uses a heuristic so simple, it's almost stupid. But don't be fooled!
 
 ### The Speed Showdown 🏁
 
-| Algorithm / Metric        |    IoT (8-core ARM, 0.5 W/core)    |  Laptop (8-core Intel, 5.6 W/core)  |  Server (22-core Intel, 6.3 W/core)   |
+| Algorithm / Metric        |    IoT    |  Laptop  |  Server    |
 | :------------------------ | :--------------------------------: | :--------------------------------: | :-----------------------------------: |
 | **Speed Comparison** 🐢🐇  |                                   |                                    |                                       |
-| Python `for`-loop 🐌           |  4 MB/s                           | 14 MB/s                            |  11 MB/s                              |
-| C++ `for`-loop 🏍️              | 520 MB/s                          | 1.0 GB/s                           | 900 MB/s                              |
-| C++ `std::string::find` 🚗    | 560 MB/s                          | 1.2 GB/s                           | 1.3 GB/s                              |
+| Python `for` loop 🐌           |  4 MB/s                           | 14 MB/s                            |  11 MB/s                              |
+| C++ `for` loop 🏍️              | 520 MB/s                          | 1.0 GB/s                           | 900 MB/s                              |
+| C++ `string.find` 🚗    | 560 MB/s                          | 1.2 GB/s                           | 1.3 GB/s                              |
 | Scalar Stringzilla 🚀  |  2 GB/s                           | 3.3 GB/s                           | 3.5 GB/s                              |
 | Hyper-Scalar Stringzilla 🛸 | **4.3 GB/s**                | **12 GB/s**                        | **12.1 GB/s**                         |
-| **Performance Metrics** 📊|                                   |                                    |                                       |
+| **Efficiency Metrics** 📊|                                   |                                    |                                       |
+| CPU Specs | 8-core ARM, 0.5 W/core | 8-core Intel, 5.6 W/core | 22-core Intel, 6.3 W/core |
 | Performance/Core 💪       | 2.1 - 3.3 GB/s                    | **11 GB/s**                         | 10.5 GB/s                             |
 | Bytes/Joule ⚡            | **4.2 GB/J**                      | 2 GB/J                              | 1.6 GB/J                              |
 
