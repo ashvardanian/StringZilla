@@ -1,4 +1,4 @@
-# StringZilla: The Godzilla of String Libraries 🦖
+# StringZilla 🦖
 
 StringZilla is the Godzilla of string libraries, splitting, sorting, and shuffling large textual datasets faster than you can say "Tokyo Tower" 🗼
 
@@ -11,7 +11,7 @@ StringZilla is the Godzilla of string libraries, splitting, sorting, and shuffli
 
 StringZilla uses a heuristic so simple, it's almost stupid... but it works.
 It matches the first few letters of words with hyper-scalar code to and achieve `memcpy` speeds.
-__The implementation fits into a single C 99 header file__, and uses different flavors of SIMD, and SWAR on older platforms.
+__The implementation fits into a single C 99 header file__ and uses different SIMD flavors and SWAR on older platforms.
 So if you're haunted by `open(...).readlines()` and `str().splitlines()` taking forever, this should help 😊
 
 ### Search Speed 🏁
@@ -50,15 +50,20 @@ text1 = Str('some-string')
 text2 = File('some-file.txt')
 ```
 
+The `Str` is designed to replace long Python `str` strings and wrap our C-level API.
+On the other hand, the `File` memory-maps a file from persistent memory without loading its copy into RAM.
+The contents of that file would remain immutable, and the mapping can be shared by multiple Python processes simultaneously.
+A standard dataset pre-processing use case would be to map a sizeable textual dataset like Common Crawl into memory, spawn child processes, and split the job between them.
+
 ### Basic Operations 📏
 
 - Length: `len(text) -> int`
-- Substring check: `'substring' in text -> bool`
 - Indexing: `text[42] -> str`
 - Slicing: `text[42:46] -> str`
 
 ### Advanced Operations 🧠
 
+- `'substring' in text -> bool`
 - `text.contains('substring', start=0, end=9223372036854775807) -> bool`
 - `text.find('substring', start=0, end=9223372036854775807) -> int`
 - `text.count('substring', start=0, end=9223372036854775807, allowoverlap=False) -> int`
@@ -70,7 +75,7 @@ text2 = File('some-file.txt')
 
 ### Collection-Level Operations 🎲
 
-Once split into a `Strs` object, you can sort, shuffle, and more:
+Once split into a `Strs` object, you can sort, shuffle, and reorganize the slices.
 
 ```python
 lines = text.split(separator='\n')
@@ -78,24 +83,23 @@ lines.sort()
 lines.shuffle(seed=42)
 ```
 
-Sorted or shuffled copies? No problemo!
+Need copies?
 
 ```python
 sorted_copy = lines.sorted()
 shuffled_copy = lines.shuffled(seed=42)
 ```
 
-Appending and extending? Easy peasy!
+Basic `list`-like operations are also supported:
 
 ```python
 lines.append('Pythonic string')
 lines.extend(shuffled_copy)
 ```
 
-## Quick Start: C 🛠️🔥
+## Quick Start: C 🛠️
 
-Building a database, an operating system, or a runtime for your new fancy programming language?
-There is an ABI-stable C 99 interface!
+There is an ABI-stable C 99 interface, in case you have a database, an operating system, or a runtime you want to integrate with StringZilla.
 
 ```c
 #include "stringzilla.h"
@@ -120,7 +124,14 @@ strzl_sort(&array, &your_config);
 
 ## Contributing 👾
 
-Here's how you can set up your dev environment and run some tests.
+Here's how to set up your dev environment and run some tests.
+Future development plans include:
+
+- Faster string sorting algorithm.
+- Bindings for JavaScript, Java, and Rust.
+- Support for reverse-order operations in Python.
+- Splitting CSV rows into columns.
+- Arm SVE backend.
 
 ### Development 📜
 
