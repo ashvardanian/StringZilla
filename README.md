@@ -1,12 +1,22 @@
 # StringZilla: The Godzilla of String Libraries 🦖
 
-Welcome to StringZilla, where we don't just handle strings, we *devour* them! 🍽️ If you've been on the hunt for a string library that's not just fast but *freakishly fast*, you've hit the jackpot. 🎰 StringZilla is the Godzilla of string libraries, stomping through your text faster than you can say "Tokyo Tower"! 🗼
+Welcome to StringZilla, where we don't just handle strings, we *devour* them!
+StringZilla is the Godzilla of string libraries, stomping through your text faster than you can say "Tokyo Tower"! 🗼
+
+- [x] [Python docs](#quick-start-python-🐍)
+- [x] [C docs](#quick-start-c-🛠️🔥)
+- [ ] JavaScript docs.
 
 ## Unleash the Beast: Performance 🚀
 
-StringZilla uses a heuristic so simple, it's almost stupid. But don't be fooled! This bad boy matches the first few letters of words with hyper-scalar code to achieve ludicrous speed. 🏎️💨 It's practical, easy to implement with different flavors of SIMD, and even SWAR for those less fortunate platforms. If you're haunted by `open(...).readlines()` and `str().splitlines()` taking forever, then StringZilla is your dream come true. 🌈
+StringZilla uses a heuristic so simple, it's almost stupid.
+But don't be fooled!
+This bad boy matches the first few letters of words with hyper-scalar code to achieve ludicrous speed. 🏎️💨
+It's practical, easy to implement with different flavors of SIMD, and even SWAR for those less fortunate platforms.
+Moreover, __the whole implementation fits into a single C 99 header file!__
+So if you're haunted by `open(...).readlines()` and `str().splitlines()` taking forever, then StringZilla is your dream come true. 🌈
 
-### The Speed Showdown 🏁
+### The Search Speed Showdown 🏁
 
 | Algorithm / Metric         |          IoT           |          Laptop          |          Server           |
 | :------------------------- | :--------------------: | :----------------------: | :-----------------------: |
@@ -14,8 +24,8 @@ StringZilla uses a heuristic so simple, it's almost stupid. But don't be fooled!
 | Python `for` loop 🐌        |         4 MB/s         |         14 MB/s          |          11 MB/s          |
 | C++ `for` loop 🏍️           |        520 MB/s        |         1.0 GB/s         |         900 MB/s          |
 | C++ `string.find` 🚗        |        560 MB/s        |         1.2 GB/s         |         1.3 GB/s          |
-| Scalar Stringzilla 🚀       |         2 GB/s         |         3.3 GB/s         |         3.5 GB/s          |
-| Hyper-Scalar Stringzilla 🛸 |      **4.3 GB/s**      |       **12 GB/s**        |       **12.1 GB/s**       |
+| Scalar StringZilla 🚀       |         2 GB/s         |         3.3 GB/s         |         3.5 GB/s          |
+| Hyper-Scalar StringZilla 🛸 |      **4.3 GB/s**      |       **12 GB/s**        |       **12.1 GB/s**       |
 | **Efficiency Metrics** 📊   |                        |                          |                           |
 | CPU Specs                  | 8-core ARM, 0.5 W/core | 8-core Intel, 5.6 W/core | 22-core Intel, 6.3 W/core |
 | Performance/Core 💪         |     2.1 - 3.3 GB/s     |       **11 GB/s**        |         10.5 GB/s         |
@@ -29,7 +39,7 @@ StringZilla uses a heuristic so simple, it's almost stupid. But don't be fooled!
 
 ### Basic Usage 🛠️
 
-Stringzilla offers two interchangeable classes for your string and file munching needs:
+StringZilla offers two interchangeable classes for your string and file munching needs:
 
 ```python
 from stringzilla import Str, File
@@ -164,3 +174,14 @@ So, are you ready to join the Monster Squad and make StringZilla even more epic?
 ## License 📜
 
 Feel free to use the project under Apache 2.0 or the Three-clause BSD license at your preference.
+
+---
+
+If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall], [UForm][uform], [UStore][ustore], [SimSIMD][simsimd], and [TenPack][tenpack] 🤗
+
+[usearch]: https://github.com/unum-cloud/usearch
+[ucall]: https://github.com/unum-cloud/ucall
+[uform]: https://github.com/unum-cloud/uform
+[ustore]: https://github.com/unum-cloud/ustore
+[simsimd]: https://github.com/ashvardanian/simsimd
+[tenpack]: https://github.com/ashvardanian/tenpack
