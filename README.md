@@ -1,45 +1,47 @@
 # StringZilla: The Godzilla of String Libraries 🦖
 
-Welcome to StringZilla, where we don't just handle strings, we *devour* them!
-StringZilla is the Godzilla of string libraries, stomping through your text faster than you can say "Tokyo Tower"! 🗼
+StringZilla is the Godzilla of string libraries, splitting, sorting, and shuffling large textual datasets faster than you can say "Tokyo Tower" 🗼
 
 - [x] [Python docs](#quick-start-python-🐍)
 - [x] [C docs](#quick-start-c-🛠️🔥)
 - [ ] JavaScript docs.
+- [ ] Rust docs.
 
-## Unleash the Beast: Performance 🚀
+## Performance 🚀
 
-StringZilla uses a heuristic so simple, it's almost stupid.
-But don't be fooled!
-This bad boy matches the first few letters of words with hyper-scalar code to achieve ludicrous speed. 🏎️💨
-It's practical, easy to implement with different flavors of SIMD, and even SWAR for those less fortunate platforms.
-Moreover, __the whole implementation fits into a single C 99 header file!__
-So if you're haunted by `open(...).readlines()` and `str().splitlines()` taking forever, then StringZilla is your dream come true. 🌈
+StringZilla uses a heuristic so simple, it's almost stupid... but it works.
+It matches the first few letters of words with hyper-scalar code to and achieve `memcpy` speeds.
+__The implementation fits into a single C 99 header file__, and uses different flavors of SIMD, and SWAR on older platforms.
+So if you're haunted by `open(...).readlines()` and `str().splitlines()` taking forever, this should help 😊
 
-### The Search Speed Showdown 🏁
+### Search Speed 🏁
 
-| Algorithm / Metric         |          IoT           |          Laptop          |          Server           |
-| :------------------------- | :--------------------: | :----------------------: | :-----------------------: |
-| **Speed Comparison** 🐢🐇    |                        |                          |                           |
-| Python `for` loop 🐌        |         4 MB/s         |         14 MB/s          |          11 MB/s          |
-| C++ `for` loop 🏍️           |        520 MB/s        |         1.0 GB/s         |         900 MB/s          |
-| C++ `string.find` 🚗        |        560 MB/s        |         1.2 GB/s         |         1.3 GB/s          |
-| Scalar StringZilla 🚀       |         2 GB/s         |         3.3 GB/s         |         3.5 GB/s          |
-| Hyper-Scalar StringZilla 🛸 |      **4.3 GB/s**      |       **12 GB/s**        |       **12.1 GB/s**       |
-| **Efficiency Metrics** 📊   |                        |                          |                           |
-| CPU Specs                  | 8-core ARM, 0.5 W/core | 8-core Intel, 5.6 W/core | 22-core Intel, 6.3 W/core |
-| Performance/Core 💪         |     2.1 - 3.3 GB/s     |       **11 GB/s**        |         10.5 GB/s         |
-| Bytes/Joule ⚡              |      **4.2 GB/J**      |          2 GB/J          |         1.6 GB/J          |
+| Algorithm / Metric       |                    IoT |                   Laptop |                    Server |
+| :----------------------- | ---------------------: | -----------------------: | ------------------------: |
+| **Speed Comparison** 🐢🐇  |                        |                          |                           |
+| Python `for` loop        |                 4 MB/s |                  14 MB/s |                   11 MB/s |
+| C++ `for` loop           |               520 MB/s |                 1.0 GB/s |                  900 MB/s |
+| C++ `string.find`        |               560 MB/s |                 1.2 GB/s |                  1.3 GB/s |
+| Scalar StringZilla       |                 2 GB/s |                 3.3 GB/s |                  3.5 GB/s |
+| Hyper-Scalar StringZilla |           **4.3 GB/s** |              **12 GB/s** |             **12.1 GB/s** |
+| **Efficiency Metrics** 📊 |                        |                          |                           |
+| CPU Specs                | 8-core ARM, 0.5 W/core | 8-core Intel, 5.6 W/core | 22-core Intel, 6.3 W/core |
+| Performance/Core         |         2.1 - 3.3 GB/s |              **11 GB/s** |                 10.5 GB/s |
+| Bytes/Joule              |           **4.2 GB/J** |                   2 GB/J |                  1.6 GB/J |
+
+### Sorting Speed 🏁
+
+Coming soon.
 
 ## Quick Start: Python 🐍
 
 1️⃣ Install via pip: `pip install stringzilla`  
 2️⃣ Import classes: `from stringzilla import Str, File, Strs`  
-3️⃣ Unleash the beast with built-in methods for string operations. 🎉
+3️⃣ Unleash the beast 🎉
 
 ### Basic Usage 🛠️
 
-StringZilla offers two interchangeable classes for your string and file munching needs:
+StringZilla offers two mostly interchangeable classes:
 
 ```python
 from stringzilla import Str, File
@@ -90,11 +92,10 @@ lines.append('Pythonic string')
 lines.extend(shuffled_copy)
 ```
 
-So what are you waiting for? Unleash the Godzilla of string libraries on your code today! 🦖🔥
-
 ## Quick Start: C 🛠️🔥
 
-Building a database, an operating system, or a runtime for your new fancy programming language? Why settle for LibC when you can unleash the Godzilla of string libraries? 🦖
+Building a database, an operating system, or a runtime for your new fancy programming language?
+There is an ABI-stable C 99 interface!
 
 ```c
 #include "stringzilla.h"
@@ -117,11 +118,11 @@ strzl_array_t array = {your_order, your_count, your_get_begin, your_get_length, 
 strzl_sort(&array, &your_config);
 ```
 
-## Contributing: Be a Part of the Monster Squad! 👾
+## Contributing 👾
 
-Ready to contribute? Here's how you can set up your dev environment and run some tests.
+Here's how you can set up your dev environment and run some tests.
 
-### Development Scripts 📜
+### Development 📜
 
 ```sh
 # Clean up and install
@@ -168,8 +169,6 @@ cmake -B ./build_release \
     && \
     make -C ./build_release -j && ./build_release/stringzilla_test
 ```
-
-So, are you ready to join the Monster Squad and make StringZilla even more epic? Let's do this! 🦖🚀
 
 ## License 📜
 
