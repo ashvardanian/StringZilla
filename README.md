@@ -66,9 +66,6 @@ A standard dataset pre-processing use case would be to map a sizeable textual da
 - `text.contains('substring', start=0, end=9223372036854775807) -> bool`
 - `text.find('substring', start=0, end=9223372036854775807) -> int`
 - `text.count('substring', start=0, end=9223372036854775807, allowoverlap=False) -> int`
-
-### Splitting and Line Operations
-
 - `text.splitlines(keeplinebreaks=False, separator='\n') -> Strs`
 - `text.split(separator=' ', maxsplit=9223372036854775807, keepseparator=False) -> Strs`
 
@@ -119,7 +116,6 @@ strzl_sort(&array, &your_config);
 
 ## Contributing 👾
 
-Here's how to set up your dev environment and run some tests.
 Future development plans include:
 
 - Faster string sorting algorithm.
@@ -127,6 +123,8 @@ Future development plans include:
 - Support for reverse-order operations in Python.
 - Splitting CSV rows into columns.
 - Arm SVE backend.
+
+Here's how to set up your dev environment and run some tests.
 
 ### Development
 
