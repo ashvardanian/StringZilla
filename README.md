@@ -18,7 +18,7 @@ So if you're haunted by `open(...).readlines()` and `str().splitlines()` taking 
 
 | Backend \ Device         |                    IoT |                   Laptop |                    Server |
 | :----------------------- | ---------------------: | -----------------------: | ------------------------: |
-| **Speed Comparison** 🐇  |                        |                          |                           |
+| **Speed Comparison** 🐇   |                        |                          |                           |
 | Python `for` loop        |                 4 MB/s |                  14 MB/s |                   11 MB/s |
 | C++ `for` loop           |               520 MB/s |                 1.0 GB/s |                  900 MB/s |
 | C++ `string.find`        |               560 MB/s |                 1.2 GB/s |                  1.3 GB/s |
@@ -118,10 +118,13 @@ strzl_sort(&array, &your_config);
 
 Future development plans include:
 
+- Replace PyBind11 with CPython.
+- Reverse-order operations in Python #12.
+- Bindings for JavaScript #25, Java, and Rust.
 - Faster string sorting algorithm.
-- Bindings for JavaScript, Java, and Rust.
-- Support for reverse-order operations in Python.
 - Splitting CSV rows into columns.
+- Splitting with multiple separators at once #29.
+- UTF-8 validation.
 - Arm SVE backend.
 
 Here's how to set up your dev environment and run some tests.
