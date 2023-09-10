@@ -561,7 +561,7 @@ std::shared_ptr<py_spans_t> py_span_t::split(std::string_view separator, size_t 
         parts.emplace_back(span_t {remaining.data(), part_len});
         last_start += offset_in_remaining + separator.size();
     }
-    // Python marks includes empy ending as well
+    // Python marks includes empty ending as well
     if (will_continue)
         parts.emplace_back(after_n(last_start));
     py_spans_t::parent_t parent = shared_from_this();
@@ -574,7 +574,7 @@ std::shared_ptr<py_subspan_t> py_span_t::sub(ssize_t start, ssize_t end) const {
 }
 
 template <typename at>
-void define_comparsion_ops(py::class_<at, std::shared_ptr<at>> &str_view_struct) {
+void define_comparison_ops(py::class_<at, std::shared_ptr<at>> &str_view_struct) {
     str_view_struct.def("__hash__", [](at const &self) { return self.hash(); });
     str_view_struct.def("__eq__", [](at const &self, py::str const &str) { return self == str; });
     str_view_struct.def("__ne__", [](at const &self, py::str const &str) { return self != str; });
@@ -650,12 +650,17 @@ void define_slice_ops(py::class_<at, std::shared_ptr<at>> &str_view_struct) {
 PYBIND11_MODULE(stringzilla, m) {
     m.doc() = "Crunch 100+ GB Strings in Python with ease";
 
+    m.def("levenstein", [](std::string_view a, std::string_view b, levenstein_distance_t bound = 255) {
+        std::vector<uint8_t> buffer(strzl_levenstein_memory_needed(a.size(), b.size()));
+        return strzl_levenstein(a.data(), a.size(), b.data(), b.size(), bound, buffer.data());
+    });
+
     auto py_span = py::class_<py_span_t, std::shared_ptr<py_span_t>>(m, "Span");
-    define_comparsion_ops(py_span);
+    define_comparison_ops(py_span);
     define_slice_ops(py_span);
 
     auto py_subspan = py::class_<py_subspan_t, std::shared_ptr<py_subspan_t>>(m, "SubSpan");
-    define_comparsion_ops(py_subspan);
+    define_comparison_ops(py_subspan);
     define_slice_ops(py_subspan);
 
     auto py_str = py::class_<py_str_t, std::shared_ptr<py_str_t>>(m, "Str");
@@ -668,7 +673,7 @@ PYBIND11_MODULE(stringzilla, m) {
             throw std::invalid_argument("Step argument is not supported for Str");
         return s.sub(start, stop);
     });
-    define_comparsion_ops(py_str);
+    define_comparison_ops(py_str);
     define_slice_ops(py_str);
 
     auto py_file = py::class_<py_file_t, std::shared_ptr<py_file_t>>(m, "File");
