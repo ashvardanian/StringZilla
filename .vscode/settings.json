@@ -120,6 +120,23 @@
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "cSpell.words": [
-    "levenstein"
+    "allowoverlap",
+    "cibuildwheel",
+    "getitem",
+    "keeplinebreaks",
+    "keepseparator",
+    "levenstein",
+    "maxsplit",
+    "memcpy",
+    "pytest",
+    "readlines",
+    "SIMD",
+    "splitlines",
+    "stringzilla",
+    "Strs",
+    "strzl",
+    "substr",
+    "SWAR",
+    "Zilla"
   ]
 }

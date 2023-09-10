@@ -646,9 +646,7 @@ typedef uint8_t levenstein_distance_t;
  *  @return Amount of temporary memory (in bytes) needed to efficiently compute
  *          the Levenstein distance between two strings of given size.
  */
-inline static size_t strzl_levenstein_memory_needed(size_t a_length, size_t b_length) {
-    return a_length + b_length + 2;
-}
+inline static size_t strzl_levenstein_memory_needed(size_t, size_t b_length) { return b_length + b_length + 2; }
 
 /**
  *  @brief  Auxiliary function, that computes the minimum of three values.
@@ -663,7 +661,7 @@ inline static levenstein_distance_t _strzl_levenstein_minimum( //
 
 /**
  *  @brief  Levenshtein String Similarity function, implemented with linear memory consumption.
- *          It accepts an upper bound on the possible error.
+ *          It accepts an upper bound on the possible error. Quadratic complexity in time, linear in space.
  */
 inline static levenstein_distance_t strzl_levenstein( //
     char const *a,
