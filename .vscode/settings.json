@@ -121,6 +121,7 @@
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "cSpell.words": [
     "allowoverlap",
+    "bigram",
     "cibuildwheel",
     "getitem",
     "keeplinebreaks",
@@ -129,6 +130,7 @@
     "maxsplit",
     "memcpy",
     "pytest",
+    "quadgram",
     "readlines",
     "SIMD",
     "splitlines",
