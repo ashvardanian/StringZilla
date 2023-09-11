@@ -55,8 +55,7 @@ typedef struct strzl_needle_t {
 } strzl_needle_t;
 
 /**
- *  @brief  A naive subtring matching algorithm with O(|h|*|n|) comparisons.
- *          Matching performance fluctuates between 200 MB/s and 2 GB/s.
+ *  @brief  SWAR single-character counting procedure, jumping 8 bytes at a time.
  */
 inline static size_t strzl_naive_count_char(strzl_haystack_t h, char n) {
 
@@ -67,7 +66,7 @@ inline static size_t strzl_naive_count_char(strzl_haystack_t h, char n) {
     for (; (uint64_t)text % 8 != 0 && text < end; ++text)
         result += *text == n;
 
-    // This code simulates hyperscalar execution, comparing 8 characters at a time.
+    // This code simulates hyper-scalar execution, comparing 8 characters at a time.
     uint64_t nnnnnnnn = n;
     nnnnnnnn |= nnnnnnnn << 8;
     nnnnnnnn |= nnnnnnnn << 16;
@@ -87,6 +86,9 @@ inline static size_t strzl_naive_count_char(strzl_haystack_t h, char n) {
     return result;
 }
 
+/**
+ *  @brief  SWAR single-character search in string, jumping 8 bytes at a time.
+ */
 inline static size_t strzl_naive_find_char(strzl_haystack_t h, char n) {
 
     char const *text = h.ptr;
@@ -96,7 +98,7 @@ inline static size_t strzl_naive_find_char(strzl_haystack_t h, char n) {
         if (*text == n)
             return text - h.ptr;
 
-    // This code simulates hyperscalar execution, analyzing 8 offsets at a time.
+    // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
     uint64_t nnnnnnnn = n;
     nnnnnnnn |= nnnnnnnn << 8;  // broadcast `n` into `nnnnnnnn`
     nnnnnnnn |= nnnnnnnn << 16; // broadcast `n` into `nnnnnnnn`
@@ -119,12 +121,15 @@ inline static size_t strzl_naive_find_char(strzl_haystack_t h, char n) {
     return h.len;
 }
 
+/**
+ *  @brief  SWAR character-bigram search in string, jumping 8 bytes at a time.
+ */
 inline static size_t strzl_naive_find_2chars(strzl_haystack_t h, char const *n) {
 
     char const *text = h.ptr;
     char const *end = h.ptr + h.len;
 
-    // This code simulates hyperscalar execution, analyzing 7 offsets at a time.
+    // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
     uint64_t nnnn = (uint64_t(n[0]) << 0) | (uint64_t(n[1]) << 8); // broadcast `n` into `nnnn`
     nnnn |= nnnn << 16;                                            // broadcast `n` into `nnnn`
     nnnn |= nnnn << 32;                                            // broadcast `n` into `nnnn`
@@ -158,12 +163,15 @@ inline static size_t strzl_naive_find_2chars(strzl_haystack_t h, char const *n) 
     return h.len;
 }
 
+/**
+ *  @brief  SWAR character-trigram search in string, jumping 8 bytes at a time.
+ */
 inline static size_t strzl_naive_find_3chars(strzl_haystack_t h, char const *n) {
 
     char const *text = h.ptr;
     char const *end = h.ptr + h.len;
 
-    // This code simulates hyperscalar execution, analyzing 6 offsets at a time.
+    // This code simulates hyper-scalar execution, analyzing 6 offsets at a time.
     // We have two unused bytes at the end.
     uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16); // broadcast `n` into `nn`
     nn |= nn << 24;                                                                     // broadcast `n` into `nn`
@@ -210,12 +218,15 @@ inline static size_t strzl_naive_find_3chars(strzl_haystack_t h, char const *n) 
     return h.len;
 }
 
+/**
+ *  @brief  SWAR character-quadgram search in string, jumping 8 bytes at a time.
+ */
 inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) {
 
     char const *text = h.ptr;
     char const *end = h.ptr + h.len;
 
-    // This code simulates hyperscalar execution, analyzing 4 offsets at a time.
+    // This code simulates hyper-scalar execution, analyzing 4 offsets at a time.
     uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16) | (uint64_t(n[3]) << 24);
     nn |= nn << 32;
     nn = nn;
