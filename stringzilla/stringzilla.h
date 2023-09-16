@@ -35,8 +35,9 @@ inline static size_t strzl_divide_round_up(size_t x, size_t divisor) { return (x
 
 /**
  *  @brief This is a faster alternative to `strncmp(a, b, len) == 0`.
+ *  @return 1 for `true`, and 0 for `false`.
  */
-inline static bool strzl_equal(char const *a, char const *b, size_t len) {
+inline static int strzl_equal(char const *a, char const *b, size_t len) {
     char const *const a_end = a + len;
     while (a != a_end && *a == *b)
         a++, b++;
@@ -130,9 +131,9 @@ inline static size_t strzl_naive_find_2chars(strzl_haystack_t h, char const *n) 
     char const *end = h.ptr + h.len;
 
     // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
-    uint64_t nnnn = (uint64_t(n[0]) << 0) | (uint64_t(n[1]) << 8); // broadcast `n` into `nnnn`
-    nnnn |= nnnn << 16;                                            // broadcast `n` into `nnnn`
-    nnnn |= nnnn << 32;                                            // broadcast `n` into `nnnn`
+    uint64_t nnnn = ((uint64_t)(n[0]) << 0) | ((uint64_t)(n[1]) << 8); // broadcast `n` into `nnnn`
+    nnnn |= nnnn << 16;                                                // broadcast `n` into `nnnn`
+    nnnn |= nnnn << 32;                                                // broadcast `n` into `nnnn`
     uint64_t text_slice;
     for (; text + 8 <= end; text += 7) {
         memcpy(&text_slice, text, 8);
@@ -173,9 +174,9 @@ inline static size_t strzl_naive_find_3chars(strzl_haystack_t h, char const *n) 
 
     // This code simulates hyper-scalar execution, analyzing 6 offsets at a time.
     // We have two unused bytes at the end.
-    uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16); // broadcast `n` into `nn`
-    nn |= nn << 24;                                                                     // broadcast `n` into `nn`
-    nn <<= 16;                                                                          // broadcast `n` into `nn`
+    uint64_t nn = (uint64_t)(n[0] << 0) | ((uint64_t)(n[1]) << 8) | ((uint64_t)(n[2]) << 16); // broadcast `n` into `nn`
+    nn |= nn << 24;                                                                           // broadcast `n` into `nn`
+    nn <<= 16;                                                                                // broadcast `n` into `nn`
 
     for (; text + 8 <= end; text += 6) {
         uint64_t text_slice;
@@ -227,9 +228,8 @@ inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) 
     char const *end = h.ptr + h.len;
 
     // This code simulates hyper-scalar execution, analyzing 4 offsets at a time.
-    uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16) | (uint64_t(n[3]) << 24);
+    uint64_t nn = (uint64_t)(n[0] << 0) | ((uint64_t)(n[1]) << 8) | ((uint64_t)(n[2]) << 16) | ((uint64_t)(n[3]) << 24);
     nn |= nn << 32;
-    nn = nn;
 
     //
     uint8_t lookup[16] = {0};
@@ -264,8 +264,8 @@ inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) 
 
         if (text01_indicators + text23_indicators) {
             // Assuming we have performed 4 comparisons, we can only have 2^4=16 outcomes.
-            // Which is small enought for a lookup table.
-            uint8_t match_indicators = uint8_t(                        //
+            // Which is small enough for a lookup table.
+            uint8_t match_indicators = (uint8_t)(                      //
                 (text01_indicators >> 31) | (text01_indicators << 0) | //
                 (text23_indicators >> 29) | (text23_indicators << 2));
             return text - h.ptr + lookup[match_indicators];
@@ -370,8 +370,10 @@ size_t strzl_avx2_find_substr(strzl_haystack_t h, strzl_needle_t n) {
     }
 
     // Don't forget the last (up to 35) characters.
-    size_t tail_len = end - text;
-    size_t tail_match = strzl_naive_find_substr({text, tail_len}, n);
+    strzl_haystack_t h_remainder;
+    h_remainder.ptr = text;
+    h_remainder.len = end - text;
+    size_t tail_match = strzl_naive_find_substr(h_remainder, n);
     return text + tail_match - h.ptr;
 }
 
@@ -415,7 +417,7 @@ inline static size_t strzl_neon_find_substr(strzl_haystack_t h, strzl_needle_t n
         // vorrq_u32 (all)
         uint32x4_t matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
         uint64x2_t matches64x2 = vreinterpretq_u64_u32(matches);
-        bool has_match = vgetq_lane_u64(matches64x2, 0) | vgetq_lane_u64(matches64x2, 1);
+        int has_match = vgetq_lane_u64(matches64x2, 0) | vgetq_lane_u64(matches64x2, 1);
 
         if (has_match) {
             for (size_t i = 0; i < 16; i++) {
@@ -426,8 +428,10 @@ inline static size_t strzl_neon_find_substr(strzl_haystack_t h, strzl_needle_t n
     }
 
     // Don't forget the last (up to 16+3=19) characters.
-    size_t tail_len = end - text;
-    size_t tail_match = strzl_naive_find_substr({text, tail_len}, n);
+    strzl_haystack_t h_remainder;
+    h_remainder.ptr = text;
+    h_remainder.len = end - text;
+    size_t tail_match = strzl_naive_find_substr(h_remainder, n);
     return text + tail_match - h.ptr;
 }
 
@@ -441,16 +445,16 @@ inline static void strzl_swap(size_t *a, size_t *b) {
 
 typedef char const *(*strzl_array_get_begin_t)(void const *, size_t);
 typedef size_t (*strzl_array_get_length_t)(void const *, size_t);
-typedef bool (*strzl_array_predicate_t)(void const *, size_t);
-typedef bool (*strzl_array_comparator_t)(void const *, size_t, size_t);
+typedef int (*strzl_array_predicate_t)(void const *, size_t);
+typedef int (*strzl_array_comparator_t)(void const *, size_t, size_t);
 
-struct strzl_array_t {
+typedef struct strzl_array_t {
     size_t *order;
     size_t count;
     strzl_array_get_begin_t get_begin;
     strzl_array_get_length_t get_length;
     void const *handle;
-};
+} strzl_array_t;
 
 /**
  *  @brief  Similar to `std::partition`, given a predicate splits the
@@ -610,9 +614,9 @@ inline static int _strzl_sort_array_strncasecmp(
     return res ? res : a_len - b_len;
 }
 
-struct strzl_sort_config_t {
-    bool case_insensitive;
-};
+typedef struct strzl_sort_config_t {
+    int case_insensitive;
+} strzl_sort_config_t;
 
 /**
  *  @brief  Sorting algorithm, combining Radix Sort for the first 32 bits of every word
@@ -620,7 +624,7 @@ struct strzl_sort_config_t {
  */
 inline static void strzl_sort(strzl_array_t *array, strzl_sort_config_t const *config) {
 
-    bool case_insensitive = config && config->case_insensitive;
+    int case_insensitive = config && config->case_insensitive;
 
     // Export up to 4 bytes into the `array` bits themselves
     for (size_t i = 0; i != array->count; ++i) {
@@ -657,7 +661,7 @@ typedef uint8_t levenstein_distance_t;
  *  @return Amount of temporary memory (in bytes) needed to efficiently compute
  *          the Levenstein distance between two strings of given size.
  */
-inline static size_t strzl_levenstein_memory_needed(size_t, size_t b_length) { return b_length + b_length + 2; }
+inline static size_t strzl_levenstein_memory_needed(size_t _, size_t b_length) { return b_length + b_length + 2; }
 
 /**
  *  @brief  Auxiliary function, that computes the minimum of three values.
@@ -711,6 +715,15 @@ inline static levenstein_distance_t strzl_levenstein( //
 
     return previous_distances[b_length];
 }
+
+/**
+ *  @brief  Hashes provided string using hardware-accelerated CRC32 instructions.
+ */
+inline static uint32_t strzl_hash_crc32_native(char const *start, size_t length) { return 0; }
+
+inline static uint32_t strzl_hash_crc32_neon(char const *start, size_t length) { return 0; }
+
+inline static uint32_t strzl_hash_crc32_sse(char const *start, size_t length) { return 0; }
 
 #ifdef __cplusplus
 }
