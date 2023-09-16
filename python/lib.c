@@ -366,6 +366,42 @@ static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
     return PyUnicode_FromStringAndSize(self->start + i, 1);
 }
 
+static PyObject *Str_subscript(Str *self, PyObject *key) {
+    if (PySlice_Check(key)) {
+        Py_ssize_t start, stop, step;
+        if (PySlice_Unpack(key, &start, &stop, &step) < 0)
+            return NULL;
+        if (PySlice_AdjustIndices(self->length, &start, &stop, step) < 0)
+            return NULL;
+
+        if (step != 1) {
+            PyErr_SetString(PyExc_IndexError, "Efficient step is not supported");
+            return NULL;
+        }
+
+        // Create a new `Str` object
+        Str *self_slice = (Str *)StrType.tp_alloc(&StrType, 0);
+        if (self_slice == NULL && PyErr_NoMemory())
+            return NULL;
+
+        // Set its properties based on the slice
+        self_slice->start = self->start + start;
+        self_slice->length = stop - start;
+        self_slice->parent = (PyObject *)self; // Set parent to keep it alive
+
+        // Increment the reference count of the parent
+        Py_INCREF(self);
+        return (PyObject *)self_slice;
+    }
+    else if (PyLong_Check(key)) {
+        return Str_getitem(self, PyLong_AsSsize_t(key));
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Str indices must be integers or slices");
+        return NULL;
+    }
+}
+
 // Will be called by the `PySequence_Contains`
 static int Str_contains(Str *self, PyObject *arg) {
 
@@ -431,17 +467,47 @@ static PyObject *Str_getslice(Str *self, PyObject *args) {
 
 static PyObject *Str_str(Str *self, PyObject *args) { return PyUnicode_FromStringAndSize(self->start, self->length); }
 
+static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
+
+    char const *a_start, *b_start;
+    size_t a_length, b_length;
+    if (!export_string_like(self, &a_start, &a_length) || !export_string_like(other, &b_start, &b_length))
+        Py_RETURN_NOTIMPLEMENTED;
+
+    // Perform byte-wise comparison up to the minimum length
+    size_t min_length = a_length < b_length ? a_length : b_length;
+    int cmp_result = memcmp(a_start, b_start, min_length);
+
+    // If the strings are equal up to `min_length`, then the shorter string is smaller
+    if (cmp_result == 0)
+        cmp_result = (a_length > b_length) - (a_length < b_length);
+
+    switch (op) {
+    case Py_LT: return PyBool_FromLong(cmp_result < 0);
+    case Py_LE: return PyBool_FromLong(cmp_result <= 0);
+    case Py_EQ: return PyBool_FromLong(cmp_result == 0);
+    case Py_NE: return PyBool_FromLong(cmp_result != 0);
+    case Py_GT: return PyBool_FromLong(cmp_result > 0);
+    case Py_GE: return PyBool_FromLong(cmp_result >= 0);
+    default: Py_RETURN_NOTIMPLEMENTED;
+    }
+}
+
 static PySequenceMethods Str_as_sequence = {
-    .sq_length = (lenfunc)Str_len,           //
-    .sq_item = (ssizeargfunc)Str_getitem,    //
-    .sq_contains = (objobjproc)Str_contains, //
+    .sq_length = Str_len,        //
+    .sq_item = Str_getitem,      //
+    .sq_contains = Str_contains, //
+};
+
+static PyMappingMethods Str_as_mapping = {
+    .mp_length = Str_len,          //
+    .mp_subscript = Str_subscript, // Is used to implement slices in Python
 };
 
 static PyMethodDef Str_methods[] = { //
     {"contains", (PyCFunction)Str_str, METH_NOARGS, "Convert to Python `str`"},
-    {"find", (PyCFunction)Str_len, METH_NOARGS, "Get length"},
-    {"find", (PyCFunction)Str_len, METH_NOARGS, "Get length"},
-    {"__getitem__", (PyCFunction)Str_getitem, METH_O, "Indexing"},
+    // {"find", (PyCFunction)Str_len, METH_NOARGS, "Get length"},
+    // {"__getitem__", (PyCFunction)Str_getitem, METH_O, "Indexing"},
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrType = {
@@ -450,11 +516,13 @@ static PyTypeObject StrType = {
     .tp_basicsize = sizeof(Str),
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_methods = Str_methods,
-    .tp_new = (newfunc)Str_new,
-    .tp_init = (initproc)Str_init,
-    .tp_dealloc = (destructor)Str_dealloc,
+    .tp_new = Str_new,
+    .tp_init = Str_init,
+    .tp_dealloc = Str_dealloc,
     .tp_as_sequence = &Str_as_sequence,
-    .tp_hash = (hashfunc)Str_hash, // String hashing functions
+    .tp_as_mapping = &Str_as_mapping,
+    .tp_hash = Str_hash, // String hashing functions
+    .tp_richcompare = Str_richcompare,
     // .tp_as_buffer = (PyBufferProcs *)NULL, // Functions to access object as input/output buffer
 };
 
@@ -475,9 +543,13 @@ static PyModuleDef stringzilla_module = {
     NULL,
 };
 
+// String functions:
 static PyObject *vectorized_find = NULL;
 static PyObject *vectorized_count = NULL;
 static PyObject *vectorized_contains = NULL;
+static PyObject *vectorized_levenstein = NULL;
+
+// String collections:
 static PyObject *vectorized_split = NULL;
 static PyObject *vectorized_sort = NULL;
 static PyObject *vectorized_shuffle = NULL;
