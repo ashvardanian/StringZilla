@@ -5,7 +5,27 @@ import math
 
 import pytest
 
-from stringzilla import Str, File, Strs, levenstein
+from stringzilla import Str
+
+
+def test_construct():
+    native = "aaaaa"
+    big = Str(native)
+    assert len(big) == len(native)
+
+
+def test_indexing():
+    native = "abcdef"
+    big = Str(native)
+    for i in range(len(native)):
+        assert big[i] == native[i]
+
+
+def test_contains():
+    big = Str("abcdef")
+    assert "a" in big
+    assert "ab" in big
+    assert "xxx" not in big
 
 
 def get_random_string(

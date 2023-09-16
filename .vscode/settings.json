@@ -121,14 +121,22 @@
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "cSpell.words": [
     "allowoverlap",
+    "basicsize",
     "bigram",
     "cibuildwheel",
+    "endregion",
     "getitem",
+    "getslice",
+    "initproc",
+    "itemsize",
     "keeplinebreaks",
     "keepseparator",
     "levenstein",
     "maxsplit",
     "memcpy",
+    "newfunc",
+    "NOARGS",
+    "NOMINMAX",
     "pytest",
     "quadgram",
     "readlines",
@@ -139,6 +147,7 @@
     "strzl",
     "substr",
     "SWAR",
+    "TPFLAGS",
     "Zilla"
   ]
 }

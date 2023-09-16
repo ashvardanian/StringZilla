@@ -11,7 +11,7 @@ link_args = []
 macros_args = []
 
 if sys.platform == "linux":
-    compile_args.append("-std=c++17")
+    compile_args.append("-std=c99")
     compile_args.append("-O3")
     compile_args.append("-pedantic")
     compile_args.append("-Wno-unknown-pragmas")
@@ -36,7 +36,7 @@ if sys.platform == "linux":
 
 
 if sys.platform == "darwin":
-    compile_args.append("-std=c++17")
+    compile_args.append("-std=c99")
     compile_args.append("-O3")
     compile_args.append("-pedantic")
     compile_args.append("-Wno-unknown-pragmas")
