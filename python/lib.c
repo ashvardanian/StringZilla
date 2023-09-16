@@ -88,6 +88,80 @@ void slice(size_t length, ssize_t start, ssize_t end, size_t *normalized_offset,
     *normalized_length = end - start;
 }
 
+int export_string_like(PyObject *object, char const **start, size_t *length) {
+    if (PyUnicode_Check(object)) {
+        // Handle Python str
+        Py_ssize_t signed_length;
+        *start = PyUnicode_AsUTF8AndSize(object, &signed_length);
+        *length = (size_t)signed_length;
+        return 1;
+    }
+    else if (PyBytes_Check(object)) {
+        // Handle Python str
+        Py_ssize_t signed_length;
+        if (PyBytes_AsStringAndSize(object, (char **)start, &signed_length) == -1) {
+            PyErr_SetString(PyExc_TypeError, "Mapping bytes failed");
+            return 0;
+        }
+        *length = (size_t)signed_length;
+        return 1;
+    }
+    else if (PyObject_TypeCheck(object, &StrType)) {
+        Str *str = (Str *)object;
+        *start = str->start;
+        *length = str->length;
+        return 1;
+    }
+    else if (PyObject_TypeCheck(object, &MemoryMappedFileType)) {
+        MemoryMappedFile *file = (MemoryMappedFile *)object;
+        *start = file->start;
+        *length = file->length;
+        return 1;
+    }
+    return 0;
+}
+
+#pragma endregion
+
+#pragma region Global Functions
+
+static PyObject *str_find_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
+    // Check the number of arguments and types
+    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    if (nargs < 2 || nargs > 4) {
+        PyErr_SetString(PyExc_TypeError, "Invalid arguments");
+        return NULL;
+    }
+
+    // Parse the haystack.
+    PyObject *haystack_obj = args[0];
+    struct strzl_haystack_t haystack;
+    if (!export_string_like(haystack_obj, &haystack.ptr, &haystack.len)) {
+        PyErr_SetString(PyExc_TypeError, "First argument (haystack) must be string-like");
+        return NULL;
+    }
+
+    // Parse the needle.
+    PyObject *needle_obj = args[1];
+    struct strzl_needle_t needle;
+    needle.anomaly_offset = 0;
+    if (!export_string_like(needle_obj, &needle.ptr, &needle.len)) {
+        PyErr_SetString(PyExc_TypeError, "Second argument (needle) must be string-like");
+        return NULL;
+    }
+
+    // Limit the haystack range.
+    Py_ssize_t start = (nargs > 2) ? PyLong_AsSsize_t(args[2]) : 0;
+    Py_ssize_t end = (nargs > 3) ? PyLong_AsSsize_t(args[3]) : PY_SSIZE_T_MAX;
+    size_t normalized_offset, normalized_length;
+    slice(haystack.len, start, end, &normalized_offset, &normalized_length);
+
+    haystack.ptr = haystack.ptr + normalized_offset;
+    haystack.len = normalized_length;
+    size_t position = strzl_neon_find_substr(haystack, needle);
+    return PyLong_FromSize_t(position);
+}
+
 #pragma endregion
 
 #pragma region MemoryMappingFile
@@ -217,39 +291,6 @@ static PyTypeObject MemoryMappedFileType = {
 };
 
 #pragma endregion
-
-int export_string_like(PyObject *object, char const **start, size_t *length) {
-    if (PyUnicode_Check(object)) {
-        // Handle Python str
-        Py_ssize_t signed_length;
-        *start = PyUnicode_AsUTF8AndSize(object, &signed_length);
-        *length = (size_t)signed_length;
-        return 1;
-    }
-    else if (PyBytes_Check(object)) {
-        // Handle Python str
-        Py_ssize_t signed_length;
-        if (PyBytes_AsStringAndSize(object, start, signed_length) == -1) {
-            PyErr_SetString(PyExc_TypeError, "Mapping bytes failed");
-            return 0;
-        }
-        *length = (size_t)signed_length;
-        return 1;
-    }
-    else if (PyObject_TypeCheck(object, &StrType)) {
-        Str *str = (Str *)object;
-        *start = str->start;
-        *length = str->length;
-        return 1;
-    }
-    else if (PyObject_TypeCheck(object, &MemoryMappedFileType)) {
-        MemoryMappedFile *file = (MemoryMappedFile *)object;
-        *start = file->start;
-        *length = file->length;
-        return 1;
-    }
-    return 0;
-}
 
 #pragma region Str
 
@@ -390,36 +431,6 @@ static PyObject *Str_getslice(Str *self, PyObject *args) {
 
 static PyObject *Str_str(Str *self, PyObject *args) { return PyUnicode_FromStringAndSize(self->start, self->length); }
 
-static PyObject *Str_find_substr(Str *self, PyObject *args) {
-    PyObject *needle_obj;
-    if (!PyArg_ParseTuple(args, "O", &needle_obj))
-        return NULL;
-
-    struct strzl_needle_t needle_struct;
-    needle_struct.anomaly_offset = 0;
-
-    if (PyObject_TypeCheck(needle_obj, &StrType)) {
-        Str *needle = (Str *)needle_obj;
-        needle_struct.ptr = needle->start;
-        needle_struct.len = needle->length;
-    }
-    else if (PyUnicode_Check(needle_obj)) {
-        needle_struct.ptr = PyUnicode_AsUTF8AndSize(needle_obj, (Py_ssize_t *)&needle_struct.len);
-        if (needle_struct.ptr == NULL)
-            return NULL; // Error case, likely a UnicodeEncodeError
-    }
-    else {
-        PyErr_SetString(PyExc_TypeError, "Argument must be an instance of Str or a native Python str");
-        return NULL;
-    }
-
-    struct strzl_haystack_t haystack;
-    haystack.ptr = self->start;
-    haystack.len = self->length;
-    size_t position = strzl_neon_find_substr(haystack, needle_struct);
-    return PyLong_FromSize_t(position);
-}
-
 static PySequenceMethods Str_as_sequence = {
     .sq_length = (lenfunc)Str_len,           //
     .sq_item = (ssizeargfunc)Str_getitem,    //
@@ -445,7 +456,6 @@ static PyTypeObject StrType = {
     .tp_as_sequence = &Str_as_sequence,
     .tp_hash = (hashfunc)Str_hash, // String hashing functions
     // .tp_as_buffer = (PyBufferProcs *)NULL, // Functions to access object as input/output buffer
-    // .tp_vectorcall = (vectorcallfunc)NULL, // Faster function dispatch
 };
 
 #pragma endregion
@@ -464,6 +474,13 @@ static PyModuleDef stringzilla_module = {
     NULL,
     NULL,
 };
+
+static PyObject *vectorized_find = NULL;
+static PyObject *vectorized_count = NULL;
+static PyObject *vectorized_contains = NULL;
+static PyObject *vectorized_split = NULL;
+static PyObject *vectorized_sort = NULL;
+static PyObject *vectorized_shuffle = NULL;
 
 PyMODINIT_FUNC PyInit_stringzilla(void) {
     PyObject *m;
@@ -493,5 +510,44 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         return NULL;
     }
 
+    // Create the 'find' function
+    vectorized_find = PyObject_Malloc(sizeof(PyCFunctionObject));
+    if (vectorized_find == NULL) {
+        Py_XDECREF(&MemoryMappedFileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        PyErr_NoMemory();
+        return NULL;
+    }
+    PyObject_Init(vectorized_find, &PyCFunction_Type);
+    ((PyCFunctionObject *)vectorized_find)->m_ml = NULL; // No regular PyMethodDef
+    ((PyCFunctionObject *)vectorized_find)->vectorcall = str_find_vectorcall;
+
+    // Add the 'find' function to the module
+    if (PyModule_AddObject(m, "find", vectorized_find) < 0) {
+        PyObject_Free(vectorized_find);
+        Py_XDECREF(&MemoryMappedFileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
     return m;
+
+cleanup:
+    if (vectorized_find)
+        Py_XDECREF(vectorized_find);
+    if (vectorized_count)
+        Py_XDECREF(vectorized_count);
+    if (vectorized_contains)
+        Py_XDECREF(vectorized_contains);
+    if (vectorized_split)
+        Py_XDECREF(vectorized_split);
+    if (vectorized_sort)
+        Py_XDECREF(vectorized_sort);
+    if (vectorized_shuffle)
+        Py_XDECREF(vectorized_shuffle);
+    Py_XDECREF(m);
+    PyErr_NoMemory();
+    return NULL;
 }
