@@ -29,6 +29,12 @@ def test_contains():
     assert "xxx" not in big
 
 
+def test_rich_comparisons():
+    assert Str("aa") == "aa"
+    assert Str("aa") < "b"
+    assert Str("abb")[1:] == "bb"
+
+
 def test_globals():
     assert sz.find("abcdef", "bcdef") == 1
     assert sz.find("abcdef", "x") == 6
