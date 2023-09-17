@@ -119,10 +119,13 @@ def test_rich_comparisons():
 #     assert native.splitlines(True) == list(big.splitlines(keeplinebreaks=True))
 
 
-# def test_split_keepseparator():
-#     native = "word1 word2 word3"
-#     big = Str(native)
-#     assert ["word1 ", "word2 ", "word3"] == list(big.split(" ", keepseparator=True))
+def test_split_keepseparator():
+    native = "word1 word2 word3"
+    big = Str(native)
+    words = sz.split(big, " ")
+    parts = sz.split(big, " ", keepseparator=True)
+    # assert words[0] == "word1"
+    # assert parts[0] == "word1 "
 
 
 # def test_strs_operations():
