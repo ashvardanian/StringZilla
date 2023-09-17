@@ -1,9 +1,7 @@
 import os
 import sys
-from setuptools import setup
 import platform
-
-from pybind11.setup_helpers import Pybind11Extension
+from setuptools import setup, Extension
 
 
 compile_args = []
@@ -49,7 +47,7 @@ if sys.platform == "win32":
 
 
 ext_modules = [
-    Pybind11Extension(
+    Extension(
         "stringzilla",
         ["python/lib.c"],
         include_dirs=["stringzilla"],
