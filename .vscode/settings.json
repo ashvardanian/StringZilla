@@ -158,6 +158,7 @@
     "TPFLAGS",
     "Vardanian",
     "vectorcallfunc",
+    "XDECREF",
     "Zilla"
   ]
 }
