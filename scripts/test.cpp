@@ -17,7 +17,7 @@ using permute_t = std::vector<idx_t>;
 
 #pragma region - C callbacks
 
-static char const *get_begin(void const *array_c, size_t i) {
+static char const *get_start(void const *array_c, size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c);
     return array[i].c_str();
 }
@@ -234,7 +234,7 @@ int main(int, char const **) {
         expect_partitioned_by_length(strings, permute_base);
 
         bench_permute("sz_partition", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            sz_array_t array;
+            sz_sequence_t array;
             array.order = permute.data();
             array.count = strings.size();
             array.handle = &strings;
@@ -253,11 +253,11 @@ int main(int, char const **) {
         expect_sorted(strings, permute_base);
 
         bench_permute("sz_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            sz_array_t array;
+            sz_sequence_t array;
             array.order = permute.data();
             array.count = strings.size();
             array.handle = &strings;
-            array.get_begin = get_begin;
+            array.get_start = get_start;
             array.get_length = get_length;
             sz_sort(&array, nullptr);
         });

@@ -124,7 +124,7 @@ size_t character_position = sz_naive_find_char(haystack, 'a');
 size_t substring_position = sz_naive_find_substr(haystack, needle);
 
 // Perform collection level operations
-sz_array_t array = {your_order, your_count, your_get_begin, your_get_length, your_handle};
+sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
 sz_sort(&array, &your_config);
 ```
 

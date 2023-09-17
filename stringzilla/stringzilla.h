@@ -35,24 +35,24 @@ typedef uint64_t sz_size_t;
 inline static sz_size_t sz_divide_round_up(sz_size_t x, sz_size_t divisor) { return (x + (divisor - 1)) / divisor; }
 
 /**
- *  @brief This is a faster alternative to `strncmp(a, b, len) == 0`.
+ *  @brief This is a faster alternative to `strncmp(a, b, length) == 0`.
  *  @return 1 for `true`, and 0 for `false`.
  */
-inline static int sz_equal(char const *a, char const *b, sz_size_t len) {
-    char const *const a_end = a + len;
+inline static int sz_equal(char const *a, char const *b, sz_size_t length) {
+    char const *const a_end = a + length;
     while (a != a_end && *a == *b)
         a++, b++;
     return a_end == a;
 }
 
 typedef struct sz_haystack_t {
-    char const *ptr;
-    sz_size_t len;
+    char const *start;
+    sz_size_t length;
 } sz_haystack_t;
 
 typedef struct sz_needle_t {
-    char const *ptr;
-    sz_size_t len;
+    char const *start;
+    sz_size_t length;
     sz_size_t anomaly_offset;
 } sz_needle_t;
 
@@ -62,8 +62,8 @@ typedef struct sz_needle_t {
 inline static sz_size_t sz_naive_count_char(sz_haystack_t h, char n) {
 
     sz_size_t result = 0;
-    char const *text = h.ptr;
-    char const *end = h.ptr + h.len;
+    char const *text = h.start;
+    char const *end = h.start + h.length;
 
     for (; (uint64_t)text % 8 != 0 && text < end; ++text)
         result += *text == n;
@@ -93,12 +93,12 @@ inline static sz_size_t sz_naive_count_char(sz_haystack_t h, char n) {
  */
 inline static sz_size_t sz_naive_find_char(sz_haystack_t h, char n) {
 
-    char const *text = h.ptr;
-    char const *end = h.ptr + h.len;
+    char const *text = h.start;
+    char const *end = h.start + h.length;
 
     for (; (uint64_t)text % 8 != 0 && text < end; ++text)
         if (*text == n)
-            return text - h.ptr;
+            return text - h.start;
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
     uint64_t nnnnnnnn = n;
@@ -114,13 +114,13 @@ inline static sz_size_t sz_naive_find_char(sz_haystack_t h, char n) {
         match_indicators &= 0x0101010101010101;
 
         if (match_indicators != 0)
-            return text - h.ptr + ctz64(match_indicators) / 8;
+            return text - h.start + ctz64(match_indicators) / 8;
     }
 
     for (; text < end; ++text)
         if (*text == n)
-            return text - h.ptr;
-    return h.len;
+            return text - h.start;
+    return h.length;
 }
 
 /**
@@ -128,8 +128,8 @@ inline static sz_size_t sz_naive_find_char(sz_haystack_t h, char n) {
  */
 inline static sz_size_t sz_naive_find_2chars(sz_haystack_t h, char const *n) {
 
-    char const *text = h.ptr;
-    char const *end = h.ptr + h.len;
+    char const *text = h.start;
+    char const *end = h.start + h.length;
 
     // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
     uint64_t nnnn = ((uint64_t)(n[0]) << 0) | ((uint64_t)(n[1]) << 8); // broadcast `n` into `nnnn`
@@ -155,14 +155,14 @@ inline static sz_size_t sz_naive_find_2chars(sz_haystack_t h, char const *n) {
 
         if (even_indicators + odd_indicators) {
             uint64_t match_indicators = even_indicators | (odd_indicators >> 8);
-            return text - h.ptr + ctz64(match_indicators) / 8;
+            return text - h.start + ctz64(match_indicators) / 8;
         }
     }
 
     for (; text + 2 <= end; ++text)
         if (text[0] == n[0] && text[1] == n[1])
-            return text - h.ptr;
-    return h.len;
+            return text - h.start;
+    return h.length;
 }
 
 /**
@@ -170,8 +170,8 @@ inline static sz_size_t sz_naive_find_2chars(sz_haystack_t h, char const *n) {
  */
 inline static sz_size_t sz_naive_find_3chars(sz_haystack_t h, char const *n) {
 
-    char const *text = h.ptr;
-    char const *end = h.ptr + h.len;
+    char const *text = h.start;
+    char const *end = h.start + h.length;
 
     // This code simulates hyper-scalar execution, analyzing 6 offsets at a time.
     // We have two unused bytes at the end.
@@ -211,13 +211,13 @@ inline static sz_size_t sz_naive_find_3chars(sz_haystack_t h, char const *n) {
 
         uint64_t match_indicators = first_indicators | (second_indicators >> 8) | (third_indicators >> 16);
         if (match_indicators != 0)
-            return text - h.ptr + ctz64(match_indicators) / 8;
+            return text - h.start + ctz64(match_indicators) / 8;
     }
 
     for (; text + 3 <= end; ++text)
         if (text[0] == n[0] && text[1] == n[1] && text[2] == n[2])
-            return text - h.ptr;
-    return h.len;
+            return text - h.start;
+    return h.length;
 }
 
 /**
@@ -225,8 +225,8 @@ inline static sz_size_t sz_naive_find_3chars(sz_haystack_t h, char const *n) {
  */
 inline static sz_size_t sz_naive_find_4chars(sz_haystack_t h, char const *n) {
 
-    char const *text = h.ptr;
-    char const *end = h.ptr + h.len;
+    char const *text = h.start;
+    char const *end = h.start + h.length;
 
     // This code simulates hyper-scalar execution, analyzing 4 offsets at a time.
     uint64_t nn = (uint64_t)(n[0] << 0) | ((uint64_t)(n[1]) << 8) | ((uint64_t)(n[2]) << 16) | ((uint64_t)(n[3]) << 24);
@@ -269,14 +269,14 @@ inline static sz_size_t sz_naive_find_4chars(sz_haystack_t h, char const *n) {
             uint8_t match_indicators = (uint8_t)(                      //
                 (text01_indicators >> 31) | (text01_indicators << 0) | //
                 (text23_indicators >> 29) | (text23_indicators << 2));
-            return text - h.ptr + lookup[match_indicators];
+            return text - h.start + lookup[match_indicators];
         }
     }
 
     for (; text + 4 <= end; ++text)
         if (text[0] == n[0] && text[1] == n[1] && text[2] == n[2] && text[3] == n[3])
-            return text - h.ptr;
-    return h.len;
+            return text - h.start;
+    return h.length;
 }
 
 /**
@@ -286,32 +286,32 @@ inline static sz_size_t sz_naive_find_4chars(sz_haystack_t h, char const *n) {
  */
 inline static sz_size_t sz_naive_find_substr(sz_haystack_t h, sz_needle_t n) {
 
-    if (h.len < n.len)
-        return h.len;
+    if (h.length < n.length)
+        return h.length;
 
-    char const *text = h.ptr;
-    char const *const end = h.ptr + h.len;
-    switch (n.len) {
+    char const *text = h.start;
+    char const *const end = h.start + h.length;
+    switch (n.length) {
     case 0: return 0;
-    case 1: return sz_naive_find_char(h, *n.ptr);
-    case 2: return sz_naive_find_2chars(h, n.ptr);
-    case 3: return sz_naive_find_3chars(h, n.ptr);
-    case 4: return sz_naive_find_4chars(h, n.ptr);
+    case 1: return sz_naive_find_char(h, *n.start);
+    case 2: return sz_naive_find_2chars(h, n.start);
+    case 3: return sz_naive_find_3chars(h, n.start);
+    case 4: return sz_naive_find_4chars(h, n.start);
     default: {
         sz_anomaly_t n_anomaly, h_anomaly;
-        sz_size_t const n_suffix_len = n.len - 4 - n.anomaly_offset;
-        char const *n_suffix_ptr = n.ptr + 4 + n.anomaly_offset;
-        memcpy(&n_anomaly, n.ptr + n.anomaly_offset, 4);
+        sz_size_t const n_suffix_len = n.length - 4 - n.anomaly_offset;
+        char const *n_suffix_ptr = n.start + 4 + n.anomaly_offset;
+        memcpy(&n_anomaly, n.start + n.anomaly_offset, 4);
 
         text += n.anomaly_offset;
-        for (; text + n.len <= end; text++) {
+        for (; text + n.length <= end; text++) {
             memcpy(&h_anomaly, text, 4);
-            if (h_anomaly == n_anomaly)                                             // Match anomaly.
-                if (sz_equal(text + 4, n_suffix_ptr, n_suffix_len))                 // Match suffix.
-                    if (sz_equal(text - n.anomaly_offset, n.ptr, n.anomaly_offset)) // Match prefix.
-                        return text - h.ptr - n.anomaly_offset;
+            if (h_anomaly == n_anomaly)                                               // Match anomaly.
+                if (sz_equal(text + 4, n_suffix_ptr, n_suffix_len))                   // Match suffix.
+                    if (sz_equal(text - n.anomaly_offset, n.start, n.anomaly_offset)) // Match prefix.
+                        return text - h.start - n.anomaly_offset;
         }
-        return h.len;
+        return h.length;
     }
     }
 }
@@ -327,14 +327,14 @@ inline static sz_size_t sz_naive_find_substr(sz_haystack_t h, sz_needle_t n) {
 sz_size_t sz_avx2_find_substr(sz_haystack_t h, sz_needle_t n) {
 
     // Precomputed constants
-    char const *const end = h.ptr + h.len;
+    char const *const end = h.start + h.length;
     uint32_t anomaly = 0;
     uint32_t mask = 0;
-    switch (n.len) {
-    case 1: memset(&mask, 0xFF, 1), memcpy(&anomaly, n.ptr, 1); break;
-    case 2: memset(&mask, 0xFF, 2), memcpy(&anomaly, n.ptr, 2); break;
-    case 3: memset(&mask, 0xFF, 3), memcpy(&anomaly, n.ptr, 3); break;
-    default: memset(&mask, 0xFF, 4), memcpy(&anomaly, n.ptr, 4); break;
+    switch (n.length) {
+    case 1: memset(&mask, 0xFF, 1), memcpy(&anomaly, n.start, 1); break;
+    case 2: memset(&mask, 0xFF, 2), memcpy(&anomaly, n.start, 2); break;
+    case 3: memset(&mask, 0xFF, 3), memcpy(&anomaly, n.start, 3); break;
+    default: memset(&mask, 0xFF, 4), memcpy(&anomaly, n.start, 4); break;
     }
 
     __m256i const anomalies = _mm256_set1_epi32(*(uint32_t const *)&anomaly);
@@ -349,8 +349,8 @@ sz_size_t sz_avx2_find_substr(sz_haystack_t h, sz_needle_t n) {
     //  + 4 movemasks.
     //  + 3 bitwise ANDs.
     //  + 1 heavy (but very unlikely) branch.
-    char const *text = h.ptr;
-    for (; (text + n.len + 32) <= end; text += 32) {
+    char const *text = h.start;
+    for (; (text + n.length + 32) <= end; text += 32) {
 
         // Performing many unaligned loads ends up being faster than loading once and shuffling around.
         __m256i texts0 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 0)), masks);
@@ -364,18 +364,18 @@ sz_size_t sz_avx2_find_substr(sz_haystack_t h, sz_needle_t n) {
 
         if (matches0 | matches1 | matches2 | matches3) {
             for (sz_size_t i = 0; i < 32; i++) {
-                if (sz_equal(text + i, n.ptr, n.len))
-                    return i + (text - h.ptr);
+                if (sz_equal(text + i, n.start, n.length))
+                    return i + (text - h.start);
             }
         }
     }
 
     // Don't forget the last (up to 35) characters.
     sz_haystack_t h_remainder;
-    h_remainder.ptr = text;
-    h_remainder.len = end - text;
+    h_remainder.start = text;
+    h_remainder.length = end - text;
     sz_size_t tail_match = sz_naive_find_substr(h_remainder, n);
-    return text + tail_match - h.ptr;
+    return text + tail_match - h.start;
 }
 
 #endif // x86 AVX2
@@ -391,21 +391,21 @@ sz_size_t sz_avx2_find_substr(sz_haystack_t h, sz_needle_t n) {
 inline static sz_size_t sz_neon_find_substr(sz_haystack_t h, sz_needle_t n) {
 
     // Precomputed constants
-    char const *const end = h.ptr + h.len;
+    char const *const end = h.start + h.length;
     uint32_t anomaly = 0;
     uint32_t mask = 0;
-    switch (n.len) {
-    case 1: memset(&mask, 0xFF, 1), memcpy(&anomaly, n.ptr, 1); break;
-    case 2: memset(&mask, 0xFF, 2), memcpy(&anomaly, n.ptr, 2); break;
-    case 3: memset(&mask, 0xFF, 3), memcpy(&anomaly, n.ptr, 3); break;
-    default: memset(&mask, 0xFF, 4), memcpy(&anomaly, n.ptr, 4); break;
+    switch (n.length) {
+    case 1: memset(&mask, 0xFF, 1), memcpy(&anomaly, n.start, 1); break;
+    case 2: memset(&mask, 0xFF, 2), memcpy(&anomaly, n.start, 2); break;
+    case 3: memset(&mask, 0xFF, 3), memcpy(&anomaly, n.start, 3); break;
+    default: memset(&mask, 0xFF, 4), memcpy(&anomaly, n.start, 4); break;
     }
 
     uint32x4_t const anomalies = vld1q_dup_u32(&anomaly);
     uint32x4_t const masks = vld1q_dup_u32(&mask);
 
-    char const *text = h.ptr;
-    for (; (text + n.len + 16) <= end; text += 16) {
+    char const *text = h.start;
+    for (; (text + n.length + 16) <= end; text += 16) {
 
         uint32x4_t matches0 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 0)), masks), anomalies);
         uint32x4_t matches1 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 1)), masks), anomalies);
@@ -422,18 +422,18 @@ inline static sz_size_t sz_neon_find_substr(sz_haystack_t h, sz_needle_t n) {
 
         if (has_match) {
             for (sz_size_t i = 0; i < 16; i++) {
-                if (sz_equal(text + i, n.ptr, n.len))
-                    return i + (text - h.ptr);
+                if (sz_equal(text + i, n.start, n.length))
+                    return i + (text - h.start);
             }
         }
     }
 
     // Don't forget the last (up to 16+3=19) characters.
     sz_haystack_t h_remainder;
-    h_remainder.ptr = text;
-    h_remainder.len = end - text;
+    h_remainder.start = text;
+    h_remainder.length = end - text;
     sz_size_t tail_match = sz_naive_find_substr(h_remainder, n);
-    return text + tail_match - h.ptr;
+    return text + tail_match - h.start;
 }
 
 #endif // Arm Neon
@@ -444,66 +444,73 @@ inline static void sz_swap(sz_size_t *a, sz_size_t *b) {
     *b = t;
 }
 
-typedef char const *(*sz_array_get_begin_t)(void const *, sz_size_t);
-typedef sz_size_t (*sz_array_get_length_t)(void const *, sz_size_t);
-typedef int (*sz_array_predicate_t)(void const *, sz_size_t);
-typedef int (*sz_array_comparator_t)(void const *, sz_size_t, sz_size_t);
+typedef char const *(*sz_sequence_get_start_t)(void const *, sz_size_t);
+typedef sz_size_t (*sz_sequence_get_length_t)(void const *, sz_size_t);
+typedef int (*sz_sequence_predicate_t)(void const *, sz_size_t);
+typedef int (*sz_sequence_comparator_t)(void const *, sz_size_t, sz_size_t);
 
-typedef struct sz_array_t {
+// Define a type for the comparison function, depending on the platform.
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(__APPLE__)
+typedef int (*sz_qsort_comparison_func_t)(void *, void const *, void const *);
+#else
+typedef int (*sz_qsort_comparison_func_t)(void const *, void const *, void *);
+#endif
+
+typedef struct sz_sequence_t {
     sz_size_t *order;
     sz_size_t count;
-    sz_array_get_begin_t get_begin;
-    sz_array_get_length_t get_length;
+    sz_sequence_get_start_t get_start;
+    sz_sequence_get_length_t get_length;
     void const *handle;
-} sz_array_t;
+} sz_sequence_t;
 
 /**
  *  @brief  Similar to `std::partition`, given a predicate splits the
- *          array into two parts.
+ *          sequence into two parts.
  */
-inline static sz_size_t sz_partition(sz_array_t *array, sz_array_predicate_t predicate) {
+inline static sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate) {
 
     sz_size_t matches = 0;
-    while (matches != array->count && predicate(array->handle, array->order[matches]))
+    while (matches != sequence->count && predicate(sequence->handle, sequence->order[matches]))
         ++matches;
 
-    for (sz_size_t i = matches + 1; i < array->count; ++i)
-        if (predicate(array->handle, array->order[i]))
-            sz_swap(array->order + i, array->order + matches), ++matches;
+    for (sz_size_t i = matches + 1; i < sequence->count; ++i)
+        if (predicate(sequence->handle, sequence->order[i]))
+            sz_swap(sequence->order + i, sequence->order + matches), ++matches;
 
     return matches;
 }
 
 /**
  *  @brief  Inplace `std::set_union` for two consecutive chunks forming
- *          the same continuous array.
+ *          the same continuous sequence.
  */
-inline static void sz_merge(sz_array_t *array, sz_size_t partition, sz_array_comparator_t less) {
+inline static void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequence_comparator_t less) {
 
     sz_size_t start_b = partition + 1;
 
     // If the direct merge is already sorted
-    if (!less(array->handle, array->order[start_b], array->order[partition]))
+    if (!less(sequence->handle, sequence->order[start_b], sequence->order[partition]))
         return;
 
     sz_size_t start_a = 0;
-    while (start_a <= partition && start_b <= array->count) {
+    while (start_a <= partition && start_b <= sequence->count) {
 
         // If element 1 is in right place
-        if (!less(array->handle, array->order[start_b], array->order[start_a])) {
+        if (!less(sequence->handle, sequence->order[start_b], sequence->order[start_a])) {
             start_a++;
         }
         else {
-            sz_size_t value = array->order[start_b];
+            sz_size_t value = sequence->order[start_b];
             sz_size_t index = start_b;
 
             // Shift all the elements between element 1
             // element 2, right by 1.
             while (index != start_a) {
-                array->order[index] = array->order[index - 1];
+                sequence->order[index] = sequence->order[index - 1];
                 index--;
             }
-            array->order[start_a] = value;
+            sequence->order[start_a] = value;
 
             // Update all the pointers
             start_a++;
@@ -514,103 +521,111 @@ inline static void sz_merge(sz_array_t *array, sz_size_t partition, sz_array_com
 }
 
 inline static void _sz_sort_recursion( //
-    sz_array_t *array,
+    sz_sequence_t *sequence,
     sz_size_t bit_idx,
     sz_size_t bit_max,
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || __APPLE__
-    int (*libc_comparator)(void *, void const *, void const *)
-#else
-    int (*libc_comparator)(void const *, void const *, void *)
-#endif
-) {
+    sz_qsort_comparison_func_t qsort_comparator) {
 
-    if (!array->count)
+    if (!sequence->count)
         return;
 
     // Partition a range of integers according to a specific bit value
     sz_size_t split = 0;
     {
         sz_size_t mask = (1ul << 63) >> bit_idx;
-        while (split != array->count && !(array->order[split] & mask))
+        while (split != sequence->count && !(sequence->order[split] & mask))
             ++split;
 
-        for (sz_size_t i = split + 1; i < array->count; ++i)
-            if (!(array->order[i] & mask))
-                sz_swap(array->order + i, array->order + split), ++split;
+        for (sz_size_t i = split + 1; i < sequence->count; ++i)
+            if (!(sequence->order[i] & mask))
+                sz_swap(sequence->order + i, sequence->order + split), ++split;
     }
 
     // Go down recursively
     if (bit_idx < bit_max) {
-        sz_array_t a = *array;
+        sz_sequence_t a = *sequence;
         a.count = split;
-        _sz_sort_recursion(&a, bit_idx + 1, bit_max, libc_comparator);
+        _sz_sort_recursion(&a, bit_idx + 1, bit_max, qsort_comparator);
 
-        sz_array_t b = *array;
+        sz_sequence_t b = *sequence;
         b.order += split;
         b.count -= split;
-        _sz_sort_recursion(&b, bit_idx + 1, bit_max, libc_comparator);
+        _sz_sort_recursion(&b, bit_idx + 1, bit_max, qsort_comparator);
     }
     // Reached the end of recursion
     else {
         // Discard the prefixes
-        for (sz_size_t i = 0; i != array->count; ++i)
-            memset((char *)(&array->order[i]) + 4, 0, 4ul);
+        for (sz_size_t i = 0; i != sequence->count; ++i) {
+            memset((char *)(&sequence->order[i]) + 4, 0, 4ul);
+        }
 
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
         // Perform sorts on smaller chunks instead of the whole handle
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
         // https://stackoverflow.com/a/39561369
         // https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/qsort-s?view=msvc-170
-        qsort_s(array->order, split, sizeof(sz_size_t), libc_comparator, (void *)array);
-        qsort_s(array->order + split, array->count - split, sizeof(sz_size_t), libc_comparator, (void *)array);
+        qsort_s(sequence->order, split, sizeof(sz_size_t), qsort_comparator, (void *)sequence);
+        qsort_s(sequence->order + split,
+                sequence->count - split,
+                sizeof(sz_size_t),
+                qsort_comparator,
+                (void *)sequence);
 #elif __APPLE__
-        qsort_r(array->order, split, sizeof(sz_size_t), (void *)array, libc_comparator);
-        qsort_r(array->order + split, array->count - split, sizeof(sz_size_t), (void *)array, libc_comparator);
+        qsort_r(sequence->order, split, sizeof(sz_size_t), (void *)sequence, qsort_comparator);
+        qsort_r(sequence->order + split,
+                sequence->count - split,
+                sizeof(sz_size_t),
+                (void *)sequence,
+                qsort_comparator);
 #else
         // https://linux.die.net/man/3/qsort_r
-        qsort_r(array->order, split, sizeof(sz_size_t), libc_comparator, (void *)array);
-        qsort_r(array->order + split, array->count - split, sizeof(sz_size_t), libc_comparator, (void *)array);
+        qsort_r(sequence->order, split, sizeof(sz_size_t), qsort_comparator, (void *)sequence);
+        qsort_r(sequence->order + split,
+                sequence->count - split,
+                sizeof(sz_size_t),
+                qsort_comparator,
+                (void *)sequence);
 #endif
     }
 }
 
-inline static int _sz_sort_array_strncmp(
+inline static int _sz_sort_sequence_strncmp(
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || __APPLE__
-    void *array_raw, void const *a_raw, void const *b_raw
+    void *sequence_raw, void const *a_raw, void const *b_raw
 #else
-    void const *a_raw, void const *b_raw, void *array_raw
+    void const *a_raw, void const *b_raw, void *sequence_raw
 #endif
 ) {
     // https://man.freebsd.org/cgi/man.cgi?query=qsort_s&sektion=3&n=1
     // https://www.man7.org/linux/man-pages/man3/strcmp.3.html
-    sz_array_t *array = (sz_array_t *)array_raw;
+    sz_sequence_t *sequence = (sz_sequence_t *)sequence_raw;
     sz_size_t a = *(sz_size_t *)a_raw;
     sz_size_t b = *(sz_size_t *)b_raw;
-    sz_size_t a_len = array->get_length(array->handle, a);
-    sz_size_t b_len = array->get_length(array->handle, b);
+    sz_size_t a_len = sequence->get_length(sequence->handle, a);
+    sz_size_t b_len = sequence->get_length(sequence->handle, b);
     int res = strncmp( //
-        array->get_begin(array->handle, a),
-        array->get_begin(array->handle, b),
+        sequence->get_start(sequence->handle, a),
+        sequence->get_start(sequence->handle, b),
         a_len > b_len ? b_len : a_len);
     return res ? res : a_len - b_len;
 }
 
-inline static int _sz_sort_array_strncasecmp(
+inline static int _sz_sort_sequence_strncasecmp(
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || __APPLE__
-    void *array_raw, void const *a_raw, void const *b_raw
+    void *sequence_raw, void const *a_raw, void const *b_raw
 #else
-    void const *a_raw, void const *b_raw, void *array_raw
+    void const *a_raw, void const *b_raw, void *sequence_raw
 #endif
 ) {
     // https://man.freebsd.org/cgi/man.cgi?query=qsort_s&sektion=3&n=1
     // https://www.man7.org/linux/man-pages/man3/strcmp.3.html
-    sz_array_t *array = (sz_array_t *)array_raw;
+    sz_sequence_t *sequence = (sz_sequence_t *)sequence_raw;
     sz_size_t a = *(sz_size_t *)a_raw;
     sz_size_t b = *(sz_size_t *)b_raw;
-    sz_size_t a_len = array->get_length(array->handle, a);
-    sz_size_t b_len = array->get_length(array->handle, b);
+    sz_size_t a_len = sequence->get_length(sequence->handle, a);
+    sz_size_t b_len = sequence->get_length(sequence->handle, b);
     int res = strncasecmp( //
-        array->get_begin(array->handle, a),
-        array->get_begin(array->handle, b),
+        sequence->get_start(sequence->handle, a),
+        sequence->get_start(sequence->handle, b),
         a_len > b_len ? b_len : a_len);
     return res ? res : a_len - b_len;
 }
@@ -623,16 +638,16 @@ typedef struct sz_sort_config_t {
  *  @brief  Sorting algorithm, combining Radix Sort for the first 32 bits of every word
  *          and a follow-up Quick Sort on resulting structure.
  */
-inline static void sz_sort(sz_array_t *array, sz_sort_config_t const *config) {
+inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *config) {
 
     int case_insensitive = config && config->case_insensitive;
 
-    // Export up to 4 bytes into the `array` bits themselves
-    for (sz_size_t i = 0; i != array->count; ++i) {
-        char const *begin = array->get_begin(array->handle, array->order[i]);
-        sz_size_t length = array->get_length(array->handle, array->order[i]);
+    // Export up to 4 bytes into the `sequence` bits themselves
+    for (sz_size_t i = 0; i != sequence->count; ++i) {
+        char const *begin = sequence->get_start(sequence->handle, sequence->order[i]);
+        sz_size_t length = sequence->get_length(sequence->handle, sequence->order[i]);
         length = length > 4ul ? 4ul : length;
-        char *prefix = (char *)&array->order[i];
+        char *prefix = (char *)&sequence->order[i];
         for (sz_size_t j = 0; j != length; ++j)
             prefix[7 - j] = begin[j];
         if (case_insensitive) {
@@ -643,17 +658,12 @@ inline static void sz_sort(sz_array_t *array, sz_sort_config_t const *config) {
         }
     }
 
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || __APPLE__
-    int (*comparator)(void *, void const *, void const *);
-#else
-    int (*comparator)(void const *, void const *, void *);
-#endif
-    comparator = _sz_sort_array_strncmp;
+    sz_qsort_comparison_func_t comparator = _sz_sort_sequence_strncmp;
     if (case_insensitive)
-        comparator = _sz_sort_array_strncasecmp;
+        comparator = _sz_sort_sequence_strncasecmp;
 
     // Perform optionally-parallel radix sort on them
-    _sz_sort_recursion(array, 0, 32, comparator);
+    _sz_sort_recursion(sequence, 0, 32, comparator);
 }
 
 typedef uint8_t levenstein_distance_t;
