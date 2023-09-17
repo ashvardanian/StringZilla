@@ -11,12 +11,18 @@ from stringzilla import Str
 
 def test_globals():
     assert sz.find("abcdef", "bcdef") == 1
-    assert sz.find("abcdef", "x") == 6
+    assert sz.find("abcdef", "x") == -1
 
     assert sz.count("abcdef", "x") == 0
     assert sz.count("aaaaa", "a") == 5
     assert sz.count("aaaaa", "aa") == 2
     assert sz.count("aaaaa", "aa", allowoverlap=True) == 4
+
+    assert sz.levenstein("aaa", "aaa") == 0
+    assert sz.levenstein("aaa", "bbb") == 3
+    assert sz.levenstein("abababab", "aaaaaaaa") == 4
+    assert sz.levenstein("abababab", "aaaaaaaa", 2) == 2
+    assert sz.levenstein("abababab", "aaaaaaaa", bound=2) == 2
 
 
 def test_construct():

@@ -116,10 +116,12 @@
     "stop_token": "cpp",
     "__verbose_abort": "cpp",
     "strstream": "cpp",
-    "filesystem": "cpp"
+    "filesystem": "cpp",
+    "__memory": "c"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "cSpell.words": [
+    "abababab",
     "allowoverlap",
     "basicsize",
     "bigram",

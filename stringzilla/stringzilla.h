@@ -412,9 +412,9 @@ inline static size_t strzl_neon_find_substr(strzl_haystack_t h, strzl_needle_t n
         uint32x4_t matches3 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 3)), masks), anomalies);
 
         // Extracting matches from matches:
-        // vmaxvq_u32 (only a64)
-        // vgetq_lane_u32 (all)
-        // vorrq_u32 (all)
+        //   vmaxvq_u32 (only a64)
+        //   vgetq_lane_u32 (all)
+        //   vorrq_u32 (all)
         uint32x4_t matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
         uint64x2_t matches64x2 = vreinterpretq_u64_u32(matches);
         int has_match = vgetq_lane_u64(matches64x2, 0) | vgetq_lane_u64(matches64x2, 1);
@@ -686,10 +686,21 @@ inline static levenstein_distance_t strzl_levenstein( //
     levenstein_distance_t bound,
     void *buffer) {
 
+    // If one of the strings is empty - the edit distance is equal to the length of the other one
     if (a_length == 0)
-        return b_length <= bound ? b_length : bound + 1;
+        return b_length <= bound ? b_length : bound;
     if (b_length == 0)
-        return a_length <= bound ? a_length : bound + 1;
+        return a_length <= bound ? a_length : bound;
+
+    // If the difference in length is beyond the `bound`, there is no need to check at all
+    if (a_length > b_length) {
+        if (a_length - b_length > bound)
+            return bound + 1;
+    }
+    else {
+        if (b_length - a_length > bound)
+            return bound + 1;
+    }
 
     levenstein_distance_t *previous_distances = (levenstein_distance_t *)buffer;
     levenstein_distance_t *current_distances = previous_distances + b_length + 1;
@@ -700,12 +711,24 @@ inline static levenstein_distance_t strzl_levenstein( //
     for (size_t idx_a = 0; idx_a != a_length; ++idx_a) {
         current_distances[0] = idx_a + 1;
 
+        // Initialize min_distance with a value greater than bound
+        levenstein_distance_t min_distance = bound;
+
         for (size_t idx_b = 0; idx_b != b_length; ++idx_b) {
             levenstein_distance_t cost_deletion = previous_distances[idx_b + 1] + 1;
             levenstein_distance_t cost_insertion = current_distances[idx_b] + 1;
             levenstein_distance_t cost_substitution = previous_distances[idx_b] + (a[idx_a] != b[idx_b]);
             current_distances[idx_b + 1] = _strzl_levenstein_minimum(cost_deletion, cost_insertion, cost_substitution);
+
+            // Keep track of the minimum distance seen so far in this row
+            if (current_distances[idx_b + 1] < min_distance) {
+                min_distance = current_distances[idx_b + 1];
+            }
         }
+
+        // If the minimum distance in this row exceeded the bound, return early
+        if (min_distance > bound)
+            return bound;
 
         // Swap previous_distances and current_distances pointers
         levenstein_distance_t *temp = previous_distances;
@@ -713,7 +736,7 @@ inline static levenstein_distance_t strzl_levenstein( //
         current_distances = temp;
     }
 
-    return previous_distances[b_length];
+    return previous_distances[b_length] <= bound ? previous_distances[b_length] : bound;
 }
 
 /**

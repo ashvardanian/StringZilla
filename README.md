@@ -36,21 +36,21 @@ Coming soon.
 ## Quick Start: Python 🐍
 
 1️. Install via pip: `pip install stringzilla`  
-1. Import the classes you need: `from stringzilla import Str, Strs, MemoryMappedFile`  
+1. Import the classes you need: `from stringzilla import Str, Strs, File`  
 
 ### Basic Usage
 
 StringZilla offers two mostly interchangeable core classes:
 
 ```python
-from stringzilla import Str, MemoryMappedFile
+from stringzilla import Str, File
 
 text_from_str = Str('some-string')
-text_from_file = Str(MemoryMappedFile('some-file.txt'))
+text_from_file = Str(File('some-file.txt'))
 ```
 
 The `Str` is designed to replace long Python `str` strings and wrap our C-level API.
-On the other hand, the `MemoryMappedFile` memory-maps a file from persistent memory without loading its copy into RAM.
+On the other hand, the `File` memory-maps a file from persistent memory without loading its copy into RAM.
 The contents of that file would remain immutable, and the mapping can be shared by multiple Python processes simultaneously.
 A standard dataset pre-processing use case would be to map a sizeable textual dataset like Common Crawl into memory, spawn child processes, and split the job between them.
 
