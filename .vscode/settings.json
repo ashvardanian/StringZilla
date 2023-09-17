@@ -131,10 +131,12 @@
     "itemsize",
     "keeplinebreaks",
     "keepseparator",
+    "kwds",
     "kwnames",
     "levenstein",
     "maxsplit",
     "memcpy",
+    "MODINIT",
     "nargsf",
     "newfunc",
     "NOARGS",
@@ -153,6 +155,7 @@
     "SWAR",
     "TPFLAGS",
     "Vardanian",
+    "vectorcallfunc",
     "Zilla"
   ]
 }

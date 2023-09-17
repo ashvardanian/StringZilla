@@ -36,21 +36,21 @@ Coming soon.
 ## Quick Start: Python 🐍
 
 1️. Install via pip: `pip install stringzilla`  
-2. Import classes: `from stringzilla import Str, File, Strs`  
+1. Import the classes you need: `from stringzilla import Str, Strs, MemoryMappedFile`  
 
 ### Basic Usage
 
 StringZilla offers two mostly interchangeable core classes:
 
 ```python
-from stringzilla import Str, File
+from stringzilla import Str, MemoryMappedFile
 
-text1 = Str('some-string')
-text2 = File('some-file.txt')
+text_from_str = Str('some-string')
+text_from_file = Str(MemoryMappedFile('some-file.txt'))
 ```
 
 The `Str` is designed to replace long Python `str` strings and wrap our C-level API.
-On the other hand, the `File` memory-maps a file from persistent memory without loading its copy into RAM.
+On the other hand, the `MemoryMappedFile` memory-maps a file from persistent memory without loading its copy into RAM.
 The contents of that file would remain immutable, and the mapping can be shared by multiple Python processes simultaneously.
 A standard dataset pre-processing use case would be to map a sizeable textual dataset like Common Crawl into memory, spawn child processes, and split the job between them.
 
@@ -58,11 +58,12 @@ A standard dataset pre-processing use case would be to map a sizeable textual da
 
 - Length: `len(text) -> int`
 - Indexing: `text[42] -> str`
-- Slicing: `text[42:46] -> str`
+- Slicing: `text[42:46] -> Str`
+- String conversion: `str(text) -> str`
+- Substring check: `'substring' in text -> bool`
 
 ### Advanced Operations
 
-- `'substring' in text -> bool`
 - `text.contains('substring', start=0, end=9223372036854775807) -> bool`
 - `text.find('substring', start=0, end=9223372036854775807) -> int`
 - `text.count('substring', start=0, end=9223372036854775807, allowoverlap=False) -> int`
@@ -91,6 +92,19 @@ Basic `list`-like operations are also supported:
 ```python
 lines.append('Pythonic string')
 lines.extend(shuffled_copy)
+```
+
+### Low-Level Python API
+
+The StringZilla CPython bindings implement vector-call conventions for faster calls.
+
+```py
+import stringzilla as sz
+
+contains: bool = sz.contains("haystack", "needle", start=0, end=9223372036854775807)
+offset: int = sz.find("haystack", "needle", start=0, end=9223372036854775807)
+count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, allowoverlap=False)
+levenstein: int = sz.levenstein("needle", "nidl")
 ```
 
 ## Quick Start: C 🛠️

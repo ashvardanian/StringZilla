@@ -125,41 +125,160 @@ int export_string_like(PyObject *object, char const **start, size_t *length) {
 
 #pragma region Global Functions
 
-static PyObject *str_find_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
-    // Check the number of arguments and types
+static size_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
-    if (nargs < 2 || nargs > 4) {
-        PyErr_SetString(PyExc_TypeError, "Invalid arguments");
+
+    // Initialize defaults
+    Py_ssize_t start = 0;
+    Py_ssize_t end = PY_SSIZE_T_MAX;
+
+    // Parse positional arguments: haystack and needle
+    if (nargs < 2) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    // Parse the haystack.
     PyObject *haystack_obj = args[0];
-    struct strzl_haystack_t haystack;
-    if (!export_string_like(haystack_obj, &haystack.ptr, &haystack.len)) {
-        PyErr_SetString(PyExc_TypeError, "First argument (haystack) must be string-like");
-        return NULL;
-    }
-
-    // Parse the needle.
     PyObject *needle_obj = args[1];
+
+    struct strzl_haystack_t haystack;
     struct strzl_needle_t needle;
-    needle.anomaly_offset = 0;
-    if (!export_string_like(needle_obj, &needle.ptr, &needle.len)) {
-        PyErr_SetString(PyExc_TypeError, "Second argument (needle) must be string-like");
+    if (!export_string_like(haystack_obj, &haystack.ptr, &haystack.len) ||
+        !export_string_like(needle_obj, &needle.ptr, &needle.len)) {
+        PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
         return NULL;
     }
 
-    // Limit the haystack range.
-    Py_ssize_t start = (nargs > 2) ? PyLong_AsSsize_t(args[2]) : 0;
-    Py_ssize_t end = (nargs > 3) ? PyLong_AsSsize_t(args[3]) : PY_SSIZE_T_MAX;
+    // Parse additional positional arguments
+    if (nargs > 2)
+        start = PyLong_AsSsize_t(args[2]);
+    if (nargs > 3)
+        end = PyLong_AsSsize_t(args[3]);
+
+    // Parse keyword arguments
+    if (kwnames != NULL) {
+        for (Py_ssize_t i = 0; i < PyTuple_Size(kwnames); ++i) {
+            PyObject *key = PyTuple_GetItem(kwnames, i);
+            PyObject *value = args[nargs + i];
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0)
+                start = PyLong_AsSsize_t(value);
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0)
+                end = PyLong_AsSsize_t(value);
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
+    }
+
+    // Limit the haystack range
     size_t normalized_offset, normalized_length;
     slice(haystack.len, start, end, &normalized_offset, &normalized_length);
-
-    haystack.ptr = haystack.ptr + normalized_offset;
+    haystack.ptr += normalized_offset;
     haystack.len = normalized_length;
-    size_t position = strzl_neon_find_substr(haystack, needle);
-    return PyLong_FromSize_t(position);
+
+    // Perform contains operation
+    return strzl_neon_find_substr(haystack, needle);
+}
+
+static PyObject *str_find_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
+    size_t offset = str_find_vectorcall_(NULL, args, nargsf, kwnames);
+    return PyLong_FromSize_t(offset);
+}
+
+static PyObject *str_contains_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
+    size_t offset = str_find_vectorcall_(NULL, args, nargsf, kwnames);
+    if (offset != haystack.len) {
+        Py_RETURN_TRUE;
+    }
+    else {
+        Py_RETURN_FALSE;
+    }
+}
+
+static PyObject *str_count_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
+    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+
+    // Initialize defaults
+    Py_ssize_t start = 0;
+    Py_ssize_t end = PY_SSIZE_T_MAX;
+    int allow_overlap = 0;
+
+    // Parse positional arguments: haystack and needle
+    if (nargs < 2) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *haystack_obj = args[0];
+    PyObject *needle_obj = args[1];
+
+    struct strzl_haystack_t haystack;
+    struct strzl_needle_t needle;
+    if (!export_string_like(haystack_obj, &haystack.ptr, &haystack.len) ||
+        !export_string_like(needle_obj, &needle.ptr, &needle.len)) {
+        PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
+        return NULL;
+    }
+
+    // Parse additional positional arguments
+    if (nargs > 2)
+        start = PyLong_AsSsize_t(args[2]);
+    if (nargs > 3)
+        end = PyLong_AsSsize_t(args[3]);
+
+    // Parse keyword arguments
+    if (kwnames != NULL) {
+        for (Py_ssize_t i = 0; i < PyTuple_Size(kwnames); ++i) {
+            PyObject *key = PyTuple_GetItem(kwnames, i);
+            PyObject *value = args[nargs + i];
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0)
+                start = PyLong_AsSsize_t(value);
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0)
+                end = PyLong_AsSsize_t(value);
+            else if (PyUnicode_CompareWithASCIIString(key, "allowoverlap") == 0)
+                allow_overlap = PyObject_IsTrue(value);
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
+    }
+
+    // Limit the haystack range
+    size_t normalized_offset, normalized_length;
+    slice(haystack.len, start, end, &normalized_offset, &normalized_length);
+    haystack.ptr += normalized_offset;
+    haystack.len = normalized_length;
+
+    // Perform counting operation
+    size_t count = 0;
+    if (needle.len == 1) {
+        count = strzl_naive_count_char(haystack, *needle.ptr);
+    }
+    else {
+        // Your existing logic for count_substr can be embedded here
+        if (allow_overlap) {
+            while (haystack.len) {
+                size_t offset = strzl_neon_find_substr(haystack, needle);
+                int found = offset != haystack.len;
+                count += found;
+                haystack.ptr += offset + found;
+                haystack.len -= offset + found;
+            }
+        }
+        else {
+            while (haystack.len) {
+                size_t offset = strzl_neon_find_substr(haystack, needle);
+                int found = offset != haystack.len;
+                count += found;
+                haystack.ptr += offset + needle.len;
+                haystack.len -= offset + needle.len * found;
+            }
+        }
+    }
+
+    return PyLong_FromSize_t(count);
 }
 
 #pragma endregion
@@ -349,7 +468,11 @@ static void Str_dealloc(Str *self) {
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
+static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->start, self->length); }
+
 static Py_ssize_t Str_len(Str *self) { return self->length; }
+
+static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)strzl_hash_crc32_native(self->start, self->length); }
 
 static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
 
@@ -419,8 +542,6 @@ static int Str_contains(Str *self, PyObject *arg) {
     return position != haystack.len;
 }
 
-static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)strzl_hash_crc32_native(self->start, self->length); }
-
 static PyObject *Str_getslice(Str *self, PyObject *args) {
     PyObject *start_obj = NULL, *end_obj = NULL;
     ssize_t start = 0, end = self->length; // Default values
@@ -465,8 +586,6 @@ static PyObject *Str_getslice(Str *self, PyObject *args) {
     return (PyObject *)new_str;
 }
 
-static PyObject *Str_str(Str *self, PyObject *args) { return PyUnicode_FromStringAndSize(self->start, self->length); }
-
 static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 
     char const *a_start, *b_start;
@@ -505,9 +624,9 @@ static PyMappingMethods Str_as_mapping = {
 };
 
 static PyMethodDef Str_methods[] = { //
-    {"contains", (PyCFunction)Str_str, METH_NOARGS, "Convert to Python `str`"},
-    // {"find", (PyCFunction)Str_len, METH_NOARGS, "Get length"},
-    // {"__getitem__", (PyCFunction)Str_getitem, METH_O, "Indexing"},
+    // {"contains", (PyCFunction)..., METH_NOARGS, "Convert to Python `str`"},
+    // {"find", (PyCFunction)..., METH_NOARGS, "Get length"},
+    // {"__getitem__", (PyCFunction)..., METH_O, "Indexing"},
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrType = {
@@ -523,6 +642,7 @@ static PyTypeObject StrType = {
     .tp_as_mapping = &Str_as_mapping,
     .tp_hash = Str_hash, // String hashing functions
     .tp_richcompare = Str_richcompare,
+    .tp_str = Str_str,
     // .tp_as_buffer = (PyBufferProcs *)NULL, // Functions to access object as input/output buffer
 };
 
@@ -554,6 +674,24 @@ static PyObject *vectorized_split = NULL;
 static PyObject *vectorized_sort = NULL;
 static PyObject *vectorized_shuffle = NULL;
 
+PyObject *register_vectorcall(PyObject *module, char const *name, vectorcallfunc vectorcall) {
+
+    PyCFunctionObject *vectorcall_object = (PyCFunctionObject *)PyObject_Malloc(sizeof(PyCFunctionObject));
+    if (vectorcall_object == NULL)
+        return NULL;
+
+    PyObject_Init(vectorcall_object, &PyCFunction_Type);
+    vectorcall_object->m_ml = NULL; // No regular `PyMethodDef`
+    vectorcall_object->vectorcall = vectorcall;
+
+    // Add the 'find' function to the module
+    if (PyModule_AddObject(module, name, vectorcall_object) < 0) {
+        Py_XDECREF(vectorcall_object);
+        return NULL;
+    }
+    return vectorcall_object;
+}
+
 PyMODINIT_FUNC PyInit_stringzilla(void) {
     PyObject *m;
 
@@ -582,26 +720,19 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         return NULL;
     }
 
-    // Create the 'find' function
-    vectorized_find = PyObject_Malloc(sizeof(PyCFunctionObject));
-    if (vectorized_find == NULL) {
-        Py_XDECREF(&MemoryMappedFileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        PyErr_NoMemory();
-        return NULL;
-    }
-    PyObject_Init(vectorized_find, &PyCFunction_Type);
-    ((PyCFunctionObject *)vectorized_find)->m_ml = NULL; // No regular PyMethodDef
-    ((PyCFunctionObject *)vectorized_find)->vectorcall = str_find_vectorcall;
+    // Register the vectorized functions
+    vectorized_find = register_vectorcall(m, "find", str_find_vectorcall);
+    vectorized_contains = register_vectorcall(m, "contains", str_contains_vectorcall);
+    vectorized_count = register_vectorcall(m, "count", str_count_vectorcall);
+    vectorized_levenstein = register_vectorcall(m, "levenstein", str_find_vectorcall);
 
-    // Add the 'find' function to the module
-    if (PyModule_AddObject(m, "find", vectorized_find) < 0) {
-        PyObject_Free(vectorized_find);
-        Py_XDECREF(&MemoryMappedFileType);
-        Py_XDECREF(&StrType);
-        Py_XDECREF(m);
-        return NULL;
+    vectorized_split = register_vectorcall(m, "split", str_find_vectorcall);
+    vectorized_sort = register_vectorcall(m, "sort", str_find_vectorcall);
+    vectorized_shuffle = register_vectorcall(m, "shuffle", str_find_vectorcall);
+    if (!vectorized_find || !vectorized_count ||          //
+        !vectorized_contains || !vectorized_levenstein || //
+        !vectorized_split || !vectorized_sort || !vectorized_shuffle) {
+        goto cleanup;
     }
 
     return m;
@@ -609,16 +740,21 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 cleanup:
     if (vectorized_find)
         Py_XDECREF(vectorized_find);
-    if (vectorized_count)
-        Py_XDECREF(vectorized_count);
     if (vectorized_contains)
         Py_XDECREF(vectorized_contains);
+    if (vectorized_count)
+        Py_XDECREF(vectorized_count);
+    if (vectorized_levenstein)
+        Py_XDECREF(vectorized_levenstein);
     if (vectorized_split)
         Py_XDECREF(vectorized_split);
     if (vectorized_sort)
         Py_XDECREF(vectorized_sort);
     if (vectorized_shuffle)
         Py_XDECREF(vectorized_shuffle);
+
+    Py_XDECREF(&MemoryMappedFileType);
+    Py_XDECREF(&StrType);
     Py_XDECREF(m);
     PyErr_NoMemory();
     return NULL;

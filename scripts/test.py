@@ -9,6 +9,16 @@ import stringzilla as sz
 from stringzilla import Str
 
 
+def test_globals():
+    assert sz.find("abcdef", "bcdef") == 1
+    assert sz.find("abcdef", "x") == 6
+
+    assert sz.count("abcdef", "x") == 0
+    assert sz.count("aaaaa", "a") == 5
+    assert sz.count("aaaaa", "aa") == 2
+    assert sz.count("aaaaa", "aa", allowoverlap=True) == 4
+
+
 def test_construct():
     native = "aaaaa"
     big = Str(native)
@@ -33,11 +43,6 @@ def test_rich_comparisons():
     assert Str("aa") == "aa"
     assert Str("aa") < "b"
     assert Str("abb")[1:] == "bb"
-
-
-def test_globals():
-    assert sz.find("abcdef", "bcdef") == 1
-    assert sz.find("abcdef", "x") == 6
 
 
 # def get_random_string(
