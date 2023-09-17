@@ -29,8 +29,8 @@ static PyTypeObject FileType;
 static PyTypeObject StrType;
 
 struct {
-    void *ptr;
-    size_t len;
+    void *start;
+    size_t length;
 } temporary_memory = {NULL, 0};
 
 /**
@@ -148,8 +148,8 @@ static Py_ssize_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_
     struct sz_haystack_t haystack;
     struct sz_needle_t needle;
     needle.anomaly_offset = 0;
-    if (!export_string_like(haystack_obj, &haystack.ptr, &haystack.len) ||
-        !export_string_like(needle_obj, &needle.ptr, &needle.len)) {
+    if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
+        !export_string_like(needle_obj, &needle.start, &needle.length)) {
         PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
         return NULL;
     }
@@ -178,13 +178,13 @@ static Py_ssize_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_
 
     // Limit the haystack range
     size_t normalized_offset, normalized_length;
-    slice(haystack.len, start, end, &normalized_offset, &normalized_length);
-    haystack.ptr += normalized_offset;
-    haystack.len = normalized_length;
+    slice(haystack.length, start, end, &normalized_offset, &normalized_length);
+    haystack.start += normalized_offset;
+    haystack.length = normalized_length;
 
     // Perform contains operation
     size_t offset = sz_neon_find_substr(haystack, needle);
-    if (offset == haystack.len)
+    if (offset == haystack.length)
         return -1;
     return (Py_ssize_t)offset;
 }
@@ -224,8 +224,8 @@ static PyObject *str_count_vectorcall(PyObject *_, PyObject *const *args, size_t
     struct sz_haystack_t haystack;
     struct sz_needle_t needle;
     needle.anomaly_offset = 0;
-    if (!export_string_like(haystack_obj, &haystack.ptr, &haystack.len) ||
-        !export_string_like(needle_obj, &needle.ptr, &needle.len)) {
+    if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
+        !export_string_like(needle_obj, &needle.start, &needle.length)) {
         PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
         return NULL;
     }
@@ -256,33 +256,33 @@ static PyObject *str_count_vectorcall(PyObject *_, PyObject *const *args, size_t
 
     // Limit the haystack range
     size_t normalized_offset, normalized_length;
-    slice(haystack.len, start, end, &normalized_offset, &normalized_length);
-    haystack.ptr += normalized_offset;
-    haystack.len = normalized_length;
+    slice(haystack.length, start, end, &normalized_offset, &normalized_length);
+    haystack.start += normalized_offset;
+    haystack.length = normalized_length;
 
     // Perform counting operation
     size_t count = 0;
-    if (needle.len == 1) {
-        count = sz_naive_count_char(haystack, *needle.ptr);
+    if (needle.length == 1) {
+        count = sz_naive_count_char(haystack, *needle.start);
     }
     else {
         // Your existing logic for count_substr can be embedded here
         if (allow_overlap) {
-            while (haystack.len) {
+            while (haystack.length) {
                 size_t offset = sz_neon_find_substr(haystack, needle);
-                int found = offset != haystack.len;
+                int found = offset != haystack.length;
                 count += found;
-                haystack.ptr += offset + found;
-                haystack.len -= offset + found;
+                haystack.start += offset + found;
+                haystack.length -= offset + found;
             }
         }
         else {
-            while (haystack.len) {
+            while (haystack.length) {
                 size_t offset = sz_neon_find_substr(haystack, needle);
-                int found = offset != haystack.len;
+                int found = offset != haystack.length;
                 count += found;
-                haystack.ptr += offset + needle.len;
-                haystack.len -= offset + needle.len * found;
+                haystack.start += offset + needle.length;
+                haystack.length -= offset + needle.length * found;
             }
         }
     }
@@ -303,7 +303,8 @@ static PyObject *str_levenstein_vectorcall(PyObject *_, PyObject *const *args, s
     PyObject *str2_obj = args[1];
 
     struct sz_haystack_t str1, str2;
-    if (!export_string_like(str1_obj, &str1.ptr, &str1.len) || !export_string_like(str2_obj, &str2.ptr, &str2.len)) {
+    if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
+        !export_string_like(str2_obj, &str2.start, &str2.length)) {
         PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
         return NULL;
     }
@@ -340,23 +341,23 @@ static PyObject *str_levenstein_vectorcall(PyObject *_, PyObject *const *args, s
     }
 
     // Initialize or reallocate the Levenshtein distance matrix
-    size_t memory_needed = sz_levenstein_memory_needed(str1.len, str2.len);
-    if (temporary_memory.len < memory_needed) {
-        temporary_memory.ptr = realloc(temporary_memory.ptr, memory_needed);
-        temporary_memory.len = memory_needed;
+    size_t memory_needed = sz_levenstein_memory_needed(str1.length, str2.length);
+    if (temporary_memory.length < memory_needed) {
+        temporary_memory.start = realloc(temporary_memory.start, memory_needed);
+        temporary_memory.length = memory_needed;
     }
-    if (temporary_memory.ptr == NULL) {
+    if (temporary_memory.start == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
         return NULL;
     }
 
     levenstein_distance_t distance = sz_levenstein( //
-        str1.ptr,
-        str1.len,
-        str2.ptr,
-        str2.len,
+        str1.start,
+        str1.length,
+        str2.start,
+        str2.length,
         (levenstein_distance_t)bound,
-        temporary_memory.ptr);
+        temporary_memory.start);
     return PyLong_FromLong(distance);
 }
 
@@ -609,16 +610,16 @@ static int Str_contains(Str *self, PyObject *arg) {
 
     struct sz_needle_t needle_struct;
     needle_struct.anomaly_offset = 0;
-    if (!export_string_like(arg, &needle_struct.ptr, &needle_struct.len)) {
+    if (!export_string_like(arg, &needle_struct.start, &needle_struct.length)) {
         PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
         return -1;
     }
 
     struct sz_haystack_t haystack;
-    haystack.ptr = self->start;
-    haystack.len = self->length;
+    haystack.start = self->start;
+    haystack.length = self->length;
     size_t position = sz_neon_find_substr(haystack, needle_struct);
-    return position != haystack.len;
+    return position != haystack.length;
 }
 
 static PyObject *Str_getslice(Str *self, PyObject *args) {
@@ -761,9 +762,9 @@ PyObject *register_vectorcall(PyObject *module, char const *name, vectorcallfunc
 }
 
 void cleanup_module(void) {
-    free(temporary_memory.ptr);
-    temporary_memory.ptr = NULL;
-    temporary_memory.len = 0;
+    free(temporary_memory.start);
+    temporary_memory.start = NULL;
+    temporary_memory.length = 0;
 }
 
 PyMODINIT_FUNC PyInit_stringzilla(void) {
@@ -796,8 +797,8 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     // Initialize temporary_memory, if needed
     // For example, allocate an initial chunk
-    temporary_memory.ptr = malloc(4096);
-    temporary_memory.len = 4096 * (temporary_memory.ptr != NULL);
+    temporary_memory.start = malloc(4096);
+    temporary_memory.length = 4096 * (temporary_memory.start != NULL);
     atexit(cleanup_module);
 
     // Register the vectorized functions
