@@ -25,8 +25,13 @@ typedef SSIZE_T ssize_t;
 
 #pragma region Forward Declarations
 
-static PyTypeObject MemoryMappedFileType;
+static PyTypeObject FileType;
 static PyTypeObject StrType;
+
+struct {
+    void *ptr;
+    size_t len;
+} temporary_memory = {NULL, 0};
 
 /**
  *  @brief  Describes an on-disk file mapped into RAM, which is different from Python's
@@ -42,11 +47,11 @@ typedef struct {
 #endif
     void *start;
     size_t length;
-} MemoryMappedFile;
+} File;
 
 /**
  *  @brief  Type-punned StringZilla-string, that points to a slice of an existing Python `str`
- *          or a `MemoryMappedFile`.
+ *          or a `File`.
  *
  *  When a slice is constructed, the `parent` object's reference count is being incremented to preserve lifetime.
  *  It usage in Python would look like:
@@ -112,8 +117,8 @@ int export_string_like(PyObject *object, char const **start, size_t *length) {
         *length = str->length;
         return 1;
     }
-    else if (PyObject_TypeCheck(object, &MemoryMappedFileType)) {
-        MemoryMappedFile *file = (MemoryMappedFile *)object;
+    else if (PyObject_TypeCheck(object, &FileType)) {
+        File *file = (File *)object;
         *start = file->start;
         *length = file->length;
         return 1;
@@ -125,7 +130,7 @@ int export_string_like(PyObject *object, char const **start, size_t *length) {
 
 #pragma region Global Functions
 
-static size_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
+static Py_ssize_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
     Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
 
     // Initialize defaults
@@ -140,9 +145,9 @@ static size_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_t na
 
     PyObject *haystack_obj = args[0];
     PyObject *needle_obj = args[1];
-
     struct strzl_haystack_t haystack;
     struct strzl_needle_t needle;
+    needle.anomaly_offset = 0;
     if (!export_string_like(haystack_obj, &haystack.ptr, &haystack.len) ||
         !export_string_like(needle_obj, &needle.ptr, &needle.len)) {
         PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
@@ -178,21 +183,24 @@ static size_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_t na
     haystack.len = normalized_length;
 
     // Perform contains operation
-    return strzl_neon_find_substr(haystack, needle);
+    size_t offset = strzl_neon_find_substr(haystack, needle);
+    if (offset == haystack.len)
+        return -1;
+    return (Py_ssize_t)offset;
 }
 
 static PyObject *str_find_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
-    size_t offset = str_find_vectorcall_(NULL, args, nargsf, kwnames);
-    return PyLong_FromSize_t(offset);
+    Py_ssize_t signed_offset = str_find_vectorcall_(NULL, args, nargsf, kwnames);
+    return PyLong_FromSsize_t(signed_offset);
 }
 
 static PyObject *str_contains_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
-    size_t offset = str_find_vectorcall_(NULL, args, nargsf, kwnames);
-    if (offset != haystack.len) {
-        Py_RETURN_TRUE;
+    Py_ssize_t signed_offset = str_find_vectorcall_(NULL, args, nargsf, kwnames);
+    if (signed_offset == -1) {
+        Py_RETURN_FALSE;
     }
     else {
-        Py_RETURN_FALSE;
+        Py_RETURN_TRUE;
     }
 }
 
@@ -215,6 +223,7 @@ static PyObject *str_count_vectorcall(PyObject *_, PyObject *const *args, size_t
 
     struct strzl_haystack_t haystack;
     struct strzl_needle_t needle;
+    needle.anomaly_offset = 0;
     if (!export_string_like(haystack_obj, &haystack.ptr, &haystack.len) ||
         !export_string_like(needle_obj, &needle.ptr, &needle.len)) {
         PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
@@ -281,11 +290,81 @@ static PyObject *str_count_vectorcall(PyObject *_, PyObject *const *args, size_t
     return PyLong_FromSize_t(count);
 }
 
+static PyObject *str_levenstein_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
+    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+
+    // Validate the number of arguments
+    if (nargs < 2 || nargs > 3) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *str1_obj = args[0];
+    PyObject *str2_obj = args[1];
+
+    struct strzl_haystack_t str1, str2;
+    if (!export_string_like(str1_obj, &str1.ptr, &str1.len) || !export_string_like(str2_obj, &str2.ptr, &str2.len)) {
+        PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
+        return NULL;
+    }
+
+    // Initialize bound argument
+    int bound = 255;
+
+    // Check if `bound` is given as a positional argument
+    if (nargs == 3) {
+        bound = PyLong_AsLong(args[2]);
+        if (bound > 255 || bound < 0) {
+            PyErr_SetString(PyExc_ValueError, "Bound must be an integer between 0 and 255");
+            return NULL;
+        }
+    }
+
+    // Parse keyword arguments
+    if (kwnames != NULL) {
+        for (Py_ssize_t i = 0; i < PyTuple_Size(kwnames); ++i) {
+            PyObject *key = PyTuple_GetItem(kwnames, i);
+            PyObject *value = args[nargs + i];
+            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0) {
+                if (nargs == 3) {
+                    PyErr_SetString(PyExc_TypeError, "Received bound both as positional and keyword argument");
+                    return NULL;
+                }
+                bound = PyLong_AsLong(value);
+                if (bound > 255 || bound < 0) {
+                    PyErr_SetString(PyExc_ValueError, "Bound must be an integer between 0 and 255");
+                    return NULL;
+                }
+            }
+        }
+    }
+
+    // Initialize or reallocate the Levenshtein distance matrix
+    size_t memory_needed = strzl_levenstein_memory_needed(str1.len, str2.len);
+    if (temporary_memory.len < memory_needed) {
+        temporary_memory.ptr = realloc(temporary_memory.ptr, memory_needed);
+        temporary_memory.len = memory_needed;
+    }
+    if (temporary_memory.ptr == NULL) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
+        return NULL;
+    }
+
+    levenstein_distance_t distance = strzl_levenstein( //
+        str1.ptr,
+        str1.len,
+        str2.ptr,
+        str2.len,
+        (levenstein_distance_t)bound,
+        temporary_memory.ptr);
+    return PyLong_FromLong(distance);
+}
+
 #pragma endregion
 
 #pragma region MemoryMappingFile
 
-static void MemoryMappedFile_dealloc(MemoryMappedFile *self) {
+static void File_dealloc(File *self) {
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
     if (self->start) {
         UnmapViewOfFile(self->start);
@@ -313,9 +392,9 @@ static void MemoryMappedFile_dealloc(MemoryMappedFile *self) {
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *MemoryMappedFile_new(PyTypeObject *type, PyObject *positional_args, PyObject *named_args) {
-    MemoryMappedFile *self;
-    self = (MemoryMappedFile *)type->tp_alloc(type, 0);
+static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObject *named_args) {
+    File *self;
+    self = (File *)type->tp_alloc(type, 0);
     if (self == NULL)
         return NULL;
 
@@ -329,7 +408,7 @@ static PyObject *MemoryMappedFile_new(PyTypeObject *type, PyObject *positional_a
     self->length = 0;
 }
 
-static int MemoryMappedFile_init(MemoryMappedFile *self, PyObject *positional_args, PyObject *named_args) {
+static int File_init(File *self, PyObject *positional_args, PyObject *named_args) {
     const char *path;
     if (!PyArg_ParseTuple(positional_args, "s", &path))
         return -1;
@@ -384,18 +463,18 @@ static int MemoryMappedFile_init(MemoryMappedFile *self, PyObject *positional_ar
     return 0;
 }
 
-static PyMethodDef MemoryMappedFile_methods[] = { //
+static PyMethodDef File_methods[] = { //
     {NULL, NULL, 0, NULL}};
 
-static PyTypeObject MemoryMappedFileType = {
-    PyObject_HEAD_INIT(NULL).tp_name = "stringzilla.MemoryMappedFile",
+static PyTypeObject FileType = {
+    PyObject_HEAD_INIT(NULL).tp_name = "stringzilla.File",
     .tp_doc = "Memory mapped file class, that exposes the memory range for low-level access",
-    .tp_basicsize = sizeof(MemoryMappedFile),
+    .tp_basicsize = sizeof(File),
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_methods = MemoryMappedFile_methods,
-    .tp_new = (newfunc)MemoryMappedFile_new,
-    .tp_init = (initproc)MemoryMappedFile_init,
-    .tp_dealloc = (destructor)MemoryMappedFile_dealloc,
+    .tp_methods = File_methods,
+    .tp_new = (newfunc)File_new,
+    .tp_init = (initproc)File_init,
+    .tp_dealloc = (destructor)File_dealloc,
 
     // PyBufferProcs *tp_as_buffer;
 
@@ -663,17 +742,6 @@ static PyModuleDef stringzilla_module = {
     NULL,
 };
 
-// String functions:
-static PyObject *vectorized_find = NULL;
-static PyObject *vectorized_count = NULL;
-static PyObject *vectorized_contains = NULL;
-static PyObject *vectorized_levenstein = NULL;
-
-// String collections:
-static PyObject *vectorized_split = NULL;
-static PyObject *vectorized_sort = NULL;
-static PyObject *vectorized_shuffle = NULL;
-
 PyObject *register_vectorcall(PyObject *module, char const *name, vectorcallfunc vectorcall) {
 
     PyCFunctionObject *vectorcall_object = (PyCFunctionObject *)PyObject_Malloc(sizeof(PyCFunctionObject));
@@ -692,13 +760,19 @@ PyObject *register_vectorcall(PyObject *module, char const *name, vectorcallfunc
     return vectorcall_object;
 }
 
+void cleanup_module(void) {
+    free(temporary_memory.ptr);
+    temporary_memory.ptr = NULL;
+    temporary_memory.len = 0;
+}
+
 PyMODINIT_FUNC PyInit_stringzilla(void) {
     PyObject *m;
 
     if (PyType_Ready(&StrType) < 0)
         return NULL;
 
-    if (PyType_Ready(&MemoryMappedFileType) < 0)
+    if (PyType_Ready(&FileType) < 0)
         return NULL;
 
     m = PyModule_Create(&stringzilla_module);
@@ -712,23 +786,30 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         return NULL;
     }
 
-    Py_INCREF(&MemoryMappedFileType);
-    if (PyModule_AddObject(m, "MemoryMappedFile", (PyObject *)&MemoryMappedFileType) < 0) {
-        Py_XDECREF(&MemoryMappedFileType);
+    Py_INCREF(&FileType);
+    if (PyModule_AddObject(m, "File", (PyObject *)&FileType) < 0) {
+        Py_XDECREF(&FileType);
         Py_XDECREF(&StrType);
         Py_XDECREF(m);
         return NULL;
     }
 
-    // Register the vectorized functions
-    vectorized_find = register_vectorcall(m, "find", str_find_vectorcall);
-    vectorized_contains = register_vectorcall(m, "contains", str_contains_vectorcall);
-    vectorized_count = register_vectorcall(m, "count", str_count_vectorcall);
-    vectorized_levenstein = register_vectorcall(m, "levenstein", str_find_vectorcall);
+    // Initialize temporary_memory, if needed
+    // For example, allocate an initial chunk
+    temporary_memory.ptr = malloc(4096);
+    temporary_memory.len = 4096 * (temporary_memory.ptr != NULL);
+    atexit(cleanup_module);
 
-    vectorized_split = register_vectorcall(m, "split", str_find_vectorcall);
-    vectorized_sort = register_vectorcall(m, "sort", str_find_vectorcall);
-    vectorized_shuffle = register_vectorcall(m, "shuffle", str_find_vectorcall);
+    // Register the vectorized functions
+    PyObject *vectorized_find = register_vectorcall(m, "find", str_find_vectorcall);
+    PyObject *vectorized_contains = register_vectorcall(m, "contains", str_contains_vectorcall);
+    PyObject *vectorized_count = register_vectorcall(m, "count", str_count_vectorcall);
+    PyObject *vectorized_levenstein = register_vectorcall(m, "levenstein", str_levenstein_vectorcall);
+
+    PyObject *vectorized_split = register_vectorcall(m, "split", str_find_vectorcall);
+    PyObject *vectorized_sort = register_vectorcall(m, "sort", str_find_vectorcall);
+    PyObject *vectorized_shuffle = register_vectorcall(m, "shuffle", str_find_vectorcall);
+
     if (!vectorized_find || !vectorized_count ||          //
         !vectorized_contains || !vectorized_levenstein || //
         !vectorized_split || !vectorized_sort || !vectorized_shuffle) {
@@ -753,7 +834,7 @@ cleanup:
     if (vectorized_shuffle)
         Py_XDECREF(vectorized_shuffle);
 
-    Py_XDECREF(&MemoryMappedFileType);
+    Py_XDECREF(&FileType);
     Py_XDECREF(&StrType);
     Py_XDECREF(m);
     PyErr_NoMemory();
