@@ -12,27 +12,27 @@
 #include <stringzilla.h>
 
 using strings_t = std::vector<std::string>;
-using idx_t = std::size_t;
+using idx_t = sz_size_t;
 using permute_t = std::vector<idx_t>;
 
 #pragma region - C callbacks
 
-static char const *get_start(void const *array_c, size_t i) {
+static char const *get_start(void const *array_c, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c);
     return array[i].c_str();
 }
 
-static size_t get_length(void const *array_c, size_t i) {
+static sz_size_t get_length(void const *array_c, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c);
     return array[i].size();
 }
 
-static bool is_less(void const *array_c, size_t i, size_t j) {
+static int is_less(void const *array_c, sz_size_t i, sz_size_t j) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c);
     return array[i] < array[j];
 }
 
-static bool has_under_four_chars(void const *array_c, size_t i) {
+static int has_under_four_chars(void const *array_c, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c);
     return array[i].size() < 4;
 }
