@@ -90,6 +90,7 @@ typedef struct {
          */
         struct consecutive_slices_32bit_t {
             size_t count;
+            size_t separator_length;
             PyObject *parent;
             char const *start;
             uint32_t *offsets;
@@ -101,6 +102,7 @@ typedef struct {
          */
         struct consecutive_slices_64bit_t {
             size_t count;
+            size_t separator_length;
             PyObject *parent;
             char const *start;
             uint64_t *offsets;
@@ -423,6 +425,125 @@ static PyObject *str_levenstein_vectorcall(PyObject *_, PyObject *const *args, s
         (levenstein_distance_t)bound,
         temporary_memory.start);
     return PyLong_FromLong(distance);
+}
+
+static PyObject *strs_split_vectorcall(PyObject *self, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
+    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+
+    // Validate the number of arguments
+    if (nargs < 1) {
+        PyErr_SetString(PyExc_TypeError, "sz.split() requires at least 1 argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = args[0];
+    struct sz_haystack_t text;
+    if (!export_string_like(text_obj, &text.start, &text.length)) {
+        PyErr_SetString(PyExc_TypeError, "First argument must be string-like");
+        return NULL;
+    }
+
+    struct sz_needle_t separator;
+    separator.start = " ";
+    separator.length = 1;
+    separator.anomaly_offset = 0;
+    int keepseparator = 0;
+    Py_ssize_t maxsplit = PY_SSIZE_T_MAX;
+
+    // Parse additional positional arguments and keyword arguments
+    if (kwnames != NULL) {
+        for (Py_ssize_t i = 0; i < PyTuple_Size(kwnames); ++i) {
+            PyObject *key = PyTuple_GetItem(kwnames, i);
+            PyObject *value = args[nargs + i];
+            if (PyUnicode_CompareWithASCIIString(key, "separator") == 0) {
+                // Assume separator is passed as a Python Unicode object
+                Py_ssize_t len;
+                separator.start = PyUnicode_AsUTF8AndSize(value, &len);
+                separator.length = (size_t)len;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0)
+                maxsplit = PyLong_AsSsize_t(value);
+            else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0)
+                keepseparator = PyObject_IsTrue(value);
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
+    }
+
+    // Create Strs object
+    Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
+    if (!result)
+        return NULL;
+
+    // Initialize Strs object based on the splitting logic
+    void *offsets = NULL;
+    size_t offsets_capacity = 0;
+    size_t offsets_count = 0;
+    size_t bytes_per_offset;
+    if (text.length >= UINT32_MAX) {
+        bytes_per_offset = 8;
+        result->type = STRS_CONSECUTIVE_64;
+        result->data.consecutive_64bit.start = text.start;
+        result->data.consecutive_64bit.parent = text_obj;
+        result->data.consecutive_64bit.separator_length = keepseparator * separator.length;
+    }
+    else {
+        bytes_per_offset = 4;
+        result->type = STRS_CONSECUTIVE_32;
+        result->data.consecutive_32bit.start = text.start;
+        result->data.consecutive_32bit.parent = text_obj;
+        result->data.consecutive_32bit.separator_length = keepseparator * separator.length;
+    }
+
+    // Iterate through string, keeping track of the
+    sz_size_t last_start = 0;
+    while (last_start < text.length && offsets_count < maxsplit) {
+        sz_haystack_t text_remaining;
+        text_remaining.start = text.start + last_start;
+        text_remaining.length = text.length - last_start;
+        sz_size_t offset_in_remaining = sz_neon_find_substr(text_remaining, separator);
+
+        // Reallocate offsets array if needed
+        if (offsets_count >= offsets_capacity) {
+            offsets_capacity = (offsets_capacity + 1) * 2;
+            void *new_offsets = realloc(offsets, offsets_capacity * bytes_per_offset);
+            if (!new_offsets) {
+                if (offsets)
+                    free(offsets);
+            }
+            offsets = new_offsets;
+        }
+
+        // If the memory allocation has failed - discard the response
+        if (!offsets) {
+            Py_XDECREF(result);
+            PyErr_NoMemory();
+            return NULL;
+        }
+
+        // Export the offset
+        if (text.length >= UINT32_MAX)
+            ((uint64_t *)offsets)[offsets_count++] = (uint64_t)(last_start + offset_in_remaining);
+        else
+            ((uint32_t *)offsets)[offsets_count++] = (uint32_t)(last_start + offset_in_remaining);
+
+        // Next time we want to start
+        last_start = last_start + offset_in_remaining + separator.length;
+    }
+
+    // Populate the Strs object with the offsets
+    if (text.length >= UINT32_MAX) {
+        result->data.consecutive_64bit.offsets = offsets;
+        result->data.consecutive_64bit.count = offsets_count;
+    }
+    else {
+        result->data.consecutive_32bit.offsets = offsets;
+        result->data.consecutive_32bit.count = offsets_count;
+    }
+
+    return (PyObject *)result;
 }
 
 #pragma endregion
@@ -881,7 +1002,6 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     }
 
     // Initialize temporary_memory, if needed
-    // For example, allocate an initial chunk
     temporary_memory.start = malloc(4096);
     temporary_memory.length = 4096 * (temporary_memory.start != NULL);
     atexit(cleanup_module);
@@ -892,7 +1012,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     PyObject *vectorized_count = register_vectorcall(m, "count", str_count_vectorcall);
     PyObject *vectorized_levenstein = register_vectorcall(m, "levenstein", str_levenstein_vectorcall);
 
-    PyObject *vectorized_split = register_vectorcall(m, "split", str_find_vectorcall);
+    PyObject *vectorized_split = register_vectorcall(m, "split", strs_split_vectorcall);
     PyObject *vectorized_sort = register_vectorcall(m, "sort", str_find_vectorcall);
     PyObject *vectorized_shuffle = register_vectorcall(m, "shuffle", str_find_vectorcall);
 
