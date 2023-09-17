@@ -27,6 +27,7 @@ typedef SSIZE_T ssize_t;
 
 static PyTypeObject FileType;
 static PyTypeObject StrType;
+static PyTypeObject StrsType;
 
 struct {
     void *start;
@@ -67,6 +68,69 @@ typedef struct {
     char const *start;
     size_t length;
 } Str;
+
+/**
+ *  @brief  Variable length Python object similar to `Tuple[Union[Str, str]]`,
+ *          for faster sorting, shuffling, joins, and lookups.
+ */
+typedef struct {
+    PyObject_HEAD;
+
+    enum {
+        STRS_CONSECUTIVE_32,
+        STRS_CONSECUTIVE_64,
+        STRS_REORDERED,
+        STRS_MULTI_SOURCE,
+    } type;
+
+    union {
+        /**
+         *  Simple structure resembling Apache Arrow arrays of variable length strings.
+         *  When you split a `Str`, that is under 4 GB in size, this is used for space-efficiency.
+         */
+        struct consecutive_slices_32bit_t {
+            size_t count;
+            PyObject *parent;
+            char const *start;
+            uint32_t *offsets;
+        } consecutive_32bit;
+
+        /**
+         *  Simple structure resembling Apache Arrow arrays of variable length strings.
+         *  When you split a `Str`, over 4 GB long, this structure is used to indicate chunk offsets.
+         */
+        struct consecutive_slices_64bit_t {
+            size_t count;
+            PyObject *parent;
+            char const *start;
+            uint64_t *offsets;
+        } consecutive_64bit;
+
+        /**
+         *  Once you sort, shuffle, or reorganize slices making up a larger string, this structure
+         *  cn be used for space-efficient lookups.
+         */
+        struct reordered_slices_t {
+            size_t count;
+            PyObject *parent;
+            sz_haystack_t *parts;
+        } reordered;
+
+        /**
+         *  Complex structure with two variable length chunks inside - for the parents and their slices.
+         *  The parents are sorted in ascending order of their memory ranges, to let us rapidly locate the source
+         *  with a binary search. The slices are preserved
+         */
+        struct multi_source_strings_t {
+            size_t count;
+            size_t parents_count;
+
+            PyObject **parents;
+            sz_haystack_t *parts;
+        } multi_source;
+    } data;
+
+} Strs;
 
 #pragma endregion
 
@@ -726,6 +790,15 @@ static PyTypeObject StrType = {
     // .tp_as_buffer = (PyBufferProcs *)NULL, // Functions to access object as input/output buffer
 };
 
+static PyTypeObject StrsType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Strs",
+    .tp_doc = "Space-efficient container for large collections of strings and their slices",
+    .tp_basicsize = sizeof(Strs),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = PyType_GenericNew,
+};
+
 #pragma endregion
 
 static PyMethodDef stringzilla_methods[] = { //
@@ -776,6 +849,9 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&FileType) < 0)
         return NULL;
 
+    if (PyType_Ready(&StrsType) < 0)
+        return NULL;
+
     m = PyModule_Create(&stringzilla_module);
     if (m == NULL)
         return NULL;
@@ -789,6 +865,15 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     Py_INCREF(&FileType);
     if (PyModule_AddObject(m, "File", (PyObject *)&FileType) < 0) {
+        Py_XDECREF(&FileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&StrsType);
+    if (PyModule_AddObject(m, "Strs", (PyObject *)&StrsType) < 0) {
+        Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);
         Py_XDECREF(&StrType);
         Py_XDECREF(m);
