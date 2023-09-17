@@ -118,7 +118,7 @@ strzl_sort(&array, &your_config);
 
 Future development plans include:
 
-- Replace PyBind11 with CPython.
+- [x] Replace PyBind11 with CPython.
 - Reverse-order operations in Python #12.
 - Bindings for JavaScript #25, Java, and Rust.
 - Faster string sorting algorithm.
