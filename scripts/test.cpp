@@ -195,23 +195,23 @@ int main(int, char const **) {
         bench_search("std::search", full_text, [&]() {
             return std::search(full_text.begin(), full_text.end(), needle.begin(), needle.end()) - full_text.begin();
         });
-        bench_search("strzl_naive_find_substr", full_text, [&]() {
-            strzl_haystack_t h {full_text.data(), full_text.size()};
-            strzl_needle_t n {needle.data(), needle.size()};
-            return strzl_naive_find_substr(h, n);
+        bench_search("sz_naive_find_substr", full_text, [&]() {
+            sz_haystack_t h {full_text.data(), full_text.size()};
+            sz_needle_t n {needle.data(), needle.size()};
+            return sz_naive_find_substr(h, n);
         });
 #if defined(__ARM_NEON)
-        bench_search("strzl_neon_find_substr", full_text, [&]() {
-            strzl_haystack_t h {full_text.data(), full_text.size()};
-            strzl_needle_t n {needle.data(), needle.size()};
-            return strzl_neon_find_substr(h, n);
+        bench_search("sz_neon_find_substr", full_text, [&]() {
+            sz_haystack_t h {full_text.data(), full_text.size()};
+            sz_needle_t n {needle.data(), needle.size()};
+            return sz_neon_find_substr(h, n);
         });
 #endif
 #if defined(__AVX2__)
-        bench_search("strzl_avx2_find_substr", full_text, [&]() {
-            strzl_haystack_t h {full_text.data(), full_text.size()};
-            strzl_needle_t n {needle.data(), needle.size()};
-            return strzl_avx2_find_substr(h, n);
+        bench_search("sz_avx2_find_substr", full_text, [&]() {
+            sz_haystack_t h {full_text.data(), full_text.size()};
+            sz_needle_t n {needle.data(), needle.size()};
+            return sz_avx2_find_substr(h, n);
         });
 #endif
     }
@@ -233,12 +233,12 @@ int main(int, char const **) {
         });
         expect_partitioned_by_length(strings, permute_base);
 
-        bench_permute("strzl_partition", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            strzl_array_t array;
+        bench_permute("sz_partition", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+            sz_array_t array;
             array.order = permute.data();
             array.count = strings.size();
             array.handle = &strings;
-            strzl_partition(&array, &has_under_four_chars);
+            sz_partition(&array, &has_under_four_chars);
         });
         expect_partitioned_by_length(strings, permute_new);
         // TODO: expect_same(permute_base, permute_new);
@@ -252,14 +252,14 @@ int main(int, char const **) {
         });
         expect_sorted(strings, permute_base);
 
-        bench_permute("strzl_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            strzl_array_t array;
+        bench_permute("sz_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+            sz_array_t array;
             array.order = permute.data();
             array.count = strings.size();
             array.handle = &strings;
             array.get_begin = get_begin;
             array.get_length = get_length;
-            strzl_sort(&array, nullptr);
+            sz_sort(&array, nullptr);
         });
         expect_sorted(strings, permute_new);
 

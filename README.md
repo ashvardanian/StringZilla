@@ -115,17 +115,17 @@ There is an ABI-stable C 99 interface, in case you have a database, an operating
 #include "stringzilla.h"
 
 // Initialize your haystack and needle
-strzl_haystack_t haystack = {your_text, your_text_length};
-strzl_needle_t needle = {your_subtext, your_subtext_length, your_anomaly_offset};
+sz_haystack_t haystack = {your_text, your_text_length};
+sz_needle_t needle = {your_subtext, your_subtext_length, your_anomaly_offset};
 
 // Perform string-level operations
-size_t character_count = strzl_naive_count_char(haystack, 'a');
-size_t character_position = strzl_naive_find_char(haystack, 'a');
-size_t substring_position = strzl_naive_find_substr(haystack, needle);
+size_t character_count = sz_naive_count_char(haystack, 'a');
+size_t character_position = sz_naive_find_char(haystack, 'a');
+size_t substring_position = sz_naive_find_substr(haystack, needle);
 
 // Perform collection level operations
-strzl_array_t array = {your_order, your_count, your_get_begin, your_get_length, your_handle};
-strzl_sort(&array, &your_config);
+sz_array_t array = {your_order, your_count, your_get_begin, your_get_length, your_handle};
+sz_sort(&array, &your_config);
 ```
 
 ## Contributing 👾
