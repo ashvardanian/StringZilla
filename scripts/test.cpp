@@ -65,7 +65,7 @@ void populate_with_test(strings_t &strings) {
 
 constexpr size_t offset_in_word = 0;
 
-inline static idx_t hybrid_sort(strings_t const &strings, idx_t *order) {
+inline static idx_t hybrid_sort_cpp(strings_t const &strings, idx_t *order) {
 
     // What if we take up-to 4 first characters and the index
     for (size_t i = 0; i != strings.size(); ++i)
@@ -87,7 +87,50 @@ inline static idx_t hybrid_sort(strings_t const &strings, idx_t *order) {
     return strings.size();
 }
 
-inline static idx_t hybrid_stable_sort(strings_t const &strings, idx_t *order) {
+int hybrid_sort_c_compare_uint32_t(const void *a, const void *b) {
+    uint32_t int_a = *((uint32_t *)(((char *)a) + sizeof(sz_size_t) - 4));
+    uint32_t int_b = *((uint32_t *)(((char *)b) + sizeof(sz_size_t) - 4));
+    return (int_a < int_b) ? -1 : (int_a > int_b);
+}
+
+int hybrid_sort_c_compare_strings(void *arg, const void *a, const void *b) {
+    sz_sequence_t *seq = (sz_sequence_t *)arg;
+    sz_size_t idx_a = *(sz_size_t *)a;
+    sz_size_t idx_b = *(sz_size_t *)b;
+
+    const char *str_a = seq->get_start(seq->handle, idx_a);
+    const char *str_b = seq->get_start(seq->handle, idx_b);
+    sz_size_t len_a = seq->get_length(seq->handle, idx_a);
+    sz_size_t len_b = seq->get_length(seq->handle, idx_b);
+
+    int res = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
+    return res ? res : (int)(len_a - len_b);
+}
+
+sz_size_t hybrid_sort_c(sz_sequence_t *sequence) {
+    // Copy up to 4 first characters into the 'order' array.
+    for (sz_size_t i = 0; i < sequence->count; ++i) {
+        const char *str = sequence->get_start(sequence->handle, sequence->order[i]);
+        sz_size_t len = sequence->get_length(sequence->handle, sequence->order[i]);
+        len = len > 4 ? 4 : len;
+        memcpy((char *)&sequence->order[i] + sizeof(sz_size_t) - 4, str, len);
+    }
+
+    // Sort based on the first 4 bytes.
+    qsort(sequence->order, sequence->count, sizeof(sz_size_t), hybrid_sort_c_compare_uint32_t);
+
+    // Clear the 4 bytes used for the initial sort.
+    for (sz_size_t i = 0; i < sequence->count; ++i) {
+        memset((char *)&sequence->order[i] + sizeof(sz_size_t) - 4, 0, 4);
+    }
+
+    // Sort the full strings.
+    qsort_r(sequence->order, sequence->count, sizeof(sz_size_t), sequence, hybrid_sort_c_compare_strings);
+
+    return sequence->count;
+}
+
+inline static idx_t hybrid_stable_sort_cpp(strings_t const &strings, idx_t *order) {
 
     // What if we take up-to 4 first characters and the index
     for (size_t i = 0; i != strings.size(); ++i)
@@ -189,7 +232,7 @@ int main(int, char const **) {
     };
 
     // Search substring
-    for (std::size_t needle_len = 1; needle_len <= 5; ++needle_len) {
+    for (std::size_t needle_len = 1; needle_len <= 0; ++needle_len) {
         std::string needle(needle_len, '\4');
         std::printf("---- Needle length: %zu\n", needle_len);
         bench_search("std::search", full_text, [&]() {
@@ -221,7 +264,7 @@ int main(int, char const **) {
     permute_new.resize(strings.size());
 
     // Partitioning
-    if (true) {
+    if (false) {
         std::printf("---- Partitioning:\n");
         bench_permute("std::partition", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
             std::partition(permute.begin(), permute.end(), [&](size_t i) { return strings[i].size() < 4; });
@@ -263,8 +306,19 @@ int main(int, char const **) {
         });
         expect_sorted(strings, permute_new);
 
-        bench_permute("hybrid_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            hybrid_sort(strings, permute.data());
+        bench_permute("hybrid_sort_c", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+            sz_sequence_t array;
+            array.order = permute.data();
+            array.count = strings.size();
+            array.handle = &strings;
+            array.get_start = get_start;
+            array.get_length = get_length;
+            hybrid_sort_c(&array);
+        });
+        expect_sorted(strings, permute_new);
+
+        bench_permute("hybrid_sort_cpp", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+            hybrid_sort_cpp(strings, permute.data());
         });
         expect_sorted(strings, permute_new);
 
@@ -274,9 +328,11 @@ int main(int, char const **) {
         });
         expect_sorted(strings, permute_base);
 
-        bench_permute("hybrid_stable_sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            hybrid_stable_sort(strings, permute.data());
-        });
+        bench_permute(
+            "hybrid_stable_sort_cpp",
+            strings,
+            permute_base,
+            [](strings_t const &strings, permute_t &permute) { hybrid_stable_sort_cpp(strings, permute.data()); });
         expect_sorted(strings, permute_new);
         expect_same(permute_base, permute_new);
     }
