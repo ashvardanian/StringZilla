@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from stringzilla import Str, File, Strs
+from stringzilla import Str, File, Strs, levenstein
 
 
 def get_random_string(
@@ -192,3 +192,18 @@ def test_strs():
             native_strings[start:stop:step],
             big_strings.sub(start, stop, step),
         )
+
+
+def test_levenstein():
+    # Create a new string by slicing and concatenating
+    def insert_char_at(s, char_to_insert, index):
+        return s[:index] + char_to_insert + s[index:]
+
+    for _ in range(100):
+        a = get_random_string(length=20)
+        b = a
+        for i in range(150):
+            source_offset = randint(0, len(ascii_lowercase) - 1)
+            target_offset = randint(0, len(b) - 1)
+            b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
+            assert levenstein(a, b, 200) == i + 1

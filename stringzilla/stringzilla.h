@@ -6,6 +6,7 @@
 #include <string.h> // `memcpy`
 #include <stdlib.h> // `qsort_r`
 #include <search.h> // `qsort_s`
+#include <ctype.h>  // `tolower`
 
 #if defined(__AVX2__)
 #include <x86intrin.h>
@@ -125,9 +126,9 @@ inline static size_t strzl_naive_find_2chars(strzl_haystack_t h, char const *n) 
     char const *end = h.ptr + h.len;
 
     // This code simulates hyperscalar execution, analyzing 7 offsets at a time.
-    uint64_t nnnn = (uint64_t(n[0]) << 0) | (uint64_t(n[1]) << 8); // broadcast `n` into `nnnn`
-    nnnn |= nnnn << 16;                                            // broadcast `n` into `nnnn`
-    nnnn |= nnnn << 32;                                            // broadcast `n` into `nnnn`
+    uint64_t nnnn = ((uint64_t)(n[0]) << 0) | ((uint64_t)(n[1]) << 8); // broadcast `n` into `nnnn`
+    nnnn |= nnnn << 16;                                                // broadcast `n` into `nnnn`
+    nnnn |= nnnn << 32;                                                // broadcast `n` into `nnnn`
     uint64_t text_slice;
     for (; text + 8 <= end; text += 7) {
         memcpy(&text_slice, text, 8);
@@ -165,9 +166,9 @@ inline static size_t strzl_naive_find_3chars(strzl_haystack_t h, char const *n) 
 
     // This code simulates hyperscalar execution, analyzing 6 offsets at a time.
     // We have two unused bytes at the end.
-    uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16); // broadcast `n` into `nn`
-    nn |= nn << 24;                                                                     // broadcast `n` into `nn`
-    nn <<= 16;                                                                          // broadcast `n` into `nn`
+    uint64_t nn = (uint64_t)(n[0] << 0) | ((uint64_t)(n[1]) << 8) | ((uint64_t)(n[2]) << 16); // broadcast `n` into `nn`
+    nn |= nn << 24;                                                                           // broadcast `n` into `nn`
+    nn <<= 16;                                                                                // broadcast `n` into `nn`
 
     for (; text + 8 <= end; text += 6) {
         uint64_t text_slice;
@@ -216,9 +217,8 @@ inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) 
     char const *end = h.ptr + h.len;
 
     // This code simulates hyperscalar execution, analyzing 4 offsets at a time.
-    uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16) | (uint64_t(n[3]) << 24);
+    uint64_t nn = (uint64_t)(n[0] << 0) | ((uint64_t)(n[1]) << 8) | ((uint64_t)(n[2]) << 16) | ((uint64_t)(n[3]) << 24);
     nn |= nn << 32;
-    nn = nn;
 
     //
     uint8_t lookup[16] = {0};
@@ -254,7 +254,7 @@ inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) 
         if (text01_indicators + text23_indicators) {
             // Assuming we have performed 4 comparisons, we can only have 2^4=16 outcomes.
             // Which is small enought for a lookup table.
-            uint8_t match_indicators = uint8_t(                        //
+            uint8_t match_indicators = (uint8_t)(                      //
                 (text01_indicators >> 31) | (text01_indicators << 0) | //
                 (text23_indicators >> 29) | (text23_indicators << 2));
             return text - h.ptr + lookup[match_indicators];
@@ -307,7 +307,7 @@ inline static size_t strzl_naive_find_substr(strzl_haystack_t h, strzl_needle_t 
 #if defined(__AVX2__)
 
 /**
- *  @brief  Substring-search implementation, leveraging x86 AVX2 instrinsics and speculative
+ *  @brief  Substring-search implementation, leveraging x86 AVX2 intrinsics and speculative
  *          execution capabilities on modern CPUs. Performing 4 unaligned vector loads per cycle
  *          was practically more efficient than loading once and shifting around, as introduces
  *          less data dependencies.
@@ -329,7 +329,7 @@ size_t strzl_avx2_find_substr(strzl_haystack_t h, strzl_needle_t n) {
     __m256i const masks = _mm256_set1_epi32(*(uint32_t const *)&mask);
 
     // Top level for-loop changes dramatically.
-    // In sequentail computing model for 32 offsets we would do:
+    // In sequential computing model for 32 offsets we would do:
     //  + 32 comparions.
     //  + 32 branches.
     // In vectorized computations models:
@@ -359,8 +359,10 @@ size_t strzl_avx2_find_substr(strzl_haystack_t h, strzl_needle_t n) {
     }
 
     // Don't forget the last (up to 35) characters.
-    size_t tail_len = end - text;
-    size_t tail_match = strzl_naive_find_substr({text, tail_len}, n);
+    strzl_haystack_t tail;
+    tail.ptr = text;
+    tail.len = end - text;
+    size_t tail_match = strzl_naive_find_substr(tail, n);
     return text + tail_match - h.ptr;
 }
 
@@ -369,7 +371,7 @@ size_t strzl_avx2_find_substr(strzl_haystack_t h, strzl_needle_t n) {
 #if defined(__ARM_NEON)
 
 /**
- *  @brief  Substring-search implementation, leveraging Arm Neon instrinsics and speculative
+ *  @brief  Substring-search implementation, leveraging Arm Neon intrinsics and speculative
  *          execution capabilities on modern CPUs. Performing 4 unaligned vector loads per cycle
  *          was practically more efficient than loading once and shifting around, as introduces
  *          less data dependencies.
@@ -415,8 +417,10 @@ inline static size_t strzl_neon_find_substr(strzl_haystack_t h, strzl_needle_t n
     }
 
     // Don't forget the last (up to 16+3=19) characters.
-    size_t tail_len = end - text;
-    size_t tail_match = strzl_naive_find_substr({text, tail_len}, n);
+    strzl_haystack_t tail;
+    tail.ptr = text;
+    tail.len = end - text;
+    size_t tail_match = strzl_naive_find_substr(tail, n);
     return text + tail_match - h.ptr;
 }
 
@@ -433,13 +437,13 @@ typedef size_t (*strzl_array_get_length_t)(void const *, size_t);
 typedef bool (*strzl_array_predicate_t)(void const *, size_t);
 typedef bool (*strzl_array_comparator_t)(void const *, size_t, size_t);
 
-struct strzl_array_t {
+typedef struct strzl_array_t {
     size_t *order;
     size_t count;
     strzl_array_get_begin_t get_begin;
     strzl_array_get_length_t get_length;
     void const *handle;
-};
+} strzl_array_t;
 
 /**
  *  @brief  Similar to `std::partition`, given a predicate splits the
@@ -638,6 +642,67 @@ inline static void strzl_sort(strzl_array_t *array, strzl_sort_config_t const *c
 
     // Perform optionally-parallel radix sort on them
     _strzl_sort_recursion(array, 0, 32, comparator);
+}
+
+typedef uint8_t levenstein_distance_t;
+
+/**
+ *  @return Amount of temporary memory (in bytes) needed to efficiently compute
+ *          the Levenstein distance between two strings of given size.
+ */
+inline static size_t strzl_levenstein_memory_needed(size_t, size_t b_length) { return b_length + b_length + 2; }
+
+/**
+ *  @brief  Auxiliary function, that computes the minimum of three values.
+ */
+inline static levenstein_distance_t _strzl_levenstein_minimum( //
+    levenstein_distance_t a,
+    levenstein_distance_t b,
+    levenstein_distance_t c) {
+
+    return (a < b ? (a < c ? a : c) : (b < c ? b : c));
+}
+
+/**
+ *  @brief  Levenshtein String Similarity function, implemented with linear memory consumption.
+ *          It accepts an upper bound on the possible error. Quadratic complexity in time, linear in space.
+ */
+inline static levenstein_distance_t strzl_levenstein( //
+    char const *a,
+    size_t a_length,
+    char const *b,
+    size_t b_length,
+    levenstein_distance_t bound,
+    void *buffer) {
+
+    if (a_length == 0)
+        return b_length <= bound ? b_length : bound + 1;
+    if (b_length == 0)
+        return a_length <= bound ? a_length : bound + 1;
+
+    levenstein_distance_t *previous_distances = (levenstein_distance_t *)buffer;
+    levenstein_distance_t *current_distances = previous_distances + b_length + 1;
+
+    for (size_t idx_b = 0; idx_b != (b_length + 1); ++idx_b)
+        previous_distances[idx_b] = idx_b;
+
+    for (size_t idx_a = 0; idx_a != a_length; ++idx_a) {
+        current_distances[0] = idx_a + 1;
+
+        for (size_t idx_b = 0; idx_b != b_length; ++idx_b) {
+            levenstein_distance_t cost_deletion = previous_distances[idx_b + 1] + 1;
+            levenstein_distance_t cost_insertion = current_distances[idx_b] + 1;
+            levenstein_distance_t cost_substitution = previous_distances[idx_b] + (a[idx_a] != b[idx_b]);
+            current_distances[idx_b + 1] = _strzl_levenstein_minimum(cost_deletion, cost_insertion, cost_substitution);
+        }
+
+        // Swap previous_distances and current_distances pointers
+        levenstein_distance_t *temp = previous_distances;
+        previous_distances = current_distances;
+        current_distances = temp;
+    }
+
+    return previous_distances[b_length];
 }
 
 #ifdef __cplusplus

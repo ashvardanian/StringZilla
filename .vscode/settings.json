@@ -118,5 +118,27 @@
     "strstream": "cpp",
     "filesystem": "cpp"
   },
-  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "cSpell.words": [
+    "allowoverlap",
+    "cibuildwheel",
+    "getitem",
+    "keeplinebreaks",
+    "keepseparator",
+    "levenstein",
+    "maxsplit",
+    "memcpy",
+    "napi",
+    "pytest",
+    "readlines",
+    "SIMD",
+    "splitlines",
+    "stringzilla",
+    "Strs",
+    "strzl",
+    "substr",
+    "SWAR",
+    "Vardanian",
+    "Zilla"
+  ]
 }

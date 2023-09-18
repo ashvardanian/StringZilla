@@ -18,16 +18,16 @@ So if you're haunted by `open(...).readlines()` and `str().splitlines()` taking 
 
 | Backend \ Device         |                    IoT |                   Laptop |                    Server |
 | :----------------------- | ---------------------: | -----------------------: | ------------------------: |
-| **Speed Comparison** 🐇  |                        |                          |                           |
+| __Speed Comparison__ 🐇   |                        |                          |                           |
 | Python `for` loop        |                 4 MB/s |                  14 MB/s |                   11 MB/s |
 | C++ `for` loop           |               520 MB/s |                 1.0 GB/s |                  900 MB/s |
 | C++ `string.find`        |               560 MB/s |                 1.2 GB/s |                  1.3 GB/s |
 | Scalar StringZilla       |                 2 GB/s |                 3.3 GB/s |                  3.5 GB/s |
-| Hyper-Scalar StringZilla |           **4.3 GB/s** |              **12 GB/s** |             **12.1 GB/s** |
-| **Efficiency Metrics** 📊 |                        |                          |                           |
+| Hyper-Scalar StringZilla |           __4.3 GB/s__ |              __12 GB/s__ |             __12.1 GB/s__ |
+| __Efficiency Metrics__ 📊 |                        |                          |                           |
 | CPU Specs                | 8-core ARM, 0.5 W/core | 8-core Intel, 5.6 W/core | 22-core Intel, 6.3 W/core |
-| Performance/Core         |         2.1 - 3.3 GB/s |              **11 GB/s** |                 10.5 GB/s |
-| Bytes/Joule              |           **4.2 GB/J** |                   2 GB/J |                  1.6 GB/J |
+| Performance/Core         |         2.1 - 3.3 GB/s |              __11 GB/s__ |                 10.5 GB/s |
+| Bytes/Joule              |           __4.2 GB/J__ |                   2 GB/J |                  1.6 GB/J |
 
 ### Partition & Sort
 
@@ -118,15 +118,20 @@ strzl_sort(&array, &your_config);
 
 Future development plans include:
 
+- Replace PyBind11 with CPython.
+- Reverse-order operations in Python #12.
+- Bindings for JavaScript #25, Java, and Rust.
 - Faster string sorting algorithm.
-- Bindings for JavaScript, Java, and Rust.
-- Support for reverse-order operations in Python.
 - Splitting CSV rows into columns.
+- Splitting with multiple separators at once #29.
+- UTF-8 validation.
 - Arm SVE backend.
 
 Here's how to set up your dev environment and run some tests.
 
 ### Development
+
+CPython:
 
 ```sh
 # Clean up and install
@@ -134,6 +139,12 @@ rm -rf build && pip install -e . && pytest scripts/test.py -s -x
 
 # Install without dependencies
 pip install -e . --no-index --no-deps
+```
+
+NodeJS:
+
+```sh
+npm install && node javascript/test.js
 ```
 
 ### Benchmarking
