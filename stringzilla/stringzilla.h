@@ -6,6 +6,7 @@
 #include <string.h> // `memcpy`
 #include <stdlib.h> // `qsort_r`
 #include <search.h> // `qsort_s`
+#include <ctype.h>  // `tolower`
 
 #if defined(__AVX2__)
 #include <x86intrin.h>
@@ -371,11 +372,11 @@ sz_size_t sz_avx2_find_substr(sz_haystack_t h, sz_needle_t n) {
     }
 
     // Don't forget the last (up to 35) characters.
-    sz_haystack_t h_remainder;
-    h_remainder.start = text;
-    h_remainder.length = end - text;
-    sz_size_t tail_match = sz_naive_find_substr(h_remainder, n);
-    return text + tail_match - h.start;
+    sz_haystack_t tail;
+    tail.ptr = text;
+    tail.len = end - text;
+    size_t tail_match = sz_naive_find_substr(tail, n);
+    return text + tail_match - h.ptr;
 }
 
 #endif // x86 AVX2
@@ -429,11 +430,11 @@ inline static sz_size_t sz_neon_find_substr(sz_haystack_t h, sz_needle_t n) {
     }
 
     // Don't forget the last (up to 16+3=19) characters.
-    sz_haystack_t h_remainder;
-    h_remainder.start = text;
-    h_remainder.length = end - text;
-    sz_size_t tail_match = sz_naive_find_substr(h_remainder, n);
-    return text + tail_match - h.start;
+    sz_haystack_t tail;
+    tail.ptr = text;
+    tail.len = end - text;
+    size_t tail_match = sz_naive_find_substr(tail, n);
+    return text + tail_match - h.ptr;
 }
 
 #endif // Arm Neon
