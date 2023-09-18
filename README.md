@@ -131,12 +131,20 @@ Here's how to set up your dev environment and run some tests.
 
 ### Development
 
+CPython:
+
 ```sh
 # Clean up and install
 rm -rf build && pip install -e . && pytest scripts/test.py -s -x
 
 # Install without dependencies
 pip install -e . --no-index --no-deps
+```
+
+NodeJS:
+
+```sh
+npm install && node javascript/test.js
 ```
 
 ### Benchmarking
