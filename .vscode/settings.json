@@ -128,6 +128,7 @@
     "levenstein",
     "maxsplit",
     "memcpy",
+    "napi",
     "pytest",
     "readlines",
     "SIMD",
@@ -137,6 +138,7 @@
     "strzl",
     "substr",
     "SWAR",
+    "Vardanian",
     "Zilla"
   ]
 }
