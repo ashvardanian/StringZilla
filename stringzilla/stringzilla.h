@@ -6,6 +6,7 @@
 #include <string.h> // `memcpy`
 #include <stdlib.h> // `qsort_r`
 #include <search.h> // `qsort_s`
+#include <ctype.h>  // `tolower`
 
 #if defined(__AVX2__)
 #include <x86intrin.h>
@@ -125,9 +126,9 @@ inline static size_t strzl_naive_find_2chars(strzl_haystack_t h, char const *n) 
     char const *end = h.ptr + h.len;
 
     // This code simulates hyperscalar execution, analyzing 7 offsets at a time.
-    uint64_t nnnn = (uint64_t(n[0]) << 0) | (uint64_t(n[1]) << 8); // broadcast `n` into `nnnn`
-    nnnn |= nnnn << 16;                                            // broadcast `n` into `nnnn`
-    nnnn |= nnnn << 32;                                            // broadcast `n` into `nnnn`
+    uint64_t nnnn = ((uint64_t)(n[0]) << 0) | ((uint64_t)(n[1]) << 8); // broadcast `n` into `nnnn`
+    nnnn |= nnnn << 16;                                                // broadcast `n` into `nnnn`
+    nnnn |= nnnn << 32;                                                // broadcast `n` into `nnnn`
     uint64_t text_slice;
     for (; text + 8 <= end; text += 7) {
         memcpy(&text_slice, text, 8);
@@ -165,9 +166,9 @@ inline static size_t strzl_naive_find_3chars(strzl_haystack_t h, char const *n) 
 
     // This code simulates hyperscalar execution, analyzing 6 offsets at a time.
     // We have two unused bytes at the end.
-    uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16); // broadcast `n` into `nn`
-    nn |= nn << 24;                                                                     // broadcast `n` into `nn`
-    nn <<= 16;                                                                          // broadcast `n` into `nn`
+    uint64_t nn = (uint64_t)(n[0] << 0) | ((uint64_t)(n[1]) << 8) | ((uint64_t)(n[2]) << 16); // broadcast `n` into `nn`
+    nn |= nn << 24;                                                                           // broadcast `n` into `nn`
+    nn <<= 16;                                                                                // broadcast `n` into `nn`
 
     for (; text + 8 <= end; text += 6) {
         uint64_t text_slice;
@@ -216,9 +217,8 @@ inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) 
     char const *end = h.ptr + h.len;
 
     // This code simulates hyperscalar execution, analyzing 4 offsets at a time.
-    uint64_t nn = uint64_t(n[0] << 0) | (uint64_t(n[1]) << 8) | (uint64_t(n[2]) << 16) | (uint64_t(n[3]) << 24);
+    uint64_t nn = (uint64_t)(n[0] << 0) | ((uint64_t)(n[1]) << 8) | ((uint64_t)(n[2]) << 16) | ((uint64_t)(n[3]) << 24);
     nn |= nn << 32;
-    nn = nn;
 
     //
     uint8_t lookup[16] = {0};
@@ -254,7 +254,7 @@ inline static size_t strzl_naive_find_4chars(strzl_haystack_t h, char const *n) 
         if (text01_indicators + text23_indicators) {
             // Assuming we have performed 4 comparisons, we can only have 2^4=16 outcomes.
             // Which is small enought for a lookup table.
-            uint8_t match_indicators = uint8_t(                        //
+            uint8_t match_indicators = (uint8_t)(                      //
                 (text01_indicators >> 31) | (text01_indicators << 0) | //
                 (text23_indicators >> 29) | (text23_indicators << 2));
             return text - h.ptr + lookup[match_indicators];
@@ -359,8 +359,10 @@ size_t strzl_avx2_find_substr(strzl_haystack_t h, strzl_needle_t n) {
     }
 
     // Don't forget the last (up to 35) characters.
-    size_t tail_len = end - text;
-    size_t tail_match = strzl_naive_find_substr({text, tail_len}, n);
+    strzl_haystack_t tail;
+    tail.ptr = text;
+    tail.len = end - text;
+    size_t tail_match = strzl_naive_find_substr(tail, n);
     return text + tail_match - h.ptr;
 }
 
@@ -415,8 +417,10 @@ inline static size_t strzl_neon_find_substr(strzl_haystack_t h, strzl_needle_t n
     }
 
     // Don't forget the last (up to 16+3=19) characters.
-    size_t tail_len = end - text;
-    size_t tail_match = strzl_naive_find_substr({text, tail_len}, n);
+    strzl_haystack_t tail;
+    tail.ptr = text;
+    tail.len = end - text;
+    size_t tail_match = strzl_naive_find_substr(tail, n);
     return text + tail_match - h.ptr;
 }
 
@@ -433,13 +437,13 @@ typedef size_t (*strzl_array_get_length_t)(void const *, size_t);
 typedef bool (*strzl_array_predicate_t)(void const *, size_t);
 typedef bool (*strzl_array_comparator_t)(void const *, size_t, size_t);
 
-struct strzl_array_t {
+typedef struct strzl_array_t {
     size_t *order;
     size_t count;
     strzl_array_get_begin_t get_begin;
     strzl_array_get_length_t get_length;
     void const *handle;
-};
+} strzl_array_t;
 
 /**
  *  @brief  Similar to `std::partition`, given a predicate splits the
