@@ -32,8 +32,14 @@ napi_value FindAPI(napi_env env, napi_callback_info info) {
     napi_get_value_string_utf8(env, args[1], needle, str_size + 1, &str_len);
     struct strzl_needle_t strzl_needle = {needle, str_len, 0};
 
-    // Perform the find operation
-    uint64_t result = stringzilla_find(&strzl_haystack, &strzl_needle);
+// Perform the find operation
+#if defined(__AVX2__)
+    uint64_t result = strzl_avx2_find_substr(strzl_haystack, strzl_needle);
+#elif defined(__ARM_NEON)
+    uint64_t result = strzl_neon_find_substr(strzl_haystack, strzl_needle);
+#else
+    uint64_t result = strzl_naive_find_substr(strzl_haystack, strzl_needle);
+#endif
 
     // Cleanup
     free(haystack);
