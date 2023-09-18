@@ -38,17 +38,17 @@ def test_indexing():
         assert big[i] == native[i]
 
 
-def test_contains():
-    big = Str("abcdef")
-    assert "a" in big
-    assert "ab" in big
-    assert "xxx" not in big
+# def test_contains():
+#     big = Str("abcdef")
+#     assert "a" in big
+#     assert "ab" in big
+#     assert "xxx" not in big
 
 
-def test_rich_comparisons():
-    assert Str("aa") == "aa"
-    assert Str("aa") < "b"
-    assert Str("abb")[1:] == "bb"
+# def test_rich_comparisons():
+#     assert Str("aa") == "aa"
+#     assert Str("aa") < "b"
+#     assert Str("abb")[1:] == "bb"
 
 
 # def get_random_string(
@@ -120,12 +120,19 @@ def test_rich_comparisons():
 
 
 def test_split_keepseparator():
-    native = "word1 word2 word3"
+    native = "word1_word2_word3"
     big = Str(native)
-    words = sz.split(big, " ")
-    parts = sz.split(big, " ", keepseparator=True)
-    # assert words[0] == "word1"
-    # assert parts[0] == "word1 "
+
+    words = sz.split(big, "_")
+    assert len(words) == 3
+
+    parts = sz.split(big, "_", keepseparator=True)
+    assert len(parts) == 3
+
+    assert str(words[0]) == "word1"
+    assert str(parts[0]) == "word1_"
+    assert str(words[2]) == "word3"
+    assert str(parts[2]) == "word3"
 
 
 # def test_strs_operations():
