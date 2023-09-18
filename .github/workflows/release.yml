@@ -109,3 +109,22 @@ jobs:
           packages-dir: ./dist/artifact
           verbose: true
           print-hash: true
+
+  publish_javascript:
+    name: Publish JavaScript
+    needs: versioning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: 'main'  
+      - run: git submodule update --init --recursive
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm install
+      - run: npm ci
+      - run: npm test
+      - uses: JS-DevTools/npm-publish@v2
+        with:
+          token: ${{ secrets.NPM_TOKEN }}

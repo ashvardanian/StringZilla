@@ -13,5 +13,6 @@ substr_search_cpp
 *.so
 *.egg-info
 *.whl
+node_modules/
 
 leipzig1M.txt
