@@ -603,9 +603,9 @@ inline static int _strzl_sort_array_strncasecmp(
     return res ? res : a_len - b_len;
 }
 
-struct strzl_sort_config_t {
+typedef struct strzl_sort_config_t {
     bool case_insensitive;
-};
+} strzl_sort_config_t;
 
 /**
  *  @brief  Sorting algorithm, combining Radix Sort for the first 32 bits of every word
