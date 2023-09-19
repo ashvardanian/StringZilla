@@ -2,7 +2,8 @@
  *  @brief  Very light-weight CPython wrapper for StringZilla, with support for memory-mapping,
  *          native Python strings, Apache Arrow collections, and more.
  *
- *  To minimize latency this implementation avoids `PyArg_ParseTupleAndKeywords` calls.
+ *  - Doesn't use PyBind11, NanoBind, Boost.Python, or any other high-level libs, only CPython API.
+ *  - To minimize latency this implementation avoids `PyArg_ParseTupleAndKeywords` calls.
  */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 #define NOMINMAX
@@ -783,7 +784,35 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
     }
 }
 
-// Will be called by the `PySequence_Contains`
+static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
+    if (view == NULL) {
+        PyErr_SetString(PyExc_ValueError, "NULL view in getbuffer");
+        return -1;
+    }
+
+    static Py_ssize_t itemsize[1] = {1};
+    view->obj = (PyObject *)self;
+    view->buf = self->start;
+    view->len = self->length;
+    view->readonly = 1;
+    view->itemsize = sizeof(char);
+    view->format = "c"; // https://docs.python.org/3/library/struct.html#format-characters
+    view->ndim = 1;
+    view->shape = &self->length; // 1-D array, so shape is just a pointer to the length
+    view->strides = itemsize;    // strides in a 1-D array is just the item size
+    view->suboffsets = NULL;
+    view->internal = NULL;
+
+    Py_INCREF(self);
+    return 0;
+}
+
+static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
+    // This function MUST NOT decrement view->obj, since that is done automatically
+    // in PyBuffer_Release() (this scheme is useful for breaking reference cycles).
+    // https://docs.python.org/3/c-api/typeobj.html#c.PyBufferProcs.bf_releasebuffer
+}
+
 static int Str_contains(Str *self, PyObject *arg) {
 
     struct sz_needle_t needle_struct;
@@ -907,6 +936,11 @@ static PyMappingMethods Str_as_mapping = {
     .mp_subscript = Str_subscript, // Is used to implement slices in Python
 };
 
+static PyBufferProcs Str_as_buffer = {
+    .bf_getbuffer = Str_getbuffer,
+    .bf_releasebuffer = Str_releasebuffer,
+};
+
 #define sz_method_flags_m METH_VARARGS | METH_KEYWORDS
 
 static PyMethodDef Str_methods[] = { //
@@ -922,16 +956,16 @@ static PyTypeObject StrType = {
     .tp_doc = "Immutable string/slice class with SIMD and SWAR-accelerated operations",
     .tp_basicsize = sizeof(Str),
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_methods = Str_methods,
     .tp_new = Str_new,
     .tp_init = Str_init,
     .tp_dealloc = Str_dealloc,
-    .tp_as_sequence = &Str_as_sequence,
-    .tp_as_mapping = &Str_as_mapping,
-    .tp_hash = Str_hash, // String hashing functions
+    .tp_hash = Str_hash,
     .tp_richcompare = Str_richcompare,
     .tp_str = Str_str,
-    // .tp_as_buffer = (PyBufferProcs *)NULL, // Functions to access object as input/output buffer
+    .tp_methods = Str_methods,
+    .tp_as_sequence = &Str_as_sequence,
+    .tp_as_mapping = &Str_as_mapping,
+    .tp_as_buffer = &Str_as_buffer,
 };
 
 static PySequenceMethods Strs_as_sequence = {
