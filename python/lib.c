@@ -205,11 +205,490 @@ int export_string_like(PyObject *object, char const **start, size_t *length) {
     return 0;
 }
 
+int get_string_at_offset(
+    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+    switch (strs->type) {
+    case STRS_CONSECUTIVE_32: {
+        uint32_t start_offset = (i == 0) ? 0 : strs->data.consecutive_32bit.end_offsets[i - 1];
+        uint32_t end_offset = strs->data.consecutive_32bit.end_offsets[i];
+        *start = strs->data.consecutive_32bit.start + start_offset;
+        *length = end_offset - start_offset - strs->data.consecutive_32bit.separator_length * (i + 1 != count);
+        *parent = strs->data.consecutive_32bit.parent;
+        return 1;
+    }
+    case STRS_CONSECUTIVE_64: {
+        uint64_t start_offset = (i == 0) ? 0 : strs->data.consecutive_64bit.end_offsets[i - 1];
+        uint64_t end_offset = strs->data.consecutive_64bit.end_offsets[i];
+        *start = strs->data.consecutive_64bit.start + start_offset;
+        *length = end_offset - start_offset - strs->data.consecutive_64bit.separator_length * (i + 1 != count);
+        *parent = strs->data.consecutive_64bit.parent;
+        return 1;
+    }
+    case STRS_REORDERED: {
+        //
+        return 1;
+    }
+    case STRS_MULTI_SOURCE: {
+        //
+        return 1;
+    }
+    default:
+        // Unsupported type
+        PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
+        return -1;
+    }
+}
+
+int prepare_strings_for_reordering(Strs *strs) {
+    // Already in reordered form
+    if (strs->type == STRS_REORDERED) { return 1; }
+
+    // Allocate memory for reordered slices
+    size_t count = 0;
+    switch (strs->type) {
+    case STRS_CONSECUTIVE_32: count = strs->data.consecutive_32bit.count; break;
+    case STRS_CONSECUTIVE_64: count = strs->data.consecutive_64bit.count; break;
+    case STRS_REORDERED: return 1;
+    case STRS_MULTI_SOURCE: return 1;
+    default:
+        // Unsupported type
+        PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
+        return -1;
+    }
+
+    sz_haystack_t *new_parts = (sz_haystack_t *)malloc(count * sizeof(sz_haystack_t));
+    if (new_parts == NULL) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
+        return -1;
+    }
+
+    // Populate the new reordered array using get_string_at_offset
+    for (Py_ssize_t i = 0; i < count; ++i) {
+        PyObject *parent;
+        char const *start;
+        size_t length;
+        if (!get_string_at_offset(strs, i, count, &parent, &start, &length)) {
+            // Handle error
+            PyErr_SetString(PyExc_RuntimeError, "Failed to get string at offset");
+            free(new_parts);
+            return -1;
+        }
+
+        new_parts[i].start = start;
+        new_parts[i].length = length;
+    }
+
+    // Release previous used memory.
+
+    // Update the Strs object
+    strs->type = STRS_REORDERED;
+    strs->data.reordered.count = count;
+    strs->data.reordered.parts = new_parts;
+    strs->data.reordered.parent = NULL; // Assuming the parent is no longer needed
+
+    return 0;
+}
+
 #pragma endregion
 
-#pragma region Global Functions
+#pragma region MemoryMappingFile
 
-static Py_ssize_t Str_find_(PyObject *self, PyObject *args, PyObject *kwargs) {
+static void File_dealloc(File *self) {
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+    if (self->start) {
+        UnmapViewOfFile(self->start);
+        self->start = NULL;
+    }
+    if (self->mapping_handle) {
+        CloseHandle(self->mapping_handle);
+        self->mapping_handle = NULL;
+    }
+    if (self->file_handle) {
+        CloseHandle(self->file_handle);
+        self->file_handle = NULL;
+    }
+#else
+    if (self->start) {
+        munmap(self->start, self->length);
+        self->start = NULL;
+        self->length = 0;
+    }
+    if (self->file_descriptor != 0) {
+        close(self->file_descriptor);
+        self->file_descriptor = 0;
+    }
+#endif
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObject *named_args) {
+    File *self;
+    self = (File *)type->tp_alloc(type, 0);
+    if (self == NULL) return NULL;
+
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+    self->file_handle = NULL;
+    self->mapping_handle = NULL;
+#else
+    self->file_descriptor = 0;
+#endif
+    self->start = NULL;
+    self->length = 0;
+}
+
+static int File_init(File *self, PyObject *positional_args, PyObject *named_args) {
+    const char *path;
+    if (!PyArg_ParseTuple(positional_args, "s", &path)) return -1;
+
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+    self->file_handle = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    if (self->file_handle == INVALID_HANDLE_VALUE) {
+        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
+        return -1;
+    }
+
+    self->mapping_handle = CreateFileMapping(self->file_handle, 0, PAGE_READONLY, 0, 0, 0);
+    if (self->mapping_handle == 0) {
+        CloseHandle(self->file_handle);
+        self->file_handle = NULL;
+        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
+        return -1;
+    }
+
+    char *file = (char *)MapViewOfFile(self->mapping_handle, FILE_MAP_READ, 0, 0, 0);
+    if (file == 0) {
+        CloseHandle(self->mapping_handle);
+        self->mapping_handle = NULL;
+        CloseHandle(self->file_handle);
+        self->file_handle = NULL;
+        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
+        return -1;
+    }
+    self->start = file;
+    self->length = GetFileSize(self->file_handle, 0);
+#else
+    struct stat sb;
+    self->file_descriptor = open(path, O_RDONLY);
+    if (fstat(self->file_descriptor, &sb) != 0) {
+        close(self->file_descriptor);
+        self->file_descriptor = 0;
+        PyErr_SetString(PyExc_RuntimeError, "Can't retrieve file size!");
+        return -1;
+    }
+    size_t file_size = sb.st_size;
+    void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, self->file_descriptor, 0);
+    if (map == MAP_FAILED) {
+        close(self->file_descriptor);
+        self->file_descriptor = 0;
+        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
+        return -1;
+    }
+    self->start = map;
+    self->length = file_size;
+#endif
+
+    return 0;
+}
+
+static PyMethodDef File_methods[] = { //
+    {NULL, NULL, 0, NULL}};
+
+static PyTypeObject FileType = {
+    PyObject_HEAD_INIT(NULL).tp_name = "stringzilla.File",
+    .tp_doc = "Memory mapped file class, that exposes the memory range for low-level access",
+    .tp_basicsize = sizeof(File),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_methods = File_methods,
+    .tp_new = (newfunc)File_new,
+    .tp_init = (initproc)File_init,
+    .tp_dealloc = (destructor)File_dealloc,
+};
+
+#pragma endregion
+
+#pragma region Str
+
+static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
+
+    // Parse all arguments into PyObjects first
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs > 3) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
+        return -1;
+    }
+    PyObject *parent_obj = nargs >= 1 ? PyTuple_GET_ITEM(args, 0) : NULL;
+    PyObject *from_obj = nargs >= 2 ? PyTuple_GET_ITEM(args, 1) : NULL;
+    PyObject *to_obj = nargs >= 3 ? PyTuple_GET_ITEM(args, 2) : NULL;
+
+    // Parse keyword arguments, if provided, and ensure no duplicates
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "parent") == 0) {
+                if (parent_obj) {
+                    PyErr_SetString(PyExc_TypeError, "Received `parent` both as positional and keyword argument");
+                    return -1;
+                }
+                parent_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "from") == 0) {
+                if (from_obj) {
+                    PyErr_SetString(PyExc_TypeError, "Received `from` both as positional and keyword argument");
+                    return -1;
+                }
+                from_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "to") == 0) {
+                if (to_obj) {
+                    PyErr_SetString(PyExc_TypeError, "Received `to` both as positional and keyword argument");
+                    return -1;
+                }
+                to_obj = value;
+            }
+            else {
+                PyErr_SetString(PyExc_TypeError, "Invalid keyword argument");
+                return -1;
+            }
+        }
+    }
+
+    // Now, type-check and cast each argument
+    Py_ssize_t from = 0, to = PY_SSIZE_T_MAX;
+    if (from_obj) {
+        from = PyLong_AsSsize_t(from_obj);
+        if (from == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "The `from` argument must be an integer");
+            return -1;
+        }
+    }
+    if (to_obj) {
+        to = PyLong_AsSsize_t(to_obj);
+        if (to == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "The `to` argument must be an integer");
+            return -1;
+        }
+    }
+
+    // Handle empty string
+    if (parent_obj == NULL) {
+        self->start = NULL;
+        self->length = 0;
+    }
+    // Increment the reference count of the parent
+    else if (export_string_like(parent_obj, &self->start, &self->length)) {
+        self->parent = parent_obj;
+        Py_INCREF(parent_obj);
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Unsupported parent type");
+        return -1;
+    }
+
+    // Apply slicing
+    size_t normalized_offset, normalized_length;
+    slice(self->length, from, to, &normalized_offset, &normalized_length);
+    self->start = ((char *)self->start) + normalized_offset;
+    self->length = normalized_length;
+    return 0;
+}
+
+static PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    Str *self;
+    self = (Str *)type->tp_alloc(type, 0);
+    if (!self) return NULL;
+
+    self->parent = NULL;
+    self->start = NULL;
+    self->length = 0;
+    return (PyObject *)self;
+}
+
+static void Str_dealloc(Str *self) {
+    if (self->parent) { Py_XDECREF(self->parent); }
+    else if (self->start) { free(self->start); }
+    self->parent = NULL;
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->start, self->length); }
+
+static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash_crc32_native(self->start, self->length); }
+
+static Py_ssize_t Str_len(Str *self) { return self->length; }
+
+static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
+
+    // Negative indexing
+    if (i < 0) i += self->length;
+
+    if (i < 0 || (size_t)i >= self->length) {
+        PyErr_SetString(PyExc_IndexError, "Index out of range");
+        return NULL;
+    }
+
+    // Assuming the underlying data is UTF-8 encoded
+    return PyUnicode_FromStringAndSize(self->start + i, 1);
+}
+
+static PyObject *Str_subscript(Str *self, PyObject *key) {
+    if (PySlice_Check(key)) {
+        // Sanity checks
+        Py_ssize_t start, stop, step;
+        if (PySlice_Unpack(key, &start, &stop, &step) < 0) return NULL;
+        if (PySlice_AdjustIndices(self->length, &start, &stop, step) < 0) return NULL;
+        if (step != 1) {
+            PyErr_SetString(PyExc_IndexError, "Efficient step is not supported");
+            return NULL;
+        }
+
+        // Create a new `Str` object
+        Str *self_slice = (Str *)StrType.tp_alloc(&StrType, 0);
+        if (self_slice == NULL && PyErr_NoMemory()) return NULL;
+
+        // Set its properties based on the slice
+        self_slice->start = self->start + start;
+        self_slice->length = stop - start;
+        self_slice->parent = (PyObject *)self; // Set parent to keep it alive
+
+        // Increment the reference count of the parent
+        Py_INCREF(self);
+        return (PyObject *)self_slice;
+    }
+    else if (PyLong_Check(key)) { return Str_getitem(self, PyLong_AsSsize_t(key)); }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Str indices must be integers or slices");
+        return NULL;
+    }
+}
+
+static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
+    if (view == NULL) {
+        PyErr_SetString(PyExc_ValueError, "NULL view in getbuffer");
+        return -1;
+    }
+
+    static Py_ssize_t itemsize[1] = {1};
+    view->obj = (PyObject *)self;
+    view->buf = self->start;
+    view->len = self->length;
+    view->readonly = 1;
+    view->itemsize = sizeof(char);
+    view->format = "c"; // https://docs.python.org/3/library/struct.html#format-characters
+    view->ndim = 1;
+    view->shape = &self->length; // 1-D array, so shape is just a pointer to the length
+    view->strides = itemsize;    // strides in a 1-D array is just the item size
+    view->suboffsets = NULL;
+    view->internal = NULL;
+
+    Py_INCREF(self);
+    return 0;
+}
+
+static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
+    // This function MUST NOT decrement view->obj, since that is done automatically
+    // in PyBuffer_Release() (this scheme is useful for breaking reference cycles).
+    // https://docs.python.org/3/c-api/typeobj.html#c.PyBufferProcs.bf_releasebuffer
+}
+
+static int Str_in(Str *self, PyObject *arg) {
+
+    sz_needle_t needle_struct;
+    needle_struct.anomaly_offset = 0;
+    if (!export_string_like(arg, &needle_struct.start, &needle_struct.length)) {
+        PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
+        return -1;
+    }
+
+    sz_haystack_t haystack;
+    haystack.start = self->start;
+    haystack.length = self->length;
+    size_t position = sz_neon_find_substr(haystack, needle_struct);
+    return position != haystack.length;
+}
+
+static Py_ssize_t Strs_len(Strs *self) {
+    switch (self->type) {
+    case STRS_CONSECUTIVE_32: return self->data.consecutive_32bit.count;
+    case STRS_CONSECUTIVE_64: return self->data.consecutive_64bit.count;
+    case STRS_REORDERED: return self->data.reordered.count;
+    case STRS_MULTI_SOURCE: return self->data.multi_source.count;
+    default: return 0;
+    }
+}
+
+static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
+    // Check for negative index and convert to positive
+    Py_ssize_t count = Strs_len(self);
+    if (i < 0) i += count;
+    if (i < 0 || i >= count) {
+        PyErr_SetString(PyExc_IndexError, "Index out of range");
+        return NULL;
+    }
+
+    PyObject *parent = NULL;
+    char const *start = NULL;
+    size_t length = 0;
+    if (!get_string_at_offset(self, i, count, &parent, &start, &length)) {
+        PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
+        return NULL;
+    }
+
+    // Create a new `Str` object
+    Str *parent_slice = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (parent_slice == NULL && PyErr_NoMemory()) return NULL;
+
+    parent_slice->start = start;
+    parent_slice->length = length;
+    parent_slice->parent = parent;
+    Py_INCREF(parent);
+    return parent_slice;
+}
+
+static PyObject *Strs_subscript(Str *self, PyObject *key) {
+    if (PyLong_Check(key)) return Strs_getitem(self, PyLong_AsSsize_t(key));
+    return NULL;
+}
+
+// Will be called by the `PySequence_Contains`
+static int Strs_contains(Str *self, PyObject *arg) { return 0; }
+
+static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
+
+    char const *a_start, *b_start;
+    size_t a_length, b_length;
+    if (!export_string_like(self, &a_start, &a_length) || !export_string_like(other, &b_start, &b_length))
+        Py_RETURN_NOTIMPLEMENTED;
+
+    // Perform byte-wise comparison up to the minimum length
+    size_t min_length = a_length < b_length ? a_length : b_length;
+    int cmp_result = memcmp(a_start, b_start, min_length);
+
+    // If the strings are equal up to `min_length`, then the shorter string is smaller
+    if (cmp_result == 0) cmp_result = (a_length > b_length) - (a_length < b_length);
+
+    switch (op) {
+    case Py_LT: return PyBool_FromLong(cmp_result < 0);
+    case Py_LE: return PyBool_FromLong(cmp_result <= 0);
+    case Py_EQ: return PyBool_FromLong(cmp_result == 0);
+    case Py_NE: return PyBool_FromLong(cmp_result != 0);
+    case Py_GT: return PyBool_FromLong(cmp_result > 0);
+    case Py_GE: return PyBool_FromLong(cmp_result >= 0);
+    default: Py_RETURN_NOTIMPLEMENTED;
+    }
+}
+
+/**
+ *  @return 1 on success, 0 on failure.
+ */
+static int Str_find_( //
+    PyObject *self,
+    PyObject *args,
+    PyObject *kwargs,
+    Py_ssize_t *offset_out,
+    sz_haystack_t *haystack_out,
+    sz_needle_t *needle_out) {
+
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 3) {
@@ -276,19 +755,27 @@ static Py_ssize_t Str_find_(PyObject *self, PyObject *args, PyObject *kwargs) {
 
     // Perform contains operation
     size_t offset = sz_neon_find_substr(haystack, needle);
-    if (offset == haystack.length) return -1;
-    return (Py_ssize_t)offset;
+    if (offset == haystack.length) { *offset_out = -1; }
+    else { *offset_out = (Py_ssize_t)offset; }
+
+    *haystack_out = haystack;
+    *needle_out = needle;
+    return 1;
 }
 
 static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t signed_offset = Str_find_(self, args, kwargs);
-    if (PyErr_Occurred()) return NULL;
+    Py_ssize_t signed_offset;
+    sz_haystack_t text;
+    sz_needle_t separator;
+    if (!Str_find_(self, args, kwargs, &signed_offset, &text, &separator)) return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
 
 static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t signed_offset = Str_find_(self, args, kwargs);
-    if (PyErr_Occurred()) return NULL;
+    Py_ssize_t signed_offset;
+    sz_haystack_t text;
+    sz_needle_t separator;
+    if (!Str_find_(self, args, kwargs, &signed_offset, &text, &separator)) return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
         return NULL;
@@ -297,10 +784,58 @@ static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t signed_offset = Str_find_(self, args, kwargs);
-    if (PyErr_Occurred()) return NULL;
+    Py_ssize_t signed_offset;
+    sz_haystack_t text;
+    sz_needle_t separator;
+    if (!Str_find_(self, args, kwargs, &signed_offset, &text, &separator)) return NULL;
     if (signed_offset == -1) { Py_RETURN_FALSE; }
     else { Py_RETURN_TRUE; }
+}
+
+static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t separator_index;
+    sz_haystack_t text;
+    sz_needle_t separator;
+    PyObject *result_tuple;
+
+    // Use Str_find_ to get the index of the separator
+    if (!Str_find_(self, args, kwargs, &separator_index, &text, &separator)) return NULL;
+
+    // If separator is not found, return a tuple (self, "", "")
+    if (separator_index == -1) {
+        PyObject *empty_str1 = Str_new(&StrType, Py_None, Py_None);
+        PyObject *empty_str2 = Str_new(&StrType, Py_None, Py_None);
+
+        result_tuple = PyTuple_New(3);
+        Py_INCREF(self);
+        PyTuple_SET_ITEM(result_tuple, 0, self);
+        PyTuple_SET_ITEM(result_tuple, 1, empty_str1);
+        PyTuple_SET_ITEM(result_tuple, 2, empty_str2);
+        return result_tuple;
+    }
+
+    // Create the three parts manually
+    Str *before = Str_new(&StrType, NULL, NULL);
+    Str *middle = Str_new(&StrType, NULL, NULL);
+    Str *after = Str_new(&StrType, NULL, NULL);
+
+    before->parent = self, before->start = text.start, before->length = separator_index;
+    middle->parent = self, middle->start = text.start + separator_index, middle->length = separator.length;
+    after->parent = self, after->start = text.start + separator_index + separator.length,
+    after->length = text.length - separator_index - separator.length;
+
+    // All parts reference the same parent
+    Py_INCREF(self);
+    Py_INCREF(self);
+    Py_INCREF(self);
+
+    // Build the result tuple
+    result_tuple = PyTuple_New(3);
+    PyTuple_SET_ITEM(result_tuple, 0, before);
+    PyTuple_SET_ITEM(result_tuple, 1, middle);
+    PyTuple_SET_ITEM(result_tuple, 2, after);
+
+    return result_tuple;
 }
 
 static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -763,420 +1298,6 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
     return (PyObject *)result_str;
 }
 
-#pragma endregion
-
-#pragma region MemoryMappingFile
-
-static void File_dealloc(File *self) {
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
-    if (self->start) {
-        UnmapViewOfFile(self->start);
-        self->start = NULL;
-    }
-    if (self->mapping_handle) {
-        CloseHandle(self->mapping_handle);
-        self->mapping_handle = NULL;
-    }
-    if (self->file_handle) {
-        CloseHandle(self->file_handle);
-        self->file_handle = NULL;
-    }
-#else
-    if (self->start) {
-        munmap(self->start, self->length);
-        self->start = NULL;
-        self->length = 0;
-    }
-    if (self->file_descriptor != 0) {
-        close(self->file_descriptor);
-        self->file_descriptor = 0;
-    }
-#endif
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObject *named_args) {
-    File *self;
-    self = (File *)type->tp_alloc(type, 0);
-    if (self == NULL) return NULL;
-
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
-    self->file_handle = NULL;
-    self->mapping_handle = NULL;
-#else
-    self->file_descriptor = 0;
-#endif
-    self->start = NULL;
-    self->length = 0;
-}
-
-static int File_init(File *self, PyObject *positional_args, PyObject *named_args) {
-    const char *path;
-    if (!PyArg_ParseTuple(positional_args, "s", &path)) return -1;
-
-#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
-    self->file_handle = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-    if (self->file_handle == INVALID_HANDLE_VALUE) {
-        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
-        return -1;
-    }
-
-    self->mapping_handle = CreateFileMapping(self->file_handle, 0, PAGE_READONLY, 0, 0, 0);
-    if (self->mapping_handle == 0) {
-        CloseHandle(self->file_handle);
-        self->file_handle = NULL;
-        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
-        return -1;
-    }
-
-    char *file = (char *)MapViewOfFile(self->mapping_handle, FILE_MAP_READ, 0, 0, 0);
-    if (file == 0) {
-        CloseHandle(self->mapping_handle);
-        self->mapping_handle = NULL;
-        CloseHandle(self->file_handle);
-        self->file_handle = NULL;
-        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
-        return -1;
-    }
-    self->start = file;
-    self->length = GetFileSize(self->file_handle, 0);
-#else
-    struct stat sb;
-    self->file_descriptor = open(path, O_RDONLY);
-    if (fstat(self->file_descriptor, &sb) != 0) {
-        close(self->file_descriptor);
-        self->file_descriptor = 0;
-        PyErr_SetString(PyExc_RuntimeError, "Can't retrieve file size!");
-        return -1;
-    }
-    size_t file_size = sb.st_size;
-    void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, self->file_descriptor, 0);
-    if (map == MAP_FAILED) {
-        close(self->file_descriptor);
-        self->file_descriptor = 0;
-        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
-        return -1;
-    }
-    self->start = map;
-    self->length = file_size;
-#endif
-
-    return 0;
-}
-
-static PyMethodDef File_methods[] = { //
-    {NULL, NULL, 0, NULL}};
-
-static PyTypeObject FileType = {
-    PyObject_HEAD_INIT(NULL).tp_name = "stringzilla.File",
-    .tp_doc = "Memory mapped file class, that exposes the memory range for low-level access",
-    .tp_basicsize = sizeof(File),
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_methods = File_methods,
-    .tp_new = (newfunc)File_new,
-    .tp_init = (initproc)File_init,
-    .tp_dealloc = (destructor)File_dealloc,
-};
-
-#pragma endregion
-
-#pragma region Str
-
-static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
-
-    // Parse all arguments into PyObjects first
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs > 3) {
-        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
-        return -1;
-    }
-    PyObject *parent_obj = nargs >= 1 ? PyTuple_GET_ITEM(args, 0) : NULL;
-    PyObject *from_obj = nargs >= 2 ? PyTuple_GET_ITEM(args, 1) : NULL;
-    PyObject *to_obj = nargs >= 3 ? PyTuple_GET_ITEM(args, 2) : NULL;
-
-    // Parse keyword arguments, if provided, and ensure no duplicates
-    if (kwargs) {
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "parent") == 0) {
-                if (parent_obj) {
-                    PyErr_SetString(PyExc_TypeError, "Received `parent` both as positional and keyword argument");
-                    return -1;
-                }
-                parent_obj = value;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "from") == 0) {
-                if (from_obj) {
-                    PyErr_SetString(PyExc_TypeError, "Received `from` both as positional and keyword argument");
-                    return -1;
-                }
-                from_obj = value;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "to") == 0) {
-                if (to_obj) {
-                    PyErr_SetString(PyExc_TypeError, "Received `to` both as positional and keyword argument");
-                    return -1;
-                }
-                to_obj = value;
-            }
-            else {
-                PyErr_SetString(PyExc_TypeError, "Invalid keyword argument");
-                return -1;
-            }
-        }
-    }
-
-    // Now, type-check and cast each argument
-    Py_ssize_t from = 0, to = PY_SSIZE_T_MAX;
-    if (from_obj) {
-        from = PyLong_AsSsize_t(from_obj);
-        if (from == -1 && PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError, "The `from` argument must be an integer");
-            return -1;
-        }
-    }
-    if (to_obj) {
-        to = PyLong_AsSsize_t(to_obj);
-        if (to == -1 && PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError, "The `to` argument must be an integer");
-            return -1;
-        }
-    }
-
-    // Handle empty string
-    if (parent_obj == NULL) {
-        self->start = NULL;
-        self->length = 0;
-    }
-    // Increment the reference count of the parent
-    else if (export_string_like(parent_obj, &self->start, &self->length)) {
-        self->parent = parent_obj;
-        Py_INCREF(parent_obj);
-    }
-    else {
-        PyErr_SetString(PyExc_TypeError, "Unsupported parent type");
-        return -1;
-    }
-
-    // Apply slicing
-    size_t normalized_offset, normalized_length;
-    slice(self->length, from, to, &normalized_offset, &normalized_length);
-    self->start = ((char *)self->start) + normalized_offset;
-    self->length = normalized_length;
-    return 0;
-}
-
-static PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
-    Str *self;
-    self = (Str *)type->tp_alloc(type, 0);
-    if (!self) return NULL;
-
-    self->parent = NULL;
-    self->start = NULL;
-    self->length = 0;
-    return (PyObject *)self;
-}
-
-static void Str_dealloc(Str *self) {
-    if (self->parent) { Py_XDECREF(self->parent); }
-    else if (self->start) { free(self->start); }
-    self->parent = NULL;
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
-static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->start, self->length); }
-
-static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash_crc32_native(self->start, self->length); }
-
-static Py_ssize_t Str_len(Str *self) { return self->length; }
-
-static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
-
-    // Negative indexing
-    if (i < 0) i += self->length;
-
-    if (i < 0 || (size_t)i >= self->length) {
-        PyErr_SetString(PyExc_IndexError, "Index out of range");
-        return NULL;
-    }
-
-    // Assuming the underlying data is UTF-8 encoded
-    return PyUnicode_FromStringAndSize(self->start + i, 1);
-}
-
-static PyObject *Str_subscript(Str *self, PyObject *key) {
-    if (PySlice_Check(key)) {
-        // Sanity checks
-        Py_ssize_t start, stop, step;
-        if (PySlice_Unpack(key, &start, &stop, &step) < 0) return NULL;
-        if (PySlice_AdjustIndices(self->length, &start, &stop, step) < 0) return NULL;
-        if (step != 1) {
-            PyErr_SetString(PyExc_IndexError, "Efficient step is not supported");
-            return NULL;
-        }
-
-        // Create a new `Str` object
-        Str *self_slice = (Str *)StrType.tp_alloc(&StrType, 0);
-        if (self_slice == NULL && PyErr_NoMemory()) return NULL;
-
-        // Set its properties based on the slice
-        self_slice->start = self->start + start;
-        self_slice->length = stop - start;
-        self_slice->parent = (PyObject *)self; // Set parent to keep it alive
-
-        // Increment the reference count of the parent
-        Py_INCREF(self);
-        return (PyObject *)self_slice;
-    }
-    else if (PyLong_Check(key)) { return Str_getitem(self, PyLong_AsSsize_t(key)); }
-    else {
-        PyErr_SetString(PyExc_TypeError, "Str indices must be integers or slices");
-        return NULL;
-    }
-}
-
-static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
-    if (view == NULL) {
-        PyErr_SetString(PyExc_ValueError, "NULL view in getbuffer");
-        return -1;
-    }
-
-    static Py_ssize_t itemsize[1] = {1};
-    view->obj = (PyObject *)self;
-    view->buf = self->start;
-    view->len = self->length;
-    view->readonly = 1;
-    view->itemsize = sizeof(char);
-    view->format = "c"; // https://docs.python.org/3/library/struct.html#format-characters
-    view->ndim = 1;
-    view->shape = &self->length; // 1-D array, so shape is just a pointer to the length
-    view->strides = itemsize;    // strides in a 1-D array is just the item size
-    view->suboffsets = NULL;
-    view->internal = NULL;
-
-    Py_INCREF(self);
-    return 0;
-}
-
-static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
-    // This function MUST NOT decrement view->obj, since that is done automatically
-    // in PyBuffer_Release() (this scheme is useful for breaking reference cycles).
-    // https://docs.python.org/3/c-api/typeobj.html#c.PyBufferProcs.bf_releasebuffer
-}
-
-static int Str_in(Str *self, PyObject *arg) {
-
-    sz_needle_t needle_struct;
-    needle_struct.anomaly_offset = 0;
-    if (!export_string_like(arg, &needle_struct.start, &needle_struct.length)) {
-        PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
-        return -1;
-    }
-
-    sz_haystack_t haystack;
-    haystack.start = self->start;
-    haystack.length = self->length;
-    size_t position = sz_neon_find_substr(haystack, needle_struct);
-    return position != haystack.length;
-}
-
-static Py_ssize_t Strs_len(Strs *self) {
-    switch (self->type) {
-    case STRS_CONSECUTIVE_32: return self->data.consecutive_32bit.count;
-    case STRS_CONSECUTIVE_64: return self->data.consecutive_64bit.count;
-    case STRS_REORDERED: return self->data.reordered.count;
-    case STRS_MULTI_SOURCE: return self->data.multi_source.count;
-    default: return 0;
-    }
-}
-
-static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
-    // Check for negative index and convert to positive
-    Py_ssize_t count = Strs_len(self);
-    if (i < 0) i += count;
-    if (i < 0 || i >= count) {
-        PyErr_SetString(PyExc_IndexError, "Index out of range");
-        return NULL;
-    }
-
-    PyObject *parent = NULL;
-    char const *start = NULL;
-    size_t length = 0;
-
-    // Extract a member element based on
-    switch (self->type) {
-    case STRS_CONSECUTIVE_32: {
-        uint32_t start_offset = (i == 0) ? 0 : self->data.consecutive_32bit.end_offsets[i - 1];
-        uint32_t end_offset = self->data.consecutive_32bit.end_offsets[i];
-        start = self->data.consecutive_32bit.start + start_offset;
-        length = end_offset - start_offset - self->data.consecutive_32bit.separator_length * (i + 1 != count);
-        parent = self->data.consecutive_32bit.parent;
-        break;
-    }
-    case STRS_CONSECUTIVE_64: {
-        uint64_t start_offset = (i == 0) ? 0 : self->data.consecutive_64bit.end_offsets[i - 1];
-        uint64_t end_offset = self->data.consecutive_64bit.end_offsets[i];
-        start = self->data.consecutive_64bit.start + start_offset;
-        length = end_offset - start_offset - self->data.consecutive_64bit.separator_length * (i + 1 != count);
-        parent = self->data.consecutive_64bit.parent;
-        break;
-    }
-    case STRS_REORDERED: {
-        //
-        break;
-    }
-    case STRS_MULTI_SOURCE: {
-        //
-        break;
-    }
-    default: PyErr_SetString(PyExc_TypeError, "Unknown Strs kind"); return NULL;
-    }
-
-    // Create a new `Str` object
-    Str *parent_slice = (Str *)StrType.tp_alloc(&StrType, 0);
-    if (parent_slice == NULL && PyErr_NoMemory()) return NULL;
-
-    parent_slice->start = start;
-    parent_slice->length = length;
-    parent_slice->parent = parent;
-    Py_INCREF(parent);
-    return parent_slice;
-}
-
-static PyObject *Strs_subscript(Str *self, PyObject *key) {
-    if (PyLong_Check(key)) return Strs_getitem(self, PyLong_AsSsize_t(key));
-    return NULL;
-}
-
-// Will be called by the `PySequence_Contains`
-static int Strs_contains(Str *self, PyObject *arg) { return 0; }
-
-static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
-
-    char const *a_start, *b_start;
-    size_t a_length, b_length;
-    if (!export_string_like(self, &a_start, &a_length) || !export_string_like(other, &b_start, &b_length))
-        Py_RETURN_NOTIMPLEMENTED;
-
-    // Perform byte-wise comparison up to the minimum length
-    size_t min_length = a_length < b_length ? a_length : b_length;
-    int cmp_result = memcmp(a_start, b_start, min_length);
-
-    // If the strings are equal up to `min_length`, then the shorter string is smaller
-    if (cmp_result == 0) cmp_result = (a_length > b_length) - (a_length < b_length);
-
-    switch (op) {
-    case Py_LT: return PyBool_FromLong(cmp_result < 0);
-    case Py_LE: return PyBool_FromLong(cmp_result <= 0);
-    case Py_EQ: return PyBool_FromLong(cmp_result == 0);
-    case Py_NE: return PyBool_FromLong(cmp_result != 0);
-    case Py_GT: return PyBool_FromLong(cmp_result > 0);
-    case Py_GE: return PyBool_FromLong(cmp_result >= 0);
-    default: Py_RETURN_NOTIMPLEMENTED;
-    }
-}
-
 static PySequenceMethods Str_as_sequence = {
     .sq_length = Str_len,   //
     .sq_item = Str_getitem, //
@@ -1203,6 +1324,7 @@ static PyMethodDef Str_methods[] = { //
     {"find", Str_find, sz_method_flags_m, "Find the first occurrence of a substring."},
     {"index", Str_index, sz_method_flags_m, "Find the first occurrence of a substring or raise error if missing."},
     {"contains", Str_contains, sz_method_flags_m, "Check if a string contains a substring."},
+    {"partition", Str_partition, sz_method_flags_m, "Splits string into 3-tuple: before, match, after."},
     {"count", Str_count, sz_method_flags_m, "Count the occurrences of a substring."},
     {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {"split", Str_split, sz_method_flags_m, "Split a string by a separator."},
@@ -1263,6 +1385,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"find", Str_find, sz_method_flags_m, "Find the first occurrence of a substring."},
     {"index", Str_index, sz_method_flags_m, "Find the first occurrence of a substring or raise error if missing."},
     {"contains", Str_contains, sz_method_flags_m, "Check if a string contains a substring."},
+    {"partition", Str_partition, sz_method_flags_m, "Splits string into 3-tuple: before, match, after."},
     {"count", Str_count, sz_method_flags_m, "Count the occurrences of a substring."},
     {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {"split", Str_split, sz_method_flags_m, "Split a string by a separator."},
