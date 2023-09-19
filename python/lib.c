@@ -724,24 +724,74 @@ static PyTypeObject FileType = {
 
 #pragma region Str
 
-static int Str_init(Str *self, PyObject *positional_args, PyObject *named_args) {
-    PyObject *parent = NULL;
-    Py_ssize_t from = 0;
-    Py_ssize_t to = PY_SSIZE_T_MAX;
+static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
 
-    // The `named_args` would be `NULL`
-    if (named_args) {
-        static char *names[] = {"parent", "from", "to", NULL};
-        if (!PyArg_ParseTupleAndKeywords(positional_args, named_args, "|Onn", names, &parent, &from, &to)) return -1;
+    // Parse all arguments into PyObjects first
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs > 3) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
+        return -1;
     }
-    else if (!PyArg_ParseTuple(positional_args, "|Onn", &parent, &from, &to))
+    PyObject *parent_obj = nargs >= 1 ? PyTuple_GET_ITEM(args, 0) : NULL;
+    PyObject *from_obj = nargs >= 2 ? PyTuple_GET_ITEM(args, 1) : NULL;
+    PyObject *to_obj = nargs >= 3 ? PyTuple_GET_ITEM(args, 2) : NULL;
+
+    // Parse keyword arguments, if provided, and ensure no duplicates
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "parent") == 0) {
+                if (parent_obj) {
+                    PyErr_SetString(PyExc_TypeError, "Received `parent` both as positional and keyword argument");
                     return -1;
+                }
+                parent_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "from") == 0) {
+                if (from_obj) {
+                    PyErr_SetString(PyExc_TypeError, "Received `from` both as positional and keyword argument");
+                    return -1;
+                }
+                from_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "to") == 0) {
+                if (to_obj) {
+                    PyErr_SetString(PyExc_TypeError, "Received `to` both as positional and keyword argument");
+                    return -1;
+                }
+                to_obj = value;
+            }
+            else {
+                PyErr_SetString(PyExc_TypeError, "Invalid keyword argument");
+                return -1;
+            }
+        }
+    }
 
     // Handle empty string
     if (parent == NULL) {
         self->start = NULL;
         self->length = 0;
     }
+
+    // Now, type-check and cast each argument
+    Py_ssize_t from = 0, to = PY_SSIZE_T_MAX;
+    if (from_obj) {
+        from = PyLong_AsSsize_t(from_obj);
+        if (from == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "The `from` argument must be an integer");
+            return -1;
+        }
+    }
+    if (to_obj) {
+        to = PyLong_AsSsize_t(to_obj);
+        if (to == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "The `to` argument must be an integer");
+            return -1;
+        }
+    }
+
     // Increment the reference count of the parent
     else if (export_string_like(parent, &self->start, &self->length)) {
         self->parent = parent;
