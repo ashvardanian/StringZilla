@@ -140,6 +140,7 @@
     "maxsplit",
     "memcpy",
     "MODINIT",
+    "napi",
     "nargsf",
     "newfunc",
     "NOARGS",
