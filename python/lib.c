@@ -1,6 +1,8 @@
 /**
  *  @brief  Very light-weight CPython wrapper for StringZilla, with support for memory-mapping,
  *          native Python strings, Apache Arrow collections, and more.
+ *
+ *  To minimize latency this implementation avoids `PyArg_ParseTupleAndKeywords` calls.
  */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 #define NOMINMAX
@@ -29,7 +31,7 @@ static PyTypeObject FileType;
 static PyTypeObject StrType;
 static PyTypeObject StrsType;
 
-struct {
+static struct {
     void *start;
     size_t length;
 } temporary_memory = {NULL, 0};
@@ -206,35 +208,30 @@ int export_string_like(PyObject *object, char const **start, size_t *length) {
 
 #pragma region Global Functions
 
-static Py_ssize_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
-
-    if (nargs < 2) {
+static Py_ssize_t api_find_(PyObject *self, PyObject *args, PyObject *kwargs) {
+    int is_member = (self != NULL && PyObject_TypeCheck(self, &StrType));
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
         PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
-        return NULL;
+        return 0;
     }
 
-    // Initialize with default values or positional arguments
-    PyObject *haystack_obj = args[0];
-    PyObject *needle_obj = args[1];
-    PyObject *start_obj = (nargs > 2) ? args[2] : NULL;
-    PyObject *end_obj = (nargs > 3) ? args[3] : NULL;
+    PyObject *haystack_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *needle_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
 
-    // Parse keyword arguments to overwrite positional ones
-    if (kwnames != NULL) {
-        for (Py_ssize_t i = 0; i < PyTuple_Size(kwnames); ++i) {
-            PyObject *key = PyTuple_GetItem(kwnames, i);
-            PyObject *value = args[nargs + i];
-            if (PyUnicode_CompareWithASCIIString(key, "start") == 0)
-                start_obj = value;
-            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0)
-                end_obj = value;
+    // Parse keyword arguments
+    if (kwargs) {
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0) { start_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) { end_obj = value; }
             else {
                 PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
-                return NULL;
+                return 0;
             }
-            if (PyErr_Occurred())
-                return NULL;
         }
     }
 
@@ -247,7 +244,7 @@ static Py_ssize_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_
     if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
         !export_string_like(needle_obj, &needle.start, &needle.length)) {
         PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
-        return NULL;
+        return 0;
     }
 
     // Validate and convert `start`
@@ -255,24 +252,20 @@ static Py_ssize_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_
         start = PyLong_AsSsize_t(start_obj);
         if (start == -1 && PyErr_Occurred()) {
             PyErr_SetString(PyExc_TypeError, "The start argument must be an integer");
-            return NULL;
+            return 0;
         }
     }
-    else {
-        start = 0;
-    }
+    else { start = 0; }
 
     // Validate and convert `end`
     if (end_obj) {
         end = PyLong_AsSsize_t(end_obj);
         if (end == -1 && PyErr_Occurred()) {
             PyErr_SetString(PyExc_TypeError, "The end argument must be an integer");
-            return NULL;
+            return 0;
         }
     }
-    else {
-        end = PY_SSIZE_T_MAX;
-    }
+    else { end = PY_SSIZE_T_MAX; }
 
     // Limit the `haystack` range
     size_t normalized_offset, normalized_length;
@@ -282,123 +275,68 @@ static Py_ssize_t str_find_vectorcall_(PyObject *_, PyObject *const *args, size_
 
     // Perform contains operation
     size_t offset = sz_neon_find_substr(haystack, needle);
-    if (offset == haystack.length)
-        return -1;
+    if (offset == haystack.length) return -1;
     return (Py_ssize_t)offset;
 }
 
-static PyObject *str_find_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
-    Py_ssize_t signed_offset = str_find_vectorcall_(NULL, args, nargsf, kwnames);
+static PyObject *api_find(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset = api_find_(self, args, kwargs);
+    if (PyErr_Occurred()) return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static PyObject *str_contains_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
-    Py_ssize_t signed_offset = str_find_vectorcall_(NULL, args, nargsf, kwnames);
-    if (signed_offset == -1) {
-        Py_RETURN_FALSE;
-    }
-    else {
-        Py_RETURN_TRUE;
-    }
+static PyObject *api_contains(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset = api_find_(self, args, kwargs);
+    if (PyErr_Occurred()) return NULL;
+    if (signed_offset == -1) { Py_RETURN_FALSE; }
+    else { Py_RETURN_TRUE; }
 }
 
-static PyObject *str_count_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
-
-    // Initialize with default values or positional arguments
-    if (nargs < 2) {
-        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
+static PyObject *api_count(PyObject *self, PyObject *args, PyObject *kwargs) {
+    int is_member = (self != NULL && PyObject_TypeCheck(self, &StrType));
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 4) {
+        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    PyObject *haystack_obj = args[0];
-    PyObject *needle_obj = args[1];
-    PyObject *start_obj = (nargs > 2) ? args[2] : NULL;
-    PyObject *end_obj = (nargs > 3) ? args[3] : NULL;
-    PyObject *allowoverlap_obj = (nargs > 4) ? args[4] : NULL;
+    PyObject *haystack_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *needle_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+    PyObject *allowoverlap_obj = nargs > !is_member + 3 ? PyTuple_GET_ITEM(args, !is_member + 3) : NULL;
 
-    // Parse keyword arguments to overwrite positional ones
-    if (kwnames != NULL) {
-        for (Py_ssize_t i = 0; i < PyTuple_Size(kwnames); ++i) {
-            PyObject *key = PyTuple_GetItem(kwnames, i);
-            PyObject *value = args[nargs + i];
-            if (PyUnicode_CompareWithASCIIString(key, "start") == 0)
-                start_obj = value;
-            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0)
-                end_obj = value;
-            else if (PyUnicode_CompareWithASCIIString(key, "allowoverlap") == 0)
-                allowoverlap_obj = value;
-            else {
-                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+    if (kwargs) {
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        while (PyDict_Next(kwargs, &pos, &key, &value))
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0) { start_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) { end_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "allowoverlap") == 0) { allowoverlap_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
                 return NULL;
-            }
-            if (PyErr_Occurred())
-                return NULL;
-        }
     }
 
     struct sz_haystack_t haystack;
     struct sz_needle_t needle;
-    int allowoverlap;
-    Py_ssize_t start, end;
+    Py_ssize_t start = start_obj ? PyLong_AsSsize_t(start_obj) : 0;
+    Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
+    int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
 
-    // Validate and convert `haystack` and `needle`
     needle.anomaly_offset = 0;
     if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
-        !export_string_like(needle_obj, &needle.start, &needle.length)) {
-        PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
-        return NULL;
-    }
+        !export_string_like(needle_obj, &needle.start, &needle.length))
+        return PyErr_Format(PyExc_TypeError, "Haystack and needle must be string-like"), NULL;
 
-    // Validate and convert `start`
-    if (start_obj) {
-        start = PyLong_AsSsize_t(start_obj);
-        if (start == -1 && PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError, "The start argument must be an integer");
-            return NULL;
-        }
-    }
-    else {
-        start = 0;
-    }
+    if ((start == -1 || end == -1 || allowoverlap == -1) && PyErr_Occurred()) return NULL;
 
-    // Validate and convert `end`
-    if (end_obj) {
-        end = PyLong_AsSsize_t(end_obj);
-        if (end == -1 && PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError, "The end argument must be an integer");
-            return NULL;
-        }
-    }
-    else {
-        end = PY_SSIZE_T_MAX;
-    }
-
-    // Validate and convert `allowoverlap`
-    if (allowoverlap_obj) {
-        allowoverlap = PyObject_IsTrue(allowoverlap_obj);
-        if (allowoverlap == -1) {
-            PyErr_SetString(PyExc_TypeError, "The allowoverlap argument must be a boolean");
-            return NULL;
-        }
-    }
-    else {
-        allowoverlap = 0;
-    }
-
-    // Limit the haystack range
     size_t normalized_offset, normalized_length;
     slice(haystack.length, start, end, &normalized_offset, &normalized_length);
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
-    // Perform counting operation
-    size_t count = 0;
-    if (needle.length == 1) {
-        count = sz_naive_count_char(haystack, *needle.start);
-    }
-    else {
-        // Your existing logic for count_substr can be embedded here
+    size_t count = needle.length == 1 ? sz_naive_count_char(haystack, *needle.start) : 0;
+    if (needle.length != 1) {
         if (allowoverlap) {
             while (haystack.length) {
                 size_t offset = sz_neon_find_substr(haystack, needle);
@@ -418,114 +356,87 @@ static PyObject *str_count_vectorcall(PyObject *_, PyObject *const *args, size_t
             }
         }
     }
-
     return PyLong_FromSize_t(count);
 }
 
-static PyObject *str_levenstein_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
-
-    // Validate the number of arguments
-    if (nargs < 2 || nargs > 3) {
-        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
+static PyObject *api_levenstein(PyObject *self, PyObject *args, PyObject *kwargs) {
+    int is_member = (self != NULL && PyObject_TypeCheck(self, &StrType));
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 2) {
+        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    PyObject *str1_obj = args[0];
-    PyObject *str2_obj = args[1];
+    PyObject *str1_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *str2_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+    PyObject *bound_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value))
+            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0) {
+                if (bound_obj) {
+                    PyErr_Format(PyExc_TypeError, "Received bound both as positional and keyword argument");
+                    return NULL;
+                }
+                bound_obj = value;
+            }
+    }
+
+    int bound = 255; // Default value for bound
+    if (bound_obj && ((bound = PyLong_AsLong(bound_obj)) > 255 || bound < 0)) {
+        PyErr_Format(PyExc_ValueError, "Bound must be an integer between 0 and 255");
+        return NULL;
+    }
 
     struct sz_haystack_t str1, str2;
     if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
         !export_string_like(str2_obj, &str2.start, &str2.length)) {
-        PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
+        PyErr_Format(PyExc_TypeError, "Both arguments must be string-like");
         return NULL;
     }
 
-    // Initialize bound argument
-    int bound = 255;
-
-    // Check if `bound` is given as a positional argument
-    if (nargs == 3) {
-        bound = PyLong_AsLong(args[2]);
-        if (bound > 255 || bound < 0) {
-            PyErr_SetString(PyExc_ValueError, "Bound must be an integer between 0 and 255");
-            return NULL;
-        }
-    }
-
-    // Parse keyword arguments
-    if (kwnames != NULL) {
-        for (Py_ssize_t i = 0; i < PyTuple_Size(kwnames); ++i) {
-            PyObject *key = PyTuple_GetItem(kwnames, i);
-            PyObject *value = args[nargs + i];
-            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0) {
-                if (nargs == 3) {
-                    PyErr_SetString(PyExc_TypeError, "Received bound both as positional and keyword argument");
-                    return NULL;
-                }
-                bound = PyLong_AsLong(value);
-                if (bound > 255 || bound < 0) {
-                    PyErr_SetString(PyExc_ValueError, "Bound must be an integer between 0 and 255");
-                    return NULL;
-                }
-            }
-        }
-    }
-
-    // Initialize or reallocate the Levenshtein distance matrix
     size_t memory_needed = sz_levenstein_memory_needed(str1.length, str2.length);
     if (temporary_memory.length < memory_needed) {
         temporary_memory.start = realloc(temporary_memory.start, memory_needed);
         temporary_memory.length = memory_needed;
     }
-    if (temporary_memory.start == NULL) {
-        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
+    if (!temporary_memory.start) {
+        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
         return NULL;
     }
 
-    levenstein_distance_t distance = sz_levenstein( //
-        str1.start,
-        str1.length,
-        str2.start,
-        str2.length,
-        (levenstein_distance_t)bound,
-        temporary_memory.start);
+    levenstein_distance_t small_bound = (levenstein_distance_t)bound;
+    levenstein_distance_t distance =
+        sz_levenstein(str1.start, str1.length, str2.start, str2.length, small_bound, temporary_memory.start);
+
     return PyLong_FromLong(distance);
 }
 
-static PyObject *strs_split_vectorcall(PyObject *_, PyObject *const *args, size_t nargsf, PyObject *kwnames) {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+static PyObject *api_split(PyObject *self, PyObject *args, PyObject *kwargs) {
 
-    if (nargs < 1) {
+    // Check minimum arguments
+    int is_member = (self != NULL && PyObject_TypeCheck(self, &StrType));
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
         PyErr_SetString(PyExc_TypeError, "sz.split() requires at least 1 argument");
         return NULL;
     }
 
-    // Initialize with default values or positional arguments
-    PyObject *text_obj = args[0];
-    PyObject *separator_obj = (nargs > 1) ? args[1] : NULL;
-    PyObject *maxsplit_obj = (nargs > 2) ? args[2] : NULL;
-    PyObject *keepseparator_obj = (nargs > 3) ? args[3] : NULL;
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *separator_obj = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
+    PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *keepseparator_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
 
-    // Parse keyword arguments to overwrite positional ones
-    if (kwnames != NULL) {
-        for (Py_ssize_t i = 0; i < PyTuple_Size(kwnames); ++i) {
-            PyObject *key = PyTuple_GetItem(kwnames, i);
-            PyObject *value = args[nargs + i];
-
-            if (PyUnicode_CompareWithASCIIString(key, "separator") == 0)
-                separator_obj = value;
-            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0)
-                maxsplit_obj = value;
-            else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0)
-                keepseparator_obj = value;
-            else {
-                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
-                return NULL;
-            }
-
-            // Check for errors during conversion
-            if (PyErr_Occurred())
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "separator") == 0) { separator_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0) { maxsplit_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0) { keepseparator_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
                 return NULL;
         }
     }
@@ -564,9 +475,7 @@ static PyObject *strs_split_vectorcall(PyObject *_, PyObject *const *args, size_
             return NULL;
         }
     }
-    else {
-        keepseparator = 0;
-    }
+    else { keepseparator = 0; }
 
     // Validate and convert `maxsplit`
     if (maxsplit_obj) {
@@ -576,14 +485,11 @@ static PyObject *strs_split_vectorcall(PyObject *_, PyObject *const *args, size_
             return NULL;
         }
     }
-    else {
-        maxsplit = PY_SSIZE_T_MAX;
-    }
+    else { maxsplit = PY_SSIZE_T_MAX; }
 
     // Create Strs object
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
-    if (!result)
-        return NULL;
+    if (!result) return NULL;
 
     // Initialize Strs object based on the splitting logic
     void *offsets_endings = NULL;
@@ -618,8 +524,7 @@ static PyObject *strs_split_vectorcall(PyObject *_, PyObject *const *args, size_
             offsets_capacity = (offsets_capacity + 1) * 2;
             void *new_offsets = realloc(offsets_endings, offsets_capacity * bytes_per_offset);
             if (!new_offsets) {
-                if (offsets_endings)
-                    free(offsets_endings);
+                if (offsets_endings) free(offsets_endings);
             }
             offsets_endings = new_offsets;
         }
@@ -634,10 +539,8 @@ static PyObject *strs_split_vectorcall(PyObject *_, PyObject *const *args, size_
         // Export the offset
         size_t will_continue = offset_in_remaining != text_remaining.length;
         size_t next_offset = last_start + offset_in_remaining + separator.length * will_continue;
-        if (text.length >= UINT32_MAX)
-            ((uint64_t *)offsets_endings)[offsets_count++] = (uint64_t)next_offset;
-        else
-            ((uint32_t *)offsets_endings)[offsets_count++] = (uint32_t)next_offset;
+        if (text.length >= UINT32_MAX) { ((uint64_t *)offsets_endings)[offsets_count++] = (uint64_t)next_offset; }
+        else { ((uint32_t *)offsets_endings)[offsets_count++] = (uint32_t)next_offset; }
 
         // Next time we want to start
         last_start = last_start + offset_in_remaining + separator.length;
@@ -692,8 +595,7 @@ static void File_dealloc(File *self) {
 static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObject *named_args) {
     File *self;
     self = (File *)type->tp_alloc(type, 0);
-    if (self == NULL)
-        return NULL;
+    if (self == NULL) return NULL;
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
     self->file_handle = NULL;
@@ -707,8 +609,7 @@ static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObjec
 
 static int File_init(File *self, PyObject *positional_args, PyObject *named_args) {
     const char *path;
-    if (!PyArg_ParseTuple(positional_args, "s", &path))
-        return -1;
+    if (!PyArg_ParseTuple(positional_args, "s", &path)) return -1;
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
     self->file_handle = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
@@ -772,17 +673,6 @@ static PyTypeObject FileType = {
     .tp_new = (newfunc)File_new,
     .tp_init = (initproc)File_init,
     .tp_dealloc = (destructor)File_dealloc,
-
-    // PyBufferProcs *tp_as_buffer;
-
-    // reprfunc tp_repr;
-    // PyNumberMethods *tp_as_number;
-    // PySequenceMethods *tp_as_sequence;
-    // PyMappingMethods *tp_as_mapping;
-    // ternaryfunc tp_call;
-    // reprfunc tp_str;
-    // getattrofunc tp_getattro;
-    // setattrofunc tp_setattro;
 };
 
 #pragma endregion
@@ -797,8 +687,7 @@ static int Str_init(Str *self, PyObject *positional_args, PyObject *named_args) 
     // The `named_args` would be `NULL`
     if (named_args) {
         static char *names[] = {"parent", "from", "to", NULL};
-        if (!PyArg_ParseTupleAndKeywords(positional_args, named_args, "|Onn", names, &parent, &from, &to))
-            return -1;
+        if (!PyArg_ParseTupleAndKeywords(positional_args, named_args, "|Onn", names, &parent, &from, &to)) return -1;
     }
     else if (!PyArg_ParseTuple(positional_args, "|Onn", &parent, &from, &to))
         return -1;
@@ -829,8 +718,7 @@ static int Str_init(Str *self, PyObject *positional_args, PyObject *named_args) 
 static PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     Str *self;
     self = (Str *)type->tp_alloc(type, 0);
-    if (!self)
-        return NULL;
+    if (!self) return NULL;
 
     self->parent = NULL;
     self->start = NULL;
@@ -839,8 +727,8 @@ static PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
 }
 
 static void Str_dealloc(Str *self) {
-    if (self->parent)
-        Py_XDECREF(self->parent);
+    if (self->parent) Py_XDECREF(self->parent);
+    self->parent = NULL;
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -853,8 +741,7 @@ static Py_ssize_t Str_len(Str *self) { return self->length; }
 static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
 
     // Negative indexing
-    if (i < 0)
-        i += self->length;
+    if (i < 0) i += self->length;
 
     if (i < 0 || (size_t)i >= self->length) {
         PyErr_SetString(PyExc_IndexError, "Index out of range");
@@ -867,12 +754,10 @@ static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
 
 static PyObject *Str_subscript(Str *self, PyObject *key) {
     if (PySlice_Check(key)) {
+        // Sanity checks
         Py_ssize_t start, stop, step;
-        if (PySlice_Unpack(key, &start, &stop, &step) < 0)
-            return NULL;
-        if (PySlice_AdjustIndices(self->length, &start, &stop, step) < 0)
-            return NULL;
-
+        if (PySlice_Unpack(key, &start, &stop, &step) < 0) return NULL;
+        if (PySlice_AdjustIndices(self->length, &start, &stop, step) < 0) return NULL;
         if (step != 1) {
             PyErr_SetString(PyExc_IndexError, "Efficient step is not supported");
             return NULL;
@@ -880,8 +765,7 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
 
         // Create a new `Str` object
         Str *self_slice = (Str *)StrType.tp_alloc(&StrType, 0);
-        if (self_slice == NULL && PyErr_NoMemory())
-            return NULL;
+        if (self_slice == NULL && PyErr_NoMemory()) return NULL;
 
         // Set its properties based on the slice
         self_slice->start = self->start + start;
@@ -892,9 +776,7 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
         Py_INCREF(self);
         return (PyObject *)self_slice;
     }
-    else if (PyLong_Check(key)) {
-        return Str_getitem(self, PyLong_AsSsize_t(key));
-    }
+    else if (PyLong_Check(key)) { return Str_getitem(self, PyLong_AsSsize_t(key)); }
     else {
         PyErr_SetString(PyExc_TypeError, "Str indices must be integers or slices");
         return NULL;
@@ -931,8 +813,7 @@ static Py_ssize_t Strs_len(Strs *self) {
 static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
     // Check for negative index and convert to positive
     Py_ssize_t count = Strs_len(self);
-    if (i < 0)
-        i += count;
+    if (i < 0) i += count;
     if (i < 0 || i >= count) {
         PyErr_SetString(PyExc_IndexError, "Index out of range");
         return NULL;
@@ -973,8 +854,7 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
 
     // Create a new `Str` object
     Str *parent_slice = (Str *)StrType.tp_alloc(&StrType, 0);
-    if (parent_slice == NULL && PyErr_NoMemory())
-        return NULL;
+    if (parent_slice == NULL && PyErr_NoMemory()) return NULL;
 
     parent_slice->start = start;
     parent_slice->length = length;
@@ -984,8 +864,7 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
 }
 
 static PyObject *Strs_subscript(Str *self, PyObject *key) {
-    if (PyLong_Check(key))
-        return Strs_getitem(self, PyLong_AsSsize_t(key));
+    if (PyLong_Check(key)) return Strs_getitem(self, PyLong_AsSsize_t(key));
     return NULL;
 }
 
@@ -1004,8 +883,7 @@ static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
     int cmp_result = memcmp(a_start, b_start, min_length);
 
     // If the strings are equal up to `min_length`, then the shorter string is smaller
-    if (cmp_result == 0)
-        cmp_result = (a_length > b_length) - (a_length < b_length);
+    if (cmp_result == 0) cmp_result = (a_length > b_length) - (a_length < b_length);
 
     switch (op) {
     case Py_LT: return PyBool_FromLong(cmp_result < 0);
@@ -1029,10 +907,14 @@ static PyMappingMethods Str_as_mapping = {
     .mp_subscript = Str_subscript, // Is used to implement slices in Python
 };
 
-static PyMethodDef Str_methods[] = {
-    // {"contains", (PyCFunction)..., METH_NOARGS, "Convert to Python `str`"},
-    // {"find", (PyCFunction)..., METH_NOARGS, "Get length"},
-    // {"__getitem__", (PyCFunction)..., METH_O, "Indexing"},
+#define sz_method_flags_m METH_VARARGS | METH_KEYWORDS
+
+static PyMethodDef Str_methods[] = { //
+    {"find", api_find, sz_method_flags_m, "Find the first occurrence of a substring."},
+    {"contains", api_contains, sz_method_flags_m, "Check if a string contains a substring."},
+    {"count", api_count, sz_method_flags_m, "Count the occurrences of a substring."},
+    {"levenstein", api_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    {"split", api_split, sz_method_flags_m, "Split a string by a separator."},
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrType = {
@@ -1076,8 +958,20 @@ static PyTypeObject StrsType = {
 
 #pragma endregion
 
-static PyMethodDef stringzilla_methods[] = { //
-    {NULL, NULL, 0, NULL}};
+static void stringzilla_cleanup(PyObject *m) {
+    if (temporary_memory.start) free(temporary_memory.start);
+    temporary_memory.start = NULL;
+    temporary_memory.length = 0;
+}
+
+static PyMethodDef stringzilla_methods[] = {
+    {"find", api_find, sz_method_flags_m, "Find the first occurrence of a substring."},
+    {"contains", api_contains, sz_method_flags_m, "Check if a string contains a substring."},
+    {"count", api_count, sz_method_flags_m, "Count the occurrences of a substring."},
+    {"levenstein", api_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    {"split", api_split, sz_method_flags_m, "Split a string by a separator."},
+    {NULL, NULL, 0, NULL} /* Sentinel */
+};
 
 static PyModuleDef stringzilla_module = {
     PyModuleDef_HEAD_INIT,
@@ -1088,49 +982,18 @@ static PyModuleDef stringzilla_module = {
     NULL,
     NULL,
     NULL,
-    NULL,
+    stringzilla_cleanup,
 };
-
-PyObject *register_vectorcall(PyObject *module, char const *name, vectorcallfunc vectorcall) {
-
-    PyCFunctionObject *vectorcall_object = (PyCFunctionObject *)PyObject_Malloc(sizeof(PyCFunctionObject));
-    if (vectorcall_object == NULL)
-        return NULL;
-
-    PyObject_Init(vectorcall_object, &PyCFunction_Type);
-    vectorcall_object->m_ml = NULL; // No regular `PyMethodDef`
-    vectorcall_object->vectorcall = vectorcall;
-
-    // Add the 'find' function to the module
-    if (PyModule_AddObject(module, name, vectorcall_object) < 0) {
-        Py_XDECREF(vectorcall_object);
-        return NULL;
-    }
-    return vectorcall_object;
-}
-
-void cleanup_module(void) {
-    if (temporary_memory.start)
-        free(temporary_memory.start);
-    temporary_memory.start = NULL;
-    temporary_memory.length = 0;
-}
 
 PyMODINIT_FUNC PyInit_stringzilla(void) {
     PyObject *m;
 
-    if (PyType_Ready(&StrType) < 0)
-        return NULL;
-
-    if (PyType_Ready(&FileType) < 0)
-        return NULL;
-
-    if (PyType_Ready(&StrsType) < 0)
-        return NULL;
+    if (PyType_Ready(&StrType) < 0) return NULL;
+    if (PyType_Ready(&FileType) < 0) return NULL;
+    if (PyType_Ready(&StrsType) < 0) return NULL;
 
     m = PyModule_Create(&stringzilla_module);
-    if (m == NULL)
-        return NULL;
+    if (m == NULL) return NULL;
 
     Py_INCREF(&StrType);
     if (PyModule_AddObject(m, "Str", (PyObject *)&StrType) < 0) {
@@ -1159,42 +1022,9 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     // Initialize temporary_memory, if needed
     temporary_memory.start = malloc(4096);
     temporary_memory.length = 4096 * (temporary_memory.start != NULL);
-    // atexit(cleanup_module);
-
-    // Register the vectorized functions
-    PyObject *vectorized_find = register_vectorcall(m, "find", str_find_vectorcall);
-    PyObject *vectorized_contains = register_vectorcall(m, "contains", str_contains_vectorcall);
-    PyObject *vectorized_count = register_vectorcall(m, "count", str_count_vectorcall);
-    PyObject *vectorized_levenstein = register_vectorcall(m, "levenstein", str_levenstein_vectorcall);
-
-    PyObject *vectorized_split = register_vectorcall(m, "split", strs_split_vectorcall);
-    PyObject *vectorized_sort = register_vectorcall(m, "sort", str_find_vectorcall);
-    PyObject *vectorized_shuffle = register_vectorcall(m, "shuffle", str_find_vectorcall);
-
-    if (!vectorized_find || !vectorized_count ||          //
-        !vectorized_contains || !vectorized_levenstein || //
-        !vectorized_split || !vectorized_sort || !vectorized_shuffle) {
-        goto cleanup;
-    }
-
     return m;
 
 cleanup:
-    if (vectorized_find)
-        Py_XDECREF(vectorized_find);
-    if (vectorized_contains)
-        Py_XDECREF(vectorized_contains);
-    if (vectorized_count)
-        Py_XDECREF(vectorized_count);
-    if (vectorized_levenstein)
-        Py_XDECREF(vectorized_levenstein);
-    if (vectorized_split)
-        Py_XDECREF(vectorized_split);
-    if (vectorized_sort)
-        Py_XDECREF(vectorized_sort);
-    if (vectorized_shuffle)
-        Py_XDECREF(vectorized_shuffle);
-
     Py_XDECREF(&FileType);
     Py_XDECREF(&StrType);
     Py_XDECREF(m);

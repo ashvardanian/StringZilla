@@ -133,6 +133,7 @@
     "itemsize",
     "keeplinebreaks",
     "keepseparator",
+    "kwargs",
     "kwds",
     "kwnames",
     "levenstein",
