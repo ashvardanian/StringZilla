@@ -209,7 +209,7 @@ int export_string_like(PyObject *object, char const **start, size_t *length) {
 
 #pragma region Global Functions
 
-static Py_ssize_t api_find_(PyObject *self, PyObject *args, PyObject *kwargs) {
+static Py_ssize_t Str_find_(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 3) {
@@ -236,8 +236,8 @@ static Py_ssize_t api_find_(PyObject *self, PyObject *args, PyObject *kwargs) {
         }
     }
 
-    struct sz_haystack_t haystack;
-    struct sz_needle_t needle;
+    sz_haystack_t haystack;
+    sz_needle_t needle;
     Py_ssize_t start, end;
 
     // Validate and convert `haystack` and `needle`
@@ -280,20 +280,30 @@ static Py_ssize_t api_find_(PyObject *self, PyObject *args, PyObject *kwargs) {
     return (Py_ssize_t)offset;
 }
 
-static PyObject *api_find(PyObject *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t signed_offset = api_find_(self, args, kwargs);
+static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset = Str_find_(self, args, kwargs);
     if (PyErr_Occurred()) return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static PyObject *api_contains(PyObject *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t signed_offset = api_find_(self, args, kwargs);
+static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset = Str_find_(self, args, kwargs);
+    if (PyErr_Occurred()) return NULL;
+    if (signed_offset == -1) {
+        PyErr_SetString(PyExc_ValueError, "substring not found");
+        return NULL;
+    }
+    return PyLong_FromSsize_t(signed_offset);
+}
+
+static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset = Str_find_(self, args, kwargs);
     if (PyErr_Occurred()) return NULL;
     if (signed_offset == -1) { Py_RETURN_FALSE; }
     else { Py_RETURN_TRUE; }
 }
 
-static PyObject *api_count(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 4) {
@@ -318,8 +328,8 @@ static PyObject *api_count(PyObject *self, PyObject *args, PyObject *kwargs) {
                 return NULL;
     }
 
-    struct sz_haystack_t haystack;
-    struct sz_needle_t needle;
+    sz_haystack_t haystack;
+    sz_needle_t needle;
     Py_ssize_t start = start_obj ? PyLong_AsSsize_t(start_obj) : 0;
     Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
     int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
@@ -360,7 +370,7 @@ static PyObject *api_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSize_t(count);
 }
 
-static PyObject *api_levenstein(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_levenstein(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 2) {
@@ -391,7 +401,7 @@ static PyObject *api_levenstein(PyObject *self, PyObject *args, PyObject *kwargs
         return NULL;
     }
 
-    struct sz_haystack_t str1, str2;
+    sz_haystack_t str1, str2;
     if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
         !export_string_like(str2_obj, &str2.start, &str2.length)) {
         PyErr_Format(PyExc_TypeError, "Both arguments must be string-like");
@@ -415,122 +425,94 @@ static PyObject *api_levenstein(PyObject *self, PyObject *args, PyObject *kwargs
     return PyLong_FromLong(distance);
 }
 
-static PyObject *api_startswith(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_startswith(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    if (PyTuple_Size(args) != !is_member + 1) {
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
     PyObject *str_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
     PyObject *prefix_obj = PyTuple_GET_ITEM(args, !is_member);
+    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
 
-    struct sz_haystack_t str, prefix;
+    // Optional start and end arguments
+    Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
+
+    if (start_obj && ((start = PyLong_AsSsize_t(start_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "start must be an integer");
+        return NULL;
+    }
+
+    if (end_obj && ((end = PyLong_AsSsize_t(end_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "end must be an integer");
+        return NULL;
+    }
+
+    sz_haystack_t str, prefix;
     if (!export_string_like(str_obj, &str.start, &str.length) ||
         !export_string_like(prefix_obj, &prefix.start, &prefix.length)) {
         PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
         return NULL;
     }
 
+    // Apply start and end arguments
+    str.start += start;
+    str.length -= start;
+    if (end != PY_SSIZE_T_MAX && end - start < str.length) { str.length = end - start; }
+
     if (str.length < prefix.length) { Py_RETURN_FALSE; }
     else if (strncmp(str.start, prefix.start, prefix.length) == 0) { Py_RETURN_TRUE; }
     else { Py_RETURN_FALSE; }
 }
 
-static PyObject *api_endswith(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    if (PyTuple_Size(args) != !is_member + 1) {
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
     PyObject *str_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
     PyObject *suffix_obj = PyTuple_GET_ITEM(args, !is_member);
+    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
 
-    struct sz_haystack_t str, suffix;
+    // Optional start and end arguments
+    Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
+
+    if (start_obj && ((start = PyLong_AsSsize_t(start_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "start must be an integer");
+        return NULL;
+    }
+
+    if (end_obj && ((end = PyLong_AsSsize_t(end_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "end must be an integer");
+        return NULL;
+    }
+
+    sz_haystack_t str, suffix;
     if (!export_string_like(str_obj, &str.start, &str.length) ||
         !export_string_like(suffix_obj, &suffix.start, &suffix.length)) {
         PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
         return NULL;
     }
 
+    // Apply start and end arguments
+    str.start += start;
+    str.length -= start;
+    if (end != PY_SSIZE_T_MAX && end - start < str.length) { str.length = end - start; }
+
     if (str.length < suffix.length) { Py_RETURN_FALSE; }
     else if (strncmp(str.start + (str.length - suffix.length), suffix.start, suffix.length) == 0) { Py_RETURN_TRUE; }
     else { Py_RETURN_FALSE; }
 }
 
-static PyObject *api_split(PyObject *self, PyObject *args, PyObject *kwargs) {
-
-    // Check minimum arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
-        PyErr_SetString(PyExc_TypeError, "sz.split() requires at least 1 argument");
-        return NULL;
-    }
-
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *separator_obj = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
-    PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *keepseparator_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
-
-    if (kwargs) {
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "separator") == 0) { separator_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0) { maxsplit_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0) { keepseparator_obj = value; }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
-                return NULL;
-        }
-    }
-
-    struct sz_haystack_t text;
-    struct sz_needle_t separator;
-    int keepseparator;
-    Py_ssize_t maxsplit;
-    separator.anomaly_offset = 0;
-
-    // Validate and convert `text`
-    if (!export_string_like(text_obj, &text.start, &text.length)) {
-        PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
-        return NULL;
-    }
-
-    // Validate and convert `separator`
-    if (separator_obj) {
-        Py_ssize_t len;
-        if (!export_string_like(separator_obj, &separator.start, &len)) {
-            PyErr_SetString(PyExc_TypeError, "The separator argument must be string-like");
-            return NULL;
-        }
-        separator.length = (size_t)len;
-    }
-    else {
-        separator.start = " ";
-        separator.length = 1;
-    }
-
-    // Validate and convert `keepseparator`
-    if (keepseparator_obj) {
-        keepseparator = PyObject_IsTrue(keepseparator_obj);
-        if (keepseparator == -1) {
-            PyErr_SetString(PyExc_TypeError, "The keepseparator argument must be a boolean");
-            return NULL;
-        }
-    }
-    else { keepseparator = 0; }
-
-    // Validate and convert `maxsplit`
-    if (maxsplit_obj) {
-        maxsplit = PyLong_AsSsize_t(maxsplit_obj);
-        if (maxsplit == -1 && PyErr_Occurred()) {
-            PyErr_SetString(PyExc_TypeError, "The maxsplit argument must be an integer");
-            return NULL;
-        }
-    }
-    else { maxsplit = PY_SSIZE_T_MAX; }
+static Strs *Str_split_(
+    PyObject *parent, sz_haystack_t text, sz_needle_t separator, int keepseparator, Py_ssize_t maxsplit) {
 
     // Create Strs object
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
@@ -545,14 +527,14 @@ static PyObject *api_split(PyObject *self, PyObject *args, PyObject *kwargs) {
         bytes_per_offset = 8;
         result->type = STRS_CONSECUTIVE_64;
         result->data.consecutive_64bit.start = text.start;
-        result->data.consecutive_64bit.parent = text_obj;
+        result->data.consecutive_64bit.parent = parent;
         result->data.consecutive_64bit.separator_length = !keepseparator * separator.length;
     }
     else {
         bytes_per_offset = 4;
         result->type = STRS_CONSECUTIVE_32;
         result->data.consecutive_32bit.start = text.start;
-        result->data.consecutive_32bit.parent = text_obj;
+        result->data.consecutive_32bit.parent = parent;
         result->data.consecutive_32bit.separator_length = !keepseparator * separator.length;
     }
 
@@ -601,8 +583,184 @@ static PyObject *api_split(PyObject *self, PyObject *args, PyObject *kwargs) {
         result->data.consecutive_32bit.count = offsets_count;
     }
 
-    Py_INCREF(text_obj);
-    return (PyObject *)result;
+    Py_INCREF(parent);
+    return result;
+}
+
+static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
+
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
+        PyErr_SetString(PyExc_TypeError, "sz.split() requires at least 1 argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *separator_obj = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
+    PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *keepseparator_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "separator") == 0) { separator_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0) { maxsplit_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0) { keepseparator_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+                return NULL;
+        }
+    }
+
+    sz_haystack_t text;
+    sz_needle_t separator;
+    int keepseparator;
+    Py_ssize_t maxsplit;
+    separator.anomaly_offset = 0;
+
+    // Validate and convert `text`
+    if (!export_string_like(text_obj, &text.start, &text.length)) {
+        PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
+        return NULL;
+    }
+
+    // Validate and convert `separator`
+    if (separator_obj) {
+        Py_ssize_t len;
+        if (!export_string_like(separator_obj, &separator.start, &len)) {
+            PyErr_SetString(PyExc_TypeError, "The separator argument must be string-like");
+            return NULL;
+        }
+        separator.length = (size_t)len;
+    }
+    else {
+        separator.start = " ";
+        separator.length = 1;
+    }
+
+    // Validate and convert `keepseparator`
+    if (keepseparator_obj) {
+        keepseparator = PyObject_IsTrue(keepseparator_obj);
+        if (keepseparator == -1) {
+            PyErr_SetString(PyExc_TypeError, "The keepseparator argument must be a boolean");
+            return NULL;
+        }
+    }
+    else { keepseparator = 0; }
+
+    // Validate and convert `maxsplit`
+    if (maxsplit_obj) {
+        maxsplit = PyLong_AsSsize_t(maxsplit_obj);
+        if (maxsplit == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "The maxsplit argument must be an integer");
+            return NULL;
+        }
+    }
+    else { maxsplit = PY_SSIZE_T_MAX; }
+
+    return Str_split_(text_obj, text, separator, keepseparator, maxsplit);
+}
+
+static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs) {
+
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member || nargs > !is_member + 2) {
+        PyErr_SetString(PyExc_TypeError, "splitlines() requires at least 1 argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *keeplinebreaks_obj = nargs > !is_member ? PyTuple_GET_ITEM(args, !is_member) : NULL;
+    PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "keeplinebreaks") == 0) { keeplinebreaks_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0) { maxsplit_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
+        }
+    }
+
+    sz_haystack_t text;
+    int keeplinebreaks;
+    Py_ssize_t maxsplit = PY_SSIZE_T_MAX; // Default value for maxsplit
+
+    // Validate and convert `text`
+    if (!export_string_like(text_obj, &text.start, &text.length)) {
+        PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
+        return NULL;
+    }
+
+    // Validate and convert `keeplinebreaks`
+    if (keeplinebreaks_obj) {
+        keeplinebreaks = PyObject_IsTrue(keeplinebreaks_obj);
+        if (keeplinebreaks == -1) {
+            PyErr_SetString(PyExc_TypeError, "The keeplinebreaks argument must be a boolean");
+            return NULL;
+        }
+    }
+    else { keeplinebreaks = 0; }
+
+    // Validate and convert `maxsplit`
+    if (maxsplit_obj) {
+        maxsplit = PyLong_AsSsize_t(maxsplit_obj);
+        if (maxsplit == -1 && PyErr_Occurred()) {
+            PyErr_SetString(PyExc_TypeError, "The maxsplit argument must be an integer");
+            return NULL;
+        }
+    }
+
+    // TODO: Support arbitrary newline characters:
+    // https://docs.python.org/3/library/stdtypes.html#str.splitlines
+    // \n, \r, \r\n, \v or \x0b, \f or \x0c, \x1c, \x1d, \x1e, \x85, \u2028, \u2029
+    // https://github.com/ashvardanian/StringZilla/issues/29
+    sz_needle_t separator;
+    separator.start = "\n";
+    separator.length = 1;
+    return Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit);
+}
+
+static PyObject *Str_concat(PyObject *self, PyObject *other) {
+    struct sz_haystack_t self_str, other_str;
+
+    // Validate and convert `self`
+    if (!export_string_like(self, &self_str.start, &self_str.length)) {
+        PyErr_SetString(PyExc_TypeError, "The self object must be string-like");
+        return NULL;
+    }
+
+    // Validate and convert `other`
+    if (!export_string_like(other, &other_str.start, &other_str.length)) {
+        PyErr_SetString(PyExc_TypeError, "The other object must be string-like");
+        return NULL;
+    }
+
+    // Allocate a new Str instance
+    Str *result_str = PyObject_New(Str, &StrType);
+    if (result_str == NULL) { return NULL; }
+
+    // Calculate the total length of the new string
+    result_str->parent = NULL;
+    result_str->length = self_str.length + other_str.length;
+
+    // Allocate memory for the new string
+    result_str->start = malloc(result_str->length);
+    if (result_str->start == NULL) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for string concatenation");
+        return NULL;
+    }
+
+    // Perform the string concatenation
+    memcpy(result_str->start, self_str.start, self_str.length);
+    memcpy(result_str->start + self_str.length, other_str.start, other_str.length);
+
+    return (PyObject *)result_str;
 }
 
 #pragma endregion
@@ -769,12 +927,6 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
         }
     }
 
-    // Handle empty string
-    if (parent == NULL) {
-        self->start = NULL;
-        self->length = 0;
-    }
-
     // Now, type-check and cast each argument
     Py_ssize_t from = 0, to = PY_SSIZE_T_MAX;
     if (from_obj) {
@@ -792,10 +944,15 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
         }
     }
 
+    // Handle empty string
+    if (parent_obj == NULL) {
+        self->start = NULL;
+        self->length = 0;
+    }
     // Increment the reference count of the parent
-    else if (export_string_like(parent, &self->start, &self->length)) {
-        self->parent = parent;
-        Py_INCREF(parent);
+    else if (export_string_like(parent_obj, &self->start, &self->length)) {
+        self->parent = parent_obj;
+        Py_INCREF(parent_obj);
     }
     else {
         PyErr_SetString(PyExc_TypeError, "Unsupported parent type");
@@ -822,7 +979,8 @@ static PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
 }
 
 static void Str_dealloc(Str *self) {
-    if (self->parent) Py_XDECREF(self->parent);
+    if (self->parent) { Py_XDECREF(self->parent); }
+    else if (self->start) { free(self->start); }
     self->parent = NULL;
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
@@ -907,16 +1065,16 @@ static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
     // https://docs.python.org/3/c-api/typeobj.html#c.PyBufferProcs.bf_releasebuffer
 }
 
-static int Str_contains(Str *self, PyObject *arg) {
+static int Str_in(Str *self, PyObject *arg) {
 
-    struct sz_needle_t needle_struct;
+    sz_needle_t needle_struct;
     needle_struct.anomaly_offset = 0;
     if (!export_string_like(arg, &needle_struct.start, &needle_struct.length)) {
         PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
         return -1;
     }
 
-    struct sz_haystack_t haystack;
+    sz_haystack_t haystack;
     haystack.start = self->start;
     haystack.length = self->length;
     size_t position = sz_neon_find_substr(haystack, needle_struct);
@@ -1020,9 +1178,9 @@ static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 }
 
 static PySequenceMethods Str_as_sequence = {
-    .sq_length = Str_len,        //
-    .sq_item = Str_getitem,      //
-    .sq_contains = Str_contains, //
+    .sq_length = Str_len,   //
+    .sq_item = Str_getitem, //
+    .sq_contains = Str_in,  //
 };
 
 static PyMappingMethods Str_as_mapping = {
@@ -1035,16 +1193,22 @@ static PyBufferProcs Str_as_buffer = {
     .bf_releasebuffer = Str_releasebuffer,
 };
 
+static PyNumberMethods Str_as_number = {
+    .nb_add = Str_concat,
+};
+
 #define sz_method_flags_m METH_VARARGS | METH_KEYWORDS
 
 static PyMethodDef Str_methods[] = { //
-    {"find", api_find, sz_method_flags_m, "Find the first occurrence of a substring."},
-    {"contains", api_contains, sz_method_flags_m, "Check if a string contains a substring."},
-    {"count", api_count, sz_method_flags_m, "Count the occurrences of a substring."},
-    {"levenstein", api_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
-    {"split", api_split, sz_method_flags_m, "Split a string by a separator."},
-    {"startswith", api_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
-    {"endswith", api_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
+    {"find", Str_find, sz_method_flags_m, "Find the first occurrence of a substring."},
+    {"index", Str_index, sz_method_flags_m, "Find the first occurrence of a substring or raise error if missing."},
+    {"contains", Str_contains, sz_method_flags_m, "Check if a string contains a substring."},
+    {"count", Str_count, sz_method_flags_m, "Count the occurrences of a substring."},
+    {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    {"split", Str_split, sz_method_flags_m, "Split a string by a separator."},
+    {"splitlines", Str_splitlines, sz_method_flags_m, "Split a string by line breaks."},
+    {"startswith", Str_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
+    {"endswith", Str_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrType = {
@@ -1062,6 +1226,7 @@ static PyTypeObject StrType = {
     .tp_as_sequence = &Str_as_sequence,
     .tp_as_mapping = &Str_as_mapping,
     .tp_as_buffer = &Str_as_buffer,
+    .tp_as_number = &Str_as_number,
 };
 
 static PySequenceMethods Strs_as_sequence = {
@@ -1095,13 +1260,15 @@ static void stringzilla_cleanup(PyObject *m) {
 }
 
 static PyMethodDef stringzilla_methods[] = {
-    {"find", api_find, sz_method_flags_m, "Find the first occurrence of a substring."},
-    {"contains", api_contains, sz_method_flags_m, "Check if a string contains a substring."},
-    {"count", api_count, sz_method_flags_m, "Count the occurrences of a substring."},
-    {"levenstein", api_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
-    {"split", api_split, sz_method_flags_m, "Split a string by a separator."},
-    {"startswith", api_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
-    {"endswith", api_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
+    {"find", Str_find, sz_method_flags_m, "Find the first occurrence of a substring."},
+    {"index", Str_index, sz_method_flags_m, "Find the first occurrence of a substring or raise error if missing."},
+    {"contains", Str_contains, sz_method_flags_m, "Check if a string contains a substring."},
+    {"count", Str_count, sz_method_flags_m, "Count the occurrences of a substring."},
+    {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    {"split", Str_split, sz_method_flags_m, "Split a string by a separator."},
+    {"splitlines", Str_splitlines, sz_method_flags_m, "Split a string by line breaks."},
+    {"startswith", Str_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
+    {"endswith", Str_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
     {NULL, NULL, 0, NULL}};
 
 static PyModuleDef stringzilla_module = {
@@ -1154,10 +1321,4 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     temporary_memory.start = malloc(4096);
     temporary_memory.length = 4096 * (temporary_memory.start != NULL);
     return m;
-
-cleanup:
-    Py_XDECREF(&FileType);
-    Py_XDECREF(&StrType);
-    Py_XDECREF(m);
-    return NULL;
 }
