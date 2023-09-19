@@ -41,8 +41,7 @@ inline static sz_size_t sz_divide_round_up(sz_size_t x, sz_size_t divisor) { ret
  */
 inline static int sz_equal(char const *a, char const *b, sz_size_t length) {
     char const *const a_end = a + length;
-    while (a != a_end && *a == *b)
-        a++, b++;
+    while (a != a_end && *a == *b) a++, b++;
     return a_end == a;
 }
 
@@ -66,8 +65,7 @@ inline static sz_size_t sz_naive_count_char(sz_haystack_t h, char n) {
     char const *text = h.start;
     char const *end = h.start + h.length;
 
-    for (; (uint64_t)text % 8 != 0 && text < end; ++text)
-        result += *text == n;
+    for (; (uint64_t)text % 8 != 0 && text < end; ++text) result += *text == n;
 
     // This code simulates hyper-scalar execution, comparing 8 characters at a time.
     uint64_t nnnnnnnn = n;
@@ -84,8 +82,7 @@ inline static sz_size_t sz_naive_count_char(sz_haystack_t h, char n) {
         result += popcount64(match_indicators);
     }
 
-    for (; text < end; ++text)
-        result += *text == n;
+    for (; text < end; ++text) result += *text == n;
     return result;
 }
 
@@ -98,8 +95,7 @@ inline static sz_size_t sz_naive_find_char(sz_haystack_t h, char n) {
     char const *end = h.start + h.length;
 
     for (; (uint64_t)text % 8 != 0 && text < end; ++text)
-        if (*text == n)
-            return text - h.start;
+        if (*text == n) return text - h.start;
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
     uint64_t nnnnnnnn = n;
@@ -114,13 +110,11 @@ inline static sz_size_t sz_naive_find_char(sz_haystack_t h, char n) {
         match_indicators &= match_indicators >> 4;
         match_indicators &= 0x0101010101010101;
 
-        if (match_indicators != 0)
-            return text - h.start + ctz64(match_indicators) / 8;
+        if (match_indicators != 0) return text - h.start + ctz64(match_indicators) / 8;
     }
 
     for (; text < end; ++text)
-        if (*text == n)
-            return text - h.start;
+        if (*text == n) return text - h.start;
     return h.length;
 }
 
@@ -161,8 +155,7 @@ inline static sz_size_t sz_naive_find_2chars(sz_haystack_t h, char const *n) {
     }
 
     for (; text + 2 <= end; ++text)
-        if (text[0] == n[0] && text[1] == n[1])
-            return text - h.start;
+        if (text[0] == n[0] && text[1] == n[1]) return text - h.start;
     return h.length;
 }
 
@@ -211,13 +204,11 @@ inline static sz_size_t sz_naive_find_3chars(sz_haystack_t h, char const *n) {
             (third_indicators >> 16) & (third_indicators >> 8) & (third_indicators >> 0) & 0x0000010000010000;
 
         uint64_t match_indicators = first_indicators | (second_indicators >> 8) | (third_indicators >> 16);
-        if (match_indicators != 0)
-            return text - h.start + ctz64(match_indicators) / 8;
+        if (match_indicators != 0) return text - h.start + ctz64(match_indicators) / 8;
     }
 
     for (; text + 3 <= end; ++text)
-        if (text[0] == n[0] && text[1] == n[1] && text[2] == n[2])
-            return text - h.start;
+        if (text[0] == n[0] && text[1] == n[1] && text[2] == n[2]) return text - h.start;
     return h.length;
 }
 
@@ -275,8 +266,7 @@ inline static sz_size_t sz_naive_find_4chars(sz_haystack_t h, char const *n) {
     }
 
     for (; text + 4 <= end; ++text)
-        if (text[0] == n[0] && text[1] == n[1] && text[2] == n[2] && text[3] == n[3])
-            return text - h.start;
+        if (text[0] == n[0] && text[1] == n[1] && text[2] == n[2] && text[3] == n[3]) return text - h.start;
     return h.length;
 }
 
@@ -287,8 +277,7 @@ inline static sz_size_t sz_naive_find_4chars(sz_haystack_t h, char const *n) {
  */
 inline static sz_size_t sz_naive_find_substr(sz_haystack_t h, sz_needle_t n) {
 
-    if (h.length < n.length)
-        return h.length;
+    if (h.length < n.length) return h.length;
 
     char const *text = h.start;
     char const *const end = h.start + h.length;
@@ -365,18 +354,17 @@ sz_size_t sz_avx2_find_substr(sz_haystack_t h, sz_needle_t n) {
 
         if (matches0 | matches1 | matches2 | matches3) {
             for (sz_size_t i = 0; i < 32; i++) {
-                if (sz_equal(text + i, n.start, n.length))
-                    return i + (text - h.start);
+                if (sz_equal(text + i, n.start, n.length)) return i + (text - h.start);
             }
         }
     }
 
     // Don't forget the last (up to 35) characters.
     sz_haystack_t tail;
-    tail.ptr = text;
-    tail.len = end - text;
+    tail.start = text;
+    tail.length = end - text;
     size_t tail_match = sz_naive_find_substr(tail, n);
-    return text + tail_match - h.ptr;
+    return text + tail_match - h.start;
 }
 
 #endif // x86 AVX2
@@ -423,18 +411,17 @@ inline static sz_size_t sz_neon_find_substr(sz_haystack_t h, sz_needle_t n) {
 
         if (has_match) {
             for (sz_size_t i = 0; i < 16; i++) {
-                if (sz_equal(text + i, n.start, n.length))
-                    return i + (text - h.start);
+                if (sz_equal(text + i, n.start, n.length)) return i + (text - h.start);
             }
         }
     }
 
     // Don't forget the last (up to 16+3=19) characters.
     sz_haystack_t tail;
-    tail.ptr = text;
-    tail.len = end - text;
+    tail.start = text;
+    tail.length = end - text;
     size_t tail_match = sz_naive_find_substr(tail, n);
-    return text + tail_match - h.ptr;
+    return text + tail_match - h.start;
 }
 
 #endif // Arm Neon
@@ -472,8 +459,7 @@ typedef struct sz_sequence_t {
 inline static sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate) {
 
     sz_size_t matches = 0;
-    while (matches != sequence->count && predicate(sequence->handle, sequence->order[matches]))
-        ++matches;
+    while (matches != sequence->count && predicate(sequence->handle, sequence->order[matches])) ++matches;
 
     for (sz_size_t i = matches + 1; i < sequence->count; ++i)
         if (predicate(sequence->handle, sequence->order[i]))
@@ -491,16 +477,13 @@ inline static void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_seq
     sz_size_t start_b = partition + 1;
 
     // If the direct merge is already sorted
-    if (!less(sequence->handle, sequence->order[start_b], sequence->order[partition]))
-        return;
+    if (!less(sequence->handle, sequence->order[start_b], sequence->order[partition])) return;
 
     sz_size_t start_a = 0;
     while (start_a <= partition && start_b <= sequence->count) {
 
         // If element 1 is in right place
-        if (!less(sequence->handle, sequence->order[start_b], sequence->order[start_a])) {
-            start_a++;
-        }
+        if (!less(sequence->handle, sequence->order[start_b], sequence->order[start_a])) { start_a++; }
         else {
             sz_size_t value = sequence->order[start_b];
             sz_size_t index = start_b;
@@ -527,19 +510,16 @@ inline static void _sz_sort_recursion( //
     sz_size_t bit_max,
     sz_qsort_comparison_func_t qsort_comparator) {
 
-    if (!sequence->count)
-        return;
+    if (!sequence->count) return;
 
     // Partition a range of integers according to a specific bit value
     sz_size_t split = 0;
     {
         sz_size_t mask = (1ul << 63) >> bit_idx;
-        while (split != sequence->count && !(sequence->order[split] & mask))
-            ++split;
+        while (split != sequence->count && !(sequence->order[split] & mask)) ++split;
 
         for (sz_size_t i = split + 1; i < sequence->count; ++i)
-            if (!(sequence->order[i] & mask))
-                sz_swap(sequence->order + i, sequence->order + split), ++split;
+            if (!(sequence->order[i] & mask)) sz_swap(sequence->order + i, sequence->order + split), ++split;
     }
 
     // Go down recursively
@@ -556,9 +536,7 @@ inline static void _sz_sort_recursion( //
     // Reached the end of recursion
     else {
         // Discard the prefixes
-        for (sz_size_t i = 0; i != sequence->count; ++i) {
-            memset((char *)(&sequence->order[i]) + 4, 0, 4ul);
-        }
+        for (sz_size_t i = 0; i != sequence->count; ++i) { memset((char *)(&sequence->order[i]) + 4, 0, 4ul); }
 
         // Perform sorts on smaller chunks instead of the whole handle
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
@@ -649,8 +627,7 @@ inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *conf
         sz_size_t length = sequence->get_length(sequence->handle, sequence->order[i]);
         length = length > 4ul ? 4ul : length;
         char *prefix = (char *)&sequence->order[i];
-        for (sz_size_t j = 0; j != length; ++j)
-            prefix[7 - j] = begin[j];
+        for (sz_size_t j = 0; j != length; ++j) prefix[7 - j] = begin[j];
         if (case_insensitive) {
             prefix[0] = tolower(prefix[0]);
             prefix[1] = tolower(prefix[1]);
@@ -660,8 +637,7 @@ inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *conf
     }
 
     sz_qsort_comparison_func_t comparator = _sz_sort_sequence_strncmp;
-    if (case_insensitive)
-        comparator = _sz_sort_sequence_strncasecmp;
+    if (case_insensitive) comparator = _sz_sort_sequence_strncasecmp;
 
     // Perform optionally-parallel radix sort on them
     _sz_sort_recursion(sequence, 0, 32, comparator);
@@ -699,26 +675,21 @@ inline static levenstein_distance_t sz_levenstein( //
     void *buffer) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one
-    if (a_length == 0)
-        return b_length <= bound ? b_length : bound;
-    if (b_length == 0)
-        return a_length <= bound ? a_length : bound;
+    if (a_length == 0) return b_length <= bound ? b_length : bound;
+    if (b_length == 0) return a_length <= bound ? a_length : bound;
 
     // If the difference in length is beyond the `bound`, there is no need to check at all
     if (a_length > b_length) {
-        if (a_length - b_length > bound)
-            return bound + 1;
+        if (a_length - b_length > bound) return bound + 1;
     }
     else {
-        if (b_length - a_length > bound)
-            return bound + 1;
+        if (b_length - a_length > bound) return bound + 1;
     }
 
     levenstein_distance_t *previous_distances = (levenstein_distance_t *)buffer;
     levenstein_distance_t *current_distances = previous_distances + b_length + 1;
 
-    for (sz_size_t idx_b = 0; idx_b != (b_length + 1); ++idx_b)
-        previous_distances[idx_b] = idx_b;
+    for (sz_size_t idx_b = 0; idx_b != (b_length + 1); ++idx_b) previous_distances[idx_b] = idx_b;
 
     for (sz_size_t idx_a = 0; idx_a != a_length; ++idx_a) {
         current_distances[0] = idx_a + 1;
@@ -733,14 +704,11 @@ inline static levenstein_distance_t sz_levenstein( //
             current_distances[idx_b + 1] = _sz_levenstein_minimum(cost_deletion, cost_insertion, cost_substitution);
 
             // Keep track of the minimum distance seen so far in this row
-            if (current_distances[idx_b + 1] < min_distance) {
-                min_distance = current_distances[idx_b + 1];
-            }
+            if (current_distances[idx_b + 1] < min_distance) { min_distance = current_distances[idx_b + 1]; }
         }
 
         // If the minimum distance in this row exceeded the bound, return early
-        if (min_distance > bound)
-            return bound;
+        if (min_distance > bound) return bound;
 
         // Swap previous_distances and current_distances pointers
         levenstein_distance_t *temp = previous_distances;
