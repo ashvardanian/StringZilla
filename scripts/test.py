@@ -75,19 +75,29 @@ def test_rich_comparisons():
     assert Str("abb")[1:] == "bb"
 
 
-# def get_random_string(
-#     length: Optional[int] = None, variability: Optional[int] = None
-# ) -> str:
-#     if length is None:
-#         length = randint(3, 300)
-#     if variability is None:
-#         variability = len(ascii_lowercase)
-#     return "".join(choice(ascii_lowercase[:variability]) for _ in range(length))
+def test_buffer_protocol():
+    import numpy as np
+
+    my_str = Str("hello")
+    arr = np.array(my_str)
+    assert arr.dtype == np.dtype("c")
+    assert arr.shape == (len("hello"),)
+    assert "".join([c.decode("utf-8") for c in arr.tolist()]) == "hello"
 
 
-# def is_equal_strings(native_strings, big_strings):
-#     for native_slice, big_slice in zip(native_strings, big_strings):
-#         assert native_slice == big_slice
+def get_random_string(
+    length: Optional[int] = None, variability: Optional[int] = None
+) -> str:
+    if length is None:
+        length = randint(3, 300)
+    if variability is None:
+        variability = len(ascii_lowercase)
+    return "".join(choice(ascii_lowercase[:variability]) for _ in range(length))
+
+
+def is_equal_strings(native_strings, big_strings):
+    for native_slice, big_slice in zip(native_strings, big_strings):
+        assert native_slice == big_slice
 
 
 # def check_identical(
@@ -255,16 +265,16 @@ def test_rich_comparisons():
 #         )
 
 
-# def test_levenstein():
-#     # Create a new string by slicing and concatenating
-#     def insert_char_at(s, char_to_insert, index):
-#         return s[:index] + char_to_insert + s[index:]
+def test_levenstein():
+    # Create a new string by slicing and concatenating
+    def insert_char_at(s, char_to_insert, index):
+        return s[:index] + char_to_insert + s[index:]
 
-#     for _ in range(100):
-#         a = get_random_string(length=20)
-#         b = a
-#         for i in range(150):
-#             source_offset = randint(0, len(ascii_lowercase) - 1)
-#             target_offset = randint(0, len(b) - 1)
-#             b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
-#             assert levenstein(a, b, 200) == i + 1
+    for _ in range(100):
+        a = get_random_string(length=20)
+        b = a
+        for i in range(150):
+            source_offset = randint(0, len(ascii_lowercase) - 1)
+            target_offset = randint(0, len(b) - 1)
+            b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
+            assert sz.levenstein(a, b, 200) == i + 1
