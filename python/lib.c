@@ -210,7 +210,7 @@ int export_string_like(PyObject *object, char const **start, size_t *length) {
 #pragma region Global Functions
 
 static Py_ssize_t api_find_(PyObject *self, PyObject *args, PyObject *kwargs) {
-    int is_member = (self != NULL && PyObject_TypeCheck(self, &StrType));
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 3) {
         PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
@@ -294,7 +294,7 @@ static PyObject *api_contains(PyObject *self, PyObject *args, PyObject *kwargs) 
 }
 
 static PyObject *api_count(PyObject *self, PyObject *args, PyObject *kwargs) {
-    int is_member = (self != NULL && PyObject_TypeCheck(self, &StrType));
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 4) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
@@ -361,7 +361,7 @@ static PyObject *api_count(PyObject *self, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *api_levenstein(PyObject *self, PyObject *args, PyObject *kwargs) {
-    int is_member = (self != NULL && PyObject_TypeCheck(self, &StrType));
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 2) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
@@ -415,10 +415,54 @@ static PyObject *api_levenstein(PyObject *self, PyObject *args, PyObject *kwargs
     return PyLong_FromLong(distance);
 }
 
+static PyObject *api_startswith(PyObject *self, PyObject *args, PyObject *kwargs) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    if (PyTuple_Size(args) != !is_member + 1) {
+        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *str_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *prefix_obj = PyTuple_GET_ITEM(args, !is_member);
+
+    struct sz_haystack_t str, prefix;
+    if (!export_string_like(str_obj, &str.start, &str.length) ||
+        !export_string_like(prefix_obj, &prefix.start, &prefix.length)) {
+        PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
+        return NULL;
+    }
+
+    if (str.length < prefix.length) { Py_RETURN_FALSE; }
+    else if (strncmp(str.start, prefix.start, prefix.length) == 0) { Py_RETURN_TRUE; }
+    else { Py_RETURN_FALSE; }
+}
+
+static PyObject *api_endswith(PyObject *self, PyObject *args, PyObject *kwargs) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    if (PyTuple_Size(args) != !is_member + 1) {
+        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *str_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *suffix_obj = PyTuple_GET_ITEM(args, !is_member);
+
+    struct sz_haystack_t str, suffix;
+    if (!export_string_like(str_obj, &str.start, &str.length) ||
+        !export_string_like(suffix_obj, &suffix.start, &suffix.length)) {
+        PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
+        return NULL;
+    }
+
+    if (str.length < suffix.length) { Py_RETURN_FALSE; }
+    else if (strncmp(str.start + (str.length - suffix.length), suffix.start, suffix.length) == 0) { Py_RETURN_TRUE; }
+    else { Py_RETURN_FALSE; }
+}
+
 static PyObject *api_split(PyObject *self, PyObject *args, PyObject *kwargs) {
 
     // Check minimum arguments
-    int is_member = (self != NULL && PyObject_TypeCheck(self, &StrType));
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 3) {
         PyErr_SetString(PyExc_TypeError, "sz.split() requires at least 1 argument");
@@ -691,7 +735,7 @@ static int Str_init(Str *self, PyObject *positional_args, PyObject *named_args) 
         if (!PyArg_ParseTupleAndKeywords(positional_args, named_args, "|Onn", names, &parent, &from, &to)) return -1;
     }
     else if (!PyArg_ParseTuple(positional_args, "|Onn", &parent, &from, &to))
-        return -1;
+                    return -1;
 
     // Handle empty string
     if (parent == NULL) {
@@ -949,6 +993,8 @@ static PyMethodDef Str_methods[] = { //
     {"count", api_count, sz_method_flags_m, "Count the occurrences of a substring."},
     {"levenstein", api_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {"split", api_split, sz_method_flags_m, "Split a string by a separator."},
+    {"startswith", api_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
+    {"endswith", api_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrType = {
@@ -1004,8 +1050,9 @@ static PyMethodDef stringzilla_methods[] = {
     {"count", api_count, sz_method_flags_m, "Count the occurrences of a substring."},
     {"levenstein", api_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {"split", api_split, sz_method_flags_m, "Split a string by a separator."},
-    {NULL, NULL, 0, NULL} /* Sentinel */
-};
+    {"startswith", api_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
+    {"endswith", api_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
+    {NULL, NULL, 0, NULL}};
 
 static PyModuleDef stringzilla_module = {
     PyModuleDef_HEAD_INIT,
