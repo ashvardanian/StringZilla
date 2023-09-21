@@ -52,6 +52,11 @@ napi_value FindAPI(napi_env env, napi_callback_info info) {
     return js_result;
 }
 
+size_t count_char(strzl_haystack_t strzl_haystack, char needle) {
+    size_t result = strzl_naive_count_char(strzl_haystack, needle);
+    return result;
+}
+
 napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
     size_t argc = 3;
     napi_value args[3];
@@ -83,7 +88,7 @@ napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
     size_t result = 0;
 
     if (haystack_l == 1)
-        result = count_char(haystack, *needle);
+        result = count_char(strzl_haystack, needle);
     else if (haystack_l < needle_l)
         result = 0;
     else if (overlap) {
