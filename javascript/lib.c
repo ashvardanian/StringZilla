@@ -8,7 +8,7 @@
  *
  *  @see NodeJS docs: https://nodejs.org/api/n-api.html
  */
-#include <stdio.h>
+ 
 #include <node_api.h>
 #include <stringzilla.h>
 
