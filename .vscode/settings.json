@@ -149,6 +149,7 @@
     "NOMINMAX",
     "NOTIMPLEMENTED",
     "pytest",
+    "Pythonic",
     "quadgram",
     "readlines",
     "releasebuffer",
