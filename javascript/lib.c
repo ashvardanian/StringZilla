@@ -50,7 +50,7 @@ napi_value FindAPI(napi_env env, napi_callback_info info) {
     napi_value js_result;
 
     // In JavaScript if find unable to find the specified value then it should return -1
-    if (result == 0)
+    if (result == strzl_haystack.len)
         napi_create_bigint_int64(env, -1, &js_result);
     else
         napi_create_bigint_uint64(env, result, &js_result);
