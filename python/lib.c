@@ -1351,6 +1351,74 @@ static PyTypeObject StrType = {
     .tp_as_number = &Str_as_number,
 };
 
+#pragma endregion
+
+#pragma regions Strs
+
+static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
+    unsigned int seed = time(NULL); // Default seed
+
+    // Check for positional arguments
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs > 1) {
+        PyErr_SetString(PyExc_TypeError, "shuffle() takes at most 1 positional argument");
+        return NULL;
+    }
+    else if (nargs == 1) {
+        PyObject *seed_obj = PyTuple_GET_ITEM(args, 0);
+        if (!PyLong_Check(seed_obj)) {
+            PyErr_SetString(PyExc_TypeError, "The seed must be an integer");
+            return NULL;
+        }
+        seed = PyLong_AsUnsignedLong(seed_obj);
+    }
+
+    // Check for keyword arguments
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "seed") == 0) {
+                if (nargs == 1) {
+                    PyErr_SetString(PyExc_TypeError, "Received seed both as positional and keyword argument");
+                    return NULL;
+                }
+                if (!PyLong_Check(value)) {
+                    PyErr_SetString(PyExc_TypeError, "The seed must be an integer");
+                    return NULL;
+                }
+                seed = PyLong_AsUnsignedLong(value);
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "Received an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
+    }
+
+    // Change the layout
+    if (!prepare_strings_for_reordering(self)) {
+        PyErr_Format(PyExc_TypeError, "Failed to prepare the sequence for shuffling");
+        return NULL;
+    }
+
+    // Get the parts and their count
+    struct reordered_slices_t *reordered = &self->data.reordered;
+    sz_haystack_t *parts = reordered->parts;
+    size_t count = reordered->count;
+
+    // Fisher-Yates Shuffle Algorithm
+    for (size_t i = count - 1; i > 0; --i) {
+        size_t j = rand() % (i + 1);
+        // Swap parts[i] and parts[j]
+        sz_haystack_t temp = parts[i];
+        parts[i] = parts[j];
+        parts[j] = temp;
+    }
+
+    Py_RETURN_NONE;
+}
+
 static PySequenceMethods Strs_as_sequence = {
     .sq_length = Strs_len,        //
     .sq_item = Strs_getitem,      //
@@ -1362,6 +1430,10 @@ static PyMappingMethods Strs_as_mapping = {
     .mp_subscript = Strs_subscript, // Is used to implement slices in Python
 };
 
+static PyMethodDef Strs_methods[] = {
+    {"shuffle", Strs_shuffle, sz_method_flags_m, "Shuffle the elements of the Strs object."}, //
+    {NULL, NULL, 0, NULL}};
+
 static PyTypeObject StrsType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Strs",
     .tp_doc = "Space-efficient container for large collections of strings and their slices",
@@ -1369,6 +1441,7 @@ static PyTypeObject StrsType = {
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_new = PyType_GenericNew,
+    .tp_methods = Strs_methods,
     .tp_as_sequence = &Strs_as_sequence,
     .tp_as_mapping = &Strs_as_mapping,
 };
