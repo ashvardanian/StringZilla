@@ -13,6 +13,7 @@ if sys.platform == "linux":
     compile_args.append("-O3")
     compile_args.append("-pedantic")
     compile_args.append("-Wno-unknown-pragmas")
+    compile_args.append("-fdiagnostics-color=always")
     compile_args.append("-fopenmp")
     link_args.append("-lgomp")
 
@@ -40,6 +41,7 @@ if sys.platform == "darwin":
     compile_args.append("-Wno-unknown-pragmas")
     compile_args.append("-Wno-incompatible-function-pointer-types")
     compile_args.append("-Wno-incompatible-pointer-types")
+    compile_args.append("-fcolor-diagnostics")
     compile_args.append("-Xpreprocessor -fopenmp")
     link_args.append("-Xpreprocessor -lomp")
 
