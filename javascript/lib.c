@@ -8,6 +8,7 @@
  *
  *  @see NodeJS docs: https://nodejs.org/api/n-api.html
  */
+
 #include <node_api.h>
 #include <stringzilla.h>
 
@@ -49,7 +50,7 @@ napi_value FindAPI(napi_env env, napi_callback_info info) {
     napi_value js_result;
 
     // In JavaScript if find unable to find the specified value then it should return -1
-    if (result = strzl_haystack.len)
+    if (result == 0)
         napi_create_bigint_int64(env, -1, &js_result);
     else
         napi_create_bigint_uint64(env, result, &js_result);
@@ -75,8 +76,8 @@ napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
     // For haystack
     napi_get_value_string_utf8(env, args[0], NULL, 0, &haystack_l);
     char *haystack = malloc(haystack_l + 1);
-    napi_get_value_string_utf8(env, args[0], haystack, haystack_l + 1, &needle_l);
-    struct strzl_haystack_t strzl_haystack = {haystack, needle_l};
+    napi_get_value_string_utf8(env, args[0], haystack, haystack_l + 1, &haystack_l);
+    struct strzl_haystack_t strzl_haystack = {haystack, haystack_l};
 
     // For needle
     napi_get_value_string_utf8(env, args[1], NULL, 0, &haystack_l);
@@ -89,8 +90,8 @@ napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
 
     size_t result = 0;
 
-    if (haystack_l == 1)
-        result = count_char(strzl_haystack, needle);
+    if (needle_l == 1 || needle_l == 0)
+        result = count_char(strzl_haystack, needle[0]);
     else if (haystack_l < needle_l)
         result = 0;
     else if (overlap) {

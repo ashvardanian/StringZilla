@@ -116,7 +116,8 @@
     "stop_token": "cpp",
     "__verbose_abort": "cpp",
     "strstream": "cpp",
-    "filesystem": "cpp"
+    "filesystem": "cpp",
+    "stringzilla.h": "c"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "cSpell.words": [
