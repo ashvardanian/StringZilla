@@ -8,12 +8,11 @@
  *
  *  @see NodeJS docs: https://nodejs.org/api/n-api.html
  */
- 
 #include <node_api.h>
 #include <stringzilla.h>
 
 napi_value FindAPI(napi_env env, napi_callback_info info) {
-    size_t argc = 2;
+size_t argc = 2;
     napi_value args[2];
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
 
@@ -33,14 +32,25 @@ napi_value FindAPI(napi_env env, napi_callback_info info) {
     napi_get_value_string_utf8(env, args[1], needle, haystack_l + 1, &needle_l);
     struct strzl_needle_t strzl_needle = {needle, needle_l, 0};
 
-// Perform the find operation
-#if defined(__AVX2__)
-    uint64_t result = strzl_avx2_find_substr(strzl_haystack, strzl_needle);
-#elif defined(__ARM_NEON)
-    uint64_t result = strzl_neon_find_substr(strzl_haystack, strzl_needle);
-#else
-    uint64_t result = strzl_naive_find_substr(strzl_haystack, strzl_needle);
-#endif
+    // Perform the find operation
+    #if defined(__AVX2__)
+        uint64_t result = strzl_avx2_find_substr(strzl_haystack, strzl_needle);
+    #elif defined(__ARM_NEON)
+        uint64_t result = strzl_neon_find_substr(strzl_haystack, strzl_needle);
+    #else
+        uint64_t result = strzl_naive_find_substr(strzl_haystack, strzl_needle);
+    #endif
+
+    // Restore length of haystack as it's lost
+    haystack_l = strlen(haystack);
+
+    // In JavaScript if find unable to find the specified value then it should return -1
+    if (haystack_l == (size_t)result) {
+        napi_value js_result;
+        napi_create_int32(env, -1, &js_result);
+
+        return js_result;
+    }
 
     // Cleanup
     free(haystack);
