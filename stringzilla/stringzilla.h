@@ -59,7 +59,7 @@ typedef struct sz_needle_t {
 /**
  *  @brief  SWAR single-character counting procedure, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_naive_count_char(sz_haystack_t h, char n) {
+inline static sz_size_t sz_count_char_swar(sz_haystack_t h, char n) {
 
     sz_size_t result = 0;
     char const *text = h.start;
@@ -89,7 +89,7 @@ inline static sz_size_t sz_naive_count_char(sz_haystack_t h, char n) {
 /**
  *  @brief  SWAR single-character search in string, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_naive_find_char(sz_haystack_t h, char n) {
+inline static sz_size_t sz_find_char_swar(sz_haystack_t h, char n) {
 
     char const *text = h.start;
     char const *end = h.start + h.length;
@@ -121,7 +121,7 @@ inline static sz_size_t sz_naive_find_char(sz_haystack_t h, char n) {
 /**
  *  @brief  SWAR character-bigram search in string, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_naive_find_2chars(sz_haystack_t h, char const *n) {
+inline static sz_size_t sz_find_2chars_swar(sz_haystack_t h, char const *n) {
 
     char const *text = h.start;
     char const *end = h.start + h.length;
@@ -162,7 +162,7 @@ inline static sz_size_t sz_naive_find_2chars(sz_haystack_t h, char const *n) {
 /**
  *  @brief  SWAR character-trigram search in string, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_naive_find_3chars(sz_haystack_t h, char const *n) {
+inline static sz_size_t sz_find_3chars_swar(sz_haystack_t h, char const *n) {
 
     char const *text = h.start;
     char const *end = h.start + h.length;
@@ -215,7 +215,7 @@ inline static sz_size_t sz_naive_find_3chars(sz_haystack_t h, char const *n) {
 /**
  *  @brief  SWAR character-quadgram search in string, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_naive_find_4chars(sz_haystack_t h, char const *n) {
+inline static sz_size_t sz_find_4chars_swar(sz_haystack_t h, char const *n) {
 
     char const *text = h.start;
     char const *end = h.start + h.length;
@@ -230,7 +230,7 @@ inline static sz_size_t sz_naive_find_4chars(sz_haystack_t h, char const *n) {
     lookup[0b0100] = lookup[0b1100] = 2;
     lookup[0b1000] = 3;
 
-    // We can perform 5 comparisons per load, but it's easir to perform 4, minimizing the size of the lookup table.
+    // We can perform 5 comparisons per load, but it's easier to perform 4, minimizing the size of the lookup table.
     for (; text + 8 <= end; text += 4) {
         uint64_t text_slice;
         memcpy(&text_slice, text, 8);
@@ -275,19 +275,20 @@ inline static sz_size_t sz_naive_find_4chars(sz_haystack_t h, char const *n) {
  *          it compares 4-byte anomalies first, most commonly prefixes. It's computationally cheaper.
  *          Matching performance fluctuates between 1 GB/s and 3,5 GB/s per core.
  */
-inline static sz_size_t sz_naive_find_substr(sz_haystack_t h, sz_needle_t n) {
+inline static sz_size_t sz_find_substr_swar(sz_haystack_t h, sz_needle_t n) {
 
     if (h.length < n.length) return h.length;
 
-    char const *text = h.start;
-    char const *const end = h.start + h.length;
     switch (n.length) {
     case 0: return 0;
-    case 1: return sz_naive_find_char(h, *n.start);
-    case 2: return sz_naive_find_2chars(h, n.start);
-    case 3: return sz_naive_find_3chars(h, n.start);
-    case 4: return sz_naive_find_4chars(h, n.start);
+    case 1: return sz_find_char_swar(h, *n.start);
+    case 2: return sz_find_2chars_swar(h, n.start);
+    case 3: return sz_find_3chars_swar(h, n.start);
+    case 4: return sz_find_4chars_swar(h, n.start);
     default: {
+        char const *text = h.start;
+        char const *const end = h.start + h.length;
+
         sz_anomaly_t n_anomaly, h_anomaly;
         sz_size_t const n_suffix_len = n.length - 4 - n.anomaly_offset;
         char const *n_suffix_ptr = n.start + 4 + n.anomaly_offset;
@@ -314,7 +315,7 @@ inline static sz_size_t sz_naive_find_substr(sz_haystack_t h, sz_needle_t n) {
  *          was practically more efficient than loading once and shifting around, as introduces
  *          less data dependencies.
  */
-sz_size_t sz_avx2_find_substr(sz_haystack_t h, sz_needle_t n) {
+inline static sz_size_t sz_find_substr_avx2(sz_haystack_t h, sz_needle_t n) {
 
     // Precomputed constants
     char const *const end = h.start + h.length;
@@ -363,7 +364,7 @@ sz_size_t sz_avx2_find_substr(sz_haystack_t h, sz_needle_t n) {
     sz_haystack_t tail;
     tail.start = text;
     tail.length = end - text;
-    size_t tail_match = sz_naive_find_substr(tail, n);
+    size_t tail_match = sz_find_substr_swar(tail, n);
     return text + tail_match - h.start;
 }
 
@@ -377,7 +378,7 @@ sz_size_t sz_avx2_find_substr(sz_haystack_t h, sz_needle_t n) {
  *          was practically more efficient than loading once and shifting around, as introduces
  *          less data dependencies.
  */
-inline static sz_size_t sz_neon_find_substr(sz_haystack_t h, sz_needle_t n) {
+inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
 
     // Precomputed constants
     char const *const end = h.start + h.length;
@@ -420,11 +421,32 @@ inline static sz_size_t sz_neon_find_substr(sz_haystack_t h, sz_needle_t n) {
     sz_haystack_t tail;
     tail.start = text;
     tail.length = end - text;
-    size_t tail_match = sz_naive_find_substr(tail, n);
+    size_t tail_match = sz_find_substr_swar(tail, n);
     return text + tail_match - h.start;
 }
 
 #endif // Arm Neon
+
+inline static sz_size_t sz_find_substr_auto(sz_haystack_t h, sz_needle_t n) {
+    if (h.length < n.length) return h.length;
+
+    switch (n.length) {
+    case 0: return 0;
+    case 1: return sz_find_char_swar(h, *n.start);
+    case 2: return sz_find_2chars_swar(h, n.start);
+    case 3: return sz_find_3chars_swar(h, n.start);
+    case 4:
+        return sz_find_4chars_swar(h, n.start);
+        // #if defined(__ARM_NEON)
+        //     default: return sz_find_substr_neon(h, n);
+        // #elif defined(__AVX2__)
+        //     default: return sz_find_substr_avx2(h, n);
+        // #else
+    default:
+        return sz_find_substr_swar(h, n);
+        // #endif
+    }
+}
 
 inline static void sz_swap(sz_size_t *a, sz_size_t *b) {
     sz_size_t t = *a;
@@ -517,7 +539,6 @@ inline static void _sz_sort_recursion( //
     {
         sz_size_t mask = (1ul << 63) >> bit_idx;
         while (split != sequence->count && !(sequence->order[split] & mask)) ++split;
-
         for (sz_size_t i = split + 1; i < sequence->count; ++i)
             if (!(sequence->order[i] & mask)) sz_swap(sequence->order + i, sequence->order + split), ++split;
     }
