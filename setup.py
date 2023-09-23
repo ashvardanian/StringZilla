@@ -3,6 +3,7 @@ import sys
 import platform
 from setuptools import setup, Extension
 
+import numpy as np
 
 compile_args = []
 link_args = []
@@ -54,7 +55,7 @@ ext_modules = [
     Extension(
         "stringzilla",
         ["python/lib.c"],
-        include_dirs=["stringzilla"],
+        include_dirs=["stringzilla", np.get_include()],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         define_macros=macros_args,
@@ -98,5 +99,6 @@ setup(
         "Topic :: Text Processing :: Indexing",
     ],
     include_dirs=[],
+    setup_requires=["numpy"],
     ext_modules=ext_modules,
 )
