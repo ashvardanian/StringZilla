@@ -46,10 +46,10 @@ napi_value FindAPI(napi_env env, napi_callback_info info) {
     free(haystack);
     free(needle);
 
-    // Convert result to JavaScript BigInt and return
+    // Convert the result to JavaScript BigInt and return
     napi_value js_result;
 
-    // In JavaScript if find unable to find the specified value then it should return -1
+    // In JavaScript, if `find` is unable to find the specified value, then it should return -1
     if (result == strzl_haystack.len)
         napi_create_bigint_int64(env, -1, &js_result);
     else
@@ -70,30 +70,30 @@ napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
 
     // Extract the C string from the JavaScript string for haystack and needle
-    size_t haystack_l;
-    size_t needle_l;
+    struct strzl_haystack_t strzl_haystack = {NULL, 0};
+    struct strzl_needle_t strzl_needle = {NULL, 0, 0};
 
     // For haystack
-    napi_get_value_string_utf8(env, args[0], NULL, 0, &haystack_l);
-    char *haystack = malloc(haystack_l + 1);
-    napi_get_value_string_utf8(env, args[0], haystack, haystack_l + 1, &haystack_l);
-    struct strzl_haystack_t strzl_haystack = {haystack, haystack_l};
+    napi_get_value_string_utf8(env, args[0], NULL, 0, &strzl_haystack.len);
+    char *haystack = malloc(strzl_haystack.len);
+    napi_get_value_string_utf8(env, args[0], haystack, strzl_haystack.len, &strzl_haystack.len);
+    strzl_haystack.ptr = haystack;
 
     // For needle
-    napi_get_value_string_utf8(env, args[1], NULL, 0, &haystack_l);
-    char *needle = malloc(haystack_l + 1);
-    napi_get_value_string_utf8(env, args[1], needle, haystack_l + 1, &needle_l);
-    struct strzl_needle_t strzl_needle = {needle, needle_l, 0};
+    napi_get_value_string_utf8(env, args[1], NULL, 0, &strzl_needle.len);
+    char *needle = malloc(strzl_needle.len);
+    napi_get_value_string_utf8(env, args[1], needle, strzl_needle.len, &strzl_needle.len);
+    strzl_needle.ptr = needle;
 
     bool overlap = false;
     napi_get_value_bool(env, args[2], &overlap);
 
-    size_t result = 0;
+    size_t result;
 
-    if (needle_l == 1 || needle_l == 0)
-        result = count_char(strzl_haystack, needle[0]);
-    else if (haystack_l < needle_l)
+    if (strzl_needle.len == 0 || strzl_haystack.len == 0 || strzl_haystack.len < strzl_needle.len) {
         result = 0;
+    else if (strzl_needle.len == 1)
+        result = count_char(strzl_haystack, strzl_needle.ptr[0]);
     else if (overlap) {
         while (strzl_haystack.len) {
 #if defined(__AVX2__)
@@ -123,8 +123,8 @@ napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
 
             bool found = offset != strzl_haystack.len;
             result += found;
-            strzl_haystack.ptr += offset + needle_l;
-            strzl_haystack.len -= offset + needle_l * found;
+            strzl_haystack.ptr += offset + strzl_needle.len;
+            strzl_haystack.len -= offset + strzl_needle.len * found;
         }
     }
 
@@ -132,7 +132,7 @@ napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
     free(haystack);
     free(needle);
 
-    // Convert result to JavaScript BigInt and return
+    // Convert the result to JavaScript `BigInt` and return
     napi_value js_result;
     napi_create_bigint_uint64(env, result, &js_result);
 
@@ -152,7 +152,7 @@ napi_value Init(napi_env env, napi_value exports) {
     // Define the number of properties in the array
     size_t propertyCount = sizeof(properties) / sizeof(properties[0]);
 
-    // Define the properties on the exports object
+    // Define the properties on the `exports` object
     napi_define_properties(env, exports, propertyCount, properties);
 
     return exports;
