@@ -6,10 +6,109 @@ import math
 import pytest
 
 import stringzilla as sz
-from stringzilla import Str
+from stringzilla import Str, Strs
 
 
-def test_globals():
+def test_unit_construct():
+    native = "aaaaa"
+    big = Str(native)
+    assert len(big) == len(native)
+
+
+def test_unit_indexing():
+    native = "abcdef"
+    big = Str(native)
+    for i in range(len(native)):
+        assert big[i] == native[i]
+
+
+def test_unit_count():
+    native = "aaaaa"
+    big = Str(native)
+    assert big.count("a") == 5
+    assert big.count("aa") == 2
+    assert big.count("aa", allowoverlap=True) == 4
+
+
+def test_unit_contains():
+    big = Str("abcdef")
+    assert "a" in big
+    assert "ab" in big
+    assert "xxx" not in big
+
+
+def test_unit_rich_comparisons():
+    assert Str("aa") == "aa"
+    assert Str("aa") < "b"
+    assert Str("abb")[1:] == "bb"
+
+
+def test_unit_buffer_protocol():
+    import numpy as np
+
+    my_str = Str("hello")
+    arr = np.array(my_str)
+    assert arr.dtype == np.dtype("c")
+    assert arr.shape == (len("hello"),)
+    assert "".join([c.decode("utf-8") for c in arr.tolist()]) == "hello"
+
+
+def test_unit_split():
+    native = "token1\ntoken2\ntoken3"
+    big = Str(native)
+    assert native.splitlines() == list(big.splitlines())
+    assert native.splitlines(True) == list(big.splitlines(keeplinebreaks=True))
+    assert native.split("token3") == list(big.split("token3"))
+
+    words = sz.split(big, "\n")
+    assert len(words) == 3
+    assert str(words[0]) == "token1"
+    assert str(words[2]) == "token3"
+
+    parts = sz.split(big, "\n", keepseparator=True)
+    assert len(parts) == 3
+    assert str(parts[0]) == "token1\n"
+    assert str(parts[2]) == "token3"
+
+
+def test_unit_sequence():
+    native = "line3\nline2\nline1"
+    big = Str(native)
+
+    lines = big.splitlines()
+    assert [2, 1, 0] == list(lines.order())
+
+    lines.sort()
+    assert [0, 1, 2] == list(lines.order())
+    assert ["line1", "line2", "line3"] == list(lines)
+
+    shuffled_copy = lines.shuffled(seed=42)
+    assert set(lines) == set(shuffled_copy)
+
+    lines.append("line4")
+    assert 4 == len(lines)
+    lines.extend(["line5", "line6"])
+    assert 6 == len(lines)
+
+    lines.append(lines[0])
+    assert 7 == len(lines)
+    assert lines[6] == "line1"
+
+    lines.extend(lines)
+    assert 14 == len(lines)
+    assert lines[7] == "line1"
+    assert lines[8] == "line2"
+    assert lines[12] == "line6"
+
+    # Test that shuffles are reproducible with the same `seed`
+    a = [str(s) for s in lines.shuffled(seed=42)]
+    b = [str(s) for s in lines.shuffled(seed=42)]
+    assert a == b
+
+
+def test_unit_globals():
+    """Validates that the previously unit-tested member methods are also visible as global functions."""
+
     assert sz.find("abcdef", "bcdef") == 1
     assert sz.find("abcdef", "x") == -1
 
@@ -23,66 +122,6 @@ def test_globals():
     assert sz.levenstein("abababab", "aaaaaaaa") == 4
     assert sz.levenstein("abababab", "aaaaaaaa", 2) == 2
     assert sz.levenstein("abababab", "aaaaaaaa", bound=2) == 2
-
-
-def test_split_keepseparator():
-    native = "word1_word2_word3"
-    big = Str(native)
-
-    words = sz.split(big, "_")
-    assert len(words) == 3
-
-    parts = sz.split(big, "_", keepseparator=True)
-    assert len(parts) == 3
-
-    assert str(words[0]) == "word1"
-    assert str(parts[0]) == "word1_"
-    assert str(words[2]) == "word3"
-    assert str(parts[2]) == "word3"
-
-
-def test_construct():
-    native = "aaaaa"
-    big = Str(native)
-    assert len(big) == len(native)
-
-
-def test_indexing():
-    native = "abcdef"
-    big = Str(native)
-    for i in range(len(native)):
-        assert big[i] == native[i]
-
-
-def test_count():
-    native = "aaaaa"
-    big = Str(native)
-    assert big.count("a") == 5
-    assert big.count("aa") == 2
-    assert big.count("aa", allowoverlap=True) == 4
-
-
-def test_contains():
-    big = Str("abcdef")
-    assert "a" in big
-    assert "ab" in big
-    assert "xxx" not in big
-
-
-def test_rich_comparisons():
-    assert Str("aa") == "aa"
-    assert Str("aa") < "b"
-    assert Str("abb")[1:] == "bb"
-
-
-def test_buffer_protocol():
-    import numpy as np
-
-    my_str = Str("hello")
-    arr = np.array(my_str)
-    assert arr.dtype == np.dtype("c")
-    assert arr.shape == (len("hello"),)
-    assert "".join([c.decode("utf-8") for c in arr.tolist()]) == "hello"
 
 
 def get_random_string(
@@ -100,169 +139,125 @@ def is_equal_strings(native_strings, big_strings):
         assert native_slice == big_slice
 
 
-# def check_identical(
-#     native: str,
-#     big: Union[Str, File],
-#     needle: Optional[str] = None,
-#     check_iterators: bool = False,
-# ):
-#     if needle is None:
-#         part_offset = randint(0, len(native) - 1)
-#         part_length = randint(1, len(native) - part_offset)
-#         needle = native[part_offset:part_length]
+def check_identical(
+    native: str,
+    big: Str,
+    needle: Optional[str] = None,
+    check_iterators: bool = False,
+):
+    if needle is None:
+        part_offset = randint(0, len(native) - 1)
+        part_length = randint(1, len(native) - part_offset)
+        needle = native[part_offset:part_length]
 
-#     present_in_native: bool = needle in native
-#     present_in_big = needle in big
-#     assert present_in_native == present_in_big
-#     assert native.find(needle) == big.find(needle)
-#     assert native.count(needle) == big.count(needle)
+    present_in_native: bool = needle in native
+    present_in_big = needle in big
+    assert present_in_native == present_in_big
+    assert native.find(needle) == big.find(needle)
+    assert native.count(needle) == big.count(needle)
 
-#     native_strings = native.split(needle)
-#     big_strings: Strs = big.split(needle)
-#     assert len(native_strings) == len(big_strings)
+    native_strings = native.split(needle)
+    big_strings: Strs = big.split(needle)
+    assert len(native_strings) == len(big_strings)
 
-#     if check_iterators:
-#         for i in range(len(native_strings)):
-#             assert len(native_strings[i]) == len(big_strings[i])
-#             assert native_strings[i] == big_strings[i]
-#             assert [c for c in native_strings[i]] == [c for c in big_strings[i]]
+    if check_iterators:
+        for i in range(len(native_strings)):
+            assert len(native_strings[i]) == len(big_strings[i])
+            assert native_strings[i] == big_strings[i]
+            assert [c for c in native_strings[i]] == [c for c in big_strings[i]]
 
-#     is_equal_strings(native_strings, big_strings)
-
-
-# @pytest.mark.parametrize("haystack_length", range(1, 65))
-# @pytest.mark.parametrize("variability", range(1, 25))
-# def test_contains(haystack_length: int, variability: int):
-#     native = get_random_string(variability=variability, length=haystack_length)
-#     big = Str(native)
-#     pattern = get_random_string(variability=variability, length=randint(1, 5))
-#     assert (pattern in native) == big.contains(pattern)
+    is_equal_strings(native_strings, big_strings)
 
 
-# def test_count_overlap():
-#     native = "aaaaa"
-#     big = Str(native)
-#     assert native.count("aa") == big.count("aa")
-#     assert 4 == big.count("aa", allowoverlap=True)
+@pytest.mark.parametrize("haystack_length", range(1, 65))
+@pytest.mark.parametrize("variability", range(1, 25))
+def test_fuzzy_substrings(haystack_length: int, variability: int):
+    native = get_random_string(variability=variability, length=haystack_length)
+    big = Str(native)
+    pattern = get_random_string(variability=variability, length=randint(1, 5))
+    assert (pattern in native) == big.contains(pattern)
+    assert native.find(pattern) == big.find(pattern)
 
 
-# def test_splitlines():
-#     native = "line1\nline2\nline3"
-#     big = Str(native)
-#     assert native.splitlines() == list(big.splitlines())
-#     assert native.splitlines(True) == list(big.splitlines(keeplinebreaks=True))
+@pytest.mark.parametrize("repetitions", range(1, 10))
+def test_basic(repetitions: int):
+    native = "abcd" * repetitions
+    big = Str(native)
+
+    check_identical(native, big, "a", True)
+    check_identical(native, big, "ab", True)
+    check_identical(native, big, "abc", True)
+    check_identical(native, big, "abcd", True)
+    check_identical(native, big, "abcde", True)  # Missing pattern
 
 
-# def test_strs_operations():
-#     native = "line1\nline2\nline3"
-#     big = Str(native)
-#     lines = big.splitlines()
-#     lines.sort()
-#     assert ["line1", "line2", "line3"] == list(lines)
+@pytest.mark.parametrize("pattern_length", [1, 2, 4, 5])
+@pytest.mark.parametrize("haystack_length", range(1, 69, 3))
+@pytest.mark.parametrize("variability", range(1, 27, 3))
+def test_fuzzy(pattern_length: int, haystack_length: int, variability: int):
+    native = get_random_string(variability=variability, length=haystack_length)
+    big = Str(native)
 
-#     shuffled_copy = lines.shuffled(seed=42)
-#     assert set(lines) == set(shuffled_copy)
+    # Start by matching the prefix and the suffix
+    check_identical(native, big, native[:pattern_length])
+    check_identical(native, big, native[-pattern_length:])
 
-#     lines.append("line4")
-#     assert 4 == len(lines)
-#     lines.extend(["line5", "line6"])
-#     assert 6 == len(lines)
-
-#     lines.append(lines[0])
-#     assert 7 == len(lines)
-#     assert lines[6] == "line1"
-
-#     lines.extend(lines)
-#     assert 14 == len(lines)
-#     assert lines[7] == "line1"
-#     assert lines[8] == "line2"
-#     assert lines[12] == "line6"
-
-#     # Test that shuffles are reproducible with the same `seed`
-#     a = [str(s) for s in lines.shuffled(seed=42)]
-#     b = [str(s) for s in lines.shuffled(seed=42)]
-#     assert a == b
+    # Continue with random strs
+    for _ in range(haystack_length // pattern_length):
+        pattern = get_random_string(variability=variability, length=pattern_length)
+        check_identical(native, big, pattern)
 
 
-# @pytest.mark.parametrize("repetitions", range(1, 10))
-# def test_basic(repetitions: int):
-#     native = "abcd" * repetitions
-#     big = Str(native)
+def test_strs():
+    native = get_random_string(length=10)
+    big = Str(native)
 
-#     check_identical(native, big, "a", True)
-#     check_identical(native, big, "ab", True)
-#     check_identical(native, big, "abc", True)
-#     check_identical(native, big, "abcd", True)
-#     check_identical(native, big, "abcde", True)  # Missing pattern
+    assert native[0:5] == big.sub(0, 5) and native[0:5] == big[0:5]
+    assert native[5:10] == big.sub(5, 10) and native[5:10] == big[5:10]
 
+    assert native[5:5] == big.sub(5, 5) and native[5:5] == big[5:5]
+    assert native[-5:-5] == big.sub(-5, -5) and native[-5:-5] == big[-5:-5]
+    assert native[2:-2] == big.sub(2, -2) and native[2:-2] == big[2:-2]
+    assert native[7:-7] == big.sub(7, -7) and native[7:-7] == big[7:-7]
 
-# @pytest.mark.parametrize("pattern_length", [1, 2, 4, 5])
-# @pytest.mark.parametrize("haystack_length", range(1, 69, 3))
-# @pytest.mark.parametrize("variability", range(1, 27, 3))
-# def test_fuzzy(pattern_length: int, haystack_length: int, variability: int):
-#     native = get_random_string(variability=variability, length=haystack_length)
-#     big = Str(native)
+    assert native[5:3] == big.sub(5, 3) and native[5:3] == big[5:3]
+    assert native[5:7] == big.sub(5, 7) and native[5:7] == big[5:7]
+    assert native[5:-3] == big.sub(5, -3) and native[5:-3] == big[5:-3]
+    assert native[5:-7] == big.sub(5, -7) and native[5:-7] == big[5:-7]
 
-#     # Start by matching the prefix and the suffix
-#     check_identical(native, big, native[:pattern_length])
-#     check_identical(native, big, native[-pattern_length:])
+    assert native[-5:3] == big.sub(-5, 3) and native[-5:3] == big[-5:3]
+    assert native[-5:7] == big.sub(-5, 7) and native[-5:7] == big[-5:7]
+    assert native[-5:-3] == big.sub(-5, -3) and native[-5:-3] == big[-5:-3]
+    assert native[-5:-7] == big.sub(-5, -7) and native[-5:-7] == big[-5:-7]
 
-#     # Continue with random strs
-#     for _ in range(haystack_length // pattern_length):
-#         pattern = get_random_string(variability=variability, length=pattern_length)
-#         check_identical(native, big, pattern)
+    assert native[2:] == big.sub(2) and native[2:] == big[2:]
+    assert native[:7] == big.sub(end=7) and native[:7] == big[:7]
+    assert native[-2:] == big.sub(-2) and native[-2:] == big[-2:]
+    assert native[:-7] == big.sub(end=-7) and native[:-7] == big[:-7]
+    assert native[:-10] == big.sub(end=-10) and native[:-10] == big[:-10]
+    assert native[:-1] == big.sub(end=-1) and native[:-1] == big[:-1]
 
+    length = 1000
+    native = get_random_string(length=length)
+    big = Str(native)
 
-# def test_strs():
-#     native = get_random_string(length=10)
-#     big = Str(native)
+    needle = native[0 : randint(2, 5)]
+    native_strings = native.split(needle)
+    big_strings: Strs = big.split(needle)
 
-#     assert native[0:5] == big.sub(0, 5) and native[0:5] == big[0:5]
-#     assert native[5:10] == big.sub(5, 10) and native[5:10] == big[5:10]
+    length = len(native_strings)
+    for i in range(length):
+        start = randint(1 - length, length - 1)
+        stop = randint(1 - length, length - 1)
+        step = 0
+        while step == 0:
+            step = randint(-int(math.sqrt(length)), int(math.sqrt(length)))
 
-#     assert native[5:5] == big.sub(5, 5) and native[5:5] == big[5:5]
-#     assert native[-5:-5] == big.sub(-5, -5) and native[-5:-5] == big[-5:-5]
-#     assert native[2:-2] == big.sub(2, -2) and native[2:-2] == big[2:-2]
-#     assert native[7:-7] == big.sub(7, -7) and native[7:-7] == big[7:-7]
-
-#     assert native[5:3] == big.sub(5, 3) and native[5:3] == big[5:3]
-#     assert native[5:7] == big.sub(5, 7) and native[5:7] == big[5:7]
-#     assert native[5:-3] == big.sub(5, -3) and native[5:-3] == big[5:-3]
-#     assert native[5:-7] == big.sub(5, -7) and native[5:-7] == big[5:-7]
-
-#     assert native[-5:3] == big.sub(-5, 3) and native[-5:3] == big[-5:3]
-#     assert native[-5:7] == big.sub(-5, 7) and native[-5:7] == big[-5:7]
-#     assert native[-5:-3] == big.sub(-5, -3) and native[-5:-3] == big[-5:-3]
-#     assert native[-5:-7] == big.sub(-5, -7) and native[-5:-7] == big[-5:-7]
-
-#     assert native[2:] == big.sub(2) and native[2:] == big[2:]
-#     assert native[:7] == big.sub(end=7) and native[:7] == big[:7]
-#     assert native[-2:] == big.sub(-2) and native[-2:] == big[-2:]
-#     assert native[:-7] == big.sub(end=-7) and native[:-7] == big[:-7]
-#     assert native[:-10] == big.sub(end=-10) and native[:-10] == big[:-10]
-#     assert native[:-1] == big.sub(end=-1) and native[:-1] == big[:-1]
-
-#     length = 1000
-#     native = get_random_string(length=length)
-#     big = Str(native)
-
-#     needle = native[0 : randint(2, 5)]
-#     native_strings = native.split(needle)
-#     big_strings: Strs = big.split(needle)
-
-#     length = len(native_strings)
-#     for i in range(length):
-#         start = randint(1 - length, length - 1)
-#         stop = randint(1 - length, length - 1)
-#         step = 0
-#         while step == 0:
-#             step = randint(-int(math.sqrt(length)), int(math.sqrt(length)))
-
-#         is_equal_strings(native_strings[start:stop:step], big_strings[start:stop:step])
-#         is_equal_strings(
-#             native_strings[start:stop:step],
-#             big_strings.sub(start, stop, step),
-#         )
+        is_equal_strings(native_strings[start:stop:step], big_strings[start:stop:step])
+        is_equal_strings(
+            native_strings[start:stop:step],
+            big_strings.sub(start, stop, step),
+        )
 
 
 def test_levenstein():

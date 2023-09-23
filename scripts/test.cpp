@@ -238,23 +238,23 @@ int main(int, char const **) {
         bench_search("std::search", full_text, [&]() {
             return std::search(full_text.begin(), full_text.end(), needle.begin(), needle.end()) - full_text.begin();
         });
-        bench_search("sz_naive_find_substr", full_text, [&]() {
+        bench_search("sz_find_substr_swar", full_text, [&]() {
             sz_haystack_t h {full_text.data(), full_text.size()};
             sz_needle_t n {needle.data(), needle.size()};
-            return sz_naive_find_substr(h, n);
+            return sz_find_substr_swar(h, n);
         });
 #if defined(__ARM_NEON)
-        bench_search("sz_neon_find_substr", full_text, [&]() {
+        bench_search("sz_find_substr_neon", full_text, [&]() {
             sz_haystack_t h {full_text.data(), full_text.size()};
             sz_needle_t n {needle.data(), needle.size()};
-            return sz_neon_find_substr(h, n);
+            return sz_find_substr_neon(h, n);
         });
 #endif
 #if defined(__AVX2__)
-        bench_search("sz_avx2_find_substr", full_text, [&]() {
+        bench_search("sz_find_substr_avx2", full_text, [&]() {
             sz_haystack_t h {full_text.data(), full_text.size()};
             sz_needle_t n {needle.data(), needle.size()};
-            return sz_avx2_find_substr(h, n);
+            return sz_find_substr_avx2(h, n);
         });
 #endif
     }

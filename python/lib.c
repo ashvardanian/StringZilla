@@ -22,7 +22,9 @@ typedef SSIZE_T ssize_t;
 #include <unistd.h> // `ssize_t`
 #endif
 
-#include <Python.h>
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#include <Python.h>            // Core CPython interfaces
+#include <numpy/arrayobject.h> // NumPy
 
 #include <stringzilla.h>
 
@@ -151,6 +153,47 @@ typedef struct {
 
 #pragma region Helpers
 
+typedef int boolean_t;
+
+inline static char const *haystacks_get_start(sz_haystack_t const *parts, sz_size_t i) { return parts[i].start; }
+inline static size_t haystacks_get_length(sz_haystack_t const *parts, sz_size_t i) { return parts[i].length; }
+
+void reverse_offsets(sz_size_t *array, size_t length) {
+    size_t i, j;
+    // Swap array[i] and array[j]
+    for (i = 0, j = length - 1; i < j; i++, j--) {
+        sz_size_t temp = array[i];
+        array[i] = array[j];
+        array[j] = temp;
+    }
+}
+
+void reverse_haystacks(sz_haystack_t *array, size_t length) {
+    size_t i, j;
+    // Swap array[i] and array[j]
+    for (i = 0, j = length - 1; i < j; i++, j--) {
+        sz_haystack_t temp = array[i];
+        array[i] = array[j];
+        array[j] = temp;
+    }
+}
+
+void apply_order(sz_haystack_t *array, sz_size_t *order, size_t length) {
+    for (size_t i = 0; i < length; ++i) {
+        while (order[i] != i) {
+            // Swap array[i] and array[order[i]]
+            sz_haystack_t temp = array[i];
+            array[i] = array[order[i]];
+            array[order[i]] = temp;
+
+            // Also update the order array to reflect the swap
+            size_t temp_idx = order[i];
+            order[i] = order[temp_idx];
+            order[temp_idx] = temp_idx;
+        }
+    }
+}
+
 void slice(size_t length, ssize_t start, ssize_t end, size_t *normalized_offset, size_t *normalized_length) {
 
     // clang-format off
@@ -172,7 +215,7 @@ void slice(size_t length, ssize_t start, ssize_t end, size_t *normalized_offset,
     *normalized_length = end - start;
 }
 
-int export_string_like(PyObject *object, char const **start, size_t *length) {
+boolean_t export_string_like(PyObject *object, char const **start, size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python str
         Py_ssize_t signed_length;
@@ -205,61 +248,86 @@ int export_string_like(PyObject *object, char const **start, size_t *length) {
     return 0;
 }
 
-int get_string_at_offset(
+typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject **, char const **, size_t *);
+
+void str_at_offset_consecutive_32bit(
     Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+    uint32_t start_offset = (i == 0) ? 0 : strs->data.consecutive_32bit.end_offsets[i - 1];
+    uint32_t end_offset = strs->data.consecutive_32bit.end_offsets[i];
+    *start = strs->data.consecutive_32bit.start + start_offset;
+    *length = end_offset - start_offset - strs->data.consecutive_32bit.separator_length * (i + 1 != count);
+    *parent = strs->data.consecutive_32bit.parent;
+}
+
+void str_at_offset_consecutive_64bit(
+    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+    uint64_t start_offset = (i == 0) ? 0 : strs->data.consecutive_64bit.end_offsets[i - 1];
+    uint64_t end_offset = strs->data.consecutive_64bit.end_offsets[i];
+    *start = strs->data.consecutive_64bit.start + start_offset;
+    *length = end_offset - start_offset - strs->data.consecutive_64bit.separator_length * (i + 1 != count);
+    *parent = strs->data.consecutive_64bit.parent;
+}
+
+void str_at_offset_reordered(
+    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+    *start = strs->data.reordered.parts[i].start;
+    *length = strs->data.reordered.parts[i].length;
+    *parent = strs->data.reordered.parent;
+}
+
+void str_at_offset_multi_source(
+    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+    *start = strs->data.multi_source.parts[i].start;
+    *length = strs->data.multi_source.parts[i].length;
+    *parent = NULL; // TODO:
+}
+
+get_string_at_offset_t str_at_offset_getter(Strs *strs) {
     switch (strs->type) {
-    case STRS_CONSECUTIVE_32: {
-        uint32_t start_offset = (i == 0) ? 0 : strs->data.consecutive_32bit.end_offsets[i - 1];
-        uint32_t end_offset = strs->data.consecutive_32bit.end_offsets[i];
-        *start = strs->data.consecutive_32bit.start + start_offset;
-        *length = end_offset - start_offset - strs->data.consecutive_32bit.separator_length * (i + 1 != count);
-        *parent = strs->data.consecutive_32bit.parent;
-        return 1;
-    }
-    case STRS_CONSECUTIVE_64: {
-        uint64_t start_offset = (i == 0) ? 0 : strs->data.consecutive_64bit.end_offsets[i - 1];
-        uint64_t end_offset = strs->data.consecutive_64bit.end_offsets[i];
-        *start = strs->data.consecutive_64bit.start + start_offset;
-        *length = end_offset - start_offset - strs->data.consecutive_64bit.separator_length * (i + 1 != count);
-        *parent = strs->data.consecutive_64bit.parent;
-        return 1;
-    }
-    case STRS_REORDERED: {
-        //
-        return 1;
-    }
-    case STRS_MULTI_SOURCE: {
-        //
-        return 1;
-    }
+    case STRS_CONSECUTIVE_32: return str_at_offset_consecutive_32bit;
+    case STRS_CONSECUTIVE_64: return str_at_offset_consecutive_64bit;
+    case STRS_REORDERED: return str_at_offset_reordered;
+    case STRS_MULTI_SOURCE: return str_at_offset_multi_source;
     default:
         // Unsupported type
         PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
-        return -1;
+        return NULL;
     }
 }
 
-int prepare_strings_for_reordering(Strs *strs) {
-    // Already in reordered form
-    if (strs->type == STRS_REORDERED) { return 1; }
+boolean_t prepare_strings_for_reordering(Strs *strs) {
 
     // Allocate memory for reordered slices
     size_t count = 0;
+    void *old_buffer = NULL;
+    get_string_at_offset_t getter = NULL;
+    PyObject *parent = NULL;
     switch (strs->type) {
-    case STRS_CONSECUTIVE_32: count = strs->data.consecutive_32bit.count; break;
-    case STRS_CONSECUTIVE_64: count = strs->data.consecutive_64bit.count; break;
+    case STRS_CONSECUTIVE_32:
+        count = strs->data.consecutive_32bit.count;
+        old_buffer = strs->data.consecutive_32bit.end_offsets;
+        parent = strs->data.consecutive_32bit.parent;
+        getter = str_at_offset_consecutive_32bit;
+        break;
+    case STRS_CONSECUTIVE_64:
+        count = strs->data.consecutive_64bit.count;
+        old_buffer = strs->data.consecutive_64bit.end_offsets;
+        parent = strs->data.consecutive_64bit.parent;
+        getter = str_at_offset_consecutive_64bit;
+        break;
+    // Already in reordered form
     case STRS_REORDERED: return 1;
     case STRS_MULTI_SOURCE: return 1;
     default:
         // Unsupported type
         PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
-        return -1;
+        return 0;
     }
 
     sz_haystack_t *new_parts = (sz_haystack_t *)malloc(count * sizeof(sz_haystack_t));
     if (new_parts == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
-        return -1;
+        return 0;
     }
 
     // Populate the new reordered array using get_string_at_offset
@@ -267,26 +335,20 @@ int prepare_strings_for_reordering(Strs *strs) {
         PyObject *parent;
         char const *start;
         size_t length;
-        if (!get_string_at_offset(strs, i, count, &parent, &start, &length)) {
-            // Handle error
-            PyErr_SetString(PyExc_RuntimeError, "Failed to get string at offset");
-            free(new_parts);
-            return -1;
-        }
-
+        getter(strs, i, count, &parent, &start, &length);
         new_parts[i].start = start;
         new_parts[i].length = length;
     }
 
     // Release previous used memory.
+    if (old_buffer) free(old_buffer);
 
     // Update the Strs object
     strs->type = STRS_REORDERED;
     strs->data.reordered.count = count;
     strs->data.reordered.parts = new_parts;
-    strs->data.reordered.parent = NULL; // Assuming the parent is no longer needed
-
-    return 0;
+    strs->data.reordered.parent = parent;
+    return 1;
 }
 
 #pragma endregion
@@ -603,7 +665,7 @@ static int Str_in(Str *self, PyObject *arg) {
     sz_haystack_t haystack;
     haystack.start = self->start;
     haystack.length = self->length;
-    size_t position = sz_neon_find_substr(haystack, needle_struct);
+    size_t position = sz_find_substr_auto(haystack, needle_struct);
     return position != haystack.length;
 }
 
@@ -629,20 +691,23 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
     PyObject *parent = NULL;
     char const *start = NULL;
     size_t length = 0;
-    if (!get_string_at_offset(self, i, count, &parent, &start, &length)) {
+    get_string_at_offset_t getter = str_at_offset_getter(self);
+    if (!getter) {
         PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
         return NULL;
     }
+    else
+        getter(self, i, count, &parent, &start, &length);
 
     // Create a new `Str` object
-    Str *parent_slice = (Str *)StrType.tp_alloc(&StrType, 0);
-    if (parent_slice == NULL && PyErr_NoMemory()) return NULL;
+    Str *view_copy = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (view_copy == NULL && PyErr_NoMemory()) return NULL;
 
-    parent_slice->start = start;
-    parent_slice->length = length;
-    parent_slice->parent = parent;
+    view_copy->start = start;
+    view_copy->length = length;
+    view_copy->parent = parent;
     Py_INCREF(parent);
-    return parent_slice;
+    return view_copy;
 }
 
 static PyObject *Strs_subscript(Str *self, PyObject *key) {
@@ -754,7 +819,7 @@ static int Str_find_( //
     haystack.length = normalized_length;
 
     // Perform contains operation
-    size_t offset = sz_neon_find_substr(haystack, needle);
+    size_t offset = sz_find_substr_auto(haystack, needle);
     if (offset == haystack.length) { *offset_out = -1; }
     else { *offset_out = (Py_ssize_t)offset; }
 
@@ -881,11 +946,11 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
-    size_t count = needle.length == 1 ? sz_naive_count_char(haystack, *needle.start) : 0;
+    size_t count = needle.length == 1 ? sz_count_char_swar(haystack, *needle.start) : 0;
     if (needle.length != 1) {
         if (allowoverlap) {
             while (haystack.length) {
-                size_t offset = sz_neon_find_substr(haystack, needle);
+                size_t offset = sz_find_substr_auto(haystack, needle);
                 int found = offset != haystack.length;
                 count += found;
                 haystack.start += offset + found;
@@ -894,7 +959,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
         }
         else {
             while (haystack.length) {
-                size_t offset = sz_neon_find_substr(haystack, needle);
+                size_t offset = sz_find_substr_auto(haystack, needle);
                 int found = offset != haystack.length;
                 count += found;
                 haystack.start += offset + needle.length;
@@ -943,6 +1008,7 @@ static PyObject *Str_levenstein(PyObject *self, PyObject *args, PyObject *kwargs
         return NULL;
     }
 
+    // Allocate memory for the Levenstein matrix
     size_t memory_needed = sz_levenstein_memory_needed(str1.length, str2.length);
     if (temporary_memory.length < memory_needed) {
         temporary_memory.start = realloc(temporary_memory.start, memory_needed);
@@ -1075,11 +1141,11 @@ static Strs *Str_split_(
 
     // Iterate through string, keeping track of the
     sz_size_t last_start = 0;
-    while (last_start < text.length && offsets_count < maxsplit) {
+    while (last_start <= text.length && offsets_count < maxsplit) {
         sz_haystack_t text_remaining;
         text_remaining.start = text.start + last_start;
         text_remaining.length = text.length - last_start;
-        sz_size_t offset_in_remaining = sz_neon_find_substr(text_remaining, separator);
+        sz_size_t offset_in_remaining = sz_find_substr_auto(text_remaining, separator);
 
         // Reallocate offsets array if needed
         if (offsets_count >= offsets_capacity) {
@@ -1419,6 +1485,176 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
     Py_RETURN_NONE;
 }
 
+static boolean_t Strs_sort_(Strs *self,
+                            sz_haystack_t **parts_output,
+                            sz_size_t **order_output,
+                            sz_size_t *count_output) {
+
+    // Change the layout
+    if (!prepare_strings_for_reordering(self)) {
+        PyErr_Format(PyExc_TypeError, "Failed to prepare the sequence for sorting");
+        return 0;
+    }
+
+    // Get the parts and their count
+    sz_haystack_t *parts = NULL;
+    size_t count = 0;
+    switch (self->type) {
+    case STRS_REORDERED:
+        parts = self->data.reordered.parts;
+        count = self->data.reordered.count;
+        break;
+
+    case STRS_MULTI_SOURCE:
+        parts = self->data.multi_source.parts;
+        count = self->data.multi_source.count;
+        break;
+    }
+
+    // Allocate temporary memory to store the ordering offsets
+    size_t memory_needed = sizeof(sz_size_t) * count;
+    if (temporary_memory.length < memory_needed) {
+        temporary_memory.start = realloc(temporary_memory.start, memory_needed);
+        temporary_memory.length = memory_needed;
+    }
+    if (!temporary_memory.start) {
+        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
+        return 0;
+    }
+
+    // Call our sorting algorithm
+    sz_sequence_t sequence = {};
+    sz_sort_config_t sort_config = {};
+    sequence.order = (sz_size_t *)temporary_memory.start;
+    sequence.count = count;
+    sequence.handle = parts;
+    sequence.get_start = haystacks_get_start;
+    sequence.get_length = haystacks_get_length;
+    for (sz_size_t i = 0; i != sequence.count; ++i) sequence.order[i] = i;
+    sz_sort(&sequence, &sort_config);
+
+    // Export results
+    *parts_output = parts;
+    *order_output = sequence.order;
+    *count_output = sequence.count;
+    return 1;
+}
+
+static PyObject *Strs_sort(Strs *self, PyObject *args, PyObject *kwargs) {
+    PyObject *reverse_obj = NULL; // Default is not reversed
+
+    // Check for positional arguments
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs > 1) {
+        PyErr_SetString(PyExc_TypeError, "sort() takes at most 1 positional argument");
+        return NULL;
+    }
+    else if (nargs == 1) { reverse_obj = PyTuple_GET_ITEM(args, 0); }
+
+    // Check for keyword arguments
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) {
+                if (reverse_obj) {
+                    PyErr_SetString(PyExc_TypeError, "Received reverse both as positional and keyword argument");
+                    return NULL;
+                }
+                reverse_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "Received an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
+    }
+
+    boolean_t reverse = 0; // Default is False
+    if (reverse_obj) {
+        if (!PyBool_Check(reverse_obj)) {
+            PyErr_SetString(PyExc_TypeError, "The reverse must be a boolean");
+            return NULL;
+        }
+        reverse = PyObject_IsTrue(reverse_obj);
+    }
+
+    sz_haystack_t *parts = NULL;
+    sz_size_t *order = NULL;
+    sz_size_t *count = NULL;
+    if (!Strs_sort_(self, &parts, &order, &count)) return NULL;
+
+    // Apply the sorting algorithm here, considering the `reverse` value
+    if (reverse) reverse_offsets(order, count);
+
+    // Apply the new order.
+    apply_order(parts, order, count);
+
+    Py_RETURN_NONE;
+}
+
+static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
+    PyObject *reverse_obj = NULL; // Default is not reversed
+
+    // Check for positional arguments
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs > 1) {
+        PyErr_SetString(PyExc_TypeError, "order() takes at most 1 positional argument");
+        return NULL;
+    }
+    else if (nargs == 1) { reverse_obj = PyTuple_GET_ITEM(args, 0); }
+
+    // Check for keyword arguments
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) {
+                if (reverse_obj) {
+                    PyErr_SetString(PyExc_TypeError, "Received reverse both as positional and keyword argument");
+                    return NULL;
+                }
+                reverse_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "Received an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
+    }
+
+    boolean_t reverse = 0; // Default is False
+    if (reverse_obj) {
+        if (!PyBool_Check(reverse_obj)) {
+            PyErr_SetString(PyExc_TypeError, "The reverse must be a boolean");
+            return NULL;
+        }
+        reverse = PyObject_IsTrue(reverse_obj);
+    }
+
+    sz_haystack_t *parts = NULL;
+    sz_size_t *order = NULL;
+    sz_size_t count = NULL;
+    if (!Strs_sort_(self, &parts, &order, &count)) return NULL;
+
+    // Apply the sorting algorithm here, considering the `reverse` value
+    if (reverse) reverse_offsets(order, count);
+
+    // Here, instead of applying the order, we want to return the copy of the
+    // order as a NumPy array of 64-bit unsigned integers.
+    npy_intp numpy_size = count;
+    PyObject *array = PyArray_SimpleNew(1, &numpy_size, NPY_UINT64);
+    if (!array) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to create a NumPy array");
+        return NULL;
+    }
+
+    // Copy the data from the order array to the newly created NumPy array
+    sz_size_t *numpy_data_ptr = (sz_size_t *)PyArray_DATA((PyArrayObject *)array);
+    memcpy(numpy_data_ptr, order, count * sizeof(sz_size_t));
+    return array;
+}
+
 static PySequenceMethods Strs_as_sequence = {
     .sq_length = Strs_len,        //
     .sq_item = Strs_getitem,      //
@@ -1431,7 +1667,9 @@ static PyMappingMethods Strs_as_mapping = {
 };
 
 static PyMethodDef Strs_methods[] = {
-    {"shuffle", Strs_shuffle, sz_method_flags_m, "Shuffle the elements of the Strs object."}, //
+    {"shuffle", Strs_shuffle, sz_method_flags_m, "Shuffle the elements of the Strs object."},  //
+    {"sort", Strs_sort, sz_method_flags_m, "Sort the elements of the Strs object."},           //
+    {"order", Strs_order, sz_method_flags_m, "Provides the indexes to achieve sorted order."}, //
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrsType = {
@@ -1481,6 +1719,8 @@ static PyModuleDef stringzilla_module = {
 
 PyMODINIT_FUNC PyInit_stringzilla(void) {
     PyObject *m;
+
+    import_array();
 
     if (PyType_Ready(&StrType) < 0) return NULL;
     if (PyType_Ready(&FileType) < 0) return NULL;
