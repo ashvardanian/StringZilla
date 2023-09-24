@@ -149,7 +149,7 @@ CPython:
 
 ```sh
 # Clean up and install
-rm -rf build && pip install -e . && pytest scripts/test.py -s -x
+rm -rf build && pip install -e . && pytest scripts/ -s -x
 
 # Install without dependencies
 pip install -e . --no-index --no-deps
