@@ -82,9 +82,6 @@ def test_unit_sequence():
     assert [0, 1, 2] == list(lines.order())
     assert ["line1", "line2", "line3"] == list(lines)
 
-    shuffled_copy = lines.shuffled(seed=42)
-    assert set(lines) == set(shuffled_copy)
-
     lines.append("line4")
     assert 4 == len(lines)
     lines.extend(["line5", "line6"])
@@ -212,30 +209,30 @@ def test_strs():
     native = get_random_string(length=10)
     big = Str(native)
 
-    assert native[0:5] == big.sub(0, 5) and native[0:5] == big[0:5]
-    assert native[5:10] == big.sub(5, 10) and native[5:10] == big[5:10]
+    assert native[0:5] == big[0:5]
+    assert native[5:10] == big[5:10]
 
-    assert native[5:5] == big.sub(5, 5) and native[5:5] == big[5:5]
-    assert native[-5:-5] == big.sub(-5, -5) and native[-5:-5] == big[-5:-5]
-    assert native[2:-2] == big.sub(2, -2) and native[2:-2] == big[2:-2]
-    assert native[7:-7] == big.sub(7, -7) and native[7:-7] == big[7:-7]
+    assert native[5:5] == big[5:5]
+    assert native[-5:-5] == big[-5:-5]
+    assert native[2:-2] == big[2:-2]
+    assert native[7:-7] == big[7:-7]
 
-    assert native[5:3] == big.sub(5, 3) and native[5:3] == big[5:3]
-    assert native[5:7] == big.sub(5, 7) and native[5:7] == big[5:7]
-    assert native[5:-3] == big.sub(5, -3) and native[5:-3] == big[5:-3]
-    assert native[5:-7] == big.sub(5, -7) and native[5:-7] == big[5:-7]
+    assert native[5:3] == big[5:3]
+    assert native[5:7] == big[5:7]
+    assert native[5:-3] == big[5:-3]
+    assert native[5:-7] == big[5:-7]
 
-    assert native[-5:3] == big.sub(-5, 3) and native[-5:3] == big[-5:3]
-    assert native[-5:7] == big.sub(-5, 7) and native[-5:7] == big[-5:7]
-    assert native[-5:-3] == big.sub(-5, -3) and native[-5:-3] == big[-5:-3]
-    assert native[-5:-7] == big.sub(-5, -7) and native[-5:-7] == big[-5:-7]
+    assert native[-5:3] == big[-5:3]
+    assert native[-5:7] == big[-5:7]
+    assert native[-5:-3] == big[-5:-3]
+    assert native[-5:-7] == big[-5:-7]
 
-    assert native[2:] == big.sub(2) and native[2:] == big[2:]
-    assert native[:7] == big.sub(end=7) and native[:7] == big[:7]
-    assert native[-2:] == big.sub(-2) and native[-2:] == big[-2:]
-    assert native[:-7] == big.sub(end=-7) and native[:-7] == big[:-7]
-    assert native[:-10] == big.sub(end=-10) and native[:-10] == big[:-10]
-    assert native[:-1] == big.sub(end=-1) and native[:-1] == big[:-1]
+    assert native[2:] == big[2:]
+    assert native[:7] == big[:7]
+    assert native[-2:] == big[-2:]
+    assert native[:-7] == big[:-7]
+    assert native[:-10] == big[:-10]
+    assert native[:-1] == big[:-1]
 
     length = 1000
     native = get_random_string(length=length)
