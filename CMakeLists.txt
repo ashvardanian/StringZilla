@@ -89,7 +89,7 @@ if(STRINGZILLA_INSTALL)
 endif()
 
 if(${STRINGZILLA_BUILD_TEST} OR ${STRINGZILLA_BUILD_BENCHMARK})
-  add_executable(stringzilla_test scripts/test.cpp)
+  add_executable(stringzilla_test scripts/test.c)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 

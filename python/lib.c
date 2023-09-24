@@ -136,11 +136,13 @@ typedef struct {
         /**
          *  Complex structure with two variable length chunks inside - for the parents and their slices.
          *  The parents are sorted in ascending order of their memory ranges, to let us rapidly locate the source
-         *  with a binary search. The slices are preserved
+         *  with a binary search.
          */
-        struct multi_source_strings_t {
+        struct multi_source_slices_t {
             size_t count;
+            size_t capacity;
             size_t parents_count;
+            size_t parents_capacity;
 
             PyObject **parents;
             sz_haystack_t *parts;
@@ -279,7 +281,24 @@ void str_at_offset_multi_source(
     Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
     *start = strs->data.multi_source.parts[i].start;
     *length = strs->data.multi_source.parts[i].length;
-    *parent = NULL; // TODO:
+
+    PyObject **parents = strs->data.multi_source.parents;
+    size_t parents_count = strs->data.multi_source.parents_count;
+    for (size_t j = 0; j < parents_count; ++j) {
+        PyObject *current_parent = parents[j];
+        char *parent_start;
+        Py_ssize_t parent_length;
+        export_string_like(current_parent, &parent_start, &parent_length);
+
+        // Check if the string at offset `i` is within the range of the current parent.
+        if (*start >= parent_start && *start + *length <= parent_start + parent_length) {
+            *parent = current_parent;
+            return;
+        }
+    }
+
+    // If no parent is found, set *parent to NULL.
+    *parent = NULL;
 }
 
 get_string_at_offset_t str_at_offset_getter(Strs *strs) {
@@ -331,11 +350,11 @@ boolean_t prepare_strings_for_reordering(Strs *strs) {
     }
 
     // Populate the new reordered array using get_string_at_offset
-    for (Py_ssize_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < count; ++i) {
         PyObject *parent;
         char const *start;
         size_t length;
-        getter(strs, i, count, &parent, &start, &length);
+        getter(strs, (Py_ssize_t)i, count, &parent, &start, &length);
         new_parts[i].start = start;
         new_parts[i].length = length;
     }
@@ -350,6 +369,8 @@ boolean_t prepare_strings_for_reordering(Strs *strs) {
     strs->data.reordered.parent = parent;
     return 1;
 }
+
+boolean_t prepare_strings_for_extension(Strs *strs, size_t new_parents, size_t new_parts) { return 1; }
 
 #pragma endregion
 
@@ -679,6 +700,16 @@ static Py_ssize_t Strs_len(Strs *self) {
     }
 }
 
+static Py_ssize_t Strs_parents_count(Strs *self) {
+    switch (self->type) {
+    case STRS_CONSECUTIVE_32: return 1;
+    case STRS_CONSECUTIVE_64: return 1;
+    case STRS_REORDERED: return 1;
+    case STRS_MULTI_SOURCE: return self->data.multi_source.parents_count;
+    default: return 0;
+    }
+}
+
 static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
     // Check for negative index and convert to positive
     Py_ssize_t count = Strs_len(self);
@@ -710,9 +741,176 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
     return view_copy;
 }
 
-static PyObject *Strs_subscript(Str *self, PyObject *key) {
-    if (PyLong_Check(key)) return Strs_getitem(self, PyLong_AsSsize_t(key));
-    return NULL;
+static PyObject *Strs_subscript(Strs *self, PyObject *key) {
+    if (PySlice_Check(key)) {
+        // Sanity checks
+        Py_ssize_t count = Strs_len(self);
+        Py_ssize_t start, stop, step;
+        if (PySlice_Unpack(key, &start, &stop, &step) < 0) return NULL;
+        if (PySlice_AdjustIndices(count, &start, &stop, step) < 0) return NULL;
+        if (step != 1) {
+            PyErr_SetString(PyExc_IndexError, "Efficient step is not supported");
+            return NULL;
+        }
+
+        // Create a new `Strs` object
+        Strs *self_slice = (Strs *)StrsType.tp_alloc(&StrsType, 0);
+        if (self_slice == NULL && PyErr_NoMemory()) return NULL;
+
+        // Depending on the layout, the procedure will be different.
+        self_slice->type = self->type;
+        switch (self->type) {
+        case STRS_CONSECUTIVE_32: {
+            struct consecutive_slices_32bit_t *from = &self->data.consecutive_32bit;
+            struct consecutive_slices_32bit_t *to = &self_slice->data.consecutive_32bit;
+            to->count = stop - start;
+            to->separator_length = from->sepa rator_length;
+            to->parent = from->parent;
+
+            size_t first_length;
+            str_at_offset_consecutive_32bit(self, start, count, &to->parent, &to->start, &first_length);
+            uint32_t first_offset = to->start - from->start;
+            to->end_offsets = malloc(sizeof(uint32_t) * to->count);
+            if (to->end_offsets == NULL && PyErr_NoMemory()) {
+                Py_XDECREF(self_slice);
+                return NULL;
+            }
+            for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i] - first_offset;
+            Py_INCREF(to->parent);
+            break;
+        }
+        case STRS_CONSECUTIVE_64: {
+            struct consecutive_slices_64bit_t *from = &self->data.consecutive_64bit;
+            struct consecutive_slices_64bit_t *to = &self_slice->data.consecutive_64bit;
+            to->count = stop - start;
+            to->separator_length = from->separator_length;
+            to->parent = from->parent;
+
+            size_t first_length;
+            str_at_offset_consecutive_64bit(self, start, count, &to->parent, &to->start, &first_length);
+            uint64_t first_offset = to->start - from->start;
+            to->end_offsets = malloc(sizeof(uint64_t) * to->count);
+            if (to->end_offsets == NULL && PyErr_NoMemory()) {
+                Py_XDECREF(self_slice);
+                return NULL;
+            }
+            for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i] - first_offset;
+            Py_INCREF(to->parent);
+            break;
+        }
+        case STRS_REORDERED: {
+            struct reordered_slices_t *from = &self->data.reordered;
+            struct reordered_slices_t *to = &self_slice->data.reordered;
+            to->count = stop - start;
+            to->parent = from->parent;
+
+            to->parts = malloc(sizeof(sz_haystack_t) * to->count);
+            if (to->parts == NULL && PyErr_NoMemory()) {
+                Py_XDECREF(self_slice);
+                return NULL;
+            }
+            memcpy(to->parts, from->parts + start, sizeof(sz_haystack_t) * to->count);
+            Py_INCREF(to->parent);
+            break;
+        }
+        case STRS_MULTI_SOURCE: {
+            struct multi_source_slices_t *from = &self->data.multi_source;
+            struct multi_source_slices_t *to = &self_slice->data.multi_source;
+            to->count = stop - start;
+            to->capacity = to->count;
+            to->parents_count = 0;
+            to->parents_capacity = from->parents_capacity;
+
+            // Allocate memory for both `parts` and `parents` references
+            to->parts = malloc(sizeof(sz_haystack_t) * to->capacity);
+            if (to->parts == NULL && PyErr_NoMemory()) {
+                Py_XDECREF(self_slice);
+                return NULL;
+            }
+            to->parents = malloc(sizeof(PyObject *) * to->parents_capacity);
+            if (to->parents == NULL && PyErr_NoMemory()) {
+                free(to->parts);
+                Py_XDECREF(self_slice);
+                return NULL;
+            }
+
+            // Iterate through the `parts` of this slice, detect the `parent`
+            // of each exported entry in `from->parents`, and upsert it into the `to->parents`
+            for (Py_ssize_t i = start; i < stop; ++i) {
+                PyObject *detected_parent;
+                char const *part_start;
+                size_t part_length;
+
+                // Find the parent of the part at the offset `i`
+                str_at_offset_multi_source(self, i, count, &detected_parent, &part_start, &part_length);
+                Py_INCREF(detected_parent);
+
+                // Upsert the detected parent into to->parents
+                // As the to->parents array is meant to be sorted,
+                // we insert in a way that maintains the sorting
+                size_t j = 0;
+                while (j < to->parents_count && to->parents[j] != detected_parent) ++j;
+
+                // If the parent is not already in to->parents, insert it.
+                if (j == to->parents_count) {
+                    to->parents[j] = detected_parent;
+                    ++to->parents_count;
+                }
+
+                // Populate the to->parts array
+                to->parts[i - start].start = part_start;
+                to->parts[i - start].length = part_length;
+            }
+
+            break;
+        }
+        default:
+            // Unsupported type
+            PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
+            return NULL;
+        }
+
+        return (PyObject *)self_slice;
+    }
+    else if (PyLong_Check(key)) { return Strs_getitem(self, PyLong_AsSsize_t(key)); }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Strs indices must be integers or slices");
+        return NULL;
+    }
+}
+
+static PyObject *Strs_extend(Strs *self, PyObject *seq) {
+    // Check if seq is an instance of Strs
+    if (PyObject_IsInstance(seq, (PyObject *)&StrsType)) {
+        Strs *other = (Strs *)seq;
+        size_t other_parents = Strs_len(other);
+        size_t other_parts = Strs_parents_count(other);
+        if (!prepare_strings_for_extension(self, other_parents, other_parts)) {
+            PyErr_Format(PyExc_TypeError, "Failed to prepare the sequence for extension");
+            return NULL;
+        }
+
+        // TODO:
+    }
+    else if (PySequence_Check(seq)) {
+        // Check if seq is a sequence
+        Py_ssize_t length = PySequence_Size(seq);
+        // Validate that every item in the sequence is string-like with `export_string_like`
+        // TODO:
+
+        for (Py_ssize_t i = 0; i < length; i++) {
+            PyObject *item = PySequence_ITEM(seq, i);
+            if (!item) return NULL; // Error getting item from sequence
+
+            // TODO:
+        }
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Parameter must be a sequence or an instance of Strs");
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
 }
 
 // Will be called by the `PySequence_Contains`
@@ -1670,6 +1868,8 @@ static PyMethodDef Strs_methods[] = {
     {"shuffle", Strs_shuffle, sz_method_flags_m, "Shuffle the elements of the Strs object."},  //
     {"sort", Strs_sort, sz_method_flags_m, "Sort the elements of the Strs object."},           //
     {"order", Strs_order, sz_method_flags_m, "Provides the indexes to achieve sorted order."}, //
+    {"append", Strs_append, sz_method_flags_m, "Append the sequence with a new string."},      //
+    {"extend", Strs_extend, sz_method_flags_m, "Extend the sequence with new strings."},       //
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrsType = {
@@ -1698,11 +1898,11 @@ static PyMethodDef stringzilla_methods[] = {
     {"contains", Str_contains, sz_method_flags_m, "Check if a string contains a substring."},
     {"partition", Str_partition, sz_method_flags_m, "Splits string into 3-tuple: before, match, after."},
     {"count", Str_count, sz_method_flags_m, "Count the occurrences of a substring."},
-    {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {"split", Str_split, sz_method_flags_m, "Split a string by a separator."},
     {"splitlines", Str_splitlines, sz_method_flags_m, "Split a string by line breaks."},
     {"startswith", Str_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
+    {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {NULL, NULL, 0, NULL}};
 
 static PyModuleDef stringzilla_module = {

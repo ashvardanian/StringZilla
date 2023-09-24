@@ -46,8 +46,7 @@ void populate_from_file( //
 
     std::ifstream f(path, std::ios::in);
     std::string s;
-    while (strings.size() < limit && std::getline(f, s, ' '))
-        strings.push_back(s);
+    while (strings.size() < limit && std::getline(f, s, ' ')) strings.push_back(s);
 }
 
 void populate_with_test(strings_t &strings) {
@@ -79,8 +78,7 @@ inline static idx_t hybrid_sort_cpp(strings_t const &strings, idx_t *order) {
         return *(uint32_t *)(i_bytes + offset_in_word) < *(uint32_t *)(j_bytes + offset_in_word);
     });
 
-    for (size_t i = 0; i != strings.size(); ++i)
-        std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
+    for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
 
     std::sort(order, order + strings.size(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
 
@@ -144,8 +142,7 @@ inline static idx_t hybrid_stable_sort_cpp(strings_t const &strings, idx_t *orde
         return *(uint32_t *)(i_bytes + offset_in_word) < *(uint32_t *)(j_bytes + offset_in_word);
     });
 
-    for (size_t i = 0; i != strings.size(); ++i)
-        std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
+    for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
 
     std::stable_sort(order, order + strings.size(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
 
@@ -198,8 +195,7 @@ void bench_search(char const *name, std::string_view full_text, algo_at &&algo) 
 
     // Run multiple iterations
     std::size_t bytes_passed = 0;
-    for (std::size_t i = 0; i != iterations; ++i)
-        bytes_passed += algo();
+    for (std::size_t i = 0; i != iterations; ++i) bytes_passed += algo();
 
     // Measure elapsed time
     stdcc::time_point t2 = stdcc::now();
@@ -215,15 +211,13 @@ int main(int, char const **) {
     strings_t strings;
     populate_from_file("leipzig1M.txt", strings, 10000000);
     std::size_t mean_bytes = 0;
-    for (std::string const &str : strings)
-        mean_bytes += str.size();
+    for (std::string const &str : strings) mean_bytes += str.size();
     mean_bytes /= strings.size();
     std::printf("Parsed the file with %zu words of %zu mean length!\n", strings.size(), mean_bytes);
 
     std::string full_text;
     full_text.reserve(mean_bytes + strings.size() * 2);
-    for (std::string const &str : strings)
-        full_text.append(str), full_text.push_back(' ');
+    for (std::string const &str : strings) full_text.append(str), full_text.push_back(' ');
 
     auto make_random_needle = [](std::string_view full_text) {
         std::size_t length = std::rand() % 6 + 2;
