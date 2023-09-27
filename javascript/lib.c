@@ -86,11 +86,13 @@ napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
     strzl_needle.ptr = needle;
 
     bool overlap = false;
-    napi_get_value_bool(env, args[2], &overlap);
+    if (argc > 2) {
+        napi_get_value_bool(env, args[2], &overlap);
+    }
 
     size_t result;
 
-    if (strzl_needle.len == 0 || strzl_haystack.len == 0 || strzl_haystack.len < strzl_needle.len) {
+    if (strzl_needle.len == 0 || strzl_haystack.len == 0 || strzl_haystack.len < strzl_needle.len)
         result = 0;
     else if (strzl_needle.len == 1)
         result = count_char(strzl_haystack, strzl_needle.ptr[0]);
