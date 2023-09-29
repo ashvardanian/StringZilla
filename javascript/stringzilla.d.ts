@@ -14,4 +14,4 @@ export function find(haystack: string, needle: string): bigint;
  * @param {string} needle 
  * @param {boolean} overlap 
  */
-export function countSubstr(haystack: string, needle: string, overlap: boolean): bigint;
+export function count(haystack: string, needle: string, overlap: boolean): bigint;
