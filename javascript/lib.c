@@ -64,7 +64,7 @@ size_t count_char(strzl_haystack_t strzl_haystack, char needle) {
     return result;
 }
 
-napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
+napi_value CountAPI(napi_env env, napi_callback_info info) {
     size_t argc = 3;
     napi_value args[3];
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
@@ -86,11 +86,13 @@ napi_value CountSubstrAPI(napi_env env, napi_callback_info info) {
     strzl_needle.ptr = needle;
 
     bool overlap = false;
-    napi_get_value_bool(env, args[2], &overlap);
+    if (argc > 2) {
+        napi_get_value_bool(env, args[2], &overlap);
+    }
 
     size_t result;
 
-    if (strzl_needle.len == 0 || strzl_haystack.len == 0 || strzl_haystack.len < strzl_needle.len) {
+    if (strzl_needle.len == 0 || strzl_haystack.len == 0 || strzl_haystack.len < strzl_needle.len)
         result = 0;
     else if (strzl_needle.len == 1)
         result = count_char(strzl_haystack, strzl_needle.ptr[0]);
@@ -143,11 +145,11 @@ napi_value Init(napi_env env, napi_value exports) {
     // Define the "find" property
     napi_property_descriptor findDesc = {"find", 0, FindAPI, 0, 0, 0, napi_default, 0};
 
-    // Define the "countSubstr" property
-    napi_property_descriptor countSubstrDesc = {"countSubstr", 0, CountSubstrAPI, 0, 0, 0, napi_default, 0};
+    // Define the "count" property
+    napi_property_descriptor countDesc = {"count", 0, CountAPI, 0, 0, 0, napi_default, 0};
 
     // Define an array of property descriptors
-    napi_property_descriptor properties[] = {findDesc, countSubstrDesc};
+    napi_property_descriptor properties[] = {findDesc, countDesc};
 
     // Define the number of properties in the array
     size_t propertyCount = sizeof(properties) / sizeof(properties[0]);
