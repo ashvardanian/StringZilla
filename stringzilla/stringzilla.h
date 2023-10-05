@@ -428,6 +428,7 @@ inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
 #endif // Arm Neon
 
 inline static sz_size_t sz_count_char(sz_haystack_t h, char n) { return sz_count_char_swar(h, n); }
+inline static sz_size_t sz_find_char(sz_haystack_t h, char n) { return sz_find_char_swar(h, n); }
 
 inline static sz_size_t sz_find_substr(sz_haystack_t h, sz_needle_t n) {
     if (h.length < n.length) return h.length;

@@ -70,4 +70,21 @@ jobs:
       - name: Test with PyTest
         run: pytest scripts/
 
+  test_javascript:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x]
+    steps:
+    
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+      
+      - name: Build locally
+        run: npm i
 
+      - name: Test
+        run: npm test
