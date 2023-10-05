@@ -1,6 +1,10 @@
 /**
- *  @brief  Very light-weight CPython wrapper for StringZilla, with support for memory-mapping,
- *          native Python strings, Apache Arrow collections, and more.
+ *  @file       lib.c
+ *  @brief      Very light-weight CPython wrapper for StringZilla, with support for memory-mapping,
+ *              native Python strings, Apache Arrow collections, and more.
+ *  @author     Ash Vardanian
+ *  @date       July 10, 2023
+ *  @copyright  Copyright (c) 2023
  *
  *  - Doesn't use PyBind11, NanoBind, Boost.Python, or any other high-level libs, only CPython API.
  *  - To minimize latency this implementation avoids `PyArg_ParseTupleAndKeywords` calls.
@@ -646,7 +650,7 @@ static int Str_in(Str *self, PyObject *arg) {
     sz_haystack_t haystack;
     haystack.start = self->start;
     haystack.length = self->length;
-    size_t position = sz_find_substr_auto(haystack, needle_struct);
+    size_t position = sz_find_substr(haystack, needle_struct);
     return position != haystack.length;
 }
 
@@ -881,7 +885,7 @@ static int Str_find_( //
     haystack.length = normalized_length;
 
     // Perform contains operation
-    size_t offset = sz_find_substr_auto(haystack, needle);
+    size_t offset = sz_find_substr(haystack, needle);
     if (offset == haystack.length) { *offset_out = -1; }
     else { *offset_out = (Py_ssize_t)offset; }
 
@@ -1008,11 +1012,13 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
-    size_t count = needle.length == 1 ? sz_count_char_swar(haystack, *needle.start) : 0;
-    if (needle.length != 1) {
+    size_t count = 0;
+    if (needle.length == 0 || haystack.length == 0 || haystack.length < needle.length) { count = 0; }
+    else if (needle.length == 1) { count = sz_count_char(haystack, needle.start[0]); }
+    else if (needle.length != 1) {
         if (allowoverlap) {
             while (haystack.length) {
-                size_t offset = sz_find_substr_auto(haystack, needle);
+                sz_size_t offset = sz_find_substr(haystack, needle);
                 int found = offset != haystack.length;
                 count += found;
                 haystack.start += offset + found;
@@ -1021,7 +1027,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
         }
         else {
             while (haystack.length) {
-                size_t offset = sz_find_substr_auto(haystack, needle);
+                sz_size_t offset = sz_find_substr(haystack, needle);
                 int found = offset != haystack.length;
                 count += found;
                 haystack.start += offset + needle.length;
@@ -1207,7 +1213,7 @@ static Strs *Str_split_(
         sz_haystack_t text_remaining;
         text_remaining.start = text.start + last_start;
         text_remaining.length = text.length - last_start;
-        sz_size_t offset_in_remaining = sz_find_substr_auto(text_remaining, separator);
+        sz_size_t offset_in_remaining = sz_find_substr(text_remaining, separator);
 
         // Reallocate offsets array if needed
         if (offsets_count >= offsets_capacity) {

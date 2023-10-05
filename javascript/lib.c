@@ -1,12 +1,11 @@
 /**
- *  @file lib.c
- *  @author Ash Vardanian
- *  @brief JavaScript bindings for StringZilla.
- *  @date 2023-09-18
+ *  @file       lib.c
+ *  @brief      JavaScript bindings for StringZilla.
+ *  @author     Ash Vardanian
+ *  @date       September 18, 2023
  *
- *  @copyright Copyright (c) 2023
- *
- *  @see NodeJS docs: https://nodejs.org/api/n-api.html
+ *  @copyright  Copyright (c) 2023
+ *  @see        NodeJS docs: https://nodejs.org/api/n-api.html
  */
 
 #include <node_api.h>
@@ -18,49 +17,39 @@ napi_value FindAPI(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
 
     // Extract the C string from the JavaScript string for haystack and needle
-    struct strzl_haystack_t strzl_haystack = {NULL, 0};
-    struct strzl_needle_t strzl_needle = {NULL, 0, 0};
+    sz_haystack_t haystack_sz = {NULL, 0};
+    sz_needle_t needle_sz = {NULL, 0, 0};
 
     // For haystack
-    napi_get_value_string_utf8(env, args[0], NULL, 0, &strzl_haystack.len);
-    char *haystack = malloc(strzl_haystack.len);
-    napi_get_value_string_utf8(env, args[0], haystack, strzl_haystack.len, &strzl_haystack.len);
-    strzl_haystack.ptr = haystack;
+    napi_get_value_string_utf8(env, args[0], NULL, 0, &haystack_sz.length);
+    haystack_sz.start = malloc(haystack_sz.length + 1);
+    napi_get_value_string_utf8(env, args[0], haystack_sz.start, haystack_sz.length + 1, &haystack_sz.length);
 
     // For needle
-    napi_get_value_string_utf8(env, args[1], NULL, 0, &strzl_needle.len);
-    char *needle = malloc(strzl_needle.len);
-    napi_get_value_string_utf8(env, args[1], needle, strzl_needle.len, &strzl_needle.len);
-    strzl_needle.ptr = needle;
+    napi_get_value_string_utf8(env, args[1], NULL, 0, &needle_sz.length);
+    needle_sz.start = malloc(needle_sz.length + 1);
+    napi_get_value_string_utf8(env, args[1], needle_sz.start, needle_sz.length + 1, &needle_sz.length);
 
-// Perform the find operation
-#if defined(__AVX2__)
-    uint64_t result = strzl_avx2_find_substr(strzl_haystack, strzl_needle);
-#elif defined(__ARM_NEON)
-    uint64_t result = strzl_neon_find_substr(strzl_haystack, strzl_needle);
-#else
-    uint64_t result = strzl_naive_find_substr(strzl_haystack, strzl_needle);
-#endif
+    // Perform the find operation
+    sz_size_t result = sz_find_substr(haystack_sz, needle_sz);
 
     // Cleanup
-    free(haystack);
-    free(needle);
+    free(haystack_sz.start);
+    free(needle_sz.start);
 
     // Convert the result to JavaScript BigInt and return
     napi_value js_result;
 
     // In JavaScript, if `find` is unable to find the specified value, then it should return -1
-    if (result == strzl_haystack.len)
-        napi_create_bigint_int64(env, -1, &js_result);
+    if (result == haystack_sz.length) napi_create_bigint_int64(env, -1, &js_result);
     else
         napi_create_bigint_uint64(env, result, &js_result);
 
     return js_result;
 }
 
-size_t count_char(strzl_haystack_t strzl_haystack, char needle) {
-    size_t result = strzl_naive_count_char(strzl_haystack, needle);
-
+size_t count_char(sz_haystack_t haystack_sz, char needle) {
+    size_t result = sz_count_char(haystack_sz, needle);
     return result;
 }
 
@@ -70,91 +59,66 @@ napi_value CountAPI(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
 
     // Extract the C string from the JavaScript string for haystack and needle
-    struct strzl_haystack_t strzl_haystack = {NULL, 0};
-    struct strzl_needle_t strzl_needle = {NULL, 0, 0};
+    sz_haystack_t haystack_sz = {NULL, 0};
+    sz_needle_t needle_sz = {NULL, 0, 0};
 
     // For haystack
-    napi_get_value_string_utf8(env, args[0], NULL, 0, &strzl_haystack.len);
-    char *haystack = malloc(strzl_haystack.len);
-    napi_get_value_string_utf8(env, args[0], haystack, strzl_haystack.len, &strzl_haystack.len);
-    strzl_haystack.ptr = haystack;
+    napi_get_value_string_utf8(env, args[0], NULL, 0, &haystack_sz.length);
+    haystack_sz.start = malloc(haystack_sz.length + 1);
+    napi_get_value_string_utf8(env, args[0], haystack_sz.start, haystack_sz.length + 1, &haystack_sz.length);
 
     // For needle
-    napi_get_value_string_utf8(env, args[1], NULL, 0, &strzl_needle.len);
-    char *needle = malloc(strzl_needle.len);
-    napi_get_value_string_utf8(env, args[1], needle, strzl_needle.len, &strzl_needle.len);
-    strzl_needle.ptr = needle;
+    napi_get_value_string_utf8(env, args[1], NULL, 0, &needle_sz.length);
+    needle_sz.start = malloc(needle_sz.length + 1);
+    napi_get_value_string_utf8(env, args[1], needle_sz.start, needle_sz.length + 1, &needle_sz.length);
 
     bool overlap = false;
-    if (argc > 2) {
-        napi_get_value_bool(env, args[2], &overlap);
-    }
+    if (argc > 2) { napi_get_value_bool(env, args[2], &overlap); }
 
-    size_t result;
+    void const *haystack_start = haystack_sz.start, *needle_start = needle_sz.start;
 
-    if (strzl_needle.len == 0 || strzl_haystack.len == 0 || strzl_haystack.len < strzl_needle.len)
-        result = 0;
-    else if (strzl_needle.len == 1)
-        result = count_char(strzl_haystack, strzl_needle.ptr[0]);
+    size_t count = 0;
+    if (needle_sz.length == 0 || haystack_sz.length == 0 || haystack_sz.length < needle_sz.length) { count = 0; }
+    else if (needle_sz.length == 1) { count = count_char(haystack_sz, needle_sz.start[0]); }
     else if (overlap) {
-        while (strzl_haystack.len) {
-#if defined(__AVX2__)
-            size_t offset = strzl_avx2_find_substr(strzl_haystack, strzl_needle);
-#elif defined(__ARM_NEON)
-            size_t offset = strzl_neon_find_substr(strzl_haystack, strzl_needle);
-#else
-            size_t offset = strzl_naive_find_substr(strzl_haystack, strzl_needle);
-#endif
-
-            bool found = offset != strzl_haystack.len;
-            result += found;
-            strzl_haystack.ptr += offset + found;
-            strzl_haystack.len -= offset + found;
+        while (haystack_sz.length) {
+            sz_size_t offset = sz_find_substr(haystack_sz, needle_sz);
+            int found = offset != haystack_sz.length;
+            count += found;
+            haystack_sz.start += offset + found;
+            haystack_sz.length -= offset + found;
         }
     }
-
     else {
-        while (strzl_haystack.len) {
-#if defined(__AVX2__)
-            size_t offset = strzl_avx2_find_substr(strzl_haystack, strzl_needle);
-#elif defined(__ARM_NEON)
-            size_t offset = strzl_neon_find_substr(strzl_haystack, strzl_needle);
-#else
-            size_t offset = strzl_naive_find_substr(strzl_haystack, strzl_needle);
-#endif
-
-            bool found = offset != strzl_haystack.len;
-            result += found;
-            strzl_haystack.ptr += offset + strzl_needle.len;
-            strzl_haystack.len -= offset + strzl_needle.len * found;
+        while (haystack_sz.length) {
+            sz_size_t offset = sz_find_substr(haystack_sz, needle_sz);
+            int found = offset != haystack_sz.length;
+            count += found;
+            haystack_sz.start += offset + needle_sz.length;
+            haystack_sz.length -= offset + needle_sz.length * found;
         }
     }
 
     // Cleanup
-    free(haystack);
-    free(needle);
+    free(haystack_start);
+    free(needle_start);
 
-    // Convert the result to JavaScript `BigInt` and return
-    napi_value js_result;
-    napi_create_bigint_uint64(env, result, &js_result);
+    // Convert the `count` to JavaScript `BigInt` and return
+    napi_value js_count;
+    napi_create_bigint_uint64(env, count, &js_count);
 
-    return js_result;
+    return js_count;
 }
 
 napi_value Init(napi_env env, napi_value exports) {
-    // Define the "find" property
-    napi_property_descriptor findDesc = {"find", 0, FindAPI, 0, 0, 0, napi_default, 0};
-
-    // Define the "count" property
-    napi_property_descriptor countDesc = {"count", 0, CountAPI, 0, 0, 0, napi_default, 0};
 
     // Define an array of property descriptors
+    napi_property_descriptor findDesc = {"find", 0, FindAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor countDesc = {"count", 0, CountAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor properties[] = {findDesc, countDesc};
 
-    // Define the number of properties in the array
-    size_t propertyCount = sizeof(properties) / sizeof(properties[0]);
-
     // Define the properties on the `exports` object
+    size_t propertyCount = sizeof(properties) / sizeof(properties[0]);
     napi_define_properties(env, exports, propertyCount, properties);
 
     return exports;
