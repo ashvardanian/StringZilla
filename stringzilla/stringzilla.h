@@ -393,28 +393,49 @@ inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
 
     uint32x4_t const anomalies = vld1q_dup_u32(&anomaly);
     uint32x4_t const masks = vld1q_dup_u32(&mask);
+    uint32x4_t matches, matches0, matches1, matches2, matches3;
 
     char const *text = h.start;
-    for (; (text + n.length + 16) <= end; text += 16) {
+    while (text + n.length + 16 <= end) {
 
-        uint32x4_t matches0 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 0)), masks), anomalies);
-        uint32x4_t matches1 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 1)), masks), anomalies);
-        uint32x4_t matches2 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 2)), masks), anomalies);
-        uint32x4_t matches3 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 3)), masks), anomalies);
+        // Each of the following `matchesX` contains only 4 relevant bits - one per word.
+        // Each signifies a match at the given offset.
+        matches0 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 0)), masks), anomalies);
+        matches1 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 1)), masks), anomalies);
+        matches2 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 2)), masks), anomalies);
+        matches3 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 3)), masks), anomalies);
+        matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
 
-        // Extracting matches from matches:
-        //   vmaxvq_u32 (only a64)
-        //   vgetq_lane_u32 (all)
-        //   vorrq_u32 (all)
-        uint32x4_t matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
-        uint64x2_t matches64x2 = vreinterpretq_u64_u32(matches);
-        uint64_t has_match = vgetq_lane_u64(matches64x2, 0) | vgetq_lane_u64(matches64x2, 1);
+        if (vmaxvq_u32(matches)) {
+            // Let's isolate the match from every word
+            matches0 = vandq_u32(matches0, vdupq_n_u32(0x00000001));
+            matches1 = vandq_u32(matches1, vdupq_n_u32(0x00000002));
+            matches2 = vandq_u32(matches2, vdupq_n_u32(0x00000004));
+            matches3 = vandq_u32(matches3, vdupq_n_u32(0x00000008));
+            matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
 
-        if (has_match) {
-            for (sz_size_t i = 0; i < 16; i++) {
-                if (sz_equal(text + i, n.start, n.length)) return i + (text - h.start);
+            // By now, every 32-bit word of `matches` no more than 4 set bits.
+            // Meaning that we can narrow it down to a single 16-bit word.
+            uint16x4_t matches_u16x4 = vmovn_u32(matches);
+            uint16_t matches_u16 =                       //
+                (vget_lane_u16(matches_u16x4, 0) << 0) | //
+                (vget_lane_u16(matches_u16x4, 1) << 4) | //
+                (vget_lane_u16(matches_u16x4, 2) << 8) | //
+                (vget_lane_u16(matches_u16x4, 3) << 12);
+
+            // Find the first match
+            size_t first_match_offset = __builtin_ctz(matches_u16);
+            if (n.length > 4) {
+                if (sz_equal(text + first_match_offset + 4, n.start + 4, n.length - 4))
+                    return text + first_match_offset - h.start;
+                else
+                    text += first_match_offset + 1;
             }
+            else
+                return text + first_match_offset - h.start;
         }
+        else
+            text += 16;
     }
 
     // Don't forget the last (up to 16+3=19) characters.
@@ -433,20 +454,13 @@ inline static sz_size_t sz_find_char(sz_haystack_t h, char n) { return sz_find_c
 inline static sz_size_t sz_find_substr(sz_haystack_t h, sz_needle_t n) {
     if (h.length < n.length) return h.length;
 
-    switch (n.length) {
-    case 0: return 0;
-    case 1: return sz_find_char_swar(h, *n.start);
-    case 2: return sz_find_2chars_swar(h, n.start);
-    case 3: return sz_find_3chars_swar(h, n.start);
-    case 4:
 #if defined(__ARM_NEON)
-    default: return sz_find_substr_neon(h, n);
+    return sz_find_substr_neon(h, n);
 #elif defined(__AVX2__)
-    default: return sz_find_substr_avx2(h, n);
+    return sz_find_substr_avx2(h, n);
 #else
-    default: return sz_find_substr_swar(h, n);
+    return sz_find_substr_swar(h, n);
 #endif
-    }
 }
 
 inline static void sz_swap(sz_size_t *a, sz_size_t *b) {

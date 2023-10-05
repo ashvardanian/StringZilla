@@ -65,15 +65,19 @@ def test_fuzzy_repetitions(repetitions: int):
     check_identical(native, big, "abcde", True)  # Missing pattern
 
 
-@pytest.mark.parametrize("pattern_length", [1, 2, 4, 5])
+@pytest.mark.parametrize("pattern_length", [1, 2, 3, 4, 5])
 @pytest.mark.parametrize("haystack_length", range(1, 65))
 @pytest.mark.parametrize("variability", range(1, 25))
 def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability: int):
     native = get_random_string(variability=variability, length=haystack_length)
     big = Str(native)
     pattern = get_random_string(variability=variability, length=pattern_length)
-    assert (pattern in native) == big.contains(pattern)
-    assert native.find(pattern) == big.find(pattern)
+    assert (pattern in native) == big.contains(
+        pattern
+    ), f"Failed to check if {pattern} at offset {native.find(pattern)} is present in {native}"
+    assert native.find(pattern) == big.find(
+        pattern
+    ), f"Failed to locate {pattern} at offset {native.find(pattern)} in {native}"
 
 
 @pytest.mark.parametrize("iterations", range(100))
