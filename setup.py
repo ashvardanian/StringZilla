@@ -1,20 +1,20 @@
 import os
 import sys
-from setuptools import setup
 import platform
+from setuptools import setup, Extension
 
-from pybind11.setup_helpers import Pybind11Extension
-
+import numpy as np
 
 compile_args = []
 link_args = []
 macros_args = []
 
 if sys.platform == "linux":
-    compile_args.append("-std=c++17")
+    compile_args.append("-std=c99")
     compile_args.append("-O3")
     compile_args.append("-pedantic")
     compile_args.append("-Wno-unknown-pragmas")
+    compile_args.append("-fdiagnostics-color=always")
     compile_args.append("-fopenmp")
     link_args.append("-lgomp")
 
@@ -36,10 +36,13 @@ if sys.platform == "linux":
 
 
 if sys.platform == "darwin":
-    compile_args.append("-std=c++17")
+    compile_args.append("-std=c99")
     compile_args.append("-O3")
     compile_args.append("-pedantic")
     compile_args.append("-Wno-unknown-pragmas")
+    compile_args.append("-Wno-incompatible-function-pointer-types")
+    compile_args.append("-Wno-incompatible-pointer-types")
+    compile_args.append("-fcolor-diagnostics")
     compile_args.append("-Xpreprocessor -fopenmp")
     link_args.append("-Xpreprocessor -lomp")
 
@@ -49,10 +52,10 @@ if sys.platform == "win32":
 
 
 ext_modules = [
-    Pybind11Extension(
+    Extension(
         "stringzilla",
-        ["python/lib.cpp"],
-        include_dirs=["stringzilla"],
+        ["python/lib.c"],
+        include_dirs=["stringzilla", np.get_include()],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         define_macros=macros_args,
@@ -96,5 +99,6 @@ setup(
         "Topic :: Text Processing :: Indexing",
     ],
     include_dirs=[],
+    setup_requires=["numpy"],
     ext_modules=ext_modules,
 )
