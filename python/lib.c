@@ -168,17 +168,16 @@ void reverse_haystacks(sz_haystack_t *array, size_t length) {
 
 void apply_order(sz_haystack_t *array, sz_size_t *order, size_t length) {
     for (size_t i = 0; i < length; ++i) {
-        while (order[i] != i) {
-            // Swap array[i] and array[order[i]]
+        if (i == order[i]) continue;
             sz_haystack_t temp = array[i];
-            array[i] = array[order[i]];
-            array[order[i]] = temp;
-
-            // Also update the order array to reflect the swap
-            size_t temp_idx = order[i];
-            order[i] = order[temp_idx];
-            order[temp_idx] = temp_idx;
+        size_t k = i, j;
+        while (i != (j = order[k])) {
+            array[k] = array[j];
+            order[k] = k;
+            k = j;
         }
+        array[k] = temp;
+        order[k] = k;
     }
 }
 

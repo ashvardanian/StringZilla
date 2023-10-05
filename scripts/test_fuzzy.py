@@ -105,9 +105,17 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
     big_joined = Str(native_joined)
     big_list = big_joined.split(".")
 
+    native_ordered = sorted(native_list)
+    native_order = big_list.order()
+    for i in range(list_length):
+        assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
+        assert native_ordered[i] == str(
+            big_list[int(native_order[i])]
+        ), "Split is wrong?!"
+
     native_list.sort()
     big_list.sort()
 
     assert len(native_list) == len(big_list)
     for native_str, big_str in zip(native_list, big_list):
-        assert native_str == str(big_str)
+        assert native_str == str(big_str), "Order is wrong"
