@@ -9,10 +9,10 @@
 #define NOMINMAX
 #include <windows.h>
 #else
-#include <sys/types.h>
-#include <sys/stat.h> // `stat`
-#include <sys/mman.h> // `mmap`
 #include <fcntl.h>    // `O_RDNLY`
+#include <sys/mman.h> // `mmap`
+#include <sys/stat.h> // `stat`
+#include <sys/types.h>
 #endif
 
 #ifdef _MSC_VER
@@ -169,7 +169,7 @@ void reverse_haystacks(sz_haystack_t *array, size_t length) {
 void apply_order(sz_haystack_t *array, sz_size_t *order, size_t length) {
     for (size_t i = 0; i < length; ++i) {
         if (i == order[i]) continue;
-            sz_haystack_t temp = array[i];
+        sz_haystack_t temp = array[i];
         size_t k = i, j;
         while (i != (j = order[k])) {
             array[k] = array[j];
@@ -1638,7 +1638,7 @@ static PyObject *Strs_sort(Strs *self, PyObject *args, PyObject *kwargs) {
 
     sz_haystack_t *parts = NULL;
     sz_size_t *order = NULL;
-    sz_size_t *count = NULL;
+    sz_size_t count = 0;
     if (!Strs_sort_(self, &parts, &order, &count)) return NULL;
 
     // Apply the sorting algorithm here, considering the `reverse` value
@@ -1691,7 +1691,7 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
 
     sz_haystack_t *parts = NULL;
     sz_size_t *order = NULL;
-    sz_size_t count = NULL;
+    sz_size_t count = 0;
     if (!Strs_sort_(self, &parts, &order, &count)) return NULL;
 
     // Apply the sorting algorithm here, considering the `reverse` value

@@ -71,7 +71,7 @@ def test_unit_split():
 
 
 def test_unit_sequence():
-    native = "line3\nline2\nline1"
+    native = "p3\np2\np1"
     big = Str(native)
 
     lines = big.splitlines()
@@ -79,11 +79,12 @@ def test_unit_sequence():
 
     lines.sort()
     assert [0, 1, 2] == list(lines.order())
-    assert ["line1", "line2", "line3"] == list(lines)
+    assert ["p1", "p2", "p3"] == list(lines)
 
+    # Reverse order
+    assert [2, 1, 0] == list(lines.order(reverse=True))
     lines.sort(reverse=True)
-    assert [2, 1, 0] == list(lines.order())
-    assert ["line3", "line2", "line1"] == list(lines)
+    assert ["p3", "p2", "p1"] == list(lines)
 
 
 def test_unit_globals():
