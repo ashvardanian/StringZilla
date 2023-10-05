@@ -53,8 +53,8 @@ def bench(
         stringzilla_file = File(haystack_path)
     else:
         haystack_length = int(haystack_length)
-        repretitions = haystack_length // len(haystack_pattern)
-        pythonic_str: str = haystack_pattern * repretitions
+        repetitions = haystack_length // len(haystack_pattern)
+        pythonic_str: str = haystack_pattern * repetitions
         stringzilla_file = None
 
     stringzilla_str = Str(pythonic_str)

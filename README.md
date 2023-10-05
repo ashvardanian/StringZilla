@@ -36,7 +36,7 @@ Coming soon.
 ## Quick Start: Python 🐍
 
 1️. Install via pip: `pip install stringzilla`  
-2. Import classes: `from stringzilla import Str, File, Strs`  
+1. Import the classes you need: `from stringzilla import Str, Strs, File`  
 
 ### Basic Usage
 
@@ -45,8 +45,8 @@ StringZilla offers two mostly interchangeable core classes:
 ```python
 from stringzilla import Str, File
 
-text1 = Str('some-string')
-text2 = File('some-file.txt')
+text_from_str = Str('some-string')
+text_from_file = Str(File('some-file.txt'))
 ```
 
 The `Str` is designed to replace long Python `str` strings and wrap our C-level API.
@@ -58,11 +58,12 @@ A standard dataset pre-processing use case would be to map a sizeable textual da
 
 - Length: `len(text) -> int`
 - Indexing: `text[42] -> str`
-- Slicing: `text[42:46] -> str`
+- Slicing: `text[42:46] -> Str`
+- String conversion: `str(text) -> str`
+- Substring check: `'substring' in text -> bool`
 
 ### Advanced Operations
 
-- `'substring' in text -> bool`
 - `text.contains('substring', start=0, end=9223372036854775807) -> bool`
 - `text.find('substring', start=0, end=9223372036854775807) -> int`
 - `text.count('substring', start=0, end=9223372036854775807, allowoverlap=False) -> int`
@@ -93,6 +94,19 @@ lines.append('Pythonic string')
 lines.extend(shuffled_copy)
 ```
 
+### Low-Level Python API
+
+The StringZilla CPython bindings implement vector-call conventions for faster calls.
+
+```py
+import stringzilla as sz
+
+contains: bool = sz.contains("haystack", "needle", start=0, end=9223372036854775807)
+offset: int = sz.find("haystack", "needle", start=0, end=9223372036854775807)
+count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, allowoverlap=False)
+levenstein: int = sz.levenstein("needle", "nidl")
+```
+
 ## Quick Start: C 🛠️
 
 There is an ABI-stable C 99 interface, in case you have a database, an operating system, or a runtime you want to integrate with StringZilla.
@@ -101,24 +115,24 @@ There is an ABI-stable C 99 interface, in case you have a database, an operating
 #include "stringzilla.h"
 
 // Initialize your haystack and needle
-strzl_haystack_t haystack = {your_text, your_text_length};
-strzl_needle_t needle = {your_subtext, your_subtext_length, your_anomaly_offset};
+sz_haystack_t haystack = {your_text, your_text_length};
+sz_needle_t needle = {your_subtext, your_subtext_length, your_anomaly_offset};
 
 // Perform string-level operations
-size_t character_count = strzl_naive_count_char(haystack, 'a');
-size_t character_position = strzl_naive_find_char(haystack, 'a');
-size_t substring_position = strzl_naive_find_substr(haystack, needle);
+size_t character_count = sz_count_char_swar(haystack, 'a');
+size_t character_position = sz_find_char_swar(haystack, 'a');
+size_t substring_position = sz_find_substr_swar(haystack, needle);
 
 // Perform collection level operations
-strzl_array_t array = {your_order, your_count, your_get_begin, your_get_length, your_handle};
-strzl_sort(&array, &your_config);
+sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
+sz_sort(&array, &your_config);
 ```
 
 ## Contributing 👾
 
 Future development plans include:
 
-- Replace PyBind11 with CPython.
+- [x] Replace PyBind11 with CPython.
 - Reverse-order operations in Python #12.
 - Bindings for JavaScript #25, Java, and Rust.
 - Faster string sorting algorithm.
@@ -135,7 +149,7 @@ CPython:
 
 ```sh
 # Clean up and install
-rm -rf build && pip install -e . && pytest scripts/test.py -s -x
+rm -rf build && pip install -e . && pytest scripts/ -s -x
 
 # Install without dependencies
 pip install -e . --no-index --no-deps
