@@ -408,7 +408,7 @@ inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
         //   vorrq_u32 (all)
         uint32x4_t matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
         uint64x2_t matches64x2 = vreinterpretq_u64_u32(matches);
-        int has_match = vgetq_lane_u64(matches64x2, 0) | vgetq_lane_u64(matches64x2, 1);
+        uint64_t has_match = vgetq_lane_u64(matches64x2, 0) | vgetq_lane_u64(matches64x2, 1);
 
         if (has_match) {
             for (sz_size_t i = 0; i < 16; i++) {
@@ -439,15 +439,13 @@ inline static sz_size_t sz_find_substr(sz_haystack_t h, sz_needle_t n) {
     case 2: return sz_find_2chars_swar(h, n.start);
     case 3: return sz_find_3chars_swar(h, n.start);
     case 4:
-        return sz_find_4chars_swar(h, n.start);
-        // #if defined(__ARM_NEON)
-        //     default: return sz_find_substr_neon(h, n);
-        // #elif defined(__AVX2__)
-        //     default: return sz_find_substr_avx2(h, n);
-        // #else
-    default:
-        return sz_find_substr_swar(h, n);
-        // #endif
+#if defined(__ARM_NEON)
+    default: return sz_find_substr_neon(h, n);
+#elif defined(__AVX2__)
+    default: return sz_find_substr_avx2(h, n);
+#else
+    default: return sz_find_substr_swar(h, n);
+#endif
     }
 }
 
