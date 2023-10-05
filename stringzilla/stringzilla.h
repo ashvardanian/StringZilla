@@ -1,12 +1,12 @@
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
 
-#include <stdint.h> // `uint8_t`
-#include <stddef.h> // `sz_size_t`
-#include <string.h> // `memcpy`
-#include <stdlib.h> // `qsort_r`
-#include <search.h> // `qsort_s`
 #include <ctype.h>  // `tolower`
+#include <search.h> // `qsort_s`
+#include <stddef.h> // `sz_size_t`
+#include <stdint.h> // `uint8_t`
+#include <stdlib.h> // `qsort_r`
+#include <string.h> // `memcpy`
 
 #if defined(__AVX2__)
 #include <x86intrin.h>
@@ -427,7 +427,9 @@ inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
 
 #endif // Arm Neon
 
-inline static sz_size_t sz_find_substr_auto(sz_haystack_t h, sz_needle_t n) {
+inline static sz_size_t sz_count_char(sz_haystack_t h, char n) { return sz_count_char_swar(h, n); }
+
+inline static sz_size_t sz_find_substr(sz_haystack_t h, sz_needle_t n) {
     if (h.length < n.length) return h.length;
 
     switch (n.length) {
