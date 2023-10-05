@@ -23,7 +23,6 @@ AllowShortFunctionsOnASingleLine: true
 AllowShortLambdasOnASingleLine: true
 AllowShortLoopsOnASingleLine: true
 AlwaysBreakTemplateDeclarations: Yes
-AlwaysBreakBeforeMultilineStrings: true
 AlwaysBreakAfterReturnType: None
 PenaltyReturnTypeOnItsOwnLine: 200
 
