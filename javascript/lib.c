@@ -21,21 +21,29 @@ napi_value FindAPI(napi_env env, napi_callback_info info) {
     sz_needle_t needle_sz = {NULL, 0, 0};
 
     // For haystack
-    napi_get_value_string_utf8(env, args[0], NULL, 0, &haystack_sz.length);
+    napi_get_value_string_utf8(env, args[0], NULL, 0, (size_t *)&haystack_sz.length);
     haystack_sz.start = malloc(haystack_sz.length + 1);
-    napi_get_value_string_utf8(env, args[0], haystack_sz.start, haystack_sz.length + 1, &haystack_sz.length);
+    napi_get_value_string_utf8(env,
+                               args[0],
+                               (char *)haystack_sz.start,
+                               haystack_sz.length + 1,
+                               (size_t *)&haystack_sz.length);
 
     // For needle
-    napi_get_value_string_utf8(env, args[1], NULL, 0, &needle_sz.length);
+    napi_get_value_string_utf8(env, args[1], NULL, 0, (size_t *)&needle_sz.length);
     needle_sz.start = malloc(needle_sz.length + 1);
-    napi_get_value_string_utf8(env, args[1], needle_sz.start, needle_sz.length + 1, &needle_sz.length);
+    napi_get_value_string_utf8(env,
+                               args[1],
+                               (char *)needle_sz.start,
+                               needle_sz.length + 1,
+                               (size_t *)&needle_sz.length);
 
     // Perform the find operation
     sz_size_t result = sz_find_substr(haystack_sz, needle_sz);
 
     // Cleanup
-    free(haystack_sz.start);
-    free(needle_sz.start);
+    free((void *)haystack_sz.start);
+    free((void *)needle_sz.start);
 
     // Convert the result to JavaScript BigInt and return
     napi_value js_result;
@@ -63,14 +71,22 @@ napi_value CountAPI(napi_env env, napi_callback_info info) {
     sz_needle_t needle_sz = {NULL, 0, 0};
 
     // For haystack
-    napi_get_value_string_utf8(env, args[0], NULL, 0, &haystack_sz.length);
+    napi_get_value_string_utf8(env, args[0], NULL, 0, (size_t *)&haystack_sz.length);
     haystack_sz.start = malloc(haystack_sz.length + 1);
-    napi_get_value_string_utf8(env, args[0], haystack_sz.start, haystack_sz.length + 1, &haystack_sz.length);
+    napi_get_value_string_utf8(env,
+                               args[0],
+                               (char *)haystack_sz.start,
+                               haystack_sz.length + 1,
+                               (size_t *)&haystack_sz.length);
 
     // For needle
-    napi_get_value_string_utf8(env, args[1], NULL, 0, &needle_sz.length);
+    napi_get_value_string_utf8(env, args[1], NULL, 0, (size_t *)&needle_sz.length);
     needle_sz.start = malloc(needle_sz.length + 1);
-    napi_get_value_string_utf8(env, args[1], needle_sz.start, needle_sz.length + 1, &needle_sz.length);
+    napi_get_value_string_utf8(env,
+                               args[1],
+                               (char *)needle_sz.start,
+                               needle_sz.length + 1,
+                               (size_t *)&needle_sz.length);
 
     bool overlap = false;
     if (argc > 2) { napi_get_value_bool(env, args[2], &overlap); }
@@ -100,8 +116,8 @@ napi_value CountAPI(napi_env env, napi_callback_info info) {
     }
 
     // Cleanup
-    free(haystack_start);
-    free(needle_start);
+    free((void *)haystack_start);
+    free((void *)needle_start);
 
     // Convert the `count` to JavaScript `BigInt` and return
     napi_value js_count;
