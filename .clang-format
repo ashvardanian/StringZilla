@@ -17,9 +17,9 @@ AllowAllArgumentsOnNextLine: false
 AllowAllConstructorInitializersOnNextLine: true
 AllowAllParametersOfDeclarationOnNextLine: true
 AllowShortBlocksOnASingleLine: Always
+AllowShortIfStatementsOnASingleLine: Always
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: true
-AllowShortIfStatementsOnASingleLine: Always
 AllowShortLambdasOnASingleLine: true
 AllowShortLoopsOnASingleLine: true
 AlwaysBreakTemplateDeclarations: Yes
@@ -46,7 +46,7 @@ BraceWrapping:
   IndentBraces: false
 
 
-SortIncludes: false
+SortIncludes: true
 SortUsingDeclarations: true 
 
 SpaceAfterCStyleCast: false
