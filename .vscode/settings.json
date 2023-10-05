@@ -117,6 +117,7 @@
     "__verbose_abort": "cpp",
     "strstream": "cpp",
     "filesystem": "cpp",
+    "stringzilla.h": "c",
     "__memory": "c"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
