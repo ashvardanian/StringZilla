@@ -119,9 +119,9 @@ sz_haystack_t haystack = {your_text, your_text_length};
 sz_needle_t needle = {your_subtext, your_subtext_length, your_anomaly_offset};
 
 // Perform string-level operations
-size_t character_count = sz_count_char_swar(haystack, 'a');
-size_t character_position = sz_find_char_swar(haystack, 'a');
-size_t substring_position = sz_find_substr_swar(haystack, needle);
+size_t character_count = sz_count_char(haystack, 'a');
+size_t character_position = sz_find_char(haystack, 'a');
+size_t substring_position = sz_find_substr(haystack, needle);
 
 // Perform collection level operations
 sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
@@ -148,7 +148,7 @@ Here's how to set up your dev environment and run some tests.
 CPython:
 
 ```sh
-# Clean up and install
+# Clean up, install, and test!
 rm -rf build && pip install -e . && pytest scripts/ -s -x
 
 # Install without dependencies
@@ -158,7 +158,7 @@ pip install -e . --no-index --no-deps
 NodeJS:
 
 ```sh
-npm install && node javascript/test.js
+npm install && npm test
 ```
 
 ### Benchmarking
