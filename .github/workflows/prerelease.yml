@@ -34,7 +34,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
-          python -m pip install --no-cache-dir --upgrade pip
+          python -m pip install --no-cache-dir --upgrade pip numpy
           pip install --no-cache-dir pytest
       - name: Build locally
         run: python -m pip install .
