@@ -387,6 +387,40 @@ inline static sz_size_t sz_find_substr_swar(sz_haystack_t h, sz_needle_t n) {
     }
 }
 
+/**
+ *  Helper function, used in substring search operations.
+ */
+inline static void _sz_find_substr_populate_quadgram( //
+    sz_haystack_t h,
+    sz_needle_t n,
+    sz_quadgram_t *quadgram_out,
+    sz_quadgram_t *mask_out) {
+
+    sz_quadgram_t quadgram;
+    sz_quadgram_t mask;
+    switch (n.length) {
+    case 1:
+        mask.u8s[0] = 0xFF, mask.u8s[1] = mask.u8s[2] = mask.u8s[3] = 0;
+        quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = quadgram.u8s[2] = quadgram.u8s[3] = 0;
+        break;
+    case 2:
+        mask.u8s[0] = mask.u8s[1] = 0xFF, mask.u8s[2] = mask.u8s[3] = 0;
+        quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = n.start[1], quadgram.u8s[2] = quadgram.u8s[3] = 0;
+        break;
+    case 3:
+        mask.u8s[0] = mask.u8s[1] = mask.u8s[2] = 0xFF, mask.u8s[3] = 0;
+        quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = n.start[1], quadgram.u8s[2] = n.start[2], quadgram.u8s[3] = 0;
+        break;
+    default:
+        mask.u32 = 0xFFFFFFFF;
+        quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = n.start[1], quadgram.u8s[2] = n.start[2],
+        quadgram.u8s[3] = n.start[3];
+        break;
+    }
+    *quadgram_out = quadgram;
+    *mask_out = mask;
+}
+
 #if defined(__AVX2__)
 
 /**
@@ -399,15 +433,9 @@ inline static sz_size_t sz_find_substr_avx2(sz_haystack_t h, sz_needle_t n) {
 
     // Precomputed constants
     char const *const end = h.start + h.length;
-    sz_quadgram_t quadgram = 0;
-    sz_quadgram_t mask = 0;
-    switch (n.length) {
-    case 1: memset(&mask, 0xFF, 1), memcpy(&quadgram, n.start, 1); break;
-    case 2: memset(&mask, 0xFF, 2), memcpy(&quadgram, n.start, 2); break;
-    case 3: memset(&mask, 0xFF, 3), memcpy(&quadgram, n.start, 3); break;
-    default: memset(&mask, 0xFF, 4), memcpy(&quadgram, n.start, 4); break;
-    }
-
+    sz_quadgram_t quadgram;
+    sz_quadgram_t mask;
+    _sz_find_substr_populate_quadgram(h, n, &quadgram, &mask);
     __m256i const quadgrams = _mm256_set1_epi32(quadgram.u32);
     __m256i const masks = _mm256_set1_epi32(mask.u32);
 
@@ -421,7 +449,7 @@ inline static sz_size_t sz_find_substr_avx2(sz_haystack_t h, sz_needle_t n) {
     //  + 3 bitwise ANDs.
     //  + 1 heavy (but very unlikely) branch.
     char const *text = h.start;
-    for (; (text + n.length + 32) <= end; text += 32) {
+    while (text + n.length + 32 <= end) {
 
         // Performing many unaligned loads ends up being faster than loading once and shuffling around.
         __m256i texts0 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 0)), masks);
@@ -434,10 +462,23 @@ inline static sz_size_t sz_find_substr_avx2(sz_haystack_t h, sz_needle_t n) {
         int matches3 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts3, quadgrams));
 
         if (matches0 | matches1 | matches2 | matches3) {
-            for (sz_size_t i = 0; i < 32; i++) {
-                if (sz_equal(text + i, n.start, n.length)) return i + (text - h.start);
+            int matches =                   //
+                (matches0 & 0x1111'1111u) | //
+                (matches1 & 0x2222'2222u) | //
+                (matches2 & 0x4444'4444u) | //
+                (matches3 & 0x8888'8888u);
+            size_t first_match_offset = _tzcnt_u32(matches);
+            if (n.length > 4) {
+                if (sz_equal(text + first_match_offset + 4, n.start + 4, n.length - 4))
+                    return text + first_match_offset - h.start;
+                else
+                    text += first_match_offset + 1;
             }
-        }
+            else
+                return text + first_match_offset - h.start;
+            }
+        else
+            text += 32;
     }
 
     // Don't forget the last (up to 35) characters.
@@ -462,21 +503,9 @@ inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
 
     // Precomputed constants
     char const *const end = h.start + h.length;
-    sz_quadgram_t quadgram = {};
-    sz_quadgram_t mask = {};
-    switch (n.length) {
-    case 1: mask.u8s[0] = 0xFF, quadgram.u8s[0] = n.start[0]; break;
-    case 2: mask.u8s[0] = mask.u8s[1] = 0xFF, quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = n.start[1]; break;
-    case 3:
-        mask.u8s[0] = mask.u8s[1] = mask.u8s[2] = 0xFF, quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = n.start[1],
-        quadgram.u8s[2] = n.start[2];
-        break;
-    default:
-        mask.u32 = 0xFFFFFFFF, quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = n.start[1], quadgram.u8s[2] = n.start[2],
-        quadgram.u8s[3] = n.start[3];
-        break;
-    }
-
+    sz_quadgram_t quadgram;
+    sz_quadgram_t mask;
+    _sz_find_substr_populate_quadgram(h, n, &quadgram, &mask);
     uint32x4_t const quadgrams = vld1q_dup_u32(&quadgram.u32);
     uint32x4_t const masks = vld1q_dup_u32(&mask);
     uint32x4_t matches, matches0, matches1, matches2, matches3;
@@ -486,10 +515,10 @@ inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
 
         // Each of the following `matchesX` contains only 4 relevant bits - one per word.
         // Each signifies a match at the given offset.
-        matches0 = vceqq_u32(vandq_u32(vld1q_u32((sz_quadgram_t const *)(text + 0)), masks), quadgrams);
-        matches1 = vceqq_u32(vandq_u32(vld1q_u32((sz_quadgram_t const *)(text + 1)), masks), quadgrams);
-        matches2 = vceqq_u32(vandq_u32(vld1q_u32((sz_quadgram_t const *)(text + 2)), masks), quadgrams);
-        matches3 = vceqq_u32(vandq_u32(vld1q_u32((sz_quadgram_t const *)(text + 3)), masks), quadgrams);
+        matches0 = vceqq_u32(vandq_u32(vld1q_u32(text + 0), masks), quadgrams);
+        matches1 = vceqq_u32(vandq_u32(vld1q_u32(text + 1), masks), quadgrams);
+        matches2 = vceqq_u32(vandq_u32(vld1q_u32(text + 2), masks), quadgrams);
+        matches3 = vceqq_u32(vandq_u32(vld1q_u32(text + 3), masks), quadgrams);
         matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
 
         if (vmaxvq_u32(matches)) {
