@@ -48,12 +48,12 @@ static struct {
  *          native `mmap` module, as it exposes the address of the mapping in memory.
  */
 typedef struct {
-    PyObject_HEAD;
+    PyObject_HEAD
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
-    HANDLE file_handle;
+        HANDLE file_handle;
     HANDLE mapping_handle;
 #else
-    int file_descriptor;
+        int file_descriptor;
 #endif
     void *start;
     size_t length;
@@ -72,8 +72,7 @@ typedef struct {
  *      - Str(File("some-path.txt"), from=0, to=sys.maxint)
  */
 typedef struct {
-    PyObject_HEAD;
-    PyObject *parent;
+    PyObject_HEAD PyObject *parent;
     char const *start;
     size_t length;
 } Str;
@@ -83,14 +82,14 @@ typedef struct {
  *          for faster sorting, shuffling, joins, and lookups.
  */
 typedef struct {
-    PyObject_HEAD;
+    PyObject_HEAD
 
-    enum {
-        STRS_CONSECUTIVE_32,
-        STRS_CONSECUTIVE_64,
-        STRS_REORDERED,
-        STRS_MULTI_SOURCE,
-    } type;
+        enum {
+            STRS_CONSECUTIVE_32,
+            STRS_CONSECUTIVE_64,
+            STRS_REORDERED,
+            STRS_MULTI_SOURCE,
+        } type;
 
     union {
         /**
@@ -641,7 +640,7 @@ static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
 static int Str_in(Str *self, PyObject *arg) {
 
     sz_needle_t needle_struct;
-    needle_struct.anomaly_offset = 0;
+    needle_struct.quadgram_offset = 0;
     if (!export_string_like(arg, &needle_struct.start, &needle_struct.length)) {
         PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
         return -1;
@@ -851,7 +850,7 @@ static int Str_find_( //
     Py_ssize_t start, end;
 
     // Validate and convert `haystack` and `needle`
-    needle.anomaly_offset = 0;
+    needle.quadgram_offset = 0;
     if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
         !export_string_like(needle_obj, &needle.start, &needle.length)) {
         PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
@@ -1000,7 +999,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
     int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
 
-    needle.anomaly_offset = 0;
+    needle.quadgram_offset = 0;
     if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
         !export_string_like(needle_obj, &needle.start, &needle.length))
         return PyErr_Format(PyExc_TypeError, "Haystack and needle must be string-like"), NULL;
@@ -1287,7 +1286,7 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
     sz_needle_t separator;
     int keepseparator;
     Py_ssize_t maxsplit;
-    separator.anomaly_offset = 0;
+    separator.quadgram_offset = 0;
 
     // Validate and convert `text`
     if (!export_string_like(text_obj, &text.start, &text.length)) {
@@ -1565,14 +1564,9 @@ static boolean_t Strs_sort_(Strs *self,
     }
 
     // Get the parts and their count
-    sz_haystack_t *parts = NULL;
-    size_t count = 0;
-    switch (self->type) {
-    case STRS_REORDERED:
-        parts = self->data.reordered.parts;
-        count = self->data.reordered.count;
-        break;
-    }
+    // The only possible `self->type` by now is the `STRS_REORDERED`
+    sz_haystack_t *parts = self->data.reordered.parts;
+    size_t count = self->data.reordered.count;
 
     // Allocate temporary memory to store the ordering offsets
     size_t memory_needed = sizeof(sz_size_t) * count;

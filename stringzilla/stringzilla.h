@@ -1,10 +1,7 @@
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
 
-#include <ctype.h>  // `tolower`
 #include <search.h> // `qsort_s`
-#include <stddef.h> // `sz_size_t`
-#include <stdint.h> // `uint8_t`
 #include <stdlib.h> // `qsort_r`
 #include <string.h> // `memcpy`
 
@@ -30,10 +27,70 @@
 extern "C" {
 #endif
 
-typedef uint32_t sz_anomaly_t;
-typedef uint64_t sz_size_t;
+#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
+typedef unsigned long sz_size_t; // 64-bit on most platforms when pointers are 64-bit
+#else
+typedef unsigned sz_size_t; // 32-bit on most platforms when pointers are 32-bit
+#endif
+
+typedef unsigned sz_u32_t;           // Always 32 bits
+typedef unsigned long long sz_u64_t; // Always 64 bits
+
+typedef union sz_quadgram_t {
+    unsigned u32;
+    unsigned char u8s[4];
+} sz_quadgram_t; // Always 32-bit unsigned integer, representing 8 bytes/characters
+
+typedef union sz_octogram_t {
+    unsigned long long u64;
+    unsigned char u8s[8];
+} sz_octogram_t; // Always 64-bit unsigned integer, representing 8 bytes/characters
 
 inline static sz_size_t sz_divide_round_up(sz_size_t x, sz_size_t divisor) { return (x + (divisor - 1)) / divisor; }
+
+inline static sz_size_t sz_tolower_ascii(char c) {
+    static char lowered[256] = {
+        0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
+        16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
+        32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  //
+        48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,  //
+        64,  97,  98,  99,  100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, //
+        112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 91,  92,  93,  94,  95,  //
+        96,  97,  98,  99,  100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, //
+        112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, //
+        128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, //
+        144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, //
+        160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, //
+        176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, //
+        224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, //
+        240, 241, 242, 243, 244, 245, 246, 215, 248, 249, 250, 251, 252, 253, 254, 223, //
+        224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, //
+        240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, //
+    };
+    return lowered[(int)c];
+}
+
+inline static sz_size_t sz_toupper_ascii(char c) {
+    static char upped[256] = {
+        0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
+        16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
+        32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  //
+        48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,  //
+        64,  97,  98,  99,  100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, //
+        112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 91,  92,  93,  94,  95,  //
+        96,  65,  66,  67,  68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,  //
+        80,  81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  123, 124, 125, 126, 127, //
+        128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, //
+        144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, //
+        160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, //
+        176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, //
+        224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, //
+        240, 241, 242, 243, 244, 245, 246, 215, 248, 249, 250, 251, 252, 253, 254, 223, //
+        224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, //
+        240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, //
+    };
+    return upped[(int)c];
+}
 
 /**
  *  @brief This is a faster alternative to `strncmp(a, b, length) == 0`.
@@ -53,28 +110,29 @@ typedef struct sz_haystack_t {
 typedef struct sz_needle_t {
     char const *start;
     sz_size_t length;
-    sz_size_t anomaly_offset;
+    sz_size_t quadgram_offset;
 } sz_needle_t;
 
 /**
  *  @brief  SWAR single-character counting procedure, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_count_char_swar(sz_haystack_t h, char n) {
+inline static sz_size_t sz_count_unigram_swar(sz_haystack_t h, char n) {
 
     sz_size_t result = 0;
     char const *text = h.start;
     char const *end = h.start + h.length;
 
-    for (; (uint64_t)text % 8 != 0 && text < end; ++text) result += *text == n;
+    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+    for (; ((unsigned long)text & 7ul) && text < end; ++text) result += *text == n;
 
     // This code simulates hyper-scalar execution, comparing 8 characters at a time.
-    uint64_t nnnnnnnn = n;
+    sz_u64_t nnnnnnnn = n;
     nnnnnnnn |= nnnnnnnn << 8;
     nnnnnnnn |= nnnnnnnn << 16;
     nnnnnnnn |= nnnnnnnn << 32;
     for (; text + 8 <= end; text += 8) {
-        uint64_t text_slice = *(uint64_t const *)text;
-        uint64_t match_indicators = ~(text_slice ^ nnnnnnnn);
+        sz_u64_t text_slice = *(sz_u64_t const *)text;
+        sz_u64_t match_indicators = ~(text_slice ^ nnnnnnnn);
         match_indicators &= match_indicators >> 1;
         match_indicators &= match_indicators >> 2;
         match_indicators &= match_indicators >> 4;
@@ -89,22 +147,23 @@ inline static sz_size_t sz_count_char_swar(sz_haystack_t h, char n) {
 /**
  *  @brief  SWAR single-character search in string, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_find_char_swar(sz_haystack_t h, char n) {
+inline static sz_size_t sz_find_unigram_swar(sz_haystack_t h, char n) {
 
     char const *text = h.start;
     char const *end = h.start + h.length;
 
-    for (; (uint64_t)text % 8 != 0 && text < end; ++text)
+    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+    for (; ((unsigned long)text & 7ul) && text < end; ++text)
         if (*text == n) return text - h.start;
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
-    uint64_t nnnnnnnn = n;
+    sz_u64_t nnnnnnnn = n;
     nnnnnnnn |= nnnnnnnn << 8;  // broadcast `n` into `nnnnnnnn`
     nnnnnnnn |= nnnnnnnn << 16; // broadcast `n` into `nnnnnnnn`
     nnnnnnnn |= nnnnnnnn << 32; // broadcast `n` into `nnnnnnnn`
     for (; text + 8 <= end; text += 8) {
-        uint64_t text_slice = *(uint64_t const *)text;
-        uint64_t match_indicators = ~(text_slice ^ nnnnnnnn);
+        sz_u64_t text_slice = *(sz_u64_t const *)text;
+        sz_u64_t match_indicators = ~(text_slice ^ nnnnnnnn);
         match_indicators &= match_indicators >> 1;
         match_indicators &= match_indicators >> 2;
         match_indicators &= match_indicators >> 4;
@@ -121,26 +180,31 @@ inline static sz_size_t sz_find_char_swar(sz_haystack_t h, char n) {
 /**
  *  @brief  SWAR character-bigram search in string, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_find_2chars_swar(sz_haystack_t h, char const *n) {
+inline static sz_size_t sz_find_bigram_swar(sz_haystack_t h, char const *n) {
 
     char const *text = h.start;
     char const *end = h.start + h.length;
 
+    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+    for (; ((unsigned long)text & 7ul) && text + 2 <= end; ++text)
+        if (text[0] == n[0] && text[1] == n[1]) return text - h.start;
+
     // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
-    uint64_t nnnn = ((uint64_t)(n[0]) << 0) | ((uint64_t)(n[1]) << 8); // broadcast `n` into `nnnn`
+    sz_u64_t nnnn = ((sz_u64_t)(n[0]) << 0) | ((sz_u64_t)(n[1]) << 8); // broadcast `n` into `nnnn`
     nnnn |= nnnn << 16;                                                // broadcast `n` into `nnnn`
     nnnn |= nnnn << 32;                                                // broadcast `n` into `nnnn`
-    uint64_t text_slice;
     for (; text + 8 <= end; text += 7) {
-        memcpy(&text_slice, text, 8);
-        uint64_t even_indicators = ~(text_slice ^ nnnn);
-        uint64_t odd_indicators = ~((text_slice << 8) ^ nnnn);
+        sz_u64_t text_slice = *(sz_u64_t const *)text;
+        sz_u64_t even_indicators = ~(text_slice ^ nnnn);
+        sz_u64_t odd_indicators = ~((text_slice << 8) ^ nnnn);
+
         // For every even match - 2 char (16 bits) must be identical.
         even_indicators &= even_indicators >> 1;
         even_indicators &= even_indicators >> 2;
         even_indicators &= even_indicators >> 4;
         even_indicators &= even_indicators >> 8;
         even_indicators &= 0x0001000100010001;
+
         // For every odd match - 2 char (16 bits) must be identical.
         odd_indicators &= odd_indicators >> 1;
         odd_indicators &= odd_indicators >> 2;
@@ -149,7 +213,7 @@ inline static sz_size_t sz_find_2chars_swar(sz_haystack_t h, char const *n) {
         odd_indicators &= 0x0001000100010000;
 
         if (even_indicators + odd_indicators) {
-            uint64_t match_indicators = even_indicators | (odd_indicators >> 8);
+            sz_u64_t match_indicators = even_indicators | (odd_indicators >> 8);
             return text - h.start + ctz64(match_indicators) / 8;
         }
     }
@@ -162,23 +226,26 @@ inline static sz_size_t sz_find_2chars_swar(sz_haystack_t h, char const *n) {
 /**
  *  @brief  SWAR character-trigram search in string, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_find_3chars_swar(sz_haystack_t h, char const *n) {
+inline static sz_size_t sz_find_trigram_swar(sz_haystack_t h, char const *n) {
 
     char const *text = h.start;
     char const *end = h.start + h.length;
 
+    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+    for (; ((unsigned long)text & 7ul) && text + 3 <= end; ++text)
+        if (text[0] == n[0] && text[1] == n[1] && text[2] == n[2]) return text - h.start;
+
     // This code simulates hyper-scalar execution, analyzing 6 offsets at a time.
     // We have two unused bytes at the end.
-    uint64_t nn = (uint64_t)(n[0] << 0) | ((uint64_t)(n[1]) << 8) | ((uint64_t)(n[2]) << 16); // broadcast `n` into `nn`
+    sz_u64_t nn = (sz_u64_t)(n[0] << 0) | ((sz_u64_t)(n[1]) << 8) | ((sz_u64_t)(n[2]) << 16); // broadcast `n` into `nn`
     nn |= nn << 24;                                                                           // broadcast `n` into `nn`
     nn <<= 16;                                                                                // broadcast `n` into `nn`
 
     for (; text + 8 <= end; text += 6) {
-        uint64_t text_slice;
-        memcpy(&text_slice, text, 8);
-        uint64_t first_indicators = ~(text_slice ^ nn);
-        uint64_t second_indicators = ~((text_slice << 8) ^ nn);
-        uint64_t third_indicators = ~((text_slice << 16) ^ nn);
+        sz_u64_t text_slice = *(sz_u64_t const *)text;
+        sz_u64_t first_indicators = ~(text_slice ^ nn);
+        sz_u64_t second_indicators = ~((text_slice << 8) ^ nn);
+        sz_u64_t third_indicators = ~((text_slice << 16) ^ nn);
         // For every first match - 3 chars (24 bits) must be identical.
         // For that merge every byte state and then combine those three-way.
         first_indicators &= first_indicators >> 1;
@@ -203,7 +270,7 @@ inline static sz_size_t sz_find_3chars_swar(sz_haystack_t h, char const *n) {
         third_indicators =
             (third_indicators >> 16) & (third_indicators >> 8) & (third_indicators >> 0) & 0x0000010000010000;
 
-        uint64_t match_indicators = first_indicators | (second_indicators >> 8) | (third_indicators >> 16);
+        sz_u64_t match_indicators = first_indicators | (second_indicators >> 8) | (third_indicators >> 16);
         if (match_indicators != 0) return text - h.start + ctz64(match_indicators) / 8;
     }
 
@@ -215,29 +282,32 @@ inline static sz_size_t sz_find_3chars_swar(sz_haystack_t h, char const *n) {
 /**
  *  @brief  SWAR character-quadgram search in string, jumping 8 bytes at a time.
  */
-inline static sz_size_t sz_find_4chars_swar(sz_haystack_t h, char const *n) {
+inline static sz_size_t sz_find_quadgram_swar(sz_haystack_t h, char const *n) {
 
     char const *text = h.start;
     char const *end = h.start + h.length;
 
+    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+    for (; ((unsigned long)text & 7ul) && text + 4 <= end; ++text)
+        if (text[0] == n[0] && text[1] == n[1] && text[2] == n[2] && text[3] == n[3]) return text - h.start;
+
     // This code simulates hyper-scalar execution, analyzing 4 offsets at a time.
-    uint64_t nn = (uint64_t)(n[0] << 0) | ((uint64_t)(n[1]) << 8) | ((uint64_t)(n[2]) << 16) | ((uint64_t)(n[3]) << 24);
+    sz_u64_t nn = (sz_u64_t)(n[0] << 0) | ((sz_u64_t)(n[1]) << 8) | ((sz_u64_t)(n[2]) << 16) | ((sz_u64_t)(n[3]) << 24);
     nn |= nn << 32;
 
     //
-    uint8_t lookup[16] = {0};
-    lookup[0b0010] = lookup[0b0110] = lookup[0b1010] = lookup[0b1110] = 1;
-    lookup[0b0100] = lookup[0b1100] = 2;
-    lookup[0b1000] = 3;
+    unsigned char lookup[16] = {0};
+    lookup[0x2] = lookup[0x6] = lookup[0xA] = lookup[0xE] = 1;
+    lookup[0x4] = lookup[0xC] = 2;
+    lookup[0x8] = 3;
 
     // We can perform 5 comparisons per load, but it's easier to perform 4, minimizing the size of the lookup table.
     for (; text + 8 <= end; text += 4) {
-        uint64_t text_slice;
-        memcpy(&text_slice, text, 8);
-        uint64_t text01 = (text_slice & 0x00000000FFFFFFFF) | ((text_slice & 0x000000FFFFFFFF00) << 24);
-        uint64_t text23 = ((text_slice & 0x0000FFFFFFFF0000) >> 16) | ((text_slice & 0x00FFFFFFFF000000) << 8);
-        uint64_t text01_indicators = ~(text01 ^ nn);
-        uint64_t text23_indicators = ~(text23 ^ nn);
+        sz_u64_t text_slice = *(sz_u64_t const *)text;
+        sz_u64_t text01 = (text_slice & 0x00000000FFFFFFFF) | ((text_slice & 0x000000FFFFFFFF00) << 24);
+        sz_u64_t text23 = ((text_slice & 0x0000FFFFFFFF0000) >> 16) | ((text_slice & 0x00FFFFFFFF000000) << 8);
+        sz_u64_t text01_indicators = ~(text01 ^ nn);
+        sz_u64_t text23_indicators = ~(text23 ^ nn);
 
         // For every first match - 4 chars (32 bits) must be identical.
         text01_indicators &= text01_indicators >> 1;
@@ -258,7 +328,7 @@ inline static sz_size_t sz_find_4chars_swar(sz_haystack_t h, char const *n) {
         if (text01_indicators + text23_indicators) {
             // Assuming we have performed 4 comparisons, we can only have 2^4=16 outcomes.
             // Which is small enough for a lookup table.
-            uint8_t match_indicators = (uint8_t)(                      //
+            unsigned char match_indicators = (unsigned char)(          //
                 (text01_indicators >> 31) | (text01_indicators << 0) | //
                 (text23_indicators >> 29) | (text23_indicators << 2));
             return text - h.start + lookup[match_indicators];
@@ -272,7 +342,7 @@ inline static sz_size_t sz_find_4chars_swar(sz_haystack_t h, char const *n) {
 
 /**
  *  @brief  Trivial substring search with scalar code. Instead of comparing characters one-by-one
- *          it compares 4-byte anomalies first, most commonly prefixes. It's computationally cheaper.
+ *          it compares 4-byte quadgrams first, most commonly prefixes. It's computationally cheaper.
  *          Matching performance fluctuates between 1 GB/s and 3,5 GB/s per core.
  */
 inline static sz_size_t sz_find_substr_swar(sz_haystack_t h, sz_needle_t n) {
@@ -281,26 +351,36 @@ inline static sz_size_t sz_find_substr_swar(sz_haystack_t h, sz_needle_t n) {
 
     switch (n.length) {
     case 0: return 0;
-    case 1: return sz_find_char_swar(h, *n.start);
-    case 2: return sz_find_2chars_swar(h, n.start);
-    case 3: return sz_find_3chars_swar(h, n.start);
-    case 4: return sz_find_4chars_swar(h, n.start);
+    case 1: return sz_find_unigram_swar(h, *n.start);
+    case 2: return sz_find_bigram_swar(h, n.start);
+    case 3: return sz_find_trigram_swar(h, n.start);
+    case 4: return sz_find_quadgram_swar(h, n.start);
     default: {
         char const *text = h.start;
         char const *const end = h.start + h.length;
 
-        sz_anomaly_t n_anomaly, h_anomaly;
-        sz_size_t const n_suffix_len = n.length - 4 - n.anomaly_offset;
-        char const *n_suffix_ptr = n.start + 4 + n.anomaly_offset;
-        memcpy(&n_anomaly, n.start + n.anomaly_offset, 4);
+        sz_quadgram_t n_quadgram, h_quadgram;
+        sz_size_t const n_suffix_len = n.length - 4 - n.quadgram_offset;
+        char const *n_suffix_ptr = n.start + 4 + n.quadgram_offset;
+        n_quadgram.u8s[0] = n.start[n.quadgram_offset];
+        n_quadgram.u8s[1] = n.start[n.quadgram_offset + 1];
+        n_quadgram.u8s[2] = n.start[n.quadgram_offset + 2];
+        n_quadgram.u8s[3] = n.start[n.quadgram_offset + 3];
+        h_quadgram.u8s[0] = h.start[0];
+        h_quadgram.u8s[1] = h.start[1];
+        h_quadgram.u8s[2] = h.start[2];
+        h_quadgram.u8s[3] = h.start[3];
 
-        text += n.anomaly_offset;
-        for (; text + n.length <= end; text++) {
-            memcpy(&h_anomaly, text, 4);
-            if (h_anomaly == n_anomaly)                                               // Match anomaly.
-                if (sz_equal(text + 4, n_suffix_ptr, n_suffix_len))                   // Match suffix.
-                    if (sz_equal(text - n.anomaly_offset, n.start, n.anomaly_offset)) // Match prefix.
-                        return text - h.start - n.anomaly_offset;
+        text += n.quadgram_offset;
+        while (text + n.length <= end) {
+            if (h_quadgram.u32 == n_quadgram.u32)                                       // Match quadgram.
+                if (sz_equal(text + 4, n_suffix_ptr, n_suffix_len))                     // Match suffix.
+                    if (sz_equal(text - n.quadgram_offset, n.start, n.quadgram_offset)) // Match prefix.
+                        return text - h.start - n.quadgram_offset;
+
+            h_quadgram.u32 <<= 8;
+            h_quadgram.u8s[3] = *text;
+            ++text;
         }
         return h.length;
     }
@@ -319,17 +399,17 @@ inline static sz_size_t sz_find_substr_avx2(sz_haystack_t h, sz_needle_t n) {
 
     // Precomputed constants
     char const *const end = h.start + h.length;
-    uint32_t anomaly = 0;
-    uint32_t mask = 0;
+    sz_quadgram_t quadgram = 0;
+    sz_quadgram_t mask = 0;
     switch (n.length) {
-    case 1: memset(&mask, 0xFF, 1), memcpy(&anomaly, n.start, 1); break;
-    case 2: memset(&mask, 0xFF, 2), memcpy(&anomaly, n.start, 2); break;
-    case 3: memset(&mask, 0xFF, 3), memcpy(&anomaly, n.start, 3); break;
-    default: memset(&mask, 0xFF, 4), memcpy(&anomaly, n.start, 4); break;
+    case 1: memset(&mask, 0xFF, 1), memcpy(&quadgram, n.start, 1); break;
+    case 2: memset(&mask, 0xFF, 2), memcpy(&quadgram, n.start, 2); break;
+    case 3: memset(&mask, 0xFF, 3), memcpy(&quadgram, n.start, 3); break;
+    default: memset(&mask, 0xFF, 4), memcpy(&quadgram, n.start, 4); break;
     }
 
-    __m256i const anomalies = _mm256_set1_epi32(*(uint32_t const *)&anomaly);
-    __m256i const masks = _mm256_set1_epi32(*(uint32_t const *)&mask);
+    __m256i const quadgrams = _mm256_set1_epi32(quadgram.u32);
+    __m256i const masks = _mm256_set1_epi32(mask.u32);
 
     // Top level for-loop changes dramatically.
     // In sequential computing model for 32 offsets we would do:
@@ -345,13 +425,13 @@ inline static sz_size_t sz_find_substr_avx2(sz_haystack_t h, sz_needle_t n) {
 
         // Performing many unaligned loads ends up being faster than loading once and shuffling around.
         __m256i texts0 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 0)), masks);
-        int matches0 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts0, anomalies));
+        int matches0 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts0, quadgrams));
         __m256i texts1 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 1)), masks);
-        int matches1 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts1, anomalies));
+        int matches1 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts1, quadgrams));
         __m256i text2 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 2)), masks);
-        int matches2 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(text2, anomalies));
+        int matches2 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(text2, quadgrams));
         __m256i texts3 = _mm256_and_si256(_mm256_loadu_si256((__m256i const *)(text + 3)), masks);
-        int matches3 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts3, anomalies));
+        int matches3 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts3, quadgrams));
 
         if (matches0 | matches1 | matches2 | matches3) {
             for (sz_size_t i = 0; i < 32; i++) {
@@ -382,16 +462,22 @@ inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
 
     // Precomputed constants
     char const *const end = h.start + h.length;
-    uint32_t anomaly = 0;
-    uint32_t mask = 0;
+    sz_quadgram_t quadgram = {};
+    sz_quadgram_t mask = {};
     switch (n.length) {
-    case 1: memset(&mask, 0xFF, 1), memcpy(&anomaly, n.start, 1); break;
-    case 2: memset(&mask, 0xFF, 2), memcpy(&anomaly, n.start, 2); break;
-    case 3: memset(&mask, 0xFF, 3), memcpy(&anomaly, n.start, 3); break;
-    default: memset(&mask, 0xFF, 4), memcpy(&anomaly, n.start, 4); break;
+    case 1: mask.u8s[0] = 0xFF, quadgram.u8s[0] = n.start[0]; break;
+    case 2: mask.u8s[0] = mask.u8s[1] = 0xFF, quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = n.start[1]; break;
+    case 3:
+        mask.u8s[0] = mask.u8s[1] = mask.u8s[2] = 0xFF, quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = n.start[1],
+        quadgram.u8s[2] = n.start[2];
+        break;
+    default:
+        mask.u32 = 0xFFFFFFFF, quadgram.u8s[0] = n.start[0], quadgram.u8s[1] = n.start[1], quadgram.u8s[2] = n.start[2],
+        quadgram.u8s[3] = n.start[3];
+        break;
     }
 
-    uint32x4_t const anomalies = vld1q_dup_u32(&anomaly);
+    uint32x4_t const quadgrams = vld1q_dup_u32(&quadgram.u32);
     uint32x4_t const masks = vld1q_dup_u32(&mask);
     uint32x4_t matches, matches0, matches1, matches2, matches3;
 
@@ -400,10 +486,10 @@ inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
 
         // Each of the following `matchesX` contains only 4 relevant bits - one per word.
         // Each signifies a match at the given offset.
-        matches0 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 0)), masks), anomalies);
-        matches1 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 1)), masks), anomalies);
-        matches2 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 2)), masks), anomalies);
-        matches3 = vceqq_u32(vandq_u32(vld1q_u32((uint32_t const *)(text + 3)), masks), anomalies);
+        matches0 = vceqq_u32(vandq_u32(vld1q_u32((sz_quadgram_t const *)(text + 0)), masks), quadgrams);
+        matches1 = vceqq_u32(vandq_u32(vld1q_u32((sz_quadgram_t const *)(text + 1)), masks), quadgrams);
+        matches2 = vceqq_u32(vandq_u32(vld1q_u32((sz_quadgram_t const *)(text + 2)), masks), quadgrams);
+        matches3 = vceqq_u32(vandq_u32(vld1q_u32((sz_quadgram_t const *)(text + 3)), masks), quadgrams);
         matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
 
         if (vmaxvq_u32(matches)) {
@@ -448,8 +534,8 @@ inline static sz_size_t sz_find_substr_neon(sz_haystack_t h, sz_needle_t n) {
 
 #endif // Arm Neon
 
-inline static sz_size_t sz_count_char(sz_haystack_t h, char n) { return sz_count_char_swar(h, n); }
-inline static sz_size_t sz_find_char(sz_haystack_t h, char n) { return sz_find_char_swar(h, n); }
+inline static sz_size_t sz_count_char(sz_haystack_t h, char n) { return sz_count_unigram_swar(h, n); }
+inline static sz_size_t sz_find_unigram(sz_haystack_t h, char n) { return sz_find_unigram_swar(h, n); }
 
 inline static sz_size_t sz_find_substr(sz_haystack_t h, sz_needle_t n) {
     if (h.length < n.length) return h.length;
@@ -665,10 +751,10 @@ inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *conf
         char *prefix = (char *)&sequence->order[i];
         for (sz_size_t j = 0; j != length; ++j) prefix[7 - j] = begin[j];
         if (case_insensitive) {
-            prefix[0] = tolower(prefix[0]);
-            prefix[1] = tolower(prefix[1]);
-            prefix[2] = tolower(prefix[2]);
-            prefix[3] = tolower(prefix[3]);
+            prefix[0] = sz_tolower_ascii(prefix[0]);
+            prefix[1] = sz_tolower_ascii(prefix[1]);
+            prefix[2] = sz_tolower_ascii(prefix[2]);
+            prefix[3] = sz_tolower_ascii(prefix[3]);
         }
     }
 
@@ -679,7 +765,7 @@ inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *conf
     _sz_sort_recursion(sequence, 0, 32, comparator);
 }
 
-typedef uint8_t levenstein_distance_t;
+typedef unsigned char levenstein_distance_t;
 
 /**
  *  @return Amount of temporary memory (in bytes) needed to efficiently compute
@@ -758,11 +844,11 @@ inline static levenstein_distance_t sz_levenstein( //
 /**
  *  @brief  Hashes provided string using hardware-accelerated CRC32 instructions.
  */
-inline static uint32_t sz_hash_crc32_native(char const *start, sz_size_t length) { return 0; }
+inline static sz_u32_t sz_hash_crc32_native(char const *start, sz_size_t length) { return 0; }
 
-inline static uint32_t sz_hash_crc32_neon(char const *start, sz_size_t length) { return 0; }
+inline static sz_u32_t sz_hash_crc32_neon(char const *start, sz_size_t length) { return 0; }
 
-inline static uint32_t sz_hash_crc32_sse(char const *start, sz_size_t length) { return 0; }
+inline static sz_u32_t sz_hash_crc32_sse(char const *start, sz_size_t length) { return 0; }
 
 #ifdef __cplusplus
 }
