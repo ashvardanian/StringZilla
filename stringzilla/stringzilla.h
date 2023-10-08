@@ -373,13 +373,13 @@ inline static sz_size_t sz_find_substr_swar(sz_haystack_t h, sz_needle_t n) {
 
         text += n.quadgram_offset;
         while (text + n.length <= end) {
+            h_quadgram.u8s[3] = text[3];
             if (h_quadgram.u32 == n_quadgram.u32)                                       // Match quadgram.
                 if (sz_equal(text + 4, n_suffix_ptr, n_suffix_len))                     // Match suffix.
                     if (sz_equal(text - n.quadgram_offset, n.start, n.quadgram_offset)) // Match prefix.
                         return text - h.start - n.quadgram_offset;
 
-            h_quadgram.u32 <<= 8;
-            h_quadgram.u8s[3] = *text;
+            h_quadgram.u32 >>= 8;
             ++text;
         }
         return h.length;
