@@ -38,10 +38,7 @@ static PyTypeObject FileType;
 static PyTypeObject StrType;
 static PyTypeObject StrsType;
 
-static struct {
-    void *start;
-    size_t length;
-} temporary_memory = {NULL, 0};
+static sz_string_view_t temporary_memory = {NULL, 0};
 
 /**
  *  @brief  Describes an on-disk file mapped into RAM, which is different from Python's
@@ -55,8 +52,8 @@ typedef struct {
 #else
         int file_descriptor;
 #endif
-    void *start;
-    size_t length;
+    sz_string_start_t start;
+    sz_size_t length;
 } File;
 
 /**
@@ -73,8 +70,8 @@ typedef struct {
  */
 typedef struct {
     PyObject_HEAD PyObject *parent;
-    char const *start;
-    size_t length;
+    sz_string_start_t start;
+    sz_size_t length;
 } Str;
 
 /**
@@ -133,7 +130,7 @@ typedef struct {
         struct reordered_slices_t {
             size_t count;
             PyObject *parent;
-            sz_haystack_t *parts;
+            sz_string_view_t *parts;
         } reordered;
 
     } data;
@@ -144,10 +141,13 @@ typedef struct {
 
 #pragma region Helpers
 
-typedef int boolean_t;
+inline static sz_string_start_t haystacks_get_start(sz_sequence_t *seq, sz_size_t i) {
+    return ((sz_string_view_t const *)seq->handle)[i].start;
+}
 
-inline static char const *haystacks_get_start(sz_haystack_t const *parts, sz_size_t i) { return parts[i].start; }
-inline static size_t haystacks_get_length(sz_haystack_t const *parts, sz_size_t i) { return parts[i].length; }
+inline static sz_size_t haystacks_get_length(sz_sequence_t *seq, sz_size_t i) {
+    return ((sz_string_view_t const *)seq->handle)[i].length;
+}
 
 void reverse_offsets(sz_size_t *array, size_t length) {
     size_t i, j;
@@ -159,21 +159,21 @@ void reverse_offsets(sz_size_t *array, size_t length) {
     }
 }
 
-void reverse_haystacks(sz_haystack_t *array, size_t length) {
+void reverse_haystacks(sz_string_view_t *array, size_t length) {
     size_t i, j;
     // Swap array[i] and array[j]
     for (i = 0, j = length - 1; i < j; i++, j--) {
-        sz_haystack_t temp = array[i];
+        sz_string_view_t temp = array[i];
         array[i] = array[j];
         array[j] = temp;
     }
 }
 
-void apply_order(sz_haystack_t *array, sz_size_t *order, size_t length) {
-    for (size_t i = 0; i < length; ++i) {
+void apply_order(sz_string_view_t *array, sz_u64_t *order, size_t length) {
+    for (sz_u64_t i = 0; i < length; ++i) {
         if (i == order[i]) continue;
-        sz_haystack_t temp = array[i];
-        size_t k = i, j;
+        sz_string_view_t temp = array[i];
+        sz_u64_t k = i, j;
         while (i != (j = order[k])) {
             array[k] = array[j];
             order[k] = k;
@@ -205,7 +205,7 @@ void slice(size_t length, ssize_t start, ssize_t end, size_t *normalized_offset,
     *normalized_length = end - start;
 }
 
-boolean_t export_string_like(PyObject *object, char const **start, size_t *length) {
+sz_bool_t export_string_like(PyObject *object, sz_string_start_t **start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python str
         Py_ssize_t signed_length;
@@ -277,7 +277,7 @@ get_string_at_offset_t str_at_offset_getter(Strs *strs) {
     }
 }
 
-boolean_t prepare_strings_for_reordering(Strs *strs) {
+sz_bool_t prepare_strings_for_reordering(Strs *strs) {
 
     // Allocate memory for reordered slices
     size_t count = 0;
@@ -306,7 +306,7 @@ boolean_t prepare_strings_for_reordering(Strs *strs) {
         return 0;
     }
 
-    sz_haystack_t *new_parts = (sz_haystack_t *)malloc(count * sizeof(sz_haystack_t));
+    sz_string_view_t *new_parts = (sz_string_view_t *)malloc(count * sizeof(sz_string_view_t));
     if (new_parts == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
         return 0;
@@ -333,7 +333,7 @@ boolean_t prepare_strings_for_reordering(Strs *strs) {
     return 1;
 }
 
-boolean_t prepare_strings_for_extension(Strs *strs, size_t new_parents, size_t new_parts) { return 1; }
+sz_bool_t prepare_strings_for_extension(Strs *strs, size_t new_parents, size_t new_parts) { return 1; }
 
 #pragma endregion
 
@@ -622,8 +622,8 @@ static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
     view->itemsize = sizeof(char);
     view->format = "c"; // https://docs.python.org/3/library/struct.html#format-characters
     view->ndim = 1;
-    view->shape = &self->length; // 1-D array, so shape is just a pointer to the length
-    view->strides = itemsize;    // strides in a 1-D array is just the item size
+    view->shape = (Py_ssize_t *)&self->length; // 1-D array, so shape is just a pointer to the length
+    view->strides = itemsize;                  // strides in a 1-D array is just the item size
     view->suboffsets = NULL;
     view->internal = NULL;
 
@@ -639,18 +639,13 @@ static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
 
 static int Str_in(Str *self, PyObject *arg) {
 
-    sz_needle_t needle_struct;
-    needle_struct.quadgram_offset = 0;
+    sz_string_view_t needle_struct;
     if (!export_string_like(arg, &needle_struct.start, &needle_struct.length)) {
         PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
         return -1;
     }
 
-    sz_haystack_t haystack;
-    haystack.start = self->start;
-    haystack.length = self->length;
-    size_t position = sz_find_substr(haystack, needle_struct);
-    return position != haystack.length;
+    return sz_find_substring(self->start, self->length, needle_struct.start, needle_struct.length) != NULL;
 }
 
 static Py_ssize_t Strs_len(Strs *self) {
@@ -756,12 +751,12 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
             to->count = stop - start;
             to->parent = from->parent;
 
-            to->parts = malloc(sizeof(sz_haystack_t) * to->count);
+            to->parts = malloc(sizeof(sz_string_view_t) * to->count);
             if (to->parts == NULL && PyErr_NoMemory()) {
                 Py_XDECREF(self_slice);
                 return NULL;
             }
-            memcpy(to->parts, from->parts + start, sizeof(sz_haystack_t) * to->count);
+            memcpy(to->parts, from->parts + start, sizeof(sz_string_view_t) * to->count);
             Py_INCREF(to->parent);
             break;
         }
@@ -816,8 +811,8 @@ static int Str_find_( //
     PyObject *args,
     PyObject *kwargs,
     Py_ssize_t *offset_out,
-    sz_haystack_t *haystack_out,
-    sz_needle_t *needle_out) {
+    sz_string_view_t *haystack_out,
+    sz_string_view_t *needle_out) {
 
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -845,12 +840,11 @@ static int Str_find_( //
         }
     }
 
-    sz_haystack_t haystack;
-    sz_needle_t needle;
+    sz_string_view_t haystack;
+    sz_string_view_t needle;
     Py_ssize_t start, end;
 
     // Validate and convert `haystack` and `needle`
-    needle.quadgram_offset = 0;
     if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
         !export_string_like(needle_obj, &needle.start, &needle.length)) {
         PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
@@ -884,9 +878,9 @@ static int Str_find_( //
     haystack.length = normalized_length;
 
     // Perform contains operation
-    size_t offset = sz_find_substr(haystack, needle);
-    if (offset == haystack.length) { *offset_out = -1; }
-    else { *offset_out = (Py_ssize_t)offset; }
+    sz_string_start_t match = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+    if (match == NULL) { *offset_out = -1; }
+    else { *offset_out = (Py_ssize_t)(match - haystack.start); }
 
     *haystack_out = haystack;
     *needle_out = needle;
@@ -895,16 +889,16 @@ static int Str_find_( //
 
 static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
-    sz_haystack_t text;
-    sz_needle_t separator;
+    sz_string_view_t text;
+    sz_string_view_t separator;
     if (!Str_find_(self, args, kwargs, &signed_offset, &text, &separator)) return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
 
 static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
-    sz_haystack_t text;
-    sz_needle_t separator;
+    sz_string_view_t text;
+    sz_string_view_t separator;
     if (!Str_find_(self, args, kwargs, &signed_offset, &text, &separator)) return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
@@ -915,8 +909,8 @@ static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
 
 static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
-    sz_haystack_t text;
-    sz_needle_t separator;
+    sz_string_view_t text;
+    sz_string_view_t separator;
     if (!Str_find_(self, args, kwargs, &signed_offset, &text, &separator)) return NULL;
     if (signed_offset == -1) { Py_RETURN_FALSE; }
     else { Py_RETURN_TRUE; }
@@ -924,8 +918,8 @@ static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) 
 
 static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t separator_index;
-    sz_haystack_t text;
-    sz_needle_t separator;
+    sz_string_view_t text;
+    sz_string_view_t separator;
     PyObject *result_tuple;
 
     // Use Str_find_ to get the index of the separator
@@ -993,13 +987,12 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
                 return NULL;
     }
 
-    sz_haystack_t haystack;
-    sz_needle_t needle;
+    sz_string_view_t haystack;
+    sz_string_view_t needle;
     Py_ssize_t start = start_obj ? PyLong_AsSsize_t(start_obj) : 0;
     Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
     int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
 
-    needle.quadgram_offset = 0;
     if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
         !export_string_like(needle_obj, &needle.start, &needle.length))
         return PyErr_Format(PyExc_TypeError, "Haystack and needle must be string-like"), NULL;
@@ -1013,27 +1006,28 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
 
     size_t count = 0;
     if (needle.length == 0 || haystack.length == 0 || haystack.length < needle.length) { count = 0; }
-    else if (needle.length == 1) { count = sz_count_char(haystack, needle.start[0]); }
-    else if (needle.length != 1) {
-        if (allowoverlap) {
-            while (haystack.length) {
-                sz_size_t offset = sz_find_substr(haystack, needle);
-                int found = offset != haystack.length;
-                count += found;
-                haystack.start += offset + found;
-                haystack.length -= offset + found;
-            }
-        }
-        else {
-            while (haystack.length) {
-                sz_size_t offset = sz_find_substr(haystack, needle);
-                int found = offset != haystack.length;
-                count += found;
-                haystack.start += offset + needle.length;
-                haystack.length -= offset + needle.length * found;
-            }
+    else if (needle.length == 1) { count = sz_count_char(haystack.start, haystack.length, needle.start); }
+    else if (allowoverlap) {
+        while (haystack.length) {
+            sz_string_start_t ptr = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+            sz_bool_t found = ptr != NULL;
+            sz_size_t offset = found ? ptr - haystack.start : haystack.length;
+            count += found;
+            haystack.start += offset + found;
+            haystack.length -= offset + found;
         }
     }
+    else {
+        while (haystack.length) {
+            sz_string_start_t ptr = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+            sz_bool_t found = ptr != NULL;
+            sz_size_t offset = found ? ptr - haystack.start : haystack.length;
+            count += found;
+            haystack.start += offset + needle.length;
+            haystack.length -= offset + needle.length * found;
+        }
+    }
+
     return PyLong_FromSize_t(count);
 }
 
@@ -1068,7 +1062,7 @@ static PyObject *Str_levenstein(PyObject *self, PyObject *args, PyObject *kwargs
         return NULL;
     }
 
-    sz_haystack_t str1, str2;
+    sz_string_view_t str1, str2;
     if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
         !export_string_like(str2_obj, &str2.start, &str2.length)) {
         PyErr_Format(PyExc_TypeError, "Both arguments must be string-like");
@@ -1119,7 +1113,7 @@ static PyObject *Str_startswith(PyObject *self, PyObject *args, PyObject *kwargs
         return NULL;
     }
 
-    sz_haystack_t str, prefix;
+    sz_string_view_t str, prefix;
     if (!export_string_like(str_obj, &str.start, &str.length) ||
         !export_string_like(prefix_obj, &prefix.start, &prefix.length)) {
         PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
@@ -1162,7 +1156,7 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
         return NULL;
     }
 
-    sz_haystack_t str, suffix;
+    sz_string_view_t str, suffix;
     if (!export_string_like(str_obj, &str.start, &str.length) ||
         !export_string_like(suffix_obj, &suffix.start, &suffix.length)) {
         PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
@@ -1180,7 +1174,7 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
 }
 
 static Strs *Str_split_(
-    PyObject *parent, sz_haystack_t text, sz_needle_t separator, int keepseparator, Py_ssize_t maxsplit) {
+    PyObject *parent, sz_string_view_t text, sz_string_view_t separator, int keepseparator, Py_ssize_t maxsplit) {
 
     // Create Strs object
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
@@ -1209,10 +1203,9 @@ static Strs *Str_split_(
     // Iterate through string, keeping track of the
     sz_size_t last_start = 0;
     while (last_start <= text.length && offsets_count < maxsplit) {
-        sz_haystack_t text_remaining;
-        text_remaining.start = text.start + last_start;
-        text_remaining.length = text.length - last_start;
-        sz_size_t offset_in_remaining = sz_find_substr(text_remaining, separator);
+        sz_string_start_t match =
+            sz_find_substring(text.start + last_start, text.length - last_start, separator.start, separator.length);
+        sz_size_t offset_in_remaining = match ? match - text.start - last_start : text.length - last_start;
 
         // Reallocate offsets array if needed
         if (offsets_count >= offsets_capacity) {
@@ -1232,7 +1225,7 @@ static Strs *Str_split_(
         }
 
         // Export the offset
-        size_t will_continue = offset_in_remaining != text_remaining.length;
+        size_t will_continue = match != NULL;
         size_t next_offset = last_start + offset_in_remaining + separator.length * will_continue;
         if (text.length >= UINT32_MAX) { ((uint64_t *)offsets_endings)[offsets_count++] = (uint64_t)next_offset; }
         else { ((uint32_t *)offsets_endings)[offsets_count++] = (uint32_t)next_offset; }
@@ -1282,11 +1275,10 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
         }
     }
 
-    sz_haystack_t text;
-    sz_needle_t separator;
+    sz_string_view_t text;
+    sz_string_view_t separator;
     int keepseparator;
     Py_ssize_t maxsplit;
-    separator.quadgram_offset = 0;
 
     // Validate and convert `text`
     if (!export_string_like(text_obj, &text.start, &text.length)) {
@@ -1355,7 +1347,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
         }
     }
 
-    sz_haystack_t text;
+    sz_string_view_t text;
     int keeplinebreaks;
     Py_ssize_t maxsplit = PY_SSIZE_T_MAX; // Default value for maxsplit
 
@@ -1388,14 +1380,14 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
     // https://docs.python.org/3/library/stdtypes.html#str.splitlines
     // \n, \r, \r\n, \v or \x0b, \f or \x0c, \x1c, \x1d, \x1e, \x85, \u2028, \u2029
     // https://github.com/ashvardanian/StringZilla/issues/29
-    sz_needle_t separator;
+    sz_string_view_t separator;
     separator.start = "\n";
     separator.length = 1;
     return Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit);
 }
 
 static PyObject *Str_concat(PyObject *self, PyObject *other) {
-    struct sz_haystack_t self_str, other_str;
+    struct sz_string_view_t self_str, other_str;
 
     // Validate and convert `self`
     if (!export_string_like(self, &self_str.start, &self_str.length)) {
@@ -1453,7 +1445,8 @@ static PyNumberMethods Str_as_number = {
 
 #define sz_method_flags_m METH_VARARGS | METH_KEYWORDS
 
-static PyMethodDef Str_methods[] = { //
+static PyMethodDef Str_methods[] = {
+    //
     {"find", Str_find, sz_method_flags_m, "Find the first occurrence of a substring."},
     {"index", Str_index, sz_method_flags_m, "Find the first occurrence of a substring or raise error if missing."},
     {"contains", Str_contains, sz_method_flags_m, "Check if a string contains a substring."},
@@ -1537,14 +1530,14 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
 
     // Get the parts and their count
     struct reordered_slices_t *reordered = &self->data.reordered;
-    sz_haystack_t *parts = reordered->parts;
+    sz_string_view_t *parts = reordered->parts;
     size_t count = reordered->count;
 
     // Fisher-Yates Shuffle Algorithm
     for (size_t i = count - 1; i > 0; --i) {
         size_t j = rand() % (i + 1);
         // Swap parts[i] and parts[j]
-        sz_haystack_t temp = parts[i];
+        sz_string_view_t temp = parts[i];
         parts[i] = parts[j];
         parts[j] = temp;
     }
@@ -1552,8 +1545,8 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
     Py_RETURN_NONE;
 }
 
-static boolean_t Strs_sort_(Strs *self,
-                            sz_haystack_t **parts_output,
+static sz_bool_t Strs_sort_(Strs *self,
+                            sz_string_view_t **parts_output,
                             sz_size_t **order_output,
                             sz_size_t *count_output) {
 
@@ -1565,7 +1558,7 @@ static boolean_t Strs_sort_(Strs *self,
 
     // Get the parts and their count
     // The only possible `self->type` by now is the `STRS_REORDERED`
-    sz_haystack_t *parts = self->data.reordered.parts;
+    sz_string_view_t *parts = self->data.reordered.parts;
     size_t count = self->data.reordered.count;
 
     // Allocate temporary memory to store the ordering offsets
@@ -1627,7 +1620,7 @@ static PyObject *Strs_sort(Strs *self, PyObject *args, PyObject *kwargs) {
         }
     }
 
-    boolean_t reverse = 0; // Default is False
+    sz_bool_t reverse = 0; // Default is False
     if (reverse_obj) {
         if (!PyBool_Check(reverse_obj)) {
             PyErr_SetString(PyExc_TypeError, "The reverse must be a boolean");
@@ -1636,7 +1629,7 @@ static PyObject *Strs_sort(Strs *self, PyObject *args, PyObject *kwargs) {
         reverse = PyObject_IsTrue(reverse_obj);
     }
 
-    sz_haystack_t *parts = NULL;
+    sz_string_view_t *parts = NULL;
     sz_size_t *order = NULL;
     sz_size_t count = 0;
     if (!Strs_sort_(self, &parts, &order, &count)) return NULL;
@@ -1680,7 +1673,7 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
         }
     }
 
-    boolean_t reverse = 0; // Default is False
+    sz_bool_t reverse = 0; // Default is False
     if (reverse_obj) {
         if (!PyBool_Check(reverse_obj)) {
             PyErr_SetString(PyExc_TypeError, "The reverse must be a boolean");
@@ -1689,7 +1682,7 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
         reverse = PyObject_IsTrue(reverse_obj);
     }
 
-    sz_haystack_t *parts = NULL;
+    sz_string_view_t *parts = NULL;
     sz_size_t *order = NULL;
     sz_size_t count = 0;
     if (!Strs_sort_(self, &parts, &order, &count)) return NULL;

@@ -45,16 +45,16 @@ typedef unsigned long sz_size_t;
 typedef unsigned sz_size_t;
 #endif
 
-typedef int sz_bool_t;               // Only one relevant bit
-typedef unsigned sz_u32_t;           // Always 32 bits
-typedef unsigned long long sz_u64_t; // Always 64 bits
-typedef char const *sz_string_ptr_t; // A type alias for `char const * `
+typedef int sz_bool_t;                 // Only one relevant bit
+typedef unsigned sz_u32_t;             // Always 32 bits
+typedef unsigned long long sz_u64_t;   // Always 64 bits
+typedef char const *sz_string_start_t; // A type alias for `char const * `
 
 /**
  *  @brief  Helper construct for higher-level bindings.
  */
 typedef struct sz_string_view_t {
-    sz_string_ptr_t start;
+    sz_string_start_t start;
     sz_size_t length;
 } sz_string_view_t;
 
@@ -72,8 +72,8 @@ typedef union _sz_anomaly_t {
  *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
  *  @return 1 for `true`, and 0 for `false`.
  */
-inline static sz_bool_t sz_equal(sz_string_ptr_t a, sz_string_ptr_t b, sz_size_t length) {
-    sz_string_ptr_t const a_end = a + length;
+inline static sz_bool_t sz_equal(sz_string_start_t a, sz_string_start_t b, sz_size_t length) {
+    sz_string_start_t const a_end = a + length;
     while (a != a_end && *a == *b) a++, b++;
     return a_end == a;
 }
@@ -82,13 +82,13 @@ inline static sz_bool_t sz_equal(sz_string_ptr_t a, sz_string_ptr_t b, sz_size_t
  *  @brief  Count the number of occurrences of a @b single-character needle in an arbitrary length haystack.
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  */
-inline static sz_size_t sz_count_char_swar(sz_string_ptr_t const haystack,
+inline static sz_size_t sz_count_char_swar(sz_string_start_t const haystack,
                                            sz_size_t const haystack_length,
-                                           sz_string_ptr_t const needle) {
+                                           sz_string_start_t const needle) {
 
     sz_size_t result = 0;
-    sz_string_ptr_t text = haystack;
-    sz_string_ptr_t const end = haystack + haystack_length;
+    sz_string_start_t text = haystack;
+    sz_string_start_t const end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((unsigned long)text & 7ul) && text < end; ++text) result += *text == *needle;
@@ -117,12 +117,12 @@ inline static sz_size_t sz_count_char_swar(sz_string_ptr_t const haystack,
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *          Identical to `memchr(haystack, needle[0], haystack_length)`.
  */
-inline static sz_string_ptr_t sz_find_1char_swar(sz_string_ptr_t const haystack,
-                                                 sz_size_t const haystack_length,
-                                                 sz_string_ptr_t const needle) {
+inline static sz_string_start_t sz_find_1char_swar(sz_string_start_t const haystack,
+                                                   sz_size_t const haystack_length,
+                                                   sz_string_start_t const needle) {
 
-    sz_string_ptr_t text = haystack;
-    sz_string_ptr_t const end = haystack + haystack_length;
+    sz_string_start_t text = haystack;
+    sz_string_start_t const end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((unsigned long)text & 7ul) && text < end; ++text)
@@ -154,12 +154,12 @@ inline static sz_string_ptr_t sz_find_1char_swar(sz_string_ptr_t const haystack,
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *          Identical to `memrchr(haystack, needle[0], haystack_length)`.
  */
-inline static sz_string_ptr_t sz_rfind_1char_swar(sz_string_ptr_t const haystack,
-                                                  sz_size_t const haystack_length,
-                                                  sz_string_ptr_t const needle) {
+inline static sz_string_start_t sz_rfind_1char_swar(sz_string_start_t const haystack,
+                                                    sz_size_t const haystack_length,
+                                                    sz_string_start_t const needle) {
 
-    sz_string_ptr_t const end = haystack + haystack_length;
-    sz_string_ptr_t text = end - 1;
+    sz_string_start_t const end = haystack + haystack_length;
+    sz_string_start_t text = end - 1;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((unsigned long)text & 7ul) && text >= haystack; --text)
@@ -190,12 +190,12 @@ inline static sz_string_ptr_t sz_rfind_1char_swar(sz_string_ptr_t const haystack
  *  @brief  Find the first occurrence of a @b two-character needle in an arbitrary length haystack.
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  */
-inline static sz_string_ptr_t sz_find_2char_swar(sz_string_ptr_t const haystack,
-                                                 sz_size_t const haystack_length,
-                                                 sz_string_ptr_t const needle) {
+inline static sz_string_start_t sz_find_2char_swar(sz_string_start_t const haystack,
+                                                   sz_size_t const haystack_length,
+                                                   sz_string_start_t const needle) {
 
-    sz_string_ptr_t text = haystack;
-    sz_string_ptr_t const end = haystack + haystack_length;
+    sz_string_start_t text = haystack;
+    sz_string_start_t const end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((unsigned long)text & 7ul) && text + 2 <= end; ++text)
@@ -239,12 +239,12 @@ inline static sz_string_ptr_t sz_find_2char_swar(sz_string_ptr_t const haystack,
  *  @brief  Find the first occurrence of a three-character needle in an arbitrary length haystack.
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  */
-inline static sz_string_ptr_t sz_find_3char_swar(sz_string_ptr_t const haystack,
-                                                 sz_size_t const haystack_length,
-                                                 sz_string_ptr_t const needle) {
+inline static sz_string_start_t sz_find_3char_swar(sz_string_start_t const haystack,
+                                                   sz_size_t const haystack_length,
+                                                   sz_string_start_t const needle) {
 
-    sz_string_ptr_t text = haystack;
-    sz_string_ptr_t end = haystack + haystack_length;
+    sz_string_start_t text = haystack;
+    sz_string_start_t end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((unsigned long)text & 7ul) && text + 3 <= end; ++text)
@@ -301,12 +301,12 @@ inline static sz_string_ptr_t sz_find_3char_swar(sz_string_ptr_t const haystack,
  *  @brief  Find the first occurrence of a @b four-character needle in an arbitrary length haystack.
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  */
-inline static sz_string_ptr_t sz_find_4char_swar(sz_string_ptr_t const haystack,
-                                                 sz_size_t const haystack_length,
-                                                 sz_string_ptr_t const needle) {
+inline static sz_string_start_t sz_find_4char_swar(sz_string_start_t const haystack,
+                                                   sz_size_t const haystack_length,
+                                                   sz_string_start_t const needle) {
 
-    sz_string_ptr_t text = haystack;
-    sz_string_ptr_t end = haystack + haystack_length;
+    sz_string_start_t text = haystack;
+    sz_string_start_t end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((unsigned long)text & 7ul) && text + 4 <= end; ++text)
@@ -367,10 +367,10 @@ inline static sz_string_ptr_t sz_find_4char_swar(sz_string_ptr_t const haystack,
  *          it compares 4-byte anomalies first, most commonly prefixes. It's computationally cheaper.
  *          Matching performance fluctuates between 1 GB/s and 3,5 GB/s per core.
  */
-inline static sz_string_ptr_t sz_find_substr_swar( //
-    sz_string_ptr_t const haystack,
+inline static sz_string_start_t sz_find_substring_swar( //
+    sz_string_start_t const haystack,
     sz_size_t const haystack_length,
-    sz_string_ptr_t const needle,
+    sz_string_start_t const needle,
     sz_size_t const needle_length) {
 
     if (haystack_length < needle_length) return NULL;
@@ -383,12 +383,12 @@ inline static sz_string_ptr_t sz_find_substr_swar( //
     case 3: return sz_find_3char_swar(haystack, haystack_length, needle);
     case 4: return sz_find_4char_swar(haystack, haystack_length, needle);
     default: {
-        sz_string_ptr_t text = haystack;
-        sz_string_ptr_t const end = haystack + haystack_length;
+        sz_string_start_t text = haystack;
+        sz_string_start_t const end = haystack + haystack_length;
 
         _sz_anomaly_t n_anomaly, h_anomaly;
         sz_size_t const n_suffix_len = needle_length - 4 - anomaly_offset;
-        sz_string_ptr_t n_suffix_ptr = needle + 4 + anomaly_offset;
+        sz_string_start_t n_suffix_ptr = needle + 4 + anomaly_offset;
         n_anomaly.u8s[0] = needle[anomaly_offset];
         n_anomaly.u8s[1] = needle[anomaly_offset + 1];
         n_anomaly.u8s[2] = needle[anomaly_offset + 2];
@@ -401,10 +401,9 @@ inline static sz_string_ptr_t sz_find_substr_swar( //
         text += anomaly_offset;
         while (text + needle_length <= end) {
             h_anomaly.u8s[3] = text[3];
-            if (h_anomaly.u32 == n_anomaly.u32)                                  // Match anomaly.
-                if (sz_equal(text + 4, n_suffix_ptr, n_suffix_len))              // Match suffix.
-                    if (sz_equal(text - anomaly_offset, needle, anomaly_offset)) // Match prefix - optimized out.
-                        return text - anomaly_offset;
+            if (h_anomaly.u32 == n_anomaly.u32)                     // Match anomaly.
+                if (sz_equal(text + 4, n_suffix_ptr, n_suffix_len)) // Match suffix.
+                    return text;
 
             h_anomaly.u32 >>= 8;
             ++text;
@@ -417,8 +416,8 @@ inline static sz_string_ptr_t sz_find_substr_swar( //
 /**
  *  Helper function, used in substring search operations.
  */
-inline static void _sz_find_substr_populate_anomaly( //
-    sz_string_ptr_t const needle,
+inline static void _sz_find_substring_populate_anomaly( //
+    sz_string_start_t const needle,
     sz_size_t const needle_length,
     _sz_anomaly_t *anomaly_out,
     _sz_anomaly_t *mask_out) {
@@ -455,16 +454,16 @@ inline static void _sz_find_substr_populate_anomaly( //
  *          was practically more efficient than loading once and shifting around, as introduces
  *          less data dependencies.
  */
-inline static sz_string_ptr_t sz_find_substr_avx2(sz_string_ptr_t const haystack,
-                                                  sz_size_t const haystack_length,
-                                                  sz_string_ptr_t const needle,
-                                                  sz_size_t const needle_length) {
+inline static sz_string_start_t sz_find_substring_avx2(sz_string_start_t const haystack,
+                                                       sz_size_t const haystack_length,
+                                                       sz_string_start_t const needle,
+                                                       sz_size_t const needle_length) {
 
     // Precomputed constants
-    sz_string_ptr_t const end = haystack + haystack_length;
+    sz_string_start_t const end = haystack + haystack_length;
     _sz_anomaly_t anomaly;
     _sz_anomaly_t mask;
-    _sz_find_substr_populate_anomaly(needle, needle_length, &anomaly, &mask);
+    _sz_find_substring_populate_anomaly(needle, needle_length, &anomaly, &mask);
     __m256i const anomalies = _mm256_set1_epi32(anomaly.u32);
     __m256i const masks = _mm256_set1_epi32(mask.u32);
 
@@ -477,7 +476,7 @@ inline static sz_string_ptr_t sz_find_substr_avx2(sz_string_ptr_t const haystack
     //  + 4 movemasks.
     //  + 3 bitwise ANDs.
     //  + 1 heavy (but very unlikely) branch.
-    sz_string_ptr_t text = haystack;
+    sz_string_start_t text = haystack;
     while (text + needle_length + 32 <= end) {
 
         // Performing many unaligned loads ends up being faster than loading once and shuffling around.
@@ -511,7 +510,7 @@ inline static sz_string_ptr_t sz_find_substr_avx2(sz_string_ptr_t const haystack
     }
 
     // Don't forget the last (up to 35) characters.
-    return sz_find_substr_swar(text, end - text, needle, needle_length);
+    return sz_find_substring_swar(text, end - text, needle, needle_length);
 }
 
 #endif // x86 AVX2
@@ -524,21 +523,21 @@ inline static sz_string_ptr_t sz_find_substr_avx2(sz_string_ptr_t const haystack
  *          was practically more efficient than loading once and shifting around, as introduces
  *          less data dependencies.
  */
-inline static sz_string_ptr_t sz_find_substr_neon(sz_string_ptr_t const haystack,
-                                                  sz_size_t const haystack_length,
-                                                  sz_string_ptr_t const needle,
-                                                  sz_size_t const needle_length) {
+inline static sz_string_start_t sz_find_substring_neon(sz_string_start_t const haystack,
+                                                       sz_size_t const haystack_length,
+                                                       sz_string_start_t const needle,
+                                                       sz_size_t const needle_length) {
 
     // Precomputed constants
-    sz_string_ptr_t const end = haystack + haystack_length;
+    sz_string_start_t const end = haystack + haystack_length;
     _sz_anomaly_t anomaly;
     _sz_anomaly_t mask;
-    _sz_find_substr_populate_anomaly(needle, needle_length, &anomaly, &mask);
+    _sz_find_substring_populate_anomaly(needle, needle_length, &anomaly, &mask);
     uint32x4_t const anomalies = vld1q_dup_u32(&anomaly.u32);
     uint32x4_t const masks = vld1q_dup_u32(&mask.u32);
     uint32x4_t matches, matches0, matches1, matches2, matches3;
 
-    sz_string_ptr_t text = haystack;
+    sz_string_start_t text = haystack;
     while (text + needle_length + 16 <= end) {
 
         // Each of the following `matchesX` contains only 4 relevant bits - one per word.
@@ -582,40 +581,40 @@ inline static sz_string_ptr_t sz_find_substr_neon(sz_string_ptr_t const haystack
     }
 
     // Don't forget the last (up to 16+3=19) characters.
-    return sz_find_substr_swar(text, end - text, needle, needle_length);
+    return sz_find_substring_swar(text, end - text, needle, needle_length);
 }
 
 #endif // Arm Neon
 
-inline static sz_size_t sz_count_char(sz_string_ptr_t const haystack,
+inline static sz_size_t sz_count_char(sz_string_start_t const haystack,
                                       sz_size_t const haystack_length,
-                                      sz_string_ptr_t const needle) {
+                                      sz_string_start_t const needle) {
     return sz_count_char_swar(haystack, haystack_length, needle);
 }
 
-inline static sz_string_ptr_t sz_find_1char(sz_string_ptr_t const haystack,
-                                            sz_size_t const haystack_length,
-                                            sz_string_ptr_t const needle) {
+inline static sz_string_start_t sz_find_1char(sz_string_start_t const haystack,
+                                              sz_size_t const haystack_length,
+                                              sz_string_start_t const needle) {
     return sz_find_1char_swar(haystack, haystack_length, needle);
 }
 
-inline static sz_string_ptr_t sz_rfind_1char(sz_string_ptr_t const haystack,
-                                             sz_size_t const haystack_length,
-                                             sz_string_ptr_t const needle) {
+inline static sz_string_start_t sz_rfind_1char(sz_string_start_t const haystack,
+                                               sz_size_t const haystack_length,
+                                               sz_string_start_t const needle) {
     return sz_rfind_1char_swar(haystack, haystack_length, needle);
 }
 
-inline static sz_string_ptr_t sz_find_substr(sz_string_ptr_t const haystack,
-                                             sz_size_t const haystack_length,
-                                             sz_string_ptr_t const needle,
-                                             sz_size_t const needle_length) {
+inline static sz_string_start_t sz_find_substring(sz_string_start_t const haystack,
+                                                  sz_size_t const haystack_length,
+                                                  sz_string_start_t const needle,
+                                                  sz_size_t const needle_length) {
     if (haystack_length < needle_length || needle_length == 0) return NULL;
 #if defined(__ARM_NEON)
-    return sz_find_substr_neon(haystack, haystack_length, needle, needle_length);
+    return sz_find_substring_neon(haystack, haystack_length, needle, needle_length);
 #elif defined(__AVX2__)
-    return sz_find_substr_avx2(haystack, haystack_length, needle, needle_length);
+    return sz_find_substring_avx2(haystack, haystack_length, needle, needle_length);
 #else
-    return sz_find_substr_swar(haystack, haystack_length, needle, needle_length);
+    return sz_find_substring_swar(haystack, haystack_length, needle, needle_length);
 #endif
 }
 
@@ -669,30 +668,46 @@ inline static char sz_toupper_ascii(char c) {
     return *(char *)&upped[(int)c];
 }
 
+inline static sz_u64_t sz_u64_unaligned_load(void const *ptr) {
+#ifdef _MSC_VER
+    return *((__unaligned sz_u64_t *)ptr);
+#else
+    __attribute__((aligned(1))) sz_u64_t const *uptr = (sz_u64_t const *)ptr;
+    return *uptr;
+#endif
+}
+
+inline static sz_u64_t sz_u64_byte_reverse(sz_u64_t val) {
+#ifdef _MSC_VER
+    return _byteswap_uint64(val);
+#else
+    return __builtin_bswap64(val);
+#endif
+}
+
 /**
  *  @brief  Char-level lexicographic comparison of two strings.
  *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
  */
-inline static sz_bool_t sz_is_less_ascii(sz_string_ptr_t const a,
+inline static sz_bool_t sz_is_less_ascii(sz_string_start_t a,
                                          sz_size_t const a_length,
-                                         sz_string_ptr_t const b,
+                                         sz_string_start_t b,
                                          sz_size_t const b_length) {
 
     sz_size_t min_length = (a_length < b_length) ? a_length : b_length;
-    for (sz_size_t i = 0; i < min_length; ++i) {
-        if (a[i] < b[i]) return 1;
-        if (a[i] > b[i]) return 0;
-    }
-    return a_length < b_length;
+    sz_string_start_t const min_end = a + min_length;
+    while (a + 8 <= min_end && sz_u64_unaligned_load(a) == sz_u64_unaligned_load(b)) a += 8, b += 8;
+    while (a != min_end && *a == *b) a++, b++;
+    return a != min_end ? (*a < *b) : (a_length < b_length);
 }
 
 /**
  *  @brief  Char-level lexicographic comparison of two strings, insensitive to the case of ASCII symbols.
  *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
  */
-inline static sz_bool_t sz_is_less_uncased_ascii(sz_string_ptr_t const a,
+inline static sz_bool_t sz_is_less_uncased_ascii(sz_string_start_t const a,
                                                  sz_size_t const a_length,
-                                                 sz_string_ptr_t const b,
+                                                 sz_string_start_t const b,
                                                  sz_size_t const b_length) {
 
     sz_size_t min_length = (a_length < b_length) ? a_length : b_length;
@@ -716,11 +731,11 @@ inline static void _sz_swap_order(sz_u64_t *a, sz_u64_t *b) {
 
 struct sz_sequence_t;
 
-typedef sz_string_ptr_t (*sz_sequence_member_start_t)(struct sz_sequence_t const *, sz_size_t);
+typedef sz_string_start_t (*sz_sequence_member_start_t)(struct sz_sequence_t const *, sz_size_t);
 typedef sz_size_t (*sz_sequence_member_length_t)(struct sz_sequence_t const *, sz_size_t);
 typedef sz_bool_t (*sz_sequence_predicate_t)(struct sz_sequence_t const *, sz_size_t);
 typedef sz_bool_t (*sz_sequence_comparator_t)(struct sz_sequence_t const *, sz_size_t, sz_size_t);
-typedef sz_bool_t (*sz_string_is_less_t)(sz_string_ptr_t, sz_size_t, sz_string_ptr_t, sz_size_t);
+typedef sz_bool_t (*sz_string_is_less_t)(sz_string_start_t, sz_size_t, sz_string_start_t, sz_size_t);
 
 typedef struct sz_sequence_t {
     sz_u64_t *order;
@@ -795,9 +810,12 @@ inline static void sz_sort_insertion(sz_sequence_t *sequence, sz_sequence_compar
 
 // Utility functions
 inline static sz_size_t _sz_log2i(sz_size_t n) {
-    sz_size_t log2 = 0;
-    while (n >>= 1) ++log2;
-    return log2;
+    if (n == 0) return 0;                // to avoid undefined behavior with __builtin_clz
+#if defined(__LP64__) || defined(_WIN64) // 64-bit
+    return 63 - __builtin_clzll(n);
+#else // 32-bit
+    return 31 - __builtin_clz(n);
+#endif
 }
 
 inline static void _sz_sift_down(
@@ -893,7 +911,7 @@ inline static void _sz_introsort(
     sz_u64_t pivot = sequence->order[median];
     sz_size_t left = first;
     sz_size_t right = last - 1;
-    while (true) {
+    while (1) {
         while (less(sequence, sequence->order[left], pivot)) left++;
         while (less(sequence, pivot, sequence->order[right])) right--;
         if (left >= right) break;
@@ -962,17 +980,17 @@ inline static void _sz_sort_recursion( //
 }
 
 inline static sz_bool_t _sz_sort_compare_less_ascii(sz_sequence_t *sequence, sz_size_t i_key, sz_size_t j_key) {
-    sz_string_ptr_t i_str = sequence->get_start(sequence, i_key);
+    sz_string_start_t i_str = sequence->get_start(sequence, i_key);
     sz_size_t i_len = sequence->get_length(sequence, i_key);
-    sz_string_ptr_t j_str = sequence->get_start(sequence, j_key);
+    sz_string_start_t j_str = sequence->get_start(sequence, j_key);
     sz_size_t j_len = sequence->get_length(sequence, j_key);
     return sz_is_less_ascii(i_str, i_len, j_str, j_len);
 }
 
 inline static sz_bool_t _sz_sort_compare_less_uncased_ascii(sz_sequence_t *sequence, sz_size_t i_key, sz_size_t j_key) {
-    sz_string_ptr_t i_str = sequence->get_start(sequence, i_key);
+    sz_string_start_t i_str = sequence->get_start(sequence, i_key);
     sz_size_t i_len = sequence->get_length(sequence, i_key);
-    sz_string_ptr_t j_str = sequence->get_start(sequence, j_key);
+    sz_string_start_t j_str = sequence->get_start(sequence, j_key);
     sz_size_t j_len = sequence->get_length(sequence, j_key);
     return sz_is_less_uncased_ascii(i_str, i_len, j_str, j_len);
 }
@@ -994,7 +1012,7 @@ inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *conf
 
     // Export up to 4 bytes into the `sequence` bits themselves
     for (sz_size_t i = 0; i != sequence->count; ++i) {
-        sz_string_ptr_t begin = sequence->get_start(sequence, sequence->order[i]);
+        sz_string_start_t begin = sequence->get_start(sequence, sequence->order[i]);
         sz_size_t length = sequence->get_length(sequence, sequence->order[i]);
         length = length > 4ul ? 4ul : length;
         char *prefix = (char *)&sequence->order[i];
@@ -1038,9 +1056,9 @@ inline static levenstein_distance_t _sz_levenstein_minimum( //
  *          It accepts an upper bound on the possible error. Quadratic complexity in time, linear in space.
  */
 inline static levenstein_distance_t sz_levenstein( //
-    sz_string_ptr_t const a,
+    sz_string_start_t const a,
     sz_size_t const a_length,
-    sz_string_ptr_t const b,
+    sz_string_start_t const b,
     sz_size_t const b_length,
     levenstein_distance_t const bound,
     void *buffer) {
@@ -1093,11 +1111,11 @@ inline static levenstein_distance_t sz_levenstein( //
 /**
  *  @brief  Hashes provided string using hardware-accelerated CRC32 instructions.
  */
-inline static sz_u32_t sz_hash_crc32_native(sz_string_ptr_t start, sz_size_t length) { return 0; }
+inline static sz_u32_t sz_hash_crc32_native(sz_string_start_t start, sz_size_t length) { return 0; }
 
-inline static sz_u32_t sz_hash_crc32_neon(sz_string_ptr_t start, sz_size_t length) { return 0; }
+inline static sz_u32_t sz_hash_crc32_neon(sz_string_start_t start, sz_size_t length) { return 0; }
 
-inline static sz_u32_t sz_hash_crc32_sse(sz_string_ptr_t start, sz_size_t length) { return 0; }
+inline static sz_u32_t sz_hash_crc32_sse(sz_string_start_t start, sz_size_t length) { return 0; }
 
 #ifdef __cplusplus
 }
