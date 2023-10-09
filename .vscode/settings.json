@@ -118,7 +118,8 @@
     "strstream": "cpp",
     "filesystem": "cpp",
     "stringzilla.h": "c",
-    "__memory": "c"
+    "__memory": "c",
+    "charconv": "c"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "cSpell.words": [

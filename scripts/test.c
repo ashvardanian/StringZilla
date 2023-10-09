@@ -18,8 +18,8 @@ void populate_random_string(char *buffer, int length, int variability) {
     buffer[length] = '\0';
 }
 
-// Test function for sz_find_substr
-void test_sz_find_substr() {
+// Test function for sz_find_substring
+void test_sz_find_substring() {
     char buffer[MAX_LENGTH + 1];
     char pattern[6]; // Maximum length of 5 + 1 for '\0'
 
@@ -39,11 +39,11 @@ void test_sz_find_substr() {
             needle.length = pattern_length;
 
             // Comparing the result of your function with the standard library function.
-            sz_string_ptr_t result_libc = strstr(buffer, pattern);
-            sz_string_ptr_t result_stringzilla =
-                sz_find_substr(haystack.start, haystack.length, needle.start, needle.length);
+            sz_string_start_t result_libc = strstr(buffer, pattern);
+            sz_string_start_t result_stringzilla =
+                sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
 
-            assert(((result_libc == NULL) ^ (result_stringzilla == NULL)) && "Test failed for sz_find_substr");
+            assert(((result_libc == NULL) ^ (result_stringzilla == NULL)) && "Test failed for sz_find_substring");
         }
     }
 }
@@ -51,7 +51,7 @@ void test_sz_find_substr() {
 int main() {
     srand((unsigned int)time(NULL));
 
-    test_sz_find_substr();
+    test_sz_find_substring();
     // Add calls to other test functions as you implement them
 
     printf("All tests passed!\n");

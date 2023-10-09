@@ -35,8 +35,8 @@ Coming soon.
 
 ## Quick Start: Python 🐍
 
-1️. Install via pip: `pip install stringzilla`  
-1. Import the classes you need: `from stringzilla import Str, Strs, File`  
+1. Install via pip: `pip install stringzilla`  
+2. Import the classes you need: `from stringzilla import Str, Strs, File`  
 
 ### Basic Usage
 
@@ -115,13 +115,13 @@ There is an ABI-stable C 99 interface, in case you have a database, an operating
 #include "stringzilla.h"
 
 // Initialize your haystack and needle
-sz_haystack_t haystack = {your_text, your_text_length};
-sz_needle_t needle = {your_subtext, your_subtext_length, your_quadgram_offset};
+sz_string_view_t haystack = {your_text, your_text_length};
+sz_string_view_t needle = {your_subtext, your_subtext_length};
 
 // Perform string-level operations
 size_t character_count = sz_count_char(haystack, 'a');
 size_t character_position = sz_find_unigram(haystack, 'a');
-size_t substring_position = sz_find_substr(haystack, needle);
+size_t substring_position = sz_find_substring(haystack, needle);
 
 // Perform collection level operations
 sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
