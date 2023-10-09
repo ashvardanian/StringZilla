@@ -714,15 +714,15 @@ inline static void _sz_swap_order(sz_u64_t *a, sz_u64_t *b) {
     *b = t;
 }
 
-struct sz_sequence_s;
+struct sz_sequence_t;
 
-typedef sz_string_ptr_t (*sz_sequence_member_start_t)(void const *, sz_size_t);
-typedef sz_size_t (*sz_sequence_member_length_t)(void const *, sz_size_t);
-typedef sz_bool_t (*sz_sequence_predicate_t)(void const *, sz_size_t);
-typedef sz_bool_t (*sz_sequence_comparator_t)(void const *, sz_size_t, sz_size_t);
+typedef sz_string_ptr_t (*sz_sequence_member_start_t)(struct sz_sequence_t const *, sz_size_t);
+typedef sz_size_t (*sz_sequence_member_length_t)(struct sz_sequence_t const *, sz_size_t);
+typedef sz_bool_t (*sz_sequence_predicate_t)(struct sz_sequence_t const *, sz_size_t);
+typedef sz_bool_t (*sz_sequence_comparator_t)(struct sz_sequence_t const *, sz_size_t, sz_size_t);
 typedef sz_bool_t (*sz_string_is_less_t)(sz_string_ptr_t, sz_size_t, sz_string_ptr_t, sz_size_t);
 
-typedef struct sz_sequence_s {
+typedef struct sz_sequence_t {
     sz_u64_t *order;
     sz_size_t count;
     sz_sequence_member_start_t get_start;
@@ -738,10 +738,10 @@ typedef struct sz_sequence_s {
 inline static sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate) {
 
     sz_size_t matches = 0;
-    while (matches != sequence->count && predicate(sequence->handle, sequence->order[matches])) ++matches;
+    while (matches != sequence->count && predicate(sequence, sequence->order[matches])) ++matches;
 
     for (sz_size_t i = matches + 1; i < sequence->count; ++i)
-        if (predicate(sequence->handle, sequence->order[i]))
+        if (predicate(sequence, sequence->order[i]))
             _sz_swap_order(sequence->order + i, sequence->order + matches), ++matches;
 
     return matches;
@@ -758,13 +758,13 @@ inline static void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_seq
     sz_size_t start_b = partition + 1;
 
     // If the direct merge is already sorted
-    if (!less(sequence->handle, sequence->order[start_b], sequence->order[partition])) return;
+    if (!less(sequence, sequence->order[start_b], sequence->order[partition])) return;
 
     sz_size_t start_a = 0;
     while (start_a <= partition && start_b <= sequence->count) {
 
         // If element 1 is in right place
-        if (!less(sequence->handle, sequence->order[start_b], sequence->order[start_a])) { start_a++; }
+        if (!less(sequence, sequence->order[start_b], sequence->order[start_a])) { start_a++; }
         else {
             sz_size_t value = sequence->order[start_b];
             sz_size_t index = start_b;
@@ -782,16 +782,133 @@ inline static void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_seq
     }
 }
 
-inline static void sz_sort_insertion(sz_sequence_t *sequence, sz_sequence_comparator_t comparator) {
+inline static void sz_sort_insertion(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
     sz_u64_t *keys = sequence->order;
     sz_size_t keys_count = sequence->count;
     for (sz_size_t i = 1; i < keys_count; i++) {
         sz_u64_t i_key = keys[i];
-        // Move elements of arr[0..i-1] that are greater than key to one position ahead of their current position
         sz_size_t j = i;
-        for (; j > 0 && comparator(sequence, keys[j - 1], i) != 0; --j) keys[j] = keys[j - 1];
+        for (; j > 0 && less(sequence, i_key, keys[j - 1]); --j) keys[j] = keys[j - 1];
         keys[j] = i_key;
     }
+}
+
+// Utility functions
+inline static sz_size_t _sz_log2i(sz_size_t n) {
+    sz_size_t log2 = 0;
+    while (n >>= 1) ++log2;
+    return log2;
+}
+
+inline static void _sz_sift_down(
+    sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_u64_t *order, sz_size_t start, sz_size_t end) {
+    sz_size_t root = start;
+    while (2 * root + 1 <= end) {
+        sz_size_t child = 2 * root + 1;
+        if (child + 1 <= end && less(sequence, order[child], order[child + 1])) { child++; }
+        if (!less(sequence, order[root], order[child])) { return; }
+        _sz_swap_order(order + root, order + child);
+        root = child;
+    }
+}
+
+inline static void _sz_heapify(sz_sequence_t *sequence,
+                               sz_sequence_comparator_t less,
+                               sz_u64_t *order,
+                               sz_size_t count) {
+    sz_size_t start = (count - 2) / 2;
+    while (1) {
+        _sz_sift_down(sequence, less, order, start, count - 1);
+        if (start == 0) return;
+        start--;
+    }
+}
+
+inline static void _sz_heapsort(sz_sequence_t *sequence,
+                                sz_sequence_comparator_t less,
+                                sz_size_t first,
+                                sz_size_t last) {
+    sz_u64_t *order = sequence->order;
+    sz_size_t count = last - first;
+    _sz_heapify(sequence, less, order + first, count);
+    sz_size_t end = count - 1;
+    while (end > 0) {
+        _sz_swap_order(order + first, order + first + end);
+        end--;
+        _sz_sift_down(sequence, less, order + first, 0, end);
+    }
+}
+
+inline static void _sz_introsort(
+    sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_size_t first, sz_size_t last, sz_size_t depth) {
+
+    sz_size_t length = last - first;
+    switch (length) {
+    case 0:
+    case 1: return;
+    case 2:
+        if (less(sequence, sequence->order[first + 1], sequence->order[first]))
+            _sz_swap_order(&sequence->order[first], &sequence->order[first + 1]);
+        return;
+    case 3:
+        sz_u64_t a = sequence->order[first];
+        sz_u64_t b = sequence->order[first + 1];
+        sz_u64_t c = sequence->order[first + 2];
+        if (less(sequence, b, a)) _sz_swap_order(&a, &b);
+        if (less(sequence, c, b)) _sz_swap_order(&c, &b);
+        if (less(sequence, b, a)) _sz_swap_order(&a, &b);
+        sequence->order[first] = a;
+        sequence->order[first + 1] = b;
+        sequence->order[first + 2] = c;
+        return;
+    }
+    // Until a certain length, the quadratic-complexity insertion-sort is fine
+    if (length <= 16) {
+        sz_sequence_t sub_seq = *sequence;
+        sub_seq.order += first;
+        sub_seq.count = length;
+        sz_sort_insertion(&sub_seq, less);
+        return;
+    }
+
+    // Fallback to N-logN-complexity heap-sort
+    if (depth == 0) {
+        _sz_heapsort(sequence, less, first, last);
+        return;
+    }
+
+    --depth;
+
+    // Median-of-three logic to choose pivot
+    sz_size_t median = first + length / 2;
+    if (less(sequence, sequence->order[median], sequence->order[first]))
+        _sz_swap_order(&sequence->order[first], &sequence->order[median]);
+    if (less(sequence, sequence->order[last - 1], sequence->order[first]))
+        _sz_swap_order(&sequence->order[first], &sequence->order[last - 1]);
+    if (less(sequence, sequence->order[median], sequence->order[last - 1]))
+        _sz_swap_order(&sequence->order[median], &sequence->order[last - 1]);
+
+    // Partition using the median-of-three as the pivot
+    sz_u64_t pivot = sequence->order[median];
+    sz_size_t left = first;
+    sz_size_t right = last - 1;
+    while (true) {
+        while (less(sequence, sequence->order[left], pivot)) left++;
+        while (less(sequence, pivot, sequence->order[right])) right--;
+        if (left >= right) break;
+        _sz_swap_order(&sequence->order[left], &sequence->order[right]);
+        left++;
+        right--;
+    }
+
+    // Recursively sort the partitions
+    _sz_introsort(sequence, less, first, left, depth);
+    _sz_introsort(sequence, less, right + 1, last, depth);
+}
+
+inline static void sz_sort_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
+    sz_size_t depth_limit = 2 * _sz_log2i(sequence->count);
+    _sz_introsort(sequence, less, 0, sequence->count, depth_limit);
 }
 
 /**
@@ -834,28 +951,28 @@ inline static void _sz_sort_recursion( //
 
         sz_sequence_t a = *sequence;
         a.count = split;
-        sz_sort_insertion(&a, comparator);
+        sz_sort_introsort(&a, comparator);
 
         sz_sequence_t b = *sequence;
         b.order += split;
         b.count -= split;
-        sz_sort_insertion(&b, comparator);
+        sz_sort_introsort(&b, comparator);
     }
 }
 
 inline static sz_bool_t _sz_sort_compare_less_ascii(sz_sequence_t *sequence, sz_size_t i_key, sz_size_t j_key) {
-    sz_string_ptr_t i_str = sequence->get_start(sequence->handle, i_key);
-    sz_size_t i_len = sequence->get_length(sequence->handle, i_key);
-    sz_string_ptr_t j_str = sequence->get_start(sequence->handle, j_key);
-    sz_size_t j_len = sequence->get_length(sequence->handle, j_key);
+    sz_string_ptr_t i_str = sequence->get_start(sequence, i_key);
+    sz_size_t i_len = sequence->get_length(sequence, i_key);
+    sz_string_ptr_t j_str = sequence->get_start(sequence, j_key);
+    sz_size_t j_len = sequence->get_length(sequence, j_key);
     return sz_is_less_ascii(i_str, i_len, j_str, j_len);
 }
 
 inline static sz_bool_t _sz_sort_compare_less_uncased_ascii(sz_sequence_t *sequence, sz_size_t i_key, sz_size_t j_key) {
-    sz_string_ptr_t i_str = sequence->get_start(sequence->handle, i_key);
-    sz_size_t i_len = sequence->get_length(sequence->handle, i_key);
-    sz_string_ptr_t j_str = sequence->get_start(sequence->handle, j_key);
-    sz_size_t j_len = sequence->get_length(sequence->handle, j_key);
+    sz_string_ptr_t i_str = sequence->get_start(sequence, i_key);
+    sz_size_t i_len = sequence->get_length(sequence, i_key);
+    sz_string_ptr_t j_str = sequence->get_start(sequence, j_key);
+    sz_size_t j_len = sequence->get_length(sequence, j_key);
     return sz_is_less_uncased_ascii(i_str, i_len, j_str, j_len);
 }
 
@@ -876,8 +993,8 @@ inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *conf
 
     // Export up to 4 bytes into the `sequence` bits themselves
     for (sz_size_t i = 0; i != sequence->count; ++i) {
-        sz_string_ptr_t begin = sequence->get_start(sequence->handle, sequence->order[i]);
-        sz_size_t length = sequence->get_length(sequence->handle, sequence->order[i]);
+        sz_string_ptr_t begin = sequence->get_start(sequence, sequence->order[i]);
+        sz_size_t length = sequence->get_length(sequence, sequence->order[i]);
         length = length > 4ul ? 4ul : length;
         char *prefix = (char *)&sequence->order[i];
         for (sz_size_t j = 0; j != length; ++j) prefix[7 - j] = begin[j];
