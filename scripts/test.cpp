@@ -232,19 +232,22 @@ int main(int, char const **) {
         bench_search("std::search", full_text, [&]() mutable {
             return std::search(full_text.begin(), full_text.end(), needle.begin(), needle.end()) - full_text.begin();
         });
-        bench_search("sz_find_substr_swar", full_text, [&]() mutable {
-            sz_string_ptr_t ptr = sz_find_substr_swar(full_text.data(), full_text.size(), needle.data(), needle.size());
+        bench_search("sz_find_substring_swar", full_text, [&]() mutable {
+            sz_string_start_t ptr =
+                sz_find_substring_swar(full_text.data(), full_text.size(), needle.data(), needle.size());
             return ptr ? ptr - full_text.data() : full_text.size();
         });
 #if defined(__ARM_NEON)
-        bench_search("sz_find_substr_neon", full_text, [&]() mutable {
-            sz_string_ptr_t ptr = sz_find_substr_neon(full_text.data(), full_text.size(), needle.data(), needle.size());
+        bench_search("sz_find_substring_neon", full_text, [&]() mutable {
+            sz_string_start_t ptr =
+                sz_find_substring_neon(full_text.data(), full_text.size(), needle.data(), needle.size());
             return ptr ? ptr - full_text.data() : full_text.size();
         });
 #endif
 #if defined(__AVX2__)
-        bench_search("sz_find_substr_avx2", full_text, [&]() mutable {
-            sz_string_ptr_t ptr = sz_find_substr_avx2(full_text.data(), full_text.size(), needle.data(), needle.size());
+        bench_search("sz_find_substring_avx2", full_text, [&]() mutable {
+            sz_string_start_t ptr =
+                sz_find_substring_avx2(full_text.data(), full_text.size(), needle.data(), needle.size());
             return ptr ? ptr - full_text.data() : full_text.size();
         });
 #endif
