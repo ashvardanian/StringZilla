@@ -609,7 +609,7 @@ inline static sz_string_ptr_t sz_find_substr(sz_string_ptr_t const haystack,
                                              sz_size_t const haystack_length,
                                              sz_string_ptr_t const needle,
                                              sz_size_t const needle_length) {
-    if (haystack_length < needle_length) return NULL;
+    if (haystack_length < needle_length || needle_length == 0) return NULL;
 #if defined(__ARM_NEON)
     return sz_find_substr_neon(haystack, haystack_length, needle, needle_length);
 #elif defined(__AVX2__)
@@ -850,7 +850,7 @@ inline static void _sz_introsort(
         if (less(sequence, sequence->order[first + 1], sequence->order[first]))
             _sz_swap_order(&sequence->order[first], &sequence->order[first + 1]);
         return;
-    case 3:
+    case 3: {
         sz_u64_t a = sequence->order[first];
         sz_u64_t b = sequence->order[first + 1];
         sz_u64_t c = sequence->order[first + 2];
@@ -861,6 +861,7 @@ inline static void _sz_introsort(
         sequence->order[first + 1] = b;
         sequence->order[first + 2] = c;
         return;
+    }
     }
     // Until a certain length, the quadratic-complexity insertion-sort is fine
     if (length <= 16) {
@@ -1102,10 +1103,6 @@ inline static sz_u32_t sz_hash_crc32_sse(sz_string_ptr_t start, sz_size_t length
 }
 #endif
 
-#ifdef _MSC_VER
-#undef strncasecmp
-#undef strcasecmp
-#endif
 #undef popcount64
 #undef ctz64
 #undef clz64

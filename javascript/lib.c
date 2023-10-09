@@ -8,17 +8,18 @@
  *  @see        NodeJS docs: https://nodejs.org/api/n-api.html
  */
 
-#include <node_api.h>
-#include <stringzilla.h>
+#include <node_api.h>    // `napi_*` functions
+#include <stdlib.h>      // `malloc`
+#include <stringzilla.h> // `sz_*` functions
 
-napi_value FindAPI(napi_env env, napi_callback_info info) {
+napi_value indexOfAPI(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value args[2];
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
 
     // Extract the C string from the JavaScript string for haystack and needle
-    sz_haystack_t haystack_sz = {NULL, 0};
-    sz_needle_t needle_sz = {NULL, 0, 0};
+    sz_string_view_t haystack_sz = {NULL, 0};
+    sz_string_view_t needle_sz = {NULL, 0};
 
     // For haystack
     napi_get_value_string_utf8(env, args[0], NULL, 0, (size_t *)&haystack_sz.length);
@@ -38,37 +39,32 @@ napi_value FindAPI(napi_env env, napi_callback_info info) {
                                needle_sz.length + 1,
                                (size_t *)&needle_sz.length);
 
-    // Perform the find operation
-    sz_size_t result = sz_find_substr(haystack_sz, needle_sz);
+    // Convert the result to JavaScript BigInt and return
+    napi_value js_result;
+    if (needle_sz.length == 0) { napi_create_bigint_int64(env, 0, &js_result); }
+    else {
+        sz_string_ptr_t result =
+            sz_find_substr(haystack_sz.start, haystack_sz.length, needle_sz.start, needle_sz.length);
+
+        // In JavaScript, if `indexOf` is unable to indexOf the specified value, then it should return -1
+        if (result == NULL) { napi_create_bigint_int64(env, -1, &js_result); }
+        else { napi_create_bigint_uint64(env, result - haystack_sz.start, &js_result); }
+    }
 
     // Cleanup
     free((void *)haystack_sz.start);
     free((void *)needle_sz.start);
-
-    // Convert the result to JavaScript BigInt and return
-    napi_value js_result;
-
-    // In JavaScript, if `find` is unable to find the specified value, then it should return -1
-    if (result == haystack_sz.length) napi_create_bigint_int64(env, -1, &js_result);
-    else
-        napi_create_bigint_uint64(env, result, &js_result);
-
     return js_result;
 }
 
-size_t count_char(sz_haystack_t haystack_sz, char needle) {
-    size_t result = sz_count_char(haystack_sz, needle);
-    return result;
-}
-
-napi_value CountAPI(napi_env env, napi_callback_info info) {
+napi_value countAPI(napi_env env, napi_callback_info info) {
     size_t argc = 3;
     napi_value args[3];
     napi_get_cb_info(env, info, &argc, args, NULL, NULL);
 
     // Extract the C string from the JavaScript string for haystack and needle
-    sz_haystack_t haystack_sz = {NULL, 0};
-    sz_needle_t needle_sz = {NULL, 0, 0};
+    sz_string_view_t haystack_sz = {NULL, 0};
+    sz_string_view_t needle_sz = {NULL, 0};
 
     // For haystack
     napi_get_value_string_utf8(env, args[0], NULL, 0, (size_t *)&haystack_sz.length);
@@ -95,11 +91,13 @@ napi_value CountAPI(napi_env env, napi_callback_info info) {
 
     size_t count = 0;
     if (needle_sz.length == 0 || haystack_sz.length == 0 || haystack_sz.length < needle_sz.length) { count = 0; }
-    else if (needle_sz.length == 1) { count = count_char(haystack_sz, needle_sz.start[0]); }
+    else if (needle_sz.length == 1) { count = sz_count_char(haystack_sz.start, haystack_sz.length, needle_sz.start); }
     else if (overlap) {
         while (haystack_sz.length) {
-            sz_size_t offset = sz_find_substr(haystack_sz, needle_sz);
-            int found = offset != haystack_sz.length;
+            sz_string_ptr_t ptr =
+                sz_find_substr(haystack_sz.start, haystack_sz.length, needle_sz.start, needle_sz.length);
+            sz_bool_t found = ptr != NULL;
+            sz_size_t offset = found ? ptr - haystack_sz.start : haystack_sz.length;
             count += found;
             haystack_sz.start += offset + found;
             haystack_sz.length -= offset + found;
@@ -107,8 +105,10 @@ napi_value CountAPI(napi_env env, napi_callback_info info) {
     }
     else {
         while (haystack_sz.length) {
-            sz_size_t offset = sz_find_substr(haystack_sz, needle_sz);
-            int found = offset != haystack_sz.length;
+            sz_string_ptr_t ptr =
+                sz_find_substr(haystack_sz.start, haystack_sz.length, needle_sz.start, needle_sz.length);
+            sz_bool_t found = ptr != NULL;
+            sz_size_t offset = found ? ptr - haystack_sz.start : haystack_sz.length;
             count += found;
             haystack_sz.start += offset + needle_sz.length;
             haystack_sz.length -= offset + needle_sz.length * found;
@@ -129,8 +129,8 @@ napi_value CountAPI(napi_env env, napi_callback_info info) {
 napi_value Init(napi_env env, napi_value exports) {
 
     // Define an array of property descriptors
-    napi_property_descriptor findDesc = {"find", 0, FindAPI, 0, 0, 0, napi_default, 0};
-    napi_property_descriptor countDesc = {"count", 0, CountAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor findDesc = {"indexOf", 0, indexOfAPI, 0, 0, 0, napi_default, 0};
+    napi_property_descriptor countDesc = {"count", 0, countAPI, 0, 0, 0, napi_default, 0};
     napi_property_descriptor properties[] = {findDesc, countDesc};
 
     // Define the properties on the `exports` object

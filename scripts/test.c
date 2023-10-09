@@ -27,24 +27,23 @@ void test_sz_find_substr() {
         for (int variability = 1; variability < VARIABILITY; variability++) {
             populate_random_string(buffer, length, variability);
 
-            struct sz_haystack_t haystack;
+            sz_string_view_t haystack;
             haystack.start = buffer;
             haystack.length = length;
 
             int pattern_length = rand() % 5 + 1;
             populate_random_string(pattern, pattern_length, variability);
 
-            struct sz_needle_t needle;
+            sz_string_view_t needle;
             needle.start = pattern;
             needle.length = pattern_length;
 
             // Comparing the result of your function with the standard library function.
-            const char *result_libc = strstr(buffer, pattern);
-            uint64_t result_stringzilla = sz_find_substr(haystack, needle);
+            sz_string_ptr_t result_libc = strstr(buffer, pattern);
+            sz_string_ptr_t result_stringzilla =
+                sz_find_substr(haystack.start, haystack.length, needle.start, needle.length);
 
-            assert(((result_libc && result_stringzilla == (uint64_t)(result_libc - buffer)) ||
-                    (!result_libc && result_stringzilla == (uint64_t)-1)) &&
-                   "Test failed for sz_find_substr");
+            assert(((result_libc == NULL) ^ (result_stringzilla == NULL)) && "Test failed for sz_find_substr");
         }
     }
 }
