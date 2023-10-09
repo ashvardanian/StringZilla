@@ -18,8 +18,8 @@ void populate_random_string(char *buffer, int length, int variability) {
     buffer[length] = '\0';
 }
 
-// Test function for sz_find_substr
-void test_sz_find_substr() {
+// Test function for sz_find_substring
+void test_sz_find_substring() {
     char buffer[MAX_LENGTH + 1];
     char pattern[6]; // Maximum length of 5 + 1 for '\0'
 
@@ -27,24 +27,23 @@ void test_sz_find_substr() {
         for (int variability = 1; variability < VARIABILITY; variability++) {
             populate_random_string(buffer, length, variability);
 
-            struct sz_haystack_t haystack;
+            sz_string_view_t haystack;
             haystack.start = buffer;
             haystack.length = length;
 
             int pattern_length = rand() % 5 + 1;
             populate_random_string(pattern, pattern_length, variability);
 
-            struct sz_needle_t needle;
+            sz_string_view_t needle;
             needle.start = pattern;
             needle.length = pattern_length;
 
             // Comparing the result of your function with the standard library function.
-            const char *result_libc = strstr(buffer, pattern);
-            uint64_t result_stringzilla = sz_find_substr(haystack, needle);
+            sz_string_start_t result_libc = strstr(buffer, pattern);
+            sz_string_start_t result_stringzilla =
+                sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
 
-            assert(((result_libc && result_stringzilla == (uint64_t)(result_libc - buffer)) ||
-                    (!result_libc && result_stringzilla == (uint64_t)-1)) &&
-                   "Test failed for sz_find_substr");
+            assert(((result_libc == NULL) ^ (result_stringzilla == NULL)) && "Test failed for sz_find_substring");
         }
     }
 }
@@ -52,7 +51,7 @@ void test_sz_find_substr() {
 int main() {
     srand((unsigned int)time(NULL));
 
-    test_sz_find_substr();
+    test_sz_find_substring();
     // Add calls to other test functions as you implement them
 
     printf("All tests passed!\n");
