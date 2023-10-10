@@ -9,13 +9,14 @@
 #include <arm_neon.h>
 #endif
 
+/**
+ *  Intrinsics aliases for MSVC, GCC, and Clang.
+ */
 #ifdef _MSC_VER
 #include <intrin.h>
 #define popcount64 __popcnt64
 #define ctz64 _tzcnt_u64
 #define clz64 _lzcnt_u64
-#define strncasecmp _strnicmp
-#define strcasecmp _stricmp
 #else
 #define popcount64 __builtin_popcountll
 #define ctz64 __builtin_ctzll
@@ -23,8 +24,8 @@
 #endif
 
 /**
- *  Generally `NULL` is coming from locale.h, stddef.h, stdio.h, stdlib.h, string.h, time.h, and wchar.h,
- *  according to the C standard.
+ *  @brief  Generally `NULL` is coming from locale.h, stddef.h, stdio.h, stdlib.h, string.h, time.h, and wchar.h,
+ *          according to the C standard.
  */
 #ifndef NULL
 #define NULL ((void *)0)
@@ -49,6 +50,11 @@ typedef int sz_bool_t;                 // Only one relevant bit
 typedef unsigned sz_u32_t;             // Always 32 bits
 typedef unsigned long long sz_u64_t;   // Always 64 bits
 typedef char const *sz_string_start_t; // A type alias for `char const * `
+
+/**
+ *  @brief  For faster bounded Levenstein (Edit) distance computation no more than 255 characters are supported.
+ */
+typedef unsigned char levenstein_distance_t;
 
 /**
  *  @brief  Helper construct for higher-level bindings.
@@ -490,12 +496,12 @@ inline static sz_string_start_t sz_find_substring_avx2(sz_string_start_t const h
         int matches3 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts3, anomalies));
 
         if (matches0 | matches1 | matches2 | matches3) {
-            int matches =                  //
-                (matches0 & 0x11111111u) | //
-                (matches1 & 0x22222222u) | //
-                (matches2 & 0x44444444u) | //
-                (matches3 & 0x88888888u);
-            sz_size_t first_match_offset = _tzcnt_u32(matches);
+            int matches =                 //
+                (matches0 & 0x11111111) | //
+                (matches1 & 0x22222222) | //
+                (matches2 & 0x44444444) | //
+                (matches3 & 0x88888888);
+            sz_size_t first_match_offset = ctz64(matches);
             if (needle_length > 4) {
                 if (sz_equal(text + first_match_offset + 4, needle + 4, needle_length - 4)) {
                     return text + first_match_offset;
@@ -564,18 +570,16 @@ inline static sz_string_start_t sz_find_substring_neon(sz_string_start_t const h
                 (vget_lane_u16(matches_u16x4, 3) << 12);
 
             // Find the first match
-            sz_size_t first_match_offset = __builtin_ctz(matches_u16);
+            sz_size_t first_match_offset = ctz64(matches_u16);
             if (needle_length > 4) {
-                if (sz_equal(text + first_match_offset + 4, needle + 4, needle_length - 4))
+                if (sz_equal(text + first_match_offset + 4, needle + 4, needle_length - 4)) {
                     return text + first_match_offset;
-                else
-                    text += first_match_offset + 1;
+                }
+                else { text += first_match_offset + 1; }
             }
-            else
-                return text + first_match_offset;
+            else { return text + first_match_offset; }
         }
-        else
-            text += 16;
+        else { text += 16; }
     }
 
     // Don't forget the last (up to 16+3=19) characters.
@@ -666,6 +670,13 @@ inline static char sz_toupper_ascii(char c) {
     return *(char *)&upped[(int)c];
 }
 
+/**
+ *  @brief Load a 64-bit unsigned integer from a potentially unaligned pointer.
+ *
+ *  @note This function uses compiler-specific attributes or keywords to
+ *        ensure correct and efficient unaligned loads. It's designed to work
+ *        with both MSVC and GCC/Clang.
+ */
 inline static sz_u64_t sz_u64_unaligned_load(void const *ptr) {
 #ifdef _MSC_VER
     return *((__unaligned sz_u64_t *)ptr);
@@ -675,11 +686,46 @@ inline static sz_u64_t sz_u64_unaligned_load(void const *ptr) {
 #endif
 }
 
+/**
+ *  @brief Reverse the byte order of a 64-bit unsigned integer.
+ *
+ *  @note This function uses compiler-specific intrinsics to achieve the
+ *        byte-reversal. It's designed to work with both MSVC and GCC/Clang.
+ */
 inline static sz_u64_t sz_u64_byte_reverse(sz_u64_t val) {
 #ifdef _MSC_VER
     return _byteswap_uint64(val);
 #else
     return __builtin_bswap64(val);
+#endif
+}
+
+/**
+ *  @brief  Compute the logarithm base 2 of an integer.
+ *
+ *  @note If n is 0, the function returns 0 to avoid undefined behavior.
+ *  @note This function uses compiler-specific intrinsics or built-ins
+ *        to achieve the computation. It's designed to work with GCC/Clang and MSVC.
+ */
+inline static sz_size_t sz_log2i(sz_size_t n) {
+    if (n == 0) return 0;
+
+#if defined(__LP64__) || defined(_WIN64) // 64-bit
+#ifdef _MSC_VER
+    unsigned long index;
+    _BitScanReverse64(&index, n);
+    return index;
+#else
+    return 63 - __builtin_clzll(n);
+#endif
+#else // 32-bit
+#ifdef _MSC_VER
+    unsigned long index;
+    _BitScanReverse(&index, n);
+    return index;
+#else
+    return 31 - __builtin_clz(n);
+#endif
 #endif
 }
 
@@ -806,28 +852,6 @@ inline static void sz_sort_insertion(sz_sequence_t *sequence, sz_sequence_compar
     }
 }
 
-inline static sz_size_t _sz_log2i(sz_size_t n) {
-    if (n == 0) return 0;
-
-#if defined(__LP64__) || defined(_WIN64) // 64-bit
-#ifdef _MSC_VER
-    unsigned long index;
-    _BitScanReverse64(&index, n);
-    return index;
-#else
-    return 63 - __builtin_clzll(n);
-#endif
-#else // 32-bit
-#ifdef _MSC_VER
-    unsigned long index;
-    _BitScanReverse(&index, n);
-    return index;
-#else
-    return 31 - __builtin_clz(n);
-#endif
-#endif
-}
-
 inline static void _sz_sift_down(
     sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_u64_t *order, sz_size_t start, sz_size_t end) {
     sz_size_t root = start;
@@ -936,13 +960,10 @@ inline static void _sz_introsort(
 }
 
 inline static void sz_sort_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
-    sz_size_t depth_limit = 2 * _sz_log2i(sequence->count);
+    sz_size_t depth_limit = 2 * sz_log2i(sequence->count);
     _sz_introsort(sequence, less, 0, sequence->count, depth_limit);
 }
 
-/**
- *  @brief  Internal Radix sorting procedure.
- */
 inline static void _sz_sort_recursion( //
     sz_sequence_t *sequence,
     sz_size_t bit_idx,
@@ -1012,7 +1033,7 @@ typedef struct sz_sort_config_t {
 
 /**
  *  @brief  Sorting algorithm, combining Radix Sort for the first 32 bits of every word
- *          and a follow-up Quick Sort on resulting structure.
+ *          and a follow-up by a more conventional sorting procedure on equally prefixed parts.
  */
 inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *config) {
 
@@ -1041,8 +1062,6 @@ inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *conf
     // Perform optionally-parallel radix sort on them
     _sz_sort_recursion(sequence, 0, 32, comparator, partial_order_length);
 }
-
-typedef unsigned char levenstein_distance_t;
 
 /**
  *  @return Amount of temporary memory (in bytes) needed to efficiently compute
