@@ -714,19 +714,26 @@ inline static sz_u64_t sz_u64_byte_reverse(sz_u64_t val) {
 inline static sz_size_t sz_log2i(sz_size_t n) {
     if (n == 0) return 0;
 
-#if defined(__LP64__) || defined(_WIN64) // 64-bit
+#ifdef _WIN64
 #ifdef _MSC_VER
     unsigned long index;
-    _BitScanReverse64(&index, n);
-    return index;
+    if (_BitScanReverse64(&index, n)) return index;
+    return 0; // This line might be redundant due to the initial check, but it's safer to include it.
 #else
     return 63 - __builtin_clzll(n);
 #endif
-#else // 32-bit
+#elif defined(_WIN32)
 #ifdef _MSC_VER
     unsigned long index;
-    _BitScanReverse(&index, n);
-    return index;
+    if (_BitScanReverse(&index, n)) return index;
+    return 0; // Same note as above.
+#else
+    return 31 - __builtin_clz(n);
+#endif
+#else
+// Handle non-Windows platforms. You can further differentiate between 32-bit and 64-bit if needed.
+#if defined(__LP64__)
+    return 63 - __builtin_clzll(n);
 #else
     return 31 - __builtin_clz(n);
 #endif
