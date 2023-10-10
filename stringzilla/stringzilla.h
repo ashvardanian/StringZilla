@@ -35,6 +35,14 @@
 #define NULL ((void *)0)
 #endif
 
+/**
+ * @brief   Compile-time assert macro.
+ */
+#define SZ_STATIC_ASSERT(condition, name)                \
+    typedef struct {                                     \
+        int static_assert_##name : (condition) ? 1 : -1; \
+    } sz_static_assert_##name##_t
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,10 +53,11 @@ extern "C" {
  *          32-bit on platforms where pointers are 32-bit.
  */
 #if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
-typedef unsigned long sz_size_t;
+typedef unsigned long long sz_size_t;
 #else
 typedef unsigned sz_size_t;
 #endif
+SZ_STATIC_ASSERT(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
 
 typedef int sz_bool_t;                 // Only one relevant bit
 typedef unsigned sz_u32_t;             // Always 32 bits
@@ -101,7 +110,7 @@ inline static sz_size_t sz_count_char_swar(sz_string_start_t const haystack,
     sz_string_start_t const end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((unsigned long)text & 7ul) && text < end; ++text) result += *text == *needle;
+    for (; ((sz_size_t)text & 7ull) && text < end; ++text) result += *text == *needle;
 
     // This code simulates hyper-scalar execution, comparing 8 characters at a time.
     sz_u64_t nnnnnnnn = *needle;
@@ -135,7 +144,7 @@ inline static sz_string_start_t sz_find_1char_swar(sz_string_start_t const hayst
     sz_string_start_t const end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((unsigned long)text & 7ul) && text < end; ++text)
+    for (; ((sz_size_t)text & 7ull) && text < end; ++text)
         if (*text == *needle) return text;
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
@@ -172,7 +181,7 @@ inline static sz_string_start_t sz_rfind_1char_swar(sz_string_start_t const hays
     sz_string_start_t text = end - 1;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((unsigned long)text & 7ul) && text >= haystack; --text)
+    for (; ((sz_size_t)text & 7ull) && text >= haystack; --text)
         if (*text == *needle) return text;
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
@@ -208,7 +217,7 @@ inline static sz_string_start_t sz_find_2char_swar(sz_string_start_t const hayst
     sz_string_start_t const end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((unsigned long)text & 7ul) && text + 2 <= end; ++text)
+    for (; ((sz_size_t)text & 7ull) && text + 2 <= end; ++text)
         if (text[0] == needle[0] && text[1] == needle[1]) return text;
 
     // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
@@ -257,7 +266,7 @@ inline static sz_string_start_t sz_find_3char_swar(sz_string_start_t const hayst
     sz_string_start_t end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((unsigned long)text & 7ul) && text + 3 <= end; ++text)
+    for (; ((sz_size_t)text & 7ull) && text + 3 <= end; ++text)
         if (text[0] == needle[0] && text[1] == needle[1] && text[2] == needle[2]) return text;
 
     // This code simulates hyper-scalar execution, analyzing 6 offsets at a time.
@@ -319,7 +328,7 @@ inline static sz_string_start_t sz_find_4char_swar(sz_string_start_t const hayst
     sz_string_start_t end = haystack + haystack_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((unsigned long)text & 7ul) && text + 4 <= end; ++text)
+    for (; ((sz_size_t)text & 7ull) && text + 4 <= end; ++text)
         if (text[0] == needle[0] && text[1] == needle[1] && text[2] == needle[2] && text[3] == needle[3]) return text;
 
     // This code simulates hyper-scalar execution, analyzing 4 offsets at a time.
@@ -987,7 +996,7 @@ inline static void _sz_sort_recursion( //
     // Partition a range of integers according to a specific bit value
     sz_size_t split = 0;
     {
-        sz_u64_t mask = (1ul << 63) >> bit_idx;
+        sz_u64_t mask = (1ull << 63) >> bit_idx;
         while (split != sequence->count && !(sequence->order[split] & mask)) ++split;
         for (sz_size_t i = split + 1; i < sequence->count; ++i)
             if (!(sequence->order[i] & mask)) _sz_swap_order(sequence->order + i, sequence->order + split), ++split;
@@ -1056,7 +1065,7 @@ inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *conf
     for (sz_size_t i = 0; i != sequence->count; ++i) {
         sz_string_start_t begin = sequence->get_start(sequence, sequence->order[i]);
         sz_size_t length = sequence->get_length(sequence, sequence->order[i]);
-        length = length > 4ul ? 4ul : length;
+        length = length > 4ull ? 4ull : length;
         char *prefix = (char *)&sequence->order[i];
         for (sz_size_t j = 0; j != length; ++j) prefix[7 - j] = begin[j];
         if (case_insensitive) {
@@ -1208,7 +1217,7 @@ inline static sz_u32_t sz_hash_crc32_arm(sz_string_start_t start, sz_size_t leng
     sz_string_start_t const end = start + length;
 
     // Align the input to the word boundary
-    while (((unsigned long)start & 7ul) && start != end) { crc = __crc32cb(crc, *start), start++; }
+    while (((unsigned long)start & 7ull) && start != end) { crc = __crc32cb(crc, *start), start++; }
 
     // Process the body 8 bytes at a time
     while (start + 8 <= end) { crc = __crc32cd(crc, *(unsigned long long *)start), start += 8; }
@@ -1227,7 +1236,7 @@ inline static sz_u32_t sz_hash_crc32_sse(sz_string_start_t start, sz_size_t leng
     sz_string_start_t const end = start + length;
 
     // Align the input to the word boundary
-    while (((unsigned long)start & 7ul) && start != end) { crc = _mm_crc32_u8(crc, *start), start++; }
+    while (((unsigned long)start & 7ull) && start != end) { crc = _mm_crc32_u8(crc, *start), start++; }
 
     // Process the body 8 bytes at a time
     while (start + 8 <= end) { crc = (sz_u32_t)_mm_crc32_u64(crc, *(unsigned long long *)start), start += 8; }

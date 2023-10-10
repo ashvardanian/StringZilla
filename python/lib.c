@@ -71,7 +71,8 @@ typedef struct {
  *      - Str(File("some-path.txt"), from=0, to=sys.maxint)
  */
 typedef struct {
-    PyObject_HEAD PyObject *parent;
+    PyObject_HEAD //
+        PyObject *parent;
     sz_string_start_t start;
     sz_size_t length;
 } Str;
@@ -782,13 +783,13 @@ static int Strs_contains(Str *self, PyObject *arg) { return 0; }
 
 static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 
-    char const *a_start, *b_start;
-    size_t a_length, b_length;
+    sz_string_start_t a_start = NULL, b_start = NULL;
+    sz_size_t a_length = 0, b_length = 0;
     if (!export_string_like(self, &a_start, &a_length) || !export_string_like(other, &b_start, &b_length))
         Py_RETURN_NOTIMPLEMENTED;
 
     // Perform byte-wise comparison up to the minimum length
-    size_t min_length = a_length < b_length ? a_length : b_length;
+    sz_size_t min_length = a_length < b_length ? a_length : b_length;
     int cmp_result = memcmp(a_start, b_start, min_length);
 
     // If the strings are equal up to `min_length`, then the shorter string is smaller
