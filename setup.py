@@ -47,7 +47,7 @@ if sys.platform == "darwin":
     link_args.append("-Xpreprocessor -lomp")
 
 if sys.platform == "win32":
-    compile_args.append("/std:c++17")
+    compile_args.append("/std:c99")
     compile_args.append("/O2")
 
 
