@@ -30,7 +30,7 @@ typedef SSIZE_T ssize_t;
 #include <Python.h>            // Core CPython interfaces
 #include <numpy/arrayobject.h> // NumPy
 
-#include <string.h> // `memset`
+#include <string.h> // `memset`, `memcpy`
 
 #include <stringzilla.h>
 
@@ -143,11 +143,11 @@ typedef struct {
 
 #pragma region Helpers
 
-inline static sz_string_start_t haystacks_get_start(sz_sequence_t *seq, sz_size_t i) {
+inline static sz_string_start_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].start;
 }
 
-inline static sz_size_t haystacks_get_length(sz_sequence_t *seq, sz_size_t i) {
+inline static sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].length;
 }
 
@@ -782,25 +782,25 @@ static int Strs_contains(Str *self, PyObject *arg) { return 0; }
 
 static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 
-    char const *a_start, *b_start;
-    size_t a_length, b_length;
+    sz_string_start_t a_start, *b_start;
+    sz_size_t a_length, b_length;
     if (!export_string_like(self, &a_start, &a_length) || !export_string_like(other, &b_start, &b_length))
         Py_RETURN_NOTIMPLEMENTED;
 
     // Perform byte-wise comparison up to the minimum length
-    size_t min_length = a_length < b_length ? a_length : b_length;
-    int cmp_result = memcmp(a_start, b_start, min_length);
+    sz_size_t min_length = a_length < b_length ? a_length : b_length;
+    int order = memcmp(a_start, b_start, min_length);
 
     // If the strings are equal up to `min_length`, then the shorter string is smaller
-    if (cmp_result == 0) cmp_result = (a_length > b_length) - (a_length < b_length);
+    if (order == 0) order = (a_length > b_length) - (a_length < b_length);
 
     switch (op) {
-    case Py_LT: return PyBool_FromLong(cmp_result < 0);
-    case Py_LE: return PyBool_FromLong(cmp_result <= 0);
-    case Py_EQ: return PyBool_FromLong(cmp_result == 0);
-    case Py_NE: return PyBool_FromLong(cmp_result != 0);
-    case Py_GT: return PyBool_FromLong(cmp_result > 0);
-    case Py_GE: return PyBool_FromLong(cmp_result >= 0);
+    case Py_LT: return PyBool_FromLong(order < 0);
+    case Py_LE: return PyBool_FromLong(order <= 0);
+    case Py_EQ: return PyBool_FromLong(order == 0);
+    case Py_NE: return PyBool_FromLong(order != 0);
+    case Py_GT: return PyBool_FromLong(order > 0);
+    case Py_GE: return PyBool_FromLong(order >= 0);
     default: Py_RETURN_NOTIMPLEMENTED;
     }
 }
@@ -1582,8 +1582,8 @@ static sz_bool_t Strs_sort_(Strs *self,
     sequence.order = (sz_size_t *)temporary_memory.start;
     sequence.count = count;
     sequence.handle = parts;
-    sequence.get_start = haystacks_get_start;
-    sequence.get_length = haystacks_get_length;
+    sequence.get_start = parts_get_start;
+    sequence.get_length = parts_get_length;
     for (sz_size_t i = 0; i != sequence.count; ++i) sequence.order[i] = i;
     sz_sort(&sequence, &sort_config);
 
