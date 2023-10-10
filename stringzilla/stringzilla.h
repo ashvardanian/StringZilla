@@ -35,7 +35,7 @@ extern "C" {
 #endif
 
 /**
- *  @brief  Analogous to `size_t` and `std::size_t`, unsigned integer, identical to pointer size.
+ *  @brief  Analogous to `sz_size_t` and `std::sz_size_t`, unsigned integer, identical to pointer size.
  *          64-bit on most platforms where pointers are 64-bit.
  *          32-bit on platforms where pointers are 32-bit.
  */
@@ -490,23 +490,21 @@ inline static sz_string_start_t sz_find_substring_avx2(sz_string_start_t const h
         int matches3 = _mm256_movemask_epi8(_mm256_cmpeq_epi32(texts3, anomalies));
 
         if (matches0 | matches1 | matches2 | matches3) {
-            int matches =                   //
-                (matches0 & 0x1111'1111u) | //
-                (matches1 & 0x2222'2222u) | //
-                (matches2 & 0x4444'4444u) | //
-                (matches3 & 0x8888'8888u);
-            size_t first_match_offset = _tzcnt_u32(matches);
+            int matches =                  //
+                (matches0 & 0x11111111u) | //
+                (matches1 & 0x22222222u) | //
+                (matches2 & 0x44444444u) | //
+                (matches3 & 0x88888888u);
+            sz_size_t first_match_offset = _tzcnt_u32(matches);
             if (needle_length > 4) {
-                if (sz_equal(text + first_match_offset + 4, needle + 4, needle_length - 4))
+                if (sz_equal(text + first_match_offset + 4, needle + 4, needle_length - 4)) {
                     return text + first_match_offset;
-                else
-                    text += first_match_offset + 1;
+                }
+                else { text += first_match_offset + 1; }
             }
-            else
-                return text + first_match_offset;
+            else { return text + first_match_offset; }
         }
-        else
-            text += 32;
+        else { text += 32; }
     }
 
     // Don't forget the last (up to 35) characters.
@@ -566,7 +564,7 @@ inline static sz_string_start_t sz_find_substring_neon(sz_string_start_t const h
                 (vget_lane_u16(matches_u16x4, 3) << 12);
 
             // Find the first match
-            size_t first_match_offset = __builtin_ctz(matches_u16);
+            sz_size_t first_match_offset = __builtin_ctz(matches_u16);
             if (needle_length > 4) {
                 if (sz_equal(text + first_match_offset + 4, needle + 4, needle_length - 4))
                     return text + first_match_offset;
