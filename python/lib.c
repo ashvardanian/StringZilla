@@ -1255,8 +1255,8 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
-        PyErr_SetString(PyExc_TypeError, "sz.split() requires at least 1 argument");
+    if (nargs < !is_member || nargs > !is_member + 3) {
+        PyErr_SetString(PyExc_TypeError, "sz.split() received unsupported number of arguments");
         return NULL;
     }
 
