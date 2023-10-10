@@ -30,6 +30,8 @@ typedef SSIZE_T ssize_t;
 #include <Python.h>            // Core CPython interfaces
 #include <numpy/arrayobject.h> // NumPy
 
+#include <string.h> // `memset`
+
 #include <stringzilla.h>
 
 #pragma region Forward Declarations
@@ -1573,8 +1575,10 @@ static sz_bool_t Strs_sort_(Strs *self,
     }
 
     // Call our sorting algorithm
-    sz_sequence_t sequence = {};
-    sz_sort_config_t sort_config = {};
+    sz_sequence_t sequence;
+    sz_sort_config_t sort_config;
+    memset(&sequence, 0, sizeof(sequence));
+    memset(&sort_config, 0, sizeof(sort_config));
     sequence.order = (sz_size_t *)temporary_memory.start;
     sequence.count = count;
     sequence.handle = parts;
