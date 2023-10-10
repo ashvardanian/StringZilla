@@ -16,15 +16,13 @@ AlignTrailingComments: true
 AllowAllArgumentsOnNextLine: false
 AllowAllConstructorInitializersOnNextLine: true
 AllowAllParametersOfDeclarationOnNextLine: true
-AllowShortBlocksOnASingleLine: false
+AllowShortBlocksOnASingleLine: Always
+AllowShortIfStatementsOnASingleLine: Always
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: true
-AllowShortIfStatementsOnASingleLine: Never
 AllowShortLambdasOnASingleLine: true
-AllowShortLoopsOnASingleLine: false
-AlwaysBreakBeforeMultilineStrings: true
+AllowShortLoopsOnASingleLine: true
 AlwaysBreakTemplateDeclarations: Yes
-AlwaysBreakBeforeMultilineStrings: true
 AlwaysBreakAfterReturnType: None
 PenaltyReturnTypeOnItsOwnLine: 200
 
@@ -47,7 +45,7 @@ BraceWrapping:
   IndentBraces: false
 
 
-SortIncludes: false
+SortIncludes: true
 SortUsingDeclarations: true 
 
 SpaceAfterCStyleCast: false

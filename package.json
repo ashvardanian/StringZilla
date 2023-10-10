@@ -5,6 +5,7 @@
   "author": "Ash Vardanian",
   "license": "Apache 2.0",
   "main": "javascript/stringzilla.js",
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/ashvardanian/stringzilla.git"
@@ -19,7 +20,7 @@
     "node-addon-api": "^3.0.0"
   },
   "scripts": {
-    "test": "node javascript/test.js"
+    "test": "node --test ./javascript/test"
   },
   "devDependencies": {
     "@semantic-release/exec": "^6.0.3",
