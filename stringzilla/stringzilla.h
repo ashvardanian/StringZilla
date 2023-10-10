@@ -806,13 +806,25 @@ inline static void sz_sort_insertion(sz_sequence_t *sequence, sz_sequence_compar
     }
 }
 
-// Utility functions
 inline static sz_size_t _sz_log2i(sz_size_t n) {
-    if (n == 0) return 0;                // to avoid undefined behavior with __builtin_clz
+    if (n == 0) return 0;
+
 #if defined(__LP64__) || defined(_WIN64) // 64-bit
+#ifdef _MSC_VER
+    unsigned long index;
+    _BitScanReverse64(&index, n);
+    return index;
+#else
     return 63 - __builtin_clzll(n);
+#endif
 #else // 32-bit
+#ifdef _MSC_VER
+    unsigned long index;
+    _BitScanReverse(&index, n);
+    return index;
+#else
     return 31 - __builtin_clz(n);
+#endif
 #endif
 }
 
