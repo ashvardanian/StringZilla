@@ -20,7 +20,9 @@ def get_random_string(
 
 def is_equal_strings(native_strings, big_strings):
     for native_slice, big_slice in zip(native_strings, big_strings):
-        assert native_slice == big_slice
+        assert (
+            native_slice == big_slice
+        ), f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
 
 
 def check_identical(
@@ -47,7 +49,9 @@ def check_identical(
     if check_iterators:
         for i in range(len(native_strings)):
             assert len(native_strings[i]) == len(big_strings[i])
-            assert native_strings[i] == big_strings[i]
+            assert (
+                native_strings[i] == big_strings[i]
+            ), f"Mismatch between `{native_strings[i]}` and `{str(big_strings[i])}`"
             assert [c for c in native_strings[i]] == [c for c in big_strings[i]]
 
     is_equal_strings(native_strings, big_strings)
