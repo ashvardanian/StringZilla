@@ -61,6 +61,7 @@ A standard dataset pre-processing use case would be to map a sizeable textual da
 - Slicing: `text[42:46] -> Str`
 - String conversion: `str(text) -> str`
 - Substring check: `'substring' in text -> bool`
+- Hashing: `hash(text) -> int`
 
 ### Advanced Operations
 
@@ -119,9 +120,11 @@ sz_string_view_t haystack = {your_text, your_text_length};
 sz_string_view_t needle = {your_subtext, your_subtext_length};
 
 // Perform string-level operations
-size_t character_count = sz_count_char(haystack, 'a');
-size_t character_position = sz_find_unigram(haystack, 'a');
-size_t substring_position = sz_find_substring(haystack, needle);
+sz_size_t character_count = sz_count_char(haystack.start, haystack.length, "a");
+sz_size_t substring_position = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+
+// Hash strings
+sz_u32_t crc32 = sz_hash_crc32(haystack.start, haystack.length);
 
 // Perform collection level operations
 sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
@@ -132,14 +135,15 @@ sz_sort(&array, &your_config);
 
 Future development plans include:
 
-- [x] Replace PyBind11 with CPython.
-- Reverse-order operations in Python #12.
-- Bindings for JavaScript #25, Java, and Rust.
-- Faster string sorting algorithm.
-- Splitting CSV rows into columns.
-- Splitting with multiple separators at once #29.
-- UTF-8 validation.
-- Arm SVE backend.
+- [x] [Replace PyBind11 with CPython](https://github.com/ashvardanian/StringZilla/issues/35)
+- [x] [Bindings for JavaScript](https://github.com/ashvardanian/StringZilla/issues/25)
+- [ ] [Faster string sorting algorithm](https://github.com/ashvardanian/StringZilla/issues/45)
+- [ ] [Reverse-order operations in Python](https://github.com/ashvardanian/StringZilla/issues/12)
+- [ ] [Splitting with multiple separators at once](https://github.com/ashvardanian/StringZilla/issues/29)
+- [ ] Splitting CSV rows into columns
+- [ ] UTF-8 validation.
+- [ ] Arm SVE backend
+- [ ] Bindings for Java and Rust
 
 Here's how to set up your dev environment and run some tests.
 
@@ -184,6 +188,12 @@ cibuildwheel --platform linux
 ```
 
 ### Compiling C++ Tests
+
+```sh
+cmake -B ./build_release -DSTRINGZILLA_BUILD_TEST=1 && make -C ./build_release -j && ./build_release/stringzilla_test
+```
+
+On MacOS it's recommended to use non-default toolchain:
 
 ```sh
 # Install dependencies
