@@ -1,9 +1,0 @@
-build/
-.DS_Store
-tmp/
-build_debug/
-__pycache__
-Makefile
-CMakeCache.txt
-cmake_install.cmake
-CMakeFiles
