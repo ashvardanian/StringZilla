@@ -4,6 +4,8 @@ tmp/
 build_debug/
 build_release/
 __pycache__
+.pytest_cache
+.conda
 Makefile
 CMakeCache.txt
 cmake_install.cmake
