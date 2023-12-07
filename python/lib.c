@@ -32,7 +32,7 @@ typedef SSIZE_T ssize_t;
 
 #include <string.h> // `memset`, `memcpy`
 
-#include <stringzilla.h>
+#include <stringzilla/stringzilla.h>
 
 #pragma region Forward Declarations
 
@@ -1034,7 +1034,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSize_t(count);
 }
 
-static PyObject *Str_levenstein(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_levenshtein(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 2) {
@@ -1072,8 +1072,8 @@ static PyObject *Str_levenstein(PyObject *self, PyObject *args, PyObject *kwargs
         return NULL;
     }
 
-    // Allocate memory for the Levenstein matrix
-    size_t memory_needed = sz_levenstein_memory_needed(str1.length, str2.length);
+    // Allocate memory for the Levenshtein matrix
+    size_t memory_needed = sz_levenshtein_memory_needed(str1.length, str2.length);
     if (temporary_memory.length < memory_needed) {
         temporary_memory.start = realloc(temporary_memory.start, memory_needed);
         temporary_memory.length = memory_needed;
@@ -1083,9 +1083,9 @@ static PyObject *Str_levenstein(PyObject *self, PyObject *args, PyObject *kwargs
         return NULL;
     }
 
-    levenstein_distance_t small_bound = (levenstein_distance_t)bound;
-    levenstein_distance_t distance =
-        sz_levenstein(str1.start, str1.length, str2.start, str2.length, small_bound, temporary_memory.start);
+    levenshtein_distance_t small_bound = (levenshtein_distance_t)bound;
+    levenshtein_distance_t distance =
+        sz_levenshtein(str1.start, str1.length, str2.start, str2.length, small_bound, temporary_memory.start);
 
     return PyLong_FromLong(distance);
 }
@@ -1459,7 +1459,7 @@ static PyMethodDef Str_methods[] = {
     {"splitlines", Str_splitlines, sz_method_flags_m, "Split a string by line breaks."},
     {"startswith", Str_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
-    {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    {"levenshtein", Str_levenshtein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrType = {
@@ -1757,7 +1757,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"splitlines", Str_splitlines, sz_method_flags_m, "Split a string by line breaks."},
     {"startswith", Str_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
-    {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    {"levenshtein", Str_levenshtein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {NULL, NULL, 0, NULL}};
 
 static PyModuleDef stringzilla_module = {

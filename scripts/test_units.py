@@ -98,8 +98,8 @@ def test_unit_globals():
     assert sz.count("aaaaa", "aa") == 2
     assert sz.count("aaaaa", "aa", allowoverlap=True) == 4
 
-    assert sz.levenstein("aaa", "aaa") == 0
-    assert sz.levenstein("aaa", "bbb") == 3
-    assert sz.levenstein("abababab", "aaaaaaaa") == 4
-    assert sz.levenstein("abababab", "aaaaaaaa", 2) == 2
-    assert sz.levenstein("abababab", "aaaaaaaa", bound=2) == 2
+    assert sz.levenshtein("aaa", "aaa") == 0
+    assert sz.levenshtein("aaa", "bbb") == 3
+    assert sz.levenshtein("abababab", "aaaaaaaa") == 4
+    assert sz.levenshtein("abababab", "aaaaaaaa", 2) == 2
+    assert sz.levenshtein("abababab", "aaaaaaaa", bound=2) == 2

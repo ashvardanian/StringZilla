@@ -5,7 +5,7 @@
 #include <string.h>
 #include <time.h>
 
-#include <stringzilla.h>
+#include <stringzilla/stringzilla.h>
 
 #define MAX_LENGTH 300
 #define MIN_LENGTH 3

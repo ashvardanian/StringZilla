@@ -8,9 +8,9 @@
  *  @see        NodeJS docs: https://nodejs.org/api/n-api.html
  */
 
-#include <node_api.h>    // `napi_*` functions
-#include <stdlib.h>      // `malloc`
-#include <stringzilla.h> // `sz_*` functions
+#include <node_api.h>                // `napi_*` functions
+#include <stdlib.h>                  // `malloc`
+#include <stringzilla/stringzilla.h> // `sz_*` functions
 
 napi_value indexOfAPI(napi_env env, napi_callback_info info) {
     size_t argc = 2;

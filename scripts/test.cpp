@@ -9,7 +9,7 @@
 #include <strstream>
 #include <vector>
 
-#include <stringzilla.h>
+#include <stringzilla/stringzilla.h>
 
 using strings_t = std::vector<std::string>;
 using idx_t = sz_size_t;

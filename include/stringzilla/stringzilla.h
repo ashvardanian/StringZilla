@@ -65,9 +65,9 @@ typedef unsigned long long sz_u64_t;   // Always 64 bits
 typedef char const *sz_string_start_t; // A type alias for `char const * `
 
 /**
- *  @brief  For faster bounded Levenstein (Edit) distance computation no more than 255 characters are supported.
+ *  @brief  For faster bounded Levenshtein (Edit) distance computation no more than 255 characters are supported.
  */
-typedef unsigned char levenstein_distance_t;
+typedef unsigned char levenshtein_distance_t;
 
 /**
  *  @brief  Helper construct for higher-level bindings.
@@ -1085,17 +1085,19 @@ inline static void sz_sort(sz_sequence_t *sequence, sz_sort_config_t const *conf
 
 /**
  *  @return Amount of temporary memory (in bytes) needed to efficiently compute
- *          the Levenstein distance between two strings of given size.
+ *          the Levenshtein distance between two strings of given size.
  */
-inline static sz_size_t sz_levenstein_memory_needed(sz_size_t _, sz_size_t b_length) { return b_length + b_length + 2; }
+inline static sz_size_t sz_levenshtein_memory_needed(sz_size_t _, sz_size_t b_length) {
+    return b_length + b_length + 2;
+}
 
 /**
  *  @brief  Auxiliary function, that computes the minimum of three values.
  */
-inline static levenstein_distance_t _sz_levenstein_minimum( //
-    levenstein_distance_t const a,
-    levenstein_distance_t const b,
-    levenstein_distance_t const c) {
+inline static levenshtein_distance_t _sz_levenshtein_minimum( //
+    levenshtein_distance_t const a,
+    levenshtein_distance_t const b,
+    levenshtein_distance_t const c) {
 
     return (a < b ? (a < c ? a : c) : (b < c ? b : c));
 }
@@ -1104,12 +1106,12 @@ inline static levenstein_distance_t _sz_levenstein_minimum( //
  *  @brief  Levenshtein String Similarity function, implemented with linear memory consumption.
  *          It accepts an upper bound on the possible error. Quadratic complexity in time, linear in space.
  */
-inline static levenstein_distance_t sz_levenstein( //
+inline static levenshtein_distance_t sz_levenshtein( //
     sz_string_start_t const a,
     sz_size_t const a_length,
     sz_string_start_t const b,
     sz_size_t const b_length,
-    levenstein_distance_t const bound,
+    levenshtein_distance_t const bound,
     void *buffer) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one
@@ -1124,8 +1126,8 @@ inline static levenstein_distance_t sz_levenstein( //
         if (b_length - a_length > bound) return bound + 1;
     }
 
-    levenstein_distance_t *previous_distances = (levenstein_distance_t *)buffer;
-    levenstein_distance_t *current_distances = previous_distances + b_length + 1;
+    levenshtein_distance_t *previous_distances = (levenshtein_distance_t *)buffer;
+    levenshtein_distance_t *current_distances = previous_distances + b_length + 1;
 
     for (sz_size_t idx_b = 0; idx_b != (b_length + 1); ++idx_b) previous_distances[idx_b] = idx_b;
 
@@ -1133,13 +1135,13 @@ inline static levenstein_distance_t sz_levenstein( //
         current_distances[0] = idx_a + 1;
 
         // Initialize min_distance with a value greater than bound
-        levenstein_distance_t min_distance = bound;
+        levenshtein_distance_t min_distance = bound;
 
         for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
-            levenstein_distance_t cost_deletion = previous_distances[idx_b + 1] + 1;
-            levenstein_distance_t cost_insertion = current_distances[idx_b] + 1;
-            levenstein_distance_t cost_substitution = previous_distances[idx_b] + (a[idx_a] != b[idx_b]);
-            current_distances[idx_b + 1] = _sz_levenstein_minimum(cost_deletion, cost_insertion, cost_substitution);
+            levenshtein_distance_t cost_deletion = previous_distances[idx_b + 1] + 1;
+            levenshtein_distance_t cost_insertion = current_distances[idx_b] + 1;
+            levenshtein_distance_t cost_substitution = previous_distances[idx_b] + (a[idx_a] != b[idx_b]);
+            current_distances[idx_b + 1] = _sz_levenshtein_minimum(cost_deletion, cost_insertion, cost_substitution);
 
             // Keep track of the minimum distance seen so far in this row
             if (current_distances[idx_b + 1] < min_distance) { min_distance = current_distances[idx_b + 1]; }
@@ -1149,7 +1151,7 @@ inline static levenstein_distance_t sz_levenstein( //
         if (min_distance > bound) return bound;
 
         // Swap previous_distances and current_distances pointers
-        levenstein_distance_t *temp = previous_distances;
+        levenshtein_distance_t *temp = previous_distances;
         previous_distances = current_distances;
         current_distances = temp;
     }
