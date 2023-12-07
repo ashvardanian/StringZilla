@@ -114,7 +114,7 @@ import stringzilla as sz
 contains: bool = sz.contains("haystack", "needle", start=0, end=9223372036854775807)
 offset: int = sz.find("haystack", "needle", start=0, end=9223372036854775807)
 count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, allowoverlap=False)
-levenstein: int = sz.levenstein("needle", "nidl")
+levenshtein: int = sz.levenshtein("needle", "nidl")
 ```
 
 ## Quick Start: C 🛠️

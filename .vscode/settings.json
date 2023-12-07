@@ -140,7 +140,7 @@
     "kwargs",
     "kwds",
     "kwnames",
-    "levenstein",
+    "levenshtein",
     "maxsplit",
     "memcpy",
     "MODINIT",

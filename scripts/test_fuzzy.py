@@ -86,7 +86,7 @@ def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability
 
 @pytest.mark.parametrize("iterations", range(100))
 @pytest.mark.parametrize("max_edit_distance", [150])
-def test_levenstein(iterations: int, max_edit_distance: int):
+def test_levenshtein(iterations: int, max_edit_distance: int):
     # Create a new string by slicing and concatenating
     def insert_char_at(s, char_to_insert, index):
         return s[:index] + char_to_insert + s[index:]
@@ -98,7 +98,7 @@ def test_levenstein(iterations: int, max_edit_distance: int):
             source_offset = randint(0, len(ascii_lowercase) - 1)
             target_offset = randint(0, len(b) - 1)
             b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
-            assert sz.levenstein(a, b, 200) == i + 1
+            assert sz.levenshtein(a, b, 200) == i + 1
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
