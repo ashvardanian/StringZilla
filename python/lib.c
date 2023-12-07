@@ -373,7 +373,10 @@ static void File_dealloc(File *self) {
 static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObject *named_args) {
     File *self;
     self = (File *)type->tp_alloc(type, 0);
-    if (self == NULL) return NULL;
+    if (self == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "Couldn't allocate the file handle!");
+        return NULL;
+    }
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
     self->file_handle = NULL;
@@ -383,6 +386,7 @@ static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObjec
 #endif
     self->start = NULL;
     self->length = 0;
+    return (PyObject *)self;
 }
 
 static int File_init(File *self, PyObject *positional_args, PyObject *named_args) {
@@ -545,7 +549,10 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
 static PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     Str *self;
     self = (Str *)type->tp_alloc(type, 0);
-    if (!self) return NULL;
+    if (!self) {
+        PyErr_SetString(PyExc_RuntimeError, "Couldn't allocate a Str handle!");
+        return NULL;
+    }
 
     self->parent = NULL;
     self->start = NULL;
