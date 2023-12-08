@@ -179,13 +179,13 @@ npm install && npm test
 To benchmark on some custom file and pattern combinations:
 
 ```sh
-python scripts/bench.py --haystack_path "your file" --needle "your pattern"
+python scripts/bench_substring.py --haystack_path "your file" --needle "your pattern"
 ```
 
 To benchmark on synthetic data:
 
 ```sh
-python scripts/bench.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce"
+python scripts/bench_substring.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce"
 ```
 
 ### Packaging
