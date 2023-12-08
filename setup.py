@@ -55,7 +55,7 @@ ext_modules = [
     Extension(
         "stringzilla",
         ["python/lib.c"],
-        include_dirs=["stringzilla", np.get_include()],
+        include_dirs=["include", np.get_include()],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         define_macros=macros_args,
