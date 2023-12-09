@@ -2,19 +2,33 @@ import os
 import sys
 import platform
 from setuptools import setup, Extension
+import glob
 
 import numpy as np
 
 compile_args = []
 link_args = []
-macros_args = []
+macros_args = [
+    ("SZ_USE_X86_AVX512", "0"),
+    ("SZ_USE_X86_AVX2", "1"),
+    ("SZ_USE_X86_SSE42", "1"),
+    ("SZ_USE_ARM_NEON", "0"),
+    ("SZ_USE_ARM_CRC32", "0"),
+]
 
 if sys.platform == "linux":
     compile_args.append("-std=c99")
     compile_args.append("-O3")
     compile_args.append("-pedantic")
-    compile_args.append("-Wno-unknown-pragmas")
     compile_args.append("-fdiagnostics-color=always")
+
+    compile_args.append("-Wno-unknown-pragmas")
+
+    # Example: passing argument 4 of ‘sz_export_prefix_u32’ from incompatible pointer type
+    compile_args.append("-Wno-incompatible-pointer-types")
+    # Example: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target type
+    compile_args.append("-Wno-discarded-qualifiers")
+
     compile_args.append("-fopenmp")
     link_args.append("-lgomp")
 
@@ -28,7 +42,7 @@ if sys.platform == "linux":
 
     arch = platform.machine()
     if arch == "x86_64" or arch == "i386":
-        compile_args.append("-march=haswell")
+        compile_args.append("-march=native")
     elif arch.startswith("arm"):
         compile_args.append("-march=armv8-a+simd")
         if compiler == "gcc":
@@ -54,7 +68,7 @@ if sys.platform == "win32":
 ext_modules = [
     Extension(
         "stringzilla",
-        ["python/lib.c"],
+        ["python/lib.c"] + glob.glob("src/*.c"),
         include_dirs=["include", np.get_include()],
         extra_compile_args=compile_args,
         extra_link_args=link_args,

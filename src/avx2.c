@@ -1,6 +1,6 @@
 #include <stringzilla/stringzilla.h>
 
-#if defined(__AVX2__)
+#if SZ_USE_X86_AVX2
 #include <x86intrin.h>
 
 /**

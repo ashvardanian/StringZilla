@@ -284,47 +284,57 @@ sz_cptr_t sz_find_4byte_serial(sz_cptr_t const haystack, sz_size_t const haystac
     return NULL;
 }
 
+/**
+ *  @brief  Implements the Bitap also known as the shift-or, shift-and or Baeza-Yates-Gonnet
+ *          algorithm, for exact string matching of patterns under 64-bytes long.
+ *          https://en.wikipedia.org/wiki/Bitap_algorithm
+ */
+sz_cptr_t sz_find_under64byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                     sz_size_t needle_length) {
+
+    sz_u64_t running_match = ~0ull;
+    sz_u64_t pattern_mask[256];
+    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = ~0ull; }
+    for (sz_size_t i = 0; i < needle_length; ++i) { pattern_mask[needle[i]] &= ~(1ull << i); }
+    for (sz_size_t i = 0; i < haystack_length; ++i) {
+        running_match = (running_match << 1) | pattern_mask[haystack[i]];
+        if ((running_match & (1ull << (needle_length - 1))) == 0) { return haystack + i - needle_length + 1; }
+    }
+
+    return NULL;
+}
+
 SZ_EXPORT sz_cptr_t sz_find_serial(sz_cptr_t const haystack, sz_size_t const haystack_length, sz_cptr_t const needle,
                                    sz_size_t const needle_length) {
 
     if (haystack_length < needle_length) return NULL;
 
-    sz_size_t anomaly_offset = 0;
     switch (needle_length) {
     case 0: return NULL;
     case 1: return sz_find_byte_serial(haystack, haystack_length, needle);
     case 2: return sz_find_2byte_serial(haystack, haystack_length, needle);
     case 3: return sz_find_3byte_serial(haystack, haystack_length, needle);
     case 4: return sz_find_4byte_serial(haystack, haystack_length, needle);
-    default: {
-        sz_cptr_t text = haystack;
-        sz_cptr_t const end = haystack + haystack_length;
-
-        _sz_anomaly_t n_anomaly, h_anomaly;
-        sz_size_t const n_suffix_len = needle_length - 4 - anomaly_offset;
-        sz_cptr_t n_suffix_ptr = needle + 4 + anomaly_offset;
-        n_anomaly.u8s[0] = needle[anomaly_offset];
-        n_anomaly.u8s[1] = needle[anomaly_offset + 1];
-        n_anomaly.u8s[2] = needle[anomaly_offset + 2];
-        n_anomaly.u8s[3] = needle[anomaly_offset + 3];
-        h_anomaly.u8s[0] = haystack[0];
-        h_anomaly.u8s[1] = haystack[1];
-        h_anomaly.u8s[2] = haystack[2];
-        h_anomaly.u8s[3] = haystack[3];
-
-        text += anomaly_offset;
-        while (text + needle_length <= end) {
-            h_anomaly.u8s[3] = text[3];
-            if (h_anomaly.u32 == n_anomaly.u32)                     // Match anomaly.
-                if (sz_equal(text + 4, n_suffix_ptr, n_suffix_len)) // Match suffix.
-                    return text;
-
-            h_anomaly.u32 >>= 8;
-            ++text;
-        }
-        return NULL;
     }
+
+    // For needle lengths up to 64, use the existing Bitap algorithm
+    if (needle_length <= 64) return sz_find_under64byte_serial(haystack, haystack_length, needle, needle_length);
+
+    // For longer needles, use Bitap for the first 64 bytes and then check the rest
+    sz_size_t prefix_length = 64;
+    for (sz_size_t i = 0; i <= haystack_length - needle_length; ++i) {
+        sz_cptr_t found = sz_find_under64byte_serial(haystack + i, haystack_length - i, needle, prefix_length);
+        if (!found) return NULL;
+
+        // Verify the remaining part of the needle
+        if (sz_order_serial(found + prefix_length, needle + prefix_length, needle_length - prefix_length) == 0)
+            return found;
+
+        // Adjust the position
+        i = found - haystack + prefix_length - 1;
     }
+
+    return NULL;
 }
 
 SZ_EXPORT sz_cptr_t sz_find_terminated_serial(sz_cptr_t haystack, sz_cptr_t needle) { return NULL; }
@@ -348,10 +358,10 @@ SZ_EXPORT sz_size_t sz_levenshtein_serial(       //
 
     // If the difference in length is beyond the `bound`, there is no need to check at all
     if (a_length > b_length) {
-        if (a_length - b_length > bound) return bound + 1; // TODO: Do we need the +1 ?!
+        if (a_length - b_length > bound) return bound;
     }
     else {
-        if (b_length - a_length > bound) return bound + 1;
+        if (b_length - a_length > bound) return bound;
     }
 
     sz_size_t *previous_distances = (sz_size_t *)buffer;
@@ -376,7 +386,7 @@ SZ_EXPORT sz_size_t sz_levenshtein_serial(       //
         }
 
         // If the minimum distance in this row exceeded the bound, return early
-        if (min_distance > bound) return bound;
+        if (min_distance >= bound) return bound;
 
         // Swap previous_distances and current_distances pointers
         sz_size_t *temp = previous_distances;
@@ -384,7 +394,7 @@ SZ_EXPORT sz_size_t sz_levenshtein_serial(       //
         current_distances = temp;
     }
 
-    return previous_distances[b_length] <= bound ? previous_distances[b_length] : bound;
+    return previous_distances[b_length] < bound ? previous_distances[b_length] : bound;
 }
 
 SZ_EXPORT sz_size_t sz_levenshtein_weighted_serial(   //

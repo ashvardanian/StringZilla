@@ -198,7 +198,7 @@ int main(int, char const **) {
     };
 
     // Search substring
-    for (std::size_t needle_len = 1; needle_len <= 5; ++needle_len) {
+    for (std::size_t needle_len = 4; needle_len <= 8; ++needle_len) {
         std::string needle(needle_len, '\4');
         std::printf("---- Needle length: %zu\n", needle_len);
         bench_search("std::search", full_text, [&]() mutable {

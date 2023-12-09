@@ -1,6 +1,6 @@
 #include <stringzilla/stringzilla.h>
 
-#if defined(__ARM_NEON)
+#if SZ_USE_ARM_NEON
 #include <arm_neon.h>
 
 /**
@@ -68,7 +68,7 @@ SZ_EXPORT sz_cptr_t sz_find_neon(sz_cptr_t const haystack, sz_size_t const hayst
 
 #endif // Arm Neon
 
-#if defined(__ARM_FEATURE_CRC32)
+#if SZ_USE_ARM_CRC32
 #include <arm_acle.h>
 
 SZ_EXPORT sz_u32_t sz_crc32_arm(sz_cptr_t start, sz_size_t length) {
