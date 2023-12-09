@@ -35,6 +35,49 @@
         int static_assert_##name : (condition) ? 1 : -1; \
     } sz_static_assert_##name##_t
 
+/*
+ *  Hardware feature detection.
+ */
+#ifndef SZ_USE_X86_AVX512
+#ifdef __AVX512BW__
+#define SZ_USE_X86_AVX512 1
+#else
+#define SZ_USE_X86_AVX512 0
+#endif
+#endif
+
+#ifndef SZ_USE_X86_AVX2
+#ifdef __AVX2__
+#define SZ_USE_X86_AVX2 1
+#else
+#define SZ_USE_X86_AVX2 0
+#endif
+#endif
+
+#ifndef SZ_USE_X86_SSE42
+#ifdef __SSE4_2__
+#define SZ_USE_X86_SSE42 1
+#else
+#define SZ_USE_X86_SSE42 0
+#endif
+#endif
+
+#ifndef SZ_USE_ARM_NEON
+#ifdef __ARM_NEON
+#define SZ_USE_ARM_NEON 1
+#else
+#define SZ_USE_ARM_NEON 0
+#endif
+#endif
+
+#ifndef SZ_USE_ARM_CRC32
+#ifdef __ARM_FEATURE_CRC32
+#define SZ_USE_ARM_CRC32 1
+#else
+#define SZ_USE_ARM_CRC32 0
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -53,8 +96,9 @@ SZ_STATIC_ASSERT(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_
 
 typedef int sz_bool_t;               /// Only one relevant bit
 typedef int sz_order_t;              /// Only three possible states: <=>
-typedef unsigned sz_u32_t;           /// Always 32 bits
 typedef unsigned char sz_u8_t;       /// Always 8 bits
+typedef unsigned short sz_u16_t;     /// Always 16 bits
+typedef unsigned sz_u32_t;           /// Always 32 bits
 typedef unsigned long long sz_u64_t; /// Always 64 bits
 typedef char *sz_ptr_t;              /// A type alias for `char *`
 typedef char const *sz_cptr_t;       /// A type alias for `char const *`
@@ -349,7 +393,7 @@ SZ_EXPORT void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #define sz_clz64 __builtin_clzll
 #endif
 
-#define sz_min_of_two(x, y) (y + ((x - y) & ((x - y) >> (sizeof(x) * CHAR_BIT - 1))))
+#define sz_min_of_two(x, y) (x < y ? x : y)
 #define sz_min_of_three(x, y, z) sz_min_of_two(x, sz_min_of_two(y, z))
 
 /**
@@ -459,6 +503,11 @@ typedef union _sz_anomaly_t {
     sz_u32_t u32;
     sz_u8_t u8s[4];
 } _sz_anomaly_t;
+
+typedef struct sz_string_view_t {
+    sz_cptr_t start;
+    sz_size_t length;
+} sz_string_view_t;
 
 #pragma endregion
 

@@ -1,6 +1,6 @@
 #include <stringzilla/stringzilla.h>
 
-#if defined(__SSE4_2__)
+#if SZ_USE_X86_SSE42
 #include <x86intrin.h>
 
 SZ_EXPORT sz_u32_t sz_crc32_sse42(sz_cptr_t start, sz_size_t length) {

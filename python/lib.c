@@ -1012,7 +1012,6 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
 
     size_t count = 0;
     if (needle.length == 0 || haystack.length == 0 || haystack.length < needle.length) { count = 0; }
-    else if (needle.length == 1) { count = sz_count_char(haystack.start, haystack.length, needle.start); }
     else if (allowoverlap) {
         while (haystack.length) {
             sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
@@ -1088,7 +1087,7 @@ static PyObject *Str_levenshtein(PyObject *self, PyObject *args, PyObject *kwarg
 
     sz_size_t small_bound = (sz_size_t)bound;
     sz_size_t distance =
-        sz_levenshtein(str1.start, str1.length, str2.start, str2.length, small_bound, temporary_memory.start);
+        sz_levenshtein(str1.start, str1.length, str2.start, str2.length, temporary_memory.start, small_bound);
 
     return PyLong_FromLong(distance);
 }
@@ -1577,16 +1576,14 @@ static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_size
 
     // Call our sorting algorithm
     sz_sequence_t sequence;
-    sz_sort_config_t sort_config;
     memset(&sequence, 0, sizeof(sequence));
-    memset(&sort_config, 0, sizeof(sort_config));
     sequence.order = (sz_size_t *)temporary_memory.start;
     sequence.count = count;
     sequence.handle = parts;
     sequence.get_start = parts_get_start;
     sequence.get_length = parts_get_length;
     for (sz_size_t i = 0; i != sequence.count; ++i) sequence.order[i] = i;
-    sz_sort(&sequence, &sort_config);
+    sz_sort(&sequence);
 
     // Export results
     *parts_output = parts;
