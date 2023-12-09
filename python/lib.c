@@ -54,7 +54,7 @@ typedef struct {
 #else
         int file_descriptor;
 #endif
-    sz_string_start_t start;
+    sz_cptr_t start;
     sz_size_t length;
 } File;
 
@@ -73,7 +73,7 @@ typedef struct {
 typedef struct {
     PyObject_HEAD //
         PyObject *parent;
-    sz_string_start_t start;
+    sz_cptr_t start;
     sz_size_t length;
 } Str;
 
@@ -144,11 +144,11 @@ typedef struct {
 
 #pragma region Helpers
 
-inline static sz_string_start_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
+SZ_EXPORT sz_cptr_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].start;
 }
 
-inline static sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
+SZ_EXPORT sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].length;
 }
 
@@ -208,7 +208,7 @@ void slice(size_t length, ssize_t start, ssize_t end, size_t *normalized_offset,
     *normalized_length = end - start;
 }
 
-sz_bool_t export_string_like(PyObject *object, sz_string_start_t **start, sz_size_t *length) {
+sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python str
         Py_ssize_t signed_length;
@@ -243,8 +243,8 @@ sz_bool_t export_string_like(PyObject *object, sz_string_start_t **start, sz_siz
 
 typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject **, char const **, size_t *);
 
-void str_at_offset_consecutive_32bit(
-    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+void str_at_offset_consecutive_32bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start,
+                                     size_t *length) {
     uint32_t start_offset = (i == 0) ? 0 : strs->data.consecutive_32bit.end_offsets[i - 1];
     uint32_t end_offset = strs->data.consecutive_32bit.end_offsets[i];
     *start = strs->data.consecutive_32bit.start + start_offset;
@@ -252,8 +252,8 @@ void str_at_offset_consecutive_32bit(
     *parent = strs->data.consecutive_32bit.parent;
 }
 
-void str_at_offset_consecutive_64bit(
-    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+void str_at_offset_consecutive_64bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start,
+                                     size_t *length) {
     uint64_t start_offset = (i == 0) ? 0 : strs->data.consecutive_64bit.end_offsets[i - 1];
     uint64_t end_offset = strs->data.consecutive_64bit.end_offsets[i];
     *start = strs->data.consecutive_64bit.start + start_offset;
@@ -261,8 +261,8 @@ void str_at_offset_consecutive_64bit(
     *parent = strs->data.consecutive_64bit.parent;
 }
 
-void str_at_offset_reordered(
-    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+void str_at_offset_reordered(Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start,
+                             size_t *length) {
     *start = strs->data.reordered.parts[i].start;
     *length = strs->data.reordered.parts[i].length;
     *parent = strs->data.reordered.parent;
@@ -569,7 +569,7 @@ static void Str_dealloc(Str *self) {
 
 static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->start, self->length); }
 
-static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash_crc32(self->start, self->length); }
+static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_crc32(self->start, self->length); }
 
 static Py_ssize_t Str_len(Str *self) { return self->length; }
 
@@ -655,7 +655,7 @@ static int Str_in(Str *self, PyObject *arg) {
         return -1;
     }
 
-    return sz_find_substring(self->start, self->length, needle_struct.start, needle_struct.length) != NULL;
+    return sz_find(self->start, self->length, needle_struct.start, needle_struct.length) != NULL;
 }
 
 static Py_ssize_t Strs_len(Strs *self) {
@@ -790,7 +790,7 @@ static int Strs_contains(Str *self, PyObject *arg) { return 0; }
 
 static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 
-    sz_string_start_t a_start = NULL, b_start = NULL;
+    sz_cptr_t a_start = NULL, b_start = NULL;
     sz_size_t a_length = 0, b_length = 0;
     if (!export_string_like(self, &a_start, &a_length) || !export_string_like(other, &b_start, &b_length))
         Py_RETURN_NOTIMPLEMENTED;
@@ -817,11 +817,7 @@ static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
  *  @return 1 on success, 0 on failure.
  */
 static int Str_find_( //
-    PyObject *self,
-    PyObject *args,
-    PyObject *kwargs,
-    Py_ssize_t *offset_out,
-    sz_string_view_t *haystack_out,
+    PyObject *self, PyObject *args, PyObject *kwargs, Py_ssize_t *offset_out, sz_string_view_t *haystack_out,
     sz_string_view_t *needle_out) {
 
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -888,7 +884,7 @@ static int Str_find_( //
     haystack.length = normalized_length;
 
     // Perform contains operation
-    sz_string_start_t match = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+    sz_cptr_t match = sz_find(haystack.start, haystack.length, needle.start, needle.length);
     if (match == NULL) { *offset_out = -1; }
     else { *offset_out = (Py_ssize_t)(match - haystack.start); }
 
@@ -1019,7 +1015,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     else if (needle.length == 1) { count = sz_count_char(haystack.start, haystack.length, needle.start); }
     else if (allowoverlap) {
         while (haystack.length) {
-            sz_string_start_t ptr = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+            sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
             sz_size_t offset = found ? ptr - haystack.start : haystack.length;
             count += found;
@@ -1029,7 +1025,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     }
     else {
         while (haystack.length) {
-            sz_string_start_t ptr = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+            sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
             sz_size_t offset = found ? ptr - haystack.start : haystack.length;
             count += found;
@@ -1090,8 +1086,8 @@ static PyObject *Str_levenshtein(PyObject *self, PyObject *args, PyObject *kwarg
         return NULL;
     }
 
-    levenshtein_distance_t small_bound = (levenshtein_distance_t)bound;
-    levenshtein_distance_t distance =
+    sz_size_t small_bound = (sz_size_t)bound;
+    sz_size_t distance =
         sz_levenshtein(str1.start, str1.length, str2.start, str2.length, small_bound, temporary_memory.start);
 
     return PyLong_FromLong(distance);
@@ -1183,8 +1179,8 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
     else { Py_RETURN_FALSE; }
 }
 
-static Strs *Str_split_(
-    PyObject *parent, sz_string_view_t text, sz_string_view_t separator, int keepseparator, Py_ssize_t maxsplit) {
+static Strs *Str_split_(PyObject *parent, sz_string_view_t text, sz_string_view_t separator, int keepseparator,
+                        Py_ssize_t maxsplit) {
 
     // Create Strs object
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
@@ -1213,8 +1209,7 @@ static Strs *Str_split_(
     // Iterate through string, keeping track of the
     sz_size_t last_start = 0;
     while (last_start <= text.length && offsets_count < maxsplit) {
-        sz_string_start_t match =
-            sz_find_substring(text.start + last_start, text.length - last_start, separator.start, separator.length);
+        sz_cptr_t match = sz_find(text.start + last_start, text.length - last_start, separator.start, separator.length);
         sz_size_t offset_in_remaining = match ? match - text.start - last_start : text.length - last_start;
 
         // Reallocate offsets array if needed
@@ -1555,9 +1550,7 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
     Py_RETURN_NONE;
 }
 
-static sz_bool_t Strs_sort_(Strs *self,
-                            sz_string_view_t **parts_output,
-                            sz_size_t **order_output,
+static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_size_t **order_output,
                             sz_size_t *count_output) {
 
     // Change the layout
