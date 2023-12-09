@@ -3,15 +3,26 @@
 # comparing the outputs of different libraries.
 #
 # Downloading commonly used datasets:
-# !wget --no-clobber -O ./leipzig1M.txt https://introcs.cs.princeton.edu/python/42sort/leipzig1m.txt
+#
+#   !wget --no-clobber -O ./leipzig1M.txt https://introcs.cs.princeton.edu/python/42sort/leipzig1m.txt
 #
 # Install the libraries:
-# !pip install python-levenshtein  # 4.8 M/mo: https://github.com/maxbachmann/python-Levenshtein
-# !pip install levenshtein # 4.2 M/mo: https://github.com/maxbachmann/Levenshtein
-# !pip install jellyfish # 2.3 M/mo: https://github.com/jamesturk/jellyfish/
-# !pip install editdistance # 700 k/mo: https://github.com/roy-ht/editdistance
-# !pip install distance # 160 k/mo: https://github.com/doukremt/distance
-# !pip install polyleven # 34 k/mo: https://github.com/fujimotos/polyleven
+#
+#   !pip install python-levenshtein  # 4.8 M/mo: https://github.com/maxbachmann/python-Levenshtein
+#   !pip install levenshtein # 4.2 M/mo: https://github.com/maxbachmann/Levenshtein
+#   !pip install jellyfish # 2.3 M/mo: https://github.com/jamesturk/jellyfish/
+#   !pip install editdistance # 700 k/mo: https://github.com/roy-ht/editdistance
+#   !pip install distance # 160 k/mo: https://github.com/doukremt/distance
+#   !pip install polyleven # 34 k/mo: https://github.com/fujimotos/polyleven
+#
+# Typical results may be:
+#
+#   Fuzzy test passed. All libraries returned consistent results.
+#   stringzilla: took 375.74 seconds ~ 0.029 GB/s - checksum is 12,705,381,903
+#   polyleven: took 432.75 seconds ~ 0.025 GB/s - checksum is 12,705,381,903
+#   levenshtein: took 768.54 seconds ~ 0.014 GB/s - checksum is 12,705,381,903
+#   editdistance: took 1186.16 seconds ~ 0.009 GB/s - checksum is 12,705,381,903
+#   jellyfish: took 1292.72 seconds ~ 0.008 GB/s - checksum is 12,705,381,903
 
 import time
 import random

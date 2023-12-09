@@ -40,9 +40,7 @@ static int has_under_four_chars(sz_sequence_t const *array_c, sz_size_t i) {
 #pragma endregion
 
 void populate_from_file( //
-    char const *path,
-    strings_t &strings,
-    std::size_t limit = std::numeric_limits<std::size_t>::max()) {
+    char const *path, strings_t &strings, std::size_t limit = std::numeric_limits<std::size_t>::max()) {
 
     std::ifstream f(path, std::ios::in);
     std::string s;
@@ -64,12 +62,11 @@ void populate_with_test(strings_t &strings) {
 
 constexpr size_t offset_in_word = 0;
 
-inline static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
+static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     // What if we take up-to 4 first characters and the index
     for (size_t i = 0; i != strings.size(); ++i)
-        std::memcpy((char *)&order[i] + offset_in_word,
-                    strings[order[i]].c_str(),
+        std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
                     std::min(strings[order[i]].size(), 4ul));
 
     std::sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
@@ -105,35 +102,11 @@ int hybrid_sort_c_compare_strings(void *arg, const void *a, const void *b) {
     return res ? res : (int)(len_a - len_b);
 }
 
-sz_size_t hybrid_sort_c(sz_sequence_t *sequence) {
-    // Copy up to 4 first characters into the 'order' array.
-    for (sz_size_t i = 0; i < sequence->count; ++i) {
-        const char *str = sequence->get_start(sequence, sequence->order[i]);
-        sz_size_t len = sequence->get_length(sequence, sequence->order[i]);
-        len = len > 4 ? 4 : len;
-        memcpy((char *)&sequence->order[i] + sizeof(sz_size_t) - 4, str, len);
-    }
-
-    // Sort based on the first 4 bytes.
-    qsort(sequence->order, sequence->count, sizeof(sz_size_t), hybrid_sort_c_compare_uint32_t);
-
-    // Clear the 4 bytes used for the initial sort.
-    for (sz_size_t i = 0; i < sequence->count; ++i) {
-        memset((char *)&sequence->order[i] + sizeof(sz_size_t) - 4, 0, 4);
-    }
-
-    // Sort the full strings.
-    qsort_r(sequence->order, sequence->count, sizeof(sz_size_t), sequence, hybrid_sort_c_compare_strings);
-
-    return sequence->count;
-}
-
-inline static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
+static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     // What if we take up-to 4 first characters and the index
     for (size_t i = 0; i != strings.size(); ++i)
-        std::memcpy((char *)&order[i] + offset_in_word,
-                    strings[order[i]].c_str(),
+        std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
                     std::min(strings[order[i]].size(), 4ul));
 
     std::stable_sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
@@ -155,9 +128,8 @@ void expect_partitioned_by_length(strings_t const &strings, permute_t const &per
 }
 
 void expect_sorted(strings_t const &strings, permute_t const &permute) {
-    if (!std::is_sorted(permute.begin(), permute.end(), [&](std::size_t i, std::size_t j) {
-            return strings[i] < strings[j];
-        }))
+    if (!std::is_sorted(permute.begin(), permute.end(),
+                        [&](std::size_t i, std::size_t j) { return strings[i] < strings[j]; }))
         throw std::runtime_error("Sorting failed!");
 }
 
@@ -226,28 +198,25 @@ int main(int, char const **) {
     };
 
     // Search substring
-    for (std::size_t needle_len = 1; needle_len <= 0; ++needle_len) {
+    for (std::size_t needle_len = 1; needle_len <= 5; ++needle_len) {
         std::string needle(needle_len, '\4');
         std::printf("---- Needle length: %zu\n", needle_len);
         bench_search("std::search", full_text, [&]() mutable {
             return std::search(full_text.begin(), full_text.end(), needle.begin(), needle.end()) - full_text.begin();
         });
-        bench_search("sz_find_substring_swar", full_text, [&]() mutable {
-            sz_string_start_t ptr =
-                sz_find_substring_swar(full_text.data(), full_text.size(), needle.data(), needle.size());
+        bench_search("sz_find_serial", full_text, [&]() mutable {
+            sz_cptr_t ptr = sz_find_serial(full_text.data(), full_text.size(), needle.data(), needle.size());
             return ptr ? ptr - full_text.data() : full_text.size();
         });
 #if defined(__ARM_NEON)
-        bench_search("sz_find_substring_neon", full_text, [&]() mutable {
-            sz_string_start_t ptr =
-                sz_find_substring_neon(full_text.data(), full_text.size(), needle.data(), needle.size());
+        bench_search("sz_find_neon", full_text, [&]() mutable {
+            sz_cptr_t ptr = sz_find_neon(full_text.data(), full_text.size(), needle.data(), needle.size());
             return ptr ? ptr - full_text.data() : full_text.size();
         });
 #endif
 #if defined(__AVX2__)
-        bench_search("sz_find_substring_avx2", full_text, [&]() mutable {
-            sz_string_start_t ptr =
-                sz_find_substring_avx2(full_text.data(), full_text.size(), needle.data(), needle.size());
+        bench_search("sz_find_avx2", full_text, [&]() mutable {
+            sz_cptr_t ptr = sz_find_avx2(full_text.data(), full_text.size(), needle.data(), needle.size());
             return ptr ? ptr - full_text.data() : full_text.size();
         });
 #endif
@@ -282,7 +251,7 @@ int main(int, char const **) {
     }
 
     // Sorting
-    if (true) {
+    if (false) {
         std::printf("---- Sorting:\n");
         bench_permute("std::sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
             std::sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
@@ -296,35 +265,12 @@ int main(int, char const **) {
             array.handle = &strings;
             array.get_start = get_start;
             array.get_length = get_length;
-            sz_sort(&array, nullptr);
+            sz_sort(&array);
         });
         expect_sorted(strings, permute_new);
 
-        bench_permute("sz_sort_introsort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            sz_sequence_t array;
-            array.order = permute.data();
-            array.count = strings.size();
-            array.handle = &strings;
-            array.get_start = get_start;
-            array.get_length = get_length;
-            sz_sort_introsort(&array, (sz_sequence_comparator_t)_sz_sort_compare_less_ascii);
-        });
-        expect_sorted(strings, permute_new);
-
-        bench_permute("hybrid_sort_c", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            sz_sequence_t array;
-            array.order = permute.data();
-            array.count = strings.size();
-            array.handle = &strings;
-            array.get_start = get_start;
-            array.get_length = get_length;
-            hybrid_sort_c(&array);
-        });
-        expect_sorted(strings, permute_new);
-
-        bench_permute("hybrid_sort_cpp", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            hybrid_sort_cpp(strings, permute.data());
-        });
+        bench_permute("hybrid_sort_cpp", strings, permute_new,
+                      [](strings_t const &strings, permute_t &permute) { hybrid_sort_cpp(strings, permute.data()); });
         expect_sorted(strings, permute_new);
 
         std::printf("---- Stable Sorting:\n");
@@ -334,9 +280,7 @@ int main(int, char const **) {
         expect_sorted(strings, permute_base);
 
         bench_permute(
-            "hybrid_stable_sort_cpp",
-            strings,
-            permute_base,
+            "hybrid_stable_sort_cpp", strings, permute_base,
             [](strings_t const &strings, permute_t &permute) { hybrid_stable_sort_cpp(strings, permute.data()); });
         expect_sorted(strings, permute_new);
         expect_same(permute_base, permute_new);

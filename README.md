@@ -122,7 +122,7 @@ levenshtein: int = sz.levenshtein("needle", "nidl")
 There is an ABI-stable C 99 interface, in case you have a database, an operating system, or a runtime you want to integrate with StringZilla.
 
 ```c
-#include "stringzilla.h"
+#include <stringzilla/stringzilla.h>
 
 // Initialize your haystack and needle
 sz_string_view_t haystack = {your_text, your_text_length};
@@ -130,10 +130,10 @@ sz_string_view_t needle = {your_subtext, your_subtext_length};
 
 // Perform string-level operations
 sz_size_t character_count = sz_count_char(haystack.start, haystack.length, "a");
-sz_size_t substring_position = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+sz_size_t substring_position = sz_find(haystack.start, haystack.length, needle.start, needle.length);
 
 // Hash strings
-sz_u32_t crc32 = sz_hash_crc32(haystack.start, haystack.length);
+sz_u32_t crc32 = sz_crc32(haystack.start, haystack.length);
 
 // Perform collection level operations
 sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
@@ -210,8 +210,8 @@ brew install libomp llvm
 
 # Compile and run tests
 cmake -B ./build_release \
-    -DCMAKE_C_COMPILER="/opt/homebrew/opt/llvm/bin/clang" \
-    -DCMAKE_CXX_COMPILER="/opt/homebrew/opt/llvm/bin/clang++" \
+    -DCMAKE_C_COMPILER="gcc-12" \
+    -DCMAKE_CXX_COMPILER="g++-12" \
     -DSTRINGZILLA_USE_OPENMP=1 \
     -DSTRINGZILLA_BUILD_TEST=1 \
     && \

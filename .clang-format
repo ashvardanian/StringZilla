@@ -1,5 +1,5 @@
 Language: Cpp
-BasedOnStyle:  LLVM
+BasedOnStyle: LLVM
 IndentWidth: 4
 TabWidth: 4
 NamespaceIndentation: All
@@ -44,9 +44,8 @@ BraceWrapping:
   SplitEmptyNamespace: false
   IndentBraces: false
 
-
 SortIncludes: true
-SortUsingDeclarations: true 
+SortUsingDeclarations: true
 
 SpaceAfterCStyleCast: false
 SpaceAfterLogicalNot: false
@@ -65,5 +64,7 @@ SpacesInContainerLiterals: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
 
-BinPackArguments: false
-BinPackParameters: false
+BinPackArguments: true
+BinPackParameters: true
+PenaltyBreakBeforeFirstCallParameter: 1
+PenaltyBreakArgument: 1
