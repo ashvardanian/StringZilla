@@ -5,12 +5,13 @@
  *  @brief  Annotation for the public API symbols.
  */
 #if defined(_WIN32) || defined(__CYGWIN__)
-#define SZ_EXPORT __declspec(dllexport)
+#define SZ_PUBLIC __declspec(dllexport)
 #elif __GNUC__ >= 4
-#define SZ_EXPORT __attribute__((visibility("default")))
+#define SZ_PUBLIC __attribute__((visibility("default")))
 #else
-#define SZ_EXPORT
+#define SZ_PUBLIC
 #endif
+#define SZ_INTERNAL inline static
 
 /**
  *  @brief  Generally `NULL` is coming from locale.h, stddef.h, stdio.h, stdlib.h, string.h, time.h,
@@ -34,6 +35,17 @@
     typedef struct {                                     \
         int static_assert_##name : (condition) ? 1 : -1; \
     } sz_static_assert_##name##_t
+
+/**
+ *  @brief  A misaligned load can be - trying to fetch eight consecutive bytes from an address
+ *          that is not divisble by eight.
+ *
+ *  Most platforms support it, but there is no industry standard way to check for those.
+ *  This value will mostly affect the performance of the serial (SWAR) backend.
+ */
+#ifndef SZ_USE_MISALIGNED_LOADS
+#define SZ_USE_MISALIGNED_LOADS 1
+#endif
 
 /*
  *  Hardware feature detection.
@@ -94,26 +106,47 @@ typedef unsigned sz_size_t;
 #endif
 SZ_STATIC_ASSERT(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
 
-typedef int sz_bool_t;               /// Only one relevant bit
-typedef int sz_order_t;              /// Only three possible states: <=>
 typedef unsigned char sz_u8_t;       /// Always 8 bits
 typedef unsigned short sz_u16_t;     /// Always 16 bits
-typedef unsigned sz_u32_t;           /// Always 32 bits
+typedef int sz_i32_t;                /// Always 32 bits
+typedef unsigned int sz_u32_t;       /// Always 32 bits
 typedef unsigned long long sz_u64_t; /// Always 64 bits
-typedef char *sz_ptr_t;              /// A type alias for `char *`
-typedef char const *sz_cptr_t;       /// A type alias for `char const *`
-typedef char sz_error_cost_t;        /// Character mismatch cost for fuzzy matching functions
+
+typedef char *sz_ptr_t;        /// A type alias for `char *`
+typedef char const *sz_cptr_t; /// A type alias for `char const *`
+typedef char sz_error_cost_t;  /// Character mismatch cost for fuzzy matching functions
+
+typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        /// Only one relevant bit
+typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; /// Only three possible states: <=>
 
 /**
  *  @brief  Computes the length of the NULL-termainted string. Equivalent to `strlen(a)` in LibC.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
+ *          Convenience method calling `sz_find_byte(text, 0)` under the hood.
  *
  *  @param text     String to enumerate.
  *  @return         Unsigned pointer-sized integer for the length of the string.
  */
-SZ_EXPORT sz_size_t sz_length_termainted(sz_cptr_t text);
-SZ_EXPORT sz_size_t sz_length_termainted_serial(sz_cptr_t text);
-SZ_EXPORT sz_size_t sz_length_termainted_avx512(sz_cptr_t text);
+SZ_PUBLIC sz_size_t sz_length_termainted(sz_cptr_t text);
+
+/**
+ *  @brief  Locates first matching substring. Equivalent to `strstr(haystack, needle)` in LibC.
+ *          Convenience method, that relies on the `sz_length_termainted` and `sz_find`.
+ *
+ *  @param haystack Haystack - the string to search in.
+ *  @param needle   Needle - substring to find.
+ *  @return         Address of the first match.
+ */
+SZ_PUBLIC sz_cptr_t sz_find_terminated(sz_cptr_t haystack, sz_cptr_t needle);
+
+/**
+ *  @brief  Estimates the relative order of two NULL-terminated strings. Equivalent to `strcmp(a, b)` in LibC.
+ *          Similar to calling `sz_length_termainted` and `sz_order`.
+ *
+ *  @param a        First null-terminated string to compare.
+ *  @param b        Second null-terminated string to compare.
+ *  @return         Negative if (a < b), positive if (a > b), zero if they are equal.
+ */
+SZ_PUBLIC sz_ordering_t sz_order_terminated(sz_cptr_t a, sz_cptr_t b);
 
 /**
  *  @brief  Computes the CRC32 hash of a string.
@@ -122,54 +155,67 @@ SZ_EXPORT sz_size_t sz_length_termainted_avx512(sz_cptr_t text);
  *  @param length   Number of bytes in the text.
  *  @return         32-bit hash value.
  */
-SZ_EXPORT sz_u32_t sz_crc32(sz_cptr_t text, sz_size_t length);
-SZ_EXPORT sz_u32_t sz_crc32_serial(sz_cptr_t text, sz_size_t length);
-SZ_EXPORT sz_u32_t sz_crc32_avx512(sz_cptr_t text, sz_size_t length);
-SZ_EXPORT sz_u32_t sz_crc32_sse42(sz_cptr_t text, sz_size_t length);
-SZ_EXPORT sz_u32_t sz_crc32_arm(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u32_t sz_crc32(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u32_t sz_crc32_serial(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u32_t sz_crc32_avx512(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u32_t sz_crc32_sse42(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u32_t sz_crc32_arm(sz_cptr_t text, sz_size_t length);
+
+typedef sz_u32_t (*sz_crc32_t)(sz_cptr_t, sz_size_t);
 
 /**
- *  @brief  Estimates the relative order of two same-length strings. Equivalent to `memcmp(a, b, length)` in LibC.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
+ *  @brief  Checks if two string are equal. Equivalent to `memcmp(a, b, length) == 0` in LibC.
+ *          Implement as special case of `sz_order` and works faster on platforms with cheap
+ *          unaligned access.
  *
  *  @param a        First string to compare.
  *  @param b        Second string to compare.
  *  @param length   Number of bytes in both strings.
- *  @return         Negative if (a < b), positive if (a > b), zero if they are equal.
+ *  @return         One if strings are equal, zero otherwise.
  */
-SZ_EXPORT sz_order_t sz_order(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
-SZ_EXPORT sz_order_t sz_order_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
-SZ_EXPORT sz_order_t sz_order_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_PUBLIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
+typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
 
 /**
- *  @brief  Estimates the relative order of two NULL-terminated strings. Equivalent to `strcmp(a, b)` in LibC.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
+ *  @brief  Estimates the relative order of two strings. Equivalent to `memcmp(a, b, length)` in LibC.
+ *          Can be used on different length strings.
  *
- *  @param a        First null-terminated string to compare.
- *  @param b        Second null-terminated string to compare.
- *  @param length   Number of bytes.
+ *  @param a        First string to compare.
+ *  @param a_length Number of bytes in the first string.
+ *  @param b        Second string to compare.
+ *  @param b_length Number of bytes in the second string.
  *  @return         Negative if (a < b), positive if (a > b), zero if they are equal.
  */
-SZ_EXPORT sz_order_t sz_order_terminated(sz_cptr_t a, sz_cptr_t b);
-SZ_EXPORT sz_order_t sz_order_terminated_serial(sz_cptr_t a, sz_cptr_t b);
-SZ_EXPORT sz_order_t sz_order_terminated_avx512(sz_cptr_t a, sz_cptr_t b);
+SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+
+typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /**
  *  @brief  Locates first matching byte in a string. Equivalent to `memchr(haystack, *needle, h_length)` in LibC.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
  *
  *  @param haystack Haystack - the string to search in.
  *  @param h_length Number of bytes in the haystack.
  *  @param needle   Needle - single-byte substring to find.
  *  @return         Address of the first match.
  */
-SZ_EXPORT sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-SZ_EXPORT sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-SZ_EXPORT sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+
+typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 
 /**
  *  @brief  Locates first matching substring. Similar to `strstr(haystack, needle)` in LibC, but requires known length.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
+ *          Uses different algorithms for different needle lengths and backends:
+ *
+ *  > Exact matching for 1-, 2-, 3-, and 4-character-long needles.
+ *  > Bitap (Baeza-Yates-Gonnet) algorithm for serial (SWAR) backend.
+ *  > Two-way heuristic for longer needles with SIMD backends.
  *
  *  @param haystack Haystack - the string to search in.
  *  @param h_length Number of bytes in the haystack.
@@ -177,85 +223,74 @@ SZ_EXPORT sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, 
  *  @param n_length Number of bytes in the needle.
  *  @return         Address of the first match.
  */
-SZ_EXPORT sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-SZ_EXPORT sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-SZ_EXPORT sz_cptr_t sz_find_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-SZ_EXPORT sz_cptr_t sz_find_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-SZ_EXPORT sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
-/**
- *  @brief  Locates first matching substring. Equivalent to `strstr(haystack, needle)` in LibC.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
- *
- *  @param haystack Haystack - the string to search in.
- *  @param needle   Needle - substring to find.
- *  @return         Address of the first match.
- */
-SZ_EXPORT sz_cptr_t sz_find_terminated(sz_cptr_t haystack, sz_cptr_t needle);
-SZ_EXPORT sz_cptr_t sz_find_terminated_serial(sz_cptr_t haystack, sz_cptr_t needle);
-SZ_EXPORT sz_cptr_t sz_find_terminated_avx512(sz_cptr_t haystack, sz_cptr_t needle);
+typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /**
  *  @brief  Enumerates matching character forming a prefix of given string.
  *          Equivalent to `strspn(text, accepted)` in LibC. Similar to `strcpan(text, rejected)`.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
  *
  *  @param text     String to be trimmed.
  *  @param accepted Set of accepted characters.
  *  @return         Number of bytes forming the prefix.
  */
-SZ_EXPORT sz_size_t sz_prefix_accepted(sz_cptr_t text, sz_cptr_t accepted);
-SZ_EXPORT sz_size_t sz_prefix_accepted_serial(sz_cptr_t text, sz_cptr_t accepted);
-SZ_EXPORT sz_size_t sz_prefix_accepted_avx512(sz_cptr_t text, sz_cptr_t accepted);
+SZ_PUBLIC sz_size_t sz_prefix_accepted(sz_cptr_t text, sz_size_t length, sz_cptr_t accepted, sz_size_t count);
+SZ_PUBLIC sz_size_t sz_prefix_accepted_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t accepted, sz_size_t count);
+SZ_PUBLIC sz_size_t sz_prefix_accepted_avx512(sz_cptr_t text, sz_size_t length, sz_cptr_t accepted, sz_size_t count);
+
+typedef sz_cptr_t (*sz_prefix_accepted_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /**
  *  @brief  Enumerates number non-matching character forming a prefix of given string.
  *          Equivalent to `strcspn(text, rejected)` in LibC. Similar to `strspn(text, accepted)`.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
  *
  *  @param text     String to be trimmed.
  *  @param rejected Set of rejected characters.
  *  @return         Number of bytes forming the prefix.
  */
-SZ_EXPORT sz_size_t sz_prefix_rejected(sz_cptr_t text, sz_cptr_t rejected);
-SZ_EXPORT sz_size_t sz_prefix_rejected_serial(sz_cptr_t text, sz_cptr_t rejected);
-SZ_EXPORT sz_size_t sz_prefix_rejected_avx512(sz_cptr_t text, sz_cptr_t rejected);
+SZ_PUBLIC sz_size_t sz_prefix_rejected(sz_cptr_t text, sz_size_t length, sz_cptr_t rejected, sz_size_t count);
+SZ_PUBLIC sz_size_t sz_prefix_rejected_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t rejected, sz_size_t count);
+SZ_PUBLIC sz_size_t sz_prefix_rejected_avx512(sz_cptr_t text, sz_size_t length, sz_cptr_t rejected, sz_size_t count);
+
+typedef sz_cptr_t (*sz_prefix_rejected_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /**
  *  @brief  Equivalent to `for (char & c : text) c = tolower(c)`.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
  *
  *  @param text     String to be normalized.
  *  @param length   Number of bytes in the string.
  *  @param result   Output string, can point to the same address as ::text.
  */
-SZ_EXPORT void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-SZ_EXPORT void sz_tolower_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-SZ_EXPORT void sz_tolower_avx512(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+SZ_PUBLIC void sz_tolower_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+SZ_PUBLIC void sz_tolower_avx512(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
 
 /**
  *  @brief  Equivalent to `for (char & c : text) c = toupper(c)`.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
  *
  *  @param text     String to be normalized.
  *  @param length   Number of bytes in the string.
  *  @param result   Output string, can point to the same address as ::text.
  */
-SZ_EXPORT void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-SZ_EXPORT void sz_toupper_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-SZ_EXPORT void sz_toupper_avx512(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+SZ_PUBLIC void sz_toupper_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+SZ_PUBLIC void sz_toupper_avx512(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
 
 /**
  *  @brief  Equivalent to `for (char & c : text) c = toascii(c)`.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
  *
  *  @param text     String to be normalized.
  *  @param length   Number of bytes in the string.
  *  @param result   Output string, can point to the same address as ::text.
  */
-SZ_EXPORT void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-SZ_EXPORT void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-SZ_EXPORT void sz_toascii_avx512(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+SZ_PUBLIC void sz_toascii_avx512(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
 
 /**
  *  @brief  Estimates the amount of temporary memory required to efficiently compute the edit distance.
@@ -264,7 +299,7 @@ SZ_EXPORT void sz_toascii_avx512(sz_cptr_t text, sz_size_t length, sz_ptr_t resu
  *  @param b_length Number of bytes in the second string.
  *  @return         Number of bytes to allocate for temporary memory.
  */
-SZ_EXPORT sz_size_t sz_levenshtein_memory_needed(sz_size_t a_length, sz_size_t b_length);
+SZ_PUBLIC sz_size_t sz_levenshtein_memory_needed(sz_size_t a_length, sz_size_t b_length);
 
 /**
  *  @brief  Computes Levenshtein edit-distance between two strings.
@@ -277,11 +312,11 @@ SZ_EXPORT sz_size_t sz_levenshtein_memory_needed(sz_size_t a_length, sz_size_t b
  *  @param buffer   Temporary memory buffer of size ::sz_levenshtein_memory_needed(a_length, b_length).
  *  @return         Edit distance.
  */
-SZ_EXPORT sz_size_t sz_levenshtein(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+SZ_PUBLIC sz_size_t sz_levenshtein(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                    sz_cptr_t buffer, sz_size_t bound);
-SZ_EXPORT sz_size_t sz_levenshtein_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+SZ_PUBLIC sz_size_t sz_levenshtein_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                           sz_cptr_t buffer, sz_size_t bound);
-SZ_EXPORT sz_size_t sz_levenshtein_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+SZ_PUBLIC sz_size_t sz_levenshtein_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                           sz_cptr_t buffer, sz_size_t bound);
 
 /**
@@ -300,13 +335,13 @@ SZ_EXPORT sz_size_t sz_levenshtein_avx512(sz_cptr_t a, sz_size_t a_length, sz_cp
  *  @param buffer   Temporary memory buffer of size ::sz_levenshtein_memory_needed(a_length, b_length).
  *  @return         Edit distance.
  */
-SZ_EXPORT sz_size_t sz_levenshtein_weighted(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+SZ_PUBLIC sz_size_t sz_levenshtein_weighted(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                             sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
                                             sz_cptr_t buffer, sz_size_t bound);
-SZ_EXPORT sz_size_t sz_levenshtein_weighted_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+SZ_PUBLIC sz_size_t sz_levenshtein_weighted_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                                    sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
                                                    sz_cptr_t buffer, sz_size_t bound);
-SZ_EXPORT sz_size_t sz_levenshtein_weighted_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+SZ_PUBLIC sz_size_t sz_levenshtein_weighted_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                                    sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
                                                    sz_cptr_t buffer, sz_size_t bound);
 
@@ -333,7 +368,7 @@ typedef struct sz_sequence_t {
  *          Expects ::offsets to contains `count + 1` entries, the last pointing at the end
  *          of the last string, indicating the total length of the ::tape.
  */
-SZ_EXPORT void sz_sequence_from_u32tape(sz_cptr_t *start, sz_u32_t const *offsets, sz_size_t count,
+SZ_PUBLIC void sz_sequence_from_u32tape(sz_cptr_t *start, sz_u32_t const *offsets, sz_size_t count,
                                         sz_sequence_t *sequence);
 
 /**
@@ -341,7 +376,7 @@ SZ_EXPORT void sz_sequence_from_u32tape(sz_cptr_t *start, sz_u32_t const *offset
  *          Expects ::offsets to contains `count + 1` entries, the last pointing at the end
  *          of the last string, indicating the total length of the ::tape.
  */
-SZ_EXPORT void sz_sequence_from_u64tape(sz_cptr_t *start, sz_u64_t const *offsets, sz_size_t count,
+SZ_PUBLIC void sz_sequence_from_u64tape(sz_cptr_t *start, sz_u64_t const *offsets, sz_size_t count,
                                         sz_sequence_t *sequence);
 
 /**
@@ -349,7 +384,7 @@ SZ_EXPORT void sz_sequence_from_u64tape(sz_cptr_t *start, sz_u64_t const *offset
  *          The algorithm is unstable, meaning that elements may change relative order, as long
  *          as they are in the right partition. This is the simpler algorithm for partitioning.
  */
-SZ_EXPORT sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate);
+SZ_PUBLIC sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate);
 
 /**
  *  @brief  Inplace `std::set_union` for two consecutive chunks forming the same continuous `sequence`.
@@ -357,24 +392,24 @@ SZ_EXPORT sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_
  *  @param partition The number of elements in the first sub-sequence in `sequence`.
  *  @param less Comparison function, to determine the lexicographic ordering.
  */
-SZ_EXPORT void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequence_comparator_t less);
+SZ_PUBLIC void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequence_comparator_t less);
 
 /**
  *  @brief  Sorting algorithm, combining Radix Sort for the first 32 bits of every word
  *          and a follow-up by a more conventional sorting procedure on equally prefixed parts.
  */
-SZ_EXPORT void sz_sort(sz_sequence_t *sequence);
+SZ_PUBLIC void sz_sort(sz_sequence_t *sequence);
 
 /**
  *  @brief  Partial sorting algorithm, combining Radix Sort for the first 32 bits of every word
  *          and a follow-up by a more conventional sorting procedure on equally prefixed parts.
  */
-SZ_EXPORT void sz_sort_partial(sz_sequence_t *sequence, sz_size_t n);
+SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t n);
 
 /**
  *  @brief  Intro-Sort algorithm that supports custom comparators.
  */
-SZ_EXPORT void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t less);
+SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t less);
 
 #pragma endregion
 
@@ -393,24 +428,34 @@ SZ_EXPORT void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #define sz_clz64 __builtin_clzll
 #endif
 
+/*
+ *  Efficiently computing the minimum and maximum of two or three values can be tricky.
+ *  The simple branching baseline would be:
+ *
+ *      x < y ? x : y                               // 1 conditional move
+ *
+ *  Branchless approach is well known for signed integers, but it doesn't apply to unsigned ones.
+ *  https://stackoverflow.com/questions/514435/templatized-branchless-int-max-min-function
+ *  https://graphics.stanford.edu/~seander/bithacks.html#IntegerMinOrMax
+ *  Using only bitshifts for singed integers it would be:
+ *
+ *      y + ((x - y) & (x - y) >> 31)               // 4 unique operations
+ *
+ *  Alternatively, for any integers using multiplication:
+ *
+ *      (x > y) * y + (x <= y) * x                  // 5 operations
+ *
+ *  Alternatively, to avoid multiplication:
+ *
+ *      x & ~((x < y) - 1) + y & ((x < y) - 1)      // 6 unique operations
+ */
 #define sz_min_of_two(x, y) (x < y ? x : y)
 #define sz_min_of_three(x, y, z) sz_min_of_two(x, sz_min_of_two(y, z))
 
 /**
- *  @brief Load a 64-bit unsigned integer from a potentially unaligned pointer.
- *
- *  @note This function uses compiler-specific attributes or keywords to
- *        ensure correct and efficient unaligned loads. It's designed to work
- *        with both MSVC and GCC/Clang.
+ *  @brief Branchless minimum function for two integers.
  */
-inline static sz_u64_t sz_u64_unaligned_load(void const *ptr) {
-#ifdef _MSC_VER
-    return *((__unaligned sz_u64_t *)ptr);
-#else
-    __attribute__((aligned(1))) sz_u64_t const *uptr = (sz_u64_t const *)ptr;
-    return *uptr;
-#endif
-}
+inline static sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
 
 /**
  *  @brief Reverse the byte order of a 64-bit unsigned integer.
@@ -508,6 +553,16 @@ typedef struct sz_string_view_t {
     sz_cptr_t start;
     sz_size_t length;
 } sz_string_view_t;
+
+/**
+ *  @brief  Helper structure to simpify work with 64-bit words.
+ */
+typedef union sz_u64_parts_t {
+    sz_u64_t u64;
+    sz_u32_t u32s[2];
+    sz_u16_t u16s[4];
+    sz_u8_t u8s[8];
+} sz_u64_parts_t;
 
 #pragma endregion
 

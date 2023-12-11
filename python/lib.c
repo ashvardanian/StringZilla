@@ -144,11 +144,11 @@ typedef struct {
 
 #pragma region Helpers
 
-SZ_EXPORT sz_cptr_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
+SZ_PUBLIC sz_cptr_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].start;
 }
 
-SZ_EXPORT sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
+SZ_PUBLIC sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].length;
 }
 

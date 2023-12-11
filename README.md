@@ -199,7 +199,7 @@ cibuildwheel --platform linux
 ### Compiling C++ Tests
 
 ```sh
-cmake -B ./build_release -DSTRINGZILLA_BUILD_TEST=1 && make -C ./build_release -j && ./build_release/stringzilla_test
+cmake -B ./build_release -DSTRINGZILLA_BUILD_TEST=1 && make -C ./build_release -j && ./build_release/stringzilla_bench
 ```
 
 On MacOS it's recommended to use non-default toolchain:
@@ -215,7 +215,7 @@ cmake -B ./build_release \
     -DSTRINGZILLA_USE_OPENMP=1 \
     -DSTRINGZILLA_BUILD_TEST=1 \
     && \
-    make -C ./build_release -j && ./build_release/stringzilla_test
+    make -C ./build_release -j && ./build_release/stringzilla_bench
 ```
 
 ## License 📜

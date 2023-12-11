@@ -69,20 +69,20 @@ if(STRINGZILLA_INSTALL)
 endif()
 
 if(${STRINGZILLA_BUILD_TEST} OR ${STRINGZILLA_BUILD_BENCHMARK})
-  add_executable(stringzilla_test scripts/test.cpp)
-  target_link_libraries(stringzilla_test PRIVATE ${STRINGZILLA_TARGET_NAME})
-  set_target_properties(stringzilla_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                                    ${CMAKE_BINARY_DIR})
-  target_link_options(stringzilla_test PRIVATE
+  add_executable(stringzilla_bench scripts/bench_substring.cpp)
+  target_link_libraries(stringzilla_bench PRIVATE ${STRINGZILLA_TARGET_NAME})
+  set_target_properties(stringzilla_bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+                                                     ${CMAKE_BINARY_DIR})
+  target_link_options(stringzilla_bench PRIVATE
                       "-Wl,--unresolved-symbols=ignore-all")
 
-  # Check for compiler and set -march=native flag for stringzilla_test
+  # Check for compiler and set -march=native flag for stringzilla_bench
   if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID}
                                                 MATCHES "Clang")
-    target_compile_options(stringzilla_test PRIVATE "-march=native")
+    target_compile_options(stringzilla_bench PRIVATE "-march=native")
     target_compile_options(${STRINGZILLA_TARGET_NAME} PRIVATE "-march=native")
   elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
-    target_compile_options(stringzilla_test PRIVATE "-xHost")
+    target_compile_options(stringzilla_bench PRIVATE "-xHost")
     target_compile_options(${STRINGZILLA_TARGET_NAME} PRIVATE "-xHost")
   elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
     # For MSVC or other compilers, you may want to specify different flags or
@@ -94,6 +94,6 @@ if(${STRINGZILLA_BUILD_TEST} OR ${STRINGZILLA_BUILD_BENCHMARK})
                                             3.13)
     include(CTest)
     enable_testing()
-    add_test(NAME stringzilla_test COMMAND stringzilla_test)
+    add_test(NAME stringzilla_bench COMMAND stringzilla_bench)
   endif()
 endif()

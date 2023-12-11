@@ -9,7 +9,7 @@
  *          was practically more efficient than loading once and shifting around, as introduces
  *          less data dependencies.
  */
-SZ_EXPORT sz_cptr_t sz_find_neon(sz_cptr_t const haystack, sz_size_t const haystack_length, sz_cptr_t const needle,
+SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t const haystack, sz_size_t const haystack_length, sz_cptr_t const needle,
                                  sz_size_t const needle_length) {
 
     // Precomputed constants
@@ -71,7 +71,7 @@ SZ_EXPORT sz_cptr_t sz_find_neon(sz_cptr_t const haystack, sz_size_t const hayst
 #if SZ_USE_ARM_CRC32
 #include <arm_acle.h>
 
-SZ_EXPORT sz_u32_t sz_crc32_arm(sz_cptr_t start, sz_size_t length) {
+SZ_PUBLIC sz_u32_t sz_crc32_arm(sz_cptr_t start, sz_size_t length) {
     sz_u32_t crc = 0xFFFFFFFF;
     sz_cptr_t const end = start + length;
 

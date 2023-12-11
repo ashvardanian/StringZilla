@@ -9,7 +9,7 @@ void _sz_swap_order(sz_u64_t *a, sz_u64_t *b) {
     *b = t;
 }
 
-SZ_EXPORT sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate) {
+SZ_PUBLIC sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate) {
 
     sz_size_t matches = 0;
     while (matches != sequence->count && predicate(sequence, sequence->order[matches])) ++matches;
@@ -21,7 +21,7 @@ SZ_EXPORT sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_
     return matches;
 }
 
-SZ_EXPORT void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequence_comparator_t less) {
+SZ_PUBLIC void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequence_comparator_t less) {
 
     sz_size_t start_b = partition + 1;
 
@@ -162,7 +162,7 @@ void _sz_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_si
     _sz_introsort(sequence, less, right + 1, last, depth);
 }
 
-SZ_EXPORT void sz_sort_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
+SZ_PUBLIC void sz_sort_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
     sz_size_t depth_limit = 2 * sz_log2i(sequence->count);
     _sz_introsort(sequence, less, 0, sequence->count, depth_limit);
 }
@@ -215,10 +215,10 @@ sz_bool_t _sz_sort_is_less(sz_sequence_t *sequence, sz_size_t i_key, sz_size_t j
     sz_cptr_t j_str = sequence->get_start(sequence, j_key);
     sz_size_t i_len = sequence->get_length(sequence, i_key);
     sz_size_t j_len = sequence->get_length(sequence, j_key);
-    return sz_order(i_str, j_str, sz_min_of_two(i_len, j_len)) > 0 ? 0 : 1;
+    return sz_order(i_str, i_len, j_str, j_len) > 0 ? 0 : 1;
 }
 
-SZ_EXPORT void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_length) {
+SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_length) {
 
     // Export up to 4 bytes into the `sequence` bits themselves
     for (sz_size_t i = 0; i != sequence->count; ++i) {
@@ -233,4 +233,4 @@ SZ_EXPORT void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_
     _sz_sort_recursion(sequence, 0, 32, (sz_sequence_comparator_t)_sz_sort_is_less, partial_order_length);
 }
 
-SZ_EXPORT void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequence->count); }
+SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequence->count); }
