@@ -1,47 +1,121 @@
 #include <stringzilla/stringzilla.h>
 
-SZ_EXPORT sz_size_t sz_length_termainted_serial(sz_cptr_t text) {
-    sz_cptr_t start = text;
-    while (*text != '\0') ++text;
-    return text - start;
-}
-
-sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    sz_cptr_t const a_end = a + length;
-    while (a != a_end && *a == *b) a++, b++;
-    return a_end == a;
+/**
+ *  @brief Load a 16-bit unsigned integer from a potentially unaligned pointer, can be expensive on some platforms.
+ */
+SZ_INTERNAL sz_u16_t sz_u16_unaligned_load(void const *ptr) {
+#ifdef _MSC_VER
+    return *((__unaligned sz_u16_t *)ptr);
+#else
+    __attribute__((aligned(1))) sz_u16_t const *uptr = (sz_u16_t const *)ptr;
+    return *uptr;
+#endif
 }
 
 /**
- *  @brief  Byte-level lexicographic comparison of two strings.
- *          Doesn't provide major performance improvements, but helps avoid the LibC dependency.
+ *  @brief Load a 32-bit unsigned integer from a potentially unaligned pointer, can be expensive on some platforms.
  */
-sz_bool_t sz_is_less_ascii(sz_cptr_t a, sz_size_t const a_length, sz_cptr_t b, sz_size_t const b_length) {
-
-    sz_size_t min_length = (a_length < b_length) ? a_length : b_length;
-    sz_cptr_t const min_end = a + min_length;
-    while (a + 8 <= min_end && sz_u64_unaligned_load(a) == sz_u64_unaligned_load(b)) a += 8, b += 8;
-    while (a != min_end && *a == *b) a++, b++;
-    return a != min_end ? (*a < *b) : (a_length < b_length);
+SZ_INTERNAL sz_u32_t sz_u32_unaligned_load(void const *ptr) {
+#ifdef _MSC_VER
+    return *((__unaligned sz_u32_t *)ptr);
+#else
+    __attribute__((aligned(1))) sz_u32_t const *uptr = (sz_u32_t const *)ptr;
+    return *uptr;
+#endif
 }
 
-SZ_EXPORT sz_order_t sz_order_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    sz_cptr_t end = a + length;
-    for (; a != end; ++a, ++b) {
-        if (*a != *b) { return (*a < *b) ? -1 : 1; }
-    }
-    return 0;
+/**
+ *  @brief Load a 64-bit unsigned integer from a potentially unaligned pointer, can be expensive on some platforms.
+ */
+SZ_INTERNAL sz_u64_t sz_u64_unaligned_load(void const *ptr) {
+#ifdef _MSC_VER
+    return *((__unaligned sz_u64_t *)ptr);
+#else
+    __attribute__((aligned(1))) sz_u64_t const *uptr = (sz_u64_t const *)ptr;
+    return *uptr;
+#endif
 }
 
-SZ_EXPORT sz_order_t sz_order_terminated_serial(sz_cptr_t a, sz_cptr_t b) {
-    for (; *a != '\0' && *b != '\0'; ++a, ++b) {
-        if (*a != *b) { return (*a < *b) ? -1 : 1; }
+/**
+ *  @brief  Byte-level equality comparison between two strings.
+ *          If unaligned loads are allowed, uses a switch-table to avoid loops on short strings.
+ */
+SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+#if SZ_USE_MISALIGNED_LOADS
+sz_equal_serial_cycle:
+    switch (length) {
+    case 0: return 1;
+    case 1: return a[0] == b[0];
+    case 2: return (sz_u16_unaligned_load(a) == sz_u16_unaligned_load(b));
+    case 3: return (sz_u16_unaligned_load(a) == sz_u16_unaligned_load(b)) & (a[2] == b[2]);
+    case 4: return (sz_u32_unaligned_load(a) == sz_u32_unaligned_load(b));
+    case 5: return (sz_u32_unaligned_load(a) == sz_u32_unaligned_load(b)) & (a[4] == b[4]);
+    case 6:
+        return (sz_u32_unaligned_load(a) == sz_u32_unaligned_load(b)) &
+               (sz_u16_unaligned_load(a + 4) == sz_u16_unaligned_load(b + 4));
+    case 7:
+        return (sz_u32_unaligned_load(a) == sz_u32_unaligned_load(b)) &
+               (sz_u16_unaligned_load(a + 4) == sz_u16_unaligned_load(b + 4)) & (a[6] == b[6]);
+    case 8: return sz_u64_unaligned_load(a) == sz_u64_unaligned_load(b);
+    default:
+        if (sz_u64_unaligned_load(a) != sz_u64_unaligned_load(b)) return 0;
+        a += 8, b += 8, length -= 8;
+        goto sz_equal_serial_cycle;
     }
+#else
+    sz_cptr_t const a_end = a + length;
+    while (a != a_end && *a == *b) a++, b++;
+    return a_end == a;
+#endif
+}
+
+/**
+ *  @brief  Byte-level lexicographic order comparison of two strings.
+ *          If unaligned loads are allowed, uses a switch-table to avoid loops on short strings.
+ */
+SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+    sz_ordering_t ordering_lookup[2] = {sz_greater_k, sz_less_k};
+#if SZ_USE_MISALIGNED_LOADS
+    sz_bool_t a_shorter = a_length < b_length;
+    sz_size_t min_length = a_shorter ? a_length : b_length;
+    sz_cptr_t min_end = a + min_length;
+    for (; a + 8 <= min_end; a += 8, b += 8) {
+        sz_u64_t a_vec = sz_u64_unaligned_load(a);
+        sz_u64_t b_vec = sz_u64_unaligned_load(b);
+        if (a_vec != b_vec) return ordering_lookup[sz_u64_byte_reverse(a_vec) < sz_u64_byte_reverse(b_vec)];
+    }
+#endif
+    for (; a != min_end; ++a, ++b)
+        if (*a != *b) return ordering_lookup[*a < *b];
+    return a_length != b_length ? ordering_lookup[a_shorter] : sz_equal_k;
+}
+
+/**
+ *  @brief  Byte-level lexicographic order comparison of two NULL-terminated strings.
+ */
+SZ_PUBLIC sz_ordering_t sz_order_terminated(sz_cptr_t a, sz_cptr_t b) {
+    sz_ordering_t ordering_lookup[2] = {sz_greater_k, sz_less_k};
+    for (; *a != '\0' && *b != '\0'; ++a, ++b)
+        if (*a != *b) return ordering_lookup[*a < *b];
 
     // Handle strings of different length
-    if (*a == '\0' && *b == '\0') { return 0; } // Both strings ended, they are equal
-    else if (*a == '\0') { return -1; }         // String 'a' ended first, it is smaller
-    else { return 1; }                          // String 'b' ended first, 'a' is larger
+    if (*a == '\0' && *b == '\0') { return sz_equal_k; } // Both strings ended, they are equal
+    else if (*a == '\0') { return sz_less_k; }           // String 'a' ended first, it is smaller
+    else { return sz_greater_k; }                        // String 'b' ended first, 'a' is larger
+}
+
+/**
+ *  @brief  Byte-level equality comparison between two 64-bit integers.
+ *  @return 64-bit integer, where every top bit in each byte signifies a match.
+ */
+SZ_INTERNAL sz_u64_t sz_u64_each_byte_equal(sz_u64_t a, sz_u64_t b) {
+    sz_u64_t match_indicators = ~(a ^ b);
+    // The match is valid, if every bit within each byte is set.
+    // For that take the bottom 7 bits of each byte, add one to them,
+    // and if this sets the top bit to one, then all the 7 bits are ones as well.
+    match_indicators = ((match_indicators & 0x7F7F7F7F7F7F7F7Full) + 0x0101010101010101ull) &
+                       ((match_indicators & 0x8080808080808080ull));
+    return match_indicators;
 }
 
 /**
@@ -49,7 +123,7 @@ SZ_EXPORT sz_order_t sz_order_terminated_serial(sz_cptr_t a, sz_cptr_t b) {
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *          Identical to `memchr(haystack, needle[0], haystack_length)`.
  */
-SZ_EXPORT sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
 
     sz_cptr_t text = haystack;
     sz_cptr_t const end = haystack + haystack_length;
@@ -58,19 +132,13 @@ SZ_EXPORT sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_l
     for (; ((sz_size_t)text & 7ull) && text < end; ++text)
         if (*text == *needle) return text;
 
-    // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
-    sz_u64_t nnnnnnnn = *needle;
-    nnnnnnnn |= nnnnnnnn << 8;  // broadcast `needle` into `nnnnnnnn`
-    nnnnnnnn |= nnnnnnnn << 16; // broadcast `needle` into `nnnnnnnn`
-    nnnnnnnn |= nnnnnnnn << 32; // broadcast `needle` into `nnnnnnnn`
+    // Broadcast the needle into every byte of a 64-bit integer to use SWAR
+    // techniques and process eight characters at a time.
+    sz_u64_parts_t needle_vec;
+    needle_vec.u64 = (sz_u64_t)needle[0] * 0x0101010101010101ull;
     for (; text + 8 <= end; text += 8) {
         sz_u64_t text_slice = *(sz_u64_t const *)text;
-        sz_u64_t match_indicators = ~(text_slice ^ nnnnnnnn);
-        match_indicators &= match_indicators >> 1;
-        match_indicators &= match_indicators >> 2;
-        match_indicators &= match_indicators >> 4;
-        match_indicators &= 0x0101010101010101;
-
+        sz_u64_t match_indicators = sz_u64_each_byte_equal(text_slice, needle_vec.u64);
         if (match_indicators != 0) return text + sz_ctz64(match_indicators) / 8;
     }
 
@@ -84,7 +152,7 @@ SZ_EXPORT sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_l
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *          Identical to `memrchr(haystack, needle[0], haystack_length)`.
  */
-sz_cptr_t sz_rfind_1byte_serial(sz_cptr_t const haystack, sz_size_t const haystack_length, sz_cptr_t const needle) {
+sz_cptr_t sz_rfind_byte_serial(sz_cptr_t const haystack, sz_size_t const haystack_length, sz_cptr_t const needle) {
 
     sz_cptr_t const end = haystack + haystack_length;
     sz_cptr_t text = end - 1;
@@ -93,25 +161,33 @@ sz_cptr_t sz_rfind_1byte_serial(sz_cptr_t const haystack, sz_size_t const haysta
     for (; ((sz_size_t)text & 7ull) && text >= haystack; --text)
         if (*text == *needle) return text;
 
-    // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
-    sz_u64_t nnnnnnnn = *needle;
-    nnnnnnnn |= nnnnnnnn << 8;  // broadcast `needle` into `nnnnnnnn`
-    nnnnnnnn |= nnnnnnnn << 16; // broadcast `needle` into `nnnnnnnn`
-    nnnnnnnn |= nnnnnnnn << 32; // broadcast `needle` into `nnnnnnnn`
+    // Broadcast the needle into every byte of a 64-bit integer to use SWAR
+    // techniques and process eight characters at a time.
+    sz_u64_parts_t needle_vec;
+    needle_vec.u64 = (sz_u64_t)needle[0] * 0x0101010101010101ull;
     for (; text - 8 >= haystack; text -= 8) {
         sz_u64_t text_slice = *(sz_u64_t const *)text;
-        sz_u64_t match_indicators = ~(text_slice ^ nnnnnnnn);
-        match_indicators &= match_indicators >> 1;
-        match_indicators &= match_indicators >> 2;
-        match_indicators &= match_indicators >> 4;
-        match_indicators &= 0x0101010101010101;
-
+        sz_u64_t match_indicators = sz_u64_each_byte_equal(text_slice, needle_vec.u64);
         if (match_indicators != 0) return text - 8 + sz_clz64(match_indicators) / 8;
     }
 
     for (; text >= haystack; --text)
         if (*text == *needle) return text;
     return NULL;
+}
+
+/**
+ *  @brief  2Byte-level equality comparison between two 64-bit integers.
+ *  @return 64-bit integer, where every top bit in each 2byte signifies a match.
+ */
+SZ_INTERNAL sz_u64_t sz_u64_each_2byte_equal(sz_u64_t a, sz_u64_t b) {
+    sz_u64_t match_indicators = ~(a ^ b);
+    // The match is valid, if every bit within each 2byte is set.
+    // For that take the bottom 15 bits of each 2byte, add one to them,
+    // and if this sets the top bit to one, then all the 15 bits are ones as well.
+    match_indicators = ((match_indicators & 0x7FFF7FFF7FFF7FFFull) + 0x0001000100010001ull) &
+                       ((match_indicators & 0x8000800080008000ull));
+    return match_indicators;
 }
 
 /**
@@ -123,35 +199,20 @@ sz_cptr_t sz_find_2byte_serial(sz_cptr_t const haystack, sz_size_t const haystac
     sz_cptr_t text = haystack;
     sz_cptr_t const end = haystack + haystack_length;
 
-    // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)text & 7ull) && text + 2 <= end; ++text)
-        if (text[0] == needle[0] && text[1] == needle[1]) return text;
-
     // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
-    sz_u64_t nnnn = ((sz_u64_t)(needle[0]) << 0) | ((sz_u64_t)(needle[1]) << 8); // broadcast `needle` into `nnnn`
-    nnnn |= nnnn << 16;                                                          // broadcast `needle` into `nnnn`
-    nnnn |= nnnn << 32;                                                          // broadcast `needle` into `nnnn`
+    sz_u64_parts_t text_vec, needle_vec, matches_odd_vec, matches_even_vec;
+    needle_vec.u64 = 0;
+    needle_vec.u8s[0] = needle[0];
+    needle_vec.u8s[1] = needle[1];
+    needle_vec.u64 *= 0x0001000100010001ull;
+
     for (; text + 8 <= end; text += 7) {
-        sz_u64_t text_slice = *(sz_u64_t const *)text;
-        sz_u64_t even_indicators = ~(text_slice ^ nnnn);
-        sz_u64_t odd_indicators = ~((text_slice << 8) ^ nnnn);
+        text_vec.u64 = sz_u64_unaligned_load(text);
+        matches_even_vec.u64 = sz_u64_each_2byte_equal(text_vec.u64, needle_vec.u64);
+        matches_odd_vec.u64 = sz_u64_each_2byte_equal(text_vec.u64 >> 8, needle_vec.u64);
 
-        // For every even match - 2 char (16 bits) must be identical.
-        even_indicators &= even_indicators >> 1;
-        even_indicators &= even_indicators >> 2;
-        even_indicators &= even_indicators >> 4;
-        even_indicators &= even_indicators >> 8;
-        even_indicators &= 0x0001000100010001;
-
-        // For every odd match - 2 char (16 bits) must be identical.
-        odd_indicators &= odd_indicators >> 1;
-        odd_indicators &= odd_indicators >> 2;
-        odd_indicators &= odd_indicators >> 4;
-        odd_indicators &= odd_indicators >> 8;
-        odd_indicators &= 0x0001000100010000;
-
-        if (even_indicators + odd_indicators) {
-            sz_u64_t match_indicators = even_indicators | (odd_indicators >> 8);
+        if (matches_even_vec.u64 + matches_odd_vec.u64) {
+            sz_u64_t match_indicators = (matches_even_vec.u64 >> 8) | (matches_odd_vec.u64);
             return text + sz_ctz64(match_indicators) / 8;
         }
     }
@@ -285,8 +346,7 @@ sz_cptr_t sz_find_4byte_serial(sz_cptr_t const haystack, sz_size_t const haystac
 }
 
 /**
- *  @brief  Implements the Bitap also known as the shift-or, shift-and or Baeza-Yates-Gonnet
- *          algorithm, for exact string matching of patterns under 64-bytes long.
+ *  @brief  Bitap algo for exact matching of patterns under @b 64-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
 sz_cptr_t sz_find_under64byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -304,20 +364,64 @@ sz_cptr_t sz_find_under64byte_serial(sz_cptr_t haystack, sz_size_t haystack_leng
     return NULL;
 }
 
-SZ_EXPORT sz_cptr_t sz_find_serial(sz_cptr_t const haystack, sz_size_t const haystack_length, sz_cptr_t const needle,
+/**
+ *  @brief  Bitap algo for exact matching of patterns under @b 16-bytes long.
+ *          https://en.wikipedia.org/wiki/Bitap_algorithm
+ */
+sz_cptr_t sz_find_under16byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                     sz_size_t needle_length) {
+
+    sz_u16_t running_match = 0xFFFF;
+    sz_u16_t pattern_mask[256];
+    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFFFF; }
+    for (sz_size_t i = 0; i < needle_length; ++i) { pattern_mask[needle[i]] &= ~(1u << i); }
+    for (sz_size_t i = 0; i < haystack_length; ++i) {
+        running_match = (running_match << 1) | pattern_mask[haystack[i]];
+        if ((running_match & (1u << (needle_length - 1))) == 0) { return haystack + i - needle_length + 1; }
+    }
+
+    return NULL;
+}
+
+/**
+ *  @brief  Bitap algo for exact matching of patterns under @b 8-bytes long.
+ *          https://en.wikipedia.org/wiki/Bitap_algorithm
+ */
+sz_cptr_t sz_find_under8byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                    sz_size_t needle_length) {
+
+    sz_u8_t running_match = 0xFF;
+    sz_u8_t pattern_mask[256];
+    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFF; }
+    for (sz_size_t i = 0; i < needle_length; ++i) { pattern_mask[needle[i]] &= ~(1u << i); }
+    for (sz_size_t i = 0; i < haystack_length; ++i) {
+        running_match = (running_match << 1) | pattern_mask[haystack[i]];
+        if ((running_match & (1u << (needle_length - 1))) == 0) { return haystack + i - needle_length + 1; }
+    }
+
+    return NULL;
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t const haystack, sz_size_t const haystack_length, sz_cptr_t const needle,
                                    sz_size_t const needle_length) {
 
     if (haystack_length < needle_length) return NULL;
 
+    // For very short strings a lookup table for an optimized backend makes a lot of sense
     switch (needle_length) {
     case 0: return NULL;
     case 1: return sz_find_byte_serial(haystack, haystack_length, needle);
     case 2: return sz_find_2byte_serial(haystack, haystack_length, needle);
     case 3: return sz_find_3byte_serial(haystack, haystack_length, needle);
     case 4: return sz_find_4byte_serial(haystack, haystack_length, needle);
+    case 5:
+    case 6:
+    case 7:
+    case 8: return sz_find_under8byte_serial(haystack, haystack_length, needle, needle_length);
     }
 
     // For needle lengths up to 64, use the existing Bitap algorithm
+    if (needle_length <= 16) return sz_find_under16byte_serial(haystack, haystack_length, needle, needle_length);
     if (needle_length <= 64) return sz_find_under64byte_serial(haystack, haystack_length, needle, needle_length);
 
     // For longer needles, use Bitap for the first 64 bytes and then check the rest
@@ -327,8 +431,7 @@ SZ_EXPORT sz_cptr_t sz_find_serial(sz_cptr_t const haystack, sz_size_t const hay
         if (!found) return NULL;
 
         // Verify the remaining part of the needle
-        if (sz_order_serial(found + prefix_length, needle + prefix_length, needle_length - prefix_length) == 0)
-            return found;
+        if (sz_equal_serial(found + prefix_length, needle + prefix_length, needle_length - prefix_length)) return found;
 
         // Adjust the position
         i = found - haystack + prefix_length - 1;
@@ -337,17 +440,19 @@ SZ_EXPORT sz_cptr_t sz_find_serial(sz_cptr_t const haystack, sz_size_t const hay
     return NULL;
 }
 
-SZ_EXPORT sz_cptr_t sz_find_terminated_serial(sz_cptr_t haystack, sz_cptr_t needle) { return NULL; }
+SZ_PUBLIC sz_size_t sz_prefix_accepted_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t accepted, sz_size_t count) {
+    return 0;
+}
 
-SZ_EXPORT sz_size_t sz_prefix_accepted_serial(sz_cptr_t text, sz_cptr_t accepted) { return 0; }
+SZ_PUBLIC sz_size_t sz_prefix_rejected_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t rejected, sz_size_t count) {
+    return 0;
+}
 
-SZ_EXPORT sz_size_t sz_prefix_rejected_serial(sz_cptr_t text, sz_cptr_t rejected) { return 0; }
-
-SZ_EXPORT sz_size_t sz_levenshtein_memory_needed(sz_size_t _, sz_size_t b_length) {
+SZ_PUBLIC sz_size_t sz_levenshtein_memory_needed(sz_size_t _, sz_size_t b_length) {
     return (b_length + b_length + 2) * sizeof(sz_size_t);
 }
 
-SZ_EXPORT sz_size_t sz_levenshtein_serial(       //
+SZ_PUBLIC sz_size_t sz_levenshtein_serial(       //
     sz_cptr_t const a, sz_size_t const a_length, //
     sz_cptr_t const b, sz_size_t const b_length, //
     sz_cptr_t buffer, sz_size_t const bound) {
@@ -397,7 +502,7 @@ SZ_EXPORT sz_size_t sz_levenshtein_serial(       //
     return previous_distances[b_length] < bound ? previous_distances[b_length] : bound;
 }
 
-SZ_EXPORT sz_size_t sz_levenshtein_weighted_serial(   //
+SZ_PUBLIC sz_size_t sz_levenshtein_weighted_serial(   //
     sz_cptr_t const a, sz_size_t const a_length,      //
     sz_cptr_t const b, sz_size_t const b_length,      //
     sz_error_cost_t gap, sz_error_cost_t const *subs, //
@@ -438,7 +543,7 @@ SZ_EXPORT sz_size_t sz_levenshtein_weighted_serial(   //
         }
 
         // If the minimum distance in this row exceeded the bound, return early
-        if (min_distance > bound) return bound;
+        if (min_distance >= bound) return bound;
 
         // Swap previous_distances and current_distances pointers
         sz_size_t *temp = previous_distances;
@@ -446,10 +551,10 @@ SZ_EXPORT sz_size_t sz_levenshtein_weighted_serial(   //
         current_distances = temp;
     }
 
-    return previous_distances[b_length] <= bound ? previous_distances[b_length] : bound;
+    return previous_distances[b_length] < bound ? previous_distances[b_length] : bound;
 }
 
-SZ_EXPORT sz_u32_t sz_crc32_serial(sz_cptr_t start, sz_size_t length) {
+SZ_PUBLIC sz_u32_t sz_crc32_serial(sz_cptr_t start, sz_size_t length) {
     /*
      * The following CRC lookup table was generated automagically using the
      * following model parameters:
@@ -553,14 +658,14 @@ char sz_char_toupper(char c) {
     return *(char *)&upped[(int)c];
 }
 
-SZ_EXPORT void sz_tolower_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+SZ_PUBLIC void sz_tolower_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
     for (sz_cptr_t end = text + length; text != end; ++text, ++result) { *result = sz_char_tolower(*text); }
 }
 
-SZ_EXPORT void sz_toupper_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+SZ_PUBLIC void sz_toupper_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
     for (sz_cptr_t end = text + length; text != end; ++text, ++result) { *result = sz_char_toupper(*text); }
 }
 
-SZ_EXPORT void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
     for (sz_cptr_t end = text + length; text != end; ++text, ++result) { *result = *text & 0x7F; }
 }

@@ -1,14 +1,8 @@
 #include <stringzilla/stringzilla.h>
 
-SZ_EXPORT sz_size_t sz_length_termainted(sz_cptr_t text) {
-#ifdef __AVX512__
-    return sz_length_termainted_avx512(text);
-#else
-    return sz_length_termainted_serial(text);
-#endif
-}
+SZ_PUBLIC sz_size_t sz_length_termainted(sz_cptr_t text) { return sz_find_byte(text, ~0ull - 1ull, 0) - text; }
 
-SZ_EXPORT sz_u32_t sz_crc32(sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC sz_u32_t sz_crc32(sz_cptr_t text, sz_size_t length) {
 #ifdef __ARM_FEATURE_CRC32
     return sz_crc32_arm(text, length);
 #elif defined(__SSE4_2__)
@@ -20,23 +14,15 @@ SZ_EXPORT sz_u32_t sz_crc32(sz_cptr_t text, sz_size_t length) {
 #endif
 }
 
-SZ_EXPORT sz_order_t sz_order(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
 #ifdef __AVX512__
-    return sz_order_avx512(a, b, length);
+    return sz_order_avx512(a, a_length, b, b_length);
 #else
-    return sz_order_serial(a, b, length);
+    return sz_order_serial(a, a_length, b, b_length);
 #endif
 }
 
-SZ_EXPORT sz_order_t sz_order_terminated(sz_cptr_t a, sz_cptr_t b) {
-#ifdef __AVX512__
-    return sz_order_terminated_avx512(a, b);
-#else
-    return sz_order_terminated_serial(a, b);
-#endif
-}
-
-SZ_EXPORT sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
+SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
 #ifdef __AVX512__
     return sz_find_byte_avx512(haystack, h_length, needle);
 #else
@@ -44,7 +30,7 @@ SZ_EXPORT sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 #endif
 }
 
-SZ_EXPORT sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
+SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
 #ifdef __AVX512__
     return sz_find_avx512(haystack, h_length, needle, n_length);
 #elif defined(__AVX2__)
@@ -56,31 +42,27 @@ SZ_EXPORT sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t ne
 #endif
 }
 
-SZ_EXPORT sz_cptr_t sz_find_terminated(sz_cptr_t haystack, sz_cptr_t needle) {
+SZ_PUBLIC sz_cptr_t sz_find_terminated(sz_cptr_t haystack, sz_cptr_t needle) {
+    return sz_find(haystack, sz_length_termainted(haystack), needle, sz_length_termainted(needle));
+}
+
+SZ_PUBLIC sz_size_t sz_prefix_accepted(sz_cptr_t text, sz_size_t length, sz_cptr_t accepted, sz_size_t count) {
 #ifdef __AVX512__
-    return sz_find_terminated_avx512(haystack, needle);
+    return sz_prefix_accepted_avx512(text, length, accepted, count);
 #else
-    return sz_find_terminated_serial(haystack, needle);
+    return sz_prefix_accepted_serial(text, length, accepted, count);
 #endif
 }
 
-SZ_EXPORT sz_size_t sz_prefix_accepted(sz_cptr_t text, sz_cptr_t accepted) {
+SZ_PUBLIC sz_size_t sz_prefix_rejected(sz_cptr_t text, sz_size_t length, sz_cptr_t rejected, sz_size_t count) {
 #ifdef __AVX512__
-    return sz_prefix_accepted_avx512(text, accepted);
+    return sz_prefix_rejected_avx512(text, length, rejected, count);
 #else
-    return sz_prefix_accepted_serial(text, accepted);
+    return sz_prefix_rejected_serial(text, length, rejected, count);
 #endif
 }
 
-SZ_EXPORT sz_size_t sz_prefix_rejected(sz_cptr_t text, sz_cptr_t rejected) {
-#ifdef __AVX512__
-    return sz_prefix_rejected_avx512(text, rejected);
-#else
-    return sz_prefix_rejected_serial(text, rejected);
-#endif
-}
-
-SZ_EXPORT void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
 #ifdef __AVX512__
     sz_tolower_avx512(text, length, result);
 #else
@@ -88,7 +70,7 @@ SZ_EXPORT void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
 #endif
 }
 
-SZ_EXPORT void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
 #ifdef __AVX512__
     sz_toupper_avx512(text, length, result);
 #else
@@ -96,7 +78,7 @@ SZ_EXPORT void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
 #endif
 }
 
-SZ_EXPORT void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
 #ifdef __AVX512__
     sz_toascii_avx512(text, length, result);
 #else
@@ -104,7 +86,7 @@ SZ_EXPORT void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
 #endif
 }
 
-SZ_EXPORT sz_size_t sz_levenshtein(  //
+SZ_PUBLIC sz_size_t sz_levenshtein(  //
     sz_cptr_t a, sz_size_t a_length, //
     sz_cptr_t b, sz_size_t b_length, //
     sz_cptr_t buffer, sz_size_t bound) {
@@ -115,7 +97,7 @@ SZ_EXPORT sz_size_t sz_levenshtein(  //
 #endif
 }
 
-SZ_EXPORT sz_size_t sz_levenshtein_weighted(          //
+SZ_PUBLIC sz_size_t sz_levenshtein_weighted(          //
     sz_cptr_t a, sz_size_t a_length,                  //
     sz_cptr_t b, sz_size_t b_length,                  //
     sz_error_cost_t gap, sz_error_cost_t const *subs, //

@@ -119,7 +119,8 @@
     "filesystem": "cpp",
     "stringzilla.h": "c",
     "__memory": "c",
-    "charconv": "c"
+    "charconv": "c",
+    "format": "cpp"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "cSpell.words": [

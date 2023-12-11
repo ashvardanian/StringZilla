@@ -3,7 +3,7 @@
 #if SZ_USE_X86_SSE42
 #include <x86intrin.h>
 
-SZ_EXPORT sz_u32_t sz_crc32_sse42(sz_cptr_t start, sz_size_t length) {
+SZ_PUBLIC sz_u32_t sz_crc32_sse42(sz_cptr_t start, sz_size_t length) {
     sz_u32_t crc = 0xFFFFFFFF;
     sz_cptr_t const end = start + length;
 
