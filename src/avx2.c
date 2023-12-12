@@ -98,8 +98,8 @@ SZ_PUBLIC sz_cptr_t sz_find_3byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_
     n_parts.u8s[1] = n[1];
     n_parts.u8s[2] = n[2];
 
-    // This implementation is more complex than the `sz_find_4byte_avx2`, as we are going to
-    // match only 3 bytes within each 4-byte word.
+    // This implementation is more complex than the `sz_find_4byte_avx2`,
+    // as we are going to match only 3 bytes within each 4-byte word.
     sz_u64_parts_t mask_parts;
     mask_parts.u64 = 0;
     mask_parts.u8s[0] = mask_parts.u8s[1] = mask_parts.u8s[2] = 0xFF, mask_parts.u8s[3] = 0;
