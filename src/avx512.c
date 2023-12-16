@@ -12,6 +12,17 @@
 #if SZ_USE_X86_AVX512
 #include <x86intrin.h>
 
+/**
+ *  @brief  Helper structure to simpify work with 64-bit words.
+ */
+typedef union sz_u512_parts_t {
+    __m512i zmm;
+    sz_u64_t u64s[8];
+    sz_u32_t u32s[16];
+    sz_u16_t u16s[32];
+    sz_u8_t u8s[64];
+} sz_u512_parts_t;
+
 SZ_INTERNAL __mmask64 clamp_mask_up_to(sz_size_t n) {
     // The simplest approach to compute this if we know that `n` is blow or equal 64:
     //      return (1ull << n) - 1;
@@ -121,6 +132,8 @@ SZ_PUBLIC sz_cptr_t sz_find_2byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cpt
     n_parts.u8s[0] = n[0];
     n_parts.u8s[1] = n[1];
 
+    // A simpler approach would ahve been to use two separate registers for
+    // different characters of the needle, but that would use more registers.
     __m512i h0_vec, h1_vec, n_vec = _mm512_set1_epi16(n_parts.u16s[0]);
     __mmask64 mask;
     __mmask32 matches0, matches1;
@@ -211,6 +224,8 @@ SZ_PUBLIC sz_cptr_t sz_find_3byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cpt
     n_parts.u8s[1] = n[1];
     n_parts.u8s[2] = n[2];
 
+    // A simpler approach would ahve been to use two separate registers for
+    // different characters of the needle, but that would use more registers.
     __m512i h0_vec, h1_vec, h2_vec, h3_vec, n_vec = _mm512_set1_epi32(n_parts.u32s[0]);
     __mmask64 mask;
     __mmask16 matches0, matches1, matches2, matches3;
@@ -255,14 +270,206 @@ sz_find_3byte_avx512_cycle:
     }
 }
 
+SZ_PUBLIC sz_cptr_t sz_find_under66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    __mmask64 mask, n_length_body_mask = mask_up_to(n_length - 2);
+    __mmask64 matches;
+    sz_u512_parts_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
+    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
+    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
+    n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
+
+sz_find_under66byte_avx512_cycle:
+    if (h_length < n_length) { return NULL; }
+    else if (h_length < n_length + 64) {
+        mask = mask_up_to(h_length);
+        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_ctz64(matches);
+            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + potential_offset + 1);
+            // Might be worth considering the `_mm256_testc_si256` intrinsic, that seems to have a lower latency
+            // https://www.agner.org/optimize/blog/read.php?i=318
+            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + potential_offset;
+
+            h += potential_offset + 1, h_length -= potential_offset + 1;
+            goto sz_find_under66byte_avx512_cycle;
+        }
+        else
+            return NULL;
+    }
+    else {
+        h_first_vec.zmm = _mm512_loadu_epi8(h);
+        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
+        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_ctz64(matches);
+            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + potential_offset + 1);
+            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + potential_offset;
+
+            h += potential_offset + 1, h_length -= potential_offset + 1;
+            goto sz_find_under66byte_avx512_cycle;
+        }
+        else {
+            h += 64, h_length -= 64;
+            goto sz_find_under66byte_avx512_cycle;
+        }
+    }
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_over66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    __mmask64 mask;
+    __mmask64 matches;
+    sz_u512_parts_t h_first_vec, h_last_vec, n_first_vec, n_last_vec;
+    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
+    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
+
+sz_find_over66byte_avx512_cycle:
+    if (h_length < n_length) { return NULL; }
+    else if (h_length < n_length + 64) {
+        mask = mask_up_to(h_length);
+        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_ctz64(matches);
+            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+
+            h += potential_offset + 1, h_length -= potential_offset + 1;
+            goto sz_find_over66byte_avx512_cycle;
+        }
+        else
+            return NULL;
+    }
+    else {
+        h_first_vec.zmm = _mm512_loadu_epi8(h);
+        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
+        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_ctz64(matches);
+            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+
+            h += potential_offset + 1, h_length -= potential_offset + 1;
+            goto sz_find_over66byte_avx512_cycle;
+        }
+        else {
+            h += 64, h_length -= 64;
+            goto sz_find_over66byte_avx512_cycle;
+        }
+    }
+}
+
 SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
     switch (n_length) {
+    case 0: return NULL;
     case 1: return sz_find_byte_avx512(h, h_length, n);
     case 2: return sz_find_2byte_avx512(h, h_length, n);
     case 3: return sz_find_3byte_avx512(h, h_length, n);
     case 4: return sz_find_4byte_avx512(h, h_length, n);
-    default: return sz_find_serial(h, h_length, n, n_length);
+    default:
     }
+
+    if (n_length <= 66) { return sz_find_under66byte_avx512(h, h_length, n, n_length); }
+    else { return sz_find_over66byte_avx512(h, h_length, n, n_length); }
+}
+
+SZ_INTERNAL sz_size_t _sz_levenshtein_avx512_upto63bytes( //
+    sz_cptr_t const a, sz_size_t const a_length,          //
+    sz_cptr_t const b, sz_size_t const b_length,          //
+    sz_ptr_t buffer, sz_size_t const bound) {
+
+    sz_u512_parts_t a_vec, b_vec, previous_vec, current_vec, permutation_vec;
+    sz_u512_parts_t cost_deletion_vec, cost_insertion_vec, cost_substitution_vec;
+    sz_size_t min_distance;
+
+    b_vec.zmm = _mm512_maskz_loadu_epi8(clamp_mask_up_to(b_length), b);
+    previous_vec.zmm = _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, //
+                                       47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, //
+                                       31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
+                                       15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+
+    permutation_vec.zmm = _mm512_set_epi8(62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, //
+                                          46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, //
+                                          30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, //
+                                          14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 63);
+
+    for (sz_size_t idx_a = 0; idx_a != a_length; ++idx_a) {
+        min_distance = bound;
+
+        a_vec.zmm = _mm512_set1_epi8(a[idx_a]);
+        // We first start by computing the cost of deletions and substitutions
+        // for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
+        //     sz_u8_t cost_deletion = previous_vec.u8s[idx_b + 1] + 1;
+        //     sz_u8_t cost_substitution = previous_vec.u8s[idx_b] + (a[idx_a] != b[idx_b]);
+        //     current_vec.u8s[idx_b + 1] = sz_min_of_two(cost_deletion, cost_substitution);
+        // }
+        cost_deletion_vec.zmm = _mm512_add_epi8(previous_vec.zmm, _mm512_set1_epi8(1));
+        cost_substitution_vec.zmm =
+            _mm512_mask_set1_epi8(_mm512_setzero_si512(), _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm), 0x01);
+        cost_substitution_vec.zmm = _mm512_add_epi8(previous_vec.zmm, cost_substitution_vec.zmm);
+        cost_substitution_vec.zmm = _mm512_permutexvar_epi8(permutation_vec.zmm, cost_substitution_vec.zmm);
+        current_vec.zmm = _mm512_min_epu8(cost_deletion_vec.zmm, cost_substitution_vec.zmm);
+        current_vec.u8s[0] = idx_a + 1;
+
+        // Now we need to compute the inclusive prefix sums using the minimum operator
+        // In one line:
+        //      current_vec.u8s[idx_b + 1] = sz_min_of_two(current_vec.u8s[idx_b + 1], current_vec.u8s[idx_b] + 1)
+        // Unrolling this:
+        //      current_vec.u8s[0 + 1] = sz_min_of_two(current_vec.u8s[0 + 1], current_vec.u8s[0] + 1)
+        //      current_vec.u8s[1 + 1] = sz_min_of_two(current_vec.u8s[1 + 1], current_vec.u8s[1] + 1)
+        //      current_vec.u8s[2 + 1] = sz_min_of_two(current_vec.u8s[2 + 1], current_vec.u8s[2] + 1)
+        //      current_vec.u8s[3 + 1] = sz_min_of_two(current_vec.u8s[3 + 1], current_vec.u8s[3] + 1)
+        // Alternatively, using a tree-like reduction in log2 steps:
+        //      - 6 cycles of reductions shifting by 1, 2, 4, 8, 16, 32, 64 bytes
+        //      - with each cycle containing at least one shift, min, add, blend
+        // Which adds meaningless complexity without any performance gains.
+        for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
+            sz_u8_t cost_insertion = current_vec.u8s[idx_b] + 1;
+            current_vec.u8s[idx_b + 1] = sz_min_of_two(current_vec.u8s[idx_b + 1], cost_insertion);
+            min_distance = sz_min_of_two(min_distance, current_vec.u8s[idx_b + 1]);
+        }
+
+        // If the minimum distance in this row exceeded the bound, return early
+        if (min_distance >= bound) return bound;
+
+        // Swap previous_distances and current_distances pointers
+        sz_u512_parts_t temp_vec;
+        temp_vec.zmm = previous_vec.zmm;
+        previous_vec.zmm = current_vec.zmm;
+        current_vec.zmm = temp_vec.zmm;
+    }
+
+    return previous_vec.u8s[b_length] < bound ? previous_vec.u8s[b_length] : bound;
+}
+
+SZ_PUBLIC sz_size_t sz_levenshtein_avx512(       //
+    sz_cptr_t const a, sz_size_t const a_length, //
+    sz_cptr_t const b, sz_size_t const b_length, //
+    sz_ptr_t buffer, sz_size_t const bound) {
+
+    // If one of the strings is empty - the edit distance is equal to the length of the other one
+    if (a_length == 0) return b_length <= bound ? b_length : bound;
+    if (b_length == 0) return a_length <= bound ? a_length : bound;
+
+    // If the difference in length is beyond the `bound`, there is no need to check at all
+    if (a_length > b_length) {
+        if (a_length - b_length > bound) return bound;
+    }
+    else {
+        if (b_length - a_length > bound) return bound;
+    }
+
+    // Depending on the length, we may be able to use the optimized implementation
+    if (a_length < 63 && b_length < 63)
+        return _sz_levenshtein_avx512_upto63bytes(a, a_length, b, b_length, buffer, bound);
+    else
+        return sz_levenshtein_serial(a, a_length, b, b_length, buffer, bound);
 }
 
 /**

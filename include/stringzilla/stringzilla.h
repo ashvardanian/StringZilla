@@ -1,3 +1,49 @@
+/**
+ *  @brief  StringZilla is a collection of fast string algorithms, designed to be used in Big Data applications.
+ *
+ *  @section   Compatibility with LibC and STL
+ *
+ *  The C++ Standard Templates Library provides an `std::string` and `std::string_view` classes with similar
+ *  functionality. LibC, in turn, provides the "string.h" header with a set of functions for working with C strings.
+ *  Both of those have a fairly constrained interface, as well as poor utilization of SIMD and SWAR techniques.
+ *  StringZilla improves on both of those, by providing a more flexible interface, and better performance.
+ *  If you are well familiar use the following index to find the equivalent functionality:
+ *
+ *      - void    *memchr(const void *, int, size_t); -> sz_find_byte
+ *      - int      memcmp(const void *, const void *, size_t); -> sz_order, sz_equal
+ *
+ *      - char    *strchr(const char *, int); -> sz_find_byte
+ *      - int      strcmp(const char *, const char *); -> sz_order, sz_equal
+ *      - size_t   strcspn(const char *, const char *); -> sz_prefix_rejected
+ *      - size_t   strlen(const char *);-> sz_find_byte
+ *      - size_t   strspn(const char *, const char *); -> sz_prefix_accepted
+ *      - char    *strstr(const char *, const char *); -> sz_find
+ *
+ *      - void    *memccpy(void *restrict, const void *restrict, int, size_t);
+ *      - void    *memcpy(void *restrict, const void *restrict, size_t);
+ *      - void    *memmove(void *, const void *, size_t);
+ *      - void    *memset(void *, int, size_t);
+ *      - char    *strcat(char *restrict, const char *restrict);
+ *      - int      strcoll(const char *, const char *);
+ *      - char    *strcpy(char *restrict, const char *restrict);
+ *      - char    *strdup(const char *);
+ *      - char    *strerror(int);
+ *      - int     *strerror_r(int, char *, size_t);
+ *      - char    *strncat(char *restrict, const char *restrict, size_t);
+ *      - int      strncmp(const char *, const char *, size_t);
+ *      - char    *strncpy(char *restrict, const char *restrict, size_t);
+ *      - char    *strpbrk(const char *, const char *);
+ *      - char    *strrchr(const char *, int);
+ *      - char    *strtok(char *restrict, const char *restrict);
+ *      - char    *strtok_r(char *, const char *, char **);
+ *      - size_t   strxfrm(char *restrict, const char *restrict, size_t);
+ *
+ *  LibC documentation: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
+ *  STL documentation: https://en.cppreference.com/w/cpp/header/string_view
+ *
+ *
+ */
+
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
 
@@ -101,10 +147,13 @@ extern "C" {
  */
 #if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
 typedef unsigned long long sz_size_t;
+typedef long long sz_ssize_t;
 #else
 typedef unsigned sz_size_t;
+typedef unsigned sz_ssize_t;
 #endif
 SZ_STATIC_ASSERT(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
+SZ_STATIC_ASSERT(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
 
 typedef unsigned char sz_u8_t;       /// Always 8 bits
 typedef unsigned short sz_u16_t;     /// Always 16 bits
@@ -149,35 +198,79 @@ SZ_PUBLIC sz_cptr_t sz_find_terminated(sz_cptr_t haystack, sz_cptr_t needle);
 SZ_PUBLIC sz_ordering_t sz_order_terminated(sz_cptr_t a, sz_cptr_t b);
 
 /**
- *  @brief  Computes the CRC32 hash of a string.
+ *  @brief  Computes the hash of a string.
+ *
+ *  @section    Why not use CRC32?
+ *
+ *  Cyclic Redundancy Check 32 is one of the most commonly used hash functions in Computer Science.
+ *  It has in-hardware support on both x86 and Arm, for both 8-bit, 16-bit, 32-bit, and 64-bit words.
+ *  In case of Arm more than one polynomial is supported. It is, however, somewhat limiting for Big Data
+ *  usecases, which often have to deal with more than 4 Billion strings, making collisions unavoidable.
+ *  Moreover, the existing SIMD approaches are tricky, combining general purpose computations with
+ *  specialized intstructions, to utilize more silicon in every cycle.
+ *
+ *  Some of the best articles on CRC32:
+ *  - Comprehensive derivation of approaches: https://github.com/komrad36/CRC
+ *  - Faster computation for 4 KB buffers on x86: https://www.corsix.org/content/fast-crc32c-4k
+ *  - Comparing different lookup tables: https://create.stephan-brumme.com/crc32
+ *
+ *  Some of the best open-source implementations:
+ *  - Peter Cawley: https://github.com/corsix/fast-crc32
+ *  - Stephan Brumme: https://github.com/stbrumme/crc32
+ *
+ *  @section    Modern Algorithms
+ *
+ *  MurmurHash from 2008 by Austin Appleby is one of the best known non-cryptographic hashes.
+ *  It has a very short implementation and is capable of producing 32-bit and 128-bit hashes.
+ *  https://github.com/aappleby/smhasher/tree/61a0530f28277f2e850bfc39600ce61d02b518de
+ *
+ *  The CityHash from 2011 by Google and the xxHash improve on that, better leveraging
+ *  the superscalar nature of modern CPUs and producing 64-bit and 128-bit hashes.
+ *  https://opensource.googleblog.com/2011/04/introducing-cityhash
+ *  https://github.com/Cyan4973/xxHash
+ *
+ *  Neither of those functions are cryptographic, unlike MD5, SHA, and BLAKE algorithms.
+ *  Most of those are based on the Merkle–Damgård construction, and aren't resistant to
+ *  the length-extension attacks. Current state of the Art, might be the BLAKE3 algorithm.
+ *  It's resistant to a broad range of attacks, can process 2 bytes per CPU cycle, and comes
+ *  with a very optimized official implementation for C and Rust. It has the same 128-bit
+ *  security level as the BLAKE2, and achieves its performance gains by reducing the number
+ *  of mixing rounds, and processing data in 1 KiB chunks, which is great for longer strings,
+ *  but may result in poor performance on short ones.
+ *  https://en.wikipedia.org/wiki/BLAKE_(hash_function)#BLAKE3
+ *  https://github.com/BLAKE3-team/BLAKE3
+ *
+ *  As shown, choosing the right hashing algorithm for your application can be crucial from
+ *  both performance and security standpoint. Assuming, this functionality will be mostly used on
+ *  multi-word short UTF8 strings, StringZilla implements a very simple scheme derived from MurMur3.
  *
  *  @param text     String to hash.
  *  @param length   Number of bytes in the text.
  *  @return         32-bit hash value.
  */
-SZ_PUBLIC sz_u32_t sz_crc32(sz_cptr_t text, sz_size_t length);
-SZ_PUBLIC sz_u32_t sz_crc32_serial(sz_cptr_t text, sz_size_t length);
-SZ_PUBLIC sz_u32_t sz_crc32_avx512(sz_cptr_t text, sz_size_t length);
-SZ_PUBLIC sz_u32_t sz_crc32_sse42(sz_cptr_t text, sz_size_t length);
-SZ_PUBLIC sz_u32_t sz_crc32_arm(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u64_t sz_hash_avx512(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length);
 
-typedef sz_u32_t (*sz_crc32_t)(sz_cptr_t, sz_size_t);
+typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
 
 /**
- *  @brief  Checks if two string are equal. Equivalent to `memcmp(a, b, length) == 0` in LibC.
- *          Implement as special case of `sz_order` and works faster on platforms with cheap
- *          unaligned access.
+ *  @brief  Checks if two string are equal.
+ *          Similar to `memcmp(a, b, length) == 0` in LibC and `a == b` in STL.
+ *
+ *  The implementation of this function is very similar to `sz_order`, but the usage patterns are different.
+ *  This function is more often used in parsing, while `sz_order` is often used in sorting.
+ *  It works best on platforms with cheap
  *
  *  @param a        First string to compare.
  *  @param b        Second string to compare.
  *  @param length   Number of bytes in both strings.
- *  @return         One if strings are equal, zero otherwise.
+ *  @return         1 if strings match, 0 otherwise.
  */
 SZ_PUBLIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
-
-typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
 
 /**
  *  @brief  Estimates the relative order of two strings. Equivalent to `memcmp(a, b, length)` in LibC.
@@ -211,11 +304,17 @@ typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 
 /**
  *  @brief  Locates first matching substring. Similar to `strstr(haystack, needle)` in LibC, but requires known length.
- *          Uses different algorithms for different needle lengths and backends:
+ *
+ *  Uses different algorithms for different needle lengths and backends:
  *
  *  > Exact matching for 1-, 2-, 3-, and 4-character-long needles.
- *  > Bitap (Baeza-Yates-Gonnet) algorithm for serial (SWAR) backend.
+ *  > Bitap "Shift Or" (Baeza-Yates-Gonnet) algorithm for serial (SWAR) backend.
  *  > Two-way heuristic for longer needles with SIMD backends.
+ *
+ *  @section Reading Materials
+ *
+ *  Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string/
+ *  SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
  *
  *  @param haystack Haystack - the string to search in.
  *  @param h_length Number of bytes in the haystack.
@@ -228,6 +327,9 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cp
 SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
@@ -262,6 +364,12 @@ typedef sz_cptr_t (*sz_prefix_rejected_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_si
 /**
  *  @brief  Equivalent to `for (char & c : text) c = tolower(c)`.
  *
+ *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
+ *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
+ *  can be done by flipping the 5th bit each inappropriate character byte. This, however,
+ *  breaks for extended ASCII, so a different solution is needed.
+ *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
+ *
  *  @param text     String to be normalized.
  *  @param length   Number of bytes in the string.
  *  @param result   Output string, can point to the same address as ::text.
@@ -272,6 +380,12 @@ SZ_PUBLIC void sz_tolower_avx512(sz_cptr_t text, sz_size_t length, sz_ptr_t resu
 
 /**
  *  @brief  Equivalent to `for (char & c : text) c = toupper(c)`.
+ *
+ *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
+ *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
+ *  can be done by flipping the 5th bit each inappropriate character byte. This, however,
+ *  breaks for extended ASCII, so a different solution is needed.
+ *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  *
  *  @param text     String to be normalized.
  *  @param length   Number of bytes in the string.
@@ -310,14 +424,24 @@ SZ_PUBLIC sz_size_t sz_levenshtein_memory_needed(sz_size_t a_length, sz_size_t b
  *  @param b        Second string to compare.
  *  @param b_length Number of bytes in the second string.
  *  @param buffer   Temporary memory buffer of size ::sz_levenshtein_memory_needed(a_length, b_length).
- *  @return         Edit distance.
+ *  @param bound    Upper bound on the distance, that allows us to exit early.
+ *  @return         Unsigned edit distance.
  */
 SZ_PUBLIC sz_size_t sz_levenshtein(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                   sz_cptr_t buffer, sz_size_t bound);
+                                   sz_ptr_t buffer, sz_size_t bound);
 SZ_PUBLIC sz_size_t sz_levenshtein_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                          sz_cptr_t buffer, sz_size_t bound);
+                                          sz_ptr_t buffer, sz_size_t bound);
 SZ_PUBLIC sz_size_t sz_levenshtein_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                          sz_cptr_t buffer, sz_size_t bound);
+                                          sz_ptr_t buffer, sz_size_t bound);
+
+/**
+ *  @brief  Estimates the amount of temporary memory required to efficiently compute the weighted edit distance.
+ *
+ *  @param a_length Number of bytes in the first string.
+ *  @param b_length Number of bytes in the second string.
+ *  @return         Number of bytes to allocate for temporary memory.
+ */
+SZ_PUBLIC sz_size_t sz_alignment_score_memory_needed(sz_size_t a_length, sz_size_t b_length);
 
 /**
  *  @brief  Computes Levenshtein edit-distance between two strings, parameterized for gap and substitution penalties.
@@ -325,6 +449,8 @@ SZ_PUBLIC sz_size_t sz_levenshtein_avx512(sz_cptr_t a, sz_size_t a_length, sz_cp
  *
  *  This function is equivalent to the default Levenshtein distance implementation with the ::gap parameter set
  *  to one, and the ::subs matrix formed of all ones except for the main diagonal, which is zeros.
+ *  Unlike the default Levenshtein implementaion, this can't be bounded, as the substitution costs can be both positive
+ *  and negative, meaning that the distance isn't monotonically growing as we go through the strings.
  *
  *  @param a        First string to compare.
  *  @param a_length Number of bytes in the first string.
@@ -332,18 +458,45 @@ SZ_PUBLIC sz_size_t sz_levenshtein_avx512(sz_cptr_t a, sz_size_t a_length, sz_cp
  *  @param b_length Number of bytes in the second string.
  *  @param gap      Penalty cost for gaps - insertions and removals.
  *  @param subs     Substitution costs matrix with 256 x 256 values for all pais of characters.
- *  @param buffer   Temporary memory buffer of size ::sz_levenshtein_memory_needed(a_length, b_length).
- *  @return         Edit distance.
+ *  @param buffer   Temporary memory buffer of size ::sz_alignment_score_memory_needed(a_length, b_length).
+ *  @return         Signed score ~ edit distance.
  */
-SZ_PUBLIC sz_size_t sz_levenshtein_weighted(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                            sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
-                                            sz_cptr_t buffer, sz_size_t bound);
-SZ_PUBLIC sz_size_t sz_levenshtein_weighted_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                                   sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
-                                                   sz_cptr_t buffer, sz_size_t bound);
-SZ_PUBLIC sz_size_t sz_levenshtein_weighted_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                                   sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
-                                                   sz_cptr_t buffer, sz_size_t bound);
+SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                        sz_error_cost_t gap, sz_error_cost_t const *subs, sz_ptr_t buffer);
+SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                               sz_error_cost_t gap, sz_error_cost_t const *subs, sz_ptr_t buffer);
+SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                               sz_error_cost_t gap, sz_error_cost_t const *subs, sz_ptr_t buffer);
+
+/**
+ *  @brief  Checks if two string are equal, and reports the first mismatch if they are not.
+ *          Similar to `memcmp(a, b, length) == 0` in LibC and `a.starts_with(b)` in STL.
+ *
+ *  The implementation of this function is very similar to `sz_order`, but the usage patterns are different.
+ *  This function is more often used in parsing, while `sz_order` is often used in sorting.
+ *  It works best on platforms with cheap
+ *
+ *  @param a        First string to compare.
+ *  @param b        Second string to compare.
+ *  @param length   Number of bytes in both strings.
+ *  @return         Null if strings match. Otherwise, the pointer to the first non-matching character in ::a.
+ */
+SZ_PUBLIC sz_cptr_t sz_mismatch_first(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_PUBLIC sz_cptr_t sz_mismatch_first_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_PUBLIC sz_cptr_t sz_mismatch_first_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
+/**
+ *  @brief  Checks if two string are equal, and reports the @b last mismatch if they are not.
+ *          Similar to `memcmp(a, b, length) == 0` in LibC and `a.ends_with(b)` in STL.
+ *
+ *  @param a        First string to compare.
+ *  @param b        Second string to compare.
+ *  @param length   Number of bytes in both strings.
+ *  @return         Null if strings match. Otherwise, the pointer to the last non-matching character in ::a.
+ */
+SZ_PUBLIC sz_cptr_t sz_mismatch_last(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_PUBLIC sz_cptr_t sz_mismatch_last_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_PUBLIC sz_cptr_t sz_mismatch_last_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 #pragma region String Sequences
 

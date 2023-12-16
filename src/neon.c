@@ -67,24 +67,3 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t const haystack, sz_size_t const hayst
 }
 
 #endif // Arm Neon
-
-#if SZ_USE_ARM_CRC32
-#include <arm_acle.h>
-
-SZ_PUBLIC sz_u32_t sz_crc32_arm(sz_cptr_t start, sz_size_t length) {
-    sz_u32_t crc = 0xFFFFFFFF;
-    sz_cptr_t const end = start + length;
-
-    // Align the input to the word boundary
-    while (((unsigned long)start & 7ull) && start != end) { crc = __crc32cb(crc, *start), start++; }
-
-    // Process the body 8 bytes at a time
-    while (start + 8 <= end) { crc = __crc32cd(crc, *(unsigned long long *)start), start += 8; }
-
-    // Process the tail bytes
-    if (start + 4 <= end) { crc = __crc32cw(crc, *(unsigned int *)start), start += 4; }
-    if (start + 2 <= end) { crc = __crc32ch(crc, *(unsigned short *)start), start += 2; }
-    if (start < end) { crc = __crc32cb(crc, *start); }
-    return crc ^ 0xFFFFFFFF;
-}
-#endif

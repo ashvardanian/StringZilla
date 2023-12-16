@@ -569,7 +569,7 @@ static void Str_dealloc(Str *self) {
 
 static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->start, self->length); }
 
-static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_crc32(self->start, self->length); }
+static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->start, self->length); }
 
 static Py_ssize_t Str_len(Str *self) { return self->length; }
 
