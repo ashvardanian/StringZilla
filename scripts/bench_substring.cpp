@@ -58,7 +58,7 @@ using tracked_unary_functions_t = std::vector<tracked_function_gt<unary_function
 using tracked_binary_functions_t = std::vector<tracked_function_gt<binary_function_t>>;
 
 #define run_tests_m 1
-#define default_seconds_m 1
+#define default_seconds_m 10
 
 std::string content_original;
 std::vector<std::string> content_words;
@@ -69,6 +69,8 @@ template <typename value_at>
 inline void do_not_optimize(value_at &&value) {
     asm volatile("" : "+r"(value) : : "memory");
 }
+
+inline sz_string_view_t sz_string_view(std::string const &str) { return {str.data(), str.size()}; };
 
 std::string read_file(std::string path) {
     std::ifstream stream(path);
@@ -109,8 +111,8 @@ tracked_unary_functions_t hashing_functions() {
     };
     return {
         {"sz_hash_serial", wrap_if(true, sz_hash_serial)},
-        {"sz_hash_avx512", wrap_if(SZ_USE_X86_AVX512, sz_hash_avx512), true},
-        {"sz_hash_neon", wrap_if(SZ_USE_ARM_NEON, sz_hash_neon), true},
+        // {"sz_hash_avx512", wrap_if(SZ_USE_X86_AVX512, sz_hash_avx512), true},
+        // {"sz_hash_neon", wrap_if(SZ_USE_ARM_NEON, sz_hash_neon), true},
         {"std::hash",
          [](sz_string_view_t s) {
              return (sz_ssize_t)std::hash<std::string_view> {}({s.start, s.length});
@@ -118,10 +120,10 @@ tracked_unary_functions_t hashing_functions() {
     };
 }
 
-tracked_binary_functions_t equality_functions() {
+inline tracked_binary_functions_t equality_functions() {
     auto wrap_if = [](bool condition, auto function) -> binary_function_t {
         return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
-            return (sz_ssize_t)(function(a.start, b.start, a.length));
+            return (sz_ssize_t)(a.length == b.length && function(a.start, b.start, a.length));
         })
                          : binary_function_t();
     };
@@ -139,7 +141,7 @@ tracked_binary_functions_t equality_functions() {
     };
 }
 
-tracked_binary_functions_t ordering_functions() {
+inline tracked_binary_functions_t ordering_functions() {
     auto wrap_if = [](bool condition, auto function) -> binary_function_t {
         return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
             return (sz_ssize_t)function(a.start, a.length, b.start, b.length);
@@ -149,7 +151,8 @@ tracked_binary_functions_t ordering_functions() {
     return {
         {"std::string.compare",
          [](sz_string_view_t a, sz_string_view_t b) {
-             return (sz_ssize_t)(std::string_view(a.start, a.length).compare(std::string_view(b.start, b.length)));
+             auto order = std::string_view(a.start, a.length).compare(std::string_view(b.start, b.length));
+             return (sz_ssize_t)(order == 0 ? sz_equal_k : (order < 0 ? sz_less_k : sz_greater_k));
          }},
         {"sz_order_serial", wrap_if(true, sz_order_serial), true},
         {"sz_order_avx512", wrap_if(SZ_USE_X86_AVX512, sz_order_avx512), true},
@@ -163,7 +166,7 @@ tracked_binary_functions_t ordering_functions() {
     };
 }
 
-tracked_binary_functions_t prefix_functions() {
+inline tracked_binary_functions_t prefix_functions() {
     auto wrap_if = [](bool condition, auto function) -> binary_function_t {
         return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
             sz_string_view_t shorter = a.length < b.length ? a : b;
@@ -201,7 +204,7 @@ tracked_binary_functions_t prefix_functions() {
     };
 }
 
-tracked_binary_functions_t suffix_functions() {
+inline tracked_binary_functions_t suffix_functions() {
     auto wrap_mismatch_if = [](bool condition, auto function) -> binary_function_t {
         return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
             sz_string_view_t shorter = a.length < b.length ? a : b;
@@ -231,7 +234,7 @@ tracked_binary_functions_t suffix_functions() {
     };
 }
 
-tracked_binary_functions_t find_first_functions() {
+inline tracked_binary_functions_t find_functions() {
     auto wrap_if = [](bool condition, auto function) -> binary_function_t {
         return condition ? binary_function_t([function](sz_string_view_t h, sz_string_view_t n) {
             sz_cptr_t match = function(h.start, h.length, n.start, n.length);
@@ -247,10 +250,10 @@ tracked_binary_functions_t find_first_functions() {
              auto match = h_view.find(n_view);
              return (sz_ssize_t)(match == std::string_view::npos ? h.length : match);
          }},
-        {"sz_find_first_serial", wrap_if(true, sz_find_first_serial), true},
-        {"sz_find_first_avx512", wrap_if(SZ_USE_X86_AVX512, sz_find_first_avx512), true},
-        {"sz_find_first_avx2", wrap_if(SZ_USE_X86_AVX2, sz_find_first_avx2), true},
-        {"sz_find_first_neon", wrap_if(SZ_USE_ARM_NEON, sz_find_first_neon), true},
+        {"sz_find_serial", wrap_if(true, sz_find_serial), true},
+        {"sz_find_avx512", wrap_if(SZ_USE_X86_AVX512, sz_find_avx512), true},
+        {"sz_find_avx2", wrap_if(SZ_USE_X86_AVX2, sz_find_avx2), true},
+        // {"sz_find_neon", wrap_if(SZ_USE_ARM_NEON, sz_find_neon), true},
         {"memcmp",
          [](sz_string_view_t h, sz_string_view_t n) {
              sz_cptr_t match = strstr(h.start, n.start);
@@ -276,7 +279,7 @@ tracked_binary_functions_t find_first_functions() {
     };
 }
 
-tracked_binary_functions_t find_last_functions() {
+inline tracked_binary_functions_t find_last_functions() {
     auto wrap_if = [](bool condition, auto function) -> binary_function_t {
         return condition ? binary_function_t([function](sz_string_view_t h, sz_string_view_t n) {
             sz_cptr_t match = function(h.start, h.length, n.start, n.length);
@@ -319,7 +322,7 @@ tracked_binary_functions_t find_last_functions() {
     };
 }
 
-tracked_binary_functions_t distance_functions() {
+inline tracked_binary_functions_t distance_functions() {
     // Populate the unary substitutions matrix
     static constexpr std::size_t max_length = 256;
     unary_substitution_costs.resize(max_length * max_length);
@@ -360,19 +363,21 @@ tracked_binary_functions_t distance_functions() {
  */
 template <typename strings_at, typename function_at>
 loop_over_words_result_t loop_over_words(strings_at &&strings, function_at &&function,
-                                         seconds_t max_time = default_seconds_m,
-                                         std::size_t repetitions_between_checks = 16) {
+                                         seconds_t max_time = default_seconds_m) {
 
     namespace stdc = std::chrono;
     using stdcc = stdc::high_resolution_clock;
     stdcc::time_point t1 = stdcc::now();
     loop_over_words_result_t result;
-    std::size_t strings_count = round_down_to_power_of_two(strings.size());
+    std::size_t lookup_mask = round_down_to_power_of_two(strings.size()) - 1;
 
     while (true) {
-        for (std::size_t i = 0; i != repetitions_between_checks; ++i, ++result.iterations) {
-            std::string const &str = strings[result.iterations & (strings_count - 1)];
-            result.bytes_passed += function({str.data(), str.size()});
+        // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
+        for (std::size_t i = 0; i != 32; ++i) {
+            result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
+            result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
+            result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
+            result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
         }
 
         stdcc::time_point t2 = stdcc::now();
@@ -425,21 +430,29 @@ void evaluate_unary_operations(strings_at &&strings, tracked_unary_functions_t &
  */
 template <typename strings_at, typename function_at>
 loop_over_words_result_t loop_over_pairs_of_words(strings_at &&strings, function_at &&function,
-                                                  seconds_t max_time = default_seconds_m,
-                                                  std::size_t repetitions_between_checks = 16) {
+                                                  seconds_t max_time = default_seconds_m) {
 
     namespace stdc = std::chrono;
     using stdcc = stdc::high_resolution_clock;
     stdcc::time_point t1 = stdcc::now();
     loop_over_words_result_t result;
-    std::size_t strings_count = round_down_to_power_of_two(strings.size());
+    std::size_t lookup_mask = round_down_to_power_of_two(strings.size());
 
     while (true) {
-        for (std::size_t i = 0; i != repetitions_between_checks; ++i, ++result.iterations) {
-            std::size_t offset = result.iterations & (strings_count - 1);
-            std::string const &str_a = strings[offset];
-            std::string const &str_b = strings[strings_count - offset - 1];
-            result.bytes_passed += function({str_a.data(), str_a.size()}, {str_b.data(), str_b.size()});
+        // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
+        for (std::size_t i = 0; i != 32; ++i) {
+            result.bytes_passed +=
+                function(sz_string_view(strings[(++result.iterations) & lookup_mask]),
+                         sz_string_view(strings[(result.iterations * 18446744073709551557ull) & lookup_mask]));
+            result.bytes_passed +=
+                function(sz_string_view(strings[(++result.iterations) & lookup_mask]),
+                         sz_string_view(strings[(result.iterations * 18446744073709551557ull) & lookup_mask]));
+            result.bytes_passed +=
+                function(sz_string_view(strings[(++result.iterations) & lookup_mask]),
+                         sz_string_view(strings[(result.iterations * 18446744073709551557ull) & lookup_mask]));
+            result.bytes_passed +=
+                function(sz_string_view(strings[(++result.iterations) & lookup_mask]),
+                         sz_string_view(strings[(result.iterations * 18446744073709551557ull) & lookup_mask]));
         }
 
         stdcc::time_point t2 = stdcc::now();
@@ -489,7 +502,7 @@ void evaluate_binary_operations(strings_at &&strings, tracked_binary_functions_t
  *  @brief  Evaluation for search string operations: find.
  */
 template <typename strings_at>
-void evaluate_find_first_operations(strings_at &&strings, tracked_binary_functions_t &&variants) {
+void evaluate_find_operations(strings_at &&strings, tracked_binary_functions_t &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
@@ -584,11 +597,12 @@ void evaluate_all_operations(strings_at &&strings) {
     evaluate_unary_operations(strings, hashing_functions());
     evaluate_binary_operations(strings, equality_functions());
     evaluate_binary_operations(strings, ordering_functions());
-    evaluate_binary_operations(strings, prefix_functions());
-    evaluate_binary_operations(strings, suffix_functions());
     evaluate_binary_operations(strings, distance_functions());
-    evaluate_find_first_operations(strings, find_first_functions());
-    evaluate_find_last_operations(strings, find_last_functions());
+    evaluate_find_operations(strings, find_functions());
+
+    // evaluate_binary_operations(strings, prefix_functions());
+    // evaluate_binary_operations(strings, suffix_functions());
+    // evaluate_find_last_operations(strings, find_last_functions());
 }
 
 int main(int, char const **) {

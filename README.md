@@ -1,14 +1,27 @@
 # StringZilla 🦖
 
-StringZilla is the Godzilla of string libraries, splitting, sorting, and shuffling large textual datasets faster than you can say "Tokyo Tower" 😅
+StringZilla is the Godzilla of string libraries, searching, splitting, sorting, and shuffling large textual datasets faster than you can say "Tokyo Tower" 😅
 
 - ✅ Single-header pure C 99 implementation [docs](#quick-start-c-🛠️)
-- ✅ [Direct CPython bindings](https://ashvardanian.com/posts/pybind11-cpython-tutorial/) with minimal call latency [docs](#quick-start-python-🐍)
-- ✅ [SWAR](https://en.wikipedia.org/wiki/SWAR) and [SIMD](https://en.wikipedia.org/wiki/Single_instruction,_multiple_data) acceleration on x86 (AVX2) and ARM (NEON)
+- Light-weight header-only C++ 11 `sz::string_view` and `sz::string` wrapper with the feature set of C++ 23 strings!
+- ✅ [Direct CPython bindings](https://ashvardanian.com/posts/pybind11-cpython-tutorial/) with minimal call latency similar to the native `str` class, but with higher throughput [docs](#quick-start-python-🐍)
+- ✅ [SWAR](https://en.wikipedia.org/wiki/SWAR) and [SIMD](https://en.wikipedia.org/wiki/Single_instruction,_multiple_data) acceleration on x86 (AVX2, AVX-512) and ARM (NEON, SVE)
 - ✅ [Radix](https://en.wikipedia.org/wiki/Radix_sort)-like sorting faster than C++ `std::sort`
 - ✅ [Memory-mapping](https://en.wikipedia.org/wiki/Memory-mapped_file) to work with larger-than-RAM datasets
-- ✅ Memory-efficient compressed arrays to work with sequences
-- 🔜 JavaScript bindings are on their way.
+
+Who is this for?
+
+- you want to process strings faster than default strings in Python, C, or C++
+- you need fuzzy string matching functionality that default libraries don't provide
+- you are student learning practical applications of SIMD and SWAR and how libraries like LibC are implemented
+- you are implementing/maintaining a programming language or porting LibC to a new hardware architecture like a RISC-V fork and need a solid SWAR baseline
+
+Limitations:
+
+- Assumes little-endian architecture
+- Assumes ASCII or UTF-8 encoding
+- Assumes 64-bit address space
+
 
 This library saved me tens of thousands of dollars pre-processing large datasets for machine learning, even on the scale of a single experiment.
 So if you want to process the 6 Billion images from [LAION](https://laion.ai/blog/laion-5b/), or the 250 Billion web pages from the [CommonCrawl](https://commoncrawl.org/), or even just a few million lines of server logs, and haunted by Python's `open(...).readlines()` and `str().splitlines()` taking forever, this should help 😊
@@ -133,7 +146,7 @@ sz_size_t character_count = sz_count_char(haystack.start, haystack.length, "a");
 sz_size_t substring_position = sz_find(haystack.start, haystack.length, needle.start, needle.length);
 
 // Hash strings
-sz_u32_t crc32 = sz_crc32(haystack.start, haystack.length);
+sz_u32_t crc32 = sz_hash(haystack.start, haystack.length);
 
 // Perform collection level operations
 sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
