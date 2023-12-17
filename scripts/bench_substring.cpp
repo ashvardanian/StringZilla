@@ -58,7 +58,7 @@ using tracked_unary_functions_t = std::vector<tracked_function_gt<unary_function
 using tracked_binary_functions_t = std::vector<tracked_function_gt<binary_function_t>>;
 
 #define run_tests_m 1
-#define default_seconds_m 10
+#define default_seconds_m 5
 
 std::string content_original;
 std::vector<std::string> content_words;
@@ -404,7 +404,7 @@ void evaluate_unary_operations(strings_at &&strings, tracked_unary_functions_t &
                 auto result = variant.function(str);
                 if (result != baseline) {
                     ++variant.failed_count;
-                    variant.failed_strings.push_back({str.start, str.length});
+                    if (variant.failed_strings.empty()) { variant.failed_strings.push_back({str.start, str.length}); }
                 }
                 return str.length;
             });
@@ -479,8 +479,10 @@ void evaluate_binary_operations(strings_at &&strings, tracked_binary_functions_t
                 auto result = variant.function(str_a, str_b);
                 if (result != baseline) {
                     ++variant.failed_count;
-                    variant.failed_strings.push_back({str_a.start, str_a.length});
-                    variant.failed_strings.push_back({str_b.start, str_b.length});
+                    if (variant.failed_strings.empty()) {
+                        variant.failed_strings.push_back({str_a.start, str_a.length});
+                        variant.failed_strings.push_back({str_b.start, str_b.length});
+                    }
                 }
                 return str_a.length + str_b.length;
             });
@@ -516,10 +518,13 @@ void evaluate_find_operations(strings_at &&strings, tracked_binary_functions_t &
                     auto result = variant.function(str_h, str_n);
                     if (result != baseline) {
                         ++variant.failed_count;
-                        variant.failed_strings.push_back({str_h.start, baseline + str_n.length});
-                        variant.failed_strings.push_back({str_n.start, str_n.length});
+                        if (variant.failed_strings.empty()) {
+                            variant.failed_strings.push_back({str_h.start, baseline + str_n.length});
+                            variant.failed_strings.push_back({str_n.start, str_n.length});
+                        }
                     }
 
+                    if (baseline == str_h.length) break;
                     str_h.start += result + str_n.length;
                     str_h.length -= result + str_n.length;
                 }
@@ -564,10 +569,13 @@ void evaluate_find_last_operations(strings_at &&strings, tracked_binary_function
                     auto result = variant.function(str_h, str_n);
                     if (result != baseline) {
                         ++variant.failed_count;
-                        variant.failed_strings.push_back({str_h.start, baseline + str_n.length});
-                        variant.failed_strings.push_back({str_n.start, str_n.length});
+                        if (variant.failed_strings.empty()) {
+                            variant.failed_strings.push_back({str_h.start, baseline + str_n.length});
+                            variant.failed_strings.push_back({str_n.start, str_n.length});
+                        }
                     }
 
+                    if (baseline == str_h.length) break;
                     str_h.length -= result + str_n.length;
                 }
 
@@ -594,10 +602,10 @@ void evaluate_find_last_operations(strings_at &&strings, tracked_binary_function
 
 template <typename strings_at>
 void evaluate_all_operations(strings_at &&strings) {
-    evaluate_unary_operations(strings, hashing_functions());
-    evaluate_binary_operations(strings, equality_functions());
-    evaluate_binary_operations(strings, ordering_functions());
-    evaluate_binary_operations(strings, distance_functions());
+    // evaluate_unary_operations(strings, hashing_functions());
+    // evaluate_binary_operations(strings, equality_functions());
+    // evaluate_binary_operations(strings, ordering_functions());
+    // evaluate_binary_operations(strings, distance_functions());
     evaluate_find_operations(strings, find_functions());
 
     // evaluate_binary_operations(strings, prefix_functions());
@@ -633,7 +641,7 @@ int main(int, char const **) {
     }
 
     // Produce benchmarks for different word lengths, both real and impossible
-    for (std::size_t word_length : {1}) {
+    for (std::size_t word_length : {1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 33, 65}) {
 
         // Generate some impossible words of that length
         std::printf("Benchmarking for abstract tokens of length %zu:\n", word_length);
