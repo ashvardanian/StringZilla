@@ -599,12 +599,13 @@ SZ_INTERNAL sz_u64_t sz_rotl64(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >>
 
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length) {
 
-    sz_u64_t h1 = length;
-    sz_u64_t h2 = length;
-    sz_u64_t k1 = 0;
-    sz_u64_t k2 = 0;
     sz_u64_t const c1 = 0x87c37b91114253d5ull;
     sz_u64_t const c2 = 0x4cf5ad432745937full;
+    sz_u64_parts_t k1, k2;
+    sz_u64_t h1, h2;
+
+    k1.u64 = k2.u64 = 0;
+    h1 = h2 = length;
 
     for (; length >= 16; length -= 16, start += 16) {
         sz_u64_t k1 = sz_u64_unaligned_load(start);
@@ -629,39 +630,39 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length) {
         h2 = h2 * 5 + 0x38495ab5;
     }
 
-    // Similar to xxHash we can optimize the short string computation:
+    // Similar to xxHash, WaterHash:
     // 0 - 3 bytes: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L4515
     // 4 - 8 bytes: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L4537
     // 9 - 16 bytes: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L4553
     // 17 - 128 bytes: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L4640
     // Long sequences: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L5906
     switch (length & 15) {
-    case 15: k2 ^= ((sz_u64_t)start[14]) << 48;
-    case 14: k2 ^= ((sz_u64_t)start[13]) << 40;
-    case 13: k2 ^= ((sz_u64_t)start[12]) << 32;
-    case 12: k2 ^= ((sz_u64_t)start[11]) << 24;
-    case 11: k2 ^= ((sz_u64_t)start[10]) << 16;
-    case 10: k2 ^= ((sz_u64_t)start[9]) << 8;
+    case 15: k2.u8s[6] = start[14];
+    case 14: k2.u8s[5] = start[13];
+    case 13: k2.u8s[4] = start[12];
+    case 12: k2.u8s[3] = start[11];
+    case 11: k2.u8s[2] = start[10];
+    case 10: k2.u8s[1] = start[9];
     case 9:
-        k2 ^= ((sz_u64_t)start[8]);
-        k2 *= c2;
-        k2 = sz_rotl64(k2, 33);
-        k2 *= c1;
-        h2 ^= k2;
+        k2.u8s[0] = start[8];
+        k2.u64 *= c2;
+        k2.u64 = sz_rotl64(k2.u64, 33);
+        k2.u64 *= c1;
+        h2 ^= k2.u64;
 
-    case 8: k1 ^= ((sz_u64_t)start[7]) << 56;
-    case 7: k1 ^= ((sz_u64_t)start[6]) << 48;
-    case 6: k1 ^= ((sz_u64_t)start[5]) << 40;
-    case 5: k1 ^= ((sz_u64_t)start[4]) << 32;
-    case 4: k1 ^= ((sz_u64_t)start[3]) << 24;
-    case 3: k1 ^= ((sz_u64_t)start[2]) << 16;
-    case 2: k1 ^= ((sz_u64_t)start[1]) << 8;
+    case 8: k1.u8s[7] = start[7];
+    case 7: k1.u8s[6] = start[6];
+    case 6: k1.u8s[5] = start[5];
+    case 5: k1.u8s[4] = start[4];
+    case 4: k1.u8s[3] = start[3];
+    case 3: k1.u8s[2] = start[2];
+    case 2: k1.u8s[1] = start[1];
     case 1:
-        k1 ^= ((sz_u64_t)start[0]);
-        k1 *= c1;
-        k1 = sz_rotl64(k1, 31);
-        k1 *= c2;
-        h1 ^= k1;
+        k1.u8s[0] = start[0];
+        k1.u64 *= c1;
+        k1.u64 = sz_rotl64(k1.u64, 31);
+        k1.u64 *= c2;
+        h1 ^= k1.u64;
     };
 
     // We almost entirely avoid the final mixing step
