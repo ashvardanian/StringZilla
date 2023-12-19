@@ -1,5 +1,3 @@
-# This CMake file is heavily inspired by following `stringzilla` CMake:
-# https://github.com/nlohmann/json/blob/develop/CMakeLists.txt
 cmake_minimum_required(VERSION 3.1)
 project(
   stringzilla
@@ -8,6 +6,13 @@ project(
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 20)
+
+# Set a default build type to "Release" if none was specified
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "Setting build type to 'Release' as none was specified.")
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif()
 
 # Determine if StringZilla is built as a subproject (using `add_subdirectory`)
 # or if it is the main project
@@ -42,12 +47,11 @@ set(STRINGZILLA_TARGET_NAME ${PROJECT_NAME})
 set(STRINGZILLA_INCLUDE_BUILD_DIR "${PROJECT_SOURCE_DIR}/include/")
 
 # Define our library
-file(GLOB STRINGZILLA_SOURCES "src/*.c")
-add_library(${STRINGZILLA_TARGET_NAME} ${STRINGZILLA_SOURCES})
+add_library(${STRINGZILLA_TARGET_NAME} INTERFACE)
 
 target_include_directories(
   ${STRINGZILLA_TARGET_NAME}
-  PUBLIC $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}>
+  INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}>
   $<INSTALL_INTERFACE:include>)
 
 # Conditional Compilation for Specialized Implementations
@@ -75,19 +79,21 @@ if(${STRINGZILLA_BUILD_TEST} OR ${STRINGZILLA_BUILD_BENCHMARK})
   target_link_options(stringzilla_bench PRIVATE
     "-Wl,--unresolved-symbols=ignore-all")
 
-  # Check for compiler and set -march=native flag for stringzilla_bench
-  if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID}
-    MATCHES "Clang")
+  # Check for compiler and set flags for stringzilla_bench
+  if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
+    # Set -march=native and -fmax-errors=1 for all build types
     target_compile_options(stringzilla_bench PRIVATE "-march=native")
-    target_compile_options(${STRINGZILLA_TARGET_NAME} PRIVATE "-march=native")
-    target_compile_options(${STRINGZILLA_TARGET_NAME} PRIVATE "-fmax-errors=1")
+    target_compile_options(stringzilla_bench PRIVATE "-fmax-errors=1")
+
+    # Set -O3 for Release build, and -g for Debug and RelWithDebInfo
+    target_compile_options(stringzilla_bench PRIVATE
+      "$<$<CONFIG:Release>:-O3>"
+      "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-g>")
   elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
+    # Intel specific flags
     target_compile_options(stringzilla_bench PRIVATE "-xHost")
-    target_compile_options(${STRINGZILLA_TARGET_NAME} PRIVATE "-xHost")
   elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
-    # For MSVC or other compilers, you may want to specify different flags or
-    # skip this You can also leave this empty if there's no equivalent for MSVC
-    # or other compilers
+    # MSVC specific flags or other settings
   endif()
 
   if(${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER
