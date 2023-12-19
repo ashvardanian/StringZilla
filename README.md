@@ -211,8 +211,20 @@ cibuildwheel --platform linux
 
 ### Compiling C++ Tests
 
+Running benchmarks:
+
 ```sh
-cmake -B ./build_release -DSTRINGZILLA_BUILD_TEST=1 && make -C ./build_release -j && ./build_release/stringzilla_bench
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_TEST=1 -B ./build_release
+cmake --build build_release --config Release
+./build_release/stringzilla_bench
+```
+
+Running tests:
+
+```sh
+cmake -DCMAKE_BUILD_TYPE=Debug -DSTRINGZILLA_BUILD_TEST=1 -B ./build_debug
+cmake --build build_debug --config Debug
+./build_debug/stringzilla_bench
 ```
 
 On MacOS it's recommended to use non-default toolchain:

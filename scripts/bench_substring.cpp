@@ -6,8 +6,8 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <random>
 #include <string>
-#include <strstream>
 #include <vector>
 
 #include <stringzilla/stringzilla.h>
@@ -58,12 +58,14 @@ using tracked_unary_functions_t = std::vector<tracked_function_gt<unary_function
 using tracked_binary_functions_t = std::vector<tracked_function_gt<binary_function_t>>;
 
 #define run_tests_m 1
-#define default_seconds_m 5
+#define default_seconds_m 10
+
+using temporary_memory_t = std::vector<char>;
 
 std::string content_original;
 std::vector<std::string> content_words;
 std::vector<sz_error_cost_t> unary_substitution_costs;
-std::vector<char> temporary_memory;
+temporary_memory_t temporary_memory;
 
 template <typename value_at>
 inline void do_not_optimize(value_at &&value) {
@@ -71,6 +73,14 @@ inline void do_not_optimize(value_at &&value) {
 }
 
 inline sz_string_view_t sz_string_view(std::string const &str) { return {str.data(), str.size()}; };
+
+sz_ptr_t _sz_memory_allocate_from_vector(sz_size_t length, void *user_data) {
+    temporary_memory_t &vec = *reinterpret_cast<temporary_memory_t *>(user_data);
+    if (vec.size() < length) vec.resize(length);
+    return vec.data();
+}
+
+void _sz_memory_free_from_vector(sz_ptr_t buffer, sz_size_t length, void *user_data) {}
 
 std::string read_file(std::string path) {
     std::ifstream stream(path);
@@ -104,58 +114,57 @@ std::size_t round_down_to_power_of_two(std::size_t n) {
 }
 
 tracked_unary_functions_t hashing_functions() {
-    auto wrap_if = [](bool condition, auto function) -> unary_function_t {
-        return condition ? unary_function_t(
-                               [function](sz_string_view_t s) { return (sz_ssize_t)function(s.start, s.length); })
-                         : unary_function_t();
+    auto wrap_sz = [](auto function) -> unary_function_t {
+        return unary_function_t([function](sz_string_view_t s) { return (sz_ssize_t)function(s.start, s.length); });
     };
     return {
-        {"sz_hash_serial", wrap_if(true, sz_hash_serial)},
-        // {"sz_hash_avx512", wrap_if(SZ_USE_X86_AVX512, sz_hash_avx512), true},
-        // {"sz_hash_neon", wrap_if(SZ_USE_ARM_NEON, sz_hash_neon), true},
-        {"std::hash",
-         [](sz_string_view_t s) {
-             return (sz_ssize_t)std::hash<std::string_view> {}({s.start, s.length});
-         }},
+        {"sz_hash_serial", wrap_sz(sz_hash_serial)},
+#if SZ_USE_X86_AVX512
+        // {"sz_hash_avx512", wrap_sz(sz_hash_avx512), true},
+#endif
+#if SZ_USE_ARM_NEON
+            {"sz_hash_neon", wrap_sz(sz_hash_neon), true},
+#endif
+            {"std::hash", [](sz_string_view_t s) {
+                 return (sz_ssize_t)std::hash<std::string_view> {}({s.start, s.length});
+             }},
     };
 }
 
 inline tracked_binary_functions_t equality_functions() {
-    auto wrap_if = [](bool condition, auto function) -> binary_function_t {
-        return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
+    auto wrap_sz = [](auto function) -> binary_function_t {
+        return binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
             return (sz_ssize_t)(a.length == b.length && function(a.start, b.start, a.length));
-        })
-                         : binary_function_t();
+        });
     };
     return {
-        {"std::string.==",
+        {"std::string_view.==",
          [](sz_string_view_t a, sz_string_view_t b) {
              return (sz_ssize_t)(std::string_view(a.start, a.length) == std::string_view(b.start, b.length));
          }},
-        {"sz_equal_serial", wrap_if(true, sz_equal_serial), true},
-        {"sz_equal_avx512", wrap_if(SZ_USE_X86_AVX512, sz_equal_avx512), true},
-        {"memcmp",
-         [](sz_string_view_t a, sz_string_view_t b) {
-             return (sz_ssize_t)(a.length == b.length && memcmp(a.start, b.start, a.length) == 0);
-         }},
+            {"sz_equal_serial", wrap_sz(sz_equal_serial), true},
+#if SZ_USE_X86_AVX512
+            {"sz_equal_avx512", wrap_sz(sz_equal_avx512), true},
+#endif
+            {"memcmp", [](sz_string_view_t a, sz_string_view_t b) {
+                 return (sz_ssize_t)(a.length == b.length && memcmp(a.start, b.start, a.length) == 0);
+             }},
     };
 }
 
 inline tracked_binary_functions_t ordering_functions() {
-    auto wrap_if = [](bool condition, auto function) -> binary_function_t {
-        return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
+    auto wrap_sz = [](auto function) -> binary_function_t {
+        return binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
             return (sz_ssize_t)function(a.start, a.length, b.start, b.length);
-        })
-                         : binary_function_t();
+        });
     };
     return {
-        {"std::string.compare",
+        {"std::string_view.compare",
          [](sz_string_view_t a, sz_string_view_t b) {
              auto order = std::string_view(a.start, a.length).compare(std::string_view(b.start, b.length));
              return (sz_ssize_t)(order == 0 ? sz_equal_k : (order < 0 ? sz_less_k : sz_greater_k));
          }},
-        {"sz_order_serial", wrap_if(true, sz_order_serial), true},
-        {"sz_order_avx512", wrap_if(SZ_USE_X86_AVX512, sz_order_avx512), true},
+        {"sz_order_serial", wrap_sz(sz_order_serial), true},
         {"memcmp",
          [](sz_string_view_t a, sz_string_view_t b) {
              auto order = memcmp(a.start, b.start, a.length < b.length ? a.length : b.length);
@@ -166,136 +175,68 @@ inline tracked_binary_functions_t ordering_functions() {
     };
 }
 
-inline tracked_binary_functions_t prefix_functions() {
-    auto wrap_if = [](bool condition, auto function) -> binary_function_t {
-        return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
-            sz_string_view_t shorter = a.length < b.length ? a : b;
-            sz_string_view_t longer = a.length < b.length ? b : a;
-            return (sz_ssize_t)function(shorter.start, longer.start, shorter.length);
-        })
-                         : binary_function_t();
-    };
-    auto wrap_mismatch_if = [](bool condition, auto function) -> binary_function_t {
-        return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
-            sz_string_view_t shorter = a.length < b.length ? a : b;
-            sz_string_view_t longer = a.length < b.length ? b : a;
-            return (sz_ssize_t)(function(shorter.start, longer.start, shorter.length) == NULL);
-        })
-                         : binary_function_t();
-    };
-    return {
-        {"std::string.starts_with",
-         [](sz_string_view_t a, sz_string_view_t b) {
-             sz_string_view_t shorter = a.length < b.length ? a : b;
-             sz_string_view_t longer = a.length < b.length ? b : a;
-             return (sz_ssize_t)(std::string_view(longer.start, longer.length)
-                                     .starts_with(std::string_view(shorter.start, shorter.length)));
-         }},
-        {"sz_equal_serial", wrap_if(true, sz_equal_serial), true},
-        {"sz_equal_avx512", wrap_if(SZ_USE_X86_AVX512, sz_equal_avx512), true},
-        {"sz_mismatch_first_serial", wrap_mismatch_if(true, sz_mismatch_first_serial), true},
-        {"sz_mismatch_first_avx512", wrap_mismatch_if(SZ_USE_X86_AVX512, sz_mismatch_first_avx512), true},
-        {"memcmp",
-         [](sz_string_view_t a, sz_string_view_t b) {
-             sz_string_view_t shorter = a.length < b.length ? a : b;
-             sz_string_view_t longer = a.length < b.length ? b : a;
-             return (sz_ssize_t)(memcmp(shorter.start, longer.start, shorter.length) == 0);
-         }},
-    };
-}
-
-inline tracked_binary_functions_t suffix_functions() {
-    auto wrap_mismatch_if = [](bool condition, auto function) -> binary_function_t {
-        return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
-            sz_string_view_t shorter = a.length < b.length ? a : b;
-            sz_string_view_t longer = a.length < b.length ? b : a;
-            return (sz_ssize_t)(function(shorter.start, longer.start + longer.length - shorter.length,
-                                         shorter.length) == NULL);
-        })
-                         : binary_function_t();
-    };
-    return {
-        {"std::string.ends_with",
-         [](sz_string_view_t a, sz_string_view_t b) {
-             sz_string_view_t shorter = a.length < b.length ? a : b;
-             sz_string_view_t longer = a.length < b.length ? b : a;
-             return (sz_ssize_t)(std::string_view(longer.start, longer.length)
-                                     .ends_with(std::string_view(shorter.start, shorter.length)));
-         }},
-        {"sz_mismatch_last_serial", wrap_mismatch_if(true, sz_mismatch_last_serial), true},
-        {"sz_mismatch_last_avx512", wrap_mismatch_if(SZ_USE_X86_AVX512, sz_mismatch_last_avx512), true},
-        {"memcmp",
-         [](sz_string_view_t a, sz_string_view_t b) {
-             sz_string_view_t shorter = a.length < b.length ? a : b;
-             sz_string_view_t longer = a.length < b.length ? b : a;
-             return (sz_ssize_t)(memcmp(shorter.start, longer.start + longer.length - shorter.length, shorter.length) ==
-                                 0);
-         }},
-    };
-}
-
 inline tracked_binary_functions_t find_functions() {
-    auto wrap_if = [](bool condition, auto function) -> binary_function_t {
-        return condition ? binary_function_t([function](sz_string_view_t h, sz_string_view_t n) {
+    auto wrap_sz = [](auto function) -> binary_function_t {
+        return binary_function_t([function](sz_string_view_t h, sz_string_view_t n) {
             sz_cptr_t match = function(h.start, h.length, n.start, n.length);
             return (sz_ssize_t)(match ? match - h.start : h.length);
-        })
-                         : binary_function_t();
+        });
     };
     return {
-        {"std::string.find",
+        {"std::string_view.find",
          [](sz_string_view_t h, sz_string_view_t n) {
              auto h_view = std::string_view(h.start, h.length);
              auto n_view = std::string_view(n.start, n.length);
              auto match = h_view.find(n_view);
              return (sz_ssize_t)(match == std::string_view::npos ? h.length : match);
          }},
-        {"sz_find_serial", wrap_if(true, sz_find_serial), true},
-        {"sz_find_avx512", wrap_if(SZ_USE_X86_AVX512, sz_find_avx512), true},
-        {"sz_find_avx2", wrap_if(SZ_USE_X86_AVX2, sz_find_avx2), true},
-        // {"sz_find_neon", wrap_if(SZ_USE_ARM_NEON, sz_find_neon), true},
-        {"memcmp",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             sz_cptr_t match = strstr(h.start, n.start);
-             return (sz_ssize_t)(match ? match - h.start : h.length);
-         }},
-        {"std::search",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto match = std::search(h.start, h.start + h.length, n.start, n.start + n.length);
-             return (sz_ssize_t)(match - h.start);
-         }},
-        {"std::search<BM>",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto match =
-                 std::search(h.start, h.start + h.length, std::boyer_moore_searcher(n.start, n.start + n.length));
-             return (sz_ssize_t)(match - h.start);
-         }},
-        {"std::search<BMH>",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto match = std::search(h.start, h.start + h.length,
-                                      std::boyer_moore_horspool_searcher(n.start, n.start + n.length));
-             return (sz_ssize_t)(match - h.start);
-         }},
+            {"sz_find_serial", wrap_sz(sz_find_serial), true},
+#if SZ_USE_X86_AVX512
+            {"sz_find_avx512", wrap_sz(sz_find_avx512), true},
+#endif
+#if SZ_USE_ARM_NEON
+            {"sz_find_neon", wrap_sz(sz_find_neon), true},
+#endif
+            {"strstr",
+             [](sz_string_view_t h, sz_string_view_t n) {
+                 sz_cptr_t match = strstr(h.start, n.start);
+                 return (sz_ssize_t)(match ? match - h.start : h.length);
+             }},
+            {"std::search",
+             [](sz_string_view_t h, sz_string_view_t n) {
+                 auto match = std::search(h.start, h.start + h.length, n.start, n.start + n.length);
+                 return (sz_ssize_t)(match - h.start);
+             }},
+            {"std::search<BM>",
+             [](sz_string_view_t h, sz_string_view_t n) {
+                 auto match =
+                     std::search(h.start, h.start + h.length, std::boyer_moore_searcher(n.start, n.start + n.length));
+                 return (sz_ssize_t)(match - h.start);
+             }},
+            {"std::search<BMH>", [](sz_string_view_t h, sz_string_view_t n) {
+                 auto match = std::search(h.start, h.start + h.length,
+                                          std::boyer_moore_horspool_searcher(n.start, n.start + n.length));
+                 return (sz_ssize_t)(match - h.start);
+             }},
     };
 }
 
 inline tracked_binary_functions_t find_last_functions() {
-    auto wrap_if = [](bool condition, auto function) -> binary_function_t {
-        return condition ? binary_function_t([function](sz_string_view_t h, sz_string_view_t n) {
+    auto wrap_sz = [](auto function) -> binary_function_t {
+        return binary_function_t([function](sz_string_view_t h, sz_string_view_t n) {
             sz_cptr_t match = function(h.start, h.length, n.start, n.length);
             return (sz_ssize_t)(match ? match - h.start : h.length);
-        })
-                         : binary_function_t();
+        });
     };
     return {
-        {"std::string.find",
+        {"std::string_view.rfind",
          [](sz_string_view_t h, sz_string_view_t n) {
              auto h_view = std::string_view(h.start, h.length);
              auto n_view = std::string_view(n.start, n.length);
              auto match = h_view.rfind(n_view);
              return (sz_ssize_t)(match == std::string_view::npos ? h.length : match);
          }},
-        {"sz_find_last_serial", wrap_if(true, sz_find_last_serial), true},
+        {"sz_find_last_serial", wrap_sz(sz_find_last_serial), true},
         {"std::search",
          [](sz_string_view_t h, sz_string_view_t n) {
              auto h_view = std::string_view(h.start, h.length);
@@ -328,30 +269,35 @@ inline tracked_binary_functions_t distance_functions() {
     unary_substitution_costs.resize(max_length * max_length);
     for (std::size_t i = 0; i != max_length; ++i)
         for (std::size_t j = 0; j != max_length; ++j) unary_substitution_costs[i * max_length + j] = (i == j ? 0 : 1);
-    sz_size_t requirements = sz_alignment_score_memory_needed(max_length, max_length);
-    temporary_memory.resize(requirements);
 
-    auto wrap_distance_if = [](bool condition, auto function) -> binary_function_t {
-        return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
+    // Two rows of the Levenshtein matrix will occupy this much:
+    temporary_memory.resize((max_length + 1) * 2 * sizeof(sz_size_t));
+    sz_memory_allocator_t alloc;
+    alloc.allocate = _sz_memory_allocate_from_vector;
+    alloc.free = _sz_memory_free_from_vector;
+    alloc.user_data = &temporary_memory;
+
+    auto wrap_sz_distance = [alloc](auto function) -> binary_function_t {
+        return binary_function_t([function, alloc](sz_string_view_t a, sz_string_view_t b) {
             a.length = sz_min_of_two(a.length, max_length);
             b.length = sz_min_of_two(b.length, max_length);
-            return (sz_ssize_t)function(a.start, a.length, b.start, b.length, temporary_memory.data(), max_length);
-        })
-                         : binary_function_t();
+            return (sz_ssize_t)function(a.start, a.length, b.start, b.length, max_length, &alloc);
+        });
     };
-    auto wrap_scoring_if = [](bool condition, auto function) -> binary_function_t {
-        return condition ? binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
+    auto wrap_sz_scoring = [alloc](auto function) -> binary_function_t {
+        return binary_function_t([function, alloc](sz_string_view_t a, sz_string_view_t b) {
             a.length = sz_min_of_two(a.length, max_length);
             b.length = sz_min_of_two(b.length, max_length);
             return (sz_ssize_t)function(a.start, a.length, b.start, b.length, 1, unary_substitution_costs.data(),
-                                        (sz_ptr_t)temporary_memory.data());
-        })
-                         : binary_function_t();
+                                        &alloc);
+        });
     };
     return {
-        {"sz_levenshtein", wrap_distance_if(true, sz_levenshtein_serial)},
-        {"sz_alignment_score", wrap_scoring_if(true, sz_alignment_score_serial), true},
-        {"sz_levenshtein_avx512", wrap_distance_if(SZ_USE_X86_AVX512, sz_levenshtein_avx512), true},
+        {"sz_levenshtein", wrap_sz_distance(sz_levenshtein_serial)},
+            {"sz_alignment_score", wrap_sz_scoring(sz_alignment_score_serial), true},
+#if SZ_USE_X86_AVX512
+        // {"sz_levenshtein_avx512", wrap_sz_distance(sz_levenshtein_avx512), true},
+#endif
     };
 }
 
@@ -373,7 +319,7 @@ loop_over_words_result_t loop_over_words(strings_at &&strings, function_at &&fun
 
     while (true) {
         // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
-        for (std::size_t i = 0; i != 32; ++i) {
+        {
             result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
             result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
             result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
@@ -425,7 +371,8 @@ void evaluate_unary_operations(strings_at &&strings, tracked_unary_functions_t &
 /**
  *  @brief  Loop over all elements in a dataset, benchmarking the function cost.
  *  @param  strings Strings to loop over. Length must be a power of two.
- *  @param  function Function to be applied to pairs of `sz_string_view_t`. Must return the number of bytes processed.
+ *  @param  function Function to be applied to pairs of `sz_string_view_t`. Must return the number of bytes
+ * processed.
  *  @return Number of seconds per iteration.
  */
 template <typename strings_at, typename function_at>
@@ -436,11 +383,11 @@ loop_over_words_result_t loop_over_pairs_of_words(strings_at &&strings, function
     using stdcc = stdc::high_resolution_clock;
     stdcc::time_point t1 = stdcc::now();
     loop_over_words_result_t result;
-    std::size_t lookup_mask = round_down_to_power_of_two(strings.size());
+    std::size_t lookup_mask = round_down_to_power_of_two(strings.size()) - 1;
 
     while (true) {
         // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
-        for (std::size_t i = 0; i != 32; ++i) {
+        {
             result.bytes_passed +=
                 function(sz_string_view(strings[(++result.iterations) & lookup_mask]),
                          sz_string_view(strings[(result.iterations * 18446744073709551557ull) & lookup_mask]));
@@ -525,8 +472,8 @@ void evaluate_find_operations(strings_at &&strings, tracked_binary_functions_t &
                     }
 
                     if (baseline == str_h.length) break;
-                    str_h.start += result + str_n.length;
-                    str_h.length -= result + str_n.length;
+                    str_h.start += baseline + 1;
+                    str_h.length -= baseline + 1;
                 }
 
                 return content_original.size();
@@ -535,14 +482,14 @@ void evaluate_find_operations(strings_at &&strings, tracked_binary_functions_t &
 
         // Benchmarks
         if (variant.function) {
-            std::size_t bytes_processed = 0;
-            std::size_t mask = content_original.size() - 1;
             variant.results = loop_over_words(strings, [&](sz_string_view_t str_n) {
                 sz_string_view_t str_h = {content_original.data(), content_original.size()};
-                str_h.start += bytes_processed & mask;
-                str_h.length -= bytes_processed & mask;
                 auto result = variant.function(str_h, str_n);
-                bytes_processed += result + str_n.length;
+                while (result != str_h.length) {
+                    str_h.start += result + 1, str_h.length -= result + 1;
+                    result = variant.function(str_h, str_n);
+                    do_not_optimize(result);
+                }
                 return result;
             });
         }
@@ -570,13 +517,13 @@ void evaluate_find_last_operations(strings_at &&strings, tracked_binary_function
                     if (result != baseline) {
                         ++variant.failed_count;
                         if (variant.failed_strings.empty()) {
-                            variant.failed_strings.push_back({str_h.start, baseline + str_n.length});
+                            variant.failed_strings.push_back({str_h.start + baseline, str_h.start + str_h.length});
                             variant.failed_strings.push_back({str_n.start, str_n.length});
                         }
                     }
 
                     if (baseline == str_h.length) break;
-                    str_h.length -= result + str_n.length;
+                    str_h.length = baseline;
                 }
 
                 return content_original.size();
@@ -591,7 +538,7 @@ void evaluate_find_last_operations(strings_at &&strings, tracked_binary_function
                 sz_string_view_t str_h = {content_original.data(), content_original.size()};
                 str_h.length -= bytes_processed & mask;
                 auto result = variant.function(str_h, str_n);
-                bytes_processed += result + str_n.length;
+                bytes_processed += (str_h.length - result) + str_n.length;
                 return result;
             });
         }
@@ -602,15 +549,15 @@ void evaluate_find_last_operations(strings_at &&strings, tracked_binary_function
 
 template <typename strings_at>
 void evaluate_all_operations(strings_at &&strings) {
-    // evaluate_unary_operations(strings, hashing_functions());
-    // evaluate_binary_operations(strings, equality_functions());
-    // evaluate_binary_operations(strings, ordering_functions());
-    // evaluate_binary_operations(strings, distance_functions());
+    evaluate_unary_operations(strings, hashing_functions());
+    evaluate_binary_operations(strings, equality_functions());
+    evaluate_binary_operations(strings, ordering_functions());
+    evaluate_binary_operations(strings, distance_functions());
     evaluate_find_operations(strings, find_functions());
+    evaluate_find_last_operations(strings, find_last_functions());
 
     // evaluate_binary_operations(strings, prefix_functions());
     // evaluate_binary_operations(strings, suffix_functions());
-    // evaluate_find_last_operations(strings, find_last_functions());
 }
 
 int main(int, char const **) {
@@ -644,6 +591,7 @@ int main(int, char const **) {
     for (std::size_t word_length : {1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 33, 65}) {
 
         // Generate some impossible words of that length
+        std::printf("\n\n");
         std::printf("Benchmarking for abstract tokens of length %zu:\n", word_length);
         std::vector<std::string> words = {
             std::string(word_length, '\1'),
