@@ -2,7 +2,7 @@ Language: Cpp
 BasedOnStyle: LLVM
 IndentWidth: 4
 TabWidth: 4
-NamespaceIndentation: All
+NamespaceIndentation: None
 ColumnLimit: 120
 ReflowComments: true
 UseTab: Never
