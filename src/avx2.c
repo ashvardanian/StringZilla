@@ -12,7 +12,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
         __m256i h0 = _mm256_loadu_si256((__m256i const *)(h + 0));
         int matches0 = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h0, n_vec));
         if (matches0) {
-            sz_size_t first_match_offset = sz_ctz64(matches0);
+            sz_size_t first_match_offset = sz_u64_ctz(matches0);
             return h + first_match_offset;
         }
         else { h += 32; }
@@ -38,7 +38,7 @@ SZ_PUBLIC sz_cptr_t sz_find_2byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_
 
         if (matches0 | matches1) {
             int combined_matches = (matches0 & 0x55555555) | (matches1 & 0xAAAAAAAA);
-            sz_size_t first_match_offset = sz_ctz64(combined_matches);
+            sz_size_t first_match_offset = sz_u64_ctz(combined_matches);
             return h + first_match_offset;
         }
         else { h += 32; }
@@ -82,7 +82,7 @@ SZ_PUBLIC sz_cptr_t sz_find_4byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_
                 (matches1 & 0x22222222) | //
                 (matches2 & 0x44444444) | //
                 (matches3 & 0x88888888);
-            sz_size_t first_match_offset = sz_ctz64(matches);
+            sz_size_t first_match_offset = sz_u64_ctz(matches);
             return h + first_match_offset;
         }
         else { h += 32; }
@@ -124,7 +124,7 @@ SZ_PUBLIC sz_cptr_t sz_find_3byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_
                 (matches1 & 0x22222222) | //
                 (matches2 & 0x44444444) | //
                 (matches3 & 0x88888888);
-            sz_size_t first_match_offset = sz_ctz64(matches);
+            sz_size_t first_match_offset = sz_u64_ctz(matches);
             return h + first_match_offset;
         }
         else { h += 32; }

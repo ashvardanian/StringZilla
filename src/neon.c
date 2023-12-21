@@ -50,7 +50,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t const haystack, sz_size_t const hayst
                 (vget_lane_u16(matches_u16x4, 3) << 12);
 
             // Find the first match
-            sz_size_t first_match_offset = sz_ctz64(matches_u16);
+            sz_size_t first_match_offset = sz_u64_ctz(matches_u16);
             if (needle_length > 4) {
                 if (sz_equal(text + first_match_offset + 4, needle + 4, needle_length - 4)) {
                     return text + first_match_offset;
