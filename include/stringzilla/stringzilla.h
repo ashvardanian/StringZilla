@@ -132,14 +132,6 @@
 #endif
 #endif
 
-#ifndef SZ_USE_X86_SSE42
-#ifdef __SSE4_2__
-#define SZ_USE_X86_SSE42 1
-#else
-#define SZ_USE_X86_SSE42 0
-#endif
-#endif
-
 #ifndef SZ_USE_ARM_NEON
 #ifdef __ARM_NEON
 #define SZ_USE_ARM_NEON 1
@@ -148,11 +140,11 @@
 #endif
 #endif
 
-#ifndef SZ_USE_ARM_CRC32
-#ifdef __ARM_FEATURE_CRC32
-#define SZ_USE_ARM_CRC32 1
+#ifndef SZ_USE_ARM_SVE
+#ifdef __ARM_FEATURE_SVE
+#define SZ_USE_ARM_SVE 1
 #else
-#define SZ_USE_ARM_CRC32 0
+#define SZ_USE_ARM_SVE 0
 #endif
 #endif
 
@@ -2455,18 +2447,10 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
 
 #include <stringzilla/stringzilla.h>
 
-SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length) {
-#if defined(__NEON__)
-    return sz_hash_neon(text, length);
-#elif defined(__AVX512__)
-    return sz_hash_avx512(text, length);
-#else
-    return sz_hash_serial(text, length);
-#endif
-}
+SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
 
 SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
-#if defined(__AVX512__)
+#if SZ_USE_X86_AVX512
     return sz_order_avx512(a, a_length, b, b_length);
 #else
     return sz_order_serial(a, a_length, b, b_length);
@@ -2474,7 +2458,7 @@ SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, s
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
-#if defined(__AVX512__)
+#if SZ_USE_X86_AVX512
     return sz_find_byte_avx512(haystack, h_length, needle);
 #else
     return sz_find_byte_serial(haystack, h_length, needle);
@@ -2482,9 +2466,9 @@ SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 }
 
 SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-#if defined(__AVX512__)
+#if SZ_USE_X86_AVX512
     return sz_find_avx512(haystack, h_length, needle, n_length);
-#elif defined(__NEON__)
+#elif SZ_USE_ARM_NEON
     return sz_find_neon(haystack, h_length, needle, n_length);
 #else
     return sz_find_serial(haystack, h_length, needle, n_length);
@@ -2492,9 +2476,9 @@ SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t ne
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-#if defined(__AVX512__)
+#if SZ_USE_X86_AVX512
     return sz_find_last_avx512(haystack, h_length, needle, n_length);
-#elif defined(__NEON__)
+#elif SZ_USE_ARM_NEON
     return sz_find_last_neon(haystack, h_length, needle, n_length);
 #else
     return sz_find_last_serial(haystack, h_length, needle, n_length);
@@ -2510,49 +2494,29 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u
 }
 
 SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-#if defined(__AVX512__)
-    sz_tolower_avx512(text, length, result);
-#else
     sz_tolower_serial(text, length, result);
-#endif
 }
 
 SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-#if defined(__AVX512__)
-    sz_toupper_avx512(text, length, result);
-#else
     sz_toupper_serial(text, length, result);
-#endif
 }
 
 SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-#if defined(__AVX512__)
-    sz_toascii_avx512(text, length, result);
-#else
     sz_toascii_serial(text, length, result);
-#endif
 }
 
 SZ_PUBLIC sz_size_t sz_levenshtein(  //
     sz_cptr_t a, sz_size_t a_length, //
     sz_cptr_t b, sz_size_t b_length, //
     sz_size_t bound, sz_memory_allocator_t const *alloc) {
-#if defined(__AVX512__)
-    return sz_levenshtein_avx512(a, a_length, b, b_length, bound, alloc);
-#else
     return sz_levenshtein_serial(a, a_length, b, b_length, bound, alloc);
-#endif
 }
 
 SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
                                         sz_error_cost_t gap, sz_error_cost_t const *subs,
                                         sz_memory_allocator_t const *alloc) {
 
-#if defined(__AVX512__)
-    return sz_alignment_score_avx512(a, a_length, b, b_length, gap, subs, alloc);
-#else
     return sz_alignment_score_serial(a, a_length, b, b_length, gap, subs, alloc);
-#endif
 }
 
 #pragma endregion
