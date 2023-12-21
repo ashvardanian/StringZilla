@@ -2,28 +2,35 @@
 #include <cstring>  // `std::memcpy`
 #include <iterator> // `std::distance`
 
+#define SZ_USE_X86_AVX2 0
+#define SZ_USE_X86_AVX512 1
+#define SZ_USE_ARM_NEON 0
+#define SZ_USE_ARM_SVE 0
+
 #include <string>                      // Baseline
 #include <string_view>                 // Baseline
 #include <stringzilla/stringzilla.hpp> // Contender
 
 namespace sz = av::sz;
 
+template <typename stl_matcher_, typename sz_matcher_>
 void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
     constexpr std::size_t max_repeats = 128;
-    alignas(64) char haystack[max_repeats * haystack_pattern.size() + misalignment];
+    alignas(64) char haystack[misalignment + max_repeats * haystack_pattern.size()];
 
     for (std::size_t repeats = 0; repeats != 128; ++repeats) {
+        std::size_t haystack_length = (repeats + 1) * haystack_pattern.size();
         std::memcpy(haystack + misalignment + repeats * haystack_pattern.size(), haystack_pattern.data(),
                     haystack_pattern.size());
 
         // Convert to string views
-        auto haystack_stl = std::string_view(haystack + misalignment, repeats * haystack_pattern.size());
-        auto haystack_sz = sz::string_view(haystack + misalignment, repeats * haystack_pattern.size());
+        auto haystack_stl = std::string_view(haystack + misalignment, haystack_length);
+        auto haystack_sz = sz::string_view(haystack + misalignment, haystack_length);
         auto needle_sz = sz::string_view(needle_stl.data(), needle_stl.size());
 
         // Wrap into ranges
-        auto matches_stl = sz::search_matches(haystack_stl, needle_stl);
-        auto matches_sz = sz::search_matches(haystack_sz, needle_sz);
+        auto matches_stl = stl_matcher_(haystack_stl, needle_stl);
+        auto matches_sz = sz_matcher_(haystack_sz, needle_sz);
         auto begin_stl = matches_stl.begin();
         auto begin_sz = matches_sz.begin();
         auto end_stl = matches_stl.end();
@@ -41,33 +48,40 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::s
         // If one range is not finished, assert failure
         assert(count_stl == count_sz);
         assert(begin_stl == end_stl && begin_sz == end_sz);
-
-        // Wrap into reverse-order ranges
-        auto reverse_matches_stl = sz::reverse_search_matches(haystack_stl, needle_stl);
-        auto reverse_matches_sz = sz::reverse_search_matches(haystack_sz, needle_sz);
-        auto reverse_begin_stl = reverse_matches_stl.begin();
-        auto reverse_begin_sz = reverse_matches_sz.begin();
-        auto reverse_end_stl = reverse_matches_stl.end();
-        auto reverse_end_sz = reverse_matches_sz.end();
-        auto reverse_count_stl = std::distance(reverse_begin_stl, reverse_end_stl);
-        auto reverse_count_sz = std::distance(reverse_begin_sz, reverse_end_sz);
-
-        // Compare reverse-order results
-        for (; reverse_begin_stl != reverse_end_stl && reverse_begin_sz != reverse_end_sz;
-             ++reverse_begin_stl, ++reverse_begin_sz) {
-            auto reverse_match_stl = *reverse_begin_stl;
-            auto reverse_match_sz = *reverse_begin_sz;
-            assert(reverse_match_stl.data() == reverse_match_sz.data());
-        }
-
-        // If one range is not finished, assert failure
-        assert(reverse_count_stl == reverse_count_sz);
-        assert(reverse_begin_stl == reverse_end_stl && reverse_begin_sz == reverse_end_sz);
-
-        // Make sure number of elements is equal
-        assert(count_stl == reverse_count_stl);
-        assert(count_sz == reverse_count_sz);
     }
+}
+
+void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
+
+    eval<                                                      //
+        sz::range_matches<std::string_view, sz::matcher_find>, //
+        sz::range_matches<sz::string_view, sz::matcher_find>>( //
+        haystack_pattern, needle_stl, misalignment);
+
+    eval<                                                               //
+        sz::reverse_range_matches<std::string_view, sz::matcher_rfind>, //
+        sz::reverse_range_matches<sz::string_view, sz::matcher_rfind>>( //
+        haystack_pattern, needle_stl, misalignment);
+
+    eval<                                                               //
+        sz::range_matches<std::string_view, sz::matcher_find_first_of>, //
+        sz::range_matches<sz::string_view, sz::matcher_find_first_of>>( //
+        haystack_pattern, needle_stl, misalignment);
+
+    eval<                                                                      //
+        sz::reverse_range_matches<std::string_view, sz::matcher_find_last_of>, //
+        sz::reverse_range_matches<sz::string_view, sz::matcher_find_last_of>>( //
+        haystack_pattern, needle_stl, misalignment);
+
+    eval<                                                                   //
+        sz::range_matches<std::string_view, sz::matcher_find_first_not_of>, //
+        sz::range_matches<sz::string_view, sz::matcher_find_first_not_of>>( //
+        haystack_pattern, needle_stl, misalignment);
+
+    eval<                                                                          //
+        sz::reverse_range_matches<std::string_view, sz::matcher_find_last_not_of>, //
+        sz::reverse_range_matches<sz::string_view, sz::matcher_find_last_not_of>>( //
+        haystack_pattern, needle_stl, misalignment);
 }
 
 void eval(std::string_view haystack_pattern, std::string_view needle_stl) {

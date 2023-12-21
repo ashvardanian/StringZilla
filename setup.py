@@ -11,9 +11,8 @@ link_args = []
 macros_args = [
     ("SZ_USE_X86_AVX512", "0"),
     ("SZ_USE_X86_AVX2", "1"),
-    ("SZ_USE_X86_SSE42", "1"),
     ("SZ_USE_ARM_NEON", "0"),
-    ("SZ_USE_ARM_CRC32", "0"),
+    ("SZ_USE_ARM_SVE", "0"),
 ]
 
 if sys.platform == "linux":

@@ -16,125 +16,6 @@ namespace av {
 namespace sz {
 
 /**
- *  @brief  A range of string views representing the matches of a substring search.
- *          Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
- */
-template <typename string_view_>
-class search_matches {
-    using string_view = string_view_;
-    string_view haystack_;
-    string_view needle_;
-
-  public:
-    search_matches(string_view haystack, string_view needle) : haystack_(haystack), needle_(needle) {}
-
-    class iterator {
-        string_view remaining_;
-        string_view needle_;
-
-      public:
-        using iterator_category = std::forward_iterator_tag;
-        using difference_type = std::ptrdiff_t;
-        using value_type = string_view;
-        using pointer = string_view const *;
-        using reference = string_view const &;
-
-        iterator(string_view haystack, string_view needle) noexcept : remaining_(haystack), needle_(needle) {}
-        value_type operator*() const noexcept { return remaining_.substr(0, needle_.size()); }
-
-        iterator &operator++() noexcept {
-            remaining_.remove_prefix(1);
-            auto position = remaining_.find(needle_);
-            remaining_ = position != string_view::npos ? remaining_.substr(position) : string_view();
-            return *this;
-        }
-
-        iterator operator++(int) noexcept {
-            iterator temp = *this;
-            ++(*this);
-            return temp;
-        }
-
-        bool operator!=(iterator const &other) const noexcept { return remaining_.size() != other.remaining_.size(); }
-        bool operator==(iterator const &other) const noexcept { return remaining_.size() == other.remaining_.size(); }
-    };
-
-    iterator begin() const noexcept {
-        auto position = haystack_.find(needle_);
-        return iterator(position != string_view::npos ? haystack_.substr(position) : string_view(), needle_);
-    }
-
-    iterator end() const noexcept { return iterator(string_view(), needle_); }
-    iterator::difference_type size() const noexcept { return std::distance(begin(), end()); }
-};
-
-/**
- *  @brief  A range of string views representing the matches of a @b reverse-order substring search.
- *          Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
- */
-template <typename string_view_>
-class reverse_search_matches {
-    using string_view = string_view_;
-    string_view_ haystack_;
-    string_view_ needle_;
-
-  public:
-    reverse_search_matches(string_view haystack, string_view needle) : haystack_(haystack), needle_(needle) {}
-
-    class iterator {
-        string_view remaining_;
-        string_view needle_;
-
-      public:
-        using iterator_category = std::forward_iterator_tag;
-        using difference_type = std::ptrdiff_t;
-        using value_type = string_view;
-        using pointer = string_view const *;
-        using reference = string_view const &;
-
-        iterator(string_view haystack, string_view needle) noexcept : remaining_(haystack), needle_(needle) {}
-        value_type operator*() const noexcept { return remaining_.substr(remaining_.size() - needle_.size()); }
-
-        iterator &operator++() noexcept {
-            remaining_.remove_suffix(1);
-            auto position = remaining_.rfind(needle_);
-            remaining_ =
-                position != string_view::npos ? remaining_.substr(0, position + needle_.size()) : string_view();
-            return *this;
-        }
-
-        iterator operator++(int) noexcept {
-            iterator temp = *this;
-            ++(*this);
-            return temp;
-        }
-
-        bool operator!=(iterator const &other) const noexcept { return remaining_.data() != other.remaining_.data(); }
-        bool operator==(iterator const &other) const noexcept { return remaining_.data() == other.remaining_.data(); }
-    };
-
-    iterator begin() const noexcept {
-        auto position = haystack_.rfind(needle_);
-        return iterator(position != string_view::npos ? haystack_.substr(0, position + needle_.size()) : string_view(),
-                        needle_);
-    }
-
-    iterator end() const noexcept { return iterator(string_view(), needle_); }
-    iterator::difference_type size() const noexcept { return std::distance(begin(), end()); }
-};
-
-/*  C++17 template type deduction guides. */
-#if __cplusplus >= 201703L
-
-template <typename string_view_>
-search_matches(string_view_, string_view_) -> search_matches<string_view_>;
-
-template <typename string_view_>
-reverse_search_matches(string_view_, string_view_) -> reverse_search_matches<string_view_>;
-
-#endif
-
-/**
  *  @brief  A string view class implementing with the superset of C++23 functionality
  *          with much faster SIMD-accelerated substring search and approximate matching.
  *          Unlike STL, never raises exceptions.
@@ -386,44 +267,53 @@ class string_view {
     bool contains(const_pointer other) const noexcept { return find(other) != npos; }
 
     /** @brief  Find the first occurence of a character from a set. */
-    size_type find_first_of(string_view other) const noexcept {
-        sz_u8_set_t set;
-        sz_u8_set_init(&set);
-        for (auto c : other) sz_u8_set_add(&set, c);
+    size_type find_first_of(string_view other) const noexcept { return find_first_of(other.character_set()); }
+
+    /** @brief  Find the first occurence of a character outside of the set. */
+    size_type find_first_not_of(string_view other) const noexcept { return find_first_not_of(other.character_set()); }
+
+    /** @brief  Find the last occurence of a character from a set. */
+    size_type find_last_of(string_view other) const noexcept { return find_last_of(other.character_set()); }
+
+    /** @brief  Find the last occurence of a character outside of the set. */
+    size_type find_last_not_of(string_view other) const noexcept { return find_last_not_of(other.character_set()); }
+
+    /** @brief  Find the first occurence of a character from a set. */
+    size_type find_first_of(sz_u8_set_t set) const noexcept {
         auto ptr = sz_find_from_set(start_, length_, &set);
         return ptr ? ptr - start_ : npos;
     }
 
     /** @brief  Find the first occurence of a character outside of the set. */
-    size_type find_first_not_of(string_view other) const noexcept {
-        sz_u8_set_t set;
-        sz_u8_set_init(&set);
-        for (auto c : other) sz_u8_set_add(&set, c);
+    size_type find_first_not_of(sz_u8_set_t set) const noexcept {
         sz_u8_set_invert(&set);
         auto ptr = sz_find_from_set(start_, length_, &set);
         return ptr ? ptr - start_ : npos;
     }
 
     /** @brief  Find the last occurence of a character from a set. */
-    size_type find_last_of(string_view other) const noexcept {
-        sz_u8_set_t set;
-        sz_u8_set_init(&set);
-        for (auto c : other) sz_u8_set_add(&set, c);
+    size_type find_last_of(sz_u8_set_t set) const noexcept {
         auto ptr = sz_find_last_from_set(start_, length_, &set);
         return ptr ? ptr - start_ : npos;
     }
 
     /** @brief  Find the last occurence of a character outside of the set. */
-    size_type find_last_not_of(string_view other) const noexcept {
-        sz_u8_set_t set;
-        sz_u8_set_init(&set);
-        for (auto c : other) sz_u8_set_add(&set, c);
+    size_type find_last_not_of(sz_u8_set_t set) const noexcept {
         sz_u8_set_invert(&set);
         auto ptr = sz_find_last_from_set(start_, length_, &set);
         return ptr ? ptr - start_ : npos;
     }
 
     size_type copy(pointer destination, size_type count, size_type pos = 0) const noexcept = delete;
+
+    size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }
+
+    sz_u8_set_t character_set() const noexcept {
+        sz_u8_set_t set;
+        sz_u8_set_init(&set);
+        for (auto c : *this) sz_u8_set_add(&set, c);
+        return set;
+    }
 
   private:
     string_view &assign(string_view const &other) noexcept {
@@ -437,6 +327,253 @@ class string_view {
         return p - s;
     }
 };
+
+/**
+ *  @brief  Zero-cost wrapper around the `.find` member function of string-like classes.
+ */
+template <typename string_view_>
+struct matcher_find {
+    using size_type = typename string_view_::size_type;
+    string_view_ needle_;
+    size_type needle_length() const noexcept { return needle_.length(); }
+    size_type operator()(string_view_ haystack) const noexcept { return haystack.find(needle_); }
+};
+
+/**
+ *  @brief  Zero-cost wrapper around the `.rfind` member function of string-like classes.
+ */
+template <typename string_view_>
+struct matcher_rfind {
+    using size_type = typename string_view_::size_type;
+    string_view_ needle_;
+    size_type needle_length() const noexcept { return needle_.length(); }
+    size_type operator()(string_view_ haystack) const noexcept { return haystack.rfind(needle_); }
+};
+
+/**
+ *  @brief  Zero-cost wrapper around the `.find_first_of` member function of string-like classes.
+ */
+template <typename string_view_>
+struct matcher_find_first_of {
+    using size_type = typename string_view_::size_type;
+    string_view_ needles_;
+    size_type needle_length() const noexcept { return 1; }
+    size_type operator()(string_view_ haystack) const noexcept { return haystack.find_first_of(needles_); }
+};
+
+template <>
+struct matcher_find_first_of<string_view> {
+    using size_type = typename string_view::size_type;
+    sz_u8_set_t needles_set_;
+    matcher_find_first_of(string_view needle) noexcept : needles_set_(needle.character_set()) {}
+    size_type needle_length() const noexcept { return 1; }
+    size_type operator()(string_view haystack) const noexcept { return haystack.find_first_of(needles_set_); }
+};
+
+/**
+ *  @brief  Zero-cost wrapper around the `.find_last_of` member function of string-like classes.
+ */
+template <typename string_view_>
+struct matcher_find_last_of {
+    using size_type = typename string_view_::size_type;
+    string_view_ needles_;
+    size_type needle_length() const noexcept { return 1; }
+    size_type operator()(string_view_ haystack) const noexcept { return haystack.find_last_of(needles_); }
+};
+
+template <>
+struct matcher_find_last_of<string_view> {
+    using size_type = typename string_view::size_type;
+    sz_u8_set_t needles_set_;
+    matcher_find_last_of(string_view needle) noexcept : needles_set_(needle.character_set()) {}
+    size_type needle_length() const noexcept { return 1; }
+    size_type operator()(string_view haystack) const noexcept { return haystack.find_last_of(needles_set_); }
+};
+
+/**
+ *  @brief  Zero-cost wrapper around the `.find_first_not_of` member function of string-like classes.
+ */
+template <typename string_view_>
+struct matcher_find_first_not_of {
+    using size_type = typename string_view_::size_type;
+    string_view_ needles_;
+    size_type needle_length() const noexcept { return 1; }
+    size_type operator()(string_view_ haystack) const noexcept { return haystack.find_first_not_of(needles_); }
+};
+
+template <>
+struct matcher_find_first_not_of<string_view> {
+    using size_type = typename string_view::size_type;
+    sz_u8_set_t needles_set_;
+    matcher_find_first_not_of(string_view needle) noexcept : needles_set_(needle.character_set()) {}
+    size_type needle_length() const noexcept { return 1; }
+    size_type operator()(string_view haystack) const noexcept { return haystack.find_first_not_of(needles_set_); }
+};
+
+/**
+ *  @brief  Zero-cost wrapper around the `.find_last_not_of` member function of string-like classes.
+ */
+template <typename string_view_>
+struct matcher_find_last_not_of {
+    using size_type = typename string_view_::size_type;
+    string_view_ needles_;
+    size_type needle_length() const noexcept { return 1; }
+    size_type operator()(string_view_ haystack) const noexcept { return haystack.find_last_not_of(needles_); }
+};
+
+template <>
+struct matcher_find_last_not_of<string_view> {
+    using size_type = typename string_view::size_type;
+    sz_u8_set_t needles_set_;
+    matcher_find_last_not_of(string_view needle) noexcept : needles_set_(needle.character_set()) {}
+    size_type needle_length() const noexcept { return 1; }
+    size_type operator()(string_view haystack) const noexcept { return haystack.find_last_not_of(needles_set_); }
+};
+
+/**
+ *  @brief  A range of string views representing the matches of a substring search.
+ *          Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
+ */
+template <typename string_view_, template <typename> typename matcher_template_>
+class range_matches {
+    using string_view = string_view_;
+    using matcher = matcher_template_<string_view>;
+
+    string_view haystack_;
+    matcher matcher_;
+
+  public:
+    range_matches(string_view haystack, string_view needle) : haystack_(haystack), matcher_(needle) {}
+
+    class iterator {
+        string_view remaining_;
+        matcher matcher_;
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = string_view;
+        using pointer = string_view const *;
+        using reference = string_view const &;
+
+        iterator(string_view haystack, matcher matcher) noexcept : remaining_(haystack), matcher_(matcher) {}
+        value_type operator*() const noexcept { return remaining_.substr(0, matcher_.needle_length()); }
+
+        iterator &operator++() noexcept {
+            remaining_.remove_prefix(1);
+            auto position = matcher_(remaining_);
+            remaining_ = position != string_view::npos ? remaining_.substr(position) : string_view();
+            return *this;
+        }
+
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator!=(iterator const &other) const noexcept { return remaining_.size() != other.remaining_.size(); }
+        bool operator==(iterator const &other) const noexcept { return remaining_.size() == other.remaining_.size(); }
+    };
+
+    iterator begin() const noexcept {
+        auto position = matcher_(haystack_);
+        return iterator(position != string_view::npos ? haystack_.substr(position) : string_view(), matcher_);
+    }
+
+    iterator end() const noexcept { return iterator(string_view(), matcher_); }
+    iterator::difference_type size() const noexcept { return std::distance(begin(), end()); }
+};
+
+/**
+ *  @brief  A range of string views representing the matches of a @b reverse-order substring search.
+ *          Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
+ */
+template <typename string_view_, template <typename> typename matcher_template_>
+class reverse_range_matches {
+    using string_view = string_view_;
+    using matcher = matcher_template_<string_view>;
+
+    string_view haystack_;
+    matcher matcher_;
+
+  public:
+    reverse_range_matches(string_view haystack, string_view needle) : haystack_(haystack), matcher_(needle) {}
+
+    class iterator {
+        string_view remaining_;
+        matcher matcher_;
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = string_view;
+        using pointer = string_view const *;
+        using reference = string_view const &;
+
+        iterator(string_view haystack, matcher matcher) noexcept : remaining_(haystack), matcher_(matcher) {}
+        value_type operator*() const noexcept {
+            return remaining_.substr(remaining_.size() - matcher_.needle_length());
+        }
+
+        iterator &operator++() noexcept {
+            remaining_.remove_suffix(1);
+            auto position = matcher_(remaining_);
+            remaining_ = position != string_view::npos ? remaining_.substr(0, position + matcher_.needle_length())
+                                                       : string_view();
+            return *this;
+        }
+
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator!=(iterator const &other) const noexcept { return remaining_.data() != other.remaining_.data(); }
+        bool operator==(iterator const &other) const noexcept { return remaining_.data() == other.remaining_.data(); }
+    };
+
+    iterator begin() const noexcept {
+        auto position = matcher_(haystack_);
+        return iterator(
+            position != string_view::npos ? haystack_.substr(0, position + matcher_.needle_length()) : string_view(),
+            matcher_);
+    }
+
+    iterator end() const noexcept { return iterator(string_view(), matcher_); }
+    iterator::difference_type size() const noexcept { return std::distance(begin(), end()); }
+};
+
+template <typename t>
+range_matches<t, matcher_find> search_substrings(t h, t n) {
+    return {h, n};
+}
+
+template <typename t>
+reverse_range_matches<t, matcher_rfind> reverse_search_substrings(t h, t n) {
+    return {h, n};
+}
+
+template <typename t>
+range_matches<t, matcher_find_first_of> search_chars(t h, t n) {
+    return {h, n};
+}
+
+template <typename t>
+reverse_range_matches<t, matcher_find_last_of> reverse_search_chars(t h, t n) {
+    return {h, n};
+}
+
+template <typename t>
+range_matches<t, matcher_find_first_not_of> search_other_chars(t h, t n) {
+    return {h, n};
+}
+
+template <typename t>
+reverse_range_matches<t, matcher_find_last_not_of> reverse_search_other_chars(t h, t n) {
+    return {h, n};
+}
 
 } // namespace sz
 } // namespace av
