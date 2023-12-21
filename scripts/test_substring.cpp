@@ -1,0 +1,71 @@
+#include <cassert>  // assertions
+#include <iterator> // `std::distance`
+
+#include <string>                      // Baseline
+#include <string_view>                 // Baseline
+#include <stringzilla/stringzilla.hpp> // Contender
+
+namespace sz = av::sz;
+
+void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
+    static std::string haystack_string;
+    haystack_string.reserve(10000);
+
+    for (std::size_t repeats = 0; repeats != 128; ++repeats) {
+        haystack_string += haystack_pattern;
+
+        // Convert to string views
+        auto haystack_stl = std::string_view(haystack_string);
+        auto haystack_sz = sz::string_view(haystack_string.data(), haystack_string.size());
+        auto needle_sz = sz::string_view(needle_stl.data(), needle_stl.size());
+
+        // Wrap into ranges
+        auto range_stl = sz::substring_matches_range(haystack_stl, needle_stl);
+        auto range_sz = sz::substring_matches_range(haystack_sz, needle_sz);
+        auto begin_stl = range_stl.begin();
+        auto begin_sz = range_sz.begin();
+        auto end_stl = range_stl.end();
+        auto end_sz = range_sz.end();
+
+        auto count_stl = std::distance(begin_stl, end_stl);
+        auto count_sz = std::distance(begin_sz, end_sz);
+
+        // Compare results
+        for (; begin_stl != end_stl && begin_sz != end_sz; ++begin_stl, ++begin_sz) {
+            auto match_stl = *begin_stl;
+            auto match_sz = *begin_sz;
+            assert(match_stl.data() == match_sz.data());
+        }
+
+        // If one range is not finished, assert failure
+        assert(count_stl == count_sz);
+        assert(begin_stl == end_stl && begin_sz == end_sz);
+    }
+}
+
+int main(int, char const **) {
+    std::printf("Hi Ash! ... or is it someone else?!\n");
+
+    std::string_view alphabet = "abcdefghijklmnopqrstuvwxyz";                                         // 26 characters
+    std::string_view common = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-=@$%"; // 68 characters
+
+    // When haystack is only formed of needles:
+    eval("a", "a");
+    eval("ab", "ab");
+    eval("abc", "abc");
+    eval("abcd", "abcd");
+    eval(alphabet, alphabet);
+    eval(common, common);
+
+    // When haystack is formed of equidistant needles:
+    eval("ab", "a");
+    eval("abc", "a");
+    eval("abcd", "a");
+
+    // When matches occur in between pattern words:
+    eval("ab", "ba");
+    eval("abc", "ca");
+    eval("abcd", "da");
+
+    return 0;
+}

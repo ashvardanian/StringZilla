@@ -71,35 +71,40 @@ if(STRINGZILLA_INSTALL)
     DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR})
 endif()
 
-if(${STRINGZILLA_BUILD_TEST} OR ${STRINGZILLA_BUILD_BENCHMARK})
-  add_executable(stringzilla_bench scripts/bench_substring.cpp)
-  target_link_libraries(stringzilla_bench PRIVATE ${STRINGZILLA_TARGET_NAME})
-  set_target_properties(stringzilla_bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+if(${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER
+  3.13)
+  include(CTest)
+  enable_testing()
+endif()
+
+# Function to set compiler-specific flags
+function(set_compiler_flags target)
+  target_link_libraries(${target} PRIVATE ${STRINGZILLA_TARGET_NAME})
+  set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     ${CMAKE_BINARY_DIR})
-  target_link_options(stringzilla_bench PRIVATE
-    "-Wl,--unresolved-symbols=ignore-all")
 
-  # Check for compiler and set flags for stringzilla_bench
   if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
-    # Set -march=native and -fmax-errors=1 for all build types
-    target_compile_options(stringzilla_bench PRIVATE "-march=native")
-    target_compile_options(stringzilla_bench PRIVATE "-fmax-errors=1")
-
-    # Set -O3 for Release build, and -g for Debug and RelWithDebInfo
-    target_compile_options(stringzilla_bench PRIVATE
+    target_compile_options(${target} PRIVATE "-march=native")
+    target_compile_options(${target} PRIVATE "-fmax-errors=1")
+    target_compile_options(${target} PRIVATE
       "$<$<CONFIG:Release>:-O3>"
       "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-g>")
   elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
-    # Intel specific flags
-    target_compile_options(stringzilla_bench PRIVATE "-xHost")
+    target_compile_options(${target} PRIVATE "-xHost")
   elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
     # MSVC specific flags or other settings
   endif()
+endfunction()
 
-  if(${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER
-    3.13)
-    include(CTest)
-    enable_testing()
-    add_test(NAME stringzilla_bench COMMAND stringzilla_bench)
-  endif()
+if(${STRINGZILLA_BUILD_BENCHMARK})
+  add_executable(stringzilla_bench_substring scripts/bench_substring.cpp)
+  set_compiler_flags(stringzilla_bench_substring)
+  add_test(NAME stringzilla_bench_substring COMMAND stringzilla_bench_substring)
+endif()
+
+if(${STRINGZILLA_BUILD_TEST})
+  # Test target
+  add_executable(stringzilla_test_substring scripts/test_substring.cpp)
+  set_compiler_flags(stringzilla_test_substring)
+  add_test(NAME stringzilla_test_substring COMMAND stringzilla_test_substring)
 endif()

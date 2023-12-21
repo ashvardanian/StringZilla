@@ -27,9 +27,9 @@
  *      - int      memcmp(const void *, const void *, size_t); -> sz_order, sz_equal
  *      - char    *strchr(const char *, int); -> sz_find_byte
  *      - int      strcmp(const char *, const char *); -> sz_order, sz_equal
- *      - size_t   strcspn(const char *, const char *); -> sz_prefix_rejected
+ *      - size_t   strcspn(const char *, const char *); -> sz_find_last_from_set
  *      - size_t   strlen(const char *);-> sz_find_byte
- *      - size_t   strspn(const char *, const char *); -> sz_prefix_accepted
+ *      - size_t   strspn(const char *, const char *); -> sz_find_from_set
  *      - char    *strstr(const char *, const char *); -> sz_find
  *
  *  Not implemented:
@@ -165,9 +165,11 @@ extern "C" {
  *          32-bit on platforms where pointers are 32-bit.
  */
 #if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
+#define sz_size_max 0xFFFFFFFFFFFFFFFFull
 typedef unsigned long long sz_size_t;
 typedef long long sz_ssize_t;
 #else
+#define sz_size_max 0xFFFFFFFFu
 typedef unsigned sz_size_t;
 typedef unsigned sz_ssize_t;
 #endif
@@ -196,6 +198,21 @@ typedef struct sz_string_view_t {
     sz_size_t length;
 } sz_string_view_t;
 
+typedef union sz_u8_set_t {
+    sz_u64_t _u64s[4];
+    sz_u8_t _u8s[32];
+} sz_u8_set_t;
+
+SZ_PUBLIC void sz_u8_set_init(sz_u8_set_t *f) { f->_u64s[0] = f->_u64s[1] = f->_u64s[2] = f->_u64s[3] = 0; }
+SZ_PUBLIC void sz_u8_set_add(sz_u8_set_t *f, sz_u8_t c) { f->_u64s[c >> 6] |= (1ull << (c & 63u)); }
+SZ_PUBLIC sz_bool_t sz_u8_set_contains(sz_u8_set_t const *f, sz_u8_t c) {
+    return (sz_bool_t)((f->_u64s[c >> 6] & (1ull << (c & 63u))) != 0);
+}
+SZ_PUBLIC void sz_u8_set_invert(sz_u8_set_t *f) {
+    f->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, f->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
+        f->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, f->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
+}
+
 typedef sz_ptr_t (*sz_memory_allocate_t)(sz_size_t, void *);
 typedef void (*sz_memory_free_t)(sz_ptr_t, sz_size_t, void *);
 
@@ -209,6 +226,10 @@ typedef struct sz_memory_allocator_t {
 } sz_memory_allocator_t;
 
 #pragma region Basic Functionality
+
+typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
+typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
+typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /**
  *  @brief  Computes the hash of a string.
@@ -266,8 +287,6 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
 SZ_PUBLIC sz_u64_t sz_hash_avx512(sz_cptr_t text, sz_size_t length);
 SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length);
 
-typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
-
 /**
  *  @brief  Checks if two string are equal.
  *          Similar to `memcmp(a, b, length) == 0` in LibC and `a == b` in STL.
@@ -286,8 +305,6 @@ SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
-typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
-
 /**
  *  @brief  Estimates the relative order of two strings. Equivalent to `memcmp(a, b, length)` in LibC.
  *          Can be used on different length strings.
@@ -300,36 +317,6 @@ typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
  */
 SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
-
-typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
-
-/**
- *  @brief  Enumerates matching character forming a prefix of given string.
- *          Equivalent to `strspn(text, accepted)` in LibC. Similar to `strcpan(text, rejected)`.
- *          May have identical implementation and performance to ::sz_prefix_rejected.
- *
- *  @param text     String to be trimmed.
- *  @param accepted Set of accepted characters.
- *  @return         Number of bytes forming the prefix.
- */
-SZ_PUBLIC sz_size_t sz_prefix_accepted(sz_cptr_t text, sz_size_t length, sz_cptr_t accepted, sz_size_t count);
-
-/**
- *  @brief  Enumerates number non-matching character forming a prefix of given string.
- *          Equivalent to `strcspn(text, rejected)` in LibC. Similar to `strspn(text, accepted)`.
- *          May have identical implementation and performance to ::sz_prefix_accepted.
- *
- *  Useful for parsing, when we want to skip a set of characters. Examples:
- *  * 6 whitespaces: " \t\n\r\v\f".
- *  * 16 digits forming a float number: "0123456789,.eE+-".
- *  * 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
- *  * 2 JSON string special characters useful to locate the end of the string: "\"\\".
- *
- *  @param text     String to be trimmed.
- *  @param rejected Set of rejected characters.
- *  @return         Number of bytes forming the prefix.
- */
-SZ_PUBLIC sz_size_t sz_prefix_rejected(sz_cptr_t text, sz_size_t length, sz_cptr_t rejected, sz_size_t count);
 
 /**
  *  @brief  Equivalent to `for (char & c : text) c = tolower(c)`.
@@ -374,11 +361,14 @@ SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
 
 #pragma region Fast Substring Search
 
+typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
+typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
+
 /**
  *  @brief  Locates first matching byte in a string. Equivalent to `memchr(haystack, *needle, h_length)` in LibC.
  *
- *  Aarch64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/aarch64/memchr.S
  *  X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memchr.S
+ *  Aarch64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/aarch64/memchr.S
  *
  *  @param haystack Haystack - the string to search in.
  *  @param h_length Number of bytes in the haystack.
@@ -386,23 +376,46 @@ SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
  *  @return         Address of the first match.
  */
 SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+
+/** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+
+/** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
-typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
+/**
+ *  @brief  Locates last matching byte in a string. Equivalent to `memrchr(haystack, *needle, h_length)` in LibC.
+ *
+ *  X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memrchr.S
+ *  Aarch64 implementation: missing
+ *
+ *  @param haystack Haystack - the string to search in.
+ *  @param h_length Number of bytes in the haystack.
+ *  @param needle   Needle - single-byte substring to find.
+ *  @return         Address of the last match.
+ */
+SZ_PUBLIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+
+/** @copydoc sz_find_last_byte */
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+
+/** @copydoc sz_find_last_byte */
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
 /**
- *  @brief  Locates first matching substring. Similar to `strstr(haystack, needle)` in LibC, but requires known length.
+ *  @brief  Locates first matching substring.
+ *          Equivalient to `memmem(haystack, h_length, needle, n_length)` in LibC.
+ *          Similar to `strstr(haystack, needle)` in LibC, but requires known length.
  *
  *  Uses different algorithms for different needle lengths and backends:
  *
- *  > Exact matching for 1-, 2-, 3-, and 4-character-long needles.
+ *  > Naive exact matching for 1-, 2-, 3-, and 4-character-long needles.
  *  > Bitap "Shift Or" (Baeza-Yates-Gonnet) algorithm for serial (SWAR) backend.
  *  > Two-way heuristic for longer needles with SIMD backends.
  *
  *  @section Reading Materials
  *
- *  Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string/
+ *  Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
  *  SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
  *
  *  @param haystack Haystack - the string to search in.
@@ -412,8 +425,14 @@ typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
  *  @return         Address of the first match.
  */
 SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+/** @copydoc sz_find */
 SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+/** @copydoc sz_find */
 SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+/** @copydoc sz_find */
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /**
@@ -421,27 +440,66 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
  *
  *  Uses different algorithms for different needle lengths and backends:
  *
- *  > Exact matching for 1-, 2-, 3-, and 4-character-long needles.
+ *  > Naive exact matching for 1-, 2-, 3-, and 4-character-long needles.
  *  > Bitap "Shift Or" (Baeza-Yates-Gonnet) algorithm for serial (SWAR) backend.
  *  > Two-way heuristic for longer needles with SIMD backends.
  *
  *  @section Reading Materials
  *
- *  Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string/
+ *  Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
  *  SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
  *
  *  @param haystack Haystack - the string to search in.
  *  @param h_length Number of bytes in the haystack.
  *  @param needle   Needle - substring to find.
  *  @param n_length Number of bytes in the needle.
- *  @return         Address of the first match.
+ *  @return         Address of the last match.
  */
 SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+/** @copydoc sz_find_last */
 SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+/** @copydoc sz_find_last */
 SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+/** @copydoc sz_find_last */
 SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
-typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
+/**
+ *  @brief  Finds the first character present from the ::set, present in ::text.
+ *          Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
+ *          May have identical implementation and performance to ::sz_find_last_from_set.
+ *
+ *  @param text     String to be trimmed.
+ *  @param accepted Set of accepted characters.
+ *  @return         Number of bytes forming the prefix.
+ */
+SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+
+/**
+ *  @brief  Finds the last character present from the ::set, present in ::text.
+ *          Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
+ *          May have identical implementation and performance to ::sz_find_from_set.
+ *
+ *  Useful for parsing, when we want to skip a set of characters. Examples:
+ *  * 6 whitespaces: " \t\n\r\v\f".
+ *  * 16 digits forming a float number: "0123456789,.eE+-".
+ *  * 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
+ *  * 2 JSON string special characters useful to locate the end of the string: "\"\\".
+ *
+ *  @param text     String to be trimmed.
+ *  @param rejected Set of rejected characters.
+ *  @return         Number of bytes forming the prefix.
+ */
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+
+SZ_PUBLIC sz_cptr_t sz_find_bounded_regex(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length,
+                                          sz_size_t bound, sz_memory_allocator_t const *alloc);
+SZ_PUBLIC sz_cptr_t sz_find_last_bounded_regex(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle,
+                                               sz_size_t n_length, sz_size_t bound, sz_memory_allocator_t const *alloc);
 
 #pragma endregion
 
@@ -586,14 +644,18 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
  *  Intrinsics aliases for MSVC, GCC, and Clang.
  */
 #if defined(_MSC_VER)
-#define sz_popcount64 __popcnt64
-#define sz_ctz64 _tzcnt_u64
-#define sz_clz64 _lzcnt_u64
+SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __popcnt64(x); }
+SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
+SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
+SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
 #else
-#define sz_popcount64 __builtin_popcountll
-#define sz_ctz64 __builtin_ctzll
-#define sz_clz64 __builtin_clzll
+SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
+SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
+SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
+SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
 #endif
+
+SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
 
 /*
  *  Efficiently computing the minimum and maximum of two or three values can be tricky.
@@ -625,29 +687,13 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 SZ_INTERNAL sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
 
 /**
- *  @brief Reverse the byte order of a 64-bit unsigned integer.
- *
- *  @note This function uses compiler-specific intrinsics to achieve the
- *        byte-reversal. It's designed to work with both MSVC and GCC/Clang.
- */
-SZ_INTERNAL sz_u64_t sz_u64_byte_reverse(sz_u64_t val) {
-#if defined(_MSC_VER)
-    return _byteswap_uint64(val);
-#else
-    return __builtin_bswap64(val);
-#endif
-}
-
-SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
-
-/**
  *  @brief  Compute the logarithm base 2 of an integer.
  *
  *  @note If n is 0, the function returns 0 to avoid undefined behavior.
  *  @note This function uses compiler-specific intrinsics or built-ins
  *        to achieve the computation. It's designed to work with GCC/Clang and MSVC.
  */
-SZ_INTERNAL sz_size_t sz_log2i(sz_size_t n) {
+SZ_INTERNAL sz_size_t sz_size_log2i(sz_size_t n) {
     if (n == 0) return 0;
 
 #ifdef _WIN64
@@ -852,6 +898,19 @@ SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
     return (sz_bool_t)(a_end == a);
 }
 
+SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+    for (sz_cptr_t const end = text + length; text != end; ++text)
+        if (sz_u8_set_contains(set, *text)) return text;
+    return NULL;
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+    sz_cptr_t const end = text;
+    for (text += length; text != end; --text)
+        if (sz_u8_set_contains(set, *(text - 1))) return text - 1;
+    return NULL;
+}
+
 /**
  *  @brief  Byte-level lexicographic order comparison of two strings.
  */
@@ -862,8 +921,8 @@ SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
     for (sz_u64_parts_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
-        a_vec.u64 = sz_u64_byte_reverse(sz_u64_load(a).u64);
-        b_vec.u64 = sz_u64_byte_reverse(sz_u64_load(b).u64);
+        a_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(a).u64);
+        b_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(b).u64);
         if (a_vec.u64 != b_vec.u64) return ordering_lookup[a_vec.u64 < b_vec.u64];
     }
 #endif
@@ -906,7 +965,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     for (; h + 8 <= h_end; h += 8) {
         sz_u64_t h_vec = *(sz_u64_t const *)h;
         sz_u64_t match_indicators = sz_u64_each_byte_equal(h_vec, n_vec.u64);
-        if (match_indicators != 0) return h + sz_ctz64(match_indicators) / 8;
+        if (match_indicators != 0) return h + sz_u64_ctz(match_indicators) / 8;
     }
 
     // Handle the misaligned tail.
@@ -938,7 +997,7 @@ sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_len, sz_cptr_t needl
     for (; h >= h_start + 8; h -= 8) {
         sz_u64_t h_vec = *(sz_u64_t const *)(h - 8);
         sz_u64_t match_indicators = sz_u64_each_byte_equal(h_vec, n_vec.u64);
-        if (match_indicators != 0) return h - 8 + sz_clz64(match_indicators) / 8;
+        if (match_indicators != 0) return h - 8 + sz_u64_clz(match_indicators) / 8;
     }
 
     for (; h >= h_start; --h)
@@ -982,7 +1041,7 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_c
 
         if (matches_even_vec.u64 + matches_odd_vec.u64) {
             sz_u64_t match_indicators = (matches_even_vec.u64 >> 8) | (matches_odd_vec.u64);
-            return h + sz_ctz64(match_indicators) / 8;
+            return h + sz_u64_ctz(match_indicators) / 8;
         }
     }
 
@@ -1044,7 +1103,7 @@ SZ_INTERNAL sz_cptr_t sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_c
 
         sz_u64_t match_indicators =
             matches_first_vec.u64 | (matches_second_vec.u64 >> 8) | (matches_third_vec.u64 >> 16);
-        if (match_indicators != 0) return h + sz_ctz64(match_indicators) / 8;
+        if (match_indicators != 0) return h + sz_u64_ctz(match_indicators) / 8;
     }
 
     for (; h + 3 <= h_end; ++h)
@@ -1745,7 +1804,7 @@ SZ_INTERNAL void _sz_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t
 }
 
 SZ_PUBLIC void sz_sort_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
-    sz_size_t depth_limit = 2 * sz_log2i(sequence->count);
+    sz_size_t depth_limit = 2 * sz_size_log2i(sequence->count);
     _sz_introsort(sequence, less, 0, sequence->count, depth_limit);
 }
 
@@ -1936,21 +1995,22 @@ sz_equal_avx512_cycle:
  *  @brief  Variation of AVX-512 exact search for patterns up to 1 bytes included.
  */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-    __m512i h_vec, n_vec = _mm512_set1_epi8(n[0]);
     __mmask64 mask;
+    sz_u512_parts_t h_vec, n_vec;
+    n_vec.zmm = _mm512_set1_epi8(n[0]);
 
 sz_find_byte_avx512_cycle:
     if (h_length < 64) {
         mask = sz_u64_mask_until(h_length);
-        h_vec = _mm512_maskz_loadu_epi8(mask, h);
+        h_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         // Reuse the same `mask` variable to find the bit that doesn't match
-        mask = _mm512_mask_cmpeq_epu8_mask(mask, h_vec, n_vec);
-        if (mask) return h + sz_ctz64(mask);
+        mask = _mm512_mask_cmpeq_epu8_mask(mask, h_vec.zmm, n_vec.zmm);
+        if (mask) return h + sz_u64_ctz(mask);
     }
     else {
-        h_vec = _mm512_loadu_epi8(h);
-        mask = _mm512_cmpeq_epi8_mask(h_vec, n_vec);
-        if (mask) return h + sz_ctz64(mask);
+        h_vec.zmm = _mm512_loadu_epi8(h);
+        mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
+        if (mask) return h + sz_u64_ctz(mask);
         h += 64, h_length -= 64;
         if (h_length) goto sz_find_byte_avx512_cycle;
     }
@@ -1982,8 +2042,8 @@ sz_find_2byte_avx512_cycle:
         matches0 = _mm512_mask_cmpeq_epi16_mask(mask, h0_vec, n_vec);
         matches1 = _mm512_mask_cmpeq_epi16_mask(mask, h1_vec, n_vec);
         if (matches0 | matches1)
-            return h + sz_ctz64(_pdep_u64(matches0, 0x5555555555555555ull) | //
-                                _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
+            return h + sz_u64_ctz(_pdep_u64(matches0, 0x5555555555555555ull) | //
+                                  _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
         return NULL;
     }
     else {
@@ -1993,8 +2053,8 @@ sz_find_2byte_avx512_cycle:
         matches1 = _mm512_cmpeq_epi16_mask(h1_vec, n_vec);
         // https://lemire.me/blog/2018/01/08/how-fast-can-you-bit-interleave-32-bit-integers/
         if (matches0 | matches1)
-            return h + sz_ctz64(_pdep_u64(matches0, 0x5555555555555555ull) | //
-                                _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
+            return h + sz_u64_ctz(_pdep_u64(matches0, 0x5555555555555555ull) | //
+                                  _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
         h += 64, h_length -= 64;
         goto sz_find_2byte_avx512_cycle;
     }
@@ -2029,10 +2089,10 @@ sz_find_4byte_avx512_cycle:
         matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec, n_vec);
         matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec, n_vec);
         if (matches0 | matches1 | matches2 | matches3)
-            return h + sz_ctz64(_pdep_u64(matches0, 0x1111111111111111ull) | //
-                                _pdep_u64(matches1, 0x2222222222222222ull) | //
-                                _pdep_u64(matches2, 0x4444444444444444ull) | //
-                                _pdep_u64(matches3, 0x8888888888888888ull));
+            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111ull) | //
+                                  _pdep_u64(matches1, 0x2222222222222222ull) | //
+                                  _pdep_u64(matches2, 0x4444444444444444ull) | //
+                                  _pdep_u64(matches3, 0x8888888888888888ull));
         return NULL;
     }
     else {
@@ -2045,10 +2105,10 @@ sz_find_4byte_avx512_cycle:
         matches2 = _mm512_cmpeq_epi32_mask(h2_vec, n_vec);
         matches3 = _mm512_cmpeq_epi32_mask(h3_vec, n_vec);
         if (matches0 | matches1 | matches2 | matches3)
-            return h + sz_ctz64(_pdep_u64(matches0, 0x1111111111111111) | //
-                                _pdep_u64(matches1, 0x2222222222222222) | //
-                                _pdep_u64(matches2, 0x4444444444444444) | //
-                                _pdep_u64(matches3, 0x8888888888888888));
+            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
+                                  _pdep_u64(matches1, 0x2222222222222222) | //
+                                  _pdep_u64(matches2, 0x4444444444444444) | //
+                                  _pdep_u64(matches3, 0x8888888888888888));
         h += 64, h_length -= 64;
         goto sz_find_4byte_avx512_cycle;
     }
@@ -2086,10 +2146,10 @@ sz_find_3byte_avx512_cycle:
         matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec, n_vec);
         matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec, n_vec);
         if (matches0 | matches1 | matches2 | matches3)
-            return h + sz_ctz64(_pdep_u64(matches0, 0x1111111111111111) | //
-                                _pdep_u64(matches1, 0x2222222222222222) | //
-                                _pdep_u64(matches2, 0x4444444444444444) | //
-                                _pdep_u64(matches3, 0x8888888888888888));
+            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
+                                  _pdep_u64(matches1, 0x2222222222222222) | //
+                                  _pdep_u64(matches2, 0x4444444444444444) | //
+                                  _pdep_u64(matches3, 0x8888888888888888));
         return NULL;
     }
     else {
@@ -2102,10 +2162,10 @@ sz_find_3byte_avx512_cycle:
         matches2 = _mm512_cmpeq_epi32_mask(h2_vec, n_vec);
         matches3 = _mm512_cmpeq_epi32_mask(h3_vec, n_vec);
         if (matches0 | matches1 | matches2 | matches3)
-            return h + sz_ctz64(_pdep_u64(matches0, 0x1111111111111111) | //
-                                _pdep_u64(matches1, 0x2222222222222222) | //
-                                _pdep_u64(matches2, 0x4444444444444444) | //
-                                _pdep_u64(matches3, 0x8888888888888888));
+            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
+                                  _pdep_u64(matches1, 0x2222222222222222) | //
+                                  _pdep_u64(matches2, 0x4444444444444444) | //
+                                  _pdep_u64(matches3, 0x8888888888888888));
         h += 64, h_length -= 64;
         goto sz_find_3byte_avx512_cycle;
     }
@@ -2132,7 +2192,7 @@ sz_find_under66byte_avx512_cycle:
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
-            int potential_offset = sz_ctz64(matches);
+            int potential_offset = sz_u64_ctz(matches);
             h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + potential_offset + 1);
             if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + potential_offset;
 
@@ -2148,7 +2208,7 @@ sz_find_under66byte_avx512_cycle:
         matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
-            int potential_offset = sz_ctz64(matches);
+            int potential_offset = sz_u64_ctz(matches);
             h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + potential_offset + 1);
             if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + potential_offset;
 
@@ -2182,7 +2242,7 @@ sz_find_over66byte_avx512_cycle:
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
-            int potential_offset = sz_ctz64(matches);
+            int potential_offset = sz_u64_ctz(matches);
             if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
 
             h += potential_offset + 1, h_length -= potential_offset + 1;
@@ -2197,7 +2257,7 @@ sz_find_over66byte_avx512_cycle:
         matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
-            int potential_offset = sz_ctz64(matches);
+            int potential_offset = sz_u64_ctz(matches);
             if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
 
             h += potential_offset + 1, h_length -= potential_offset + 1;
@@ -2211,19 +2271,278 @@ sz_find_over66byte_avx512_cycle:
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    switch (n_length) {
-    case 0: return NULL;
-    case 1: return sz_find_byte_avx512(h, h_length, n);
-    case 2: return sz_find_2byte_avx512(h, h_length, n);
-    case 3: return sz_find_3byte_avx512(h, h_length, n);
-    case 4: return sz_find_4byte_avx512(h, h_length, n);
-    default:
-        if (n_length <= 66) { return sz_find_under66byte_avx512(h, h_length, n, n_length); }
-        else { return sz_find_over66byte_avx512(h, h_length, n, n_length); }
+
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return NULL;
+
+    sz_find_t backends[] = {
+        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        (sz_find_t)sz_find_byte_avx512,
+        (sz_find_t)sz_find_2byte_avx512,
+        (sz_find_t)sz_find_3byte_avx512,
+        (sz_find_t)sz_find_4byte_avx512,
+        // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
+        (sz_find_t)sz_find_under66byte_avx512,
+        (sz_find_t)sz_find_over66byte_avx512,
+    };
+
+    return backends[
+        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        (n_length > 1) + (n_length > 2) + (n_length > 3) +
+        // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
+        (n_length > 4) + (n_length > 66)](h, h_length, n, n_length);
+}
+
+/**
+ *  @brief  Variation of AVX-512 exact reverse-order search for patterns up to 1 bytes included.
+ */
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+    __mmask64 mask;
+    sz_u512_parts_t h_vec, n_vec;
+    n_vec.zmm = _mm512_set1_epi8(n[0]);
+
+sz_find_last_byte_avx512_cycle:
+    if (h_length < 64) {
+        mask = sz_u64_mask_until(h_length);
+        h_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        // Reuse the same `mask` variable to find the bit that doesn't match
+        mask = _mm512_mask_cmpeq_epu8_mask(mask, h_vec.zmm, n_vec.zmm);
+        int potential_offset = sz_u64_clz(mask);
+        if (mask) return h + 64 - sz_u64_clz(mask) - 1;
+    }
+    else {
+        h_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
+        mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
+        int potential_offset = sz_u64_clz(mask);
+        if (mask) return h + h_length - 1 - sz_u64_clz(mask);
+        h_length -= 64;
+        if (h_length) goto sz_find_last_byte_avx512_cycle;
+    }
+    return NULL;
+}
+
+/**
+ *  @brief  Variation of AVX-512 reverse-order exact search for patterns up to 66 bytes included.
+ */
+SZ_INTERNAL sz_cptr_t sz_find_last_under66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                      sz_size_t n_length) {
+
+    __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
+    __mmask64 matches;
+    sz_u512_parts_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
+    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
+    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
+    n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
+
+sz_find_under66byte_avx512_cycle:
+    if (h_length < n_length) { return NULL; }
+    else if (h_length < n_length + 64) {
+        mask = sz_u64_mask_until(h_length);
+        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_u64_clz(matches);
+            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + 64 - potential_offset);
+            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + 64 - potential_offset - 1;
+
+            h_length = 64 - potential_offset - 1;
+            goto sz_find_under66byte_avx512_cycle;
+        }
+        else
+            return NULL;
+    }
+    else {
+        h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
+        h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
+        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_u64_clz(matches);
+            h_body_vec.zmm =
+                _mm512_maskz_loadu_epi8(n_length_body_mask, h + h_length - n_length - potential_offset + 1);
+            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm))
+                return h + h_length - n_length - potential_offset;
+
+            h_length -= potential_offset + 1;
+            goto sz_find_under66byte_avx512_cycle;
+        }
+        else {
+            h_length -= 64;
+            goto sz_find_under66byte_avx512_cycle;
+        }
     }
 }
 
+/**
+ *  @brief  Variation of AVX-512 exact search for patterns longer than 66 bytes.
+ */
+SZ_INTERNAL sz_cptr_t sz_find_last_over66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    __mmask64 mask;
+    __mmask64 matches;
+    sz_u512_parts_t h_first_vec, h_last_vec, n_first_vec, n_last_vec;
+    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
+    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
+
+sz_find_over66byte_avx512_cycle:
+    if (h_length < n_length) { return NULL; }
+    else if (h_length < n_length + 64) {
+        mask = sz_u64_mask_until(h_length);
+        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_u64_ctz(matches);
+            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+
+            h += potential_offset + 1, h_length -= potential_offset + 1;
+            goto sz_find_over66byte_avx512_cycle;
+        }
+        else
+            return NULL;
+    }
+    else {
+        h_first_vec.zmm = _mm512_loadu_epi8(h);
+        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
+        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_u64_ctz(matches);
+            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+
+            h += potential_offset + 1, h_length -= potential_offset + 1;
+            goto sz_find_over66byte_avx512_cycle;
+        }
+        else {
+            h += 64, h_length -= 64;
+            goto sz_find_over66byte_avx512_cycle;
+        }
+    }
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return NULL;
+
+    sz_find_t backends[] = {
+        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        (sz_find_t)sz_find_last_byte_avx512,
+        // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
+        (sz_find_t)sz_find_last_under66byte_avx512,
+        (sz_find_t)sz_find_last_over66byte_avx512,
+    };
+
+    return backends[
+        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        0 +
+        // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
+        (n_length > 1) + (n_length > 66)](h, h_length, n, n_length);
+}
+
 #endif
+
+#pragma endregion
+
+/*
+ *  @brief  Pick the right implementation for the string search algorithms.
+ */
+#pragma region Compile-Time Dispatching
+
+#include <stringzilla/stringzilla.h>
+
+SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length) {
+#if defined(__NEON__)
+    return sz_hash_neon(text, length);
+#elif defined(__AVX512__)
+    return sz_hash_avx512(text, length);
+#else
+    return sz_hash_serial(text, length);
+#endif
+}
+
+SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+#if defined(__AVX512__)
+    return sz_order_avx512(a, a_length, b, b_length);
+#else
+    return sz_order_serial(a, a_length, b, b_length);
+#endif
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
+#if defined(__AVX512__)
+    return sz_find_byte_avx512(haystack, h_length, needle);
+#else
+    return sz_find_byte_serial(haystack, h_length, needle);
+#endif
+}
+
+SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
+#if defined(__AVX512__)
+    return sz_find_avx512(haystack, h_length, needle, n_length);
+#elif defined(__NEON__)
+    return sz_find_neon(haystack, h_length, needle, n_length);
+#else
+    return sz_find_serial(haystack, h_length, needle, n_length);
+#endif
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+    return sz_find_from_set_serial(text, length, set);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+    return sz_find_last_from_set_serial(text, length, set);
+}
+
+SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+#if defined(__AVX512__)
+    sz_tolower_avx512(text, length, result);
+#else
+    sz_tolower_serial(text, length, result);
+#endif
+}
+
+SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+#if defined(__AVX512__)
+    sz_toupper_avx512(text, length, result);
+#else
+    sz_toupper_serial(text, length, result);
+#endif
+}
+
+SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+#if defined(__AVX512__)
+    sz_toascii_avx512(text, length, result);
+#else
+    sz_toascii_serial(text, length, result);
+#endif
+}
+
+SZ_PUBLIC sz_size_t sz_levenshtein(  //
+    sz_cptr_t a, sz_size_t a_length, //
+    sz_cptr_t b, sz_size_t b_length, //
+    sz_size_t bound, sz_memory_allocator_t const *alloc) {
+#if defined(__AVX512__)
+    return sz_levenshtein_avx512(a, a_length, b, b_length, bound, alloc);
+#else
+    return sz_levenshtein_serial(a, a_length, b, b_length, bound, alloc);
+#endif
+}
+
+SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                        sz_error_cost_t gap, sz_error_cost_t const *subs,
+                                        sz_memory_allocator_t const *alloc) {
+
+#if defined(__AVX512__)
+    return sz_alignment_score_avx512(a, a_length, b, b_length, gap, subs, alloc);
+#else
+    return sz_alignment_score_serial(a, a_length, b, b_length, gap, subs, alloc);
+#endif
+}
 
 #pragma endregion
 

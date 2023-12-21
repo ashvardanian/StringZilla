@@ -9,6 +9,17 @@ StringZilla is the Godzilla of string libraries, searching, splitting, sorting, 
 - ✅ [Radix](https://en.wikipedia.org/wiki/Radix_sort)-like sorting faster than C++ `std::sort`
 - ✅ [Memory-mapping](https://en.wikipedia.org/wiki/Memory-mapped_file) to work with larger-than-RAM datasets
 
+Putting this into a table:
+
+| Feature \ Library    |  STL | LibC |      StringZilla |
+| :------------------- | ---: | ---: | ---------------: |
+| Substring Search     |      |      |                  |
+| Reverse Order Search |      |    ❌ |                  |
+| Fuzzy Search         |    ❌ |    ❌ |                  |
+| Edit Distance        |    ❌ |    ❌ |                  |
+| Interface            |  C++ |    C | C , C++ , Python |
+
+
 Who is this for?
 
 - you want to process strings faster than default strings in Python, C, or C++
@@ -21,7 +32,6 @@ Limitations:
 - Assumes little-endian architecture
 - Assumes ASCII or UTF-8 encoding
 - Assumes 64-bit address space
-
 
 This library saved me tens of thousands of dollars pre-processing large datasets for machine learning, even on the scale of a single experiment.
 So if you want to process the 6 Billion images from [LAION](https://laion.ai/blog/laion-5b/), or the 250 Billion web pages from the [CommonCrawl](https://commoncrawl.org/), or even just a few million lines of server logs, and haunted by Python's `open(...).readlines()` and `str().splitlines()` taking forever, this should help 😊
@@ -216,7 +226,7 @@ Running benchmarks:
 ```sh
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_TEST=1 -B ./build_release
 cmake --build build_release --config Release
-./build_release/stringzilla_bench
+./build_release/stringzilla_bench_substring
 ```
 
 Running tests:
@@ -224,7 +234,7 @@ Running tests:
 ```sh
 cmake -DCMAKE_BUILD_TYPE=Debug -DSTRINGZILLA_BUILD_TEST=1 -B ./build_debug
 cmake --build build_debug --config Debug
-./build_debug/stringzilla_bench
+./build_debug/stringzilla_bench_substring
 ```
 
 On MacOS it's recommended to use non-default toolchain:
@@ -240,7 +250,7 @@ cmake -B ./build_release \
     -DSTRINGZILLA_USE_OPENMP=1 \
     -DSTRINGZILLA_BUILD_TEST=1 \
     && \
-    make -C ./build_release -j && ./build_release/stringzilla_bench
+    make -C ./build_release -j && ./build_release/stringzilla_bench_substring
 ```
 
 ## License 📜
@@ -257,3 +267,34 @@ If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall],
 [ustore]: https://github.com/unum-cloud/ustore
 [simsimd]: https://github.com/ashvardanian/simsimd
 [tenpack]: https://github.com/ashvardanian/tenpack
+
+
+# The weirdest interfaces of C++23 strings:
+
+## Third `std::basic_string_view<CharT,Traits>::find`
+
+constexpr size_type find( basic_string_view v, size_type pos = 0 ) const noexcept;
+(1)	(since C++17)
+constexpr size_type find( CharT ch, size_type pos = 0 ) const noexcept;
+(2)	(since C++17)
+constexpr size_type find( const CharT* s, size_type pos, size_type count ) const;
+(3)	(since C++17)
+constexpr size_type find( const CharT* s, size_type pos = 0 ) const;
+(4)	(since C++17)
+
+
+## HTML Parsing
+
+```txt
+<tag>       Isolated tag start
+<tag\w      Tag start with attributes
+<tag/>      Self-closing tag
+</tag>      Tag end
+```
+
+In any case, the tag name is always followed by whitespace, `/` or `>`.
+And is always preceded by whitespace. `/` or `<`.
+
+Important distinctions between XML and HTML:
+
+- XML does not truncate multiple white-spaces, while HTML does.

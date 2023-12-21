@@ -57,8 +57,13 @@ struct tracked_function_gt {
 using tracked_unary_functions_t = std::vector<tracked_function_gt<unary_function_t>>;
 using tracked_binary_functions_t = std::vector<tracked_function_gt<binary_function_t>>;
 
+#ifdef NDEBUG // Make debugging faster
 #define run_tests_m 1
 #define default_seconds_m 10
+#else
+#define run_tests_m 1
+#define default_seconds_m 100
+#endif
 
 using temporary_memory_t = std::vector<char>;
 
@@ -229,14 +234,15 @@ inline tracked_binary_functions_t find_last_functions() {
         });
     };
     return {
-        {"std::string_view.rfind",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto h_view = std::string_view(h.start, h.length);
-             auto n_view = std::string_view(n.start, n.length);
-             auto match = h_view.rfind(n_view);
-             return (sz_ssize_t)(match == std::string_view::npos ? h.length : match);
-         }},
-        {"sz_find_last_serial", wrap_sz(sz_find_last_serial), true},
+        // {"std::string_view.rfind",
+        //  [](sz_string_view_t h, sz_string_view_t n) {
+        //      auto h_view = std::string_view(h.start, h.length);
+        //      auto n_view = std::string_view(n.start, n.length);
+        //      auto match = h_view.rfind(n_view);
+        //      return (sz_ssize_t)(match == std::string_view::npos ? h.length : match);
+        //  }},
+        // {"sz_find_last_serial", wrap_sz(sz_find_last_serial), true},
+        {"sz_find_last_avx512", wrap_sz(sz_find_last_avx512), true},
         {"std::search",
          [](sz_string_view_t h, sz_string_view_t n) {
              auto h_view = std::string_view(h.start, h.length);
@@ -549,11 +555,11 @@ void evaluate_find_last_operations(strings_at &&strings, tracked_binary_function
 
 template <typename strings_at>
 void evaluate_all_operations(strings_at &&strings) {
-    evaluate_unary_operations(strings, hashing_functions());
-    evaluate_binary_operations(strings, equality_functions());
-    evaluate_binary_operations(strings, ordering_functions());
-    evaluate_binary_operations(strings, distance_functions());
-    evaluate_find_operations(strings, find_functions());
+    // evaluate_unary_operations(strings, hashing_functions());
+    // evaluate_binary_operations(strings, equality_functions());
+    // evaluate_binary_operations(strings, ordering_functions());
+    // evaluate_binary_operations(strings, distance_functions());
+    // evaluate_find_operations(strings, find_functions());
     evaluate_find_last_operations(strings, find_last_functions());
 
     // evaluate_binary_operations(strings, prefix_functions());
