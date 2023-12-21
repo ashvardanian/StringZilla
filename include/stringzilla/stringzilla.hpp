@@ -20,12 +20,13 @@ namespace sz {
  *          Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
  */
 template <typename string_view_>
-class substring_matches_range {
+class search_matches {
+    using string_view = string_view_;
+    string_view haystack_;
+    string_view needle_;
 
   public:
-    using string_view = string_view_;
-
-    substring_matches_range(string_view haystack, string_view needle) : haystack_(haystack), needle_(needle) {}
+    search_matches(string_view haystack, string_view needle) : haystack_(haystack), needle_(needle) {}
 
     class iterator {
         string_view remaining_;
@@ -42,8 +43,9 @@ class substring_matches_range {
         value_type operator*() const noexcept { return remaining_.substr(0, needle_.size()); }
 
         iterator &operator++() noexcept {
+            remaining_.remove_prefix(1);
             auto position = remaining_.find(needle_);
-            remaining_ = remaining_.substr(position);
+            remaining_ = position != string_view::npos ? remaining_.substr(position) : string_view();
             return *this;
         }
 
@@ -53,28 +55,84 @@ class substring_matches_range {
             return temp;
         }
 
-        bool operator!=(iterator const &other) const noexcept { return !(*this == other); }
-        bool operator==(iterator const &other) const noexcept {
-            return remaining_.begin() == other.remaining_.begin() && remaining_.end() == other.remaining_.end();
-        }
+        bool operator!=(iterator const &other) const noexcept { return remaining_.size() != other.remaining_.size(); }
+        bool operator==(iterator const &other) const noexcept { return remaining_.size() == other.remaining_.size(); }
     };
 
     iterator begin() const noexcept {
         auto position = haystack_.find(needle_);
-        return iterator(haystack_.substr(position), needle_);
+        return iterator(position != string_view::npos ? haystack_.substr(position) : string_view(), needle_);
     }
 
     iterator end() const noexcept { return iterator(string_view(), needle_); }
-
-  private:
-    string_view haystack_;
-    string_view needle_;
+    iterator::difference_type size() const noexcept { return std::distance(begin(), end()); }
 };
 
-// C++17 deduction guides
+/**
+ *  @brief  A range of string views representing the matches of a @b reverse-order substring search.
+ *          Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
+ */
+template <typename string_view_>
+class reverse_search_matches {
+    using string_view = string_view_;
+    string_view_ haystack_;
+    string_view_ needle_;
+
+  public:
+    reverse_search_matches(string_view haystack, string_view needle) : haystack_(haystack), needle_(needle) {}
+
+    class iterator {
+        string_view remaining_;
+        string_view needle_;
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = string_view;
+        using pointer = string_view const *;
+        using reference = string_view const &;
+
+        iterator(string_view haystack, string_view needle) noexcept : remaining_(haystack), needle_(needle) {}
+        value_type operator*() const noexcept { return remaining_.substr(remaining_.size() - needle_.size()); }
+
+        iterator &operator++() noexcept {
+            remaining_.remove_suffix(1);
+            auto position = remaining_.rfind(needle_);
+            remaining_ =
+                position != string_view::npos ? remaining_.substr(0, position + needle_.size()) : string_view();
+            return *this;
+        }
+
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator!=(iterator const &other) const noexcept { return remaining_.data() != other.remaining_.data(); }
+        bool operator==(iterator const &other) const noexcept { return remaining_.data() == other.remaining_.data(); }
+    };
+
+    iterator begin() const noexcept {
+        auto position = haystack_.rfind(needle_);
+        return iterator(position != string_view::npos ? haystack_.substr(0, position + needle_.size()) : string_view(),
+                        needle_);
+    }
+
+    iterator end() const noexcept { return iterator(string_view(), needle_); }
+    iterator::difference_type size() const noexcept { return std::distance(begin(), end()); }
+};
+
+/*  C++17 template type deduction guides. */
+#if __cplusplus >= 201703L
 
 template <typename string_view_>
-substring_matches_range(string_view_, string_view_) -> substring_matches_range<string_view_>;
+search_matches(string_view_, string_view_) -> search_matches<string_view_>;
+
+template <typename string_view_>
+reverse_search_matches(string_view_, string_view_) -> reverse_search_matches<string_view_>;
+
+#endif
 
 /**
  *  @brief  A string view class implementing with the superset of C++23 functionality

@@ -10,6 +10,7 @@ namespace sz = av::sz;
 void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
     static std::string haystack_string;
     haystack_string.reserve(10000);
+    haystack_string.clear();
 
     for (std::size_t repeats = 0; repeats != 128; ++repeats) {
         haystack_string += haystack_pattern;
@@ -20,13 +21,12 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
         auto needle_sz = sz::string_view(needle_stl.data(), needle_stl.size());
 
         // Wrap into ranges
-        auto range_stl = sz::substring_matches_range(haystack_stl, needle_stl);
-        auto range_sz = sz::substring_matches_range(haystack_sz, needle_sz);
-        auto begin_stl = range_stl.begin();
-        auto begin_sz = range_sz.begin();
-        auto end_stl = range_stl.end();
-        auto end_sz = range_sz.end();
-
+        auto matches_stl = sz::search_matches(haystack_stl, needle_stl);
+        auto matches_sz = sz::search_matches(haystack_sz, needle_sz);
+        auto begin_stl = matches_stl.begin();
+        auto begin_sz = matches_sz.begin();
+        auto end_stl = matches_stl.end();
+        auto end_sz = matches_sz.end();
         auto count_stl = std::distance(begin_stl, end_stl);
         auto count_sz = std::distance(begin_sz, end_sz);
 
@@ -40,6 +40,32 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
         // If one range is not finished, assert failure
         assert(count_stl == count_sz);
         assert(begin_stl == end_stl && begin_sz == end_sz);
+
+        // Wrap into reverse-order ranges
+        auto reverse_matches_stl = sz::reverse_search_matches(haystack_stl, needle_stl);
+        auto reverse_matches_sz = sz::reverse_search_matches(haystack_sz, needle_sz);
+        auto reverse_begin_stl = reverse_matches_stl.begin();
+        auto reverse_begin_sz = reverse_matches_sz.begin();
+        auto reverse_end_stl = reverse_matches_stl.end();
+        auto reverse_end_sz = reverse_matches_sz.end();
+        auto reverse_count_stl = std::distance(reverse_begin_stl, reverse_end_stl);
+        auto reverse_count_sz = std::distance(reverse_begin_sz, reverse_end_sz);
+
+        // Compare reverse-order results
+        for (; reverse_begin_stl != reverse_end_stl && reverse_begin_sz != reverse_end_sz;
+             ++reverse_begin_stl, ++reverse_begin_sz) {
+            auto reverse_match_stl = *reverse_begin_stl;
+            auto reverse_match_sz = *reverse_begin_sz;
+            assert(reverse_match_stl.data() == reverse_match_sz.data());
+        }
+
+        // If one range is not finished, assert failure
+        assert(reverse_count_stl == reverse_count_sz);
+        assert(reverse_begin_stl == reverse_end_stl && reverse_begin_sz == reverse_end_sz);
+
+        // Make sure number of elements is equal
+        assert(count_stl == reverse_count_stl);
+        assert(count_sz == reverse_count_sz);
     }
 }
 
