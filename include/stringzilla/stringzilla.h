@@ -961,11 +961,11 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
 
     // Broadcast the n into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
-    sz_u64_parts_t n_vec;
+    sz_u64_parts_t h_vec, n_vec;
     n_vec.u64 = (sz_u64_t)n[0] * 0x0101010101010101ull;
     for (; h + 8 <= h_end; h += 8) {
-        sz_u64_t h_vec = *(sz_u64_t const *)h;
-        sz_u64_t match_indicators = sz_u64_each_byte_equal(h_vec, n_vec.u64);
+        h_vec.u64 = *(sz_u64_t const *)h;
+        sz_u64_t match_indicators = sz_u64_each_byte_equal(h_vec.u64, n_vec.u64);
         if (match_indicators != 0) return h + sz_u64_ctz(match_indicators) / 8;
     }
 
@@ -984,7 +984,7 @@ sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_len, sz_cptr_t needl
 
     sz_cptr_t const h_start = h;
 
-    // Reposition the `h` pointer to the last character, as we will be walking backwards.
+    // Reposition the `h` pointer to the end, as we will be walking backwards.
     h = h + h_len - 1;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
@@ -993,12 +993,12 @@ sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_len, sz_cptr_t needl
 
     // Broadcast the needle into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
-    sz_u64_parts_t n_vec;
+    sz_u64_parts_t h_vec, n_vec;
     n_vec.u64 = (sz_u64_t)needle[0] * 0x0101010101010101ull;
-    for (; h >= h_start + 8; h -= 8) {
-        sz_u64_t h_vec = *(sz_u64_t const *)(h - 8);
-        sz_u64_t match_indicators = sz_u64_each_byte_equal(h_vec, n_vec.u64);
-        if (match_indicators != 0) return h - 8 + sz_u64_clz(match_indicators) / 8;
+    for (; h >= h_start + 7; h -= 8) {
+        h_vec.u64 = *(sz_u64_t const *)(h - 7);
+        sz_u64_t match_indicators = sz_u64_each_byte_equal(h_vec.u64, n_vec.u64);
+        if (match_indicators != 0) return h - sz_u64_clz(match_indicators) / 8;
     }
 
     for (; h >= h_start; --h)
@@ -1344,13 +1344,13 @@ SZ_INTERNAL sz_cptr_t sz_find_last_over64byte_serial(sz_cptr_t h, sz_size_t h_le
     sz_size_t const suffix_length = 64;
     sz_size_t const prefix_length = n_length - suffix_length;
     while (true) {
-        sz_cptr_t found = sz_find_under64byte_serial(h, h_length, n + prefix_length, suffix_length);
+        sz_cptr_t found = sz_find_last_under64byte_serial(h, h_length, n + prefix_length, suffix_length);
         if (!found) return NULL;
 
         // Verify the remaining part of the needle
         sz_size_t remaining = found - h;
         if (remaining < prefix_length) return NULL;
-        if (sz_equal_serial(found - prefix_length, n, prefix_length)) return found;
+        if (sz_equal_serial(found - prefix_length, n, prefix_length)) return found - prefix_length;
 
         // Adjust the position.
         h_length = remaining - 1;

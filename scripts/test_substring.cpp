@@ -1,4 +1,5 @@
 #include <cassert>  // assertions
+#include <cstring>  // `std::memcpy`
 #include <iterator> // `std::distance`
 
 #include <string>                      // Baseline
@@ -7,17 +8,17 @@
 
 namespace sz = av::sz;
 
-void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
-    static std::string haystack_string;
-    haystack_string.reserve(10000);
-    haystack_string.clear();
+void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
+    constexpr std::size_t max_repeats = 128;
+    alignas(64) char haystack[max_repeats * haystack_pattern.size() + misalignment];
 
     for (std::size_t repeats = 0; repeats != 128; ++repeats) {
-        haystack_string += haystack_pattern;
+        std::memcpy(haystack + misalignment + repeats * haystack_pattern.size(), haystack_pattern.data(),
+                    haystack_pattern.size());
 
         // Convert to string views
-        auto haystack_stl = std::string_view(haystack_string);
-        auto haystack_sz = sz::string_view(haystack_string.data(), haystack_string.size());
+        auto haystack_stl = std::string_view(haystack + misalignment, repeats * haystack_pattern.size());
+        auto haystack_sz = sz::string_view(haystack + misalignment, repeats * haystack_pattern.size());
         auto needle_sz = sz::string_view(needle_stl.data(), needle_stl.size());
 
         // Wrap into ranges
@@ -69,10 +70,18 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
     }
 }
 
+void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
+    eval(haystack_pattern, needle_stl, 0);
+    eval(haystack_pattern, needle_stl, 1);
+    eval(haystack_pattern, needle_stl, 2);
+    eval(haystack_pattern, needle_stl, 3);
+}
+
 int main(int, char const **) {
     std::printf("Hi Ash! ... or is it someone else?!\n");
 
     std::string_view alphabet = "abcdefghijklmnopqrstuvwxyz";                                         // 26 characters
+    std::string_view base64 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";     // 64 characters
     std::string_view common = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-=@$%"; // 68 characters
 
     // When haystack is only formed of needles:
@@ -81,6 +90,7 @@ int main(int, char const **) {
     eval("abc", "abc");
     eval("abcd", "abcd");
     eval(alphabet, alphabet);
+    eval(base64, base64);
     eval(common, common);
 
     // When haystack is formed of equidistant needles:
