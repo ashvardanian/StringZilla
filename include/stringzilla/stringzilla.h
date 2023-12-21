@@ -24,6 +24,7 @@
  *
  *  Covered:
  *      - void    *memchr(const void *, int, size_t); -> sz_find_byte
+ *      - void    *memrchr(const void *, int, size_t); -> sz_find_last_byte
  *      - int      memcmp(const void *, const void *, size_t); -> sz_order, sz_equal
  *      - char    *strchr(const char *, int); -> sz_find_byte
  *      - int      strcmp(const char *, const char *); -> sz_order, sz_equal
@@ -2487,6 +2488,16 @@ SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t ne
     return sz_find_neon(haystack, h_length, needle, n_length);
 #else
     return sz_find_serial(haystack, h_length, needle, n_length);
+#endif
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
+#if defined(__AVX512__)
+    return sz_find_last_avx512(haystack, h_length, needle, n_length);
+#elif defined(__NEON__)
+    return sz_find_last_neon(haystack, h_length, needle, n_length);
+#else
+    return sz_find_last_serial(haystack, h_length, needle, n_length);
 #endif
 }
 
