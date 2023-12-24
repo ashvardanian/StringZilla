@@ -144,11 +144,26 @@ typedef struct {
 
 #pragma region Helpers
 
-SZ_PUBLIC sz_cptr_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
+static sz_ptr_t temporary_memory_allocate(sz_size_t size, sz_string_view_t *existing) {
+    if (existing->length < size) {
+        sz_cptr_t new_start = realloc(existing->start, size);
+        if (!new_start) {
+            PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
+            return NULL;
+        }
+        existing->start = new_start;
+        existing->length = size;
+    }
+    return existing->start;
+}
+
+static void temporary_memory_free(sz_ptr_t start, sz_size_t size, sz_string_view_t *existing) {}
+
+static sz_cptr_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].start;
 }
 
-SZ_PUBLIC sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
+static sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].length;
 }
 
@@ -1075,19 +1090,13 @@ static PyObject *Str_levenshtein(PyObject *self, PyObject *args, PyObject *kwarg
     }
 
     // Allocate memory for the Levenshtein matrix
-    size_t memory_needed = sz_levenshtein_memory_needed(str1.length, str2.length);
-    if (temporary_memory.length < memory_needed) {
-        temporary_memory.start = realloc(temporary_memory.start, memory_needed);
-        temporary_memory.length = memory_needed;
-    }
-    if (!temporary_memory.start) {
-        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
-        return NULL;
-    }
+    sz_memory_allocator_t reusing_allocator;
+    reusing_allocator.allocate = &temporary_memory_allocate;
+    reusing_allocator.free = &temporary_memory_free;
+    reusing_allocator.user_data = &temporary_memory;
 
-    sz_size_t small_bound = (sz_size_t)bound;
     sz_size_t distance =
-        sz_levenshtein(str1.start, str1.length, str2.start, str2.length, temporary_memory.start, small_bound);
+        sz_levenshtein(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &reusing_allocator);
 
     return PyLong_FromLong(distance);
 }
