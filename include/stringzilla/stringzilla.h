@@ -104,9 +104,9 @@
  *  @brief  Annotation for the public API symbols.
  */
 #if defined(_WIN32) || defined(__CYGWIN__)
-#define SZ_PUBLIC inline static __declspec(dllexport)
+#define SZ_PUBLIC __declspec(dllexport) inline static
 #elif __GNUC__ >= 4
-#define SZ_PUBLIC inline static __attribute__((visibility("default")))
+#define SZ_PUBLIC __attribute__((visibility("default"))) inline static
 #else
 #define SZ_PUBLIC inline static
 #endif
@@ -399,6 +399,23 @@ SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
  *  @param result   Output string, can point to the same address as ::text.
  */
 SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
+
+/**
+ *  @brief  Generates a random string for a given alphabet, avoiding integer division and modulo operations.
+ *          Similar to `result[i] = alphabet[rand() % size]`.
+ *
+ *  The modulo operation is expensive, and should be avoided in performance-critical code.
+ *  We avoid it using small lookup tables and replacing it with a multiplication and shifts, similar to libdivide.
+ *  Alternative algorithms would include:
+ *      - Montgomery form: https://en.algorithmica.org/hpc/number-theory/montgomery/
+ *      - Barret reduction: https://www.nayuki.io/page/barrett-reduction-algorithm
+ *      - Lemire's trick: https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
+ *
+ *  @param text     String to be normalized.
+ *  @param length   Number of bytes in the string.
+ *  @param result   Output string, can point to the same address as ::text.
+ */
+SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t size, sz_ptr_t result, sz_size_t length);
 
 #pragma endregion
 
@@ -1693,6 +1710,9 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     return previous_distances[b_length];
 }
 
+/**
+ *  @brief  Uses a small lookup-table to convert a lowercase character to uppercase.
+ */
 SZ_INTERNAL sz_u8_t sz_u8_tolower(sz_u8_t c) {
     static sz_u8_t lowered[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
@@ -1715,6 +1735,9 @@ SZ_INTERNAL sz_u8_t sz_u8_tolower(sz_u8_t c) {
     return lowered[c];
 }
 
+/**
+ *  @brief  Uses a small lookup-table to convert an uppercase character to lowercase.
+ */
 SZ_INTERNAL sz_u8_t sz_u8_toupper(sz_u8_t c) {
     static sz_u8_t upped[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
@@ -1737,6 +1760,47 @@ SZ_INTERNAL sz_u8_t sz_u8_toupper(sz_u8_t c) {
     return upped[c];
 }
 
+/**
+ *  @brief  Uses two small lookup tables (768 bytes total) to accelerate division by a small
+ *          unsigned integer. Performs two lookups, one multiplication, two shifts, and two accumulations.
+ */
+SZ_INTERNAL sz_u8_t sz_u8_divide(sz_u8_t number, sz_u8_t divisor) {
+    static sz_u16_t multipliers[256] = {
+        0,     0,     0,     21846, 0,     39322, 21846, 9363,  0,     50973, 39322, 29790, 21846, 15124, 9363,  4370,
+        0,     57826, 50973, 44841, 39322, 34329, 29790, 25645, 21846, 18351, 15124, 12137, 9363,  6780,  4370,  2115,
+        0,     61565, 57826, 54302, 50973, 47824, 44841, 42011, 39322, 36765, 34329, 32006, 29790, 27671, 25645, 23705,
+        21846, 20063, 18351, 16706, 15124, 13602, 12137, 10725, 9363,  8049,  6780,  5554,  4370,  3224,  2115,  1041,
+        0,     63520, 61565, 59668, 57826, 56039, 54302, 52614, 50973, 49377, 47824, 46313, 44841, 43407, 42011, 40649,
+        39322, 38028, 36765, 35532, 34329, 33154, 32006, 30885, 29790, 28719, 27671, 26647, 25645, 24665, 23705, 22766,
+        21846, 20945, 20063, 19198, 18351, 17520, 16706, 15907, 15124, 14356, 13602, 12863, 12137, 11424, 10725, 10038,
+        9363,  8700,  8049,  7409,  6780,  6162,  5554,  4957,  4370,  3792,  3224,  2665,  2115,  1573,  1041,  517,
+        0,     64520, 63520, 62535, 61565, 60609, 59668, 58740, 57826, 56926, 56039, 55164, 54302, 53452, 52614, 51788,
+        50973, 50169, 49377, 48595, 47824, 47063, 46313, 45572, 44841, 44120, 43407, 42705, 42011, 41326, 40649, 39982,
+        39322, 38671, 38028, 37392, 36765, 36145, 35532, 34927, 34329, 33738, 33154, 32577, 32006, 31443, 30885, 30334,
+        29790, 29251, 28719, 28192, 27671, 27156, 26647, 26143, 25645, 25152, 24665, 24182, 23705, 23233, 22766, 22303,
+        21846, 21393, 20945, 20502, 20063, 19628, 19198, 18772, 18351, 17933, 17520, 17111, 16706, 16305, 15907, 15514,
+        15124, 14738, 14356, 13977, 13602, 13231, 12863, 12498, 12137, 11779, 11424, 11073, 10725, 10380, 10038, 9699,
+        9363,  9030,  8700,  8373,  8049,  7727,  7409,  7093,  6780,  6470,  6162,  5857,  5554,  5254,  4957,  4662,
+        4370,  4080,  3792,  3507,  3224,  2943,  2665,  2388,  2115,  1843,  1573,  1306,  1041,  778,   517,   258,
+    };
+    static sz_u8_t shifts[256] = {
+        0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, //
+        4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, //
+        5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, //
+        6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, //
+        6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, //
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, //
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, //
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, //
+    };
+    sz_u32_t multiplier = multipliers[divisor];
+    sz_u8_t shift = shifts[divisor];
+
+    sz_u16_t q = (sz_u16_t)((multiplier * number) >> 16);
+    sz_u16_t t = ((number - q) >> 1) + q;
+    return (sz_u8_t)(t >> shift);
+}
+
 SZ_PUBLIC void sz_tolower_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
     for (sz_cptr_t end = text + length; text != end; ++text, ++result) {
         *result = sz_u8_tolower(*(sz_u8_t const *)text);
@@ -1750,8 +1814,14 @@ SZ_PUBLIC void sz_toupper_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t resu
 }
 
 SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    for (sz_cptr_t end = text + length; text != end; ++text, ++result) { *result = *text & 0x7F; }
+    for (sz_cptr_t end = text + length; text != end; ++text, ++result) { *result = *(sz_u8_t const *)text & 0x7F; }
 }
+
+SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+    for (sz_cptr_t end = text + length; text != end; ++text, ++result) { *result = *(sz_u8_t const *)text & 0x7F; }
+}
+
+SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t size, sz_ptr_t result, sz_size_t length) {}
 
 #pragma endregion
 
