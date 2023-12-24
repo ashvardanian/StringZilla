@@ -62,7 +62,7 @@ using tracked_binary_functions_t = std::vector<tracked_function_gt<binary_functi
 #define default_seconds_m 10
 #else
 #define run_tests_m 1
-#define default_seconds_m 100
+#define default_seconds_m 10
 #endif
 
 using temporary_memory_t = std::vector<char>;
@@ -125,7 +125,7 @@ tracked_unary_functions_t hashing_functions() {
     return {
         {"sz_hash_serial", wrap_sz(sz_hash_serial)},
 #if SZ_USE_X86_AVX512
-        // {"sz_hash_avx512", wrap_sz(sz_hash_avx512), true},
+            {"sz_hash_avx512", wrap_sz(sz_hash_avx512), true},
 #endif
 #if SZ_USE_ARM_NEON
             {"sz_hash_neon", wrap_sz(sz_hash_neon), true},
@@ -234,38 +234,45 @@ inline tracked_binary_functions_t find_last_functions() {
         });
     };
     return {
-        // {"std::string_view.rfind",
-        //  [](sz_string_view_t h, sz_string_view_t n) {
-        //      auto h_view = std::string_view(h.start, h.length);
-        //      auto n_view = std::string_view(n.start, n.length);
-        //      auto match = h_view.rfind(n_view);
-        //      return (sz_ssize_t)(match == std::string_view::npos ? h.length : match);
-        //  }},
-        // {"sz_find_last_serial", wrap_sz(sz_find_last_serial), true},
-        {"sz_find_last_avx512", wrap_sz(sz_find_last_avx512), true},
-        {"std::search",
+        {"std::string_view.rfind",
          [](sz_string_view_t h, sz_string_view_t n) {
              auto h_view = std::string_view(h.start, h.length);
              auto n_view = std::string_view(n.start, n.length);
-             auto match = std::search(h_view.rbegin(), h_view.rend(), n_view.rbegin(), n_view.rend());
-             return (sz_ssize_t)(match - h_view.rbegin());
+             auto match = h_view.rfind(n_view);
+             return (sz_ssize_t)(match == std::string_view::npos ? h.length : match);
          }},
-        {"std::search<BM>",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto h_view = std::string_view(h.start, h.length);
-             auto n_view = std::string_view(n.start, n.length);
-             auto match =
-                 std::search(h_view.rbegin(), h_view.rend(), std::boyer_moore_searcher(n_view.rbegin(), n_view.rend()));
-             return (sz_ssize_t)(match - h_view.rbegin());
-         }},
-        {"std::search<BMH>",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto h_view = std::string_view(h.start, h.length);
-             auto n_view = std::string_view(n.start, n.length);
-             auto match = std::search(h_view.rbegin(), h_view.rend(),
-                                      std::boyer_moore_horspool_searcher(n_view.rbegin(), n_view.rend()));
-             return (sz_ssize_t)(match - h_view.rbegin());
-         }},
+            {"sz_find_last_serial", wrap_sz(sz_find_last_serial), true},
+#if SZ_USE_X86_AVX512
+            {"sz_find_last_avx512", wrap_sz(sz_find_last_avx512), true},
+#endif
+#if SZ_USE_ARM_NEON
+            {"sz_find_last_neon", wrap_sz(sz_find_last_neon), true},
+#endif
+            {"std::search",
+             [](sz_string_view_t h, sz_string_view_t n) {
+                 auto h_view = std::string_view(h.start, h.length);
+                 auto n_view = std::string_view(n.start, n.length);
+                 auto match = std::search(h_view.rbegin(), h_view.rend(), n_view.rbegin(), n_view.rend());
+                 auto offset_from_end = (sz_ssize_t)(match - h_view.rbegin());
+                 return h.length - offset_from_end;
+             }},
+            {"std::search<BM>",
+             [](sz_string_view_t h, sz_string_view_t n) {
+                 auto h_view = std::string_view(h.start, h.length);
+                 auto n_view = std::string_view(n.start, n.length);
+                 auto match = std::search(h_view.rbegin(), h_view.rend(),
+                                          std::boyer_moore_searcher(n_view.rbegin(), n_view.rend()));
+                 auto offset_from_end = (sz_ssize_t)(match - h_view.rbegin());
+                 return h.length - offset_from_end;
+             }},
+            {"std::search<BMH>", [](sz_string_view_t h, sz_string_view_t n) {
+                 auto h_view = std::string_view(h.start, h.length);
+                 auto n_view = std::string_view(n.start, n.length);
+                 auto match = std::search(h_view.rbegin(), h_view.rend(),
+                                          std::boyer_moore_horspool_searcher(n_view.rbegin(), n_view.rend()));
+                 auto offset_from_end = (sz_ssize_t)(match - h_view.rbegin());
+                 return h.length - offset_from_end;
+             }},
     };
 }
 
@@ -302,7 +309,7 @@ inline tracked_binary_functions_t distance_functions() {
         {"sz_levenshtein", wrap_sz_distance(sz_levenshtein_serial)},
             {"sz_alignment_score", wrap_sz_scoring(sz_alignment_score_serial), true},
 #if SZ_USE_X86_AVX512
-        // {"sz_levenshtein_avx512", wrap_sz_distance(sz_levenshtein_avx512), true},
+            {"sz_levenshtein_avx512", wrap_sz_distance(sz_levenshtein_avx512), true},
 #endif
     };
 }
@@ -555,11 +562,11 @@ void evaluate_find_last_operations(strings_at &&strings, tracked_binary_function
 
 template <typename strings_at>
 void evaluate_all_operations(strings_at &&strings) {
-    // evaluate_unary_operations(strings, hashing_functions());
-    // evaluate_binary_operations(strings, equality_functions());
-    // evaluate_binary_operations(strings, ordering_functions());
-    // evaluate_binary_operations(strings, distance_functions());
-    // evaluate_find_operations(strings, find_functions());
+    evaluate_unary_operations(strings, hashing_functions());
+    evaluate_binary_operations(strings, equality_functions());
+    evaluate_binary_operations(strings, ordering_functions());
+    evaluate_binary_operations(strings, distance_functions());
+    evaluate_find_operations(strings, find_functions());
     evaluate_find_last_operations(strings, find_last_functions());
 
     // evaluate_binary_operations(strings, prefix_functions());

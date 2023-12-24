@@ -224,9 +224,27 @@ cibuildwheel --platform linux
 Running benchmarks:
 
 ```sh
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_TEST=1 -B ./build_release
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 -B ./build_release
 cmake --build build_release --config Release
 ./build_release/stringzilla_bench_substring
+```
+
+Comparing different hardware setups:
+
+```sh
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+    -DCMAKE_CXX_FLAGS="-march=sandybridge" -DCMAKE_C_FLAGS="-march=sandybridge" \
+    -B ./build_release/sandybridge && cmake --build build_release/sandybridge --config Release
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+    -DCMAKE_CXX_FLAGS="-march=haswell" -DCMAKE_C_FLAGS="-march=haswell" \
+    -B ./build_release/haswell && cmake --build build_release/haswell --config Release
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+    -DCMAKE_CXX_FLAGS="-march=sapphirerapids" -DCMAKE_C_FLAGS="-march=sapphirerapids" \
+    -B ./build_release/sapphirerapids && cmake --build build_release/sapphirerapids --config Release
+
+./build_release/sandybridge/stringzilla_bench_substring
+./build_release/haswell/stringzilla_bench_substring
+./build_release/sapphirerapids/stringzilla_bench_substring
 ```
 
 Running tests:
@@ -234,7 +252,7 @@ Running tests:
 ```sh
 cmake -DCMAKE_BUILD_TYPE=Debug -DSTRINGZILLA_BUILD_TEST=1 -B ./build_debug
 cmake --build build_debug --config Debug
-./build_debug/stringzilla_bench_substring
+./build_debug/stringzilla_test_substring
 ```
 
 On MacOS it's recommended to use non-default toolchain:
@@ -249,6 +267,7 @@ cmake -B ./build_release \
     -DCMAKE_CXX_COMPILER="g++-12" \
     -DSTRINGZILLA_USE_OPENMP=1 \
     -DSTRINGZILLA_BUILD_TEST=1 \
+    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     && \
     make -C ./build_release -j && ./build_release/stringzilla_bench_substring
 ```
