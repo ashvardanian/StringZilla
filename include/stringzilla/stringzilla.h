@@ -25,7 +25,7 @@
  *
  *  > Naive exact matching for 1-, 2-, 3-, and 4-character-long needles using SIMD.
  *  > Bitap "Shift Or" Baeza-Yates-Gonnet (BYG) algorithm for mid-length needles on a serial backend.
- *  > Boyer-Moore-Horspool (BMH) algorithm variations for longer than 64-bytes needles.
+ *  > Boyer-Moore-Horspool (BMH) algorithm with Raita heuristic variation for longer needles.
  *  > Apostolico-Giancarlo algorithm for longer needles (TODO), if needle preprocessing time isn't an issue.
  *
  *  Substring search algorithms are generally divided into: comparison-based, automaton-based, and bit-parallel.
@@ -40,13 +40,16 @@
  *
  *  Going beyond that, to long needles, Boyer-Moore (BM) and its variants are often the best choice. It has two tables:
  *  the good-suffix shift and the bad-character shift. Common choice is to use the simplified BMH algorithm,
- *  which only uses the bad-character shift table, reducing the pre-processing time.
- *  In the C++ Standards Library, the `std::string::find` function uses the BMH algorithm with Raita's heuristic.
+ *  which only uses the bad-character shift table, reducing the pre-processing time. In the C++ Standards Library,
+ *  the `std::string::find` function uses the BMH algorithm with Raita's heuristic. We do the same for longer needles.
+ *
  *  All those, still, have O(hn) worst case complexity, and struggle with repetitive needle patterns.
  *  To guarantee O(h) worst case time complexity, the Apostolico-Giancarlo (AG) algorithm adds an additional skip-table.
  *  Preprocessing phase is O(n+sigma) in time and space. On traversal, performs from (h/n) to (3h/2) comparisons.
- *
- *
+ *  We should consider implementing it if we can:
+ *      - accelerate the preprocessing phase of the needle.
+ *      - simplify th econtrol-flow of the main loop.
+ *      - replace the array of shift values with a circual buffer.
  *
  *  Reading materials:
  *      - Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
@@ -125,14 +128,6 @@
 #endif
 
 /**
- *  @brief  Compile-time assert macro similar to `static_assert` in C++.
- */
-#define SZ_STATIC_ASSERT(condition, name)                \
-    typedef struct {                                     \
-        int static_assert_##name : (condition) ? 1 : -1; \
-    } sz_static_assert_##name##_t
-
-/**
  *  @brief  A misaligned load can be - trying to fetch eight consecutive bytes from an address
  *          that is not divisble by eight.
  *
@@ -194,6 +189,14 @@
             exit(EXIT_FAILURE);                                                                             \
         }                                                                                                   \
     } while (0)
+
+/**
+ *  @brief  Compile-time assert macro similar to `static_assert` in C++.
+ */
+#define SZ_STATIC_ASSERT(condition, name)                \
+    typedef struct {                                     \
+        int static_assert_##name : (condition) ? 1 : -1; \
+    } sz_static_assert_##name##_t
 
 #ifdef __cplusplus
 extern "C" {
