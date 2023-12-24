@@ -12,8 +12,8 @@
 
 #include <stringzilla/stringzilla.h>
 
-namespace av {
-namespace sz {
+namespace ashvardanian {
+namespace stringzilla {
 
 /**
  *  @brief  A string view class implementing with the superset of C++23 functionality
@@ -545,37 +545,37 @@ class reverse_range_matches {
     iterator::difference_type size() const noexcept { return std::distance(begin(), end()); }
 };
 
-template <typename t>
-range_matches<t, matcher_find> search_substrings(t h, t n) {
+template <typename string>
+range_matches<string, matcher_find> search_substrings(string h, string n) {
     return {h, n};
 }
 
-template <typename t>
-reverse_range_matches<t, matcher_rfind> reverse_search_substrings(t h, t n) {
+template <typename string>
+reverse_range_matches<string, matcher_rfind> reverse_search_substrings(string h, string n) {
     return {h, n};
 }
 
-template <typename t>
-range_matches<t, matcher_find_first_of> search_chars(t h, t n) {
+template <typename string>
+range_matches<string, matcher_find_first_of> search_chars(string h, string n) {
     return {h, n};
 }
 
-template <typename t>
-reverse_range_matches<t, matcher_find_last_of> reverse_search_chars(t h, t n) {
+template <typename string>
+reverse_range_matches<string, matcher_find_last_of> reverse_search_chars(string h, string n) {
     return {h, n};
 }
 
-template <typename t>
-range_matches<t, matcher_find_first_not_of> search_other_chars(t h, t n) {
+template <typename string>
+range_matches<string, matcher_find_first_not_of> search_other_chars(string h, string n) {
     return {h, n};
 }
 
-template <typename t>
-reverse_range_matches<t, matcher_find_last_not_of> reverse_search_other_chars(t h, t n) {
+template <typename string>
+reverse_range_matches<string, matcher_find_last_not_of> reverse_search_other_chars(string h, string n) {
     return {h, n};
 }
 
-} // namespace sz
-} // namespace av
+} // namespace stringzilla
+} // namespace ashvardanian
 
 #endif // STRINGZILLA_HPP_

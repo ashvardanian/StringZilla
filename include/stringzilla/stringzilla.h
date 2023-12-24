@@ -1,7 +1,7 @@
 /**
  *  @brief  StringZilla is a collection of simple string algorithms, designed to be used in Big Data applications.
  *          It may be slower than LibC, but has a broader & cleaner interface, and a very short implementation
- *          targeting modern CPUs with AVX-512 and SVE and older CPUs with SWAR and auto-vecotrization.
+ *          targeting modern x86 CPUs with AVX-512 and Arm NEON and older CPUs with SWAR and auto-vecotrization.
  *
  *  @section    Operations potentially not worth optimizing in StringZilla
  *
@@ -11,8 +11,46 @@
  *
  *  @section    Uncommon operations covered by StringZilla
  *
- *  * Reverse order search is rarely supported on par with normal order string scans.
- *  * Approximate string-matching is not the most common functionality for general-purpose string libraries.
+ *  Every in-order search/matching operations has a reverse order counterpart, a rare feature in string libraries.
+ *  That way `sz_find` and `sz_find_last` are similar to `strstr` and `strrstr` in LibC, but `sz_find_byte` and
+ *  `sz_find_last_byte` are equivalent to `memchr` and `memrchr`. The same goes for `sz_find_from_set` and
+ *  `sz_find_last_from_set`, which are equivalent to `strspn` and `strcspn` in LibC.
+ *
+ *  Edit distance computations can be parameterized with the substitution matrix and gap (insertion & deletion)
+ *  penalties. This allows for more flexible usecases, like scoring fuzzy string matches, and bioinformatics.
+
+ *  @section    Exact substring search algorithms
+ *
+ *  Uses different algorithms for different needle lengths and backends:
+ *
+ *  > Naive exact matching for 1-, 2-, 3-, and 4-character-long needles using SIMD.
+ *  > Bitap "Shift Or" Baeza-Yates-Gonnet (BYG) algorithm for mid-length needles on a serial backend.
+ *  > Boyer-Moore-Horspool (BMH) algorithm variations for longer than 64-bytes needles.
+ *  > Apostolico-Giancarlo algorithm for longer needles (TODO), if needle preprocessing time isn't an issue.
+ *
+ *  Substring search algorithms are generally divided into: comparison-based, automaton-based, and bit-parallel.
+ *  Different families are effective for different alphabet sizes and needle lengths. The more operations are
+ *  needed per-character - the more effective SIMD would be. The longer the needle - the more effective the
+ *  skip-tables are.
+ *
+ *  On very short needles, especially 1-4 characters long, brute force with SIMD is the fastest solution.
+ *  On mid-length needles, bit-parallel algorithms are very effective, as the character masks fit into 32-bit
+ *  or 64-bit words. Either way, if the needle is under 64-bytes long, on haystack traversal we will still fetch
+ *  every CPU cache line. So the only way to improve performance is to reduce the number of comparisons.
+ *
+ *  Going beyond that, to long needles, Boyer-Moore (BM) and its variants are often the best choice. It has two tables:
+ *  the good-suffix shift and the bad-character shift. Common choice is to use the simplified BMH algorithm,
+ *  which only uses the bad-character shift table, reducing the pre-processing time.
+ *  In the C++ Standards Library, the `std::string::find` function uses the BMH algorithm with Raita's heuristic.
+ *  All those, still, have O(hn) worst case complexity, and struggle with repetitive needle patterns.
+ *  To guarantee O(h) worst case time complexity, the Apostolico-Giancarlo (AG) algorithm adds an additional skip-table.
+ *  Preprocessing phase is O(n+sigma) in time and space. On traversal, performs from (h/n) to (3h/2) comparisons.
+ *
+ *
+ *
+ *  Reading materials:
+ *      - Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
+ *      - SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
  *
  *  @section    Compatibility with LibC and STL
  *
@@ -147,6 +185,15 @@
 #define SZ_USE_ARM_SVE 0
 #endif
 #endif
+
+#define sz_assert(condition, message, ...)                                                                  \
+    do {                                                                                                    \
+        if (!(condition)) {                                                                                 \
+            fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", #condition, __FILE__, __LINE__); \
+            fprintf(stderr, "Message: " message "\n", ##__VA_ARGS__);                                       \
+            exit(EXIT_FAILURE);                                                                             \
+        }                                                                                                   \
+    } while (0)
 
 #ifdef __cplusplus
 extern "C" {
@@ -400,17 +447,6 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t haystack, sz_size_t h_len
  *          Equivalient to `memmem(haystack, h_length, needle, n_length)` in LibC.
  *          Similar to `strstr(haystack, needle)` in LibC, but requires known length.
  *
- *  Uses different algorithms for different needle lengths and backends:
- *
- *  > Naive exact matching for 1-, 2-, 3-, and 4-character-long needles.
- *  > Bitap "Shift Or" (Baeza-Yates-Gonnet) algorithm for serial (SWAR) backend.
- *  > Two-way heuristic for longer needles with SIMD backends.
- *
- *  @section Reading Materials
- *
- *  Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
- *  SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
- *
  *  @param haystack Haystack - the string to search in.
  *  @param h_length Number of bytes in the haystack.
  *  @param needle   Needle - substring to find.
@@ -430,17 +466,6 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 
 /**
  *  @brief  Locates the last matching substring.
- *
- *  Uses different algorithms for different needle lengths and backends:
- *
- *  > Naive exact matching for 1-, 2-, 3-, and 4-character-long needles.
- *  > Bitap "Shift Or" (Baeza-Yates-Gonnet) algorithm for serial (SWAR) backend.
- *  > Two-way heuristic for longer needles with SIMD backends.
- *
- *  @section Reading Materials
- *
- *  Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
- *  SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
  *
  *  @param haystack Haystack - the string to search in.
  *  @param h_length Number of bytes in the haystack.
@@ -1166,17 +1191,18 @@ SZ_INTERNAL sz_cptr_t sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_c
 }
 
 /**
- *  @brief  Bitap algo for exact matching of patterns under @b 8-bytes long.
+ *  @brief  Bitap algo for exact matching of patterns up to @b 8-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t sz_find_under8byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                        sz_size_t n_length) {
 
     sz_u8_t running_match = 0xFF;
-    sz_u8_t pattern_mask[256];
-    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { pattern_mask[n[i]] &= ~(1u << i); }
+    sz_u8_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFF; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[i]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | pattern_mask[h[i]];
+        running_match = (running_match << 1) | character_position_masks[h[i]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
     }
 
@@ -1184,17 +1210,18 @@ SZ_INTERNAL sz_cptr_t sz_find_under8byte_serial(sz_cptr_t h, sz_size_t h_length,
 }
 
 /**
- *  @brief  Bitap algorithm for exact matching of patterns under @b 8-bytes long in @b reverse order.
+ *  @brief  Bitap algorithm for exact matching of patterns up to @b 8-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t sz_find_last_under8byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                             sz_size_t n_length) {
 
     sz_u8_t running_match = 0xFF;
-    sz_u8_t pattern_mask[256];
-    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { pattern_mask[n[n_length - i - 1]] &= ~(1u << i); }
+    sz_u8_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFF; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[n_length - i - 1]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | pattern_mask[h[h_length - i - 1]];
+        running_match = (running_match << 1) | character_position_masks[h[h_length - i - 1]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + h_length - i - 1; }
     }
 
@@ -1202,17 +1229,18 @@ SZ_INTERNAL sz_cptr_t sz_find_last_under8byte_serial(sz_cptr_t h, sz_size_t h_le
 }
 
 /**
- *  @brief  Bitap algo for exact matching of patterns under @b 16-bytes long.
+ *  @brief  Bitap algo for exact matching of patterns up to @b 16-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t sz_find_under16byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                         sz_size_t n_length) {
 
     sz_u16_t running_match = 0xFFFF;
-    sz_u16_t pattern_mask[256];
-    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { pattern_mask[n[i]] &= ~(1u << i); }
+    sz_u16_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFF; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[i]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | pattern_mask[h[i]];
+        running_match = (running_match << 1) | character_position_masks[h[i]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
     }
 
@@ -1220,18 +1248,18 @@ SZ_INTERNAL sz_cptr_t sz_find_under16byte_serial(sz_cptr_t h, sz_size_t h_length
 }
 
 /**
- *  @brief  Bitap algorithm for exact matching of patterns under @b 16-bytes long in @b reverse order.
+ *  @brief  Bitap algorithm for exact matching of patterns up to @b 16-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t sz_find_last_under16byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                      sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                              sz_size_t n_length) {
 
     sz_u16_t running_match = 0xFFFF;
-    sz_u16_t pattern_mask[256];
-    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { pattern_mask[n[n_length - i - 1]] &= ~(1u << i); }
+    sz_u16_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFF; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[n_length - i - 1]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | pattern_mask[h[h_length - i - 1]];
+        running_match = (running_match << 1) | character_position_masks[h[h_length - i - 1]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + h_length - i - 1; }
     }
 
@@ -1239,17 +1267,18 @@ SZ_INTERNAL sz_cptr_t sz_find_last_under16byte_serial(sz_cptr_t h, sz_size_t h_l
 }
 
 /**
- *  @brief  Bitap algo for exact matching of patterns under @b 32-bytes long.
+ *  @brief  Bitap algo for exact matching of patterns up to @b 32-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t sz_find_under32byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                         sz_size_t n_length) {
 
     sz_u32_t running_match = 0xFFFFFFFF;
-    sz_u32_t pattern_mask[256];
-    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFFFFFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { pattern_mask[n[i]] &= ~(1u << i); }
+    sz_u32_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFF; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[i]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | pattern_mask[h[i]];
+        running_match = (running_match << 1) | character_position_masks[h[i]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
     }
 
@@ -1257,18 +1286,18 @@ SZ_INTERNAL sz_cptr_t sz_find_under32byte_serial(sz_cptr_t h, sz_size_t h_length
 }
 
 /**
- *  @brief  Bitap algorithm for exact matching of patterns under @b 32-bytes long in @b reverse order.
+ *  @brief  Bitap algorithm for exact matching of patterns up to @b 32-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t sz_find_last_under32byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                      sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                              sz_size_t n_length) {
 
     sz_u32_t running_match = 0xFFFFFFFF;
-    sz_u32_t pattern_mask[256];
-    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFFFFFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { pattern_mask[n[n_length - i - 1]] &= ~(1u << i); }
+    sz_u32_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFF; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[n_length - i - 1]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | pattern_mask[h[h_length - i - 1]];
+        running_match = (running_match << 1) | character_position_masks[h[h_length - i - 1]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + h_length - i - 1; }
     }
 
@@ -1276,17 +1305,18 @@ SZ_INTERNAL sz_cptr_t sz_find_last_under32byte_serial(sz_cptr_t h, sz_size_t h_l
 }
 
 /**
- *  @brief  Bitap algo for exact matching of patterns under @b 64-bytes long.
+ *  @brief  Bitap algo for exact matching of patterns up to @b 64-bytes long.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t sz_find_under64byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                         sz_size_t n_length) {
 
     sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
-    sz_u64_t pattern_mask[256];
-    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFFFFFFFFFFFFFFFFull; }
-    for (sz_size_t i = 0; i < n_length; ++i) { pattern_mask[n[i]] &= ~(1ull << i); }
+    sz_u64_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[i]] &= ~(1ull << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | pattern_mask[h[i]];
+        running_match = (running_match << 1) | character_position_masks[h[i]];
         if ((running_match & (1ull << (n_length - 1))) == 0) { return h + i - n_length + 1; }
     }
 
@@ -1294,30 +1324,93 @@ SZ_INTERNAL sz_cptr_t sz_find_under64byte_serial(sz_cptr_t h, sz_size_t h_length
 }
 
 /**
- *  @brief  Bitap algorithm for exact matching of patterns under @b 64-bytes long in @b reverse order.
+ *  @brief  Bitap algorithm for exact matching of patterns up to @b 64-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t sz_find_last_under64byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                      sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                              sz_size_t n_length) {
 
     sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
-    sz_u64_t pattern_mask[256];
-    for (sz_size_t i = 0; i < 256; ++i) { pattern_mask[i] = 0xFFFFFFFFFFFFFFFFull; }
-    for (sz_size_t i = 0; i < n_length; ++i) { pattern_mask[n[n_length - i - 1]] &= ~(1ull << i); }
+    sz_u64_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[n_length - i - 1]] &= ~(1ull << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | pattern_mask[h[h_length - i - 1]];
+        running_match = (running_match << 1) | character_position_masks[h[h_length - i - 1]];
         if ((running_match & (1ull << (n_length - 1))) == 0) { return h + h_length - i - 1; }
     }
 
     return NULL;
 }
 
-SZ_INTERNAL sz_cptr_t sz_find_over64byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+/**
+ *  @brief  Boyer-Moore-Horspool algorithm for exact matching of patterns up to @b 256-bytes long.
+ *          Uses the Raita heuristic to match the first two, the last, and the middle character of the pattern.
+ */
+SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                             sz_size_t n_length) {
 
-    sz_size_t const prefix_length = 64;
-    sz_size_t const suffix_length = n_length - prefix_length;
+    // Several popular string matching algorithms are using a bad-character shift table.
+    // Boyer Moore: https://www-igm.univ-mlv.fr/~lecroq/string/node14.html
+    // Quick Search: https://www-igm.univ-mlv.fr/~lecroq/string/node19.html
+    // Smith: https://www-igm.univ-mlv.fr/~lecroq/string/node21.html
+    sz_u8_t bad_shift_table[256] = {(sz_u8_t)n_length};
+    for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n[i]] = (sz_u8_t)(n_length - i - 1);
+
+    // Another common heuristic is to match a few characters from different parts of a string.
+    // Raita suggests to use the first two, the last, and the middle character of the pattern.
+    sz_size_t n_midpoint = n_length / 2 + 1;
+    sz_u32_parts_t h_vec, n_vec;
+    n_vec.u8s[0] = n[0];
+    n_vec.u8s[1] = n[1];
+    n_vec.u8s[2] = n[n_midpoint];
+    n_vec.u8s[3] = n[n_length - 1];
+
+    // Scan through the whole haystack, skipping the last `n_length` bytes.
+    for (sz_size_t i = 0; i <= h_length - n_length;) {
+        h_vec.u8s[0] = h[i + 0];
+        h_vec.u8s[1] = h[i + 1];
+        h_vec.u8s[2] = h[i + n_midpoint];
+        h_vec.u8s[3] = h[i + n_length - 1];
+        if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i + 2, n + 2, n_length - 3)) return h + i;
+        i += bad_shift_table[h_vec.u8s[3]];
+    }
+    return NULL;
+}
+
+SZ_INTERNAL sz_cptr_t _sz_find_last_horspool_upto_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                                  sz_size_t n_length) {
+    sz_u8_t bad_shift_table[256] = {(sz_u8_t)n_length};
+    for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n[i]] = (sz_u8_t)(i + 1);
+
+    sz_size_t n_midpoint = n_length / 2;
+    sz_u32_parts_t h_vec, n_vec;
+    n_vec.u8s[0] = n[n_length - 1];
+    n_vec.u8s[1] = n[n_length - 2];
+    n_vec.u8s[2] = n[n_midpoint];
+    n_vec.u8s[3] = n[0];
+
+    for (sz_size_t j = 0; j <= h_length - n_length;) {
+        sz_size_t i = h_length - n_length - j;
+        h_vec.u8s[0] = h[i + n_length - 1];
+        h_vec.u8s[1] = h[i + n_length - 2];
+        h_vec.u8s[2] = h[i + n_midpoint];
+        h_vec.u8s[3] = h[i];
+        if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i + 1, n + 1, n_length - 3)) return h + i;
+        j += bad_shift_table[h_vec.u8s[0]];
+    }
+    return NULL;
+}
+
+/**
+ *  @brief  Exact substring search helper function, that finds the first occurrence of a prefix of the needle
+ *          using a given search function, and then verifies the remaining part of the needle.
+ */
+SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length,
+                                           sz_find_t find_prefix, sz_size_t prefix_length) {
+
+    sz_size_t suffix_length = n_length - prefix_length;
     while (true) {
-        sz_cptr_t found = sz_find_under64byte_serial(h, h_length, n, prefix_length);
+        sz_cptr_t found = find_prefix(h, h_length, n, prefix_length);
         if (!found) return NULL;
 
         // Verify the remaining part of the needle
@@ -1331,12 +1424,16 @@ SZ_INTERNAL sz_cptr_t sz_find_over64byte_serial(sz_cptr_t h, sz_size_t h_length,
     }
 }
 
-SZ_INTERNAL sz_cptr_t sz_find_last_over64byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+/**
+ *  @brief  Exact reverse-order substring search helper function, that finds the last occurrence of a suffix of the
+ *          needle using a given search function, and then verifies the remaining part of the needle.
+ */
+SZ_INTERNAL sz_cptr_t _sz_find_last_with_suffix(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length,
+                                                sz_find_t find_suffix, sz_size_t suffix_length) {
 
-    sz_size_t const suffix_length = 64;
-    sz_size_t const prefix_length = n_length - suffix_length;
+    sz_size_t prefix_length = n_length - suffix_length;
     while (true) {
-        sz_cptr_t found = sz_find_last_under64byte_serial(h, h_length, n + prefix_length, suffix_length);
+        sz_cptr_t found = find_suffix(h, h_length, n + prefix_length, suffix_length);
         if (!found) return NULL;
 
         // Verify the remaining part of the needle
@@ -1347,6 +1444,16 @@ SZ_INTERNAL sz_cptr_t sz_find_last_over64byte_serial(sz_cptr_t h, sz_size_t h_le
         // Adjust the position.
         h_length = remaining - 1;
     }
+}
+
+SZ_INTERNAL sz_cptr_t _sz_find_horspool_over_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                             sz_size_t n_length) {
+    return _sz_find_with_prefix(h, h_length, n, n_length, _sz_find_horspool_upto_256bytes_serial, 256);
+}
+
+SZ_INTERNAL sz_cptr_t _sz_find_last_horspool_over_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                                  sz_size_t n_length) {
+    return _sz_find_last_with_suffix(h, h_length, n, n_length, _sz_find_last_horspool_upto_256bytes_serial, 256);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -1361,12 +1468,13 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         (sz_find_t)sz_find_3byte_serial,
         (sz_find_t)sz_find_4byte_serial,
         // For needle lengths up to 64, use the Bitap algorithm variation for exact search.
-        (sz_find_t)sz_find_under8byte_serial,
-        (sz_find_t)sz_find_under16byte_serial,
-        (sz_find_t)sz_find_under32byte_serial,
-        (sz_find_t)sz_find_under64byte_serial,
-        // For longer needles, use Bitap for the first 64 bytes and then check the rest.
-        (sz_find_t)sz_find_over64byte_serial,
+        (sz_find_t)_sz_find_bitap_upto_8bytes_serial,
+        (sz_find_t)_sz_find_bitap_upto_16bytes_serial,
+        (sz_find_t)_sz_find_bitap_upto_32bytes_serial,
+        (sz_find_t)_sz_find_bitap_upto_64bytes_serial,
+        // For longer needles - use skip tables.
+        (sz_find_t)_sz_find_horspool_upto_256bytes_serial,
+        (sz_find_t)_sz_find_horspool_over_256bytes_serial,
     };
 
     return backends[
@@ -1374,8 +1482,8 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         (n_length > 1) + (n_length > 2) + (n_length > 3) +
         // For needle lengths up to 64, use the Bitap algorithm variation for exact search.
         (n_length > 4) + (n_length > 8) + (n_length > 16) + (n_length > 32) +
-        // For longer needles, use Bitap for the first 64 bytes and then check the rest.
-        (n_length > 64)](h, h_length, n, n_length);
+        // For longer needles - use skip tables.
+        (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -1387,12 +1495,13 @@ SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
         // For very short strings a lookup table for an optimized backend makes a lot of sense.
         (sz_find_t)sz_find_last_byte_serial,
         // For needle lengths up to 64, use the Bitap algorithm variation for reverse-order exact search.
-        (sz_find_t)sz_find_last_under8byte_serial,
-        (sz_find_t)sz_find_last_under16byte_serial,
-        (sz_find_t)sz_find_last_under32byte_serial,
-        (sz_find_t)sz_find_last_under64byte_serial,
-        // For longer needles, use Bitap for the last 64 bytes and then check the rest.
-        (sz_find_t)sz_find_last_over64byte_serial,
+        (sz_find_t)_sz_find_last_bitap_upto_8bytes_serial,
+        (sz_find_t)_sz_find_last_bitap_upto_16bytes_serial,
+        (sz_find_t)_sz_find_last_bitap_upto_32bytes_serial,
+        (sz_find_t)_sz_find_last_bitap_upto_64bytes_serial,
+        // For longer needles - use skip tables.
+        (sz_find_t)_sz_find_last_horspool_upto_256bytes_serial,
+        (sz_find_t)_sz_find_last_horspool_over_256bytes_serial,
     };
 
     return backends[
@@ -1400,8 +1509,8 @@ SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
         0 +
         // For needle lengths up to 64, use the Bitap algorithm variation for reverse-order exact search.
         (n_length > 1) + (n_length > 8) + (n_length > 16) + (n_length > 32) +
-        // For longer needles, use Bitap for the last 64 bytes and then check the rest.
-        (n_length > 64)](h, h_length, n, n_length);
+        // For longer needles - use skip tables.
+        (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
 }
 
 SZ_INTERNAL sz_size_t _sz_levenshtein_serial_upto256bytes( //
@@ -2301,13 +2410,13 @@ sz_find_last_byte_avx512_cycle:
         // Reuse the same `mask` variable to find the bit that doesn't match
         mask = _mm512_mask_cmpeq_epu8_mask(mask, h_vec.zmm, n_vec.zmm);
         int potential_offset = sz_u64_clz(mask);
-        if (mask) return h + 64 - sz_u64_clz(mask) - 1;
+        if (mask) return h + 64 - potential_offset - 1;
     }
     else {
         h_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
         mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
         int potential_offset = sz_u64_clz(mask);
-        if (mask) return h + h_length - 1 - sz_u64_clz(mask);
+        if (mask) return h + h_length - 1 - potential_offset;
         h_length -= 64;
         if (h_length) goto sz_find_last_byte_avx512_cycle;
     }
@@ -2332,7 +2441,7 @@ sz_find_under66byte_avx512_cycle:
     else if (h_length < n_length + 64) {
         mask = sz_u64_mask_until(h_length);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask >> (n_length - 1), h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
@@ -2384,7 +2493,7 @@ sz_find_over66byte_avx512_cycle:
     else if (h_length < n_length + 64) {
         mask = sz_u64_mask_until(h_length);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask >> (n_length - 1), h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
