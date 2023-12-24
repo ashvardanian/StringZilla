@@ -104,11 +104,11 @@
  *  @brief  Annotation for the public API symbols.
  */
 #if defined(_WIN32) || defined(__CYGWIN__)
-#define SZ_PUBLIC __declspec(dllexport)
+#define SZ_PUBLIC inline static __declspec(dllexport)
 #elif __GNUC__ >= 4
-#define SZ_PUBLIC __attribute__((visibility("default")))
+#define SZ_PUBLIC inline static __attribute__((visibility("default")))
 #else
-#define SZ_PUBLIC
+#define SZ_PUBLIC inline static
 #endif
 #define SZ_INTERNAL inline static
 
@@ -1199,13 +1199,14 @@ SZ_INTERNAL sz_cptr_t sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_c
  */
 SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                         sz_size_t n_length) {
-
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u8_t running_match = 0xFF;
     sz_u8_t character_position_masks[256];
     for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[i]] &= ~(1u << i); }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h[i]];
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
     }
 
@@ -1218,13 +1219,14 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h
  */
 SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                              sz_size_t n_length) {
-
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u8_t running_match = 0xFF;
     sz_u8_t character_position_masks[256];
     for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[n_length - i - 1]] &= ~(1u << i); }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h[h_length - i - 1]];
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + h_length - i - 1; }
     }
 
@@ -1237,13 +1239,14 @@ SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_8bytes_serial(sz_cptr_t h, sz_siz
  */
 SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                          sz_size_t n_length) {
-
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u16_t running_match = 0xFFFF;
     sz_u16_t character_position_masks[256];
     for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[i]] &= ~(1u << i); }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h[i]];
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
     }
 
@@ -1256,13 +1259,14 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t 
  */
 SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                               sz_size_t n_length) {
-
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u16_t running_match = 0xFFFF;
     sz_u16_t character_position_masks[256];
     for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[n_length - i - 1]] &= ~(1u << i); }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h[h_length - i - 1]];
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + h_length - i - 1; }
     }
 
@@ -1275,13 +1279,14 @@ SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_16bytes_serial(sz_cptr_t h, sz_si
  */
 SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                          sz_size_t n_length) {
-
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u32_t running_match = 0xFFFFFFFF;
     sz_u32_t character_position_masks[256];
     for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[i]] &= ~(1u << i); }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h[i]];
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
     }
 
@@ -1294,13 +1299,14 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t 
  */
 SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                               sz_size_t n_length) {
-
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u32_t running_match = 0xFFFFFFFF;
     sz_u32_t character_position_masks[256];
     for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[n_length - i - 1]] &= ~(1u << i); }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1u << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h[h_length - i - 1]];
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
         if ((running_match & (1u << (n_length - 1))) == 0) { return h + h_length - i - 1; }
     }
 
@@ -1313,13 +1319,14 @@ SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_32bytes_serial(sz_cptr_t h, sz_si
  */
 SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                          sz_size_t n_length) {
-
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
     sz_u64_t character_position_masks[256];
     for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[i]] &= ~(1ull << i); }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1ull << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h[i]];
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
         if ((running_match & (1ull << (n_length - 1))) == 0) { return h + i - n_length + 1; }
     }
 
@@ -1332,13 +1339,14 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t 
  */
 SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                               sz_size_t n_length) {
-
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
     sz_u64_t character_position_masks[256];
     for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n[n_length - i - 1]] &= ~(1ull << i); }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1ull << i); }
     for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h[h_length - i - 1]];
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
         if ((running_match & (1ull << (n_length - 1))) == 0) { return h + h_length - i - 1; }
     }
 
@@ -1412,7 +1420,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_c
                                            sz_find_t find_prefix, sz_size_t prefix_length) {
 
     sz_size_t suffix_length = n_length - prefix_length;
-    while (true) {
+    while (1) {
         sz_cptr_t found = find_prefix(h, h_length, n, prefix_length);
         if (!found) return NULL;
 
@@ -1425,6 +1433,9 @@ SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_c
         h = found + 1;
         h_length = remaining - 1;
     }
+
+    // Unreachable, but helps silence compiler warnings:
+    return NULL;
 }
 
 /**
@@ -1435,7 +1446,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_last_with_suffix(sz_cptr_t h, sz_size_t h_length,
                                                 sz_find_t find_suffix, sz_size_t suffix_length) {
 
     sz_size_t prefix_length = n_length - suffix_length;
-    while (true) {
+    while (1) {
         sz_cptr_t found = find_suffix(h, h_length, n + prefix_length, suffix_length);
         if (!found) return NULL;
 
@@ -1447,6 +1458,9 @@ SZ_INTERNAL sz_cptr_t _sz_find_last_with_suffix(sz_cptr_t h, sz_size_t h_length,
         // Adjust the position.
         h_length = remaining - 1;
     }
+
+    // Unreachable, but helps silence compiler warnings:
+    return NULL;
 }
 
 SZ_INTERNAL sz_cptr_t _sz_find_horspool_over_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
