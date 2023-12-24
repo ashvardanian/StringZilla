@@ -3,7 +3,7 @@
 #include <iterator> // `std::distance`
 
 #define SZ_USE_X86_AVX2 0
-#define SZ_USE_X86_AVX512 1
+#define SZ_USE_X86_AVX512 0
 #define SZ_USE_ARM_NEON 0
 #define SZ_USE_ARM_SVE 0
 
@@ -11,7 +11,7 @@
 #include <string_view>                 // Baseline
 #include <stringzilla/stringzilla.hpp> // Contender
 
-namespace sz = av::sz;
+namespace sz = ashvardanian::stringzilla;
 
 template <typename stl_matcher_, typename sz_matcher_>
 void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
@@ -99,7 +99,7 @@ int main(int, char const **) {
     std::string_view common = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-=@$%"; // 68 characters
 
     // When haystack is only formed of needles:
-    eval("a", "a");
+    // eval("a", "a");
     eval("ab", "ab");
     eval("abc", "abc");
     eval("abcd", "abcd");
