@@ -181,7 +181,7 @@
 #endif
 #endif
 
-#define sz_assert(condition, message, ...)                                                                  \
+#define SZ_ASSERT(condition, message, ...)                                                                  \
     do {                                                                                                    \
         if (!(condition)) {                                                                                 \
             fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", #condition, __FILE__, __LINE__); \
@@ -258,6 +258,7 @@ SZ_PUBLIC void sz_u8_set_invert(sz_u8_set_t *f) {
 
 typedef sz_ptr_t (*sz_memory_allocate_t)(sz_size_t, void *);
 typedef void (*sz_memory_free_t)(sz_ptr_t, sz_size_t, void *);
+typedef sz_u64_t (*sz_random_generator_t)(void *);
 
 /**
  *  @brief  Some complex pattern matching algorithms may require memory allocations.
@@ -402,7 +403,7 @@ SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
 
 /**
  *  @brief  Generates a random string for a given alphabet, avoiding integer division and modulo operations.
- *          Similar to `result[i] = alphabet[rand() % size]`.
+ *          Similar to `text[i] = alphabet[rand() % cardinality]`.
  *
  *  The modulo operation is expensive, and should be avoided in performance-critical code.
  *  We avoid it using small lookup tables and replacing it with a multiplication and shifts, similar to libdivide.
@@ -411,11 +412,14 @@ SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
  *      - Barret reduction: https://www.nayuki.io/page/barrett-reduction-algorithm
  *      - Lemire's trick: https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
  *
- *  @param text     String to be normalized.
- *  @param length   Number of bytes in the string.
- *  @param result   Output string, can point to the same address as ::text.
+ *  @param alphabet     Set of characters to sample from.
+ *  @param cardinality  Number of characters to sample from.
+ *  @param text         Output string, can point to the same address as ::text.
+ *  @param generate     Callback producing random numbers given the generator state.
+ *  @param generator    Generator state, can be a pointer to a seed, or a pointer to a random number generator.
  */
-SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t size, sz_ptr_t result, sz_size_t length);
+SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
+                           sz_random_generator_t generate, void *generator);
 
 #pragma endregion
 
@@ -1763,6 +1767,9 @@ SZ_INTERNAL sz_u8_t sz_u8_toupper(sz_u8_t c) {
 /**
  *  @brief  Uses two small lookup tables (768 bytes total) to accelerate division by a small
  *          unsigned integer. Performs two lookups, one multiplication, two shifts, and two accumulations.
+ *
+ *  @param  divisor Integral value larger than one.
+ *  @param  number  Integral value to divide.
  */
 SZ_INTERNAL sz_u8_t sz_u8_divide(sz_u8_t number, sz_u8_t divisor) {
     static sz_u16_t multipliers[256] = {
@@ -1783,6 +1790,7 @@ SZ_INTERNAL sz_u8_t sz_u8_divide(sz_u8_t number, sz_u8_t divisor) {
         9363,  9030,  8700,  8373,  8049,  7727,  7409,  7093,  6780,  6470,  6162,  5857,  5554,  5254,  4957,  4662,
         4370,  4080,  3792,  3507,  3224,  2943,  2665,  2388,  2115,  1843,  1573,  1306,  1041,  778,   517,   258,
     };
+    // This table can be avoided using a single addition and counting trailing zeros.
     static sz_u8_t shifts[256] = {
         0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, //
         4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, //
@@ -1802,26 +1810,40 @@ SZ_INTERNAL sz_u8_t sz_u8_divide(sz_u8_t number, sz_u8_t divisor) {
 }
 
 SZ_PUBLIC void sz_tolower_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    for (sz_cptr_t end = text + length; text != end; ++text, ++result) {
-        *result = sz_u8_tolower(*(sz_u8_t const *)text);
-    }
+    sz_u8_t *unsigned_result = (sz_u8_t *)result;
+    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
+    sz_u8_t const *end = unsigned_text + length;
+    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = sz_u8_tolower(*unsigned_text);
 }
 
 SZ_PUBLIC void sz_toupper_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    for (sz_cptr_t end = text + length; text != end; ++text, ++result) {
-        *result = sz_u8_toupper(*(sz_u8_t const *)text);
+    sz_u8_t *unsigned_result = (sz_u8_t *)result;
+    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
+    sz_u8_t const *end = unsigned_text + length;
+    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = sz_u8_toupper(*unsigned_text);
+}
+
+SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
+    sz_u8_t *unsigned_result = (sz_u8_t *)result;
+    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
+    sz_u8_t const *end = unsigned_text + length;
+    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = *unsigned_text & 0x7F;
+}
+
+SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
+                           sz_random_generator_t generator, void *generator_user_data) {
+
+    SZ_ASSERT(alphabet_size > 0 && alphabet_size <= 256, "Inadequate alphabet size");
+
+    if (alphabet_size == 1)
+        for (sz_cptr_t end = result + result_length; result != end; ++result) *result = *alphabet;
+
+    else {
+        SZ_ASSERT(generator, "Expects a valid random generator");
+        for (sz_cptr_t end = result + result_length; result != end; ++result)
+            *result = alphabet[sz_u8_divide(generator(generator_user_data) & 0xFF, alphabet_size)];
     }
 }
-
-SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    for (sz_cptr_t end = text + length; text != end; ++text, ++result) { *result = *(sz_u8_t const *)text & 0x7F; }
-}
-
-SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    for (sz_cptr_t end = text + length; text != end; ++text, ++result) { *result = *(sz_u8_t const *)text & 0x7F; }
-}
-
-SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t size, sz_ptr_t result, sz_size_t length) {}
 
 #pragma endregion
 
@@ -2640,8 +2662,6 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
  *  @brief  Pick the right implementation for the string search algorithms.
  */
 #pragma region Compile-Time Dispatching
-
-#include <stringzilla/stringzilla.h>
 
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
 
