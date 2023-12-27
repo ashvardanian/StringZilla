@@ -1,52 +1,73 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Current Python File",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Current PyTest File",
+      "type": "python",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "${file}",
+        "-s",
+        "-x"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Debug Unit Tests",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_debug/stringzilla_test_substring",
+      "cwd": "${workspaceFolder}",
+      "environment": [
         {
-            "name": "Debug Unit Tests",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build_debug/stringzilla_test_substring",
-            "cwd": "${workspaceFolder}",
-            "environment": [
-                {
-                    "name": "ASAN_OPTIONS",
-                    "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
-                }
-            ],
-            "stopAtEntry": false,
-            "linux": {
-                "preLaunchTask": "Build for Linux: Debug",
-                "MIMode": "gdb"
-            },
-            "osx": {
-                "preLaunchTask": "Build for MacOS: Debug",
-                "MIMode": "lldb"
-            }
-        },
-        {
-            "name": "Debug Benchmarks",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build_debug/stringzilla_bench_substring",
-            "cwd": "${workspaceFolder}",
-            "environment": [
-                {
-                    "name": "ASAN_OPTIONS",
-                    "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
-                }
-            ],
-            "stopAtEntry": false,
-            "linux": {
-                "preLaunchTask": "Build for Linux: Debug",
-                "MIMode": "gdb"
-            },
-            "osx": {
-                "preLaunchTask": "Build for MacOS: Debug",
-                "MIMode": "lldb"
-            }
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
         }
-    ]
+      ],
+      "stopAtEntry": false,
+      "linux": {
+        "preLaunchTask": "Build for Linux: Debug",
+        "MIMode": "gdb"
+      },
+      "osx": {
+        "preLaunchTask": "Build for MacOS: Debug",
+        "MIMode": "lldb"
+      }
+    },
+    {
+      "name": "Debug Benchmarks",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_debug/stringzilla_bench_substring",
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
+        }
+      ],
+      "stopAtEntry": false,
+      "linux": {
+        "preLaunchTask": "Build for Linux: Debug",
+        "MIMode": "gdb"
+      },
+      "osx": {
+        "preLaunchTask": "Build for MacOS: Debug",
+        "MIMode": "lldb"
+      }
+    }
+  ]
 }

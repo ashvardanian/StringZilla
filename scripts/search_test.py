@@ -1,21 +1,14 @@
+import random, time
 from typing import Union, Optional
 from random import choice, randint
 from string import ascii_lowercase
 
+import numpy as np
 import pytest
 
 import stringzilla as sz
 from stringzilla import Str, Strs
-
-
-def get_random_string(
-    length: Optional[int] = None, variability: Optional[int] = None
-) -> str:
-    if length is None:
-        length = randint(3, 300)
-    if variability is None:
-        variability = len(ascii_lowercase)
-    return "".join(choice(ascii_lowercase[:variability]) for _ in range(length))
+from levenshtein_baseline import levenshtein
 
 
 def is_equal_strings(native_strings, big_strings):
@@ -84,21 +77,27 @@ def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability
     ), f"Failed to locate {pattern} at offset {native.find(pattern)} in {native}"
 
 
-@pytest.mark.parametrize("iterations", range(100))
+@pytest.mark.repeat(100)
 @pytest.mark.parametrize("max_edit_distance", [150])
-def test_levenshtein(iterations: int, max_edit_distance: int):
+def test_levenshtein_insertions(max_edit_distance: int):
     # Create a new string by slicing and concatenating
     def insert_char_at(s, char_to_insert, index):
         return s[:index] + char_to_insert + s[index:]
 
-    for _ in range(iterations):
-        a = get_random_string(length=20)
-        b = a
-        for i in range(max_edit_distance):
-            source_offset = randint(0, len(ascii_lowercase) - 1)
-            target_offset = randint(0, len(b) - 1)
-            b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
-            assert sz.levenshtein(a, b, 200) == i + 1
+    a = get_random_string(length=20)
+    b = a
+    for i in range(max_edit_distance):
+        source_offset = randint(0, len(ascii_lowercase) - 1)
+        target_offset = randint(0, len(b) - 1)
+        b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
+        assert sz.levenshtein(a, b, 200) == i + 1
+
+
+@pytest.mark.repeat(1000)
+def test_levenshtein_randos():
+    a = get_random_string(length=20)
+    b = get_random_string(length=20)
+    assert sz.levenshtein(a, b, 200) == levenshtein(a, b)
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
