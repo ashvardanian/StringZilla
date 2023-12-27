@@ -266,7 +266,7 @@ typedef sz_u64_t (*sz_random_generator_t)(void *);
 typedef struct sz_memory_allocator_t {
     sz_memory_allocate_t allocate;
     sz_memory_free_t free;
-    void *user_data;
+    void *handle;
 } sz_memory_allocator_t;
 
 #pragma region Basic Functionality
@@ -548,7 +548,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_bounded_regex(sz_cptr_t haystack, sz_size_t h_l
 #pragma region String Similarity Measures
 
 /**
- *  @brief  Computes Levenshtein edit-distance between two strings.
+ *  @brief  Computes Levenshtein edit-distance between two strings using the Wagner Ficher algorithm.
  *          Similar to the Needleman–Wunsch algorithm. Often used in fuzzy string matching.
  *
  *  @param a        First string to compare.
@@ -593,7 +593,7 @@ SZ_PUBLIC sz_size_t sz_alignment_score_memory_needed(sz_size_t a_length, sz_size
  *  @param b        Second string to compare.
  *  @param b_length Number of bytes in the second string.
  *  @param gap      Penalty cost for gaps - insertions and removals.
- *  @param subs     Substitution costs matrix with 256 x 256 values for all pais of characters.
+ *  @param subs     Substitution costs matrix with 256 x 256 values for all pairs of characters.
  *  @param alloc    Temporary memory allocator, that will allocate at most two rows of the Levenshtein matrix.
  *  @return         Signed score ~ edit distance.
  */
@@ -851,6 +851,19 @@ SZ_INTERNAL sz_u64_parts_t sz_u64_load(sz_cptr_t ptr) {
     __attribute__((aligned(1))) sz_u64_parts_t const *result = (sz_u64_parts_t const *)ptr;
     return *result;
 #endif
+}
+
+SZ_INTERNAL sz_ptr_t _sz_memory_allocate_for_static_buffer(sz_size_t length, sz_string_view_t *string_view) {
+    if (length > string_view->length) return NULL;
+    return (sz_ptr_t)string_view->start;
+}
+
+SZ_INTERNAL void _sz_memory_free_for_static_buffer(sz_ptr_t start, sz_size_t length, sz_string_view_t *string_view) {}
+
+SZ_PUBLIC void sz_memory_allocator_init_for_static_buffer(sz_string_view_t buffer, sz_memory_allocator_t *alloc) {
+    alloc->allocate = (sz_memory_allocate_t)_sz_memory_allocate_for_static_buffer;
+    alloc->free = (sz_memory_free_t)_sz_memory_free_for_static_buffer;
+    alloc->handle = &buffer;
 }
 
 #pragma endregion
@@ -1564,9 +1577,9 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_serial_upto256bytes( //
 
     // If the strings are under 256-bytes long, the distance can never exceed 256,
     // and will fit into `sz_u8_t` reducing our memory requirements.
-    sz_u8_t levenshtein_matrx_rows[(b_length + 1) * 2];
-    sz_u8_t *previous_distances = &levenshtein_matrx_rows[0];
-    sz_u8_t *current_distances = &levenshtein_matrx_rows[b_length + 1];
+    sz_u8_t levenshtein_matrix_rows[(b_length + 1) * 2];
+    sz_u8_t *previous_distances = &levenshtein_matrix_rows[0];
+    sz_u8_t *current_distances = &levenshtein_matrix_rows[b_length + 1];
 
     // The very first row of the matrix is equivalent to `std::iota` outputs.
     for (sz_size_t idx_b = 0; idx_b != (b_length + 1); ++idx_b) previous_distances[idx_b] = idx_b;
@@ -1576,6 +1589,9 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_serial_upto256bytes( //
 
         // Initialize min_distance with a value greater than bound.
         sz_size_t min_distance = bound;
+
+        // In case the next few characters match between a[idx_a:] and b[idx_b:]
+        // we can skip part of enumeration.
 
         for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
             sz_u8_t cost_deletion = previous_distances[idx_b + 1] + 1;
@@ -1606,10 +1622,10 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_serial_over256bytes( //
 
     // Let's make sure that we use the amount proportional to the number of elements in the shorter string,
     // not the larger.
-    if (b_length > a_length) return _sz_levenshtein_serial_upto256bytes(b, b_length, a, a_length, bound, alloc);
+    if (b_length > a_length) return _sz_levenshtein_serial_over256bytes(b, b_length, a, a_length, bound, alloc);
 
     sz_size_t buffer_length = (b_length + 1) * 2;
-    sz_ptr_t buffer = alloc->allocate(buffer_length, alloc->user_data);
+    sz_ptr_t buffer = alloc->allocate(buffer_length, alloc->handle);
     sz_size_t *previous_distances = (sz_size_t *)buffer;
     sz_size_t *current_distances = previous_distances + b_length + 1;
 
@@ -1633,7 +1649,7 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_serial_over256bytes( //
 
         // If the minimum distance in this row exceeded the bound, return early
         if (min_distance >= bound) {
-            alloc->free(buffer, buffer_length, alloc->user_data);
+            alloc->free(buffer, buffer_length, alloc->handle);
             return bound;
         }
 
@@ -1643,8 +1659,9 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_serial_over256bytes( //
         current_distances = temp;
     }
 
-    alloc->free(buffer, buffer_length, alloc->user_data);
-    return previous_distances[b_length] < bound ? previous_distances[b_length] : bound;
+    sz_size_t result = previous_distances[b_length] < bound ? previous_distances[b_length] : bound;
+    alloc->free(buffer, buffer_length, alloc->handle);
+    return result;
 }
 
 SZ_PUBLIC sz_size_t sz_levenshtein_serial( //
@@ -1663,6 +1680,13 @@ SZ_PUBLIC sz_size_t sz_levenshtein_serial( //
     else {
         if (b_length - a_length > bound) return bound;
     }
+
+    // Skip the matching prefixes and suffixes.
+    for (sz_cptr_t a_end = a + a_length, b_end = b + b_length; a != a_end && b != b_end && *a == *b;
+         ++a, ++b, --a_length, --b_length)
+        ;
+    for (; a_length && b_length && a[a_length - 1] == b[b_length - 1]; --a_length, --b_length)
+        ;
 
     // Depending on the length, we may be able to use the optimized implementation.
     if (a_length < 256 && b_length < 256)
@@ -1686,7 +1710,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     if (b_length > a_length) return sz_alignment_score_serial(b, b_length, a, a_length, gap, subs, alloc);
 
     sz_size_t buffer_length = (b_length + 1) * 2;
-    sz_ptr_t buffer = alloc->allocate(buffer_length, alloc->user_data);
+    sz_ptr_t buffer = alloc->allocate(buffer_length, alloc->handle);
     sz_ssize_t *previous_distances = (sz_ssize_t *)buffer;
     sz_ssize_t *current_distances = previous_distances + b_length + 1;
 
@@ -1710,7 +1734,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
         current_distances = temp;
     }
 
-    alloc->free(buffer, buffer_length, alloc->user_data);
+    alloc->free(buffer, buffer_length, alloc->handle);
     return previous_distances[b_length];
 }
 
