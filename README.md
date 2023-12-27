@@ -1,69 +1,63 @@
 # StringZilla 🦖
 
-StringZilla is the Godzilla of string libraries, searching, splitting, sorting, and shuffling large textual datasets faster than you can say "Tokyo Tower" 😅
+StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations for modern CPUs.
+It is significantly faster than the default string libraries in Python and C++, and offers a more powerful API.
+Aside from exact search, the library also accelerates fuzzy search, edit distance computation, and sorting.
 
-- ✅ Single-header pure C 99 implementation [docs](#quick-start-c-🛠️)
-- Light-weight header-only C++ 11 `sz::string_view` and `sz::string` wrapper with the feature set of C++ 23 strings!
-- ✅ [Direct CPython bindings](https://ashvardanian.com/posts/pybind11-cpython-tutorial/) with minimal call latency similar to the native `str` class, but with higher throughput [docs](#quick-start-python-🐍)
-- ✅ [SWAR](https://en.wikipedia.org/wiki/SWAR) and [SIMD](https://en.wikipedia.org/wiki/Single_instruction,_multiple_data) acceleration on x86 (AVX2, AVX-512) and ARM (NEON, SVE)
-- ✅ [Radix](https://en.wikipedia.org/wiki/Radix_sort)-like sorting faster than C++ `std::sort`
-- ✅ [Memory-mapping](https://en.wikipedia.org/wiki/Memory-mapped_file) to work with larger-than-RAM datasets
+[faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
+[faq-swar]: https://en.wikipedia.org/wiki/SWAR
 
-Putting this into a table:
+- Code in C? Replace LibC's `<string.h>` with C 99 `<stringzilla.h>`  - [_more_](#quick-start-c-🛠️)
+- Code in C++? Replace STL's `<string>` with C++ 11 `<stringzilla.hpp>` - [_more_](#quick-start-cpp-🛠️)
+- Code in Python? Upgrade your `str` to faster `Str` - [_more_](#quick-start-python-🐍)
 
-| Feature \ Library    |  STL | LibC |      StringZilla |
-| :------------------- | ---: | ---: | ---------------: |
-| Substring Search     |      |      |                  |
-| Reverse Order Search |      |    ❌ |                  |
-| Fuzzy Search         |    ❌ |    ❌ |                  |
-| Edit Distance        |    ❌ |    ❌ |                  |
-| Interface            |  C++ |    C | C , C++ , Python |
+__Features:__
 
+| Feature \ Library              | C++ STL |    LibC |      StringZilla |
+| :----------------------------- | ------: | ------: | ---------------: |
+| Substring Search               |  1 GB/s | 12 GB/s |          12 GB/s |
+| Reverse Order Substring Search |  1 GB/s |       ❌ |          12 GB/s |
+| Fuzzy Search                   |       ❌ |       ❌ |                ? |
+| Levenshtein Edit Distance      |       ❌ |       ❌ |                ✅ |
+| Hashing                        |       ✅ |       ❌ |                ✅ |
+| Interface                      |     C++ |       C | C , C++ , Python |
 
-Who is this for?
+> Benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
+> The hardware used is an AVX-512 capable Intel Sapphire Rapids CPU.
+> The code was compiled with GCC 12, using `glibc` v2.35.
 
-- you want to process strings faster than default strings in Python, C, or C++
-- you need fuzzy string matching functionality that default libraries don't provide
-- you are student learning practical applications of SIMD and SWAR and how libraries like LibC are implemented
-- you are implementing/maintaining a programming language or porting LibC to a new hardware architecture like a RISC-V fork and need a solid SWAR baseline
+__Who is this for?__
 
-Limitations:
+- For data-engineers often memory-mapping and parsing large datasets, like the [CommonCrawl](https://commoncrawl.org/).
+- For Python, C, or C++ software engineers looking for faster strings for their apps.
+- For Bioinformaticians and Search Engineers measuring edit distances and fuzzy-matching.
+- For students learning practical applications of SIMD and SWAR and how libraries like LibC are implemented.
+- For hardware designers, needing a SWAR baseline for strings-processing functionality.
 
-- Assumes little-endian architecture
-- Assumes ASCII or UTF-8 encoding
-- Assumes 64-bit address space
+__Limitations:__
 
-This library saved me tens of thousands of dollars pre-processing large datasets for machine learning, even on the scale of a single experiment.
-So if you want to process the 6 Billion images from [LAION](https://laion.ai/blog/laion-5b/), or the 250 Billion web pages from the [CommonCrawl](https://commoncrawl.org/), or even just a few million lines of server logs, and haunted by Python's `open(...).readlines()` and `str().splitlines()` taking forever, this should help 😊
+- Assumes little-endian architecture (most CPUs, including x86, Arm, RISC-V).
+- Assumes ASCII or UTF-8 encoding (most content and systems).
+- Assumes 64-bit address space (most modern CPUs).
 
-## Performance
+__Technical insghts:__
 
-StringZilla is built on a very simple heuristic:
+- Uses SWAR and SIMD to accelerate exact search for very short needles under 4 bytes.
+- Uses the Shift-Or Bitap algorithm for mid-length needles under 64 bytes.
+- Uses the Boyer-Moore-Horpool algorithm with Raita heuristic for longer needles.
+- Uses the Manber-Wu improvement of the Shift-Or algorithm for bounded fuzzy search.
+- Uses the two-row Wagner-Fisher algorithm for edit distance computation.
+- Uses the Needleman-Wunsh improvement for parameterized edit distance computation.
+- Uses the Karp-Rabin rolling hashes to produce binary fingerprints.
+- Uses Radix Sort to accelerate sorting of strings.
 
-> If the first 4 bytes of the string are the same, the strings are likely to be equal.
-> Similarly, the first 4 bytes of the strings can be used to determine their relative order most of the time.
+The choice of the optimal algorithm is predicated on the length of the needle and the alphabet cardinality.
+If the amount of compute per byte is low and the needles are beyond longer than the cache-line (64 bytes), skip-table-based approaches are preferred.
+In other cases, brute force approaches can be more efficient.
+On the engineering side, the library:
 
-Thanks to that it can avoid scalar code processing one `char` at a time and use hyper-scalar code to achieve `memcpy` speeds.
-__The implementation fits into a single C 99 header file__ and uses different SIMD flavors and SWAR on older platforms.
-
-### Substring Search
-
-| Backend \ Device         |                    IoT |                   Laptop |                    Server |
-| :----------------------- | ---------------------: | -----------------------: | ------------------------: |
-| __Speed Comparison__ 🐇   |                        |                          |                           |
-| Python `for` loop        |                 4 MB/s |                  14 MB/s |                   11 MB/s |
-| C++ `for` loop           |               520 MB/s |                 1.0 GB/s |                  900 MB/s |
-| C++ `string.find`        |               560 MB/s |                 1.2 GB/s |                  1.3 GB/s |
-| Scalar StringZilla       |                 2 GB/s |                 3.3 GB/s |                  3.5 GB/s |
-| Hyper-Scalar StringZilla |           __4.3 GB/s__ |              __12 GB/s__ |             __12.1 GB/s__ |
-| __Efficiency Metrics__ 📊 |                        |                          |                           |
-| CPU Specs                | 8-core ARM, 0.5 W/core | 8-core Intel, 5.6 W/core | 22-core Intel, 6.3 W/core |
-| Performance/Core         |         2.1 - 3.3 GB/s |              __11 GB/s__ |                 10.5 GB/s |
-| Bytes/Joule              |           __4.2 GB/J__ |                   2 GB/J |                  1.6 GB/J |
-
-### Split, Partition, Sort, and Shuffle
-
-Coming soon.
+- Implement the Small String Optimization for strings shorter than 23 bytes.
+- Avoids PyBind11, SWIG, `ParseTuple` and other CPython sugar to minimize call latency. [_details_](https://ashvardanian.com/posts/pybind11-cpython-tutorial/) 
 
 ## Quick Start: Python 🐍
 
@@ -140,9 +134,28 @@ count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, al
 levenshtein: int = sz.levenshtein("needle", "nidl")
 ```
 
-## Quick Start: C 🛠️
+## Quick Start: C/C++ 🛠️
 
-There is an ABI-stable C 99 interface, in case you have a database, an operating system, or a runtime you want to integrate with StringZilla.
+The library is header-only, so you can just copy the `stringzilla.h` header into your project.
+Alternatively, add it as a submodule, and include it in your build system.
+
+```sh
+git submodule add https://github.com/ashvardanian/stringzilla.git
+```
+
+Or using a pure CMake approach:
+
+```cmake
+FetchContent_Declare(stringzilla GIT_REPOSITORY https://github.com/ashvardanian/stringzilla.git)
+FetchContent_MakeAvailable(stringzilla)
+```
+
+### Basic Usage with C 99 and Newer
+
+There is a stable C 99 interface, where all function names are prefixed with `sz_`.
+Most interfaces are well documented, and come with self-explanatory names and examples.
+In some cases, hardware specific overloads are available, like `sz_find_avx512` or `sz_find_neon`.
+Both are companions of the `sz_find`, first for x86 CPUs with AVX-512 support, and second for Arm NEON-capable CPUs.
 
 ```c
 #include <stringzilla/stringzilla.h>
@@ -152,32 +165,107 @@ sz_string_view_t haystack = {your_text, your_text_length};
 sz_string_view_t needle = {your_subtext, your_subtext_length};
 
 // Perform string-level operations
-sz_size_t character_count = sz_count_char(haystack.start, haystack.length, "a");
 sz_size_t substring_position = sz_find(haystack.start, haystack.length, needle.start, needle.length);
+sz_size_t substring_position = sz_find_avx512(haystack.start, haystack.length, needle.start, needle.length);
+sz_size_t substring_position = sz_find_neon(haystack.start, haystack.length, needle.start, needle.length);
 
 // Hash strings
-sz_u32_t crc32 = sz_hash(haystack.start, haystack.length);
+sz_u64_t hash = sz_hash(haystack.start, haystack.length);
 
 // Perform collection level operations
 sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
 sz_sort(&array, &your_config);
 ```
 
+### Basic Usage with C++ 11 and Newer
+
+There is a stable C++ 11 interface available in ther `ashvardanian::stringzilla` namespace.
+It comes with two STL-like classes: `string_view` and `string`.
+The first is a non-owning view of a string, and the second is a mutable string with a [Small String Optimization][faq-sso].
+
+```cpp
+#include <stringzilla/stringzilla.hpp>
+
+namespace sz = ashvardanian::stringzilla;
+
+sz::string haystack = "some string";
+sz::string_view needle = sz::string_view(haystack).substr(0, 4);
+
+auto substring_position = haystack.find(needle); // Or `rfind`
+auto hash = std::hash<sz::string_view>(haystack); // Compatible with STL's `std::hash`
+
+haystack.end() - haystack.begin() == haystack.size(); // Or `rbegin`, `rend`
+haystack.find_first_of(" \w\t") == 4; // Or `find_last_of`, `find_first_not_of`, `find_last_not_of`
+haystack.starts_with(needle) == true; // Or `ends_with`
+haystack.remove_prefix(needle.size()); // Why is this operation inplace?!
+haystack.contains(needle) == true; // STL has this only from C++ 23 onwards
+haystack.compare(needle) == 1; // Or `haystack <=> needle` in C++ 20 and beyond
+```
+
+### Beyond Standard Templates Library
+
+Aside from conventional `std::string` interfaces, non-STL extensions are available.
+
+```cpp
+haystack.count(needle) == 1; // Why is this not in STL?!
+haystack.edit_distance(needle) == 7;
+haystack.find_edited(needle, bound);
+haystack.rfind_edited(needle, bound);
+```
+
+### Ranges
+
+One of the most common use cases is to split a string into a collection of substrings.
+Which would often result in snippets like the one below.
+
+```cpp
+std::vector<std::string> lines = your_split(haystack, '\n');
+std::vector<std::string> words = your_split(lines, ' ');
+```
+
+Those allocate memory for each string and the temporary vectors.
+Each of those can be orders of magnitude more expensive, than even serial for-loop over character.
+To avoid those, StringZilla provides lazily-evaluated ranges.
+
+```cpp
+for (auto line : split_substrings(haystack, '\r\n'))
+    for (auto word : split_chars(line, ' \w\t.,;:!?'))
+        std::cout << word << std::endl;
+```
+
+Each of those is available in reverse order as well.
+It also allows interleaving matches, and controlling the inclusion/exclusion of the separator itself into the result.
+Debugging pointer offsets is not a pleasant excersise, so keep the following functions in mind.
+
+- `split_substrings`.
+- `split_chars`.
+- `split_not_chars`.
+- `reverse_split_substrings`.
+- `reverse_split_chars`.
+- `reverse_split_not_chars`.
+- `search_substrings`.
+- `reverse_search_substrings`.
+- `search_chars`.
+- `reverse_search_chars`.
+- `search_other_chars`.
+- `reverse_search_other_chars`.
+
+### Debugging
+
+For maximal performance, the library does not perform any bounds checking in Release builds.
+That behaviour is controllable for both C and C++ interfaces via the `STRINGZILLA_DEBUG` macro.
+
+[faq-sso]: https://cpp-optimizations.netlify.app/small_strings/
+
 ## Contributing 👾
 
-Future development plans include:
+Please check out the [contributing guide](CONTRIBUTING.md) for more details on how to setup the development environment and contribute to this project.
+If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall], [UForm][uform], and [SimSIMD][simsimd]. 🤗
 
-- [x] [Replace PyBind11 with CPython](https://github.com/ashvardanian/StringZilla/issues/35), [blog](https://ashvardanian.com/posts/pybind11-cpython-tutorial/)
-- [x] [Bindings for JavaScript](https://github.com/ashvardanian/StringZilla/issues/25)
-- [ ] [Faster string sorting algorithm](https://github.com/ashvardanian/StringZilla/issues/45)
-- [ ] [Reverse-order operations in Python](https://github.com/ashvardanian/StringZilla/issues/12)
-- [ ] [Splitting with multiple separators at once](https://github.com/ashvardanian/StringZilla/issues/29)
-- [ ] Splitting CSV rows into columns
-- [ ] UTF-8 validation.
-- [ ] Arm SVE backend
-- [ ] Bindings for Java and Rust
-
-Here's how to set up your dev environment and run some tests.
+[usearch]: https://github.com/unum-cloud/usearch
+[ucall]: https://github.com/unum-cloud/ucall
+[uform]: https://github.com/unum-cloud/uform
+[simsimd]: https://github.com/ashvardanian/simsimd
 
 ### Development
 
@@ -278,14 +366,7 @@ Feel free to use the project under Apache 2.0 or the Three-clause BSD license at
 
 ---
 
-If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall], [UForm][uform], [UStore][ustore], [SimSIMD][simsimd], and [TenPack][tenpack] 🤗
 
-[usearch]: https://github.com/unum-cloud/usearch
-[ucall]: https://github.com/unum-cloud/ucall
-[uform]: https://github.com/unum-cloud/uform
-[ustore]: https://github.com/unum-cloud/ustore
-[simsimd]: https://github.com/ashvardanian/simsimd
-[tenpack]: https://github.com/ashvardanian/tenpack
 
 
 # The weirdest interfaces of C++23 strings:
