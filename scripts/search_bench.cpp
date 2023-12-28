@@ -79,13 +79,13 @@ inline void do_not_optimize(value_at &&value) {
 
 inline sz_string_view_t sz_string_view(std::string const &str) { return {str.data(), str.size()}; };
 
-sz_ptr_t _sz_memory_allocate_from_vector(sz_size_t length, void *user_data) {
-    temporary_memory_t &vec = *reinterpret_cast<temporary_memory_t *>(user_data);
+sz_ptr_t _sz_memory_allocate_from_vector(sz_size_t length, void *handle) {
+    temporary_memory_t &vec = *reinterpret_cast<temporary_memory_t *>(handle);
     if (vec.size() < length) vec.resize(length);
     return vec.data();
 }
 
-void _sz_memory_free_from_vector(sz_ptr_t buffer, sz_size_t length, void *user_data) {}
+void _sz_memory_free_from_vector(sz_ptr_t buffer, sz_size_t length, void *handle) {}
 
 std::string read_file(std::string path) {
     std::ifstream stream(path);
@@ -288,7 +288,7 @@ inline tracked_binary_functions_t distance_functions() {
     sz_memory_allocator_t alloc;
     alloc.allocate = _sz_memory_allocate_from_vector;
     alloc.free = _sz_memory_free_from_vector;
-    alloc.user_data = &temporary_memory;
+    alloc.handle = &temporary_memory;
 
     auto wrap_sz_distance = [alloc](auto function) -> binary_function_t {
         return binary_function_t([function, alloc](sz_string_view_t a, sz_string_view_t b) {
