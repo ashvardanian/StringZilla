@@ -768,24 +768,24 @@ SZ_INTERNAL sz_size_t sz_size_log2i(sz_size_t n) {
  *  @brief  Helper structure to simpify work with 16-bit words.
  *  @see    sz_u16_load
  */
-typedef union sz_u16_parts_t {
+typedef union sz_u16_vec_t {
     sz_u16_t u16;
     sz_u8_t u8s[2];
-} sz_u16_parts_t;
+} sz_u16_vec_t;
 
 /**
  *  @brief Load a 16-bit unsigned integer from a potentially unaligned pointer, can be expensive on some platforms.
  */
-SZ_INTERNAL sz_u16_parts_t sz_u16_load(sz_cptr_t ptr) {
+SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
-    sz_u16_parts_t result;
+    sz_u16_vec_t result;
     result.u8s[0] = ptr[0];
     result.u8s[1] = ptr[1];
     return result;
 #elif defined(_MSC_VER)
-    return *((__unaligned sz_u16_parts_t *)ptr);
+    return *((__unaligned sz_u16_vec_t *)ptr);
 #else
-    __attribute__((aligned(1))) sz_u16_parts_t const *result = (sz_u16_parts_t const *)ptr;
+    __attribute__((aligned(1))) sz_u16_vec_t const *result = (sz_u16_vec_t const *)ptr;
     return *result;
 #endif
 }
@@ -794,27 +794,27 @@ SZ_INTERNAL sz_u16_parts_t sz_u16_load(sz_cptr_t ptr) {
  *  @brief  Helper structure to simpify work with 32-bit words.
  *  @see    sz_u32_load
  */
-typedef union sz_u32_parts_t {
+typedef union sz_u32_vec_t {
     sz_u32_t u32;
     sz_u16_t u16s[2];
     sz_u8_t u8s[4];
-} sz_u32_parts_t;
+} sz_u32_vec_t;
 
 /**
  *  @brief Load a 32-bit unsigned integer from a potentially unaligned pointer, can be expensive on some platforms.
  */
-SZ_INTERNAL sz_u32_parts_t sz_u32_load(sz_cptr_t ptr) {
+SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
-    sz_u32_parts_t result;
+    sz_u32_vec_t result;
     result.u8s[0] = ptr[0];
     result.u8s[1] = ptr[1];
     result.u8s[2] = ptr[2];
     result.u8s[3] = ptr[3];
     return result;
 #elif defined(_MSC_VER)
-    return *((__unaligned sz_u32_parts_t *)ptr);
+    return *((__unaligned sz_u32_vec_t *)ptr);
 #else
-    __attribute__((aligned(1))) sz_u32_parts_t const *result = (sz_u32_parts_t const *)ptr;
+    __attribute__((aligned(1))) sz_u32_vec_t const *result = (sz_u32_vec_t const *)ptr;
     return *result;
 #endif
 }
@@ -823,19 +823,19 @@ SZ_INTERNAL sz_u32_parts_t sz_u32_load(sz_cptr_t ptr) {
  *  @brief  Helper structure to simpify work with 64-bit words.
  *  @see    sz_u64_load
  */
-typedef union sz_u64_parts_t {
+typedef union sz_u64_vec_t {
     sz_u64_t u64;
     sz_u32_t u32s[2];
     sz_u16_t u16s[4];
     sz_u8_t u8s[8];
-} sz_u64_parts_t;
+} sz_u64_vec_t;
 
 /**
  *  @brief Load a 64-bit unsigned integer from a potentially unaligned pointer, can be expensive on some platforms.
  */
-SZ_INTERNAL sz_u64_parts_t sz_u64_load(sz_cptr_t ptr) {
+SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
-    sz_u64_parts_t result;
+    sz_u64_vec_t result;
     result.u8s[0] = ptr[0];
     result.u8s[1] = ptr[1];
     result.u8s[2] = ptr[2];
@@ -846,9 +846,9 @@ SZ_INTERNAL sz_u64_parts_t sz_u64_load(sz_cptr_t ptr) {
     result.u8s[7] = ptr[7];
     return result;
 #elif defined(_MSC_VER)
-    return *((__unaligned sz_u64_parts_t *)ptr);
+    return *((__unaligned sz_u64_vec_t *)ptr);
 #else
-    __attribute__((aligned(1))) sz_u64_parts_t const *result = (sz_u64_parts_t const *)ptr;
+    __attribute__((aligned(1))) sz_u64_vec_t const *result = (sz_u64_vec_t const *)ptr;
     return *result;
 #endif
 }
@@ -874,7 +874,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length) {
 
     sz_u64_t const c1 = 0x87c37b91114253d5ull;
     sz_u64_t const c2 = 0x4cf5ad432745937full;
-    sz_u64_parts_t k1, k2;
+    sz_u64_vec_t k1, k2;
     sz_u64_t h1, h2;
 
     k1.u64 = k2.u64 = 0;
@@ -975,7 +975,7 @@ SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr
     sz_bool_t a_shorter = (sz_bool_t)(a_length < b_length);
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
-    for (sz_u64_parts_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
+    for (sz_u64_vec_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
         a_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(a).u64);
         b_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(b).u64);
         if (a_vec.u64 != b_vec.u64) return ordering_lookup[a_vec.u64 < b_vec.u64];
@@ -1007,6 +1007,7 @@ SZ_INTERNAL sz_u64_t sz_u64_each_byte_equal(sz_u64_t a, sz_u64_t b) {
  */
 SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
+    if (!h_length) return NULL;
     sz_cptr_t const h_end = h + h_length;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
@@ -1015,7 +1016,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
 
     // Broadcast the n into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
-    sz_u64_parts_t h_vec, n_vec;
+    sz_u64_vec_t h_vec, n_vec;
     n_vec.u64 = (sz_u64_t)n[0] * 0x0101010101010101ull;
     for (; h + 8 <= h_end; h += 8) {
         h_vec.u64 = *(sz_u64_t const *)h;
@@ -1034,12 +1035,13 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *          Identical to `memrchr(haystack, needle[0], haystack_length)`.
  */
-sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_len, sz_cptr_t needle) {
+sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t needle) {
 
+    if (!h_length) return NULL;
     sz_cptr_t const h_start = h;
 
     // Reposition the `h` pointer to the end, as we will be walking backwards.
-    h = h + h_len - 1;
+    h = h + h_length - 1;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)(h + 1) & 7ull) && h >= h_start; --h)
@@ -1047,7 +1049,7 @@ sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_len, sz_cptr_t needl
 
     // Broadcast the needle into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
-    sz_u64_parts_t h_vec, n_vec;
+    sz_u64_vec_t h_vec, n_vec;
     n_vec.u64 = (sz_u64_t)needle[0] * 0x0101010101010101ull;
     for (; h >= h_start + 7; h -= 8) {
         h_vec.u64 = *(sz_u64_t const *)(h - 7);
@@ -1082,8 +1084,11 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_c
 
     sz_cptr_t const h_end = h + h_length;
 
+    // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
+    SZ_ASSERT(h_length >= 2, "The haystack is too short.");
+
     // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
-    sz_u64_parts_t h_vec, n_vec, matches_odd_vec, matches_even_vec;
+    sz_u64_vec_t h_vec, n_vec, matches_odd_vec, matches_even_vec;
     n_vec.u64 = 0;
     n_vec.u8s[0] = n[0];
     n_vec.u8s[1] = n[1];
@@ -1102,128 +1107,6 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_c
 
     for (; h + 2 <= h_end; ++h)
         if (h[0] == n[0] && h[1] == n[1]) return h;
-    return NULL;
-}
-
-/**
- *  @brief  Find the first occurrence of a three-character needle in an arbitrary length haystack.
- *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
- */
-SZ_INTERNAL sz_cptr_t sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-
-    sz_cptr_t const h_end = h + h_length;
-
-    // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)h & 7ull) && h + 3 <= h_end; ++h)
-        if (h[0] == n[0] && h[1] == n[1] && h[2] == n[2]) return h;
-
-    // This code simulates hyper-scalar execution, analyzing 6 offsets at a time.
-    // We have two unused bytes at the end.
-    sz_u64_parts_t h_vec, n_vec, matches_first_vec, matches_second_vec, matches_third_vec;
-    n_vec.u8s[2] = n[0]; // broadcast `n` into `nn`
-    n_vec.u8s[3] = n[1]; // broadcast `n` into `nn`
-    n_vec.u8s[4] = n[2]; // broadcast `n` into `nn`
-    n_vec.u8s[5] = n[0]; // broadcast `n` into `nn`
-    n_vec.u8s[6] = n[1]; // broadcast `n` into `nn`
-    n_vec.u8s[7] = n[2]; // broadcast `n` into `nn`
-
-    for (; h + 8 <= h_end; h += 6) {
-        h_vec = sz_u64_load(h);
-        matches_first_vec.u64 = ~(h_vec.u64 ^ n_vec.u64);
-        matches_second_vec.u64 = ~((h_vec.u64 << 8) ^ n_vec.u64);
-        matches_third_vec.u64 = ~((h_vec.u64 << 16) ^ n_vec.u64);
-        // For every first match - 3 chars (24 bits) must be identical.
-        // For that merge every byte state and then combine those three-way.
-        matches_first_vec.u64 &= matches_first_vec.u64 >> 1;
-        matches_first_vec.u64 &= matches_first_vec.u64 >> 2;
-        matches_first_vec.u64 &= matches_first_vec.u64 >> 4;
-        matches_first_vec.u64 = (matches_first_vec.u64 >> 16) & (matches_first_vec.u64 >> 8) &
-                                (matches_first_vec.u64 >> 0) & 0x0000010000010000;
-
-        // For every second match - 3 chars (24 bits) must be identical.
-        // For that merge every byte state and then combine those three-way.
-        matches_second_vec.u64 &= matches_second_vec.u64 >> 1;
-        matches_second_vec.u64 &= matches_second_vec.u64 >> 2;
-        matches_second_vec.u64 &= matches_second_vec.u64 >> 4;
-        matches_second_vec.u64 = (matches_second_vec.u64 >> 16) & (matches_second_vec.u64 >> 8) &
-                                 (matches_second_vec.u64 >> 0) & 0x0000010000010000;
-
-        // For every third match - 3 chars (24 bits) must be identical.
-        // For that merge every byte state and then combine those three-way.
-        matches_third_vec.u64 &= matches_third_vec.u64 >> 1;
-        matches_third_vec.u64 &= matches_third_vec.u64 >> 2;
-        matches_third_vec.u64 &= matches_third_vec.u64 >> 4;
-        matches_third_vec.u64 = (matches_third_vec.u64 >> 16) & (matches_third_vec.u64 >> 8) &
-                                (matches_third_vec.u64 >> 0) & 0x0000010000010000;
-
-        sz_u64_t match_indicators =
-            matches_first_vec.u64 | (matches_second_vec.u64 >> 8) | (matches_third_vec.u64 >> 16);
-        if (match_indicators != 0) return h + sz_u64_ctz(match_indicators) / 8;
-    }
-
-    for (; h + 3 <= h_end; ++h)
-        if (h[0] == n[0] && h[1] == n[1] && h[2] == n[2]) return h;
-    return NULL;
-}
-
-/**
- *  @brief  Find the first occurrence of a @b four-character needle in an arbitrary length haystack.
- *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
- */
-SZ_INTERNAL sz_cptr_t sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-
-    sz_cptr_t const h_end = h + h_length;
-
-    // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)h & 7ull) && h + 4 <= h_end; ++h)
-        if (h[0] == n[0] && h[1] == n[1] && h[2] == n[2] && h[3] == n[3]) return h;
-
-    // This code simulates hyper-scalar execution, analyzing 4 offsets at a time.
-    sz_u64_t nn = (sz_u64_t)(n[0] << 0) | ((sz_u64_t)(n[1]) << 8) | ((sz_u64_t)(n[2]) << 16) | ((sz_u64_t)(n[3]) << 24);
-    nn |= nn << 32;
-
-    //
-    unsigned char offset_in_slice[16] = {0};
-    offset_in_slice[0x2] = offset_in_slice[0x6] = offset_in_slice[0xA] = offset_in_slice[0xE] = 1;
-    offset_in_slice[0x4] = offset_in_slice[0xC] = 2;
-    offset_in_slice[0x8] = 3;
-
-    // We can perform 5 comparisons per load, but it's easier to perform 4, minimizing the size of the lookup table.
-    for (; h + 8 <= h_end; h += 4) {
-        sz_u64_t h_vec = sz_u64_load(h).u64;
-        sz_u64_t h01 = (h_vec & 0x00000000FFFFFFFF) | ((h_vec & 0x000000FFFFFFFF00) << 24);
-        sz_u64_t h23 = ((h_vec & 0x0000FFFFFFFF0000) >> 16) | ((h_vec & 0x00FFFFFFFF000000) << 8);
-        sz_u64_t h01_indicators = ~(h01 ^ nn);
-        sz_u64_t h23_indicators = ~(h23 ^ nn);
-
-        // For every first match - 4 chars (32 bits) must be identical.
-        h01_indicators &= h01_indicators >> 1;
-        h01_indicators &= h01_indicators >> 2;
-        h01_indicators &= h01_indicators >> 4;
-        h01_indicators &= h01_indicators >> 8;
-        h01_indicators &= h01_indicators >> 16;
-        h01_indicators &= 0x0000000100000001;
-
-        // For every first match - 4 chars (32 bits) must be identical.
-        h23_indicators &= h23_indicators >> 1;
-        h23_indicators &= h23_indicators >> 2;
-        h23_indicators &= h23_indicators >> 4;
-        h23_indicators &= h23_indicators >> 8;
-        h23_indicators &= h23_indicators >> 16;
-        h23_indicators &= 0x0000000100000001;
-
-        if (h01_indicators + h23_indicators) {
-            // Assuming we have performed 4 comparisons, we can only have 2^4=16 outcomes.
-            // Which is small enough for a lookup table.
-            unsigned char match_indicators = (unsigned char)(    //
-                (h01_indicators >> 31) | (h01_indicators << 0) | //
-                (h23_indicators >> 29) | (h23_indicators << 2));
-            return h + offset_in_slice[match_indicators];
-        }
-    }
-
-    for (; h + 4 <= h_end; ++h)
-        if (h[0] == n[0] && h[1] == n[1] && h[2] == n[2] && h[3] == n[3]) return h;
     return NULL;
 }
 
@@ -1404,7 +1287,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_siz
     // Another common heuristic is to match a few characters from different parts of a string.
     // Raita suggests to use the first two, the last, and the middle character of the pattern.
     sz_size_t n_midpoint = n_length / 2 + 1;
-    sz_u32_parts_t h_vec, n_vec;
+    sz_u32_vec_t h_vec, n_vec;
     n_vec.u8s[0] = n[0];
     n_vec.u8s[1] = n[1];
     n_vec.u8s[2] = n[n_midpoint];
@@ -1428,7 +1311,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_last_horspool_upto_256bytes_serial(sz_cptr_t h, s
     for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n[i]] = (sz_u8_t)(i + 1);
 
     sz_size_t n_midpoint = n_length / 2;
-    sz_u32_parts_t h_vec, n_vec;
+    sz_u32_vec_t h_vec, n_vec;
     n_vec.u8s[0] = n[n_length - 1];
     n_vec.u8s[1] = n[n_length - 2];
     n_vec.u8s[2] = n[n_midpoint];
@@ -1513,11 +1396,9 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     if (h_length < n_length || !n_length) return NULL;
 
     sz_find_t backends[] = {
-        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_byte_serial,
         (sz_find_t)sz_find_2byte_serial,
-        (sz_find_t)sz_find_3byte_serial,
-        (sz_find_t)sz_find_4byte_serial,
         // For needle lengths up to 64, use the Bitap algorithm variation for exact search.
         (sz_find_t)_sz_find_bitap_upto_8bytes_serial,
         (sz_find_t)_sz_find_bitap_upto_16bytes_serial,
@@ -1529,10 +1410,10 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     };
 
     return backends[
-        // For very short strings a lookup table for an optimized backend makes a lot of sense.
-        (n_length > 1) + (n_length > 2) + (n_length > 3) +
+        // For very short strings brute-force SWAR makes sense.
+        (n_length > 1) +
         // For needle lengths up to 64, use the Bitap algorithm variation for exact search.
-        (n_length > 4) + (n_length > 8) + (n_length > 16) + (n_length > 32) +
+        (n_length > 2) + (n_length > 8) + (n_length > 16) + (n_length > 32) +
         // For longer needles - use skip tables.
         (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
 }
@@ -1543,7 +1424,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     if (h_length < n_length || !n_length) return NULL;
 
     sz_find_t backends[] = {
-        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_last_byte_serial,
         // For needle lengths up to 64, use the Bitap algorithm variation for reverse-order exact search.
         (sz_find_t)_sz_find_last_bitap_upto_8bytes_serial,
@@ -1556,7 +1437,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     };
 
     return backends[
-        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        // For very short strings brute-force SWAR makes sense.
         0 +
         // For needle lengths up to 64, use the Bitap algorithm variation for reverse-order exact search.
         (n_length > 1) + (n_length > 8) + (n_length > 16) + (n_length > 32) +
@@ -2130,13 +2011,13 @@ SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequ
 /**
  *  @brief  Helper structure to simpify work with 64-bit words.
  */
-typedef union sz_u512_parts_t {
+typedef union sz_u512_vec_t {
     __m512i zmm;
     sz_u64_t u64s[8];
     sz_u32_t u32s[16];
     sz_u16_t u16s[32];
     sz_u8_t u8s[64];
-} sz_u512_parts_t;
+} sz_u512_vec_t;
 
 SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until(sz_size_t n) {
     // The simplest approach to compute this if we know that `n` is blow or equal 64:
@@ -2157,19 +2038,20 @@ SZ_INTERNAL __mmask64 sz_u64_mask_until(sz_size_t n) {
  */
 SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_ordering_t ordering_lookup[2] = {sz_greater_k, sz_less_k};
-    __m512i a_vec, b_vec;
+    sz_u512_vec_t a_vec, b_vec;
+    __mmask64 a_mask, b_mask, mask_not_equal;
 
 sz_order_avx512_cycle:
     // In most common scenarios at least one of the strings is under 64 bytes.
     if ((a_length < 64) + (b_length < 64)) {
-        __mmask64 a_mask = sz_u64_clamp_mask_until(a_length);
-        __mmask64 b_mask = sz_u64_clamp_mask_until(b_length);
-        a_vec = _mm512_maskz_loadu_epi8(a_mask, a);
-        b_vec = _mm512_maskz_loadu_epi8(b_mask, b);
+        a_mask = sz_u64_clamp_mask_until(a_length);
+        b_mask = sz_u64_clamp_mask_until(b_length);
+        a_vec.zmm = _mm512_maskz_loadu_epi8(a_mask, a);
+        b_vec.zmm = _mm512_maskz_loadu_epi8(b_mask, b);
         // The AVX-512 `_mm512_mask_cmpneq_epi8_mask` intrinsics are generally handy in such environments.
         // They, however, have latency 3 on most modern CPUs. Using AVX2: `_mm256_cmpeq_epi8` would have
         // been cheaper, if we didn't have to apply `_mm256_movemask_epi8` afterwards.
-        __mmask64 mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec, b_vec);
+        mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
         if (mask_not_equal != 0) {
             int first_diff = _tzcnt_u64(mask_not_equal);
             char a_char = a[first_diff];
@@ -2182,9 +2064,9 @@ sz_order_avx512_cycle:
             return a_length != b_length ? ordering_lookup[a_length < b_length] : sz_equal_k;
     }
     else {
-        a_vec = _mm512_loadu_epi8(a);
-        b_vec = _mm512_loadu_epi8(b);
-        __mmask64 mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec, b_vec);
+        a_vec.zmm = _mm512_loadu_epi8(a);
+        b_vec.zmm = _mm512_loadu_epi8(b);
+        mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
         if (mask_not_equal != 0) {
             int first_diff = _tzcnt_u64(mask_not_equal);
             char a_char = a[first_diff];
@@ -2203,22 +2085,22 @@ sz_order_avx512_cycle:
 SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 
     // In the absolute majority of the cases, the first mismatch is
-    __m512i a_vec, b_vec;
     __mmask64 mask;
+    sz_u512_vec_t a_vec, b_vec;
 
 sz_equal_avx512_cycle:
     if (length < 64) {
         mask = sz_u64_mask_until(length);
-        a_vec = _mm512_maskz_loadu_epi8(mask, a);
-        b_vec = _mm512_maskz_loadu_epi8(mask, b);
+        a_vec.zmm = _mm512_maskz_loadu_epi8(mask, a);
+        b_vec.zmm = _mm512_maskz_loadu_epi8(mask, b);
         // Reuse the same `mask` variable to find the bit that doesn't match
-        mask = _mm512_mask_cmpneq_epi8_mask(mask, a_vec, b_vec);
+        mask = _mm512_mask_cmpneq_epi8_mask(mask, a_vec.zmm, b_vec.zmm);
         return (sz_bool_t)(mask == 0);
     }
     else {
-        a_vec = _mm512_loadu_epi8(a);
-        b_vec = _mm512_loadu_epi8(b);
-        mask = _mm512_cmpneq_epi8_mask(a_vec, b_vec);
+        a_vec.zmm = _mm512_loadu_epi8(a);
+        b_vec.zmm = _mm512_loadu_epi8(b);
+        mask = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
         if (mask != 0) return sz_false_k;
         a += 64, b += 64, length -= 64;
         if (length) goto sz_equal_avx512_cycle;
@@ -2231,7 +2113,7 @@ sz_equal_avx512_cycle:
  */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     __mmask64 mask;
-    sz_u512_parts_t h_vec, n_vec;
+    sz_u512_vec_t h_vec, n_vec;
     n_vec.zmm = _mm512_set1_epi8(n[0]);
 
 sz_find_byte_avx512_cycle:
@@ -2257,16 +2139,17 @@ sz_find_byte_avx512_cycle:
  */
 SZ_INTERNAL sz_cptr_t sz_find_2byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    sz_u64_parts_t n_parts;
-    n_parts.u64 = 0;
-    n_parts.u8s[0] = n[0];
-    n_parts.u8s[1] = n[1];
+    sz_u64_vec_t n_vec;
+    n_vec.u64 = 0;
+    n_vec.u8s[0] = n[0];
+    n_vec.u8s[1] = n[1];
 
     // A simpler approach would ahve been to use two separate registers for
     // different characters of the needle, but that would use more registers.
-    __m512i h0_vec, h1_vec, n_vec = _mm512_set1_epi16(n_parts.u16s[0]);
+    sz_u512_vec_t h0_vec, h1_vec, n_vec;
     __mmask64 mask;
     __mmask32 matches0, matches1;
+    n_vec.zmm = _mm512_set1_epi16(n_vec.u16s[0]);
 
 sz_find_2byte_avx512_cycle:
     if (h_length < 2) { return NULL; }
@@ -2300,14 +2183,14 @@ sz_find_2byte_avx512_cycle:
  */
 SZ_INTERNAL sz_cptr_t sz_find_4byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    sz_u64_parts_t n_parts;
-    n_parts.u64 = 0;
-    n_parts.u8s[0] = n[0];
-    n_parts.u8s[1] = n[1];
-    n_parts.u8s[2] = n[2];
-    n_parts.u8s[3] = n[3];
+    sz_u64_vec_t n_vec;
+    n_vec.u64 = 0;
+    n_vec.u8s[0] = n[0];
+    n_vec.u8s[1] = n[1];
+    n_vec.u8s[2] = n[2];
+    n_vec.u8s[3] = n[3];
 
-    __m512i h0_vec, h1_vec, h2_vec, h3_vec, n_vec = _mm512_set1_epi32(n_parts.u32s[0]);
+    sz_u512_vec_t h0_vec, h1_vec, h2_vec, h3_vec, n_vec = _mm512_set1_epi32(n_vec.u32s[0]);
     __mmask64 mask;
     __mmask16 matches0, matches1, matches2, matches3;
 
@@ -2354,15 +2237,15 @@ sz_find_4byte_avx512_cycle:
  */
 SZ_INTERNAL sz_cptr_t sz_find_3byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    sz_u64_parts_t n_parts;
-    n_parts.u64 = 0;
-    n_parts.u8s[0] = n[0];
-    n_parts.u8s[1] = n[1];
-    n_parts.u8s[2] = n[2];
+    sz_u64_vec_t n_vec;
+    n_vec.u64 = 0;
+    n_vec.u8s[0] = n[0];
+    n_vec.u8s[1] = n[1];
+    n_vec.u8s[2] = n[2];
 
     // A simpler approach would ahve been to use two separate registers for
     // different characters of the needle, but that would use more registers.
-    __m512i h0_vec, h1_vec, h2_vec, h3_vec, n_vec = _mm512_set1_epi32(n_parts.u32s[0]);
+    __m512i h0_vec, h1_vec, h2_vec, h3_vec, n_vec = _mm512_set1_epi32(n_vec.u32s[0]);
     __mmask64 mask;
     __mmask16 matches0, matches1, matches2, matches3;
 
@@ -2413,7 +2296,7 @@ SZ_INTERNAL sz_cptr_t sz_find_under66byte_avx512(sz_cptr_t h, sz_size_t h_length
 
     __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
     __mmask64 matches;
-    sz_u512_parts_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
+    sz_u512_vec_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
     n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
@@ -2464,7 +2347,7 @@ SZ_INTERNAL sz_cptr_t sz_find_over66byte_avx512(sz_cptr_t h, sz_size_t h_length,
 
     __mmask64 mask;
     __mmask64 matches;
-    sz_u512_parts_t h_first_vec, h_last_vec, n_first_vec, n_last_vec;
+    sz_u512_vec_t h_first_vec, h_last_vec, n_first_vec, n_last_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
 
@@ -2511,7 +2394,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     if (h_length < n_length || !n_length) return NULL;
 
     sz_find_t backends[] = {
-        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_byte_avx512,
         (sz_find_t)sz_find_2byte_avx512,
         (sz_find_t)sz_find_3byte_avx512,
@@ -2522,7 +2405,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     };
 
     return backends[
-        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        // For very short strings brute-force SWAR makes sense.
         (n_length > 1) + (n_length > 2) + (n_length > 3) +
         // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
         (n_length > 4) + (n_length > 66)](h, h_length, n, n_length);
@@ -2533,7 +2416,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
  */
 SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     __mmask64 mask;
-    sz_u512_parts_t h_vec, n_vec;
+    sz_u512_vec_t h_vec, n_vec;
     n_vec.zmm = _mm512_set1_epi8(n[0]);
 
 sz_find_last_byte_avx512_cycle:
@@ -2564,7 +2447,7 @@ SZ_INTERNAL sz_cptr_t sz_find_last_under66byte_avx512(sz_cptr_t h, sz_size_t h_l
 
     __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
     __mmask64 matches;
-    sz_u512_parts_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
+    sz_u512_vec_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
     n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
@@ -2617,7 +2500,7 @@ SZ_INTERNAL sz_cptr_t sz_find_last_over66byte_avx512(sz_cptr_t h, sz_size_t h_le
 
     __mmask64 mask;
     __mmask64 matches;
-    sz_u512_parts_t h_first_vec, h_last_vec, n_first_vec, n_last_vec;
+    sz_u512_vec_t h_first_vec, h_last_vec, n_first_vec, n_last_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
 
@@ -2664,7 +2547,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
     if (h_length < n_length || !n_length) return NULL;
 
     sz_find_t backends[] = {
-        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_last_byte_avx512,
         // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
         (sz_find_t)sz_find_last_under66byte_avx512,
@@ -2672,7 +2555,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
     };
 
     return backends[
-        // For very short strings a lookup table for an optimized backend makes a lot of sense.
+        // For very short strings brute-force SWAR makes sense.
         0 +
         // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
         (n_length > 1) + (n_length > 66)](h, h_length, n, n_length);
