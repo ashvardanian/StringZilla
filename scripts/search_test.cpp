@@ -12,6 +12,7 @@
 #include <stringzilla/stringzilla.hpp> // Contender
 
 namespace sz = ashvardanian::stringzilla;
+using namespace sz::literals;
 
 template <typename stl_matcher_, typename sz_matcher_>
 void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
@@ -29,8 +30,8 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::s
         auto needle_sz = sz::string_view(needle_stl.data(), needle_stl.size());
 
         // Wrap into ranges
-        auto matches_stl = stl_matcher_(haystack_stl, needle_stl);
-        auto matches_sz = sz_matcher_(haystack_sz, needle_sz);
+        auto matches_stl = stl_matcher_(haystack_stl, {needle_stl});
+        auto matches_sz = sz_matcher_(haystack_sz, {needle_sz});
         auto begin_stl = matches_stl.begin();
         auto begin_sz = matches_sz.begin();
         auto end_stl = matches_stl.end();
@@ -58,9 +59,9 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::s
         sz::range_matches<sz::string_view, sz::matcher_find>>( //
         haystack_pattern, needle_stl, misalignment);
 
-    eval<                                                               //
-        sz::reverse_range_matches<std::string_view, sz::matcher_rfind>, //
-        sz::reverse_range_matches<sz::string_view, sz::matcher_rfind>>( //
+    eval<                                                        //
+        sz::range_rmatches<std::string_view, sz::matcher_rfind>, //
+        sz::range_rmatches<sz::string_view, sz::matcher_rfind>>( //
         haystack_pattern, needle_stl, misalignment);
 
     eval<                                                               //
@@ -68,9 +69,9 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::s
         sz::range_matches<sz::string_view, sz::matcher_find_first_of>>( //
         haystack_pattern, needle_stl, misalignment);
 
-    eval<                                                                      //
-        sz::reverse_range_matches<std::string_view, sz::matcher_find_last_of>, //
-        sz::reverse_range_matches<sz::string_view, sz::matcher_find_last_of>>( //
+    eval<                                                               //
+        sz::range_rmatches<std::string_view, sz::matcher_find_last_of>, //
+        sz::range_rmatches<sz::string_view, sz::matcher_find_last_of>>( //
         haystack_pattern, needle_stl, misalignment);
 
     eval<                                                                   //
@@ -78,9 +79,9 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::s
         sz::range_matches<sz::string_view, sz::matcher_find_first_not_of>>( //
         haystack_pattern, needle_stl, misalignment);
 
-    eval<                                                                          //
-        sz::reverse_range_matches<std::string_view, sz::matcher_find_last_not_of>, //
-        sz::reverse_range_matches<sz::string_view, sz::matcher_find_last_not_of>>( //
+    eval<                                                                   //
+        sz::range_rmatches<std::string_view, sz::matcher_find_last_not_of>, //
+        sz::range_rmatches<sz::string_view, sz::matcher_find_last_not_of>>( //
         haystack_pattern, needle_stl, misalignment);
 }
 
@@ -116,6 +117,16 @@ int main(int, char const **) {
     eval("ab", "ba");
     eval("abc", "ca");
     eval("abcd", "da");
+
+    // Check more advanced composite operations:
+    assert("abbccc"_sz.split("bb").before.size() == 1);
+    assert("abbccc"_sz.split("bb").match.size() == 2);
+    assert("abbccc"_sz.split("bb").after.size() == 3);
+
+    assert("a.b.c.d"_sz.find_all(".").size() == 3);
+    assert("a.,b.,c.,d"_sz.find_all(".,").size() == 3);
+    assert("a.,b.,c.,d"_sz.rfind_all(".,").size() == 3);
+    assert("a.b,c.d"_sz.find_all(sz::character_set(".,")).size() == 3);
 
     return 0;
 }

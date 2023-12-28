@@ -208,9 +208,20 @@ Aside from conventional `std::string` interfaces, non-STL extensions are availab
 
 ```cpp
 haystack.count(needle) == 1; // Why is this not in STL?!
+
 haystack.edit_distance(needle) == 7;
 haystack.find_edited(needle, bound);
 haystack.rfind_edited(needle, bound);
+```
+
+When parsing documents, it is often useful to split it into substrings.
+Most often, after that, you would compute the length of the skipped part, the offset and the length of the remaining part.
+StringZilla provides a convenient `split` function, which returns a tuple of three string views, making the code cleaner.
+
+```cpp
+auto [before, match, after] = haystack.split(':');
+auto [before, match, after] = haystack.split(character_set(":;"));
+auto [before, match, after] = haystack.split(" : ");
 ```
 
 ### Ranges
@@ -219,17 +230,17 @@ One of the most common use cases is to split a string into a collection of subst
 Which would often result in snippets like the one below.
 
 ```cpp
-std::vector<std::string> lines = your_split(haystack, '\n');
-std::vector<std::string> words = your_split(lines, ' ');
+std::vector<std::string> lines = your_split_by_substrings(haystack, "\r\n");
+std::vector<std::string> words = your_split_by_character(lines, ' ');
 ```
 
 Those allocate memory for each string and the temporary vectors.
-Each of those can be orders of magnitude more expensive, than even serial for-loop over character.
-To avoid those, StringZilla provides lazily-evaluated ranges.
+Each of those can be orders of magnitude more expensive, than even serial `for`-loop over characters.
+To avoid those, StringZilla provides lazily-evaluated ranges, compatible with the Range-v3 library.
 
 ```cpp
-for (auto line : split_substrings(haystack, '\r\n'))
-    for (auto word : split_chars(line, ' \w\t.,;:!?'))
+for (auto line : haystack.split_all("\r\n"))
+    for (auto word : line.split_all(character_set(" \w\t.,;:!?")))
         std::cout << word << std::endl;
 ```
 
@@ -237,18 +248,10 @@ Each of those is available in reverse order as well.
 It also allows interleaving matches, and controlling the inclusion/exclusion of the separator itself into the result.
 Debugging pointer offsets is not a pleasant excersise, so keep the following functions in mind.
 
-- `split_substrings`.
-- `split_chars`.
-- `split_not_chars`.
-- `reverse_split_substrings`.
-- `reverse_split_chars`.
-- `reverse_split_not_chars`.
-- `search_substrings`.
-- `reverse_search_substrings`.
-- `search_chars`.
-- `reverse_search_chars`.
-- `search_other_chars`.
-- `reverse_search_other_chars`.
+- `haystack.find_all(needle, interleaving)`
+- `haystack.rfind_all(needle, interleaving)`
+- `haystack.find_all(character_set(""))`
+- `haystack.rfind_all(character_set(""))`
 
 ### Debugging
 
@@ -290,13 +293,13 @@ npm install && npm test
 To benchmark on some custom file and pattern combinations:
 
 ```sh
-python scripts/bench_substring.py --haystack_path "your file" --needle "your pattern"
+python scripts/search_bench.py --haystack_path "your file" --needle "your pattern"
 ```
 
 To benchmark on synthetic data:
 
 ```sh
-python scripts/bench_substring.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce"
+python scripts/search_bench.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce"
 ```
 
 ### Packaging
@@ -314,7 +317,7 @@ Running benchmarks:
 ```sh
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 -B ./build_release
 cmake --build build_release --config Release
-./build_release/stringzilla_bench_substring
+./build_release/stringzilla_search_bench
 ```
 
 Comparing different hardware setups:
@@ -330,9 +333,9 @@ cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     -DCMAKE_CXX_FLAGS="-march=sapphirerapids" -DCMAKE_C_FLAGS="-march=sapphirerapids" \
     -B ./build_release/sapphirerapids && cmake --build build_release/sapphirerapids --config Release
 
-./build_release/sandybridge/stringzilla_bench_substring
-./build_release/haswell/stringzilla_bench_substring
-./build_release/sapphirerapids/stringzilla_bench_substring
+./build_release/sandybridge/stringzilla_search_bench
+./build_release/haswell/stringzilla_search_bench
+./build_release/sapphirerapids/stringzilla_search_bench
 ```
 
 Running tests:
@@ -340,7 +343,7 @@ Running tests:
 ```sh
 cmake -DCMAKE_BUILD_TYPE=Debug -DSTRINGZILLA_BUILD_TEST=1 -B ./build_debug
 cmake --build build_debug --config Debug
-./build_debug/stringzilla_test_substring
+./build_debug/stringzilla_search_test
 ```
 
 On MacOS it's recommended to use non-default toolchain:
@@ -357,7 +360,7 @@ cmake -B ./build_release \
     -DSTRINGZILLA_BUILD_TEST=1 \
     -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     && \
-    make -C ./build_release -j && ./build_release/stringzilla_bench_substring
+    make -C ./build_release -j && ./build_release/stringzilla_search_bench
 ```
 
 ## License 📜
