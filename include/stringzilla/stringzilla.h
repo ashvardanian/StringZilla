@@ -1,7 +1,7 @@
 /**
  *  @brief  StringZilla is a collection of simple string algorithms, designed to be used in Big Data applications.
  *          It may be slower than LibC, but has a broader & cleaner interface, and a very short implementation
- *          targeting modern x86 CPUs with AVX-512 and Arm NEON and older CPUs with SWAR and auto-vecotrization.
+ *          targeting modern x86 CPUs with AVX-512 and Arm NEON and older CPUs with SWAR and auto-vectorization.
  *
  *  @section    Operations potentially not worth optimizing in StringZilla
  *
@@ -48,8 +48,8 @@
  *  Preprocessing phase is O(n+sigma) in time and space. On traversal, performs from (h/n) to (3h/2) comparisons.
  *  We should consider implementing it if we can:
  *      - accelerate the preprocessing phase of the needle.
- *      - simplify th econtrol-flow of the main loop.
- *      - replace the array of shift values with a circual buffer.
+ *      - simplify the control-flow of the main loop.
+ *      - replace the array of shift values with a circular buffer.
  *
  *  Reading materials:
  *      - Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
@@ -167,7 +167,7 @@
 
 #ifndef SZ_USE_ARM_NEON
 #ifdef __ARM_NEON
-#define SZ_USE_ARM_NEON 1
+#define SZ_USE_ARM_NEON 0
 #else
 #define SZ_USE_ARM_NEON 0
 #endif
@@ -241,6 +241,9 @@ typedef struct sz_string_view_t {
     sz_size_t length;
 } sz_string_view_t;
 
+/**
+ *  @brief  Bit-set structure for 256 ASCII characters. Useful for filtering and search.
+ */
 typedef union sz_u8_set_t {
     sz_u64_t _u64s[4];
     sz_u8_t _u8s[32];
@@ -269,6 +272,46 @@ typedef struct sz_memory_allocator_t {
     void *handle;
 } sz_memory_allocator_t;
 
+/**
+ *  @brief  Tiny memory-owning string structure with a Small String Optimization (SSO).
+ *          Uses similar layout to Folly, 32-bytes long, like modern GCC and Clang STL.
+ *          In uninitialized
+ */
+typedef union sz_string_t {
+
+    union on_stack {
+        sz_u8_t u8s[32];
+        char chars[32];
+    } on_stack;
+
+    struct on_heap {
+        sz_ptr_t start;
+        sz_size_t length;
+        sz_size_t capacity;
+        sz_size_t tail;
+    } on_heap;
+
+} sz_string_t;
+
+SZ_PUBLIC void sz_string_to_view(sz_string_t *string, sz_ptr_t *start, sz_size_t *length) {
+    //
+}
+
+SZ_PUBLIC void sz_string_init(sz_string_t *string) {
+    string->on_heap.start = NULL;
+    string->on_heap.length = 0;
+    string->on_heap.capacity = 0;
+    string->on_heap.tail = 31;
+}
+
+SZ_PUBLIC void sz_string_append() {}
+
+SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {}
+
+SZ_PUBLIC void sz_copy(sz_cptr_t, sz_size_t, sz_ptr_t) {}
+
+SZ_PUBLIC void sz_fill(sz_ptr_t, sz_size_t, sz_u8_t) {}
+
 #pragma region Basic Functionality
 
 typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
@@ -285,7 +328,7 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
  *  In case of Arm more than one polynomial is supported. It is, however, somewhat limiting for Big Data
  *  usecases, which often have to deal with more than 4 Billion strings, making collisions unavoidable.
  *  Moreover, the existing SIMD approaches are tricky, combining general purpose computations with
- *  specialized intstructions, to utilize more silicon in every cycle.
+ *  specialized instructions, to utilize more silicon in every cycle.
  *
  *  Some of the best articles on CRC32:
  *  - Comprehensive derivation of approaches: https://github.com/komrad36/CRC
@@ -303,7 +346,7 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
  *  https://github.com/aappleby/smhasher/tree/61a0530f28277f2e850bfc39600ce61d02b518de
  *
  *  The CityHash from 2011 by Google and the xxHash improve on that, better leveraging
- *  the superscalar nature of modern CPUs and producing 64-bit and 128-bit hashes.
+ *  the super-scalar nature of modern CPUs and producing 64-bit and 128-bit hashes.
  *  https://opensource.googleblog.com/2011/04/introducing-cityhash
  *  https://github.com/Cyan4973/xxHash
  *
@@ -708,7 +751,7 @@ SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x 
  *  Branchless approach is well known for signed integers, but it doesn't apply to unsigned ones.
  *  https://stackoverflow.com/questions/514435/templatized-branchless-int-max-min-function
  *  https://graphics.stanford.edu/~seander/bithacks.html#IntegerMinOrMax
- *  Using only bitshifts for singed integers it would be:
+ *  Using only bit-shifts for singed integers it would be:
  *
  *      y + ((x - y) & (x - y) >> 31)               // 4 unique operations
  *
@@ -765,7 +808,7 @@ SZ_INTERNAL sz_size_t sz_size_log2i(sz_size_t n) {
 }
 
 /**
- *  @brief  Helper structure to simpify work with 16-bit words.
+ *  @brief  Helper structure to simplify work with 16-bit words.
  *  @see    sz_u16_load
  */
 typedef union sz_u16_vec_t {
@@ -791,7 +834,7 @@ SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 }
 
 /**
- *  @brief  Helper structure to simpify work with 32-bit words.
+ *  @brief  Helper structure to simplify work with 32-bit words.
  *  @see    sz_u32_load
  */
 typedef union sz_u32_vec_t {
@@ -820,7 +863,7 @@ SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 }
 
 /**
- *  @brief  Helper structure to simpify work with 64-bit words.
+ *  @brief  Helper structure to simplify work with 64-bit words.
  *  @see    sz_u64_load
  */
 typedef union sz_u64_vec_t {
@@ -2009,7 +2052,7 @@ SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequ
 #include <x86intrin.h>
 
 /**
- *  @brief  Helper structure to simpify work with 64-bit words.
+ *  @brief  Helper structure to simplify work with 64-bit words.
  */
 typedef union sz_u512_vec_t {
     __m512i zmm;
@@ -2572,6 +2615,14 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
 
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
 
+SZ_PUBLIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+#if SZ_USE_X86_AVX512
+    return sz_equal_avx512(a, b, length);
+#else
+    return sz_equal_serial(a, b, length);
+#endif
+}
+
 SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
 #if SZ_USE_X86_AVX512
     return sz_order_avx512(a, a_length, b, b_length);
@@ -2585,6 +2636,14 @@ SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
     return sz_find_byte_avx512(haystack, h_length, needle);
 #else
     return sz_find_byte_serial(haystack, h_length, needle);
+#endif
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
+#if SZ_USE_X86_AVX512
+    return sz_find_last_byte_avx512(haystack, h_length, needle);
+#else
+    return sz_find_last_byte_serial(haystack, h_length, needle);
 #endif
 }
 
