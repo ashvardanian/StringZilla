@@ -127,6 +127,13 @@ int main(int, char const **) {
     assert("a.,b.,c.,d"_sz.find_all(".,").size() == 3);
     assert("a.,b.,c.,d"_sz.rfind_all(".,").size() == 3);
     assert("a.b,c.d"_sz.find_all(sz::character_set(".,")).size() == 3);
+    assert("a...b...c"_sz.rfind_all("..", true).size() == 4);
+
+    // assert("a.b.c.d"_sz.split_all(".").size() == 3);
+    // assert("a.,b.,c.,d"_sz.split_all(".,").size() == 3);
+    // assert("a.,b.,c.,d"_sz.rsplit_all(".,").size() == 3);
+    // assert("a.b,c.d"_sz.split_all(sz::character_set(".,")).size() == 3);
+    // assert("a...b...c"_sz.rsplit_all("..", true).size() == 4);
 
     return 0;
 }
