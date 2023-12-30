@@ -83,6 +83,13 @@ function(set_compiler_flags target)
   set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     ${CMAKE_BINARY_DIR})
 
+  # Maximum warnings level & warnings as error
+  # add_compile_options(
+  # "$<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>"
+  # "$<$<CXX_COMPILER_ID:GNU>:-Wall;-Wextra;-pedantic;-Werror>"
+  # "$<$<CXX_COMPILER_ID:Clang>:-Wall;-Wextra;-pedantic;-Werror>"
+  # "$<$<CXX_COMPILER_ID:AppleClang>:-Wall;-Wextra;-pedantic;-Werror>"
+  # )
   if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
     target_compile_options(${target} PRIVATE "-march=native")
     target_compile_options(${target} PRIVATE "-fmax-errors=1")

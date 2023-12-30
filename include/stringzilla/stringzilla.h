@@ -241,6 +241,9 @@ typedef struct sz_string_view_t {
     sz_size_t length;
 } sz_string_view_t;
 
+/**
+ *  @brief  Bit-set structure for 256 ASCII characters. Useful for filtering and search.
+ */
 typedef union sz_u8_set_t {
     sz_u64_t _u64s[4];
     sz_u8_t _u8s[32];
@@ -268,6 +271,46 @@ typedef struct sz_memory_allocator_t {
     sz_memory_free_t free;
     void *handle;
 } sz_memory_allocator_t;
+
+/**
+ *  @brief  Tiny memory-owning string structure with a Small String Optimization (SSO).
+ *          Uses similar layout to Folly, 32-bytes long, like modern GCC and Clang STL.
+ *          In uninitialized
+ */
+typedef union sz_string_t {
+
+    union on_stack {
+        sz_u8_t u8s[32];
+        char chars[32];
+    } on_stack;
+
+    struct on_heap {
+        sz_ptr_t start;
+        sz_size_t length;
+        sz_size_t capacity;
+        sz_size_t tail;
+    } on_heap;
+
+} sz_string_t;
+
+SZ_PUBLIC void sz_string_to_view(sz_string_t *string, sz_ptr_t *start, sz_size_t *length) {
+    //
+}
+
+SZ_PUBLIC void sz_string_init(sz_string_t *string) {
+    string->on_heap.start = NULL;
+    string->on_heap.length = 0;
+    string->on_heap.capacity = 0;
+    string->on_heap.tail = 31;
+}
+
+SZ_PUBLIC void sz_string_append() {}
+
+SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {}
+
+SZ_PUBLIC void sz_copy(sz_cptr_t, sz_size_t, sz_ptr_t) {}
+
+SZ_PUBLIC void sz_fill(sz_ptr_t, sz_size_t, sz_u8_t) {}
 
 #pragma region Basic Functionality
 
