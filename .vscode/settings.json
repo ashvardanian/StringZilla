@@ -120,7 +120,8 @@
     "stringzilla.h": "c",
     "__memory": "c",
     "charconv": "c",
-    "format": "cpp"
+    "format": "cpp",
+    "shared_mutex": "cpp"
   },
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "cSpell.words": [

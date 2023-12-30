@@ -29,7 +29,7 @@
       "name": "Debug Unit Tests",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build_debug/stringzilla_test_substring",
+      "program": "${workspaceFolder}/build_debug/stringzilla_search_test",
       "cwd": "${workspaceFolder}",
       "environment": [
         {
@@ -51,7 +51,7 @@
       "name": "Debug Benchmarks",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build_debug/stringzilla_bench_substring",
+      "program": "${workspaceFolder}/build_debug/stringzilla_search_bench",
       "cwd": "${workspaceFolder}",
       "environment": [
         {
