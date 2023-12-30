@@ -66,8 +66,8 @@ struct matcher_find {
     string_view_ needle_;
     std::size_t skip_after_match_ = 1;
 
-    matcher_find(string_view_ needle, bool allow_interleaving = true) noexcept
-        : needle_(needle), skip_after_match_(allow_interleaving ? 1 : needle_.length()) {}
+    matcher_find(string_view_ needle, bool allow_overlaps = true) noexcept
+        : needle_(needle), skip_after_match_(allow_overlaps ? 1 : needle_.length()) {}
     size_type needle_length() const noexcept { return needle_.length(); }
     size_type skip_length() const noexcept { return skip_after_match_; }
     size_type operator()(string_view_ haystack) const noexcept { return haystack.find(needle_); }
@@ -84,8 +84,8 @@ struct matcher_rfind {
     string_view_ needle_;
     std::size_t skip_after_match_ = 1;
 
-    matcher_rfind(string_view_ needle, bool allow_interleaving = true) noexcept
-        : needle_(needle), skip_after_match_(allow_interleaving ? 1 : needle_.length()) {}
+    matcher_rfind(string_view_ needle, bool allow_overlaps = true) noexcept
+        : needle_(needle), skip_after_match_(allow_overlaps ? 1 : needle_.length()) {}
     size_type needle_length() const noexcept { return needle_.length(); }
     size_type skip_length() const noexcept { return skip_after_match_; }
     size_type operator()(string_view_ haystack) const noexcept { return haystack.rfind(needle_); }
@@ -143,7 +143,7 @@ struct end_sentinel_t {};
 inline static constexpr end_sentinel_t end_sentinel;
 
 /**
- *  @brief  A range of string views representing the matches of a substring search.
+ *  @brief  A range of string slices representing the matches of a substring search.
  *          Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
  */
 template <typename string_view_, template <typename> typename matcher_template_>
@@ -198,10 +198,11 @@ class range_matches {
     iterator end() const noexcept { return iterator(string_view(), matcher_); }
     iterator::difference_type size() const noexcept { return std::distance(begin(), end()); }
     bool empty() const noexcept { return begin() == end_sentinel; }
+    bool allow_overlaps() const noexcept { return matcher_.skip_length() < matcher_.needle_length(); }
 };
 
 /**
- *  @brief  A range of string views representing the matches of a @b reverse-order substring search.
+ *  @brief  A range of string slices representing the matches of a @b reverse-order substring search.
  *          Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
  */
 template <typename string_view_, template <typename> typename matcher_template_>
@@ -256,6 +257,70 @@ class range_rmatches {
         return iterator(
             position != string_view::npos ? haystack_.substr(0, position + matcher_.needle_length()) : string_view(),
             matcher_);
+    }
+
+    iterator end() const noexcept { return iterator(string_view(), matcher_); }
+    iterator::difference_type size() const noexcept { return std::distance(begin(), end()); }
+    bool empty() const noexcept { return begin() == end_sentinel; }
+    bool allow_overlaps() const noexcept { return matcher_.skip_length() < matcher_.needle_length(); }
+};
+
+/**
+ *  @brief  A range of string slices for different splits of the data.
+ *          Compatible with C++23 ranges, C++11 string views, and of course, StringZilla.
+ *
+ *  In some sense, represents the inverse operation to `range_matches`, as it reports
+ */
+template <typename string_view_, template <typename> typename matcher_template_>
+class range_splits {
+    using string_view = string_view_;
+    using matcher = matcher_template_<string_view>;
+
+    string_view haystack_;
+    matcher matcher_;
+    bool include_empty_ = true;
+    bool include_delimiter_ = false;
+
+  public:
+    range_splits(string_view haystack, matcher needle) : haystack_(haystack), matcher_(needle) {}
+
+    class iterator {
+        string_view remaining_;
+        matcher matcher_;
+        std::size_t next_offset_;
+
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using difference_type = std::ptrdiff_t;
+        using value_type = string_view;
+        using pointer = void;
+        using reference = void;
+
+        iterator(string_view haystack, matcher matcher) noexcept : remaining_(haystack), matcher_(matcher) {}
+        value_type operator*() const noexcept { return remaining_.substr(0, matcher_.needle_length()); }
+
+        iterator &operator++() noexcept {
+            remaining_.remove_prefix(matcher_.skip_length());
+            auto position = matcher_(remaining_);
+            remaining_ = position != string_view::npos ? remaining_.substr(position) : string_view();
+            return *this;
+        }
+
+        iterator operator++(int) noexcept {
+            iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+
+        bool operator!=(iterator const &other) const noexcept { return remaining_.size() != other.remaining_.size(); }
+        bool operator==(iterator const &other) const noexcept { return remaining_.size() == other.remaining_.size(); }
+        bool operator!=(end_sentinel_t) const noexcept { return !remaining_.empty(); }
+        bool operator==(end_sentinel_t) const noexcept { return remaining_.empty(); }
+    };
+
+    iterator begin() const noexcept {
+        auto position = matcher_(haystack_);
+        return iterator(position != string_view::npos ? haystack_.substr(position) : string_view(), matcher_);
     }
 
     iterator end() const noexcept { return iterator(string_view(), matcher_); }
