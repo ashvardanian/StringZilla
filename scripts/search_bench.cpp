@@ -27,19 +27,19 @@ struct loop_over_words_result_t {
  */
 template <typename function_at>
 struct tracked_function_gt {
-    std::string name = "";
-    function_at function = nullptr;
-    bool needs_testing = false;
+    std::string name {""};
+    function_at function {nullptr};
+    bool needs_testing {false};
 
-    std::size_t failed_count = 0;
-    std::vector<std::string> failed_strings = {};
-    loop_over_words_result_t results = {};
+    std::size_t failed_count {0};
+    std::vector<std::string> failed_strings {};
+    loop_over_words_result_t results {};
 
     void print() const {
         char const *format;
         // Now let's print in the format:
         //  - name, up to 20 characters
-        //  - thoughput in GB/s with up to 3 significant digits, 10 characters
+        //  - throughput in GB/s with up to 3 significant digits, 10 characters
         //  - call latency in ns with up to 1 significant digit, 10 characters
         //  - number of failed tests, 10 characters
         //  - first example of a failed test, up to 20 characters
@@ -113,9 +113,9 @@ sz_string_view_t random_slice(sz_string_view_t full_text, std::size_t min_length
 
 std::size_t round_down_to_power_of_two(std::size_t n) {
     if (n == 0) return 0;
-    std::size_t most_siginificant_bit_pisition = 0;
-    while (n > 1) n >>= 1, most_siginificant_bit_pisition++;
-    return static_cast<std::size_t>(1) << most_siginificant_bit_pisition;
+    std::size_t most_siginificant_bit_position = 0;
+    while (n > 1) n >>= 1, most_siginificant_bit_position++;
+    return static_cast<std::size_t>(1) << most_siginificant_bit_position;
 }
 
 tracked_unary_functions_t hashing_functions() {
@@ -628,15 +628,15 @@ int main(int, char const **) {
     // The genomes of bacteria are relatively small - E. coli genome is about 4.6 million base pairs long.
     // In techniques like PCR (Polymerase Chain Reaction), short DNA sequences called primers are used.
     // These are usually 18 to 25 base pairs long.
-    char dna_parts[] = "ATCG";
+    char aminoacids[] = "ATCG";
     for (std::size_t dna_length : {300, 2000, 15000}) {
-        std::vector<std::string> dnas(16);
+        std::vector<std::string> dna_sequences(16);
         for (std::size_t i = 0; i != 16; ++i) {
-            dnas[i].resize(dna_length);
-            for (std::size_t j = 0; j != dna_length; ++j) dnas[i][j] = dna_parts[std::rand() % 4];
+            dna_sequences[i].resize(dna_length);
+            for (std::size_t j = 0; j != dna_length; ++j) dna_sequences[i][j] = aminoacids[std::rand() % 4];
         }
         std::printf("Benchmarking for DNA-like sequences of length %zu:\n", dna_length);
-        evaluate_all_operations(dnas);
+        evaluate_all_operations(dna_sequences);
     }
 
     return 0;

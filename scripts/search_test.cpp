@@ -122,18 +122,43 @@ int main(int, char const **) {
     assert("abbccc"_sz.split("bb").before.size() == 1);
     assert("abbccc"_sz.split("bb").match.size() == 2);
     assert("abbccc"_sz.split("bb").after.size() == 3);
+    assert("abbccc"_sz.split("bb").before == "a");
+    assert("abbccc"_sz.split("bb").match == "bb");
+    assert("abbccc"_sz.split("bb").after == "ccc");
 
+    assert(""_sz.find_all(".").size() == 0);
     assert("a.b.c.d"_sz.find_all(".").size() == 3);
     assert("a.,b.,c.,d"_sz.find_all(".,").size() == 3);
     assert("a.,b.,c.,d"_sz.rfind_all(".,").size() == 3);
     assert("a.b,c.d"_sz.find_all(sz::character_set(".,")).size() == 3);
     assert("a...b...c"_sz.rfind_all("..", true).size() == 4);
 
-    // assert("a.b.c.d"_sz.split_all(".").size() == 3);
-    // assert("a.,b.,c.,d"_sz.split_all(".,").size() == 3);
-    // assert("a.,b.,c.,d"_sz.rsplit_all(".,").size() == 3);
-    // assert("a.b,c.d"_sz.split_all(sz::character_set(".,")).size() == 3);
-    // assert("a...b...c"_sz.rsplit_all("..", true).size() == 4);
+    auto finds = "a.b.c"_sz.find_all(sz::character_set("abcd")).template to<std::vector<std::string>>();
+    assert(finds.size() == 3);
+    assert(finds[0] == "a");
+
+    auto rfinds = "a.b.c"_sz.rfind_all(sz::character_set("abcd")).template to<std::vector<std::string>>();
+    assert(rfinds.size() == 3);
+    assert(rfinds[0] == "c");
+
+    auto splits = ".a..c."_sz.split_all(sz::character_set(".")).template to<std::vector<std::string>>();
+    assert(splits.size() == 5);
+    assert(splits[0] == "");
+    assert(splits[1] == "a");
+    assert(splits[4] == "");
+
+    assert(""_sz.split_all(".").size() == 1);
+    assert(""_sz.rsplit_all(".").size() == 1);
+    assert("a.b.c.d"_sz.split_all(".").size() == 4);
+    assert("a.b.c.d"_sz.rsplit_all(".").size() == 4);
+    assert("a.b.,c,d"_sz.split_all(".,").size() == 2);
+    assert("a.b,c.d"_sz.split_all(sz::character_set(".,")).size() == 4);
+
+    auto rsplits = ".a..c."_sz.rsplit_all(sz::character_set(".")).template to<std::vector<std::string>>();
+    assert(rsplits.size() == 5);
+    assert(rsplits[0] == "");
+    assert(rsplits[1] == "c");
+    assert(rsplits[4] == "");
 
     return 0;
 }
