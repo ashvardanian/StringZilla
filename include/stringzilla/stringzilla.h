@@ -129,7 +129,7 @@
 
 /**
  *  @brief  A misaligned load can be - trying to fetch eight consecutive bytes from an address
- *          that is not divisble by eight.
+ *          that is not divisible by eight.
  *
  *  Most platforms support it, but there is no industry standard way to check for those.
  *  This value will mostly affect the performance of the serial (SWAR) backend.
@@ -142,8 +142,8 @@
  *  @brief  Cache-line width, that will affect the execution of some algorithms,
  *          like equality checks and relative order computing.
  */
-#ifndef SZ_CACHE_LINE_WIDRTH
-#define SZ_CACHE_LINE_WIDRTH (64)
+#ifndef SZ_CACHE_LINE_WIDTH
+#define SZ_CACHE_LINE_WIDTH (64)
 #endif
 
 /*
@@ -351,7 +351,7 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
  *  https://github.com/Cyan4973/xxHash
  *
  *  Neither of those functions are cryptographic, unlike MD5, SHA, and BLAKE algorithms.
- *  Most of those are based on the Merkle–Damgård construction, and aren't resistant to
+ *  Most of those are based on the Merkle-Damgård construction, and aren't resistant to
  *  the length-extension attacks. Current state of the Art, might be the BLAKE3 algorithm.
  *  It's resistant to a broad range of attacks, can process 2 bytes per CPU cycle, and comes
  *  with a very optimized official implementation for C and Rust. It has the same 128-bit
@@ -511,7 +511,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t haystack, sz_size_t h_len
 
 /**
  *  @brief  Locates first matching substring.
- *          Equivalient to `memmem(haystack, h_length, needle, n_length)` in LibC.
+ *          Equivalent to `memmem(haystack, h_length, needle, n_length)` in LibC.
  *          Similar to `strstr(haystack, needle)` in LibC, but requires known length.
  *
  *  @param haystack Haystack - the string to search in.
@@ -591,8 +591,8 @@ SZ_PUBLIC sz_cptr_t sz_find_last_bounded_regex(sz_cptr_t haystack, sz_size_t h_l
 #pragma region String Similarity Measures
 
 /**
- *  @brief  Computes Levenshtein edit-distance between two strings using the Wagner Ficher algorithm.
- *          Similar to the Needleman–Wunsch algorithm. Often used in fuzzy string matching.
+ *  @brief  Computes Levenshtein edit-distance between two strings using the Wagner-Fisher algorithm.
+ *          Similar to the Needleman-Wunsch algorithm. Often used in fuzzy string matching.
  *
  *  @param a        First string to compare.
  *  @param a_length Number of bytes in the first string.
@@ -628,7 +628,7 @@ SZ_PUBLIC sz_size_t sz_alignment_score_memory_needed(sz_size_t a_length, sz_size
  *
  *  This function is equivalent to the default Levenshtein distance implementation with the ::gap parameter set
  *  to one, and the ::subs matrix formed of all ones except for the main diagonal, which is zeros.
- *  Unlike the default Levenshtein implementaion, this can't be bounded, as the substitution costs can be both positive
+ *  Unlike the default Levenshtein implementation, this can't be bounded, as the substitution costs can be both positive
  *  and negative, meaning that the distance isn't monotonically growing as we go through the strings.
  *
  *  @param a        First string to compare.
@@ -1494,7 +1494,7 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_serial_upto256bytes( //
     sz_size_t bound, sz_memory_allocator_t const *alloc) {
 
     // When dealing with short strings, we won't need to allocate memory on heap,
-    // as everythin would easily fit on the stack. Let's just make sure that
+    // as everything would easily fit on the stack. Let's just make sure that
     // we use the amount proportional to the number of elements in the shorter string,
     // not the larger.
     if (b_length > a_length) return _sz_levenshtein_serial_upto256bytes(b, b_length, a, a_length, bound, alloc);
@@ -2065,14 +2065,14 @@ typedef union sz_u512_vec_t {
 SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until(sz_size_t n) {
     // The simplest approach to compute this if we know that `n` is blow or equal 64:
     //      return (1ull << n) - 1;
-    // A slighly more complex approach, if we don't know that `n` is under 64:
+    // A slightly more complex approach, if we don't know that `n` is under 64:
     return _bzhi_u64(0xFFFFFFFFFFFFFFFF, n < 64 ? n : 64);
 }
 
 SZ_INTERNAL __mmask64 sz_u64_mask_until(sz_size_t n) {
     // The simplest approach to compute this if we know that `n` is blow or equal 64:
     //      return (1ull << n) - 1;
-    // A slighly more complex approach, if we don't know that `n` is under 64:
+    // A slightly more complex approach, if we don't know that `n` is under 64:
     return _bzhi_u64(0xFFFFFFFFFFFFFFFF, n);
 }
 
@@ -2442,7 +2442,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         (sz_find_t)sz_find_2byte_avx512,
         (sz_find_t)sz_find_3byte_avx512,
         (sz_find_t)sz_find_4byte_avx512,
-        // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
+        // For longer needles we use a Two-Way heuristic with a follow-up check in-between.
         (sz_find_t)sz_find_under66byte_avx512,
         (sz_find_t)sz_find_over66byte_avx512,
     };
@@ -2450,7 +2450,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     return backends[
         // For very short strings brute-force SWAR makes sense.
         (n_length > 1) + (n_length > 2) + (n_length > 3) +
-        // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
+        // For longer needles we use a Two-Way heuristic with a follow-up check in-between.
         (n_length > 4) + (n_length > 66)](h, h_length, n, n_length);
 }
 
@@ -2592,7 +2592,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_last_byte_avx512,
-        // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
+        // For longer needles we use a Two-Way heuristic with a follow-up check in-between.
         (sz_find_t)sz_find_last_under66byte_avx512,
         (sz_find_t)sz_find_last_over66byte_avx512,
     };
@@ -2600,7 +2600,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
     return backends[
         // For very short strings brute-force SWAR makes sense.
         0 +
-        // For longer needles we use a Two-Way heurstic with a follow-up check in-between.
+        // For longer needles we use a Two-Way heuristic with a follow-up check in-between.
         (n_length > 1) + (n_length > 66)](h, h_length, n, n_length);
 }
 
