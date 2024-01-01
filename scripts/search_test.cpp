@@ -1,6 +1,8 @@
 #include <cassert>  // assertions
+#include <cstdio>   // `std::printf`
 #include <cstring>  // `std::memcpy`
 #include <iterator> // `std::distance`
+#include <vector>   // `std::vector`
 
 #define SZ_USE_X86_AVX2 0
 #define SZ_USE_X86_AVX512 0
@@ -12,7 +14,7 @@
 #include <stringzilla/stringzilla.hpp> // Contender
 
 namespace sz = ashvardanian::stringzilla;
-using namespace sz::literals;
+using sz::literals::operator""_sz;
 
 template <typename stl_matcher_, typename sz_matcher_>
 void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
@@ -159,6 +161,15 @@ int main(int, char const **) {
     assert(rsplits[0] == "");
     assert(rsplits[1] == "c");
     assert(rsplits[4] == "");
+
+    // Compare STL and StringZilla strings append functionality.
+    std::string stl_string;
+    sz::string sz_string;
+    for (std::size_t length = 1; length != 200; ++length) {
+        stl_string.push_back('a');
+        sz_string.push_back('a');
+        assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+    }
 
     return 0;
 }

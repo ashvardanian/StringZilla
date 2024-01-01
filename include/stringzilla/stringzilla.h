@@ -273,46 +273,39 @@ typedef struct sz_memory_allocator_t {
 } sz_memory_allocator_t;
 
 /**
+ *  @brief  The number of bytes a stack-allocated string can hold, including the NULL termination character.
+ */
+#define sz_string_stack_space (23)
+
+/**
  *  @brief  Tiny memory-owning string structure with a Small String Optimization (SSO).
- *          Uses similar layout to Folly, 32-bytes long, like modern GCC and Clang STL.
- *          In uninitialized
+ *          Differs in layout from Folly, Clang, GCC, and probably most other implementations.
+ *          It's designed to avoid any branches on read-only operations, and can store up
+ *          to 22 characters on stack, followed by the NULL-termination character.
+ *
+ *  Such string design makes it both effieicent and broadly compatible,
  */
 typedef union sz_string_t {
 
-    union on_stack {
-        sz_u8_t u8s[32];
-        char chars[32];
+    struct on_stack {
+        sz_ptr_t start;
+        char chars[sz_string_stack_space];
+        sz_u8_t length;
     } on_stack;
 
     struct on_heap {
         sz_ptr_t start;
+        /// @brief Number of bytes, that have been allocated for this string, equals to (capacity + 1).
+        sz_size_t space;
+        sz_size_t padding;
         sz_size_t length;
-        sz_size_t capacity;
-        sz_size_t tail;
     } on_heap;
+
+    sz_u64_t u64s[4];
 
 } sz_string_t;
 
-SZ_PUBLIC void sz_string_to_view(sz_string_t *string, sz_ptr_t *start, sz_size_t *length) {
-    //
-}
-
-SZ_PUBLIC void sz_string_init(sz_string_t *string) {
-    string->on_heap.start = NULL;
-    string->on_heap.length = 0;
-    string->on_heap.capacity = 0;
-    string->on_heap.tail = 31;
-}
-
-SZ_PUBLIC void sz_string_append() {}
-
-SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {}
-
-SZ_PUBLIC void sz_copy(sz_cptr_t, sz_size_t, sz_ptr_t) {}
-
-SZ_PUBLIC void sz_fill(sz_ptr_t, sz_size_t, sz_u8_t) {}
-
-#pragma region Basic Functionality
+#pragma region API
 
 typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
@@ -463,6 +456,112 @@ SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
  */
 SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
                            sz_random_generator_t generate, void *generator);
+
+/**
+ *  @brief  Similar to `memcpy`, copies contents of one string into another.
+ *          The behavior is undefined if the strings overlap.
+ *
+ *  @param target   String to copy into.
+ *  @param length   Number of bytes to copy.
+ *  @param source   String to copy from.
+ */
+SZ_PUBLIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/**
+ *  @brief  Similar to `memmove`, copies (moves) contents of one string into another.
+ *          Unlike `sz_copy`, allows overlapping strings as arguments.
+ *
+ *  @param target   String to copy into.
+ *  @param length   Number of bytes to copy.
+ *  @param source   String to copy from.
+ */
+SZ_PUBLIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/**
+ *  @brief  Similar to `memset`, fills a string with a given value.
+ *
+ *  @param target   String to fill.
+ *  @param length   Number of bytes to fill.
+ *  @param value    Value to fill with.
+ */
+SZ_PUBLIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
+/**
+ *  @brief  Initializes a string class instance to an empty value.
+ */
+SZ_PUBLIC void sz_string_init(sz_string_t *string);
+
+/**
+ *  @brief  Convenience function checking if the provided string is located on the stack,
+ *          as opposed to being allocated on the heap, or in the constant address range.
+ */
+SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
+
+/**
+ *  @brief  Upacks the opaque instance of a string class into its components.
+ *          Recommended to use only in read-only operations.
+ *
+ *  @param string       String to unpack.
+ *  @param start        Pointer to the start of the string.
+ *  @param length       Number of bytes in the string, before the NULL character.
+ *  @param space        Number of bytes allocated for the string (heap or stack), including the NULL character.
+ *  @param is_on_heap   Whether the string is allocated on the heap.
+ */
+SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space,
+                                sz_bool_t *is_on_heap);
+
+/**
+ *  @brief  Grows the string to a given capacity, that must be bigger than current capacity.
+ *          If the string is on the stack, it will be moved to the heap.
+ *
+ *  @param string       String to grow.
+ *  @param new_space    New capacity of the string, including the NULL character.
+ *  @param allocator    Memory allocator to use for the allocation.
+ *  @return             Whether the operation was successful. The only failures can come from the allocator.
+ */
+SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_memory_allocator_t *allocator);
+
+/**
+ *  @brief  Appends a given string to the end of the string class instance.
+ *
+ *  @param string       String to append to.
+ *  @param added_start  Start of the string to append.
+ *  @param added_length Number of bytes in the string to append, before the NULL character.
+ *  @param allocator    Memory allocator to use for the allocation.
+ *  @return             Whether the operation was successful. The only failures can come from the allocator.
+ */
+SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start, sz_size_t added_length,
+                                     sz_memory_allocator_t *allocator);
+
+/**
+ *  @brief  Removes a range from a string.
+ *
+ *  @param string       String to clean.
+ *  @param offset       Offset of the first byte to remove.
+ *  @param length       Number of bytes to remove.
+ */
+SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
+
+/**
+ *  @brief  Shrinks the string to fit the current length, if it's allocated on the heap.
+ *
+ *  @param string       String to shrink.
+ *  @param allocator    Memory allocator to use for the allocation.
+ *  @return             Whether the operation was successful. The only failures can come from the allocator.
+ */
+SZ_PUBLIC sz_bool_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator);
+
+/**
+ *  @brief  Frees the string, if it's allocated on the heap.
+ *          If the string is on the stack, this function does nothing.
+ */
+SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator);
 
 #pragma endregion
 
@@ -742,6 +841,15 @@ SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap
 
 SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
 
+/**
+ *  @brief  Select bits from either ::a or ::b depending on the value of ::mask bits.
+ *
+ *  Similar to `_mm_blend_epi16` intrinsic on x86.
+ *  Described in the "Bit Twiddling Hacks" by Sean Eron Anderson.
+ *  https://graphics.stanford.edu/~seander/bithacks.html#ConditionalSetOrClearBitsWithoutBranching
+ */
+SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { return a ^ ((a ^ b) & mask); }
+
 /*
  *  Efficiently computing the minimum and maximum of two or three values can be tricky.
  *  The simple branching baseline would be:
@@ -764,7 +872,9 @@ SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x 
  *      x & ~((x < y) - 1) + y & ((x < y) - 1)      // 6 unique operations
  */
 #define sz_min_of_two(x, y) (x < y ? x : y)
+#define sz_max_of_two(x, y) (x < y ? y : x)
 #define sz_min_of_three(x, y, z) sz_min_of_two(x, sz_min_of_two(y, z))
+#define sz_max_of_three(x, y, z) sz_max_of_two(x, sz_max_of_two(y, z))
 
 /**
  *  @brief Branchless minimum function for two integers.
@@ -805,6 +915,14 @@ SZ_INTERNAL sz_size_t sz_size_log2i(sz_size_t n) {
     return 31 - __builtin_clz(n);
 #endif
 #endif
+}
+
+/**
+ *  @brief  Compute the smallest power of two greater than or equal to ::n.
+ */
+SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t n) {
+    if (n == 0) return 0;
+    return 1ull << sz_size_log2i(n - 1);
 }
 
 /**
@@ -1790,6 +1908,123 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
         SZ_ASSERT(generator, "Expects a valid random generator");
         for (sz_cptr_t end = result + result_length; result != end; ++result)
             *result = alphabet[sz_u8_divide(generator(generator_user_data) & 0xFF, alphabet_size)];
+    }
+}
+
+#pragma endregion
+
+/*
+ *  Serial implementation of string class operations.
+ */
+#pragma region Serial Imeplementation for the String Class
+
+SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
+    // It doesn't matter if it's on stack or heap, the pointer location is the same.
+    return (sz_bool_t)((sz_cptr_t)string->on_stack.start + sizeof(sz_cptr_t) == (sz_cptr_t)string->on_stack.chars);
+}
+
+SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space,
+                                sz_bool_t *is_on_heap) {
+    sz_size_t is_small = (sz_cptr_t)string->on_stack.start + sizeof(sz_cptr_t) == (sz_cptr_t)string->on_stack.chars;
+    *start = string->on_heap.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
+    // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
+    *length = string->on_heap.length & (0x00000000000000FFull * is_small);
+    // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
+    *space = sz_u64_blend(sz_string_stack_space, string->on_heap.space, is_small - 1ull);
+    *is_on_heap = (sz_bool_t)!is_small;
+}
+
+SZ_PUBLIC void sz_string_init(sz_string_t *string) {
+    SZ_ASSERT(string, "String can't be NULL.");
+
+    // Only 8 + 1 + 1 need to be initialized.
+    string->on_stack.start = &string->on_stack.chars[0];
+    string->on_stack.chars[0] = 0;
+    string->on_stack.length = 0;
+}
+
+SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_memory_allocator_t *allocator) {
+
+    SZ_ASSERT(string, "String can't be NULL.");
+    SZ_ASSERT(new_space > sz_string_stack_space, "New space must be larger than current.");
+
+    sz_ptr_t string_start;
+    sz_size_t string_length;
+    sz_size_t string_space;
+    sz_bool_t string_is_on_heap;
+    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
+
+    sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
+    if (!new_start) return sz_false_k;
+
+    sz_copy(new_start, string_start, string_length);
+    string->on_heap.space = new_space;
+
+    // Deallocate the old string.
+    if (string_is_on_heap) allocator->free(string_start, string_space, allocator->handle);
+    return sz_true_k;
+}
+
+SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start, sz_size_t added_length,
+                                     sz_memory_allocator_t *allocator) {
+
+    SZ_ASSERT(string && allocator, "String and allocator can't be NULL.");
+    if (!added_length) return sz_true_k;
+
+    sz_ptr_t string_start;
+    sz_size_t string_length;
+    sz_size_t string_space;
+    sz_bool_t string_is_on_heap;
+    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
+
+    // If we are lucky, no memory allocations will be needed.
+    if (string_length + added_length + 1 < string_space) {
+        sz_copy(string_start + string_length, added_start, added_length);
+        string_start[string_length + added_length] = 0;
+        // Even if the string is on the stack, the `+=` won't affect the tail of the string.
+        string->on_heap.length += added_length;
+    }
+    // If we are not lucky, we need to allocate more memory.
+    else {
+        sz_size_t min_allocation_size = 64;
+        sz_size_t min_needed_space = sz_size_bit_ceil(string_length + added_length + 1);
+        sz_size_t new_space = sz_max_of_two(min_needed_space, min_allocation_size);
+        if (!sz_string_grow(string, new_space, allocator)) return sz_false_k;
+
+        // Copy into the new buffer.
+        string_start = string->on_heap.start;
+        sz_copy(string_start + string_length, added_start, added_length);
+        string_start[string_length + added_length] = 0;
+        string->on_heap.length += added_length;
+    }
+
+    return sz_true_k;
+}
+
+SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
+    if (sz_string_is_on_stack(string)) return;
+    allocator->free(string->on_heap.start, string->on_heap.space, allocator->handle);
+}
+
+SZ_PUBLIC void sz_assign_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source) {
+    sz_ptr_t end = target + length;
+    for (; target != end; ++target, ++source) *target = *source;
+}
+
+SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+    sz_ptr_t end = target + length;
+    // Dealing with short strings, a single sequential pass would be faster.
+    // If the size is larger than 2 words, then at least 1 of them will be aligned.
+    // But just one aligned word may not be worth SWAR.
+    if (length < sizeof(sz_u64_t) * 3)
+        for (; target != end; ++target) *target = value;
+
+    // In case of long strings, skip unaligned bytes, and then fill the rest in 64-bit chunks.
+    else {
+        sz_u64_t value64 = (sz_u64_t)(value) * 0x0101010101010101ull;
+        for (; (sz_size_t)target % sizeof(sz_u64_t) != 0; ++target) *target = value;
+        for (; target + sizeof(sz_u64_t) <= end; target += sizeof(sz_u64_t)) *(sz_u64_t *)target = value64;
+        for (; target != end; ++target) *target = value;
     }
 }
 
