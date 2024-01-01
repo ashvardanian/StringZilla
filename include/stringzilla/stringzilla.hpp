@@ -986,8 +986,113 @@ class string_view {
     }
 };
 
+/**
+ *  @brief  Memory-owning string class with a Small String Optimization.
+ *
+ *  @section Exceptions
+ *
+ *  Default constructor is `constexpr`. Move constructor and move assignment operator are `noexcept`.
+ *  Copy constructor and copy assignment operator are not! They may throw `std::bad_alloc` if the memory
+ *  allocation fails. Alternatively, if exceptions are disabled, they may call `std::terminate`.
+ */
+template <typename allocator_ = std::allocator<char>>
+class basic_string {
+    sz_string_t string_;
+
+    using alloc_t = sz_memory_allocator_t;
+
+    static sz_ptr_t call_allocate(sz_size_t n, void *allocator_state) noexcept {
+        return reinterpret_cast<allocator_ *>(allocator_state)->allocate(n);
+    }
+    static void call_free(sz_ptr_t ptr, sz_size_t n, void *allocator_state) noexcept {
+        return reinterpret_cast<allocator_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
+    }
+    template <typename allocator_callback>
+    static bool with_alloc(allocator_callback &&callback) noexcept {
+        allocator_ allocator;
+        sz_memory_allocator_t alloc;
+        alloc.allocate = &call_allocate;
+        alloc.free = &call_free;
+        alloc.handle = &allocator;
+        return callback(alloc) == sz_true_k;
+    }
+
+  public:
+    using allocator_type = allocator_;
+
+    constexpr basic_string() noexcept {
+        // Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
+        string_.on_stack.start = &string_.on_stack.chars[0];
+        string_.on_stack.chars[0] = 0;
+        string_.on_stack.length = 0;
+    }
+
+    ~basic_string() noexcept {
+        with_alloc([&](alloc_t &alloc) {
+            sz_string_free(&string_, &alloc);
+            return sz_true_k;
+        });
+    }
+
+    basic_string(basic_string &&other) noexcept : string_(other.string_) { sz_string_init(&other.string_); }
+    basic_string &operator=(basic_string &&other) noexcept {
+        string_ = other.string_;
+        sz_string_init(&other.string_);
+        return *this;
+    }
+
+    basic_string(basic_string const &other) noexcept(false) : basic_string() { assign(other); }
+    basic_string &operator=(basic_string const &other) noexcept(false) { return assign(other); }
+    basic_string(string_view view) noexcept(false) : basic_string() { assign(view); }
+    basic_string &operator=(string_view view) noexcept(false) { return assign(view); }
+
+    operator string_view() const noexcept {
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_size_t string_space;
+        sz_bool_t string_is_on_heap;
+        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+        return {string_start, string_length};
+    }
+
+    basic_string &assign(string_view other) noexcept(false) {
+        if (!try_assign(other)) throw std::bad_alloc();
+        return *this;
+    }
+
+    basic_string &append(string_view other) noexcept(false) {
+        if (!try_append(other)) throw std::bad_alloc();
+        return *this;
+    }
+
+    void push_back(char c) noexcept(false) {
+        if (!try_push_back(c)) throw std::bad_alloc();
+    }
+
+    void clear() noexcept { sz_string_erase(&string_, 0, sz_size_max); }
+
+    bool try_assign(string_view other) noexcept {
+        clear();
+        return try_append(other);
+    }
+
+    bool try_push_back(char c) noexcept {
+        return with_alloc([&](alloc_t &alloc) { return sz_string_append(&string_, &c, 1, &alloc); });
+    }
+
+    bool try_append(char const *str, std::size_t length) noexcept {
+        return with_alloc([&](alloc_t &alloc) { return sz_string_append(&string_, str, length, &alloc); });
+    }
+
+    bool try_append(string_view str) noexcept { return try_append(str.data(), str.size()); }
+};
+
+using string = basic_string<>;
+
+static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 pointers.");
+
 namespace literals {
-constexpr string_view operator""_sz(char const *str, size_t length) noexcept { return {str, length}; }
+constexpr string_view operator""_sz(char const *str, std::size_t length) noexcept { return {str, length}; }
 } // namespace literals
 
 template <>
