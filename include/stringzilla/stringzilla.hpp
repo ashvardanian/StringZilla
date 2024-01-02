@@ -1081,6 +1081,11 @@ class basic_string {
 
     void clear() noexcept { sz_string_erase(&string_, 0, sz_size_max); }
 
+    basic_string &erase(std::size_t pos = 0, std::size_t count = sz_size_max) noexcept {
+        sz_string_erase(&string_, pos, count);
+        return *this;
+    }
+
     bool try_assign(string_view other) noexcept {
         clear();
         return try_append(other);

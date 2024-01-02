@@ -40,14 +40,14 @@ __Limitations:__
 - Assumes ASCII or UTF-8 encoding (most content and systems).
 - Assumes 64-bit address space (most modern CPUs).
 
-__Technical insghts:__
+__Technical insights:__
 
 - Uses SWAR and SIMD to accelerate exact search for very short needles under 4 bytes.
 - Uses the Shift-Or Bitap algorithm for mid-length needles under 64 bytes.
-- Uses the Boyer-Moore-Horpool algorithm with Raita heuristic for longer needles.
+- Uses the Boyer-Moore-Horspool algorithm with Raita heuristic for longer needles.
 - Uses the Manber-Wu improvement of the Shift-Or algorithm for bounded fuzzy search.
 - Uses the two-row Wagner-Fisher algorithm for edit distance computation.
-- Uses the Needleman-Wunsh improvement for parameterized edit distance computation.
+- Uses the Needleman-Wunsch improvement for parameterized edit distance computation.
 - Uses the Karp-Rabin rolling hashes to produce binary fingerprints.
 - Uses Radix Sort to accelerate sorting of strings.
 
@@ -179,7 +179,7 @@ sz_sort(&array, &your_config);
 
 ### Basic Usage with C++ 11 and Newer
 
-There is a stable C++ 11 interface available in ther `ashvardanian::stringzilla` namespace.
+There is a stable C++ 11 interface available in the `ashvardanian::stringzilla` namespace.
 It comes with two STL-like classes: `string_view` and `string`.
 The first is a non-owning view of a string, and the second is a mutable string with a [Small String Optimization][faq-sso].
 
@@ -197,7 +197,7 @@ auto hash = std::hash<sz::string_view>(haystack); // Compatible with STL's `std:
 haystack.end() - haystack.begin() == haystack.size(); // Or `rbegin`, `rend`
 haystack.find_first_of(" \w\t") == 4; // Or `find_last_of`, `find_first_not_of`, `find_last_not_of`
 haystack.starts_with(needle) == true; // Or `ends_with`
-haystack.remove_prefix(needle.size()); // Why is this operation inplace?!
+haystack.remove_prefix(needle.size()); // Why is this operation in-place?!
 haystack.contains(needle) == true; // STL has this only from C++ 23 onwards
 haystack.compare(needle) == 1; // Or `haystack <=> needle` in C++ 20 and beyond
 ```
@@ -227,7 +227,9 @@ auto [before, match, after] = haystack.split(" : ");
 ### Ranges
 
 One of the most common use cases is to split a string into a collection of substrings.
-Which would often result in snippets like the one below.
+Which would often result in [StackOverflow lookups][so-split] and snippets like the one below.
+
+[so-split]: https://stackoverflow.com/questions/14265581/parse-split-a-string-in-c-using-string-delimiter-standard-c
 
 ```cpp
 std::vector<std::string> lines = your_split_by_substrings(haystack, "\r\n");
@@ -235,8 +237,10 @@ std::vector<std::string> words = your_split_by_character(lines, ' ');
 ```
 
 Those allocate memory for each string and the temporary vectors.
-Each of those can be orders of magnitude more expensive, than even serial `for`-loop over characters.
-To avoid those, StringZilla provides lazily-evaluated ranges, compatible with the Range-v3 library.
+Each allocation can be orders of magnitude more expensive, than even serial `for`-loop over characters.
+To avoid those, StringZilla provides lazily-evaluated ranges, compatible with the [Range-v3][range-v3] library.
+
+[range-v3]: https://github.com/ericniebler/range-v3
 
 ```cpp
 for (auto line : haystack.split_all("\r\n"))
@@ -246,7 +250,7 @@ for (auto line : haystack.split_all("\r\n"))
 
 Each of those is available in reverse order as well.
 It also allows interleaving matches, and controlling the inclusion/exclusion of the separator itself into the result.
-Debugging pointer offsets is not a pleasant excersise, so keep the following functions in mind.
+Debugging pointer offsets is not a pleasant exercise, so keep the following functions in mind.
 
 - `haystack.find_all(needle, interleaving)`
 - `haystack.rfind_all(needle, interleaving)`
@@ -256,7 +260,7 @@ Debugging pointer offsets is not a pleasant excersise, so keep the following fun
 ### Debugging
 
 For maximal performance, the library does not perform any bounds checking in Release builds.
-That behaviour is controllable for both C and C++ interfaces via the `STRINGZILLA_DEBUG` macro.
+That behavior is controllable for both C and C++ interfaces via the `STRINGZILLA_DEBUG` macro.
 
 [faq-sso]: https://cpp-optimizations.netlify.app/small_strings/
 
