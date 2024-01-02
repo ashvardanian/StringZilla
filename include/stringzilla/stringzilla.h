@@ -2001,6 +2001,39 @@ SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start,
     return sz_true_k;
 }
 
+SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
+
+    SZ_ASSERT(string, "String can't be NULL.");
+    if (!length) return;
+
+    sz_ptr_t string_start;
+    sz_size_t string_length;
+    sz_size_t string_space;
+    sz_bool_t string_is_on_heap;
+    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
+
+    // Normalize the offset, it can't be larger than the length.
+    if (offset >= string_length) return;
+
+    // We shouldn't normalize the length, to avoid overflowing on `offset + length >= string_length`,
+    // if receiving `length == sz_size_max`. After following expression the `length` will contain
+    // exactly the delta between original and final length of this `string`.
+    length = sz_min_of_two(length, string_length - offset);
+
+    // One common case is to clear the whole string.
+    // In that case `length` argument will be equal or greater than `length` member.
+    // Another common case, is removing the tail of the string.
+    // In both of those, regardless of the location of the string - stack or heap,
+    // the erasing is as easy as setting the length to the offset.
+    if (offset + length == string_length) {
+        // The `string->on_heap.length = offset` assignment would discard last characters
+        // of the on-the-stack string, but inplace subtraction would work.
+        string->on_heap.length -= length;
+        string_start[string_length - length] = 0;
+    }
+    else { sz_move(string_start + offset, string_start + offset + length, string_length - offset - length); }
+}
+
 SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
     if (sz_string_is_on_stack(string)) return;
     allocator->free(string->on_heap.start, string->on_heap.space, allocator->handle);
