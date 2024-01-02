@@ -641,12 +641,22 @@ class string_view {
     constexpr string_view &operator=(string_view const &other) noexcept { return assign(other); }
     string_view(std::nullptr_t) = delete;
 
-    constexpr string_view(std::string const &other) noexcept : string_view(other.data(), other.size()) {}
-    constexpr string_view(std::string_view const &other) noexcept : string_view(other.data(), other.size()) {}
-    constexpr string_view &operator=(std::string const &other) noexcept { return assign({other.data(), other.size()}); }
-    constexpr string_view &operator=(std::string_view const &other) noexcept {
+#if SZ_INCLUDE_STL_CONVERSIONS
+#if __cplusplus >= 202002L
+#define sz_constexpr_if20 constexpr
+#else
+#define sz_constexpr_if20 inline
+#endif
+
+    sz_constexpr_if20 string_view(std::string const &other) noexcept : string_view(other.data(), other.size()) {}
+    sz_constexpr_if20 string_view(std::string_view const &other) noexcept : string_view(other.data(), other.size()) {}
+    sz_constexpr_if20 string_view &operator=(std::string const &other) noexcept {
         return assign({other.data(), other.size()});
     }
+    sz_constexpr_if20 string_view &operator=(std::string_view const &other) noexcept {
+        return assign({other.data(), other.size()});
+    }
+#endif
 
     inline const_iterator begin() const noexcept { return const_iterator(start_); }
     inline const_iterator end() const noexcept { return const_iterator(start_ + length_); }
