@@ -2028,6 +2028,22 @@ SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) 
     }
 }
 
+SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_ptr_t end = target + length;
+    // Dealing with short strings, a single sequential pass would be faster.
+    // If the size is larger than 2 words, then at least 1 of them will be aligned.
+    // But just one aligned word may not be worth SWAR.
+#if !SZ_USE_MISALIGNED_LOADS
+    if (length >= sizeof(sz_u64_t) * 3)
+        for (; target + sizeof(sz_u64_t) <= end; target += sizeof(sz_u64_t), source += sizeof(sz_u64_t))
+            *(sz_u64_t *)target = *(sz_u64_t *)source;
+#endif
+
+    for (; target != end; ++target, ++source) *target = *source;
+}
+
+SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {}
+
 #pragma endregion
 
 /*
