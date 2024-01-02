@@ -2907,6 +2907,30 @@ SZ_PUBLIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #endif
 }
 
+SZ_PUBLIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+#if SZ_USE_X86_AVX512
+    sz_copy_avx512(target, source, length);
+#else
+    sz_copy_serial(target, source, length);
+#endif
+}
+
+SZ_PUBLIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+#if SZ_USE_X86_AVX512
+    sz_move_avx512(target, source, length);
+#else
+    sz_move_serial(target, source, length);
+#endif
+}
+
+SZ_PUBLIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+#if SZ_USE_X86_AVX512
+    sz_fill_avx512(target, length, value);
+#else
+    sz_fill_serial(target, length, value);
+#endif
+}
+
 SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
 #if SZ_USE_X86_AVX512
     return sz_order_avx512(a, a_length, b, b_length);
