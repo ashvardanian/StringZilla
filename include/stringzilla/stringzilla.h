@@ -2075,7 +2075,15 @@ SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     for (; target != end; ++target, ++source) *target = *source;
 }
 
-SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {}
+SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+#if SZ_USE_MISALIGNED_LOADS
+    for (auto t64 = (sz_u64_t *)target, s64 = (sz_u64_t *)source; (target - start) >= sizeof(sz_u64_t); ++t64, ++s64) {
+        *t64 = *s64;
+    }
+#else
+    sz_ptr_t end = target + length;
+    for (; target != end; ++target, ++source) *target = *source;
+}
 
 #pragma endregion
 
