@@ -283,7 +283,12 @@ typedef struct sz_memory_allocator_t {
  *          It's designed to avoid any branches on read-only operations, and can store up
  *          to 22 characters on stack, followed by the NULL-termination character.
  *
- *  Such string design makes it both effieicent and broadly compatible,
+ *  @section Changing Length
+ *
+ *  One nice thing about this design, is that you can, in many cases, change the length of the string
+ *  without any branches, invoking a `+=` or `-=` on the 64-bit `length` field. If the string is on heap,
+ *  the solution is obvious. If it's on stack, inplace decrement wouldn't affect the top bytes of the string,
+ *  only changing the last byte containing the length.
  */
 typedef union sz_string_t {
 
@@ -442,7 +447,7 @@ SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
  *          Similar to `text[i] = alphabet[rand() % cardinality]`.
  *
  *  The modulo operation is expensive, and should be avoided in performance-critical code.
- *  We avoid it using small lookup tables and replacing it with a multiplication and shifts, similar to libdivide.
+ *  We avoid it using small lookup tables and replacing it with a multiplication and shifts, similar to `libdivide`.
  *  Alternative algorithms would include:
  *      - Montgomery form: https://en.algorithmica.org/hpc/number-theory/montgomery/
  *      - Barret reduction: https://www.nayuki.io/page/barrett-reduction-algorithm
@@ -504,7 +509,7 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string);
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
 
 /**
- *  @brief  Upacks the opaque instance of a string class into its components.
+ *  @brief  Unpacks the opaque instance of a string class into its components.
  *          Recommended to use only in read-only operations.
  *
  *  @param string       String to unpack.
@@ -722,8 +727,8 @@ SZ_PUBLIC sz_size_t sz_levenshtein_avx512(sz_cptr_t a, sz_size_t a_length, sz_cp
 SZ_PUBLIC sz_size_t sz_alignment_score_memory_needed(sz_size_t a_length, sz_size_t b_length);
 
 /**
- *  @brief  Computes Levenshtein edit-distance between two strings, parameterized for gap and substitution penalties.
- *          Similar to the Needleman–Wunsch algorithm. Often used in bioinformatics and cheminformatics.
+ *  @brief  Computes Needleman–Wunsch alignment score for two string. Often used in bioinformatics and cheminformatics.
+ *          Similar to the Levenshtein edit-distance, parameterized for gap and substitution penalties.
  *
  *  This function is equivalent to the default Levenshtein distance implementation with the ::gap parameter set
  *  to one, and the ::subs matrix formed of all ones except for the main diagonal, which is zeros.
@@ -751,6 +756,55 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(sz_cptr_t a, sz_size_t a_length, 
 SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                                sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
                                                sz_memory_allocator_t const *alloc);
+
+#if 0
+/**
+ *  @brief  Computes the Karp-Rabin rolling hash of a string outputting a binary fingerprint.
+ *          Such fingerprints can be compared with Hamming or Jaccard (Tanimoto) distance for similarity.
+ */
+SZ_PUBLIC sz_ssize_t sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length,                  //
+                                            sz_ptr_t fingerprint, sz_size_t fingerprint_bytes, //
+                                            sz_size_t window_length) {
+    /// The size of our alphabet.
+    sz_u64_t base = 256;
+    /// Define a large prime number that we are going to use for modulo arithmetic.
+    /// Fun fact, the largest signed 32-bit signed integer (2147483647) is a prime number.
+    /// But we are going to use a larger one, to reduce collisions.
+    /// https://www.mersenneforum.org/showthread.php?t=3471
+    sz_u64_t prime = 18446744073709551557ull;
+    /// The `prime ^ window_length` value, that we are going to use for modulo arithmetic.
+    sz_u64_t prime_power = 1;
+    for (sz_size_t i = 0; i <= w; ++i) prime_power = (prime_power * base) % prime;
+    /// Here we stick to 32-bit hashes as 64-bit modulo arithmetic is expensive.
+    sz_u64_t hash = 0;
+    /// Compute the initial hash value for the first window.
+    sz_cptr_t text_end = text + length;
+    for (sz_cptr_t first_end = text + window_length; text < first_end; ++text) hash = (hash * base + *text) % prime;
+
+    /// In most cases the fingerprint length will be a power of two.
+    sz_bool_t fingerprint_length_is_power_of_two = fingerprint_bytes & (fingerprint_bytes - 1);
+    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint;
+    if (!fingerprint_length_is_power_of_two) {
+        /// Compute the hash value for every window, exporting into the fingerprint,
+        /// using the expensive modulo operation.
+        for (; text < text_end; ++text) {
+            hash = (base * (hash - *(text - window_length) * h) + *text) % prime;
+            sz_size_t byte_offset = (hash / 8) % fingerprint_bytes;
+            fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
+        }
+    }
+    else {
+        /// Compute the hash value for every window, exporting into the fingerprint,
+        /// using a cheap bitwise-and operation to determine the byte offset
+        for (; text < text_end; ++text) {
+            hash = (base * (hash - *(text - window_length) * h) + *text) % prime;
+            sz_size_t byte_offset = (hash / 8) & (fingerprint_bytes - 1);
+            fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
+        }
+    }
+}
+
+#endif
 
 #pragma endregion
 
@@ -1916,7 +1970,7 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
 /*
  *  Serial implementation of string class operations.
  */
-#pragma region Serial Imeplementation for the String Class
+#pragma region Serial Implementation for the String Class
 
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
     // It doesn't matter if it's on stack or heap, the pointer location is the same.
@@ -1978,7 +2032,7 @@ SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start,
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
 
     // If we are lucky, no memory allocations will be needed.
-    if (string_length + added_length + 1 < string_space) {
+    if (string_length + added_length + 1 <= string_space) {
         sz_copy(string_start + string_length, added_start, added_length);
         string_start[string_length + added_length] = 0;
         // Even if the string is on the stack, the `+=` won't affect the tail of the string.
@@ -2004,7 +2058,6 @@ SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start,
 SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
 
     SZ_ASSERT(string, "String can't be NULL.");
-    if (!length) return;
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -2013,7 +2066,7 @@ SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t 
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
 
     // Normalize the offset, it can't be larger than the length.
-    if (offset >= string_length) return;
+    offset = sz_min_of_two(offset, string_length);
 
     // We shouldn't normalize the length, to avoid overflowing on `offset + length >= string_length`,
     // if receiving `length == sz_size_max`. After following expression the `length` will contain
@@ -2076,13 +2129,28 @@ SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 }
 
 SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_MISALIGNED_LOADS
-    for (auto t64 = (sz_u64_t *)target, s64 = (sz_u64_t *)source; (target - start) >= sizeof(sz_u64_t); ++t64, ++s64) {
-        *t64 = *s64;
-    }
-#else
-    sz_ptr_t end = target + length;
-    for (; target != end; ++target, ++source) *target = *source;
+    // Implementing `memmove` is trickier, than `memcpy`, if the ranges overlap.
+    // Assume, we use `memmove` to remove a range of characters from a string.
+    // One other limitation is - we can't use words that are wider than the removed interval.
+    // - If we are removing a single byte, we can't use anything but 8-bit words.
+    // - If we are removing a two-byte substring, we can't use anything but 16-bit words.
+    // - If we are removing a four-byte substring, we can't use anything but 32-bit words...
+    //
+    // Existing implementations often have two passes, in normal and reversed order,
+    // depending on the relation of `target` and `source` addresses.
+    // https://student.cs.uwaterloo.ca/~cs350/common/os161-src-html/doxygen/html/memmove_8c_source.html
+    // https://marmota.medium.com/c-language-making-memmove-def8792bb8d5
+    //
+    // We can use the `memcpy` like left-to-right pass if we know that the `target` is before `source`.
+    // Or if we know that they don't intersect!
+    if (target < source || target >= source + length) return sz_copy(target, source, length);
+
+    // The regions overlap, and the target is after the source.
+    // Copy backwards to avoid overwriting data that has not been copied yet.
+    sz_ptr_t target_end = target;
+    target += length;
+    source += length;
+    for (; length--; --target, --source) *target = *source;
 }
 
 #pragma endregion

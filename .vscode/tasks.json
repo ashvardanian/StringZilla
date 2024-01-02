@@ -21,13 +21,13 @@
         },
         {
             "label": "Build for MacOS: Debug",
-            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ -DCMAKE_BUILD_TYPE=Debug -B ./build_debug && make -C ./build_debug",
+            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=Debug -B ./build_debug && make -C ./build_debug",
             "args": [],
             "type": "shell",
         },
         {
             "label": "Build for MacOS: Release",
-            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -DCMAKE_C_COMPILER=/opt/homebrew/opt/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo -B ./build_release && make -C ./build_release",
+            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo -B ./build_release && make -C ./build_release",
             "args": [],
             "type": "shell"
         }

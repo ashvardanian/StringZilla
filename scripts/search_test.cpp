@@ -163,11 +163,22 @@ int main(int, char const **) {
     assert(rsplits[4] == "");
 
     // Compare STL and StringZilla strings append functionality.
+    char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
     std::string stl_string;
     sz::string sz_string;
     for (std::size_t length = 1; length != 200; ++length) {
-        stl_string.push_back('a');
-        sz_string.push_back('a');
+        char c = alphabet_chars[std::rand() % 26];
+        stl_string.push_back(c);
+        sz_string.push_back(c);
+        assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+    }
+
+    // Compare STL and StringZilla strings erase functionality.
+    while (stl_string.length()) {
+        std::size_t offset_to_erase = std::rand() % stl_string.length();
+        std::size_t chars_to_erase = std::rand() % (stl_string.length() - offset_to_erase);
+        stl_string.erase(offset_to_erase, chars_to_erase);
+        sz_string.erase(offset_to_erase, chars_to_erase);
         assert(sz::string_view(stl_string) == sz::string_view(sz_string));
     }
 
