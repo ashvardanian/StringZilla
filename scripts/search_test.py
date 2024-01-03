@@ -8,7 +8,7 @@ import pytest
 
 import stringzilla as sz
 from stringzilla import Str, Strs
-from levenshtein_baseline import levenshtein
+from scripts.similarity_baseline import levenshtein
 
 
 def is_equal_strings(native_strings, big_strings):

@@ -306,10 +306,10 @@ inline tracked_binary_functions_t distance_functions() {
         });
     };
     return {
-        {"sz_levenshtein", wrap_sz_distance(sz_levenshtein_serial)},
+        {"sz_edit_distance", wrap_sz_distance(sz_edit_distance_serial)},
             {"sz_alignment_score", wrap_sz_scoring(sz_alignment_score_serial), true},
 #if SZ_USE_X86_AVX512
-            {"sz_levenshtein_avx512", wrap_sz_distance(sz_levenshtein_avx512), true},
+            {"sz_edit_distance_avx512", wrap_sz_distance(sz_edit_distance_avx512), true},
 #endif
     };
 }
