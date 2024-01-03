@@ -1,4 +1,4 @@
-# PyTest + Cppyy test of the `sz_levenshtein` utility function.
+# PyTest + Cppyy test of the `sz_edit_distance` utility function.
 #
 # This file is useful for quick iteration on the underlying C implementation,
 # validating the core algorithm on examples produced by the Python test below.
@@ -6,7 +6,7 @@ import pytest
 import cppyy
 import random
 
-from levenshtein_baseline import levenshtein
+from scripts.similarity_baseline import levenshtein
 
 cppyy.include("include/stringzilla/stringzilla.h")
 cppyy.cppdef(
@@ -22,7 +22,7 @@ sz_size_t native_implementation(std::string a, std::string b) {
     alloc.allocate = _sz_malloc;
     alloc.free = _sz_free;
     alloc.handle = NULL;
-    return sz_levenshtein_serial(a.data(), a.size(), b.data(), b.size(), 200, &alloc);
+    return sz_edit_distance_serial(a.data(), a.size(), b.data(), b.size(), 200, &alloc);
 }
 """
 )
@@ -34,8 +34,8 @@ sz_size_t native_implementation(std::string a, std::string b) {
 def test(alphabet: str, length: int):
     a = "".join(random.choice(alphabet) for _ in range(length))
     b = "".join(random.choice(alphabet) for _ in range(length))
-    sz_levenshtein = cppyy.gbl.native_implementation
+    sz_edit_distance = cppyy.gbl.native_implementation
 
     pythonic = levenshtein(a, b)
-    native = sz_levenshtein(a, b)
+    native = sz_edit_distance(a, b)
     assert pythonic == native

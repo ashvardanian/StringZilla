@@ -135,7 +135,7 @@
  *  This value will mostly affect the performance of the serial (SWAR) backend.
  */
 #ifndef SZ_USE_MISALIGNED_LOADS
-#define SZ_USE_MISALIGNED_LOADS (1)
+#define SZ_USE_MISALIGNED_LOADS (1) // true or false
 #endif
 
 /**
@@ -143,7 +143,16 @@
  *          like equality checks and relative order computing.
  */
 #ifndef SZ_CACHE_LINE_WIDTH
-#define SZ_CACHE_LINE_WIDTH (64)
+#define SZ_CACHE_LINE_WIDTH (64) // bytes
+#endif
+
+/**
+ *  @brief  Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops.
+ *          On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
+ *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
+ */
+#ifndef SZ_SWAR_THRESHOLD
+#define SZ_SWAR_THRESHOLD (24) // bytes
 #endif
 
 /*
@@ -319,10 +328,11 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 /**
  *  @brief  Computes the hash of a string.
  *
- *  @section    Why not use CRC32?
+ *  @section    Why not use vanilla CRC32?
  *
  *  Cyclic Redundancy Check 32 is one of the most commonly used hash functions in Computer Science.
  *  It has in-hardware support on both x86 and Arm, for both 8-bit, 16-bit, 32-bit, and 64-bit words.
+ *  The `0x1EDC6F41` polynomial is used in iSCSI, Btrfs, ext4, and the `0x04C11DB7` in SATA, Ethernet, Zlib, PNG.
  *  In case of Arm more than one polynomial is supported. It is, however, somewhat limiting for Big Data
  *  usecases, which often have to deal with more than 4 Billion strings, making collisions unavoidable.
  *  Moreover, the existing SIMD approaches are tricky, combining general purpose computations with
@@ -369,7 +379,7 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
  */
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length);
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
-SZ_PUBLIC sz_u64_t sz_hash_avx512(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u64_t sz_hash_avx512(sz_cptr_t text, sz_size_t length) {}
 SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length);
 
 /**
@@ -695,8 +705,8 @@ SZ_PUBLIC sz_cptr_t sz_find_last_bounded_regex(sz_cptr_t haystack, sz_size_t h_l
 #pragma region String Similarity Measures
 
 /**
- *  @brief  Computes Levenshtein edit-distance between two strings using the Wagner-Fisher algorithm.
- *          Similar to the Needleman-Wunsch algorithm. Often used in fuzzy string matching.
+ *  @brief  Computes the Levenshtein edit-distance between two strings using the Wagner-Fisher algorithm.
+ *          Similar to the Needleman-Wunsch alignment algorithm. Often used in fuzzy string matching.
  *
  *  @param a        First string to compare.
  *  @param a_length Number of bytes in the first string.
@@ -706,25 +716,16 @@ SZ_PUBLIC sz_cptr_t sz_find_last_bounded_regex(sz_cptr_t haystack, sz_size_t h_l
  *  @param bound    Upper bound on the distance, that allows us to exit early.
  *  @return         Unsigned edit distance.
  */
-SZ_PUBLIC sz_size_t sz_levenshtein(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+SZ_PUBLIC sz_size_t sz_edit_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                    sz_size_t bound, sz_memory_allocator_t const *alloc);
 
-/** @copydoc sz_levenshtein */
-SZ_PUBLIC sz_size_t sz_levenshtein_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+/** @copydoc sz_edit_distance */
+SZ_PUBLIC sz_size_t sz_edit_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                           sz_size_t bound, sz_memory_allocator_t const *alloc);
 
-/** @copydoc sz_levenshtein */
-SZ_PUBLIC sz_size_t sz_levenshtein_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                          sz_size_t bound, sz_memory_allocator_t const *alloc);
-
-/**
- *  @brief  Estimates the amount of temporary memory required to efficiently compute the weighted edit distance.
- *
- *  @param a_length Number of bytes in the first string.
- *  @param b_length Number of bytes in the second string.
- *  @return         Number of bytes to allocate for temporary memory.
- */
-SZ_PUBLIC sz_size_t sz_alignment_score_memory_needed(sz_size_t a_length, sz_size_t b_length);
+/** @copydoc sz_edit_distance */
+SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                            sz_size_t bound, sz_memory_allocator_t const *alloc) {}
 
 /**
  *  @brief  Computes Needleman–Wunsch alignment score for two string. Often used in bioinformatics and cheminformatics.
@@ -1660,16 +1661,16 @@ SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
         (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
 }
 
-SZ_INTERNAL sz_size_t _sz_levenshtein_serial_upto256bytes( //
-    sz_cptr_t a, sz_size_t a_length,                       //
-    sz_cptr_t b, sz_size_t b_length,                       //
+SZ_INTERNAL sz_size_t _sz_edit_distance_serial_upto256bytes( //
+    sz_cptr_t a, sz_size_t a_length,                         //
+    sz_cptr_t b, sz_size_t b_length,                         //
     sz_size_t bound, sz_memory_allocator_t const *alloc) {
 
     // When dealing with short strings, we won't need to allocate memory on heap,
     // as everything would easily fit on the stack. Let's just make sure that
     // we use the amount proportional to the number of elements in the shorter string,
     // not the larger.
-    if (b_length > a_length) return _sz_levenshtein_serial_upto256bytes(b, b_length, a, a_length, bound, alloc);
+    if (b_length > a_length) return _sz_edit_distance_serial_upto256bytes(b, b_length, a, a_length, bound, alloc);
 
     // If the strings are under 256-bytes long, the distance can never exceed 256,
     // and will fit into `sz_u8_t` reducing our memory requirements.
@@ -1711,14 +1712,14 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_serial_upto256bytes( //
     return previous_distances[b_length] < bound ? previous_distances[b_length] : bound;
 }
 
-SZ_INTERNAL sz_size_t _sz_levenshtein_serial_over256bytes( //
-    sz_cptr_t a, sz_size_t a_length,                       //
-    sz_cptr_t b, sz_size_t b_length,                       //
+SZ_INTERNAL sz_size_t _sz_edit_distance_serial_over256bytes( //
+    sz_cptr_t a, sz_size_t a_length,                         //
+    sz_cptr_t b, sz_size_t b_length,                         //
     sz_size_t bound, sz_memory_allocator_t const *alloc) {
 
     // Let's make sure that we use the amount proportional to the number of elements in the shorter string,
     // not the larger.
-    if (b_length > a_length) return _sz_levenshtein_serial_over256bytes(b, b_length, a, a_length, bound, alloc);
+    if (b_length > a_length) return _sz_edit_distance_serial_over256bytes(b, b_length, a, a_length, bound, alloc);
 
     sz_size_t buffer_length = (b_length + 1) * 2;
     sz_ptr_t buffer = alloc->allocate(buffer_length, alloc->handle);
@@ -1760,9 +1761,9 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_serial_over256bytes( //
     return result;
 }
 
-SZ_PUBLIC sz_size_t sz_levenshtein_serial( //
-    sz_cptr_t a, sz_size_t a_length,       //
-    sz_cptr_t b, sz_size_t b_length,       //
+SZ_PUBLIC sz_size_t sz_edit_distance_serial( //
+    sz_cptr_t a, sz_size_t a_length,         //
+    sz_cptr_t b, sz_size_t b_length,         //
     sz_size_t bound, sz_memory_allocator_t const *alloc) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one.
@@ -1786,9 +1787,9 @@ SZ_PUBLIC sz_size_t sz_levenshtein_serial( //
 
     // Depending on the length, we may be able to use the optimized implementation.
     if (a_length < 256 && b_length < 256)
-        return _sz_levenshtein_serial_upto256bytes(a, a_length, b, b_length, bound, alloc);
+        return _sz_edit_distance_serial_upto256bytes(a, a_length, b, b_length, bound, alloc);
     else
-        return _sz_levenshtein_serial_over256bytes(a, a_length, b, b_length, bound, alloc);
+        return _sz_edit_distance_serial_over256bytes(a, a_length, b, b_length, bound, alloc);
 }
 
 SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
@@ -2075,9 +2076,11 @@ SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t 
     // exactly the delta between original and final length of this `string`.
     length = sz_min_of_two(length, string_length - offset);
 
-    // One common case is to clear the whole string.
-    // In that case `length` argument will be equal or greater than `length` member.
-    // Another common case, is removing the tail of the string.
+    // There are 2 common cases, that wouldn't even require a `memmove`:
+    //      1.  Erasing the entire contents of the string.
+    //          In that case `length` argument will be equal or greater than `length` member.
+    //      2.  Removing the tail of the string with something like `string.pop_back()` in C++.
+    //
     // In both of those, regardless of the location of the string - stack or heap,
     // the erasing is as easy as setting the length to the offset.
     // In every other case, we must `memmove` the tail of the string to the left.
@@ -2095,65 +2098,54 @@ SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *alloca
     allocator->free(string->on_heap.start, string->on_heap.space, allocator->handle);
 }
 
-SZ_PUBLIC void sz_assign_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source) {
-    sz_ptr_t end = target + length;
-    for (; target != end; ++target, ++source) *target = *source;
-}
-
 SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_ptr_t end = target + length;
     // Dealing with short strings, a single sequential pass would be faster.
     // If the size is larger than 2 words, then at least 1 of them will be aligned.
     // But just one aligned word may not be worth SWAR.
-    if (length < sizeof(sz_u64_t) * 3)
-        for (; target != end; ++target) *target = value;
+    if (length < SZ_SWAR_THRESHOLD)
+        while (target != end) *(target++) = value;
 
     // In case of long strings, skip unaligned bytes, and then fill the rest in 64-bit chunks.
     else {
         sz_u64_t value64 = (sz_u64_t)(value) * 0x0101010101010101ull;
-        for (; (sz_size_t)target % sizeof(sz_u64_t) != 0; ++target) *target = value;
-        for (; target + sizeof(sz_u64_t) <= end; target += sizeof(sz_u64_t)) *(sz_u64_t *)target = value64;
-        for (; target != end; ++target) *target = value;
+        while ((sz_size_t)target & 7ull) *(target++) = value;
+        while (target + 8 <= end) *(sz_u64_t *)target = value64, target += 8;
+        while (target != end) *(target++) = value;
     }
 }
 
 SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    sz_ptr_t end = target + length;
-    // Dealing with short strings, a single sequential pass would be faster.
-    // If the size is larger than 2 words, then at least 1 of them will be aligned.
-    // But just one aligned word may not be worth SWAR.
 #if SZ_USE_MISALIGNED_LOADS
-    if (length >= sizeof(sz_u64_t) * 3)
-        for (; target + sizeof(sz_u64_t) <= end; target += sizeof(sz_u64_t), source += sizeof(sz_u64_t))
-            *(sz_u64_t *)target = *(sz_u64_t *)source;
+    while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, length -= 8;
 #endif
-
-    for (; target != end; ++target, ++source) *target = *source;
+    while (length--) *(target++) = *(source++);
 }
 
 SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    // Implementing `memmove` is trickier, than `memcpy`, if the ranges overlap.
-    // Assume, we use `memmove` to remove a range of characters from a string.
-    // One other limitation is - we can't use words that are wider than the removed interval.
-    // - If we are removing a single byte, we can't use anything but 8-bit words.
-    // - If we are removing a two-byte substring, we can't use anything but 16-bit words.
-    // - If we are removing a four-byte substring, we can't use anything but 32-bit words...
-    //
+    // Implementing `memmove` is trickier, than `memcpy`, as the ranges may overlap.
     // Existing implementations often have two passes, in normal and reversed order,
     // depending on the relation of `target` and `source` addresses.
     // https://student.cs.uwaterloo.ca/~cs350/common/os161-src-html/doxygen/html/memmove_8c_source.html
     // https://marmota.medium.com/c-language-making-memmove-def8792bb8d5
     //
     // We can use the `memcpy` like left-to-right pass if we know that the `target` is before `source`.
-    // Or if we know that they don't intersect!
-    if (target < source || target >= source + length) return sz_copy(target, source, length);
-
-    // The regions overlap, and the target is after the source.
-    // Copy backwards to avoid overwriting data that has not been copied yet.
-    sz_ptr_t target_end = target;
-    target += length;
-    source += length;
-    for (; length--; --target, --source) *target = *source;
+    // Or if we know that they don't intersect! In that case the traversal order is irrelevant,
+    // but older CPUs may predict and fetch forward-passes better.
+    if (target < source || target >= source + length) {
+#if SZ_USE_MISALIGNED_LOADS
+        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, length -= 8;
+#endif
+        while (length--) *(target++) = *(source++);
+    }
+    else {
+        // Jump to the end and walk backwards.
+        target += length, source += length;
+#if SZ_USE_MISALIGNED_LOADS
+        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target -= 8, source -= 8, length -= 8;
+#endif
+        while (length--) *(target--) = *(source--);
+    }
 }
 
 #pragma endregion
@@ -2545,36 +2537,31 @@ sz_find_byte_avx512_cycle:
  */
 SZ_INTERNAL sz_cptr_t sz_find_2byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    sz_u64_vec_t n_vec;
-    n_vec.u64 = 0;
-    n_vec.u8s[0] = n[0];
-    n_vec.u8s[1] = n[1];
-
     // A simpler approach would ahve been to use two separate registers for
     // different characters of the needle, but that would use more registers.
-    sz_u512_vec_t h0_vec, h1_vec, n_vec;
     __mmask64 mask;
     __mmask32 matches0, matches1;
-    n_vec.zmm = _mm512_set1_epi16(n_vec.u16s[0]);
+    sz_u512_vec_t h0_vec, h1_vec, n_vec;
+    n_vec.zmm = _mm512_set1_epi16(sz_u16_load(n).u16);
 
 sz_find_2byte_avx512_cycle:
     if (h_length < 2) { return NULL; }
     else if (h_length < 66) {
         mask = sz_u64_mask_until(h_length);
-        h0_vec = _mm512_maskz_loadu_epi8(mask, h);
-        h1_vec = _mm512_maskz_loadu_epi8(mask, h + 1);
-        matches0 = _mm512_mask_cmpeq_epi16_mask(mask, h0_vec, n_vec);
-        matches1 = _mm512_mask_cmpeq_epi16_mask(mask, h1_vec, n_vec);
+        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + 1);
+        matches0 = _mm512_mask_cmpeq_epi16_mask(mask, h0_vec.zmm, n_vec.zmm);
+        matches1 = _mm512_mask_cmpeq_epi16_mask(mask, h1_vec.zmm, n_vec.zmm);
         if (matches0 | matches1)
             return h + sz_u64_ctz(_pdep_u64(matches0, 0x5555555555555555ull) | //
                                   _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
         return NULL;
     }
     else {
-        h0_vec = _mm512_loadu_epi8(h);
-        h1_vec = _mm512_loadu_epi8(h + 1);
-        matches0 = _mm512_cmpeq_epi16_mask(h0_vec, n_vec);
-        matches1 = _mm512_cmpeq_epi16_mask(h1_vec, n_vec);
+        h0_vec.zmm = _mm512_loadu_epi8(h);
+        h1_vec.zmm = _mm512_loadu_epi8(h + 1);
+        matches0 = _mm512_cmpeq_epi16_mask(h0_vec.zmm, n_vec.zmm);
+        matches1 = _mm512_cmpeq_epi16_mask(h1_vec.zmm, n_vec.zmm);
         // https://lemire.me/blog/2018/01/08/how-fast-can-you-bit-interleave-32-bit-integers/
         if (matches0 | matches1)
             return h + sz_u64_ctz(_pdep_u64(matches0, 0x5555555555555555ull) | //
@@ -2589,29 +2576,23 @@ sz_find_2byte_avx512_cycle:
  */
 SZ_INTERNAL sz_cptr_t sz_find_4byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    sz_u64_vec_t n_vec;
-    n_vec.u64 = 0;
-    n_vec.u8s[0] = n[0];
-    n_vec.u8s[1] = n[1];
-    n_vec.u8s[2] = n[2];
-    n_vec.u8s[3] = n[3];
-
-    sz_u512_vec_t h0_vec, h1_vec, h2_vec, h3_vec, n_vec = _mm512_set1_epi32(n_vec.u32s[0]);
     __mmask64 mask;
     __mmask16 matches0, matches1, matches2, matches3;
+    sz_u512_vec_t h0_vec, h1_vec, h2_vec, h3_vec, n_vec;
+    n_vec.zmm = _mm512_set1_epi32(sz_u32_load(n).u32);
 
 sz_find_4byte_avx512_cycle:
     if (h_length < 4) { return NULL; }
     else if (h_length < 68) {
         mask = sz_u64_mask_until(h_length);
-        h0_vec = _mm512_maskz_loadu_epi8(mask, h);
-        h1_vec = _mm512_maskz_loadu_epi8(mask, h + 1);
-        h2_vec = _mm512_maskz_loadu_epi8(mask, h + 2);
-        h3_vec = _mm512_maskz_loadu_epi8(mask, h + 3);
-        matches0 = _mm512_mask_cmpeq_epi32_mask(mask, h0_vec, n_vec);
-        matches1 = _mm512_mask_cmpeq_epi32_mask(mask, h1_vec, n_vec);
-        matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec, n_vec);
-        matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec, n_vec);
+        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + 1);
+        h2_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + 2);
+        h3_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + 3);
+        matches0 = _mm512_mask_cmpeq_epi32_mask(mask, h0_vec.zmm, n_vec.zmm);
+        matches1 = _mm512_mask_cmpeq_epi32_mask(mask, h1_vec.zmm, n_vec.zmm);
+        matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec.zmm, n_vec.zmm);
+        matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec.zmm, n_vec.zmm);
         if (matches0 | matches1 | matches2 | matches3)
             return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111ull) | //
                                   _pdep_u64(matches1, 0x2222222222222222ull) | //
@@ -2620,14 +2601,14 @@ sz_find_4byte_avx512_cycle:
         return NULL;
     }
     else {
-        h0_vec = _mm512_loadu_epi8(h);
-        h1_vec = _mm512_loadu_epi8(h + 1);
-        h2_vec = _mm512_loadu_epi8(h + 2);
-        h3_vec = _mm512_loadu_epi8(h + 3);
-        matches0 = _mm512_cmpeq_epi32_mask(h0_vec, n_vec);
-        matches1 = _mm512_cmpeq_epi32_mask(h1_vec, n_vec);
-        matches2 = _mm512_cmpeq_epi32_mask(h2_vec, n_vec);
-        matches3 = _mm512_cmpeq_epi32_mask(h3_vec, n_vec);
+        h0_vec.zmm = _mm512_loadu_epi8(h);
+        h1_vec.zmm = _mm512_loadu_epi8(h + 1);
+        h2_vec.zmm = _mm512_loadu_epi8(h + 2);
+        h3_vec.zmm = _mm512_loadu_epi8(h + 3);
+        matches0 = _mm512_cmpeq_epi32_mask(h0_vec.zmm, n_vec.zmm);
+        matches1 = _mm512_cmpeq_epi32_mask(h1_vec.zmm, n_vec.zmm);
+        matches2 = _mm512_cmpeq_epi32_mask(h2_vec.zmm, n_vec.zmm);
+        matches3 = _mm512_cmpeq_epi32_mask(h3_vec.zmm, n_vec.zmm);
         if (matches0 | matches1 | matches2 | matches3)
             return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
                                   _pdep_u64(matches1, 0x2222222222222222) | //
@@ -2643,17 +2624,18 @@ sz_find_4byte_avx512_cycle:
  */
 SZ_INTERNAL sz_cptr_t sz_find_3byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    sz_u64_vec_t n_vec;
-    n_vec.u64 = 0;
-    n_vec.u8s[0] = n[0];
-    n_vec.u8s[1] = n[1];
-    n_vec.u8s[2] = n[2];
-
     // A simpler approach would ahve been to use two separate registers for
     // different characters of the needle, but that would use more registers.
-    __m512i h0_vec, h1_vec, h2_vec, h3_vec, n_vec = _mm512_set1_epi32(n_vec.u32s[0]);
     __mmask64 mask;
     __mmask16 matches0, matches1, matches2, matches3;
+    sz_u512_vec_t h0_vec, h1_vec, h2_vec, h3_vec, n_vec;
+
+    sz_u64_vec_t n64_vec;
+    n64_vec.u8s[0] = n[0];
+    n64_vec.u8s[1] = n[1];
+    n64_vec.u8s[2] = n[2];
+    n64_vec.u8s[3] = 0;
+    n_vec.zmm = _mm512_set1_epi32(n64_vec.u32s[0]);
 
 sz_find_3byte_avx512_cycle:
     if (h_length < 3) { return NULL; }
@@ -2661,14 +2643,14 @@ sz_find_3byte_avx512_cycle:
         mask = sz_u64_mask_until(h_length);
         // This implementation is more complex than the `sz_find_4byte_avx512`,
         // as we are going to match only 3 bytes within each 4-byte word.
-        h0_vec = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h);
-        h1_vec = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h + 1);
-        h2_vec = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h + 2);
-        h3_vec = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h + 3);
-        matches0 = _mm512_mask_cmpeq_epi32_mask(mask, h0_vec, n_vec);
-        matches1 = _mm512_mask_cmpeq_epi32_mask(mask, h1_vec, n_vec);
-        matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec, n_vec);
-        matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec, n_vec);
+        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h);
+        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h + 1);
+        h2_vec.zmm = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h + 2);
+        h3_vec.zmm = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h + 3);
+        matches0 = _mm512_mask_cmpeq_epi32_mask(mask, h0_vec.zmm, n_vec.zmm);
+        matches1 = _mm512_mask_cmpeq_epi32_mask(mask, h1_vec.zmm, n_vec.zmm);
+        matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec.zmm, n_vec.zmm);
+        matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec.zmm, n_vec.zmm);
         if (matches0 | matches1 | matches2 | matches3)
             return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
                                   _pdep_u64(matches1, 0x2222222222222222) | //
@@ -2677,14 +2659,14 @@ sz_find_3byte_avx512_cycle:
         return NULL;
     }
     else {
-        h0_vec = _mm512_maskz_loadu_epi8(0x7777777777777777, h);
-        h1_vec = _mm512_maskz_loadu_epi8(0x7777777777777777, h + 1);
-        h2_vec = _mm512_maskz_loadu_epi8(0x7777777777777777, h + 2);
-        h3_vec = _mm512_maskz_loadu_epi8(0x7777777777777777, h + 3);
-        matches0 = _mm512_cmpeq_epi32_mask(h0_vec, n_vec);
-        matches1 = _mm512_cmpeq_epi32_mask(h1_vec, n_vec);
-        matches2 = _mm512_cmpeq_epi32_mask(h2_vec, n_vec);
-        matches3 = _mm512_cmpeq_epi32_mask(h3_vec, n_vec);
+        h0_vec.zmm = _mm512_maskz_loadu_epi8(0x7777777777777777, h);
+        h1_vec.zmm = _mm512_maskz_loadu_epi8(0x7777777777777777, h + 1);
+        h2_vec.zmm = _mm512_maskz_loadu_epi8(0x7777777777777777, h + 2);
+        h3_vec.zmm = _mm512_maskz_loadu_epi8(0x7777777777777777, h + 3);
+        matches0 = _mm512_cmpeq_epi32_mask(h0_vec.zmm, n_vec.zmm);
+        matches1 = _mm512_cmpeq_epi32_mask(h1_vec.zmm, n_vec.zmm);
+        matches2 = _mm512_cmpeq_epi32_mask(h2_vec.zmm, n_vec.zmm);
+        matches3 = _mm512_cmpeq_epi32_mask(h3_vec.zmm, n_vec.zmm);
         if (matches0 | matches1 | matches2 | matches3)
             return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
                                   _pdep_u64(matches1, 0x2222222222222222) | //
@@ -2700,8 +2682,8 @@ sz_find_3byte_avx512_cycle:
  */
 SZ_INTERNAL sz_cptr_t sz_find_under66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
-    __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
     __mmask64 matches;
+    __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
     sz_u512_vec_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
@@ -3074,11 +3056,11 @@ SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
     sz_toascii_serial(text, length, result);
 }
 
-SZ_PUBLIC sz_size_t sz_levenshtein(  //
-    sz_cptr_t a, sz_size_t a_length, //
-    sz_cptr_t b, sz_size_t b_length, //
+SZ_PUBLIC sz_size_t sz_edit_distance( //
+    sz_cptr_t a, sz_size_t a_length,  //
+    sz_cptr_t b, sz_size_t b_length,  //
     sz_size_t bound, sz_memory_allocator_t const *alloc) {
-    return sz_levenshtein_serial(a, a_length, b, b_length, bound, alloc);
+    return sz_edit_distance_serial(a, a_length, b, b_length, bound, alloc);
 }
 
 SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,

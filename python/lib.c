@@ -1096,7 +1096,7 @@ static PyObject *Str_levenshtein(PyObject *self, PyObject *args, PyObject *kwarg
     reusing_allocator.user_data = &temporary_memory;
 
     sz_size_t distance =
-        sz_levenshtein(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &reusing_allocator);
+        sz_edit_distance(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &reusing_allocator);
 
     return PyLong_FromLong(distance);
 }
