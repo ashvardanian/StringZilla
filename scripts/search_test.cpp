@@ -176,7 +176,7 @@ int main(int, char const **) {
     // Compare STL and StringZilla strings erase functionality.
     while (stl_string.length()) {
         std::size_t offset_to_erase = std::rand() % stl_string.length();
-        std::size_t chars_to_erase = std::rand() % (stl_string.length() - offset_to_erase);
+        std::size_t chars_to_erase = std::rand() % (stl_string.length() - offset_to_erase) + 1;
         stl_string.erase(offset_to_erase, chars_to_erase);
         sz_string.erase(offset_to_erase, chars_to_erase);
         assert(sz::string_view(stl_string) == sz::string_view(sz_string));

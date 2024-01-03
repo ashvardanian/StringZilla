@@ -294,16 +294,16 @@ typedef union sz_string_t {
 
     struct on_stack {
         sz_ptr_t start;
-        char chars[sz_string_stack_space];
         sz_u8_t length;
+        char chars[sz_string_stack_space];
     } on_stack;
 
     struct on_heap {
         sz_ptr_t start;
+        sz_size_t length;
         /// @brief Number of bytes, that have been allocated for this string, equals to (capacity + 1).
         sz_size_t space;
         sz_size_t padding;
-        sz_size_t length;
     } on_heap;
 
     sz_u64_t u64s[4];
@@ -1974,15 +1974,15 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
 
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
     // It doesn't matter if it's on stack or heap, the pointer location is the same.
-    return (sz_bool_t)((sz_cptr_t)string->on_stack.start + sizeof(sz_cptr_t) == (sz_cptr_t)string->on_stack.chars);
+    return (sz_bool_t)((sz_cptr_t)string->on_stack.start == (sz_cptr_t)string->on_stack.chars);
 }
 
 SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space,
                                 sz_bool_t *is_on_heap) {
-    sz_size_t is_small = (sz_cptr_t)string->on_stack.start + sizeof(sz_cptr_t) == (sz_cptr_t)string->on_stack.chars;
+    sz_size_t is_small = (sz_cptr_t)string->on_stack.start == (sz_cptr_t)&string->on_stack.chars[0];
     *start = string->on_heap.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
-    *length = string->on_heap.length & (0x00000000000000FFull * is_small);
+    *length = (string->on_heap.length << (56ull * is_small)) >> (56ull * is_small);
     // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
     *space = sz_u64_blend(sz_string_stack_space, string->on_heap.space, is_small - 1ull);
     *is_on_heap = (sz_bool_t)!is_small;
@@ -2012,7 +2012,9 @@ SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_
     if (!new_start) return sz_false_k;
 
     sz_copy(new_start, string_start, string_length);
+    string->on_heap.start = new_start;
     string->on_heap.space = new_space;
+    string->on_heap.padding = 0;
 
     // Deallocate the old string.
     if (string_is_on_heap) allocator->free(string_start, string_space, allocator->handle);
@@ -2040,16 +2042,16 @@ SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start,
     }
     // If we are not lucky, we need to allocate more memory.
     else {
-        sz_size_t min_allocation_size = 64;
+        sz_size_t nex_planned_size = sz_max_of_two(64ull, string_space * 2ull);
         sz_size_t min_needed_space = sz_size_bit_ceil(string_length + added_length + 1);
-        sz_size_t new_space = sz_max_of_two(min_needed_space, min_allocation_size);
+        sz_size_t new_space = sz_max_of_two(min_needed_space, nex_planned_size);
         if (!sz_string_grow(string, new_space, allocator)) return sz_false_k;
 
         // Copy into the new buffer.
         string_start = string->on_heap.start;
         sz_copy(string_start + string_length, added_start, added_length);
         string_start[string_length + added_length] = 0;
-        string->on_heap.length += added_length;
+        string->on_heap.length = string_length + added_length;
     }
 
     return sz_true_k;
@@ -2078,13 +2080,14 @@ SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t 
     // Another common case, is removing the tail of the string.
     // In both of those, regardless of the location of the string - stack or heap,
     // the erasing is as easy as setting the length to the offset.
-    if (offset + length == string_length) {
-        // The `string->on_heap.length = offset` assignment would discard last characters
-        // of the on-the-stack string, but inplace subtraction would work.
-        string->on_heap.length -= length;
-        string_start[string_length - length] = 0;
-    }
-    else { sz_move(string_start + offset, string_start + offset + length, string_length - offset - length); }
+    // In every other case, we must `memmove` the tail of the string to the left.
+    if (offset + length < string_length)
+        sz_move(string_start + offset, string_start + offset + length, string_length - offset - length);
+
+    // The `string->on_heap.length = offset` assignment would discard last characters
+    // of the on-the-stack string, but inplace subtraction would work.
+    string->on_heap.length -= length;
+    string_start[string_length - length] = 0;
 }
 
 SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
@@ -2119,7 +2122,7 @@ SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     // Dealing with short strings, a single sequential pass would be faster.
     // If the size is larger than 2 words, then at least 1 of them will be aligned.
     // But just one aligned word may not be worth SWAR.
-#if !SZ_USE_MISALIGNED_LOADS
+#if SZ_USE_MISALIGNED_LOADS
     if (length >= sizeof(sz_u64_t) * 3)
         for (; target + sizeof(sz_u64_t) <= end; target += sizeof(sz_u64_t), source += sizeof(sz_u64_t))
             *(sz_u64_t *)target = *(sz_u64_t *)source;
