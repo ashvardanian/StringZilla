@@ -31,8 +31,8 @@ __Who is this for?__
 - For data-engineers often memory-mapping and parsing large datasets, like the [CommonCrawl](https://commoncrawl.org/).
 - For Python, C, or C++ software engineers looking for faster strings for their apps.
 - For Bioinformaticians and Search Engineers measuring edit distances and fuzzy-matching.
-- For students learning practical applications of SIMD and SWAR and how libraries like LibC are implemented.
 - For hardware designers, needing a SWAR baseline for strings-processing functionality.
+- For students studying SIMD/SWAR applications to non-data-parallel operations.
 
 __Limitations:__
 
@@ -46,7 +46,7 @@ __Technical insights:__
 - Uses the Shift-Or Bitap algorithm for mid-length needles under 64 bytes.
 - Uses the Boyer-Moore-Horspool algorithm with Raita heuristic for longer needles.
 - Uses the Manber-Wu improvement of the Shift-Or algorithm for bounded fuzzy search.
-- Uses the two-row Wagner-Fisher algorithm for edit distance computation.
+- Uses the two-row Wagner-Fisher algorithm for Levenshtein edit distance computation.
 - Uses the Needleman-Wunsch improvement for parameterized edit distance computation.
 - Uses the Karp-Rabin rolling hashes to produce binary fingerprints.
 - Uses Radix Sort to accelerate sorting of strings.
@@ -202,7 +202,83 @@ haystack.contains(needle) == true; // STL has this only from C++ 23 onwards
 haystack.compare(needle) == 1; // Or `haystack <=> needle` in C++ 20 and beyond
 ```
 
-### Beyond Standard Templates Library
+### Memory Ownership and Small String Optimization
+
+Most operations in StringZilla don't assume any memory ownership.
+But in addition to the read-only search-like operations StringZilla provides a minimalistic C and C++ implementations for a memory owning string "class".
+Like other efficient string implementations, it uses the [Small String Optimization][faq-sso] to avoid heap allocations for short strings.
+
+```c
+typedef union sz_string_t {
+    struct on_stack {
+        sz_ptr_t start;
+        sz_u8_t length;
+        char chars[sz_string_stack_space]; /// Ends with a null-terminator.
+    } on_stack;
+
+    struct on_heap {
+        sz_ptr_t start;
+        sz_size_t length;        
+        sz_size_t space; /// The length of the heap-allocated buffer.
+        sz_size_t padding;
+    } on_heap;
+
+} sz_string_t;
+```
+
+As one can see, a short string can be kept on the stack, if it fits within `on_stack.chars` array.
+Before 2015 GCC string implementation was just 8 bytes.
+Today, practically all variants are at least 32 bytes, so two of them fit in a cache line.
+Practically all of them can only store 15 bytes of the "Small String" on the stack.
+StringZilla can store strings up to 22 bytes long on the stack, while avoiding any branches on pointer and length lookups.
+
+|                       | GCC 13 | Clang 17 | ICX 2024 |     StringZilla |
+| :-------------------- | -----: | -------: | -------: | --------------: |
+| `sizeof(std::string)` |     32 |       32 |       32 |              32 |
+| Small String Capacity |     15 |       15 |       15 | __22__ (+ 47 %) |
+
+> Use the following gist to check on your compiler: https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21
+
+For C++ users, the `sz::string` class hides those implementation details under the hood.
+For C users, less familiar with C++ classes, the `sz_string_t` union is available with following API.
+
+```c
+sz_memory_allocator_t allocator;
+sz_string_t string;
+
+// Init and make sure we are on stack
+sz_string_init(&string);
+assert(sz_string_is_on_stack(&string) == sz_true_k);
+
+// Optionally pre-allocate space on the heap for future insertions.
+assert(sz_string_grow(&string, 100, &allocator) == sz_true_k);
+
+// Append, erase, insert into the string.
+assert(sz_string_append(&string, "_Hello_", 7, &allocator) == sz_true_k);
+assert(sz_string_append(&string, "world", 5, &allocator) == sz_true_k);
+sz_string_erase(&string, 0, 1);
+
+// Upacking & introspection.
+sz_ptr_t string_start;
+sz_size_t string_length;
+sz_size_t string_space;
+sz_bool_t string_is_on_heap;
+sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
+assert(sz_equal(string_start, "Hello_world", 11) == sz_true_k);
+
+// Reclaim some memory.
+assert(sz_string_shrink_to_fit(&string, &allocator) == sz_true_k);
+sz_string_free(&string, &allocator);
+```
+
+Unlike the conventional C strings, the `sz_string_t` is allowed to contain null characters.
+To safely print those, pass the `string_length` to `printf` as well.
+
+```c
+printf("%.*s\n", (int)string_length, string_start);
+```
+
+### Beyond the Standard Templates Library
 
 Aside from conventional `std::string` interfaces, non-STL extensions are available.
 
@@ -210,8 +286,8 @@ Aside from conventional `std::string` interfaces, non-STL extensions are availab
 haystack.count(needle) == 1; // Why is this not in STL?!
 
 haystack.edit_distance(needle) == 7;
-haystack.find_edited(needle, bound);
-haystack.rfind_edited(needle, bound);
+haystack.find_similar(needle, bound);
+haystack.rfind_similar(needle, bound);
 ```
 
 When parsing documents, it is often useful to split it into substrings.
@@ -249,13 +325,15 @@ for (auto line : haystack.split_all("\r\n"))
 ```
 
 Each of those is available in reverse order as well.
-It also allows interleaving matches, and controlling the inclusion/exclusion of the separator itself into the result.
+It also allows interleaving matches, if you want both inclusions of `xx` in `xxx`.
 Debugging pointer offsets is not a pleasant exercise, so keep the following functions in mind.
 
-- `haystack.find_all(needle, interleaving)`
-- `haystack.rfind_all(needle, interleaving)`
-- `haystack.find_all(character_set(""))`
-- `haystack.rfind_all(character_set(""))`
+- `haystack.[r]find_all(needle, interleaving)`
+- `haystack.[r]find_all(character_set(""))`
+- `haystack.[r]split_all(needle)`
+- `haystack.[r]split_all(character_set(""))`
+
+For $N$ matches the split functions will report $N+1$ matches, potentially including empty strings.
 
 ### Debugging
 
@@ -274,134 +352,6 @@ If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall],
 [uform]: https://github.com/unum-cloud/uform
 [simsimd]: https://github.com/ashvardanian/simsimd
 
-### Development
-
-CPython:
-
-```sh
-# Clean up, install, and test!
-rm -rf build && pip install -e . && pytest scripts/ -s -x
-
-# Install without dependencies
-pip install -e . --no-index --no-deps
-```
-
-NodeJS:
-
-```sh
-npm install && npm test
-```
-
-### Benchmarking
-
-To benchmark on some custom file and pattern combinations:
-
-```sh
-python scripts/search_bench.py --haystack_path "your file" --needle "your pattern"
-```
-
-To benchmark on synthetic data:
-
-```sh
-python scripts/search_bench.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce"
-```
-
-### Packaging
-
-To validate packaging:
-
-```sh
-cibuildwheel --platform linux
-```
-
-### Compiling C++ Tests
-
-Running benchmarks:
-
-```sh
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 -B ./build_release
-cmake --build build_release --config Release
-./build_release/stringzilla_search_bench
-```
-
-Comparing different hardware setups:
-
-```sh
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DCMAKE_CXX_FLAGS="-march=sandybridge" -DCMAKE_C_FLAGS="-march=sandybridge" \
-    -B ./build_release/sandybridge && cmake --build build_release/sandybridge --config Release
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DCMAKE_CXX_FLAGS="-march=haswell" -DCMAKE_C_FLAGS="-march=haswell" \
-    -B ./build_release/haswell && cmake --build build_release/haswell --config Release
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DCMAKE_CXX_FLAGS="-march=sapphirerapids" -DCMAKE_C_FLAGS="-march=sapphirerapids" \
-    -B ./build_release/sapphirerapids && cmake --build build_release/sapphirerapids --config Release
-
-./build_release/sandybridge/stringzilla_search_bench
-./build_release/haswell/stringzilla_search_bench
-./build_release/sapphirerapids/stringzilla_search_bench
-```
-
-Running tests:
-
-```sh
-cmake -DCMAKE_BUILD_TYPE=Debug -DSTRINGZILLA_BUILD_TEST=1 -B ./build_debug
-cmake --build build_debug --config Debug
-./build_debug/stringzilla_search_test
-```
-
-On MacOS it's recommended to use non-default toolchain:
-
-```sh
-# Install dependencies
-brew install libomp llvm
-
-# Compile and run tests
-cmake -B ./build_release \
-    -DCMAKE_C_COMPILER="gcc-12" \
-    -DCMAKE_CXX_COMPILER="g++-12" \
-    -DSTRINGZILLA_USE_OPENMP=1 \
-    -DSTRINGZILLA_BUILD_TEST=1 \
-    -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    && \
-    make -C ./build_release -j && ./build_release/stringzilla_search_bench
-```
-
 ## License 📜
 
 Feel free to use the project under Apache 2.0 or the Three-clause BSD license at your preference.
-
----
-
-
-
-
-# The weirdest interfaces of C++23 strings:
-
-## Third `std::basic_string_view<CharT,Traits>::find`
-
-constexpr size_type find( basic_string_view v, size_type pos = 0 ) const noexcept;
-(1)	(since C++17)
-constexpr size_type find( CharT ch, size_type pos = 0 ) const noexcept;
-(2)	(since C++17)
-constexpr size_type find( const CharT* s, size_type pos, size_type count ) const;
-(3)	(since C++17)
-constexpr size_type find( const CharT* s, size_type pos = 0 ) const;
-(4)	(since C++17)
-
-
-## HTML Parsing
-
-```txt
-<tag>       Isolated tag start
-<tag\w      Tag start with attributes
-<tag/>      Self-closing tag
-</tag>      Tag end
-```
-
-In any case, the tag name is always followed by whitespace, `/` or `>`.
-And is always preceded by whitespace. `/` or `<`.
-
-Important distinctions between XML and HTML:
-
-- XML does not truncate multiple white-spaces, while HTML does.
