@@ -11,17 +11,36 @@ The project is split into the following parts:
 
 - `include/stringzilla/stringzilla.h` - single-header C implementation.
 - `include/stringzilla/stringzilla.hpp` - single-header C++ wrapper.
-- `python/**` - Python bindings.
-- `javascript/**` - JavaScript bindings.
-- `scripts/**` - Scripts for benchmarking and testing.
+- `python/*` - Python bindings.
+- `javascript/*` - JavaScript bindings.
+- `scripts/*` - Scripts for benchmarking and testing.
 
-The scripts name convention is as follows: `<workload>_<nature>.<language>`.
-An example would be, `search_bench.cpp` or `similarity_fuzz.py`.
-The nature of the script can be:
+For minimal test coverage, check the following scripts:
 
-- `bench` - bounded in time benchmarking, generally on user-provided data.
-- `fuzz` - unbounded in time fuzzing, generally on randomly generated data.
-- `test` - unit tests.
+- `test.cpp` - tests C++ API (not underlying C) against STL.
+- `test.py` - tests Python API against native strings.
+- `test.js`.
+
+At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.
+They have the broadest coverage of the library, and are the most important to keep up-to-date:
+
+- `bench_token.cpp` - token-level ops, like hashing, ordering, equality checks.
+- `bench_search.cpp` - bidirectional substring search, both exact and fuzzy.
+- `bench_similarity.cpp` - benchmark all edit distance backends.
+- `bench_sort.cpp` - sorting, partitioning, merging.
+- `bench_container.cpp` - STL containers with different string keys.
+
+The role of Python benchmarks is less to provide absolute number, but to compare against popular tools in the Python ecosystem.
+
+- `bench_search.py` - compares against native Python `str`.
+- `bench_sort.py` - compares against `pandas`.
+- `bench_similarity.py` - compares against `jellyfish`, `editdistance`, etc.
+
+For presentation purposes, we also 
+
+## IDE Integrations
+
+The project is developed in VS Code, and comes with debugger launchers in `.vscode/launch.json`.
 
 ## Contributing in C++ and C
 
@@ -40,7 +59,7 @@ Using modern syntax, this is how you build and run the test suite:
 ```bash
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B ./build_debug
 cmake --build ./build_debug --config Debug  # Which will produce the following targets:
-./build_debug/search_test                   # Unit test for substring search
+./build_debug/stringzilla_test              # Unit test for the entire library
 ```
 
 For benchmarks, you can use the following commands:
@@ -48,8 +67,8 @@ For benchmarks, you can use the following commands:
 ```bash
 cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -B ./build_release
 cmake --build ./build_release --config Release  # Which will produce the following targets:
-./build_release/search_bench                    # Benchmark for substring search
-./build_release/sort_bench                      # Benchmark for sorting arrays of strings
+./build_release/stringzilla_bench_search        # Benchmark for substring search
+./build_release/stringzilla_bench_sort          # Benchmark for sorting arrays of strings
 ```
 
 Running on modern hardware, you may want to compile the code for older generations to compare the relative performance.
@@ -67,9 +86,9 @@ cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     -DCMAKE_CXX_FLAGS="-march=sapphirerapids" -DCMAKE_C_FLAGS="-march=sapphirerapids" \
     -B ./build_release/sapphirerapids && cmake --build build_release/sapphirerapids --config Release
 
-./build_release/sandybridge/stringzilla_search_bench
-./build_release/haswell/stringzilla_search_bench
-./build_release/sapphirerapids/stringzilla_search_bench
+./build_release/sandybridge/stringzilla_bench_search
+./build_release/haswell/stringzilla_bench_search
+./build_release/sapphirerapids/stringzilla_bench_search
 ```
 
 Alternatively, you may want to compare the performance of the code compiled with different compilers.
@@ -95,8 +114,8 @@ pip install -e . # To build locally from source
 For testing we use PyTest, which may not be installed on your system.
 
 ```bash
-pip install pytest      # To install PyTest
-pytest scripts/ -s -x   # To run the test suite
+pip install pytest                      # To install PyTest
+pytest scripts/unit_test.py -s -x       # To run the test suite
 ```
 
 For fuzzing we love the ability to call the native C implementation from Python bypassing the binding layer.
@@ -110,8 +129,8 @@ python scripts/similarity_fuzz.py       # To run the fuzzing script
 For benchmarking, the following scripts are provided.
 
 ```sh
-python scripts/search_bench.py --haystack_path "your file" --needle "your pattern" # real data
-python scripts/search_bench.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce" # synthetic data
+python scripts/bench_search.py --haystack_path "your file" --needle "your pattern" # real data
+python scripts/bench_search.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce" # synthetic data
 python scripts/similarity_bench.py --text_path "your file" # edit ditance computations
 ```
 
@@ -132,6 +151,7 @@ Future development plans include:
 - [x] [Reverse-order operations](https://github.com/ashvardanian/StringZilla/issues/12).
 - [ ] [Faster string sorting algorithm](https://github.com/ashvardanian/StringZilla/issues/45).
 - [ ] [Splitting with multiple separators at once](https://github.com/ashvardanian/StringZilla/issues/29).
+- [ ] Add `.pyi` interface fior Python.
 - [ ] Arm NEON backend.
 - [ ] Bindings for Rust.
 - [ ] Arm SVE backend.

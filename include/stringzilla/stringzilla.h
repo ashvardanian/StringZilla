@@ -104,9 +104,9 @@
  *  @brief  Annotation for the public API symbols.
  */
 #if defined(_WIN32) || defined(__CYGWIN__)
-#define SZ_PUBLIC __declspec(dllexport) inline static
+#define SZ_PUBLIC inline static
 #elif __GNUC__ >= 4
-#define SZ_PUBLIC __attribute__((visibility("default"))) inline static
+#define SZ_PUBLIC inline static
 #else
 #define SZ_PUBLIC inline static
 #endif
@@ -717,11 +717,11 @@ SZ_PUBLIC sz_cptr_t sz_find_last_bounded_regex(sz_cptr_t haystack, sz_size_t h_l
  *  @return         Unsigned edit distance.
  */
 SZ_PUBLIC sz_size_t sz_edit_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                   sz_size_t bound, sz_memory_allocator_t const *alloc);
+                                     sz_size_t bound, sz_memory_allocator_t const *alloc);
 
 /** @copydoc sz_edit_distance */
 SZ_PUBLIC sz_size_t sz_edit_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                          sz_size_t bound, sz_memory_allocator_t const *alloc);
+                                            sz_size_t bound, sz_memory_allocator_t const *alloc);
 
 /** @copydoc sz_edit_distance */
 SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //

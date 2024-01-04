@@ -1051,7 +1051,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSize_t(count);
 }
 
-static PyObject *Str_levenshtein(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 2) {
@@ -1093,7 +1093,7 @@ static PyObject *Str_levenshtein(PyObject *self, PyObject *args, PyObject *kwarg
     sz_memory_allocator_t reusing_allocator;
     reusing_allocator.allocate = &temporary_memory_allocate;
     reusing_allocator.free = &temporary_memory_free;
-    reusing_allocator.user_data = &temporary_memory;
+    reusing_allocator.handle = &temporary_memory;
 
     sz_size_t distance =
         sz_edit_distance(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &reusing_allocator);
@@ -1469,7 +1469,7 @@ static PyMethodDef Str_methods[] = {
     {"splitlines", Str_splitlines, sz_method_flags_m, "Split a string by line breaks."},
     {"startswith", Str_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
-    {"levenshtein", Str_levenshtein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    {"edit_distance", Str_edit_distance, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrType = {
@@ -1763,7 +1763,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"splitlines", Str_splitlines, sz_method_flags_m, "Split a string by line breaks."},
     {"startswith", Str_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
-    {"levenshtein", Str_levenshtein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    {"edit_distance", Str_edit_distance, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
     {NULL, NULL, 0, NULL}};
 
 static PyModuleDef stringzilla_module = {
