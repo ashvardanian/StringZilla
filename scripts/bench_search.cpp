@@ -1,6 +1,6 @@
 /**
  *  @file   bench_search.cpp
- *  @brief  Benchmarks for bidirectional string search operations - exact and approximate.
+ *  @brief  Benchmarks for bidirectional string search operations - exact and TODO: approximate.
  *
  *  This file is the sibling of `bench_sort.cpp`, `bench_token.cpp` and `bench_similarity.cpp`.
  *  It accepts a file with a list of words, and benchmarks the search operations on them.
@@ -59,10 +59,11 @@ tracked_binary_functions_t find_functions() {
 }
 
 tracked_binary_functions_t find_last_functions() {
+    // TODO: Computing throughput seems wrong
     auto wrap_sz = [](auto function) -> binary_function_t {
         return binary_function_t([function](sz_string_view_t h, sz_string_view_t n) {
             sz_cptr_t match = function(h.start, h.length, n.start, n.length);
-            return (sz_ssize_t)(match ? match - h.start : h.length);
+            return (sz_ssize_t)(match ? match - h.start : 0);
         });
     };
     tracked_binary_functions_t result = {
@@ -71,7 +72,7 @@ tracked_binary_functions_t find_last_functions() {
              auto h_view = std::string_view(h.start, h.length);
              auto n_view = std::string_view(n.start, n.length);
              auto match = h_view.rfind(n_view);
-             return (sz_ssize_t)(match == std::string_view::npos ? h.length : match);
+             return (sz_ssize_t)(match == std::string_view::npos ? 0 : match);
          }},
         {"sz_find_last_serial", wrap_sz(sz_find_last_serial), true},
 #if SZ_USE_X86_AVX512
@@ -148,13 +149,13 @@ void evaluate_find_operations(std::string_view content_original, strings_at &&st
         if (variant.function) {
             variant.results = loop_over_words(strings, [&](sz_string_view_t str_n) {
                 sz_string_view_t str_h = {content_original.data(), content_original.size()};
-                auto result = variant.function(str_h, str_n);
-                while (result != str_h.length) {
-                    str_h.start += result + 1, str_h.length -= result + 1;
-                    result = variant.function(str_h, str_n);
-                    do_not_optimize(result);
+                auto offset_from_start = variant.function(str_h, str_n);
+                while (offset_from_start != str_h.length) {
+                    str_h.start += offset_from_start + 1, str_h.length -= offset_from_start + 1;
+                    offset_from_start = variant.function(str_h, str_n);
+                    do_not_optimize(offset_from_start);
                 }
-                return result;
+                return str_h.length;
             });
         }
 
@@ -201,10 +202,13 @@ void evaluate_find_last_operations(std::string_view content_original, strings_at
             std::size_t mask = content_original.size() - 1;
             variant.results = loop_over_words(strings, [&](sz_string_view_t str_n) {
                 sz_string_view_t str_h = {content_original.data(), content_original.size()};
-                str_h.length -= bytes_processed & mask;
-                auto result = variant.function(str_h, str_n);
-                bytes_processed += (str_h.length - result) + str_n.length;
-                return result;
+                auto offset_from_start = variant.function(str_h, str_n);
+                while (offset_from_start != 0) {
+                    str_h.length = offset_from_start - 1;
+                    offset_from_start = variant.function(str_h, str_n);
+                    do_not_optimize(offset_from_start);
+                }
+                return str_h.length;
             });
         }
 
