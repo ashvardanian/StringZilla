@@ -1085,6 +1085,34 @@ class basic_string {
         return {string_start, string_length};
     }
 
+    inline const_iterator begin() const noexcept { return const_iterator(data()); }
+    inline const_iterator end() const noexcept { return const_iterator(data() + size()); }
+    inline const_iterator cbegin() const noexcept { return const_iterator(data()); }
+    inline const_iterator cend() const noexcept { return const_iterator(data() + size()); }
+    inline const_reverse_iterator rbegin() const noexcept;
+    inline const_reverse_iterator rend() const noexcept;
+    inline const_reverse_iterator crbegin() const noexcept;
+    inline const_reverse_iterator crend() const noexcept;
+
+    inline const_reference operator[](size_type pos) const noexcept { return string_.on_stack.start[pos]; }
+    inline const_reference at(size_type pos) const noexcept { return string_.on_stack.start[pos]; }
+    inline const_reference front() const noexcept { return string_.on_stack.start[0]; }
+    inline const_reference back() const noexcept { return string_.on_stack.start[size() - 1]; }
+    inline const_pointer data() const noexcept { return string_.on_stack.start; }
+
+    inline bool empty() const noexcept { return string_.on_heap.length == 0; }
+    inline size_type size() const noexcept {
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_size_t string_space;
+        sz_bool_t string_is_on_heap;
+        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+        return string_length;
+    }
+
+    inline size_type length() const noexcept { return size(); }
+    inline size_type max_size() const noexcept { return sz_size_max; }
+
     basic_string &assign(string_view other) noexcept(false) {
         if (!try_assign(other)) throw std::bad_alloc();
         return *this;
