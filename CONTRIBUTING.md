@@ -66,9 +66,12 @@ For benchmarks, you can use the following commands:
 
 ```bash
 cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -B ./build_release
-cmake --build ./build_release --config Release  # Which will produce the following targets:
-./build_release/stringzilla_bench_search        # Benchmark for substring search
-./build_release/stringzilla_bench_sort          # Benchmark for sorting arrays of strings
+cmake --build ./build_release --config Release      # Which will produce the following targets:
+./build_release/stringzilla_bench_search <path>     # for substring search
+./build_release/stringzilla_bench_token <path>      # for hashing, equality comparisons, etc.
+./build_release/stringzilla_bench_similarity <path> # for edit distances and alignment scores
+./build_release/stringzilla_bench_sort <path>       # for sorting arrays of strings
+./build_release/stringzilla_bench_container <path>  # for STL containers with string keys
 ```
 
 Running on modern hardware, you may want to compile the code for older generations to compare the relative performance.
@@ -85,10 +88,6 @@ cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     -DCMAKE_CXX_FLAGS="-march=sapphirerapids" -DCMAKE_C_FLAGS="-march=sapphirerapids" \
     -B ./build_release/sapphirerapids && cmake --build build_release/sapphirerapids --config Release
-
-./build_release/sandybridge/stringzilla_bench_search
-./build_release/haswell/stringzilla_bench_search
-./build_release/sapphirerapids/stringzilla_bench_search
 ```
 
 Alternatively, you may want to compare the performance of the code compiled with different compilers.
@@ -151,6 +150,7 @@ Future development plans include:
 - [x] [Reverse-order operations](https://github.com/ashvardanian/StringZilla/issues/12).
 - [ ] [Faster string sorting algorithm](https://github.com/ashvardanian/StringZilla/issues/45).
 - [ ] [Splitting with multiple separators at once](https://github.com/ashvardanian/StringZilla/issues/29).
+- [ ] Universal hashing solution.
 - [ ] Add `.pyi` interface fior Python.
 - [ ] Arm NEON backend.
 - [ ] Bindings for Rust.

@@ -1031,7 +1031,24 @@ class basic_string {
     }
 
   public:
+    // Member types
+    using traits_type = std::char_traits<char>;
+    using value_type = char;
+    using pointer = char *;
+    using const_pointer = char const *;
+    using reference = char &;
+    using const_reference = char const &;
+    using const_iterator = char const *;
+    using iterator = const_iterator;
+    using const_reverse_iterator = reversed_iterator_for<char const>;
+    using reverse_iterator = const_reverse_iterator;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+
     using allocator_type = allocator_;
+
+    /** @brief  Special value for missing matches. */
+    static constexpr size_type npos = size_type(-1);
 
     constexpr basic_string() noexcept {
         // Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
@@ -1103,6 +1120,16 @@ class basic_string {
     }
 
     bool try_append(string_view str) noexcept { return try_append(str.data(), str.size()); }
+
+    size_type edit_distance(string_view other, size_type bound = npos) const noexcept {
+        size_type distance;
+        with_alloc([&](alloc_t &alloc) {
+            distance = sz_edit_distance(string_.on_stack.start, string_.on_stack.length, other.data(), other.size(),
+                                        bound, &alloc);
+            return sz_true_k;
+        });
+        return distance;
+    }
 };
 
 using string = basic_string<>;

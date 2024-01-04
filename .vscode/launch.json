@@ -29,7 +29,7 @@
       "name": "Debug Unit Tests",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build_debug/stringzilla_search_test",
+      "program": "${workspaceFolder}/build_debug/stringzilla_test",
       "cwd": "${workspaceFolder}",
       "environment": [
         {

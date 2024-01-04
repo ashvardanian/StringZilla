@@ -123,7 +123,7 @@ void evaluate_find_operations(std::string_view content_original, strings_at &&st
 
         // Tests
         if (variant.function && variant.needs_testing) {
-            loop_over_words(strings, [&](sz_string_view_t str_n) {
+            bench_on_tokens(strings, [&](sz_string_view_t str_n) {
                 sz_string_view_t str_h = {content_original.data(), content_original.size()};
                 while (true) {
                     auto baseline = variants[0].function(str_h, str_n);
@@ -147,7 +147,7 @@ void evaluate_find_operations(std::string_view content_original, strings_at &&st
 
         // Benchmarks
         if (variant.function) {
-            variant.results = loop_over_words(strings, [&](sz_string_view_t str_n) {
+            variant.results = bench_on_tokens(strings, [&](sz_string_view_t str_n) {
                 sz_string_view_t str_h = {content_original.data(), content_original.size()};
                 auto offset_from_start = variant.function(str_h, str_n);
                 while (offset_from_start != str_h.length) {
@@ -175,7 +175,7 @@ void evaluate_find_last_operations(std::string_view content_original, strings_at
 
         // Tests
         if (variant.function && variant.needs_testing) {
-            loop_over_words(strings, [&](sz_string_view_t str_n) {
+            bench_on_tokens(strings, [&](sz_string_view_t str_n) {
                 sz_string_view_t str_h = {content_original.data(), content_original.size()};
                 while (true) {
                     auto baseline = variants[0].function(str_h, str_n);
@@ -200,7 +200,7 @@ void evaluate_find_last_operations(std::string_view content_original, strings_at
         if (variant.function) {
             std::size_t bytes_processed = 0;
             std::size_t mask = content_original.size() - 1;
-            variant.results = loop_over_words(strings, [&](sz_string_view_t str_n) {
+            variant.results = bench_on_tokens(strings, [&](sz_string_view_t str_n) {
                 sz_string_view_t str_h = {content_original.data(), content_original.size()};
                 auto offset_from_start = variant.function(str_h, str_n);
                 while (offset_from_start != 0) {
@@ -236,7 +236,7 @@ int main(int argc, char const **argv) {
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
         std::printf("Benchmarking on real words of length %zu:\n", token_length);
-        evaluate_all(dataset.text, dataset.tokens_of_length(token_length));
+        evaluate_all(dataset.text, filter_by_length(dataset.tokens, token_length));
     }
 
     // Run bechnmarks on abstract tokens of different length
