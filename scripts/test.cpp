@@ -16,6 +16,12 @@
 namespace sz = ashvardanian::stringzilla;
 using sz::literals::operator""_sz;
 
+/**
+ *  Evaluates the correctness of a "matcher", searching for all the occurences of the `needle_stl`
+ *  in a haystack formed of `haystack_pattern` repeated from one to `max_repeats` times.
+ *
+ *  @param misalignment The number of bytes to misalign the haystack within the cacheline.
+ */
 template <typename stl_matcher_, typename sz_matcher_>
 void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
     constexpr std::size_t max_repeats = 128;
@@ -54,6 +60,10 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::s
     }
 }
 
+/**
+ *  Evaluates the correctness of a "matcher", searching for all the occurences of the `needle_stl`,
+ *  as a substring, as a set of allowed characters, or as a set of disallowed characters, in a haystack.
+ */
 void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
 
     eval<                                                      //
@@ -94,7 +104,7 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
     eval(haystack_pattern, needle_stl, 3);
 }
 
-int main(int, char const **) {
+int main(int argc, char const **argv) {
     std::printf("Hi Ash! ... or is it someone else?!\n");
 
     std::string_view alphabet = "abcdefghijklmnopqrstuvwxyz";                                         // 26 characters

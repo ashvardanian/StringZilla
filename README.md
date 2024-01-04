@@ -10,6 +10,7 @@ Aside from exact search, the library also accelerates fuzzy search, edit distanc
 - Code in C? Replace LibC's `<string.h>` with C 99 `<stringzilla.h>`  - [_more_](#quick-start-c-🛠️)
 - Code in C++? Replace STL's `<string>` with C++ 11 `<stringzilla.hpp>` - [_more_](#quick-start-cpp-🛠️)
 - Code in Python? Upgrade your `str` to faster `Str` - [_more_](#quick-start-python-🐍)
+- Code in other languages? Let us know!
 
 __Features:__
 
@@ -131,7 +132,7 @@ import stringzilla as sz
 contains: bool = sz.contains("haystack", "needle", start=0, end=9223372036854775807)
 offset: int = sz.find("haystack", "needle", start=0, end=9223372036854775807)
 count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, allowoverlap=False)
-levenshtein: int = sz.levenshtein("needle", "nidl")
+edit_distance: int = sz.edit_distance("needle", "nidl")
 ```
 
 ## Quick Start: C/C++ 🛠️
@@ -201,6 +202,19 @@ haystack.remove_prefix(needle.size()); // Why is this operation in-place?!
 haystack.contains(needle) == true; // STL has this only from C++ 23 onwards
 haystack.compare(needle) == 1; // Or `haystack <=> needle` in C++ 20 and beyond
 ```
+
+StringZilla also provides string literals for automatic type resolution, [similar to STL][stl-literal]:
+
+```cpp
+using sz::literals::operator""_sz;
+using std::literals::operator""sv;
+
+auto a = "some string"; // char const *
+auto b = "some string"sv; // std::string_view
+auto b = "some string"_sz; // sz::string_view
+```
+
+[stl-literal]: https://en.cppreference.com/w/cpp/string/basic_string_view/operator%22%22sv
 
 ### Memory Ownership and Small String Optimization
 
@@ -334,6 +348,73 @@ Debugging pointer offsets is not a pleasant exercise, so keep the following func
 - `haystack.[r]split_all(character_set(""))`
 
 For $N$ matches the split functions will report $N+1$ matches, potentially including empty strings.
+Ranges have a few convinience methods as well:
+
+```cpp
+range.size(); // -> std::size_t
+range.empty(); // -> bool
+range.template to<std::set<std::sting>>(); 
+range.template to<std::vector<std::sting_view>>(); 
+```
+
+### TODO: STL Containers with String Keys
+
+The C++ Standard Templates Library provides several associative containers, often used with string keys.
+
+```cpp
+std::map<std::string, int, std::less<std::string>> sorted_words;
+std::unordered_map<std::string, int, std::hash<std::string>, std::equal_to<std::string>> words;
+```
+
+The performance of those containers is often limited by the performance of the string keys, especially on reads.
+StringZilla can be used to accelerate containers with `std::string` keys, by overriding the default comparator and hash functions.
+
+```cpp
+std::map<std::string, int, sz::string_view_less> sorted_words;
+std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to> words;
+```
+
+Alternatively, a better approach would be to use the `sz::string` class as a key.
+The right hash function and comparator would be automatically selected and the performance gains would be more noticeable if the keys are short.
+
+```cpp
+std::map<sz::string, int> sorted_words;
+std::unordered_map<sz::string, int> words;
+```
+
+### TODO: Concatenating Strings
+
+Ansother common string operation is concatenation.
+The STL provides `std::string::operator+` and `std::string::append`, but those are not the most efficient, if multiple invocations are performed.
+
+```cpp
+std::string name, domain, tld;
+auto email = name + "@" + domain + "." + tld; // 4 allocations
+```
+
+The efficient approach would be to pre-allocate the memory and copy the strings into it.
+
+```cpp
+std::string email;
+email.reserve(name.size() + domain.size() + tld.size() + 2);
+email.append(name), email.append("@"), email.append(domain), email.append("."), email.append(tld);
+```
+
+That's mouthful and error-prone.
+StringZilla provides a more convenient `concat` function, which takes a variadic number of arguments.
+
+```cpp
+auto email = sz::concat(name, "@", domain, ".", tld);
+```
+
+Moreover, if the first or second argument of the expression is a StringZilla string, the concatenation can be poerformed lazily using the same `operator+` syntax.
+That behavior is disabled for compatibility by default, but can be enabled by defining `SZ_LAZY_CONCAT` macro.
+
+```cpp
+sz::string name, domain, tld;
+auto email_expression = name + "@" + domain + "." + tld;    // 0 allocations
+sz::string email = name + "@" + domain + "." + tld;         // 1 allocations
+```
 
 ### Debugging
 
@@ -341,6 +422,12 @@ For maximal performance, the library does not perform any bounds checking in Rel
 That behavior is controllable for both C and C++ interfaces via the `STRINGZILLA_DEBUG` macro.
 
 [faq-sso]: https://cpp-optimizations.netlify.app/small_strings/
+
+## Algorithms 📚
+
+### Hashing
+
+### Substring Search
 
 ## Contributing 👾
 

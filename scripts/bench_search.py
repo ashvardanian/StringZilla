@@ -21,11 +21,6 @@ def log_functionality(
     stringzilla_str: Str,
     stringzilla_file: File,
 ):
-    log("str.contains", bytes_length, lambda: pattern in pythonic_str)
-    log("Str.contains", bytes_length, lambda: pattern in stringzilla_str)
-    if stringzilla_file:
-        log("File.contains", bytes_length, lambda: pattern in stringzilla_file)
-
     log("str.count", bytes_length, lambda: pythonic_str.count(pattern))
     log("Str.count", bytes_length, lambda: stringzilla_str.count(pattern))
     if stringzilla_file:
@@ -43,7 +38,7 @@ def log_functionality(
 
 
 def bench(
-    needle: str,
+    needle: str = None,
     haystack_path: str = None,
     haystack_pattern: str = None,
     haystack_length: int = None,

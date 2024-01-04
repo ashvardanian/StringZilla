@@ -1,15 +1,14 @@
-#include <algorithm>
-#include <chrono>
-#include <cstring>
-#include <fstream>
-#include <iostream>
-#include <limits>
-#include <numeric>
-#include <string>
-#include <strstream>
-#include <vector>
 
-#include <stringzilla/stringzilla.h>
+/**
+ *  @file   bench_sort.cpp
+ *  @brief  Benchmarks sorting, partitioning, and merging operations on string sequences.
+ *
+ *  This file is the sibling of `bench_similarity.cpp`, `bench_search.cpp` and `bench_token.cpp`.
+ *  It accepts a file with a list of words, and benchmarks the sorting operations on them.
+ */
+#include <bench.hpp>
+
+using namespace ashvardanian::stringzilla::scripts;
 
 using strings_t = std::vector<std::string>;
 using idx_t = sz_size_t;
@@ -27,14 +26,14 @@ static sz_size_t get_length(sz_sequence_t const *array_c, sz_size_t i) {
     return array[i].size();
 }
 
-static int is_less(sz_sequence_t const *array_c, sz_size_t i, sz_size_t j) {
+static sz_bool_t is_less(sz_sequence_t const *array_c, sz_size_t i, sz_size_t j) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c->handle);
-    return array[i] < array[j];
+    return (sz_bool_t)(array[i] < array[j]);
 }
 
-static int has_under_four_chars(sz_sequence_t const *array_c, sz_size_t i) {
+static sz_bool_t has_under_four_chars(sz_sequence_t const *array_c, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c->handle);
-    return array[i].size() < 4;
+    return (sz_bool_t)(array[i].size() < 4);
 }
 
 #pragma endregion
@@ -145,19 +144,10 @@ void bench_permute(char const *name, strings_t &strings, permute_t &permute, alg
     std::printf("Elapsed time is %.2lf miliseconds/iteration for %s.\n", milisecs, name);
 }
 
-int main(int, char const **) {
-    std::printf("Hey, Ash!\n");
-
-    strings_t strings;
-    populate_from_file("leipzig1M.txt", strings, 1000000);
-    std::size_t mean_bytes = 0;
-    for (std::string const &str : strings) mean_bytes += str.size();
-    mean_bytes /= strings.size();
-    std::printf("Parsed the file with %zu words of %zu mean length!\n", strings.size(), mean_bytes);
-
-    std::string full_text;
-    full_text.reserve(mean_bytes + strings.size() * 2);
-    for (std::string const &str : strings) full_text.append(str), full_text.push_back(' ');
+int main(int argc, char const **argv) {
+    std::printf("StringZilla. Starting sorting benchmarks.\n");
+    dataset_t dataset = make_dataset(argc, argv);
+    strings_t &strings = dataset.tokens;
 
     permute_t permute_base, permute_new;
     permute_base.resize(strings.size());

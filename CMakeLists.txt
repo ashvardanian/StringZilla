@@ -79,6 +79,7 @@ endif()
 
 # Function to set compiler-specific flags
 function(set_compiler_flags target)
+  target_include_directories(${target} PRIVATE scripts)
   target_link_libraries(${target} PRIVATE ${STRINGZILLA_TARGET_NAME})
   set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     ${CMAKE_BINARY_DIR})
@@ -104,14 +105,30 @@ function(set_compiler_flags target)
 endfunction()
 
 if(${STRINGZILLA_BUILD_BENCHMARK})
-  add_executable(stringzilla_search_bench scripts/search_bench.cpp)
-  set_compiler_flags(stringzilla_search_bench)
-  add_test(NAME stringzilla_search_bench COMMAND stringzilla_search_bench)
+  add_executable(stringzilla_bench_search scripts/bench_search.cpp)
+  set_compiler_flags(stringzilla_bench_search)
+  add_test(NAME stringzilla_bench_search COMMAND stringzilla_bench_search)
+
+  add_executable(stringzilla_bench_similarity scripts/bench_similarity.cpp)
+  set_compiler_flags(stringzilla_bench_similarity)
+  add_test(NAME stringzilla_bench_similarity COMMAND stringzilla_bench_similarity)
+
+  add_executable(stringzilla_bench_sort scripts/bench_sort.cpp)
+  set_compiler_flags(stringzilla_bench_sort)
+  add_test(NAME stringzilla_bench_sort COMMAND stringzilla_bench_sort)
+
+  add_executable(stringzilla_bench_token scripts/bench_token.cpp)
+  set_compiler_flags(stringzilla_bench_token)
+  add_test(NAME stringzilla_bench_token COMMAND stringzilla_bench_token)
+
+  add_executable(stringzilla_bench_container scripts/bench_container.cpp)
+  set_compiler_flags(stringzilla_bench_container)
+  add_test(NAME stringzilla_bench_container COMMAND stringzilla_bench_container)
 endif()
 
 if(${STRINGZILLA_BUILD_TEST})
   # Test target
-  add_executable(stringzilla_search_test scripts/search_test.cpp)
-  set_compiler_flags(stringzilla_search_test)
-  add_test(NAME stringzilla_search_test COMMAND stringzilla_search_test)
+  add_executable(stringzilla_test scripts/test.cpp)
+  set_compiler_flags(stringzilla_test)
+  add_test(NAME stringzilla_test COMMAND stringzilla_test)
 endif()

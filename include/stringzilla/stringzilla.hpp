@@ -19,6 +19,9 @@
 #include <string_view>
 #endif
 
+#include <cassert> // `assert`
+#include <cstddef> // `std::size_t`
+
 #include <stringzilla/stringzilla.h>
 
 namespace ashvardanian {
