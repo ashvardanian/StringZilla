@@ -107,6 +107,10 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
 int main(int argc, char const **argv) {
     std::printf("Hi Ash! ... or is it someone else?!\n");
 
+    assert(sz::string("abc").edit_distance("_abc") == 1);
+    assert(sz::string("").edit_distance("_") == 1);
+    assert(sz::string("_").edit_distance("") == 1);
+
     std::string_view alphabet = "abcdefghijklmnopqrstuvwxyz";                                         // 26 characters
     std::string_view base64 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";     // 64 characters
     std::string_view common = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-=@$%"; // 68 characters

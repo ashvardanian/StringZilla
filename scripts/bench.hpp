@@ -1,5 +1,5 @@
 /**
- *  @brief  Helper structures for C++ benchmarks.
+ *  @brief  Helper structures and functions for C++ benchmarks.
  */
 #include <algorithm>
 #include <chrono>
@@ -47,8 +47,8 @@ struct tracked_function_gt {
     bool needs_testing {false};
 
     std::size_t failed_count {0};
-    std::vector<std::string> failed_strings {};
-    benchmark_result_t results {};
+    std::vector<std::string> failed_strings;
+    benchmark_result_t results;
 
     void print() const {
         char const *format;
@@ -59,11 +59,11 @@ struct tracked_function_gt {
         //  - number of failed tests, 10 characters
         //  - first example of a failed test, up to 20 characters
         if constexpr (std::is_same<function_at, binary_function_t>())
-            format = "%-20s %10.3f GB/s %10.1f ns %10zu %s %s\n";
+            format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s %s\n";
         else
-            format = "%-20s %10.3f GB/s %10.1f ns %10zu %s\n";
+            format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s\n";
         std::printf(format, name.c_str(), results.bytes_passed / results.seconds / 1.e9,
-                    results.seconds * 1e9 / results.iterations, failed_count,
+                    results.seconds * 1e9 / results.iterations, failed_count, results.iterations,
                     failed_strings.size() ? failed_strings[0].c_str() : "",
                     failed_strings.size() ? failed_strings[1].c_str() : "");
     }
@@ -81,6 +81,7 @@ inline void do_not_optimize(value_at &&value) {
     asm volatile("" : "+r"(value) : : "memory");
 }
 
+inline sz_string_view_t sz_string_view(std::string_view str) { return {str.data(), str.size()}; };
 inline sz_string_view_t sz_string_view(std::string const &str) { return {str.data(), str.size()}; };
 
 /**
@@ -103,8 +104,8 @@ inline std::string read_file(std::string path) {
 /**
  *  @brief  Splits a string into words,using newlines, tabs, and whitespaces as delimiters.
  */
-inline std::vector<std::string> tokenize(std::string_view str) {
-    std::vector<std::string> words;
+inline std::vector<std::string_view> tokenize(std::string_view str) {
+    std::vector<std::string_view> words;
     std::size_t start = 0;
     for (std::size_t end = 0; end <= str.length(); ++end) {
         if (end == str.length() || std::isspace(str[end])) {
@@ -115,16 +116,17 @@ inline std::vector<std::string> tokenize(std::string_view str) {
     return words;
 }
 
+template <typename string_type>
+inline std::vector<string_type> filter_by_length(std::vector<string_type> tokens, std::size_t n) {
+    std::vector<string_type> result;
+    for (auto const &str : tokens)
+        if (str.length() == n) result.push_back(str);
+    return result;
+}
+
 struct dataset_t {
     std::string text;
-    std::vector<std::string> tokens;
-
-    inline std::vector<std::string> tokens_of_length(std::size_t n) const {
-        std::vector<std::string> result;
-        for (auto const &str : tokens)
-            if (str.size() == n) result.push_back(str);
-        return result;
-    }
+    std::vector<std::string_view> tokens;
 };
 
 /**
@@ -167,7 +169,7 @@ inline dataset_t make_dataset(int argc, char const *argv[]) {
  *  @return Number of seconds per iteration.
  */
 template <typename strings_at, typename function_at>
-benchmark_result_t loop_over_words(strings_at &&strings, function_at &&function,
+benchmark_result_t bench_on_tokens(strings_at &&strings, function_at &&function,
                                    seconds_t max_time = default_seconds_m) {
 
     namespace stdc = std::chrono;
@@ -179,10 +181,10 @@ benchmark_result_t loop_over_words(strings_at &&strings, function_at &&function,
     while (true) {
         // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
         {
-            result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
-            result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
-            result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
-            result.bytes_passed += function(sz_string_view(strings[(++result.iterations) & lookup_mask]));
+            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask]);
+            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask]);
+            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask]);
+            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask]);
         }
 
         stdcc::time_point t2 = stdcc::now();
@@ -201,30 +203,27 @@ benchmark_result_t loop_over_words(strings_at &&strings, function_at &&function,
  *  @return Number of seconds per iteration.
  */
 template <typename strings_at, typename function_at>
-benchmark_result_t loop_over_pairs_of_words(strings_at &&strings, function_at &&function,
-                                            seconds_t max_time = default_seconds_m) {
+benchmark_result_t bench_on_token_pairs(strings_at &&strings, function_at &&function,
+                                        seconds_t max_time = default_seconds_m) {
 
     namespace stdc = std::chrono;
     using stdcc = stdc::high_resolution_clock;
     stdcc::time_point t1 = stdcc::now();
     benchmark_result_t result;
     std::size_t lookup_mask = bit_floor(strings.size()) - 1;
+    std::size_t largest_prime = 18446744073709551557ull;
 
     while (true) {
         // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
         {
-            result.bytes_passed +=
-                function(sz_string_view(strings[(++result.iterations) & lookup_mask]),
-                         sz_string_view(strings[(result.iterations * 18446744073709551557ull) & lookup_mask]));
-            result.bytes_passed +=
-                function(sz_string_view(strings[(++result.iterations) & lookup_mask]),
-                         sz_string_view(strings[(result.iterations * 18446744073709551557ull) & lookup_mask]));
-            result.bytes_passed +=
-                function(sz_string_view(strings[(++result.iterations) & lookup_mask]),
-                         sz_string_view(strings[(result.iterations * 18446744073709551557ull) & lookup_mask]));
-            result.bytes_passed +=
-                function(sz_string_view(strings[(++result.iterations) & lookup_mask]),
-                         sz_string_view(strings[(result.iterations * 18446744073709551557ull) & lookup_mask]));
+            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask],
+                                            strings[(result.iterations * largest_prime) & lookup_mask]);
+            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask],
+                                            strings[(result.iterations * largest_prime) & lookup_mask]);
+            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask],
+                                            strings[(result.iterations * largest_prime) & lookup_mask]);
+            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask],
+                                            strings[(result.iterations * largest_prime) & lookup_mask]);
         }
 
         stdcc::time_point t2 = stdcc::now();
@@ -239,14 +238,14 @@ benchmark_result_t loop_over_pairs_of_words(strings_at &&strings, function_at &&
  *  @brief  Evaluation for unary string operations: hashing.
  */
 template <typename strings_at>
-void evaluate_unary_operations(strings_at &&strings, tracked_unary_functions_t &&variants) {
+void evaluate_unary_functions(strings_at &&strings, tracked_unary_functions_t &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
 
         // Tests
         if (variant.function && variant.needs_testing) {
-            loop_over_words(strings, [&](sz_string_view_t str) {
+            bench_on_tokens(strings, [&](auto str) {
                 auto baseline = variants[0].function(str);
                 auto result = variant.function(str);
                 if (result != baseline) {
@@ -259,7 +258,7 @@ void evaluate_unary_operations(strings_at &&strings, tracked_unary_functions_t &
 
         // Benchmarks
         if (variant.function) {
-            variant.results = loop_over_words(strings, [&](sz_string_view_t str) {
+            variant.results = bench_on_tokens(strings, [&](auto str) {
                 do_not_optimize(variant.function(str));
                 return str.length;
             });
@@ -273,14 +272,14 @@ void evaluate_unary_operations(strings_at &&strings, tracked_unary_functions_t &
  *  @brief  Evaluation for binary string operations: equality, ordering, prefix, suffix, distance.
  */
 template <typename strings_at>
-void evaluate_binary_operations(strings_at &&strings, tracked_binary_functions_t &&variants) {
+void bench_binary_functions(strings_at &&strings, tracked_binary_functions_t &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
 
         // Tests
         if (variant.function && variant.needs_testing) {
-            loop_over_pairs_of_words(strings, [&](sz_string_view_t str_a, sz_string_view_t str_b) {
+            bench_on_token_pairs(strings, [&](auto str_a, auto str_b) {
                 auto baseline = variants[0].function(str_a, str_b);
                 auto result = variant.function(str_a, str_b);
                 if (result != baseline) {
@@ -296,7 +295,7 @@ void evaluate_binary_operations(strings_at &&strings, tracked_binary_functions_t
 
         // Benchmarks
         if (variant.function) {
-            variant.results = loop_over_pairs_of_words(strings, [&](sz_string_view_t str_a, sz_string_view_t str_b) {
+            variant.results = bench_on_token_pairs(strings, [&](auto str_a, auto str_b) {
                 do_not_optimize(variant.function(str_a, str_b));
                 return str_a.length + str_b.length;
             });

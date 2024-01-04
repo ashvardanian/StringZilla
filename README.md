@@ -262,14 +262,14 @@ sz_string_t string;
 
 // Init and make sure we are on stack
 sz_string_init(&string);
-assert(sz_string_is_on_stack(&string) == sz_true_k);
+sz_string_is_on_stack(&string); // == sz_true_k
 
 // Optionally pre-allocate space on the heap for future insertions.
-assert(sz_string_grow(&string, 100, &allocator) == sz_true_k);
+sz_string_grow(&string, 100, &allocator); // == sz_true_k
 
 // Append, erase, insert into the string.
-assert(sz_string_append(&string, "_Hello_", 7, &allocator) == sz_true_k);
-assert(sz_string_append(&string, "world", 5, &allocator) == sz_true_k);
+sz_string_append(&string, "_Hello_", 7, &allocator); // == sz_true_k
+sz_string_append(&string, "world", 5, &allocator); // == sz_true_k
 sz_string_erase(&string, 0, 1);
 
 // Upacking & introspection.
@@ -278,10 +278,10 @@ sz_size_t string_length;
 sz_size_t string_space;
 sz_bool_t string_is_on_heap;
 sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
-assert(sz_equal(string_start, "Hello_world", 11) == sz_true_k);
+sz_equal(string_start, "Hello_world", 11); // == sz_true_k
 
 // Reclaim some memory.
-assert(sz_string_shrink_to_fit(&string, &allocator) == sz_true_k);
+sz_string_shrink_to_fit(&string, &allocator); // == sz_true_k
 sz_string_free(&string, &allocator);
 ```
 

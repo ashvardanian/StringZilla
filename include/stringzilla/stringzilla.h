@@ -1685,7 +1685,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_serial_upto256bytes( //
         current_distances[0] = idx_a + 1;
 
         // Initialize min_distance with a value greater than bound.
-        sz_size_t min_distance = bound;
+        sz_size_t min_distance = bound - 1;
 
         // In case the next few characters match between a[idx_a:] and b[idx_b:]
         // we can skip part of enumeration.
@@ -1732,7 +1732,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_serial_over256bytes( //
         current_distances[0] = idx_a + 1;
 
         // Initialize min_distance with a value greater than bound
-        sz_size_t min_distance = bound;
+        sz_size_t min_distance = bound - 1;
 
         for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
             sz_size_t cost_deletion = previous_distances[idx_b + 1] + 1;

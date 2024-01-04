@@ -79,9 +79,9 @@ template <typename strings_at>
 void evaluate_all(strings_at &&strings) {
     if (strings.size() == 0) return;
 
-    evaluate_unary_operations(strings, hashing_functions());
-    evaluate_binary_operations(strings, equality_functions());
-    evaluate_binary_operations(strings, ordering_functions());
+    evaluate_unary_functions(strings, hashing_functions());
+    bench_binary_functions(strings, equality_functions());
+    bench_binary_functions(strings, ordering_functions());
 }
 
 int main(int argc, char const **argv) {
@@ -96,7 +96,7 @@ int main(int argc, char const **argv) {
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
         std::printf("Benchmarking on real words of length %zu:\n", token_length);
-        evaluate_all(dataset.tokens_of_length(token_length));
+        evaluate_all(filter_by_length(dataset.tokens, token_length));
     }
 
     std::printf("All benchmarks passed.\n");
