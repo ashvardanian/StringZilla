@@ -123,7 +123,12 @@ sz_size_t hybrid_sort_c(sz_sequence_t *sequence) {
     }
 
     // Sort the full strings.
+    // The MacOS and Linux version have different argument order.
+#if defined(__APPLE__)
     qsort_r(sequence->order, sequence->count, sizeof(sz_size_t), sequence, hybrid_sort_c_compare_strings);
+#else
+    qsort_r(sequence->order, sequence->count, sizeof(sz_size_t), hybrid_sort_c_compare_strings, sequence);
+#endif
 
     return sequence->count;
 }
