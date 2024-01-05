@@ -1065,10 +1065,30 @@ class basic_string {
         });
     }
 
-    basic_string(basic_string &&other) noexcept : string_(other.string_) { sz_string_init(&other.string_); }
+    basic_string(basic_string &&other) noexcept : string_(other.string_) {
+        // We can't just assign the other string state, as its start address may be somewhere else on the stack.
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_size_t string_space;
+        sz_bool_t string_is_on_heap;
+        sz_string_unpack(&other.string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+
+        // Reposition the string start pointer to the stack if it fits.
+        string_.on_stack.start = string_is_on_heap ? string_start : &string_.on_stack.chars[0];
+        sz_string_init(&other.string_); // Discrad the other string.
+    }
+
     basic_string &operator=(basic_string &&other) noexcept {
-        string_ = other.string_;
-        sz_string_init(&other.string_);
+        // We can't just assign the other string state, as its start address may be somewhere else on the stack.
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_size_t string_space;
+        sz_bool_t string_is_on_heap;
+        sz_string_unpack(&other.string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+
+        // Reposition the string start pointer to the stack if it fits.
+        string_.on_stack.start = string_is_on_heap ? string_start : &string_.on_stack.chars[0];
+        sz_string_init(&other.string_); // Discrad the other string.
         return *this;
     }
 
@@ -1094,12 +1114,10 @@ class basic_string {
 
 #if SZ_INCLUDE_STL_CONVERSIONS
 
-    basic_string(std::string const &other) noexcept(false) : string_view(other.data(), other.size()) {}
-    basic_string(std::string_view const &other) noexcept(false) : string_view(other.data(), other.size()) {}
+    basic_string(std::string const &other) noexcept(false) : basic_string(other.data(), other.size()) {}
+    basic_string(std::string_view other) noexcept(false) : basic_string(other.data(), other.size()) {}
     basic_string &operator=(std::string const &other) noexcept(false) { return assign({other.data(), other.size()}); }
-    basic_string &operator=(std::string_view const &other) noexcept(false) {
-        return assign({other.data(), other.size()});
-    }
+    basic_string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
 
     // As we are need both `data()` and `size()`, going through `operator string_view()`
     // and `sz_string_unpack` is faster than separate invokations.
