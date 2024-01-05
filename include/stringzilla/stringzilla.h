@@ -2106,15 +2106,17 @@ SZ_PUBLIC sz_bool_t sz_string_init_from(sz_string_t *string, sz_cptr_t added_sta
                                         sz_memory_allocator_t *allocator) {
 
     SZ_ASSERT(string && allocator, "String and allocator can't be NULL.");
-    if (!added_length) return sz_true_k;
+
+    // If the string is empty, we can just initialize it.
+    if (!added_length) { sz_string_init(string); }
 
     // If we are lucky, no memory allocations will be needed.
-    if (added_length + 1 <= sz_string_stack_space) {
+    else if (added_length + 1 <= sz_string_stack_space) {
         string->on_stack.start = &string->on_stack.chars[0];
         sz_copy(string->on_stack.start, added_start, added_length);
         string->on_stack.start[added_length] = 0;
         // Even if the string is on the stack, the `+=` won't affect the tail of the string.
-        string->on_heap.length += added_length;
+        string->on_stack.length = added_length;
     }
     // If we are not lucky, we need to allocate memory.
     else {
@@ -2126,6 +2128,7 @@ SZ_PUBLIC sz_bool_t sz_string_init_from(sz_string_t *string, sz_cptr_t added_sta
         sz_copy(string->on_heap.start, added_start, added_length);
         string->on_heap.start[added_length] = 0;
         string->on_heap.length = added_length;
+        string->on_heap.space = added_length + 1;
     }
 
     return sz_true_k;
@@ -2277,7 +2280,7 @@ SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         // Jump to the end and walk backwards.
         target += length, source += length;
 #if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target -= 8, source -= 8, length -= 8;
+        while (length >= 8) *(sz_u64_t *)(target -= 8) = *(sz_u64_t *)(source -= 8), length -= 8;
 #endif
         while (length--) *(target--) = *(source--);
     }
