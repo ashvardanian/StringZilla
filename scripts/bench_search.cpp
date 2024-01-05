@@ -12,18 +12,16 @@ using namespace ashvardanian::stringzilla::scripts;
 
 tracked_binary_functions_t find_functions() {
     auto wrap_sz = [](auto function) -> binary_function_t {
-        return binary_function_t([function](sz_string_view_t h, sz_string_view_t n) {
-            sz_cptr_t match = function(h.start, h.length, n.start, n.length);
-            return (sz_ssize_t)(match ? match - h.start : h.length);
+        return binary_function_t([function](std::string_view h, std::string_view n) {
+            sz_cptr_t match = function(h.data(), h.size(), n.data(), n.size());
+            return (match ? match - h.data() : h.size());
         });
     };
     tracked_binary_functions_t result = {
         {"std::string_view.find",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto h_view = std::string_view(h.start, h.length);
-             auto n_view = std::string_view(n.start, n.length);
-             auto match = h_view.find(n_view);
-             return (sz_ssize_t)(match == std::string_view::npos ? h.length : match);
+         [](std::string_view h, std::string_view n) {
+             auto match = h.find(n);
+             return (match == std::string_view::npos ? h.size() : match);
          }},
         {"sz_find_serial", wrap_sz(sz_find_serial), true},
 #if SZ_USE_X86_AVX512
@@ -33,46 +31,43 @@ tracked_binary_functions_t find_functions() {
         {"sz_find_neon", wrap_sz(sz_find_neon), true},
 #endif
         {"strstr",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             sz_cptr_t match = strstr(h.start, n.start);
-             return (sz_ssize_t)(match ? match - h.start : h.length);
+         [](std::string_view h, std::string_view n) {
+             sz_cptr_t match = strstr(h.data(), n.data());
+             return (match ? match - h.data() : h.size());
          }},
         {"std::search",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto match = std::search(h.start, h.start + h.length, n.start, n.start + n.length);
-             return (sz_ssize_t)(match - h.start);
+         [](std::string_view h, std::string_view n) {
+             auto match = std::search(h.data(), h.data() + h.size(), n.data(), n.data() + n.size());
+             return (match - h.data());
          }},
         {"std::search<BM>",
-         [](sz_string_view_t h, sz_string_view_t n) {
+         [](std::string_view h, std::string_view n) {
              auto match =
-                 std::search(h.start, h.start + h.length, std::boyer_moore_searcher(n.start, n.start + n.length));
-             return (sz_ssize_t)(match - h.start);
+                 std::search(h.data(), h.data() + h.size(), std::boyer_moore_searcher(n.data(), n.data() + n.size()));
+             return (match - h.data());
          }},
         {"std::search<BMH>",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto match = std::search(h.start, h.start + h.length,
-                                      std::boyer_moore_horspool_searcher(n.start, n.start + n.length));
-             return (sz_ssize_t)(match - h.start);
+         [](std::string_view h, std::string_view n) {
+             auto match = std::search(h.data(), h.data() + h.size(),
+                                      std::boyer_moore_horspool_searcher(n.data(), n.data() + n.size()));
+             return (match - h.data());
          }},
     };
     return result;
 }
 
-tracked_binary_functions_t find_last_functions() {
-    // TODO: Computing throughput seems wrong
+tracked_binary_functions_t rfind_functions() {
     auto wrap_sz = [](auto function) -> binary_function_t {
-        return binary_function_t([function](sz_string_view_t h, sz_string_view_t n) {
-            sz_cptr_t match = function(h.start, h.length, n.start, n.length);
-            return (sz_ssize_t)(match ? match - h.start : 0);
+        return binary_function_t([function](std::string_view h, std::string_view n) {
+            sz_cptr_t match = function(h.data(), h.size(), n.data(), n.size());
+            return (match ? match - h.data() : 0);
         });
     };
     tracked_binary_functions_t result = {
         {"std::string_view.rfind",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto h_view = std::string_view(h.start, h.length);
-             auto n_view = std::string_view(n.start, n.length);
-             auto match = h_view.rfind(n_view);
-             return (sz_ssize_t)(match == std::string_view::npos ? 0 : match);
+         [](std::string_view h, std::string_view n) {
+             auto match = h.rfind(n);
+             return (match == std::string_view::npos ? 0 : match);
          }},
         {"sz_find_last_serial", wrap_sz(sz_find_last_serial), true},
 #if SZ_USE_X86_AVX512
@@ -82,30 +77,22 @@ tracked_binary_functions_t find_last_functions() {
         {"sz_find_last_neon", wrap_sz(sz_find_last_neon), true},
 #endif
         {"std::search",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto h_view = std::string_view(h.start, h.length);
-             auto n_view = std::string_view(n.start, n.length);
-             auto match = std::search(h_view.rbegin(), h_view.rend(), n_view.rbegin(), n_view.rend());
-             auto offset_from_end = (sz_ssize_t)(match - h_view.rbegin());
-             return h.length - offset_from_end;
+         [](std::string_view h, std::string_view n) {
+             auto match = std::search(h.rbegin(), h.rend(), n.rbegin(), n.rend());
+             auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
+             return h.size() - offset_from_end;
          }},
         {"std::search<BM>",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto h_view = std::string_view(h.start, h.length);
-             auto n_view = std::string_view(n.start, n.length);
-             auto match =
-                 std::search(h_view.rbegin(), h_view.rend(), std::boyer_moore_searcher(n_view.rbegin(), n_view.rend()));
-             auto offset_from_end = (sz_ssize_t)(match - h_view.rbegin());
-             return h.length - offset_from_end;
+         [](std::string_view h, std::string_view n) {
+             auto match = std::search(h.rbegin(), h.rend(), std::boyer_moore_searcher(n.rbegin(), n.rend()));
+             auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
+             return h.size() - offset_from_end;
          }},
         {"std::search<BMH>",
-         [](sz_string_view_t h, sz_string_view_t n) {
-             auto h_view = std::string_view(h.start, h.length);
-             auto n_view = std::string_view(n.start, n.length);
-             auto match = std::search(h_view.rbegin(), h_view.rend(),
-                                      std::boyer_moore_horspool_searcher(n_view.rbegin(), n_view.rend()));
-             auto offset_from_end = (sz_ssize_t)(match - h_view.rbegin());
-             return h.length - offset_from_end;
+         [](std::string_view h, std::string_view n) {
+             auto match = std::search(h.rbegin(), h.rend(), std::boyer_moore_horspool_searcher(n.rbegin(), n.rend()));
+             auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
+             return h.size() - offset_from_end;
          }},
     };
     return result;
@@ -115,47 +102,45 @@ tracked_binary_functions_t find_last_functions() {
  *  @brief  Evaluation for search string operations: find.
  */
 template <typename strings_at>
-void evaluate_find_operations(std::string_view content_original, strings_at &&strings,
-                              tracked_binary_functions_t &&variants) {
+void bench_finds(std::string_view haystack, strings_at &&strings, tracked_binary_functions_t &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
 
         // Tests
         if (variant.function && variant.needs_testing) {
-            bench_on_tokens(strings, [&](sz_string_view_t str_n) {
-                sz_string_view_t str_h = {content_original.data(), content_original.size()};
+            bench_on_tokens(strings, [&](std::string_view needle) {
+                std::string_view remaining = haystack;
                 while (true) {
-                    auto baseline = variants[0].function(str_h, str_n);
-                    auto result = variant.function(str_h, str_n);
+                    auto baseline = variants[0].function(remaining, needle);
+                    auto result = variant.function(remaining, needle);
                     if (result != baseline) {
                         ++variant.failed_count;
                         if (variant.failed_strings.empty()) {
-                            variant.failed_strings.push_back({str_h.start, baseline + str_n.length});
-                            variant.failed_strings.push_back({str_n.start, str_n.length});
+                            variant.failed_strings.push_back({remaining.data(), baseline + needle.size()});
+                            variant.failed_strings.push_back({needle.data(), needle.size()});
                         }
                     }
 
-                    if (baseline == str_h.length) break;
-                    str_h.start += baseline + 1;
-                    str_h.length -= baseline + 1;
+                    if (baseline == remaining.size()) break;
+                    remaining = remaining.substr(baseline + 1);
                 }
 
-                return content_original.size();
+                return haystack.size();
             });
         }
 
         // Benchmarks
         if (variant.function) {
-            variant.results = bench_on_tokens(strings, [&](sz_string_view_t str_n) {
-                sz_string_view_t str_h = {content_original.data(), content_original.size()};
-                auto offset_from_start = variant.function(str_h, str_n);
-                while (offset_from_start != str_h.length) {
-                    str_h.start += offset_from_start + 1, str_h.length -= offset_from_start + 1;
-                    offset_from_start = variant.function(str_h, str_n);
+            variant.results = bench_on_tokens(strings, [&](std::string_view needle) {
+                std::string_view remaining = haystack;
+                auto offset_from_start = variant.function(remaining, needle);
+                while (offset_from_start != remaining.size()) {
+                    remaining = remaining.substr(offset_from_start + 1);
+                    offset_from_start = variant.function(remaining, needle);
                     do_not_optimize(offset_from_start);
                 }
-                return str_h.length;
+                return haystack.size();
             });
         }
 
@@ -167,48 +152,46 @@ void evaluate_find_operations(std::string_view content_original, strings_at &&st
  *  @brief  Evaluation for reverse order search string operations: find.
  */
 template <typename strings_at>
-void evaluate_find_last_operations(std::string_view content_original, strings_at &&strings,
-                                   tracked_binary_functions_t &&variants) {
+void bench_rfinds(std::string_view haystack, strings_at &&strings, tracked_binary_functions_t &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
 
         // Tests
         if (variant.function && variant.needs_testing) {
-            bench_on_tokens(strings, [&](sz_string_view_t str_n) {
-                sz_string_view_t str_h = {content_original.data(), content_original.size()};
+            bench_on_tokens(strings, [&](std::string_view needle) {
+                std::string_view remaining = haystack;
                 while (true) {
-                    auto baseline = variants[0].function(str_h, str_n);
-                    auto result = variant.function(str_h, str_n);
+                    auto baseline = variants[0].function(remaining, needle);
+                    auto result = variant.function(remaining, needle);
                     if (result != baseline) {
                         ++variant.failed_count;
                         if (variant.failed_strings.empty()) {
-                            variant.failed_strings.push_back({str_h.start + baseline, str_h.start + str_h.length});
-                            variant.failed_strings.push_back({str_n.start, str_n.length});
+                            variant.failed_strings.push_back(
+                                {remaining.data() + baseline, remaining.data() + remaining.size()});
+                            variant.failed_strings.push_back({needle.data(), needle.size()});
                         }
                     }
 
-                    if (baseline == str_h.length) break;
-                    str_h.length = baseline;
+                    if (baseline == remaining.size()) break;
+                    remaining = remaining.substr(0, baseline);
                 }
 
-                return content_original.size();
+                return haystack.size();
             });
         }
 
         // Benchmarks
         if (variant.function) {
-            std::size_t bytes_processed = 0;
-            std::size_t mask = content_original.size() - 1;
-            variant.results = bench_on_tokens(strings, [&](sz_string_view_t str_n) {
-                sz_string_view_t str_h = {content_original.data(), content_original.size()};
-                auto offset_from_start = variant.function(str_h, str_n);
+            variant.results = bench_on_tokens(strings, [&](std::string_view needle) {
+                std::string_view remaining = haystack;
+                auto offset_from_start = variant.function(remaining, needle);
                 while (offset_from_start != 0) {
-                    str_h.length = offset_from_start - 1;
-                    offset_from_start = variant.function(str_h, str_n);
+                    remaining = remaining.substr(0, offset_from_start - 1);
+                    offset_from_start = variant.function(remaining, needle);
                     do_not_optimize(offset_from_start);
                 }
-                return str_h.length;
+                return haystack.size();
             });
         }
 
@@ -217,11 +200,11 @@ void evaluate_find_last_operations(std::string_view content_original, strings_at
 }
 
 template <typename strings_at>
-void evaluate_all(std::string_view content_original, strings_at &&strings) {
+void bench_search(std::string_view haystack, strings_at &&strings) {
     if (strings.size() == 0) return;
 
-    evaluate_find_operations(content_original, strings, find_functions());
-    evaluate_find_last_operations(content_original, strings, find_last_functions());
+    bench_finds(haystack, strings, find_functions());
+    bench_rfinds(haystack, strings, rfind_functions());
 }
 
 int main(int argc, char const **argv) {
@@ -231,18 +214,18 @@ int main(int argc, char const **argv) {
 
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");
-    evaluate_all(dataset.text, dataset.tokens);
+    bench_search(dataset.text, dataset.tokens);
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
         std::printf("Benchmarking on real words of length %zu:\n", token_length);
-        evaluate_all(dataset.text, filter_by_length(dataset.tokens, token_length));
+        bench_search(dataset.text, filter_by_length(dataset.tokens, token_length));
     }
 
     // Run bechnmarks on abstract tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
         std::printf("Benchmarking for missing tokens of length %zu:\n", token_length);
-        evaluate_all(dataset.text, std::vector<std::string> {
+        bench_search(dataset.text, std::vector<std::string> {
                                        std::string(token_length, '\1'),
                                        std::string(token_length, '\2'),
                                        std::string(token_length, '\3'),
