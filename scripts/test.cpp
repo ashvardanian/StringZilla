@@ -55,6 +55,15 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::s
                        [&](auto const &match) { return match.data() - haystack_stl.data(); });
         std::transform(begin_sz, end_sz, std::back_inserter(offsets_sz),
                        [&](auto const &match) { return match.data() - haystack_sz.data(); });
+        auto print_all_matches = [&]() {
+            std::printf("Breakdown of found matches:\n");
+            std::printf("- STL (%zu): ", offsets_stl.size());
+            for (auto offset : offsets_stl) std::printf("%zu ", offset);
+            std::printf("\n");
+            std::printf("- StringZilla (%zu): ", offsets_sz.size());
+            for (auto offset : offsets_sz) std::printf("%zu ", offset);
+            std::printf("\n");
+        };
 
         // Compare results
         for (std::size_t match_idx = 0; begin_stl != end_stl && begin_sz != end_sz;
@@ -64,19 +73,16 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::s
             if (match_stl.data() != match_sz.data()) {
                 std::printf("Mismatch at index #%zu: %zu != %zu\n", match_idx, match_stl.data() - haystack_stl.data(),
                             match_sz.data() - haystack_sz.data());
-                std::printf("Breakdown of found matches:\n");
-                std::printf("- STL (%zu): ", offsets_stl.size());
-                for (auto offset : offsets_stl) std::printf("%zu ", offset);
-                std::printf("\n");
-                std::printf("- StringZilla (%zu): ", offsets_sz.size());
-                for (auto offset : offsets_sz) std::printf("%zu ", offset);
-                std::printf("\n");
+                print_all_matches();
                 assert(false);
             }
         }
 
         // If one range is not finished, assert failure
-        assert(count_stl == count_sz);
+        if (count_stl != count_sz) {
+            print_all_matches();
+            assert(false);
+        }
         assert(begin_stl == end_stl && begin_sz == end_sz);
 
         offsets_stl.clear();
@@ -126,6 +132,9 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
     eval(haystack_pattern, needle_stl, 1);
     eval(haystack_pattern, needle_stl, 2);
     eval(haystack_pattern, needle_stl, 3);
+    eval(haystack_pattern, needle_stl, 63);
+    eval(haystack_pattern, needle_stl, 24);
+    eval(haystack_pattern, needle_stl, 33);
 }
 
 int main(int argc, char const **argv) {

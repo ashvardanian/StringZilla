@@ -1029,6 +1029,12 @@ class basic_string {
         return callback(alloc) == sz_true_k;
     }
 
+    void init(string_view other) noexcept(false) {
+        if (!with_alloc(
+                [&](alloc_t &alloc) { return sz_string_init_from(&string_, other.data(), other.size(), &alloc); }))
+            throw std::bad_alloc();
+    }
+
   public:
     // Member types
     using traits_type = std::char_traits<char>;
@@ -1092,9 +1098,9 @@ class basic_string {
         return *this;
     }
 
-    basic_string(basic_string const &other) noexcept(false) : basic_string() { assign(other); }
+    basic_string(basic_string const &other) noexcept(false) { init(other); }
     basic_string &operator=(basic_string const &other) noexcept(false) { return assign(other); }
-    basic_string(string_view view) noexcept(false) : basic_string() { assign(view); }
+    basic_string(string_view view) noexcept(false) { init(view); }
     basic_string &operator=(string_view view) noexcept(false) { return assign(view); }
 
     basic_string(const_pointer c_string) noexcept(false) : basic_string(string_view(c_string)) {}
@@ -1106,9 +1112,7 @@ class basic_string {
     string_view view() const noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;
-        sz_size_t string_space;
-        sz_bool_t string_is_on_heap;
-        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+        sz_string_range(&string_, &string_start, &string_length);
         return {string_start, string_length};
     }
 
@@ -1215,6 +1219,12 @@ class basic_string {
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
      *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
      */
+    inline int compare(basic_string const &other) const noexcept { return sz_string_order(&string_, &other.string_); }
+
+    /**
+     *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
+     *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
+     */
     inline int compare(string_view other) const noexcept { return view().compare(other); }
 
     /**
@@ -1259,6 +1269,11 @@ class basic_string {
     /** @brief  Checks if the string is equal to the other string. */
     inline bool operator==(string_view other) const noexcept { return view() == other; }
 
+    /** @brief  Checks if the string is equal to the other string. */
+    inline bool operator==(basic_string const &other) const noexcept {
+        return sz_string_equal(&string_, &other.string_);
+    }
+
 #if __cplusplus >= 201402L
 #define sz_deprecate_compare [[deprecated("Use the three-way comparison operator (<=>) in C++20 and later")]]
 #else
@@ -1267,6 +1282,11 @@ class basic_string {
 
     /** @brief  Checks if the string is not equal to the other string. */
     sz_deprecate_compare inline bool operator!=(string_view other) const noexcept { return !(operator==(other)); }
+
+    /** @brief  Checks if the string is not equal to the other string. */
+    sz_deprecate_compare inline bool operator!=(basic_string const &other) const noexcept {
+        return !(operator==(other));
+    }
 
     /** @brief  Checks if the string is lexicographically smaller than the other string. */
     sz_deprecate_compare inline bool operator<(string_view other) const noexcept { return compare(other) == sz_less_k; }
@@ -1286,10 +1306,33 @@ class basic_string {
         return compare(other) != sz_less_k;
     }
 
+    /** @brief  Checks if the string is lexicographically smaller than the other string. */
+    sz_deprecate_compare inline bool operator<(basic_string const &other) const noexcept {
+        return compare(other) == sz_less_k;
+    }
+
+    /** @brief  Checks if the string is lexicographically equal or smaller than the other string. */
+    sz_deprecate_compare inline bool operator<=(basic_string const &other) const noexcept {
+        return compare(other) != sz_greater_k;
+    }
+
+    /** @brief  Checks if the string is lexicographically greater than the other string. */
+    sz_deprecate_compare inline bool operator>(basic_string const &other) const noexcept {
+        return compare(other) == sz_greater_k;
+    }
+
+    /** @brief  Checks if the string is lexicographically equal or greater than the other string. */
+    sz_deprecate_compare inline bool operator>=(basic_string const &other) const noexcept {
+        return compare(other) != sz_less_k;
+    }
+
 #if __cplusplus >= 202002L
 
     /** @brief  Checks if the string is not equal to the other string. */
     inline int operator<=>(string_view other) const noexcept { return compare(other); }
+
+    /** @brief  Checks if the string is not equal to the other string. */
+    inline int operator<=>(basic_string const &other) const noexcept { return compare(other); }
 #endif
 
     /** @brief  Checks if the string starts with the other string. */

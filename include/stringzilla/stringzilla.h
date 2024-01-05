@@ -334,7 +334,7 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
  *  - Short implementation.
  *  - Supports rolling computation.
  *  - For two strings with known hashes, the hash of their concatenation can be computed in sublinear time.
- *  - Invariance to zero characters?
+ *  - Invariance to zero characters? Maybe only at start/end?
  *
  *  @section    Why not use vanilla CRC32?
  *
@@ -387,7 +387,7 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
  */
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length);
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
-SZ_PUBLIC sz_u64_t sz_hash_avx512(sz_cptr_t text, sz_size_t length) {}
+SZ_PUBLIC sz_u64_t sz_hash_avx512(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
 SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length);
 
 /**
@@ -538,6 +538,16 @@ SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
  */
 SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space,
                                 sz_bool_t *is_on_heap);
+
+/**
+ *  @brief  Upacks only the start and length of the string.
+ *          Recommended to use only in read-only operations.
+ *
+ * @param string       String to unpack.
+ * @param start        Pointer to the start of the string.
+ * @param length       Number of bytes in the string, before the NULL character.
+ */
+SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
 
 /**
  *  @brief  Grows the string to a given capacity, that must be bigger than current capacity.
@@ -733,7 +743,9 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_
 
 /** @copydoc sz_edit_distance */
 SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                            sz_size_t bound, sz_memory_allocator_t const *alloc) {}
+                                            sz_size_t bound, sz_memory_allocator_t const *alloc) {
+    return sz_edit_distance_serial(a, a_length, b, b_length, bound, alloc);
+}
 
 /**
  *  @brief  Computes Needleman–Wunsch alignment score for two string. Often used in bioinformatics and cheminformatics.
@@ -2023,18 +2035,58 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
 
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
     // It doesn't matter if it's on stack or heap, the pointer location is the same.
-    return (sz_bool_t)((sz_cptr_t)string->on_stack.start == (sz_cptr_t)string->on_stack.chars);
+    return (sz_bool_t)((sz_cptr_t)string->on_stack.start == (sz_cptr_t)&string->on_stack.chars[0]);
+}
+
+SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length) {
+    sz_size_t is_small = (sz_cptr_t)string->on_stack.start == (sz_cptr_t)&string->on_stack.chars[0];
+    sz_size_t is_big_mask = is_small - 1ull;
+    *start = string->on_heap.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
+    // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
+    *length = string->on_heap.length & (0x00000000000000FFull | is_big_mask);
 }
 
 SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space,
                                 sz_bool_t *is_on_heap) {
     sz_size_t is_small = (sz_cptr_t)string->on_stack.start == (sz_cptr_t)&string->on_stack.chars[0];
+    sz_size_t is_big_mask = is_small - 1ull;
     *start = string->on_heap.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
-    *length = (string->on_heap.length << (56ull * is_small)) >> (56ull * is_small);
+    *length = string->on_heap.length & (0x00000000000000FFull | is_big_mask);
     // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
-    *space = sz_u64_blend(sz_string_stack_space, string->on_heap.space, is_small - 1ull);
+    *space = sz_u64_blend(sz_string_stack_space, string->on_heap.space, is_big_mask);
     *is_on_heap = (sz_bool_t)!is_small;
+}
+
+SZ_PUBLIC sz_bool_t sz_string_equal(sz_string_t const *a, sz_string_t const *b) {
+    // If the strings aren't equal, the `length` will be different, regardless of the layout.
+    if (a->on_heap.length != b->on_heap.length) return sz_false_k;
+
+#if SZ_USE_MISALIGNED_LOADS
+        // Dealing with StringZilla strings, we know that the `start` pointer always points
+        // to a word at least 8 bytes long. Therefore, we can compare the first 8 bytes at once.
+
+#endif
+    // Alternatively, fall back to byte-by-byte comparison.
+    sz_ptr_t a_start, b_start;
+    sz_size_t a_length, b_length;
+    sz_string_range(a, &a_start, &a_length);
+    sz_string_range(b, &b_start, &b_length);
+    return (sz_bool_t)(a_length == b_length && sz_equal(a_start, b_start, b_length));
+}
+
+SZ_PUBLIC sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const *b) {
+#if SZ_USE_MISALIGNED_LOADS
+    // Dealing with StringZilla strings, we know that the `start` pointer always points
+    // to a word at least 8 bytes long. Therefore, we can compare the first 8 bytes at once.
+
+#endif
+    // Alternatively, fall back to byte-by-byte comparison.
+    sz_ptr_t a_start, b_start;
+    sz_size_t a_length, b_length;
+    sz_string_range(a, &a_start, &a_length);
+    sz_string_range(b, &b_start, &b_length);
+    return sz_order(a_start, a_length, b_start, b_length);
 }
 
 SZ_PUBLIC void sz_string_init(sz_string_t *string) {
@@ -2048,6 +2100,35 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
     string->u64s[1] = 0;
     string->u64s[2] = 0;
     string->u64s[3] = 0;
+}
+
+SZ_PUBLIC sz_bool_t sz_string_init_from(sz_string_t *string, sz_cptr_t added_start, sz_size_t added_length,
+                                        sz_memory_allocator_t *allocator) {
+
+    SZ_ASSERT(string && allocator, "String and allocator can't be NULL.");
+    if (!added_length) return sz_true_k;
+
+    // If we are lucky, no memory allocations will be needed.
+    if (added_length + 1 <= sz_string_stack_space) {
+        string->on_stack.start = &string->on_stack.chars[0];
+        sz_copy(string->on_stack.start, added_start, added_length);
+        string->on_stack.start[added_length] = 0;
+        // Even if the string is on the stack, the `+=` won't affect the tail of the string.
+        string->on_heap.length += added_length;
+    }
+    // If we are not lucky, we need to allocate memory.
+    else {
+        sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(added_length + 1, allocator->handle);
+        if (!new_start) return sz_false_k;
+
+        // Copy into the new buffer.
+        string->on_heap.start = new_start;
+        sz_copy(string->on_heap.start, added_start, added_length);
+        string->on_heap.start[added_length] = 0;
+        string->on_heap.length = added_length;
+    }
+
+    return sz_true_k;
 }
 
 SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_memory_allocator_t *allocator) {
@@ -2096,9 +2177,9 @@ SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start,
     }
     // If we are not lucky, we need to allocate more memory.
     else {
-        sz_size_t nex_planned_size = sz_max_of_two(64ull, string_space * 2ull);
+        sz_size_t next_planned_size = sz_max_of_two(64ull, string_space * 2ull);
         sz_size_t min_needed_space = sz_size_bit_ceil(string_length + added_length + 1);
-        sz_size_t new_space = sz_max_of_two(min_needed_space, nex_planned_size);
+        sz_size_t new_space = sz_max_of_two(min_needed_space, next_planned_size);
         if (!sz_string_grow(string, new_space, allocator)) return sz_false_k;
 
         // Copy into the new buffer.
@@ -2148,7 +2229,7 @@ SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t 
 
 SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
     if (!sz_string_is_on_stack(string))
-    allocator->free(string->on_heap.start, string->on_heap.space, allocator->handle);
+        allocator->free(string->on_heap.start, string->on_heap.space, allocator->handle);
     sz_string_init(string);
 }
 
@@ -2560,6 +2641,56 @@ sz_equal_avx512_cycle:
     }
 }
 
+SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+    sz_ptr_t end = target + length;
+    // Dealing with short strings, a single sequential pass would be faster.
+    // If the size is larger than 2 words, then at least 1 of them will be aligned.
+    // But just one aligned word may not be worth SWAR.
+    if (length < SZ_SWAR_THRESHOLD)
+        while (target != end) *(target++) = value;
+
+    // In case of long strings, skip unaligned bytes, and then fill the rest in 64-bit chunks.
+    else {
+        sz_u64_t value64 = (sz_u64_t)(value) * 0x0101010101010101ull;
+        while ((sz_size_t)target & 7ull) *(target++) = value;
+        while (target + 8 <= end) *(sz_u64_t *)target = value64, target += 8;
+        while (target != end) *(target++) = value;
+    }
+}
+
+SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+#if SZ_USE_MISALIGNED_LOADS
+    for (; length >= 8; target += 8, source += 8, length -= 8) *(sz_u64_t *)target = *(sz_u64_t *)source;
+#endif
+    while (length--) *(target++) = *(source++);
+}
+
+SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    // Implementing `memmove` is trickier, than `memcpy`, as the ranges may overlap.
+    // Existing implementations often have two passes, in normal and reversed order,
+    // depending on the relation of `target` and `source` addresses.
+    // https://student.cs.uwaterloo.ca/~cs350/common/os161-src-html/doxygen/html/memmove_8c_source.html
+    // https://marmota.medium.com/c-language-making-memmove-def8792bb8d5
+    //
+    // We can use the `memcpy` like left-to-right pass if we know that the `target` is before `source`.
+    // Or if we know that they don't intersect! In that case the traversal order is irrelevant,
+    // but older CPUs may predict and fetch forward-passes better.
+    if (target < source || target >= source + length) {
+#if SZ_USE_MISALIGNED_LOADS
+        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, length -= 8;
+#endif
+        while (length--) *(target++) = *(source++);
+    }
+    else {
+        // Jump to the end and walk backwards.
+        target += length, source += length;
+#if SZ_USE_MISALIGNED_LOADS
+        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target -= 8, source -= 8, length -= 8;
+#endif
+        while (length--) *(target--) = *(source--);
+    }
+}
+
 /**
  *  @brief  Variation of AVX-512 exact search for patterns up to 1 bytes included.
  */
@@ -2600,10 +2731,10 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_c
 
 sz_find_2byte_avx512_cycle:
     if (h_length < 2) { return NULL; }
-    else if (h_length < 66) {
+    else if (h_length < 65) {
         mask = sz_u64_mask_until(h_length);
         h0_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + 1);
+        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 1, h + 1);
         matches0 = _mm512_mask_cmpeq_epi16_mask(mask, h0_vec.zmm, n_vec.zmm);
         matches1 = _mm512_mask_cmpeq_epi16_mask(mask, h1_vec.zmm, n_vec.zmm);
         if (matches0 | matches1)
@@ -2637,12 +2768,12 @@ SZ_INTERNAL sz_cptr_t sz_find_4byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_c
 
 sz_find_4byte_avx512_cycle:
     if (h_length < 4) { return NULL; }
-    else if (h_length < 68) {
+    else if (h_length < 67) {
         mask = sz_u64_mask_until(h_length);
-        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + 1);
-        h2_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + 2);
-        h3_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + 3);
+        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 0, h + 0);
+        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 1, h + 1);
+        h2_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 2, h + 2);
+        h3_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 3, h + 3);
         matches0 = _mm512_mask_cmpeq_epi32_mask(mask, h0_vec.zmm, n_vec.zmm);
         matches1 = _mm512_mask_cmpeq_epi32_mask(mask, h1_vec.zmm, n_vec.zmm);
         matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec.zmm, n_vec.zmm);
@@ -2655,7 +2786,7 @@ sz_find_4byte_avx512_cycle:
         return NULL;
     }
     else {
-        h0_vec.zmm = _mm512_loadu_epi8(h);
+        h0_vec.zmm = _mm512_loadu_epi8(h + 0);
         h1_vec.zmm = _mm512_loadu_epi8(h + 1);
         h2_vec.zmm = _mm512_loadu_epi8(h + 2);
         h3_vec.zmm = _mm512_loadu_epi8(h + 3);
@@ -2674,64 +2805,6 @@ sz_find_4byte_avx512_cycle:
 }
 
 /**
- *  @brief  Variation of AVX-512 exact search for patterns up to 3 bytes included.
- */
-SZ_INTERNAL sz_cptr_t sz_find_3byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-
-    // A simpler approach would ahve been to use two separate registers for
-    // different characters of the needle, but that would use more registers.
-    __mmask64 mask;
-    __mmask16 matches0, matches1, matches2, matches3;
-    sz_u512_vec_t h0_vec, h1_vec, h2_vec, h3_vec, n_vec;
-
-    sz_u64_vec_t n64_vec;
-    n64_vec.u8s[0] = n[0];
-    n64_vec.u8s[1] = n[1];
-    n64_vec.u8s[2] = n[2];
-    n64_vec.u8s[3] = 0;
-    n_vec.zmm = _mm512_set1_epi32(n64_vec.u32s[0]);
-
-sz_find_3byte_avx512_cycle:
-    if (h_length < 3) { return NULL; }
-    else if (h_length < 67) {
-        mask = sz_u64_mask_until(h_length);
-        // This implementation is more complex than the `sz_find_4byte_avx512`,
-        // as we are going to match only 3 bytes within each 4-byte word.
-        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h);
-        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h + 1);
-        h2_vec.zmm = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h + 2);
-        h3_vec.zmm = _mm512_maskz_loadu_epi8(mask & 0x7777777777777777, h + 3);
-        matches0 = _mm512_mask_cmpeq_epi32_mask(mask, h0_vec.zmm, n_vec.zmm);
-        matches1 = _mm512_mask_cmpeq_epi32_mask(mask, h1_vec.zmm, n_vec.zmm);
-        matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec.zmm, n_vec.zmm);
-        matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec.zmm, n_vec.zmm);
-        if (matches0 | matches1 | matches2 | matches3)
-            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
-                                  _pdep_u64(matches1, 0x2222222222222222) | //
-                                  _pdep_u64(matches2, 0x4444444444444444) | //
-                                  _pdep_u64(matches3, 0x8888888888888888));
-        return NULL;
-    }
-    else {
-        h0_vec.zmm = _mm512_maskz_loadu_epi8(0x7777777777777777, h);
-        h1_vec.zmm = _mm512_maskz_loadu_epi8(0x7777777777777777, h + 1);
-        h2_vec.zmm = _mm512_maskz_loadu_epi8(0x7777777777777777, h + 2);
-        h3_vec.zmm = _mm512_maskz_loadu_epi8(0x7777777777777777, h + 3);
-        matches0 = _mm512_cmpeq_epi32_mask(h0_vec.zmm, n_vec.zmm);
-        matches1 = _mm512_cmpeq_epi32_mask(h1_vec.zmm, n_vec.zmm);
-        matches2 = _mm512_cmpeq_epi32_mask(h2_vec.zmm, n_vec.zmm);
-        matches3 = _mm512_cmpeq_epi32_mask(h3_vec.zmm, n_vec.zmm);
-        if (matches0 | matches1 | matches2 | matches3)
-            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
-                                  _pdep_u64(matches1, 0x2222222222222222) | //
-                                  _pdep_u64(matches2, 0x4444444444444444) | //
-                                  _pdep_u64(matches3, 0x8888888888888888));
-        h += 64, h_length -= 64;
-        goto sz_find_3byte_avx512_cycle;
-    }
-}
-
-/**
  *  @brief  Variation of AVX-512 exact search for patterns up to 66 bytes included.
  */
 SZ_INTERNAL sz_cptr_t sz_find_under66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -2746,7 +2819,7 @@ SZ_INTERNAL sz_cptr_t sz_find_under66byte_avx512(sz_cptr_t h, sz_size_t h_length
 sz_find_under66byte_avx512_cycle:
     if (h_length < n_length) { return NULL; }
     else if (h_length < n_length + 64) {
-        mask = sz_u64_mask_until(h_length);
+        mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
@@ -2796,7 +2869,7 @@ SZ_INTERNAL sz_cptr_t sz_find_over66byte_avx512(sz_cptr_t h, sz_size_t h_length,
 sz_find_over66byte_avx512_cycle:
     if (h_length < n_length) { return NULL; }
     else if (h_length < n_length + 64) {
-        mask = sz_u64_mask_until(h_length);
+        mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
@@ -2839,7 +2912,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_byte_avx512,
         (sz_find_t)sz_find_2byte_avx512,
-        (sz_find_t)sz_find_3byte_avx512,
+        (sz_find_t)sz_find_under66byte_avx512,
         (sz_find_t)sz_find_4byte_avx512,
         // For longer needles we use a Two-Way heuristic with a follow-up check in-between.
         (sz_find_t)sz_find_under66byte_avx512,
@@ -2894,12 +2967,12 @@ SZ_INTERNAL sz_cptr_t sz_find_last_under66byte_avx512(sz_cptr_t h, sz_size_t h_l
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
     n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
 
-sz_find_under66byte_avx512_cycle:
+sz_find_last_under66byte_avx512_cycle:
     if (h_length < n_length) { return NULL; }
     else if (h_length < n_length + 64) {
-        mask = sz_u64_mask_until(h_length);
+        mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask >> (n_length - 1), h + n_length - 1);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
@@ -2908,7 +2981,7 @@ sz_find_under66byte_avx512_cycle:
             if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + 64 - potential_offset - 1;
 
             h_length = 64 - potential_offset - 1;
-            goto sz_find_under66byte_avx512_cycle;
+            goto sz_find_last_under66byte_avx512_cycle;
         }
         else
             return NULL;
@@ -2926,11 +2999,11 @@ sz_find_under66byte_avx512_cycle:
                 return h + h_length - n_length - potential_offset;
 
             h_length -= potential_offset + 1;
-            goto sz_find_under66byte_avx512_cycle;
+            goto sz_find_last_under66byte_avx512_cycle;
         }
         else {
             h_length -= 64;
-            goto sz_find_under66byte_avx512_cycle;
+            goto sz_find_last_under66byte_avx512_cycle;
         }
     }
 }
@@ -2940,45 +3013,50 @@ sz_find_under66byte_avx512_cycle:
  */
 SZ_INTERNAL sz_cptr_t sz_find_last_over66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
-    __mmask64 mask;
+    __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
     __mmask64 matches;
-    sz_u512_vec_t h_first_vec, h_last_vec, n_first_vec, n_last_vec;
+    sz_u512_vec_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
+    n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
 
-sz_find_over66byte_avx512_cycle:
+sz_find_last_over66byte_avx512_cycle:
     if (h_length < n_length) { return NULL; }
     else if (h_length < n_length + 64) {
-        mask = sz_u64_mask_until(h_length);
+        mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask >> (n_length - 1), h + n_length - 1);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
-            int potential_offset = sz_u64_ctz(matches);
-            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+            int potential_offset = sz_u64_clz(matches);
+            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + 64 - potential_offset);
+            if (sz_equal_avx512(h + 64 - potential_offset, n + 1, n_length - 2)) return h + 64 - potential_offset - 1;
 
-            h += potential_offset + 1, h_length -= potential_offset + 1;
-            goto sz_find_over66byte_avx512_cycle;
+            h_length = 64 - potential_offset - 1;
+            goto sz_find_last_over66byte_avx512_cycle;
         }
         else
             return NULL;
     }
     else {
-        h_first_vec.zmm = _mm512_loadu_epi8(h);
-        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
+        h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
+        h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
         matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
-            int potential_offset = sz_u64_ctz(matches);
-            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+            int potential_offset = sz_u64_clz(matches);
+            h_body_vec.zmm =
+                _mm512_maskz_loadu_epi8(n_length_body_mask, h + h_length - n_length - potential_offset + 1);
+            if (sz_equal_avx512(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
+                return h + h_length - n_length - potential_offset;
 
-            h += potential_offset + 1, h_length -= potential_offset + 1;
-            goto sz_find_over66byte_avx512_cycle;
+            h_length -= potential_offset + 1;
+            goto sz_find_last_over66byte_avx512_cycle;
         }
         else {
-            h += 64, h_length -= 64;
-            goto sz_find_over66byte_avx512_cycle;
+            h_length -= 64;
+            goto sz_find_last_over66byte_avx512_cycle;
         }
     }
 }
