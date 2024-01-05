@@ -22,6 +22,8 @@
 #define default_seconds_m 10
 #endif
 
+namespace sz = ashvardanian::stringzilla;
+
 namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
@@ -34,16 +36,16 @@ struct benchmark_result_t {
     seconds_t seconds = 0;
 };
 
-using unary_function_t = std::function<sz_ssize_t(sz_string_view_t)>;
-using binary_function_t = std::function<sz_ssize_t(sz_string_view_t, sz_string_view_t)>;
+using unary_function_t = std::function<std::size_t(std::string_view)>;
+using binary_function_t = std::function<std::size_t(std::string_view, std::string_view)>;
 
 /**
  *  @brief  Wrapper for a single execution backend.
  */
-template <typename function_at>
+template <typename function_type>
 struct tracked_function_gt {
     std::string name {""};
-    function_at function {nullptr};
+    function_type function {nullptr};
     bool needs_testing {false};
 
     std::size_t failed_count {0};
@@ -58,7 +60,7 @@ struct tracked_function_gt {
         //  - call latency in ns with up to 1 significant digit, 10 characters
         //  - number of failed tests, 10 characters
         //  - first example of a failed test, up to 20 characters
-        if constexpr (std::is_same<function_at, binary_function_t>())
+        if constexpr (std::is_same<function_type, binary_function_t>())
             format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s %s\n";
         else
             format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s\n";
@@ -80,9 +82,6 @@ template <typename value_at>
 inline void do_not_optimize(value_at &&value) {
     asm volatile("" : "+r"(value) : : "memory");
 }
-
-inline sz_string_view_t sz_string_view(std::string_view str) { return {str.data(), str.size()}; };
-inline sz_string_view_t sz_string_view(std::string const &str) { return {str.data(), str.size()}; };
 
 /**
  *  @brief  Rounds the number down to the preceding power of two.
@@ -162,14 +161,20 @@ inline dataset_t make_dataset(int argc, char const *argv[]) {
     return make_dataset_from_path(argv[1]);
 }
 
+inline sz_string_view_t to_c(std::string_view str) noexcept { return {str.data(), str.size()}; }
+inline sz_string_view_t to_c(std::string const &str) noexcept { return {str.data(), str.size()}; }
+inline sz_string_view_t to_c(sz::string_view str) noexcept { return {str.data(), str.size()}; }
+inline sz_string_view_t to_c(sz::string const &str) noexcept { return {str.data(), str.size()}; }
+inline sz_string_view_t to_c(sz_string_view_t str) noexcept { return str; }
+
 /**
  *  @brief  Loop over all elements in a dataset in somewhat random order, benchmarking the function cost.
  *  @param  strings Strings to loop over. Length must be a power of two.
  *  @param  function Function to be applied to each `sz_string_view_t`. Must return the number of bytes processed.
  *  @return Number of seconds per iteration.
  */
-template <typename strings_at, typename function_at>
-benchmark_result_t bench_on_tokens(strings_at &&strings, function_at &&function,
+template <typename strings_type, typename function_type>
+benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&function,
                                    seconds_t max_time = default_seconds_m) {
 
     namespace stdc = std::chrono;
@@ -202,8 +207,8 @@ benchmark_result_t bench_on_tokens(strings_at &&strings, function_at &&function,
  *                   Must return the number of bytes processed.
  *  @return Number of seconds per iteration.
  */
-template <typename strings_at, typename function_at>
-benchmark_result_t bench_on_token_pairs(strings_at &&strings, function_at &&function,
+template <typename strings_type, typename function_type>
+benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&function,
                                         seconds_t max_time = default_seconds_m) {
 
     namespace stdc = std::chrono;
@@ -237,30 +242,32 @@ benchmark_result_t bench_on_token_pairs(strings_at &&strings, function_at &&func
 /**
  *  @brief  Evaluation for unary string operations: hashing.
  */
-template <typename strings_at>
-void evaluate_unary_functions(strings_at &&strings, tracked_unary_functions_t &&variants) {
+template <typename strings_type, typename functions_type>
+void bench_unary_functions(strings_type &&strings, functions_type &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
 
         // Tests
         if (variant.function && variant.needs_testing) {
-            bench_on_tokens(strings, [&](auto str) {
+            bench_on_tokens(strings, [&](auto str) -> std::size_t {
                 auto baseline = variants[0].function(str);
                 auto result = variant.function(str);
                 if (result != baseline) {
                     ++variant.failed_count;
-                    if (variant.failed_strings.empty()) { variant.failed_strings.push_back({str.start, str.length}); }
+                    if (variant.failed_strings.empty()) {
+                        variant.failed_strings.push_back({to_c(str).start, to_c(str).length});
+                    }
                 }
-                return str.length;
+                return to_c(str).length;
             });
         }
 
         // Benchmarks
         if (variant.function) {
-            variant.results = bench_on_tokens(strings, [&](auto str) {
+            variant.results = bench_on_tokens(strings, [&](auto str) -> std::size_t {
                 do_not_optimize(variant.function(str));
-                return str.length;
+                return to_c(str).length;
             });
         }
 
@@ -271,33 +278,33 @@ void evaluate_unary_functions(strings_at &&strings, tracked_unary_functions_t &&
 /**
  *  @brief  Evaluation for binary string operations: equality, ordering, prefix, suffix, distance.
  */
-template <typename strings_at>
-void bench_binary_functions(strings_at &&strings, tracked_binary_functions_t &&variants) {
+template <typename strings_type, typename functions_type>
+void bench_binary_functions(strings_type &&strings, functions_type &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
 
         // Tests
         if (variant.function && variant.needs_testing) {
-            bench_on_token_pairs(strings, [&](auto str_a, auto str_b) {
+            bench_on_token_pairs(strings, [&](auto str_a, auto str_b) -> std::size_t {
                 auto baseline = variants[0].function(str_a, str_b);
                 auto result = variant.function(str_a, str_b);
                 if (result != baseline) {
                     ++variant.failed_count;
                     if (variant.failed_strings.empty()) {
-                        variant.failed_strings.push_back({str_a.start, str_a.length});
-                        variant.failed_strings.push_back({str_b.start, str_b.length});
+                        variant.failed_strings.push_back({to_c(str_a).start, to_c(str_a).length});
+                        variant.failed_strings.push_back({to_c(str_b).start, to_c(str_b).length});
                     }
                 }
-                return str_a.length + str_b.length;
+                return to_c(str_a).length + to_c(str_b).length;
             });
         }
 
         // Benchmarks
         if (variant.function) {
-            variant.results = bench_on_token_pairs(strings, [&](auto str_a, auto str_b) {
+            variant.results = bench_on_token_pairs(strings, [&](auto str_a, auto str_b) -> std::size_t {
                 do_not_optimize(variant.function(str_a, str_b));
-                return str_a.length + str_b.length;
+                return to_c(str_a).length + to_c(str_b).length;
             });
         }
 

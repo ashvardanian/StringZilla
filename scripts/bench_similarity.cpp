@@ -37,17 +37,21 @@ tracked_binary_functions_t distance_functions() {
     alloc.handle = &temporary_memory;
 
     auto wrap_sz_distance = [alloc](auto function) -> binary_function_t {
-        return binary_function_t([function, alloc](sz_string_view_t a, sz_string_view_t b) {
+        return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) {
+            sz_string_view_t a = to_c(a_str);
+            sz_string_view_t b = to_c(b_str);
             a.length = sz_min_of_two(a.length, max_length);
             b.length = sz_min_of_two(b.length, max_length);
-            return (sz_ssize_t)function(a.start, a.length, b.start, b.length, max_length, &alloc);
+            return function(a.start, a.length, b.start, b.length, max_length, &alloc);
         });
     };
     auto wrap_sz_scoring = [alloc](auto function) -> binary_function_t {
-        return binary_function_t([function, alloc](sz_string_view_t a, sz_string_view_t b) {
+        return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) {
+            sz_string_view_t a = to_c(a_str);
+            sz_string_view_t b = to_c(b_str);
             a.length = sz_min_of_two(a.length, max_length);
             b.length = sz_min_of_two(b.length, max_length);
-            return (sz_ssize_t)function(a.start, a.length, b.start, b.length, 1, unary_substitution_costs.data(),
+            return function(a.start, a.length, b.start, b.length, 1, unary_substitution_costs.data(),
                                         &alloc);
         });
     };
@@ -62,7 +66,7 @@ tracked_binary_functions_t distance_functions() {
 }
 
 template <typename strings_at>
-void evaluate_all(strings_at &&strings) {
+void bench_similarity(strings_at &&strings) {
     if (strings.size() == 0) return;
     bench_binary_functions(strings, distance_functions());
 }
@@ -74,12 +78,12 @@ int main(int argc, char const **argv) {
 
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");
-    evaluate_all(dataset.tokens);
+    bench_similarity(dataset.tokens);
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
         std::printf("Benchmarking on real words of length %zu:\n", token_length);
-        evaluate_all(filter_by_length(dataset.tokens, token_length));
+        bench_similarity(filter_by_length(dataset.tokens, token_length));
     }
 
     std::printf("All benchmarks passed.\n");

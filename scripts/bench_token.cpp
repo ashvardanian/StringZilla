@@ -10,7 +10,7 @@ using namespace ashvardanian::stringzilla::scripts;
 
 tracked_unary_functions_t hashing_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](sz_string_view_t s) { return (sz_ssize_t)function(s.start, s.length); });
+        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
     };
     tracked_unary_functions_t result = {
         {"sz_hash_serial", wrap_sz(sz_hash_serial)},
@@ -20,32 +20,26 @@ tracked_unary_functions_t hashing_functions() {
 #if SZ_USE_ARM_NEON
         {"sz_hash_neon", wrap_sz(sz_hash_neon), true},
 #endif
-        {"std::hash",
-         [](sz_string_view_t s) {
-             return (sz_ssize_t)std::hash<std::string_view> {}({s.start, s.length});
-         }},
+        {"std::hash", [](std::string_view s) { return std::hash<std::string_view> {}(s); }},
     };
     return result;
 }
 
 tracked_binary_functions_t equality_functions() {
     auto wrap_sz = [](auto function) -> binary_function_t {
-        return binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
-            return (sz_ssize_t)(a.length == b.length && function(a.start, b.start, a.length));
+        return binary_function_t([function](std::string_view a, std::string_view b) {
+            return (a.size() == b.size() && function(a.data(), b.data(), a.size()));
         });
     };
     tracked_binary_functions_t result = {
-        {"std::string_view.==",
-         [](sz_string_view_t a, sz_string_view_t b) {
-             return (sz_ssize_t)(std::string_view(a.start, a.length) == std::string_view(b.start, b.length));
-         }},
+        {"std::string_view.==", [](std::string_view a, std::string_view b) { return (a == b); }},
         {"sz_equal_serial", wrap_sz(sz_equal_serial), true},
 #if SZ_USE_X86_AVX512
         {"sz_equal_avx512", wrap_sz(sz_equal_avx512), true},
 #endif
         {"memcmp",
-         [](sz_string_view_t a, sz_string_view_t b) {
-             return (sz_ssize_t)(a.length == b.length && memcmp(a.start, b.start, a.length) == 0);
+         [](std::string_view a, std::string_view b) {
+             return (a.size() == b.size() && memcmp(a.data(), b.data(), a.size()) == 0);
          }},
     };
     return result;
@@ -53,22 +47,22 @@ tracked_binary_functions_t equality_functions() {
 
 tracked_binary_functions_t ordering_functions() {
     auto wrap_sz = [](auto function) -> binary_function_t {
-        return binary_function_t([function](sz_string_view_t a, sz_string_view_t b) {
-            return (sz_ssize_t)function(a.start, a.length, b.start, b.length);
+        return binary_function_t([function](std::string_view a, std::string_view b) {
+            return function(a.data(), a.size(), b.data(), b.size());
         });
     };
     tracked_binary_functions_t result = {
         {"std::string_view.compare",
-         [](sz_string_view_t a, sz_string_view_t b) {
-             auto order = std::string_view(a.start, a.length).compare(std::string_view(b.start, b.length));
-             return (sz_ssize_t)(order == 0 ? sz_equal_k : (order < 0 ? sz_less_k : sz_greater_k));
+         [](std::string_view a, std::string_view b) {
+             auto order = a.compare(b);
+             return (order == 0 ? sz_equal_k : (order < 0 ? sz_less_k : sz_greater_k));
          }},
         {"sz_order_serial", wrap_sz(sz_order_serial), true},
         {"memcmp",
-         [](sz_string_view_t a, sz_string_view_t b) {
-             auto order = memcmp(a.start, b.start, a.length < b.length ? a.length : b.length);
-             return order != 0 ? (a.length == b.length ? (order < 0 ? sz_less_k : sz_greater_k)
-                                                       : (a.length < b.length ? sz_less_k : sz_greater_k))
+         [](std::string_view a, std::string_view b) {
+             auto order = memcmp(a.data(), b.data(), a.size() < b.size() ? a.size() : b.size());
+             return order != 0 ? (a.size() == b.size() ? (order < 0 ? sz_less_k : sz_greater_k)
+                                                       : (a.size() < b.size() ? sz_less_k : sz_greater_k))
                                : sz_equal_k;
          }},
     };
@@ -79,7 +73,7 @@ template <typename strings_at>
 void evaluate_all(strings_at &&strings) {
     if (strings.size() == 0) return;
 
-    evaluate_unary_functions(strings, hashing_functions());
+    bench_unary_functions(strings, hashing_functions());
     bench_binary_functions(strings, equality_functions());
     bench_binary_functions(strings, ordering_functions());
 }
