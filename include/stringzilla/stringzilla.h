@@ -2068,6 +2068,7 @@ SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_
     string->on_heap.start = new_start;
     string->on_heap.space = new_space;
     string->on_heap.padding = 0;
+    string->on_heap.length = string_length;
 
     // Deallocate the old string.
     if (string_is_on_heap) allocator->free(string_start, string_space, allocator->handle);
@@ -2146,8 +2147,9 @@ SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t 
 }
 
 SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
-    if (sz_string_is_on_stack(string)) return;
+    if (!sz_string_is_on_stack(string))
     allocator->free(string->on_heap.start, string->on_heap.space, allocator->handle);
+    sz_string_init(string);
 }
 
 SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {

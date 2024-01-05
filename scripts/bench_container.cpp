@@ -14,27 +14,6 @@
 
 using namespace ashvardanian::stringzilla::scripts;
 
-/**
- *  @brief  Evaluation for search string operations: find.
- */
-template <typename container_at>
-void bench(std::vector<typename container_at::key_type> const &strings) {
-
-    using key_type = typename container_at::key_type;
-
-    // Build up the container
-    container_at container;
-    for (key_type const &key : strings) container[key] = 0;
-
-    tracked_function_gt<unary_function_t> variant;
-    variant.results = bench_on_tokens(strings, [&](key_type const &key) {
-        container[key]++;
-        return 1;
-    });
-
-    variant.print();
-}
-
 template <typename string_type_to, typename string_type_from>
 std::vector<string_type_to> to(std::vector<string_type_from> const &strings) {
     std::vector<string_type_to> result;
@@ -43,27 +22,51 @@ std::vector<string_type_to> to(std::vector<string_type_from> const &strings) {
     return result;
 }
 
+/**
+ *  @brief  Evaluation for search string operations: find.
+ */
+template <typename container_at>
+void bench(std::string name, std::vector<std::string_view> const &strings) {
+
+    using key_type = typename container_at::key_type;
+    std::vector<key_type> keys = to<key_type>(strings);
+
+    // Build up the container
+    container_at container;
+    for (key_type const &key : keys) container[key] = 0;
+
+    tracked_function_gt<unary_function_t> variant;
+    variant.name = name;
+    variant.results = bench_on_tokens(keys, [&](key_type const &key) {
+        container.find(key)->second++;
+        return key.size();
+    });
+
+    variant.print();
+}
+
 template <typename strings_type>
 void bench_tokens(strings_type const &strings) {
     if (strings.size() == 0) return;
-
-    // Pure STL
-    bench<std::map<std::string, int>>(to<std::string>(strings));
-    bench<std::map<std::string_view, int>>(to<std::string_view>(strings));
-    bench<std::unordered_map<std::string, int>>(to<std::string>(strings));
-    bench<std::unordered_map<std::string_view, int>>(to<std::string_view>(strings));
+    auto const &s = strings;
 
     // StringZilla structures
-    bench<std::map<sz::string, int>>(to<sz::string>(strings));
-    bench<std::map<sz::string_view, int>>(to<sz::string_view>(strings));
-    bench<std::unordered_map<sz::string, int>>(to<sz::string>(strings));
-    bench<std::unordered_map<sz::string_view, int>>(to<sz::string_view>(strings));
+    bench<std::map<sz::string, int>>("map<sz::string>", s);
+    bench<std::map<sz::string_view, int>>("map<sz::string_view>", s);
+    bench<std::unordered_map<sz::string, int>>("unordered_map<sz::string>", s);
+    bench<std::unordered_map<sz::string_view, int>>("unordered_map<sz::string_view>", s);
+
+    // Pure STL
+    bench<std::map<std::string, int>>("map<std::string>", s);
+    bench<std::map<std::string_view, int>>("map<std::string_view>", s);
+    bench<std::unordered_map<std::string, int>>("unordered_map<std::string>", s);
+    bench<std::unordered_map<std::string_view, int>>("unordered_map<std::string_view>", s);
 
     // STL structures with StringZilla operations
-    // bench<std::map<std::string, int, sz::less>>(to<std::string>(strings));
-    // bench<std::map<std::string_view, int, sz::less>>(to<std::string_view>(strings));
-    // bench<std::unordered_map<std::string, int, sz::hash, sz::equal_to>>(to<std::string>(strings));
-    // bench<std::unordered_map<std::string_view, int, sz::hash, sz::equal_to>>(to<std::string_view>(strings));
+    // bench<std::map<std::string, int, sz::less>>("map<std::string>", s);
+    // bench<std::map<std::string_view, int, sz::less>>("map<std::string_view>", s);
+    // bench<std::unordered_map<std::string, int, sz::hash, sz::equal_to>>("unordered_map<std::string>", s);
+    // bench<std::unordered_map<std::string_view, int, sz::hash, sz::equal_to>>("unordered_map<std::string_view>", s);
 }
 
 int main(int argc, char const **argv) {
