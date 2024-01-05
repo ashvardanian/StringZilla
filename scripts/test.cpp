@@ -283,8 +283,17 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
 }
 
 
+static const char* USER_NAME = 
+#define str(s) #s
+#define xstr(s) str(s)
+  xstr(DEV_USER_NAME);
+
 
 int main(int argc, char const **argv) {
+int main(int argc, char const **argv) {
+    std::printf("Hi " xstr(DEV_USER_NAME)"! You look nice today!\n");
+#undef str
+#undef xstr
 
     test_util();
     explicit_test_cases_run();

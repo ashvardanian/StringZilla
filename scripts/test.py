@@ -5,8 +5,11 @@ import numpy as np
 
 import pytest
 
+from random import choice, randint
+from string import ascii_lowercase
 import stringzilla as sz
 from stringzilla import Str, Strs
+from typing import Optional
 
 
 def test_unit_construct():
