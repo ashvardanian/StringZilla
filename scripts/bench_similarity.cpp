@@ -13,13 +13,13 @@ using namespace ashvardanian::stringzilla::scripts;
 using temporary_memory_t = std::vector<char>;
 temporary_memory_t temporary_memory;
 
-static sz_ptr_t allocate_from_vector(sz_size_t length, void *handle) {
+static void* allocate_from_vector(sz_size_t length, void *handle) {
     temporary_memory_t &vec = *reinterpret_cast<temporary_memory_t *>(handle);
     if (vec.size() < length) vec.resize(length);
     return vec.data();
 }
 
-static void free_from_vector(sz_ptr_t buffer, sz_size_t length, void *handle) {}
+static void free_from_vector(void* buffer, sz_size_t length, void *handle) {}
 
 tracked_binary_functions_t distance_functions() {
     // Populate the unary substitutions matrix

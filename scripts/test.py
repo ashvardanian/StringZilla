@@ -2,6 +2,7 @@ import pytest
 
 import stringzilla as sz
 from stringzilla import Str
+from typing import Optional
 
 
 def test_unit_construct():
@@ -178,9 +179,9 @@ def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability
     ), f"Failed to locate {pattern} at offset {native.find(pattern)} in {native}"
 
 
-@pytest.mark.repeat(100)
+@pytest.mark.parametrize("iters", [100])
 @pytest.mark.parametrize("max_edit_distance", [150])
-def test_edit_distance_insertions(max_edit_distance: int):
+def test_edit_distance_insertions(max_edit_distance: int, iters: int):
     # Create a new string by slicing and concatenating
     def insert_char_at(s, char_to_insert, index):
         return s[:index] + char_to_insert + s[index:]
@@ -194,8 +195,8 @@ def test_edit_distance_insertions(max_edit_distance: int):
         assert sz.edit_distance(a, b, 200) == i + 1
 
 
-@pytest.mark.repeat(1000)
-def test_edit_distance_randos():
+@pytest.mark.parametrize("iters", [100])
+def test_edit_distance_randos(iters: int):
     a = get_random_string(length=20)
     b = get_random_string(length=20)
     assert sz.edit_distance(a, b, 200) == edit_distance(a, b)

@@ -6,6 +6,8 @@ project(
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_COMPILE_WARNING_AS_ERROR)
+set(DEV_USER_NAME $ENV{USER})
 
 # Set a default build type to "Release" if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -81,6 +83,7 @@ endif()
 function(set_compiler_flags target)
   target_include_directories(${target} PRIVATE scripts)
   target_link_libraries(${target} PRIVATE ${STRINGZILLA_TARGET_NAME})
+  target_compile_definitions(${target} PUBLIC DEV_USER_NAME=${DEV_USER_NAME})
   set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     ${CMAKE_BINARY_DIR})
 
@@ -104,31 +107,21 @@ function(set_compiler_flags target)
   endif()
 endfunction()
 
+function(define_test exec_name source)
+   add_executable(${exec_name} ${source})
+   set_compiler_flags(${exec_name})
+   add_test(NAME ${exec_name} COMMAND ${exec_name})
+endfunction()
+
 if(${STRINGZILLA_BUILD_BENCHMARK})
-  add_executable(stringzilla_bench_search scripts/bench_search.cpp)
-  set_compiler_flags(stringzilla_bench_search)
-  add_test(NAME stringzilla_bench_search COMMAND stringzilla_bench_search)
-
-  add_executable(stringzilla_bench_similarity scripts/bench_similarity.cpp)
-  set_compiler_flags(stringzilla_bench_similarity)
-  add_test(NAME stringzilla_bench_similarity COMMAND stringzilla_bench_similarity)
-
-  add_executable(stringzilla_bench_sort scripts/bench_sort.cpp)
-  set_compiler_flags(stringzilla_bench_sort)
-  add_test(NAME stringzilla_bench_sort COMMAND stringzilla_bench_sort)
-
-  add_executable(stringzilla_bench_token scripts/bench_token.cpp)
-  set_compiler_flags(stringzilla_bench_token)
-  add_test(NAME stringzilla_bench_token COMMAND stringzilla_bench_token)
-
-  add_executable(stringzilla_bench_container scripts/bench_container.cpp)
-  set_compiler_flags(stringzilla_bench_container)
-  add_test(NAME stringzilla_bench_container COMMAND stringzilla_bench_container)
+  define_test(stringzilla_bench_search scripts/bench_search.cpp)
+  define_test(stringzilla_bench_similarity scripts/bench_similarity.cpp)
+  define_test(stringzilla_bench_sort scripts/bench_sort.cpp)
+  define_test(stringzilla_bench_token scripts/bench_sort.cpp)
+  define_test(stringzilla_bench_container scripts/bench_container.cpp)
 endif()
 
 if(${STRINGZILLA_BUILD_TEST})
   # Test target
-  add_executable(stringzilla_test scripts/test.cpp)
-  set_compiler_flags(stringzilla_test)
-  add_test(NAME stringzilla_test COMMAND stringzilla_test)
+  define_test(stringzilla_test scripts/test.cpp)
 endif()

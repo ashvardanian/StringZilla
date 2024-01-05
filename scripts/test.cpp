@@ -14,8 +14,153 @@
 #include <string_view>                 // Baseline
 #include <stringzilla/stringzilla.hpp> // Contender
 
+
+static void
+test_util() {
+    assert(sz_leading_zeros64(0x0000000000000000ull) == 64);
+
+    assert(sz_leading_zeros64(0x0000000000000001ull) == 63);
+
+    assert(sz_leading_zeros64(0x0000000000000002ull) == 62);
+    assert(sz_leading_zeros64(0x0000000000000003ull) == 62);
+
+    assert(sz_leading_zeros64(0x0000000000000004ull) == 61);
+    assert(sz_leading_zeros64(0x0000000000000007ull) == 61);
+
+    assert(sz_leading_zeros64(0x8000000000000000ull) == 0);
+    assert(sz_leading_zeros64(0x8000000000000001ull) == 0);
+    assert(sz_leading_zeros64(0xffffffffffffffffull) == 0);
+
+    assert(sz_leading_zeros64(0x4000000000000000ull) == 1);
+
+    assert(sz_size_log2i(1) == 0);
+    assert(sz_size_log2i(2) == 1);
+
+    assert(sz_size_log2i(3) == 2);
+    assert(sz_size_log2i(4) == 2);
+    assert(sz_size_log2i(5) == 3);
+
+    assert(sz_size_log2i(7) == 3);
+    assert(sz_size_log2i(8) == 3);
+    assert(sz_size_log2i(9) == 4);
+
+    assert(sz_size_bit_ceil(0) == 1);
+    assert(sz_size_bit_ceil(1) == 1);
+
+    assert(sz_size_bit_ceil(2) == 2);
+    assert(sz_size_bit_ceil(3) == 4);
+    assert(sz_size_bit_ceil(4) == 4);
+
+    assert(sz_size_bit_ceil(77) == 128);
+    assert(sz_size_bit_ceil(127) == 128);
+    assert(sz_size_bit_ceil(128) == 128);
+
+    assert(sz_size_bit_ceil(uint64_t(1e6)) == (1ull << 20));
+    assert(sz_size_bit_ceil(uint64_t(2e6)) == (1ull << 21));
+    assert(sz_size_bit_ceil(uint64_t(4e6)) == (1ull << 22));
+    assert(sz_size_bit_ceil(uint64_t(8e6)) == (1ull << 23));
+
+    assert(sz_size_bit_ceil(uint64_t(1.6e7)) == (1ull << 24));
+    assert(sz_size_bit_ceil(uint64_t(3.2e7)) == (1ull << 25));
+    assert(sz_size_bit_ceil(uint64_t(6.4e7)) == (1ull << 26));
+
+    assert(sz_size_bit_ceil(uint64_t(1.28e8)) == (1ull << 27));
+    assert(sz_size_bit_ceil(uint64_t(2.56e8)) == (1ull << 28));
+    assert(sz_size_bit_ceil(uint64_t(5.12e8)) == (1ull << 29));
+
+    assert(sz_size_bit_ceil(uint64_t(1e9)) == (1ull << 30));
+    assert(sz_size_bit_ceil(uint64_t(2e9)) == (1ull << 31));
+    assert(sz_size_bit_ceil(uint64_t(4e9)) == (1ull << 32));
+    assert(sz_size_bit_ceil(uint64_t(8e9)) == (1ull << 33));
+
+    assert(sz_size_bit_ceil(uint64_t(1.6e10)) == (1ull << 34));
+
+    assert(sz_size_bit_ceil((1ull << 62))  == (1ull << 62));
+    assert(sz_size_bit_ceil((1ull << 62) + 1)  == (1ull << 63));
+    assert(sz_size_bit_ceil((1ull << 63))  == (1ull << 63));
+}
+
 namespace sz = ashvardanian::stringzilla;
 using sz::literals::operator""_sz;
+
+void
+genstr(sz::string& out, size_t len, uint64_t seed) {
+    auto chr = [&seed]() {
+        seed = seed * 25214903917 + 11; // POSIX srand48 constants (shrug)
+        return 'a' + seed % 36;
+    };
+
+    out.clear();
+    for (auto i = 0; i < len; i++) {
+        out.push_back(chr());
+    }
+}
+
+static void
+explicit_test_cases_run() {
+    static const struct {
+        const char* left;
+        const char* right;
+        size_t distance;
+    } _explict_test_cases[] = {
+        { "", "", 0 },
+        { "", "abc", 3 },
+        { "abc", "", 3 },
+        { "abc", "ac", 1 },   // d,1
+        { "abc", "a_bc", 1 }, // i,1
+        { "abc", "adc", 1 },  // r,1
+        { "ggbuzgjux{}l", "gbuzgjux{}l", 1 },  // prepend,1
+    };
+
+    auto cstr = [](const sz::string& s) {
+        return &(sz::string_view(s))[0];
+    };
+
+    auto expect = [&cstr](const sz::string& l, const sz::string& r, size_t sz) {
+        auto d = l.edit_distance(r);
+        auto f = [&] {
+            const char* ellipsis = l.length() > 22 || r.length() > 22 ? "..." : "";
+            fprintf(stderr, "test failure: distance(\"%.22s%s\", \"%.22s%s\"); got %zd, expected %zd\n",
+               cstr(l), ellipsis,
+               cstr(r), ellipsis,
+               d, sz);
+            abort();
+        };
+        if (d != sz) {
+            f();
+        }
+        // The distance relation commutes
+        d = r.edit_distance(l);
+        if (d != sz) {
+            f();
+        }
+    };
+
+    for (const auto tc: _explict_test_cases)
+        expect(sz::string(tc.left), sz::string(tc.right), tc.distance);
+
+    // Long string distances.
+    const size_t LONG = size_t(19337);
+    sz::string longstr;
+    genstr(longstr, LONG, 071177);
+
+    sz::string longstr2(longstr);
+    expect(longstr, longstr2, 0); 
+
+    for (auto i = 0; i < LONG; i += 17) {
+        char buf[LONG + 1];
+        // Insert at position i for a long string
+        const char* longc = cstr(longstr);
+        memcpy(buf, &longc[0], i);
+
+        // Insert!
+        buf[i] = longc[i];
+        memcpy(buf + i + 1, &longc[i], LONG - i);
+
+        sz::string inserted(sz::string_view(buf, LONG + 1));
+        expect(inserted, longstr, 1);
+    }
+}
 
 /**
  *  Evaluates the correctness of a "matcher", searching for all the occurences of the `needle_stl`
@@ -137,33 +282,18 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
     eval(haystack_pattern, needle_stl, 33);
 }
 
+static const char* USER_NAME = 
+#define str(s) #s
+#define xstr(s) str(s)
+  xstr(DEV_USER_NAME);
+
 int main(int argc, char const **argv) {
-    std::printf("Hi Ash! ... or is it someone else?!\n");
+    std::printf("Hi " xstr(DEV_USER_NAME)"! You look nice today!\n");
+#undef str
+#undef xstr
 
-    // Comparing relative order of the strings
-    assert("a"_sz.compare("a") == 0);
-    assert("a"_sz.compare("ab") == -1);
-    assert("ab"_sz.compare("a") == 1);
-    assert("a"_sz.compare("a\0"_sz) == -1);
-    assert("a\0"_sz.compare("a") == 1);
-    assert("a\0"_sz.compare("a\0"_sz) == 0);
-    assert("a"_sz == "a"_sz);
-    assert("a"_sz != "a\0"_sz);
-    assert("a\0"_sz == "a\0"_sz);
-
-    assert(sz_size_bit_ceil(0) == 1);
-    assert(sz_size_bit_ceil(1) == 1);
-    assert(sz_size_bit_ceil(2) == 2);
-    assert(sz_size_bit_ceil(3) == 4);
-    assert(sz_size_bit_ceil(127) == 128);
-    assert(sz_size_bit_ceil(128) == 128);
-
-    assert(sz::string("abc").edit_distance("_abc") == 1);
-    assert(sz::string("").edit_distance("_") == 1);
-    assert(sz::string("_").edit_distance("") == 1);
-    assert(sz::string("_").edit_distance("xx") == 2);
-    assert(sz::string("_").edit_distance("xx", 1) == 1);
-    assert(sz::string("_").edit_distance("xx", 0) == 0);
+    test_util();
+    explicit_test_cases_run();
 
     std::string_view alphabet = "abcdefghijklmnopqrstuvwxyz";                                         // 26 characters
     std::string_view base64 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";     // 64 characters
@@ -175,7 +305,22 @@ int main(int argc, char const **argv) {
         for (std::size_t alphabet_slice = 0; alphabet_slice != alphabet.size(); ++alphabet_slice)
             strings.push_back(alphabet.substr(0, alphabet_slice));
         std::vector<sz::string> copies {strings};
+        assert(copies.size() == strings.size());
+        for (size_t i = 0; i < copies.size(); i++) {
+            assert(copies[i].size() == strings[i].size());
+            assert(copies[i] == strings[i]);
+            for (size_t j = 0; j < strings[i].size(); j++) {
+                assert(copies[i][j] == strings[i][j]);
+            }
+        }
         std::vector<sz::string> assignments = strings;
+        for (size_t i = 0; i < assignments.size(); i++) {
+            assert(assignments[i].size() == strings[i].size());
+            assert(assignments[i] == strings[i]);
+            for (size_t j = 0; j < strings[i].size(); j++) {
+                assert(assignments[i][j] == strings[i][j]);
+            }
+        }
         assert(std::equal(strings.begin(), strings.end(), copies.begin()));
         assert(std::equal(strings.begin(), strings.end(), assignments.begin()));
     }
