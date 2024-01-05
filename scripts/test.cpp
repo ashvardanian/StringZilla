@@ -1,8 +1,9 @@
-#include <cassert>  // assertions
-#include <cstdio>   // `std::printf`
-#include <cstring>  // `std::memcpy`
-#include <iterator> // `std::distance`
-#include <vector>   // `std::vector`
+#include <algorithm> // `std::transform`
+#include <cassert>   // assertions
+#include <cstdio>    // `std::printf`
+#include <cstring>   // `std::memcpy`
+#include <iterator>  // `std::distance`
+#include <vector>    // `std::vector`
 
 #define SZ_USE_X86_AVX2 0
 #define SZ_USE_X86_AVX512 0
@@ -26,6 +27,8 @@ template <typename stl_matcher_, typename sz_matcher_>
 void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::size_t misalignment) {
     constexpr std::size_t max_repeats = 128;
     alignas(64) char haystack[misalignment + max_repeats * haystack_pattern.size()];
+    std::vector<std::size_t> offsets_stl;
+    std::vector<std::size_t> offsets_sz;
 
     for (std::size_t repeats = 0; repeats != 128; ++repeats) {
         std::size_t haystack_length = (repeats + 1) * haystack_pattern.size();
@@ -47,16 +50,37 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl, std::s
         auto count_stl = std::distance(begin_stl, end_stl);
         auto count_sz = std::distance(begin_sz, end_sz);
 
+        // To simplify debugging, let's first export all the match offsets, and only then compare them
+        std::transform(begin_stl, end_stl, std::back_inserter(offsets_stl),
+                       [&](auto const &match) { return match.data() - haystack_stl.data(); });
+        std::transform(begin_sz, end_sz, std::back_inserter(offsets_sz),
+                       [&](auto const &match) { return match.data() - haystack_sz.data(); });
+
         // Compare results
-        for (; begin_stl != end_stl && begin_sz != end_sz; ++begin_stl, ++begin_sz) {
+        for (std::size_t match_idx = 0; begin_stl != end_stl && begin_sz != end_sz;
+             ++begin_stl, ++begin_sz, ++match_idx) {
             auto match_stl = *begin_stl;
             auto match_sz = *begin_sz;
-            assert(match_stl.data() == match_sz.data());
+            if (match_stl.data() != match_sz.data()) {
+                std::printf("Mismatch at index #%zu: %zu != %zu\n", match_idx, match_stl.data() - haystack_stl.data(),
+                            match_sz.data() - haystack_sz.data());
+                std::printf("Breakdown of found matches:\n");
+                std::printf("- STL (%zu): ", offsets_stl.size());
+                for (auto offset : offsets_stl) std::printf("%zu ", offset);
+                std::printf("\n");
+                std::printf("- StringZilla (%zu): ", offsets_sz.size());
+                for (auto offset : offsets_sz) std::printf("%zu ", offset);
+                std::printf("\n");
+                assert(false);
+            }
         }
 
         // If one range is not finished, assert failure
         assert(count_stl == count_sz);
         assert(begin_stl == end_stl && begin_sz == end_sz);
+
+        offsets_stl.clear();
+        offsets_sz.clear();
     }
 }
 
@@ -107,22 +131,63 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
 int main(int argc, char const **argv) {
     std::printf("Hi Ash! ... or is it someone else?!\n");
 
+    // Comparing relative order of the strings
+    assert("a"_sz.compare("a") == 0);
+    assert("a"_sz.compare("ab") == -1);
+    assert("ab"_sz.compare("a") == 1);
+    assert("a"_sz.compare("a\0"_sz) == -1);
+    assert("a\0"_sz.compare("a") == 1);
+    assert("a\0"_sz.compare("a\0"_sz) == 0);
+    assert("a"_sz == "a"_sz);
+    assert("a"_sz != "a\0"_sz);
+    assert("a\0"_sz == "a\0"_sz);
+
+    assert(sz_size_bit_ceil(0) == 1);
+    assert(sz_size_bit_ceil(1) == 1);
+    assert(sz_size_bit_ceil(2) == 2);
+    assert(sz_size_bit_ceil(3) == 4);
+    assert(sz_size_bit_ceil(127) == 128);
+    assert(sz_size_bit_ceil(128) == 128);
+
     assert(sz::string("abc").edit_distance("_abc") == 1);
     assert(sz::string("").edit_distance("_") == 1);
     assert(sz::string("_").edit_distance("") == 1);
+    assert(sz::string("_").edit_distance("xx") == 2);
+    assert(sz::string("_").edit_distance("xx", 1) == 1);
+    assert(sz::string("_").edit_distance("xx", 0) == 0);
 
     std::string_view alphabet = "abcdefghijklmnopqrstuvwxyz";                                         // 26 characters
     std::string_view base64 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";     // 64 characters
     std::string_view common = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-=@$%"; // 68 characters
 
+    // Make sure copy constructors work as expected:
+    {
+        std::vector<sz::string> strings;
+        for (std::size_t alphabet_slice = 0; alphabet_slice != alphabet.size(); ++alphabet_slice)
+            strings.push_back(alphabet.substr(0, alphabet_slice));
+        std::vector<sz::string> copies {strings};
+        std::vector<sz::string> assignments = strings;
+        assert(std::equal(strings.begin(), strings.end(), copies.begin()));
+        assert(std::equal(strings.begin(), strings.end(), assignments.begin()));
+    }
+
     // When haystack is only formed of needles:
-    // eval("a", "a");
+    eval("a", "a");
     eval("ab", "ab");
     eval("abc", "abc");
     eval("abcd", "abcd");
     eval(alphabet, alphabet);
     eval(base64, base64);
     eval(common, common);
+
+    // When we are dealing with NULL characters inside the string
+    eval("\0", "\0");
+    eval("a\0", "a\0");
+    eval("ab\0", "ab");
+    eval("ab\0", "ab\0");
+    eval("abc\0", "abc");
+    eval("abc\0", "abc\0");
+    eval("abcd\0", "abcd");
 
     // When haystack is formed of equidistant needles:
     eval("ab", "a");
