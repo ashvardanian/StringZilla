@@ -328,6 +328,14 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 /**
  *  @brief  Computes the hash of a string.
  *
+ *  Preferences for the ideal hash:
+ *  - 64 bits long.
+ *  - Fast on short strings.
+ *  - Short implementation.
+ *  - Supports rolling computation.
+ *  - For two strings with known hashes, the hash of their concatenation can be computed in sublinear time.
+ *  - Invariance to zero characters?
+ *
  *  @section    Why not use vanilla CRC32?
  *
  *  Cyclic Redundancy Check 32 is one of the most commonly used hash functions in Computer Science.
@@ -976,7 +984,7 @@ SZ_INTERNAL sz_size_t sz_size_log2i(sz_size_t n) {
  *  @brief  Compute the smallest power of two greater than or equal to ::n.
  */
 SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t n) {
-    if (n == 0) return 1;
+    if (n <= 1) return 1;
     return 1ull << (sz_size_log2i(n - 1) + 1);
 }
 
@@ -1472,6 +1480,46 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t 
  */
 SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                               sz_size_t n_length) {
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
+    sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
+    sz_u64_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1ull << i); }
+    for (sz_size_t i = 0; i < h_length; ++i) {
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
+        if ((running_match & (1ull << (n_length - 1))) == 0) { return h + h_length - i - 1; }
+    }
+
+    return NULL;
+}
+
+/**
+ *  @brief  Bitap algo for approximate matching of patterns up to @b 64-bytes long.
+ *          https://en.wikipedia.org/wiki/Bitap_algorithm
+ */
+SZ_INTERNAL sz_cptr_t _sz_find_bounded_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                                 sz_size_t n_length) {
+    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
+    sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
+    sz_u64_t character_position_masks[256];
+    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
+    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1ull << i); }
+    for (sz_size_t i = 0; i < h_length; ++i) {
+        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
+        if ((running_match & (1ull << (n_length - 1))) == 0) { return h + i - n_length + 1; }
+    }
+
+    return NULL;
+}
+
+/**
+ *  @brief  Bitap algorithm for approximate matching of patterns up to @b 64-bytes long in @b reverse order.
+ *          https://en.wikipedia.org/wiki/Bitap_algorithm
+ */
+SZ_INTERNAL sz_cptr_t _sz_find_bounded_last_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                                      sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
