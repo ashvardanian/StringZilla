@@ -659,6 +659,9 @@ class string_view {
     sz_constexpr_if20 string_view &operator=(std::string_view const &other) noexcept {
         return assign({other.data(), other.size()});
     }
+
+    inline operator std::string() const { return {data(), size()}; }
+    inline operator std::string_view() const noexcept { return {data(), size()}; }
 #endif
 
     inline const_iterator begin() const noexcept { return const_iterator(start_); }
@@ -967,11 +970,6 @@ class string_view {
         return set;
     }
 
-#if SZ_INCLUDE_STL_CONVERSIONS
-    inline operator std::string() const { return {data(), size()}; }
-    inline operator std::string_view() const noexcept { return {data(), size()}; }
-#endif
-
   private:
     constexpr string_view &assign(string_view const &other) noexcept {
         start_ = other.start_;
@@ -1053,8 +1051,9 @@ class basic_string {
     constexpr basic_string() noexcept {
         // Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
         string_.on_stack.start = &string_.on_stack.chars[0];
-        string_.on_stack.chars[0] = 0;
-        string_.on_stack.length = 0;
+        string_.u64s[1] = 0;
+        string_.u64s[2] = 0;
+        string_.u64s[3] = 0;
     }
 
     ~basic_string() noexcept {
@@ -1076,6 +1075,11 @@ class basic_string {
     basic_string(string_view view) noexcept(false) : basic_string() { assign(view); }
     basic_string &operator=(string_view view) noexcept(false) { return assign(view); }
 
+    basic_string(const_pointer c_string) noexcept(false) : basic_string(string_view(c_string)) {}
+    basic_string(const_pointer c_string, size_type length) noexcept(false)
+        : basic_string(string_view(c_string, length)) {}
+    basic_string(std::nullptr_t) = delete;
+
     operator string_view() const noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;
@@ -1085,14 +1089,32 @@ class basic_string {
         return {string_start, string_length};
     }
 
+#if SZ_INCLUDE_STL_CONVERSIONS
+
+    basic_string(std::string const &other) noexcept(false) : string_view(other.data(), other.size()) {}
+    basic_string(std::string_view const &other) noexcept(false) : string_view(other.data(), other.size()) {}
+    basic_string &operator=(std::string const &other) noexcept(false) { return assign({other.data(), other.size()}); }
+    basic_string &operator=(std::string_view const &other) noexcept(false) {
+        return assign({other.data(), other.size()});
+    }
+
+    // As we are need both `data()` and `size()`, going through `operator string_view()`
+    // and `sz_string_unpack` is faster than separate invokations.
+    operator std::string() const { return string_view(*this); }
+    operator std::string_view() const noexcept { return string_view(*this); }
+#endif
+
     inline const_iterator begin() const noexcept { return const_iterator(data()); }
-    inline const_iterator end() const noexcept { return const_iterator(data() + size()); }
     inline const_iterator cbegin() const noexcept { return const_iterator(data()); }
-    inline const_iterator cend() const noexcept { return const_iterator(data() + size()); }
-    inline const_reverse_iterator rbegin() const noexcept;
-    inline const_reverse_iterator rend() const noexcept;
-    inline const_reverse_iterator crbegin() const noexcept;
-    inline const_reverse_iterator crend() const noexcept;
+
+    // As we are need both `data()` and `size()`, going through `operator string_view()`
+    // and `sz_string_unpack` is faster than separate invokations.
+    inline const_iterator end() const noexcept { return string_view(*this).end(); }
+    inline const_iterator cend() const noexcept { return string_view(*this).end(); }
+    inline const_reverse_iterator rbegin() const noexcept { return string_view(*this).rbegin(); }
+    inline const_reverse_iterator rend() const noexcept { return string_view(*this).rend(); }
+    inline const_reverse_iterator crbegin() const noexcept { return string_view(*this).crbegin(); }
+    inline const_reverse_iterator crend() const noexcept { return string_view(*this).crend(); }
 
     inline const_reference operator[](size_type pos) const noexcept { return string_.on_stack.start[pos]; }
     inline const_reference at(size_type pos) const noexcept { return string_.on_stack.start[pos]; }
@@ -1101,14 +1123,7 @@ class basic_string {
     inline const_pointer data() const noexcept { return string_.on_stack.start; }
 
     inline bool empty() const noexcept { return string_.on_heap.length == 0; }
-    inline size_type size() const noexcept {
-        sz_ptr_t string_start;
-        sz_size_t string_length;
-        sz_size_t string_space;
-        sz_bool_t string_is_on_heap;
-        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_on_heap);
-        return string_length;
-    }
+    inline size_type size() const noexcept { return string_view(*this).size(); }
 
     inline size_type length() const noexcept { return size(); }
     inline size_type max_size() const noexcept { return sz_size_max; }

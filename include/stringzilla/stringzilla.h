@@ -976,8 +976,8 @@ SZ_INTERNAL sz_size_t sz_size_log2i(sz_size_t n) {
  *  @brief  Compute the smallest power of two greater than or equal to ::n.
  */
 SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t n) {
-    if (n == 0) return 0;
-    return 1ull << sz_size_log2i(n - 1);
+    if (n == 0) return 1;
+    return 1ull << (sz_size_log2i(n - 1) + 1);
 }
 
 /**
@@ -1994,8 +1994,12 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
 
     // Only 8 + 1 + 1 need to be initialized.
     string->on_stack.start = &string->on_stack.chars[0];
-    string->on_stack.chars[0] = 0;
-    string->on_stack.length = 0;
+    // But for safety let's initialize the entire structure to zeros.
+    // string->on_stack.chars[0] = 0;
+    // string->on_stack.length = 0;
+    string->u64s[1] = 0;
+    string->u64s[2] = 0;
+    string->u64s[3] = 0;
 }
 
 SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_memory_allocator_t *allocator) {
