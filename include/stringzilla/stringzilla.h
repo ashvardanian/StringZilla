@@ -2811,8 +2811,9 @@ SZ_INTERNAL sz_cptr_t sz_find_under66byte_avx512(sz_cptr_t h, sz_size_t h_length
 
     __mmask64 matches;
     __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
-    sz_u512_vec_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
+    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, h_body_vec, n_first_vec, n_mid_vec, n_last_vec, n_body_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
+    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
     n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
 
@@ -2821,8 +2822,10 @@ sz_find_under66byte_avx512_cycle:
     else if (h_length < n_length + 64) {
         mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
         h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_ctz(matches);
@@ -2837,8 +2840,10 @@ sz_find_under66byte_avx512_cycle:
     }
     else {
         h_first_vec.zmm = _mm512_loadu_epi8(h);
+        h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
         h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
         matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_ctz(matches);
@@ -2862,8 +2867,9 @@ SZ_INTERNAL sz_cptr_t sz_find_over66byte_avx512(sz_cptr_t h, sz_size_t h_length,
 
     __mmask64 mask;
     __mmask64 matches;
-    sz_u512_vec_t h_first_vec, h_last_vec, n_first_vec, n_last_vec;
+    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, h_body_vec, n_first_vec, n_mid_vec, n_last_vec, n_body_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
+    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
 
 sz_find_over66byte_avx512_cycle:
@@ -2871,8 +2877,10 @@ sz_find_over66byte_avx512_cycle:
     else if (h_length < n_length + 64) {
         mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
         h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_ctz(matches);
@@ -2886,8 +2894,10 @@ sz_find_over66byte_avx512_cycle:
     }
     else {
         h_first_vec.zmm = _mm512_loadu_epi8(h);
+        h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
         h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
         matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_ctz(matches);
@@ -2962,8 +2972,9 @@ SZ_INTERNAL sz_cptr_t sz_find_last_under66byte_avx512(sz_cptr_t h, sz_size_t h_l
 
     __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
     __mmask64 matches;
-    sz_u512_vec_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
+    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, h_body_vec, n_first_vec, n_mid_vec, n_last_vec, n_body_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
+    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
     n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
 
@@ -2972,8 +2983,10 @@ sz_find_last_under66byte_avx512_cycle:
     else if (h_length < n_length + 64) {
         mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
         h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_clz(matches);
@@ -2988,8 +3001,10 @@ sz_find_last_under66byte_avx512_cycle:
     }
     else {
         h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
+        h_mid_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1 + n_length / 2);
         h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
         matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_clz(matches);
@@ -3015,8 +3030,9 @@ SZ_INTERNAL sz_cptr_t sz_find_last_over66byte_avx512(sz_cptr_t h, sz_size_t h_le
 
     __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
     __mmask64 matches;
-    sz_u512_vec_t h_first_vec, h_last_vec, h_body_vec, n_first_vec, n_last_vec, n_body_vec;
+    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, h_body_vec, n_first_vec, n_mid_vec, n_last_vec, n_body_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
+    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
     n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
 
@@ -3025,8 +3041,10 @@ sz_find_last_over66byte_avx512_cycle:
     else if (h_length < n_length + 64) {
         mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
         h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_clz(matches);
@@ -3041,8 +3059,10 @@ sz_find_last_over66byte_avx512_cycle:
     }
     else {
         h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
+        h_mid_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1 + n_length / 2);
         h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
         matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_clz(matches);
