@@ -2135,7 +2135,6 @@ SZ_PUBLIC sz_bool_t sz_string_init_from(sz_string_t *string, sz_cptr_t added_sta
         string->on_stack.start = &string->on_stack.chars[0];
         sz_copy(string->on_stack.start, added_start, added_length);
         string->on_stack.start[added_length] = 0;
-        // Even if the string is on the stack, the `+=` won't affect the tail of the string.
         string->on_stack.length = added_length;
     }
     // If we are not lucky, we need to allocate memory.
@@ -2569,6 +2568,8 @@ SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequ
  */
 typedef union sz_u512_vec_t {
     __m512i zmm;
+    __m256i ymms[2];
+    __m128i xmms[4];
     sz_u64_t u64s[8];
     sz_u32_t u32s[16];
     sz_u16_t u16s[32];
@@ -2597,9 +2598,22 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
     sz_u512_vec_t a_vec, b_vec;
     __mmask64 a_mask, b_mask, mask_not_equal;
 
-sz_order_avx512_cycle:
+    // The rare case, when both string are very long.
+    while ((a_length >= 64) & (b_length >= 64)) {
+        a_vec.zmm = _mm512_loadu_epi8(a);
+        b_vec.zmm = _mm512_loadu_epi8(b);
+        mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
+        if (mask_not_equal != 0) {
+            int first_diff = _tzcnt_u64(mask_not_equal);
+            char a_char = a[first_diff];
+            char b_char = b[first_diff];
+            return ordering_lookup[a_char < b_char];
+        }
+        a += 64, b += 64, a_length -= 64, b_length -= 64;
+    }
+
     // In most common scenarios at least one of the strings is under 64 bytes.
-    if ((a_length < 64) + (b_length < 64)) {
+    if (a_length | b_length) {
         a_mask = sz_u64_clamp_mask_until(a_length);
         b_mask = sz_u64_clamp_mask_until(b_length);
         a_vec.zmm = _mm512_maskz_loadu_epi8(a_mask, a);
@@ -2619,33 +2633,26 @@ sz_order_avx512_cycle:
             // The result must be `sz_greater_k`, as the latter is shorter.
             return a_length != b_length ? ordering_lookup[a_length < b_length] : sz_equal_k;
     }
-    else {
-        a_vec.zmm = _mm512_loadu_epi8(a);
-        b_vec.zmm = _mm512_loadu_epi8(b);
-        mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
-        if (mask_not_equal != 0) {
-            int first_diff = _tzcnt_u64(mask_not_equal);
-            char a_char = a[first_diff];
-            char b_char = b[first_diff];
-            return ordering_lookup[a_char < b_char];
-        }
-        a += 64, b += 64, a_length -= 64, b_length -= 64;
-        if ((a_length > 0) + (b_length > 0)) goto sz_order_avx512_cycle;
-        return a_length != b_length ? ordering_lookup[a_length < b_length] : sz_equal_k;
-    }
+    else
+        return sz_equal_k;
 }
 
 /**
  *  @brief  Variation of AVX-512 equality check between equivalent length strings.
  */
 SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-
-    // In the absolute majority of the cases, the first mismatch is
     __mmask64 mask;
     sz_u512_vec_t a_vec, b_vec;
 
-sz_equal_avx512_cycle:
-    if (length < 64) {
+    while (length >= 64) {
+        a_vec.zmm = _mm512_loadu_epi8(a);
+        b_vec.zmm = _mm512_loadu_epi8(b);
+        mask = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
+        if (mask != 0) return sz_false_k;
+        a += 64, b += 64, length -= 64;
+    }
+
+    if (length) {
         mask = sz_u64_mask_until(length);
         a_vec.zmm = _mm512_maskz_loadu_epi8(mask, a);
         b_vec.zmm = _mm512_maskz_loadu_epi8(mask, b);
@@ -2653,64 +2660,39 @@ sz_equal_avx512_cycle:
         mask = _mm512_mask_cmpneq_epi8_mask(mask, a_vec.zmm, b_vec.zmm);
         return (sz_bool_t)(mask == 0);
     }
-    else {
-        a_vec.zmm = _mm512_loadu_epi8(a);
-        b_vec.zmm = _mm512_loadu_epi8(b);
-        mask = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
-        if (mask != 0) return sz_false_k;
-        a += 64, b += 64, length -= 64;
-        if (length) goto sz_equal_avx512_cycle;
+    else
         return sz_true_k;
-    }
 }
 
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    sz_ptr_t end = target + length;
-    // Dealing with short strings, a single sequential pass would be faster.
-    // If the size is larger than 2 words, then at least 1 of them will be aligned.
-    // But just one aligned word may not be worth SWAR.
-    if (length < SZ_SWAR_THRESHOLD)
-        while (target != end) *(target++) = value;
-
-    // In case of long strings, skip unaligned bytes, and then fill the rest in 64-bit chunks.
-    else {
-        sz_u64_t value64 = (sz_u64_t)(value) * 0x0101010101010101ull;
-        while ((sz_size_t)target & 7ull) *(target++) = value;
-        while (target + 8 <= end) *(sz_u64_t *)target = value64, target += 8;
-        while (target != end) *(target++) = value;
-    }
+    for (; length >= 64; target += 64, length -= 64) _mm512_storeu_epi8(target, _mm512_set1_epi8(value));
+    // At this point the length is guaranteed to be under 64.
+    _mm512_mask_storeu_epi8(target, sz_u64_mask_until(length), _mm512_set1_epi8(value));
 }
 
 SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_MISALIGNED_LOADS
-    for (; length >= 8; target += 8, source += 8, length -= 8) *(sz_u64_t *)target = *(sz_u64_t *)source;
-#endif
-    while (length--) *(target++) = *(source++);
+    for (; length >= 64; target += 64, source += 64, length -= 64)
+        _mm512_storeu_epi8(target, _mm512_loadu_epi8(source));
+    // At this point the length is guaranteed to be under 64.
+    __mmask64 mask = sz_u64_mask_until(length);
+    _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
 }
 
 SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    // Implementing `memmove` is trickier, than `memcpy`, as the ranges may overlap.
-    // Existing implementations often have two passes, in normal and reversed order,
-    // depending on the relation of `target` and `source` addresses.
-    // https://student.cs.uwaterloo.ca/~cs350/common/os161-src-html/doxygen/html/memmove_8c_source.html
-    // https://marmota.medium.com/c-language-making-memmove-def8792bb8d5
-    //
-    // We can use the `memcpy` like left-to-right pass if we know that the `target` is before `source`.
-    // Or if we know that they don't intersect! In that case the traversal order is irrelevant,
-    // but older CPUs may predict and fetch forward-passes better.
     if (target < source || target >= source + length) {
-#if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, length -= 8;
-#endif
-        while (length--) *(target++) = *(source++);
+        for (; length >= 64; target += 64, source += 64, length -= 64)
+            _mm512_storeu_epi8(target, _mm512_loadu_epi8(source));
+        // At this point the length is guaranteed to be under 64.
+        __mmask64 mask = sz_u64_mask_until(length);
+        _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     }
     else {
         // Jump to the end and walk backwards.
-        target += length, source += length;
-#if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target -= 8, source -= 8, length -= 8;
-#endif
-        while (length--) *(target--) = *(source--);
+        for (target += length, source += length; length >= 64; length -= 64)
+            _mm512_storeu_epi8(target -= 64, _mm512_loadu_epi8(source -= 64));
+        // At this point the length is guaranteed to be under 64.
+        __mmask64 mask = sz_u64_mask_until(length);
+        _mm512_mask_storeu_epi8(target - length, mask, _mm512_maskz_loadu_epi8(mask, source - length));
     }
 }
 
@@ -2722,21 +2704,21 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
     sz_u512_vec_t h_vec, n_vec;
     n_vec.zmm = _mm512_set1_epi8(n[0]);
 
-sz_find_byte_avx512_cycle:
-    if (h_length < 64) {
+    while (h_length >= 64) {
+        h_vec.zmm = _mm512_loadu_epi8(h);
+        mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
+        if (mask) return h + sz_u64_ctz(mask);
+        h += 64, h_length -= 64;
+    }
+
+    if (h_length) {
         mask = sz_u64_mask_until(h_length);
         h_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         // Reuse the same `mask` variable to find the bit that doesn't match
         mask = _mm512_mask_cmpeq_epu8_mask(mask, h_vec.zmm, n_vec.zmm);
         if (mask) return h + sz_u64_ctz(mask);
     }
-    else {
-        h_vec.zmm = _mm512_loadu_epi8(h);
-        mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
-        if (mask) return h + sz_u64_ctz(mask);
-        h += 64, h_length -= 64;
-        if (h_length) goto sz_find_byte_avx512_cycle;
-    }
+
     return NULL;
 }
 
@@ -2752,20 +2734,7 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_c
     sz_u512_vec_t h0_vec, h1_vec, n_vec;
     n_vec.zmm = _mm512_set1_epi16(sz_u16_load(n).u16);
 
-sz_find_2byte_avx512_cycle:
-    if (h_length < 2) { return NULL; }
-    else if (h_length < 65) {
-        mask = sz_u64_mask_until(h_length);
-        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 1, h + 1);
-        matches0 = _mm512_mask_cmpeq_epi16_mask(mask, h0_vec.zmm, n_vec.zmm);
-        matches1 = _mm512_mask_cmpeq_epi16_mask(mask, h1_vec.zmm, n_vec.zmm);
-        if (matches0 | matches1)
-            return h + sz_u64_ctz(_pdep_u64(matches0, 0x5555555555555555ull) | //
-                                  _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
-        return NULL;
-    }
-    else {
+    while (h_length >= 65) {
         h0_vec.zmm = _mm512_loadu_epi8(h);
         h1_vec.zmm = _mm512_loadu_epi8(h + 1);
         matches0 = _mm512_cmpeq_epi16_mask(h0_vec.zmm, n_vec.zmm);
@@ -2775,8 +2744,20 @@ sz_find_2byte_avx512_cycle:
             return h + sz_u64_ctz(_pdep_u64(matches0, 0x5555555555555555ull) | //
                                   _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
         h += 64, h_length -= 64;
-        goto sz_find_2byte_avx512_cycle;
     }
+
+    if (h_length >= 2) {
+        mask = sz_u64_mask_until(h_length);
+        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 1, h + 1);
+        matches0 = _mm512_mask_cmpeq_epi16_mask(mask, h0_vec.zmm, n_vec.zmm);
+        matches1 = _mm512_mask_cmpeq_epi16_mask(mask, h1_vec.zmm, n_vec.zmm);
+        if (matches0 | matches1)
+            return h + sz_u64_ctz(_pdep_u64(matches0, 0x5555555555555555ull) | //
+                                  _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
+    }
+
+    return NULL;
 }
 
 /**
@@ -2789,26 +2770,7 @@ SZ_INTERNAL sz_cptr_t sz_find_4byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_c
     sz_u512_vec_t h0_vec, h1_vec, h2_vec, h3_vec, n_vec;
     n_vec.zmm = _mm512_set1_epi32(sz_u32_load(n).u32);
 
-sz_find_4byte_avx512_cycle:
-    if (h_length < 4) { return NULL; }
-    else if (h_length < 67) {
-        mask = sz_u64_mask_until(h_length);
-        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 0, h + 0);
-        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 1, h + 1);
-        h2_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 2, h + 2);
-        h3_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 3, h + 3);
-        matches0 = _mm512_mask_cmpeq_epi32_mask(mask, h0_vec.zmm, n_vec.zmm);
-        matches1 = _mm512_mask_cmpeq_epi32_mask(mask, h1_vec.zmm, n_vec.zmm);
-        matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec.zmm, n_vec.zmm);
-        matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec.zmm, n_vec.zmm);
-        if (matches0 | matches1 | matches2 | matches3)
-            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111ull) | //
-                                  _pdep_u64(matches1, 0x2222222222222222ull) | //
-                                  _pdep_u64(matches2, 0x4444444444444444ull) | //
-                                  _pdep_u64(matches3, 0x8888888888888888ull));
-        return NULL;
-    }
-    else {
+    while (h_length >= 64) {
         h0_vec.zmm = _mm512_loadu_epi8(h + 0);
         h1_vec.zmm = _mm512_loadu_epi8(h + 1);
         h2_vec.zmm = _mm512_loadu_epi8(h + 2);
@@ -2823,8 +2785,26 @@ sz_find_4byte_avx512_cycle:
                                   _pdep_u64(matches2, 0x4444444444444444) | //
                                   _pdep_u64(matches3, 0x8888888888888888));
         h += 64, h_length -= 64;
-        goto sz_find_4byte_avx512_cycle;
     }
+
+    if (h_length >= 4) {
+        mask = sz_u64_mask_until(h_length);
+        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 0, h + 0);
+        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 1, h + 1);
+        h2_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 2, h + 2);
+        h3_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 3, h + 3);
+        matches0 = _mm512_mask_cmpeq_epi32_mask(mask, h0_vec.zmm, n_vec.zmm);
+        matches1 = _mm512_mask_cmpeq_epi32_mask(mask, h1_vec.zmm, n_vec.zmm);
+        matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec.zmm, n_vec.zmm);
+        matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec.zmm, n_vec.zmm);
+        if (matches0 | matches1 | matches2 | matches3)
+            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111ull) | //
+                                  _pdep_u64(matches1, 0x2222222222222222ull) | //
+                                  _pdep_u64(matches2, 0x4444444444444444ull) | //
+                                  _pdep_u64(matches3, 0x8888888888888888ull));
+    }
+
+    return NULL;
 }
 
 /**
@@ -2840,9 +2820,23 @@ SZ_INTERNAL sz_cptr_t sz_find_under66byte_avx512(sz_cptr_t h, sz_size_t h_length
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
     n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
 
-sz_find_under66byte_avx512_cycle:
-    if (h_length < n_length) { return NULL; }
-    else if (h_length < n_length + 64) {
+    while (h_length >= n_length + 64) {
+        h_first_vec.zmm = _mm512_loadu_epi8(h);
+        h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
+        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
+        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_u64_ctz(matches);
+            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + potential_offset + 1);
+            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + potential_offset;
+            h += potential_offset + 1, h_length -= potential_offset + 1;
+        }
+        else { h += 64, h_length -= 64; }
+    }
+
+    while (h_length >= n_length) {
         mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
@@ -2854,33 +2848,12 @@ sz_find_under66byte_avx512_cycle:
             int potential_offset = sz_u64_ctz(matches);
             h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + potential_offset + 1);
             if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + potential_offset;
-
             h += potential_offset + 1, h_length -= potential_offset + 1;
-            goto sz_find_under66byte_avx512_cycle;
         }
-        else
-            return NULL;
+        else { break; }
     }
-    else {
-        h_first_vec.zmm = _mm512_loadu_epi8(h);
-        h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
-        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
-        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_ctz(matches);
-            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + potential_offset + 1);
-            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + potential_offset;
 
-            h += potential_offset + 1, h_length -= potential_offset + 1;
-            goto sz_find_under66byte_avx512_cycle;
-        }
-        else {
-            h += 64, h_length -= 64;
-            goto sz_find_under66byte_avx512_cycle;
-        }
-    }
+    return NULL;
 }
 
 /**
@@ -2895,9 +2868,22 @@ SZ_INTERNAL sz_cptr_t sz_find_over66byte_avx512(sz_cptr_t h, sz_size_t h_length,
     n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
 
-sz_find_over66byte_avx512_cycle:
-    if (h_length < n_length) { return NULL; }
-    else if (h_length < n_length + 64) {
+    while (h_length >= n_length + 64) {
+        h_first_vec.zmm = _mm512_loadu_epi8(h);
+        h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
+        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
+        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_u64_ctz(matches);
+            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+            h += potential_offset + 1, h_length -= potential_offset + 1;
+        }
+        else { h += 64, h_length -= 64; }
+    }
+
+    while (h_length >= n_length) {
         mask = sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
@@ -2908,32 +2894,12 @@ sz_find_over66byte_avx512_cycle:
         if (matches) {
             int potential_offset = sz_u64_ctz(matches);
             if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
-
             h += potential_offset + 1, h_length -= potential_offset + 1;
-            goto sz_find_over66byte_avx512_cycle;
         }
-        else
-            return NULL;
+        else { break; }
     }
-    else {
-        h_first_vec.zmm = _mm512_loadu_epi8(h);
-        h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
-        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
-        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_ctz(matches);
-            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
 
-            h += potential_offset + 1, h_length -= potential_offset + 1;
-            goto sz_find_over66byte_avx512_cycle;
-        }
-        else {
-            h += 64, h_length -= 64;
-            goto sz_find_over66byte_avx512_cycle;
-        }
-    }
+    return NULL;
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -2967,8 +2933,15 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz
     sz_u512_vec_t h_vec, n_vec;
     n_vec.zmm = _mm512_set1_epi8(n[0]);
 
-sz_find_last_byte_avx512_cycle:
-    if (h_length < 64) {
+    while (h_length >= 64) {
+        h_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
+        mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
+        int potential_offset = sz_u64_clz(mask);
+        if (mask) return h + h_length - 1 - potential_offset;
+        h_length -= 64;
+    }
+
+    if (h_length) {
         mask = sz_u64_mask_until(h_length);
         h_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         // Reuse the same `mask` variable to find the bit that doesn't match
@@ -2976,14 +2949,7 @@ sz_find_last_byte_avx512_cycle:
         int potential_offset = sz_u64_clz(mask);
         if (mask) return h + 64 - potential_offset - 1;
     }
-    else {
-        h_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
-        mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
-        int potential_offset = sz_u64_clz(mask);
-        if (mask) return h + h_length - 1 - potential_offset;
-        h_length -= 64;
-        if (h_length) goto sz_find_last_byte_avx512_cycle;
-    }
+
     return NULL;
 }
 
@@ -3001,28 +2967,8 @@ SZ_INTERNAL sz_cptr_t sz_find_last_under66byte_avx512(sz_cptr_t h, sz_size_t h_l
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
     n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
 
-sz_find_last_under66byte_avx512_cycle:
-    if (h_length < n_length) { return NULL; }
-    else if (h_length < n_length + 64) {
-        mask = sz_u64_mask_until(h_length - n_length + 1);
-        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
-        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_clz(matches);
-            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + 64 - potential_offset);
-            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + 64 - potential_offset - 1;
+    while (h_length >= n_length + 64) {
 
-            h_length = 64 - potential_offset - 1;
-            goto sz_find_last_under66byte_avx512_cycle;
-        }
-        else
-            return NULL;
-    }
-    else {
         h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
         h_mid_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1 + n_length / 2);
         h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
@@ -3035,15 +2981,29 @@ sz_find_last_under66byte_avx512_cycle:
                 _mm512_maskz_loadu_epi8(n_length_body_mask, h + h_length - n_length - potential_offset + 1);
             if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm))
                 return h + h_length - n_length - potential_offset;
-
             h_length -= potential_offset + 1;
-            goto sz_find_last_under66byte_avx512_cycle;
         }
-        else {
-            h_length -= 64;
-            goto sz_find_last_under66byte_avx512_cycle;
-        }
+        else { h_length -= 64; }
     }
+
+    while (h_length >= n_length) {
+        mask = sz_u64_mask_until(h_length - n_length + 1);
+        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_u64_clz(matches);
+            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + 64 - potential_offset);
+            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + 64 - potential_offset - 1;
+            h_length = 64 - potential_offset - 1;
+        }
+        else { break; }
+    }
+
+    return NULL;
 }
 
 /**
@@ -3059,28 +3019,7 @@ SZ_INTERNAL sz_cptr_t sz_find_last_over66byte_avx512(sz_cptr_t h, sz_size_t h_le
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
     n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
 
-sz_find_last_over66byte_avx512_cycle:
-    if (h_length < n_length) { return NULL; }
-    else if (h_length < n_length + 64) {
-        mask = sz_u64_mask_until(h_length - n_length + 1);
-        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
-        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_clz(matches);
-            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + 64 - potential_offset);
-            if (sz_equal_avx512(h + 64 - potential_offset, n + 1, n_length - 2)) return h + 64 - potential_offset - 1;
-
-            h_length = 64 - potential_offset - 1;
-            goto sz_find_last_over66byte_avx512_cycle;
-        }
-        else
-            return NULL;
-    }
-    else {
+    while (h_length >= n_length + 64) {
         h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
         h_mid_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1 + n_length / 2);
         h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
@@ -3093,15 +3032,29 @@ sz_find_last_over66byte_avx512_cycle:
                 _mm512_maskz_loadu_epi8(n_length_body_mask, h + h_length - n_length - potential_offset + 1);
             if (sz_equal_avx512(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
                 return h + h_length - n_length - potential_offset;
-
             h_length -= potential_offset + 1;
-            goto sz_find_last_over66byte_avx512_cycle;
         }
-        else {
-            h_length -= 64;
-            goto sz_find_last_over66byte_avx512_cycle;
-        }
+        else { h_length -= 64; }
     }
+
+    while (h_length >= n_length) {
+        mask = sz_u64_mask_until(h_length - n_length + 1);
+        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
+        if (matches) {
+            int potential_offset = sz_u64_clz(matches);
+            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + 64 - potential_offset);
+            if (sz_equal_avx512(h + 64 - potential_offset, n + 1, n_length - 2)) return h + 64 - potential_offset - 1;
+            h_length = 64 - potential_offset - 1;
+        }
+        else { break; };
+    }
+
+    return NULL;
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
