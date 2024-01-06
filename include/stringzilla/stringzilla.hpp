@@ -57,11 +57,11 @@ class character_set {
 };
 
 /**
- *  @brief  A result of a string split operation, containing the string slice ::before,
+ *  @brief  A result of split a string once, containing the string slice ::before,
  *          the ::match itself, and the slice ::after.
  */
 template <typename string_>
-struct string_split_result {
+struct string_partition_result {
     string_ before;
     string_ match;
     string_ after;
@@ -529,32 +529,32 @@ range_rmatches<string, matcher_find_last_not_of> rfind_all_other_characters(stri
 }
 
 template <typename string>
-range_splits<string, matcher_find> split_all(string h, string n, bool interleaving = true) noexcept {
+range_splits<string, matcher_find> split(string h, string n, bool interleaving = true) noexcept {
     return {h, n};
 }
 
 template <typename string>
-range_rmatches<string, matcher_rfind> rsplit_all(string h, string n, bool interleaving = true) noexcept {
+range_rmatches<string, matcher_rfind> rsplit(string h, string n, bool interleaving = true) noexcept {
     return {h, n};
 }
 
 template <typename string>
-range_splits<string, matcher_find_first_of> split_all_characters(string h, string n) noexcept {
+range_splits<string, matcher_find_first_of> split_characters(string h, string n) noexcept {
     return {h, n};
 }
 
 template <typename string>
-range_rsplits<string, matcher_find_last_of> rsplit_all_characters(string h, string n) noexcept {
+range_rsplits<string, matcher_find_last_of> rsplit_characters(string h, string n) noexcept {
     return {h, n};
 }
 
 template <typename string>
-range_splits<string, matcher_find_first_not_of> split_all_other_characters(string h, string n) noexcept {
+range_splits<string, matcher_find_first_not_of> split_other_characters(string h, string n) noexcept {
     return {h, n};
 }
 
 template <typename string>
-range_rsplits<string, matcher_find_last_not_of> rsplit_all_other_characters(string h, string n) noexcept {
+range_rsplits<string, matcher_find_last_not_of> rsplit_other_characters(string h, string n) noexcept {
     return {h, n};
 }
 
@@ -631,7 +631,7 @@ class string_view {
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
 
-    using split_result = string_split_result<string_view>;
+    using partition_result = string_partition_result<string_view>;
 
     /** @brief  Special value for missing matches. */
     static constexpr size_type npos = size_type(-1);
@@ -935,30 +935,30 @@ class string_view {
     inline range_rmatches<string_view, matcher_find_last_of> rfind_all(character_set) const noexcept;
 
     /** @brief  Split the string into three parts, before the match, the match itself, and after it. */
-    inline split_result split(string_view pattern) const noexcept { return split_(pattern, pattern.length()); }
+    inline partition_result partition(string_view pattern) const noexcept { return split_(pattern, pattern.length()); }
 
     /** @brief  Split the string into three parts, before the match, the match itself, and after it. */
-    inline split_result split(character_set pattern) const noexcept { return split_(pattern, 1); }
+    inline partition_result partition(character_set pattern) const noexcept { return split_(pattern, 1); }
 
     /** @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
-    inline split_result rsplit(string_view pattern) const noexcept { return split_(pattern, pattern.length()); }
+    inline partition_result rpartition(string_view pattern) const noexcept { return split_(pattern, pattern.length()); }
 
     /** @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
-    inline split_result rsplit(character_set pattern) const noexcept { return split_(pattern, 1); }
+    inline partition_result rpartition(character_set pattern) const noexcept { return split_(pattern, 1); }
 
     /** @brief  Find all occurrences of a given string.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
-    inline range_splits<string_view, matcher_find> split_all(string_view) const noexcept;
+    inline range_splits<string_view, matcher_find> split(string_view) const noexcept;
 
     /** @brief  Find all occurrences of a given string in @b reverse order.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
-    inline range_rsplits<string_view, matcher_rfind> rsplit_all(string_view) const noexcept;
+    inline range_rsplits<string_view, matcher_rfind> rsplit(string_view) const noexcept;
 
     /** @brief  Find all occurrences of given characters. */
-    inline range_splits<string_view, matcher_find_first_of> split_all(character_set) const noexcept;
+    inline range_splits<string_view, matcher_find_first_of> split(character_set) const noexcept;
 
     /** @brief  Find all occurrences of given characters in @b reverse order. */
-    inline range_rsplits<string_view, matcher_find_last_of> rsplit_all(character_set) const noexcept;
+    inline range_rsplits<string_view, matcher_find_last_of> rsplit(character_set) const noexcept;
 
     inline size_type copy(pointer destination, size_type count, size_type pos = 0) const noexcept = delete;
 
@@ -984,14 +984,14 @@ class string_view {
     }
 
     template <typename pattern_>
-    split_result split_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
+    partition_result split_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = find(pattern);
         if (pos == npos) return {substr(), string_view(), string_view()};
         return {substr(0, pos), substr(pos, pattern_length), substr(pos + pattern_length)};
     }
 
     template <typename pattern_>
-    split_result rsplit_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
+    partition_result rsplit_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = rfind(pattern);
         if (pos == npos) return {substr(), string_view(), string_view()};
         return {substr(0, pos), substr(pos, pattern_length), substr(pos + pattern_length)};
@@ -1051,7 +1051,7 @@ class basic_string {
     using difference_type = std::ptrdiff_t;
 
     using allocator_type = allocator_;
-    using split_result = string_split_result<string_view>;
+    using partition_result = string_partition_result<string_view>;
 
     /** @brief  Special value for missing matches. */
     static constexpr size_type npos = size_type(-1);
@@ -1443,30 +1443,30 @@ class basic_string {
     inline range_rmatches<string_view, matcher_find_last_of> rfind_all(character_set set) const noexcept;
 
     /** @brief  Split the string into three parts, before the match, the match itself, and after it. */
-    inline split_result split(string_view pattern) const noexcept { return view().split(pattern); }
+    inline partition_result partition(string_view pattern) const noexcept { return view().partition(pattern); }
 
     /** @brief  Split the string into three parts, before the match, the match itself, and after it. */
-    inline split_result split(character_set pattern) const noexcept { return view().split(pattern); }
+    inline partition_result partition(character_set pattern) const noexcept { return view().partition(pattern); }
 
     /** @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
-    inline split_result rsplit(string_view pattern) const noexcept { return view().split(pattern); }
+    inline partition_result rpartition(string_view pattern) const noexcept { return view().partition(pattern); }
 
     /** @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
-    inline split_result rsplit(character_set pattern) const noexcept { return view().split(pattern); }
+    inline partition_result rpartition(character_set pattern) const noexcept { return view().partition(pattern); }
 
     /** @brief  Find all occurrences of a given string.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
-    inline range_splits<string_view, matcher_find> split_all(string_view pattern) const noexcept;
+    inline range_splits<string_view, matcher_find> split(string_view pattern) const noexcept;
 
     /** @brief  Find all occurrences of a given string in @b reverse order.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
-    inline range_rsplits<string_view, matcher_rfind> rsplit_all(string_view pattern) const noexcept;
+    inline range_rsplits<string_view, matcher_rfind> rsplit(string_view pattern) const noexcept;
 
     /** @brief  Find all occurrences of given characters. */
-    inline range_splits<string_view, matcher_find_first_of> split_all(character_set pattern) const noexcept;
+    inline range_splits<string_view, matcher_find_first_of> split(character_set pattern) const noexcept;
 
     /** @brief  Find all occurrences of given characters in @b reverse order. */
-    inline range_rsplits<string_view, matcher_find_last_of> rsplit_all(character_set pattern) const noexcept;
+    inline range_rsplits<string_view, matcher_find_last_of> rsplit(character_set pattern) const noexcept;
 
     /** @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     inline size_type hash() const noexcept { return view().hash(); }
@@ -1475,6 +1475,72 @@ class basic_string {
 using string = basic_string<>;
 
 static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 pointers.");
+
+/**
+ *  @brief  The concatenation of the `ascii_lowercase` and `ascii_uppercase`. This value is not locale-dependent.
+ *          https://docs.python.org/3/library/string.html#string.ascii_letters
+ */
+inline static string_view ascii_letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/**
+ *  @brief  The lowercase letters "abcdefghijklmnopqrstuvwxyz". This value is not locale-dependent.
+ *          https://docs.python.org/3/library/string.html#string.ascii_letters
+ */
+inline static string_view ascii_lowercase = "abcdefghijklmnopqrstuvwxyz";
+
+/**
+ *  @brief  The lowercase letters "ABCDEFGHIJKLMNOPQRSTUVWXYZ". This value is not locale-dependent.
+ *          https://docs.python.org/3/library/string.html#string.ascii_uppercase
+ */
+inline static string_view ascii_uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/**
+ *  @brief  The letters "0123456789".
+ *          https://docs.python.org/3/library/string.html#string.digits
+ */
+inline static string_view digits = "0123456789";
+
+/**
+ *  @brief  The letters "0123456789abcdefABCDEF".
+ *          https://docs.python.org/3/library/string.html#string.hexdigits
+ */
+inline static string_view hexdigits = "0123456789abcdefABCDEF";
+
+/**
+ *  @brief  The letters "01234567".
+ *          https://docs.python.org/3/library/string.html#string.octdigits
+ */
+inline static string_view octdigits = "01234567";
+
+/**
+ *  @brief  A string containing all ASCII characters that are considered whitespace.
+ *          This includes space, tab, linefeed, return, formfeed, and vertical tab.
+ *          https://docs.python.org/3/library/string.html#string.whitespace
+ */
+inline static string_view whitespace = " \t\n\r\f\v";
+
+/**
+ *  @brief  ASCII characters considered punctuation characters in the C locale:
+ *          !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~.
+ *          https://docs.python.org/3/library/string.html#string.punctuation
+ */
+inline static string_view punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+/**
+ *  @brief  ASCII characters which are considered printable.
+ *          A combination of `digits`, `ascii_letters`, `punctuation`, and `whitespace`.
+ *          https://docs.python.org/3/library/string.html#string.printable
+ */
+inline static string_view printable =
+    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ \t\n\r\f\v";
+
+/**
+ *  @brief  A string containing all non-printable ASCII characters.
+ *          Putting the zero character at the end makes it compatible with `strcspn`.
+ */
+inline static string_view non_printable = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
+                                          "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F"
+                                          "\x7F\x00";
 
 namespace literals {
 constexpr string_view operator""_sz(char const *str, std::size_t length) noexcept { return {str, length}; }
@@ -1544,19 +1610,17 @@ inline range_rmatches<string_view, matcher_find_last_of> string_view::rfind_all(
     return {*this, {n}};
 }
 
-inline range_splits<string_view, matcher_find> string_view::split_all(string_view n) const noexcept {
+inline range_splits<string_view, matcher_find> string_view::split(string_view n) const noexcept { return {*this, {n}}; }
+
+inline range_rsplits<string_view, matcher_rfind> string_view::rsplit(string_view n) const noexcept {
     return {*this, {n}};
 }
 
-inline range_rsplits<string_view, matcher_rfind> string_view::rsplit_all(string_view n) const noexcept {
+inline range_splits<string_view, matcher_find_first_of> string_view::split(character_set n) const noexcept {
     return {*this, {n}};
 }
 
-inline range_splits<string_view, matcher_find_first_of> string_view::split_all(character_set n) const noexcept {
-    return {*this, {n}};
-}
-
-inline range_rsplits<string_view, matcher_find_last_of> string_view::rsplit_all(character_set n) const noexcept {
+inline range_rsplits<string_view, matcher_find_last_of> string_view::rsplit(character_set n) const noexcept {
     return {*this, {n}};
 }
 
@@ -1585,26 +1649,25 @@ inline range_rmatches<string_view, matcher_find_last_of> basic_string<allocator_
 }
 
 template <typename allocator_>
-inline range_splits<string_view, matcher_find> basic_string<allocator_>::split_all(string_view pattern) const noexcept {
-    return view().split_all(pattern);
+inline range_splits<string_view, matcher_find> basic_string<allocator_>::split(string_view pattern) const noexcept {
+    return view().split(pattern);
 }
 
 template <typename allocator_>
-inline range_rsplits<string_view, matcher_rfind> basic_string<allocator_>::rsplit_all(
-    string_view pattern) const noexcept {
-    return view().rsplit_all(pattern);
+inline range_rsplits<string_view, matcher_rfind> basic_string<allocator_>::rsplit(string_view pattern) const noexcept {
+    return view().rsplit(pattern);
 }
 
 template <typename allocator_>
-inline range_splits<string_view, matcher_find_first_of> basic_string<allocator_>::split_all(
+inline range_splits<string_view, matcher_find_first_of> basic_string<allocator_>::split(
     character_set pattern) const noexcept {
-    return view().split_all(pattern);
+    return view().split(pattern);
 }
 
 template <typename allocator_>
-inline range_rsplits<string_view, matcher_find_last_of> basic_string<allocator_>::rsplit_all(
+inline range_rsplits<string_view, matcher_find_last_of> basic_string<allocator_>::rsplit(
     character_set pattern) const noexcept {
-    return view().rsplit_all(pattern);
+    return view().rsplit(pattern);
 }
 
 } // namespace stringzilla
