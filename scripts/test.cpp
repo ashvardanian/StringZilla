@@ -6,7 +6,7 @@
 #include <vector>    // `std::vector`
 
 #define SZ_USE_X86_AVX2 0
-#define SZ_USE_X86_AVX512 0
+#define SZ_USE_X86_AVX512 1
 #define SZ_USE_ARM_NEON 0
 #define SZ_USE_ARM_SVE 0
 
@@ -140,6 +140,7 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
 int main(int argc, char const **argv) {
     std::printf("Hi Ash! ... or is it someone else?!\n");
 
+#if 1
     // Comparing relative order of the strings
     assert("a"_sz.compare("a") == 0);
     assert("a"_sz.compare("ab") == -1);
@@ -168,6 +169,14 @@ int main(int argc, char const **argv) {
     std::string_view alphabet = "abcdefghijklmnopqrstuvwxyz";                                         // 26 characters
     std::string_view base64 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";     // 64 characters
     std::string_view common = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-=@$%"; // 68 characters
+
+    assert(sz::string_view("aXbYaXbY").find_first_of("XY") == 1);
+    assert(sz::string_view("axbYaxbY").find_first_of("Y") == 3);
+    assert(sz::string_view("YbXaYbXa").find_last_of("XY") == 6);
+    assert(sz::string_view("YbxaYbxa").find_last_of("Y") == 4);
+    assert(sz::string_view(common).find_first_of("_") == sz::string_view::npos);
+    assert(sz::string_view(common).find_first_of("+") == 62);
+    assert(sz::string_view(common).find_first_of("=") == 64);
 
     // Make sure copy constructors work as expected:
     {
@@ -206,6 +215,7 @@ int main(int argc, char const **argv) {
     // When matches occur in between pattern words:
     eval("ab", "ba");
     eval("abc", "ca");
+#endif
     eval("abcd", "da");
 
     // Check more advanced composite operations:

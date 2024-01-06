@@ -255,12 +255,19 @@ typedef struct sz_string_view_t {
  */
 typedef union sz_u8_set_t {
     sz_u64_t _u64s[4];
+    sz_u32_t _u32s[8];
+    sz_u16_t _u16s[16];
     sz_u8_t _u8s[32];
 } sz_u8_set_t;
 
 SZ_PUBLIC void sz_u8_set_init(sz_u8_set_t *f) { f->_u64s[0] = f->_u64s[1] = f->_u64s[2] = f->_u64s[3] = 0; }
 SZ_PUBLIC void sz_u8_set_add(sz_u8_set_t *f, sz_u8_t c) { f->_u64s[c >> 6] |= (1ull << (c & 63u)); }
 SZ_PUBLIC sz_bool_t sz_u8_set_contains(sz_u8_set_t const *f, sz_u8_t c) {
+    // Checking the bit can be done in different ways:
+    // - (f->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
+    // - (f->_u32s[c >> 5] & (1u << (c & 31u))) != 0
+    // - (f->_u16s[c >> 4] & (1u << (c & 15u))) != 0
+    // - (f->_u8s[c >> 3] & (1u << (c & 7u))) != 0
     return (sz_bool_t)((f->_u64s[c >> 6] & (1ull << (c & 63u))) != 0);
 }
 SZ_PUBLIC void sz_u8_set_invert(sz_u8_set_t *f) {
@@ -693,7 +700,12 @@ SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t haystack, sz_size_t h_length, sz
  *  @return         Number of bytes forming the prefix.
  */
 SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+
+/** @copydoc sz_find_from_set */
 SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+
+/** @copydoc sz_find_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
 
 /**
  *  @brief  Finds the last character present from the ::set, present in ::text.
@@ -711,12 +723,12 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz
  *  @return         Number of bytes forming the prefix.
  */
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+
+/** @copydoc sz_find_last_from_set */
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
 
-SZ_PUBLIC sz_cptr_t sz_find_bounded_regex(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length,
-                                          sz_size_t bound, sz_memory_allocator_t const *alloc);
-SZ_PUBLIC sz_cptr_t sz_find_last_bounded_regex(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle,
-                                               sz_size_t n_length, sz_size_t bound, sz_memory_allocator_t const *alloc);
+/** @copydoc sz_find_last_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
 
 #pragma endregion
 
@@ -907,11 +919,19 @@ SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __popcnt64(x); }
 SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
 SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
 SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
+SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __popcnt32(x); }
+SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return _tzcnt_u32(x); }
+SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return _lzcnt_u32(x); }
+SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_uint32(val); }
 #else
 SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
 SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
 SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
 SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
+SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
+SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); }
+SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); }
+SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
 
 SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
@@ -3104,6 +3124,116 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
         (n_length > 1) + (n_length > 66)](h, h_length, n, n_length);
 }
 
+SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t *filter) {
+
+    sz_size_t load_length;
+    __mmask32 load_mask, matches_mask;
+    // To store the set in the register we need just 256 bits, but the `VPERMB` instruction
+    // we are going to invoke is surprisingly cheaper on ZMM registers.
+    sz_u512_vec_t text_vec, filter_vec;
+    filter_vec.ymms[0] = _mm256_load_epi64(&filter->_u64s[0]);
+
+    // We are going to view the `filter` at 8-bit word granularity.
+    sz_u512_vec_t filter_slice_offsets_vec;
+    sz_u512_vec_t filter_slice_vec;
+    sz_u512_vec_t offset_within_slice_vec;
+    sz_u512_vec_t mask_in_filter_slice_vec;
+    sz_u512_vec_t matches_vec;
+
+    while (length) {
+        // For every byte:
+        // 1. Find corresponding word in a set.
+        // 2. Produce a bitmask to check against that word.
+        load_length = sz_min_of_two(length, 32);
+        load_mask = sz_u64_mask_until(load_length);
+        text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text);
+
+        // To shift right every byte by 3 bits we can use the GF2 affine transformations.
+        // https://wunkolo.github.io/post/2020/11/gf2p8affineqb-int8-shifting/
+        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 32.
+        filter_slice_offsets_vec.ymms[0] =
+            _mm256_gf2p8affine_epi64_epi8(text_vec.ymms[0], _mm256_set1_epi64x(0x0102040810204080ull << (3 * 8)), 0);
+
+        // After next line, `filter_slice_vec` will contain the right word from the set,
+        // needed to filter the presence of the byte in the set.
+        filter_slice_vec.ymms[0] = _mm256_permutexvar_epi8(filter_slice_offsets_vec.ymms[0], filter_vec.ymms[0]);
+
+        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 8.
+        offset_within_slice_vec.ymms[0] = _mm256_and_si256(text_vec.ymms[0], _mm256_set1_epi64x(0x0707070707070707ull));
+
+        // Instead of performing one more Galois Field operation, we can upcast to 16-bit integers,
+        // and perform the fift and intersection there.
+        filter_slice_vec.zmm = _mm512_cvtepi8_epi16(filter_slice_vec.ymms[0]);
+        offset_within_slice_vec.zmm = _mm512_cvtepi8_epi16(offset_within_slice_vec.ymms[0]);
+        mask_in_filter_slice_vec.zmm = _mm512_sllv_epi16(_mm512_set1_epi16(1), offset_within_slice_vec.zmm);
+        matches_vec.zmm = _mm512_and_si512(filter_slice_vec.zmm, mask_in_filter_slice_vec.zmm);
+
+        matches_mask = _mm512_cmpneq_epi16_mask(matches_vec.zmm, _mm512_setzero_si512());
+        if (matches_mask) {
+            int offset = sz_u32_ctz(matches_mask);
+            return text + offset;
+        }
+        else { text += load_length, length -= load_length; }
+    }
+
+    return NULL;
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t *filter) {
+
+    sz_size_t load_length;
+    __mmask32 load_mask, matches_mask;
+    // To store the set in the register we need just 256 bits, but the `VPERMB` instruction
+    // we are going to invoke is surprisingly cheaper on ZMM registers.
+    sz_u512_vec_t text_vec, filter_vec;
+    filter_vec.ymms[0] = _mm256_load_epi64(&filter->_u64s[0]);
+
+    // We are going to view the `filter` at 8-bit word granularity.
+    sz_u512_vec_t filter_slice_offsets_vec;
+    sz_u512_vec_t filter_slice_vec;
+    sz_u512_vec_t offset_within_slice_vec;
+    sz_u512_vec_t mask_in_filter_slice_vec;
+    sz_u512_vec_t matches_vec;
+
+    while (length) {
+        // For every byte:
+        // 1. Find corresponding word in a set.
+        // 2. Produce a bitmask to check against that word.
+        load_length = sz_min_of_two(length, 32);
+        load_mask = sz_u64_mask_until(load_length);
+        text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text + length - load_length);
+
+        // To shift right every byte by 3 bits we can use the GF2 affine transformations.
+        // https://wunkolo.github.io/post/2020/11/gf2p8affineqb-int8-shifting/
+        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 32.
+        filter_slice_offsets_vec.ymms[0] =
+            _mm256_gf2p8affine_epi64_epi8(text_vec.ymms[0], _mm256_set1_epi64x(0x0102040810204080ull << (3 * 8)), 0);
+
+        // After next line, `filter_slice_vec` will contain the right word from the set,
+        // needed to filter the presence of the byte in the set.
+        filter_slice_vec.ymms[0] = _mm256_permutexvar_epi8(filter_slice_offsets_vec.ymms[0], filter_vec.ymms[0]);
+
+        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 8.
+        offset_within_slice_vec.ymms[0] = _mm256_and_si256(text_vec.ymms[0], _mm256_set1_epi64x(0x0707070707070707ull));
+
+        // Instead of performing one more Galois Field operation, we can upcast to 16-bit integers,
+        // and perform the fift and intersection there.
+        filter_slice_vec.zmm = _mm512_cvtepi8_epi16(filter_slice_vec.ymms[0]);
+        offset_within_slice_vec.zmm = _mm512_cvtepi8_epi16(offset_within_slice_vec.ymms[0]);
+        mask_in_filter_slice_vec.zmm = _mm512_sllv_epi16(_mm512_set1_epi16(1), offset_within_slice_vec.zmm);
+        matches_vec.zmm = _mm512_and_si512(filter_slice_vec.zmm, mask_in_filter_slice_vec.zmm);
+
+        matches_mask = _mm512_cmpneq_epi16_mask(matches_vec.zmm, _mm512_setzero_si512());
+        if (matches_mask) {
+            int offset = sz_u32_clz(matches_mask);
+            return text + length - load_length + 32 - offset - 1;
+        }
+        else { length -= load_length; }
+    }
+
+    return NULL;
+}
+
 #endif
 
 #pragma endregion
@@ -3192,11 +3322,19 @@ SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+#if SZ_USE_X86_AVX512
+    return sz_find_from_set_avx512(text, length, set);
+#else
     return sz_find_from_set_serial(text, length, set);
+#endif
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+#if SZ_USE_X86_AVX512
+    return sz_find_last_from_set_avx512(text, length, set);
+#else
     return sz_find_last_from_set_serial(text, length, set);
+#endif
 }
 
 SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
