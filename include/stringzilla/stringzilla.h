@@ -275,8 +275,8 @@ SZ_PUBLIC void sz_u8_set_invert(sz_u8_set_t *f) {
         f->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, f->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
 }
 
-typedef void* (*sz_memory_allocate_t)(sz_size_t, void *);
-typedef void (*sz_memory_free_t)(void*, sz_size_t, void *);
+typedef void *(*sz_memory_allocate_t)(sz_size_t, void *);
+typedef void (*sz_memory_free_t)(void *, sz_size_t, void *);
 typedef sz_u64_t (*sz_random_generator_t)(void *);
 
 /**
@@ -929,8 +929,8 @@ SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
 SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
 SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
 SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
-SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); }
-SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); }
+SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); } // ! Undefined if `x == 0`
+SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefined if `x == 0`
 SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
 
@@ -977,42 +977,29 @@ SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { retur
 SZ_INTERNAL sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
 
 /**
- *  @brief  Compute the logarithm base 2 of an integer.
- *
- *  @note If n is 0, the function returns 0 to avoid undefined behavior.
- *  @note This function uses compiler-specific intrinsics or built-ins
- *        to achieve the computation. It's designed to work with GCC/Clang and MSVC.
+ *  @brief  Compute the logarithm base 2 of a positive integer, rounding down.
  */
-SZ_INTERNAL int sz_leading_zeros64(sz_u64_t n) {
-    if (n == 0) return 64;
-#ifdef _MSC_VER
-    unsigned long index;
-    if (_BitScanReverse64(&index, n)) return index;
-    abort(); // unreachable
-#else
-    return __builtin_clzll(n);
-#endif
-}
-
-SZ_INTERNAL sz_size_t sz_size_log2i(sz_size_t n) {
-    SZ_ASSERT(n > 0, "Non-positive numbers have no defined logarithm");
-    int lz = sz_leading_zeros64(n);
-    int msb = 63 - sz_leading_zeros64(n);
-    SZ_ASSERT(msb >= 0, "some bit somewhere would have to be set");
-    sz_u64_t minexp = (1ull << msb);
-    sz_u64_t mask = minexp - 1;
-    // To round up, increase by 1 if there is any residue beyond the log
-    return msb + ((n & mask) != 0);
+SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
+    SZ_ASSERT(x > 0, "Non-positive numbers have no defined logarithm");
+    sz_size_t leading_zeros = sz_u64_clz(x);
+    return 63 - leading_zeros;
 }
 
 /**
- *  @brief  Compute the smallest power of two greater than or equal to ::n.
+ *  @brief  Compute the smallest power of two greater than or equal to ::x.
  */
-SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t n) {
-    if (n == 0) return 1;
-    unsigned long long retval = 1ull << sz_size_log2i(n);
-    SZ_ASSERT(retval >= n, "moar bytes");
-    return retval;
+SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
+    // Unlike the commonly used trick with `clz` intrinsics, is valid across the whole range of `x`.
+    // https://stackoverflow.com/a/10143264
+    x--;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x |= x >> 32;
+    x++;
+    return x;
 }
 
 /**
@@ -1882,7 +1869,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     if (b_length > a_length) return sz_alignment_score_serial(b, b_length, a, a_length, gap, subs, alloc);
 
     sz_size_t buffer_length = sizeof(sz_ssize_t) * (b_length + 1) * 2;
-    sz_ssize_t *distances = (sz_ssize_t*)alloc->allocate(buffer_length, alloc->handle);
+    sz_ssize_t *distances = (sz_ssize_t *)alloc->allocate(buffer_length, alloc->handle);
     sz_ssize_t *previous_distances = distances;
     sz_ssize_t *current_distances = previous_distances + b_length + 1;
 
@@ -2080,8 +2067,8 @@ SZ_PUBLIC sz_bool_t sz_string_equal(sz_string_t const *a, sz_string_t const *b) 
     // the hard/correct way.
 
 #if SZ_USE_MISALIGNED_LOADS
-        // Dealing with StringZilla strings, we know that the `start` pointer always points
-        // to a word at least 8 bytes long. Therefore, we can compare the first 8 bytes at once.
+    // Dealing with StringZilla strings, we know that the `start` pointer always points
+    // to a word at least 8 bytes long. Therefore, we can compare the first 8 bytes at once.
 
 #endif
     // Alternatively, fall back to byte-by-byte comparison.
@@ -2466,7 +2453,8 @@ SZ_INTERNAL void _sz_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t
 
 SZ_PUBLIC void sz_sort_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
     if (sequence->count == 0) return;
-    sz_size_t depth_limit = 2 * sz_size_log2i(sequence->count);
+    sz_size_t size_is_not_power_of_two = (sequence->count & (sequence->count - 1)) != 0;
+    sz_size_t depth_limit = sz_size_log2i_nonzero(sequence->count) + size_is_not_power_of_two;
     _sz_introsort(sequence, less, 0, sequence->count, depth_limit);
 }
 

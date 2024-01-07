@@ -111,6 +111,14 @@ inline constexpr static char whitespaces[6] = {' ', '\t', '\n', '\r', '\f', '\v'
 inline constexpr static char newlines[8] = {'\n', '\r', '\f', '\v', '\x1C', '\x1D', '\x1E', '\x85'};
 
 /**
+ *  @brief  ASCII characters forming the BASE64 encoding alphabet.
+ */
+inline constexpr static char base64[64] = { //
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
+    'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R',
+    'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'};
+
+/**
  *  @brief  A set of characters represented as a bitset with 256 slots.
  */
 class character_set {
@@ -172,6 +180,7 @@ inline constexpr static character_set octdigits_set {octdigits};
 inline constexpr static character_set punctuation_set {punctuation};
 inline constexpr static character_set whitespaces_set {whitespaces};
 inline constexpr static character_set newlines_set {newlines};
+inline constexpr static character_set base64_set {base64};
 
 /**
  *  @brief  A result of split a string once, containing the string slice ::before,
@@ -1141,10 +1150,10 @@ class basic_string {
 
     using alloc_t = sz_memory_allocator_t;
 
-    static void* call_allocate(sz_size_t n, void *allocator_state) noexcept {
+    static void *call_allocate(sz_size_t n, void *allocator_state) noexcept {
         return reinterpret_cast<allocator_ *>(allocator_state)->allocate(n);
     }
-    static void call_free(void* ptr, sz_size_t n, void *allocator_state) noexcept {
+    static void call_free(void *ptr, sz_size_t n, void *allocator_state) noexcept {
         return reinterpret_cast<allocator_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
     }
     template <typename allocator_callback>
@@ -1278,6 +1287,7 @@ class basic_string {
     inline const_reference front() const noexcept { return string_.on_stack.start[0]; }
     inline const_reference back() const noexcept { return string_.on_stack.start[size() - 1]; }
     inline const_pointer data() const noexcept { return string_.on_stack.start; }
+    inline const_pointer c_str() const noexcept { return string_.on_stack.start; }
 
     inline bool empty() const noexcept { return string_.on_heap.length == 0; }
     inline size_type size() const noexcept { return view().size(); }
