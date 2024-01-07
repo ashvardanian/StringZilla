@@ -190,6 +190,18 @@
 #endif
 #endif
 
+/*
+ *  Debugging and testing.
+ */
+#ifndef SZ_DEBUG
+#ifndef NDEBUG
+#define SZ_DEBUG 1
+#else
+#define SZ_DEBUG 0
+#endif
+#endif
+
+#if !SZ_DEBUG
 #define SZ_ASSERT(condition, message, ...)                                                                  \
     do {                                                                                                    \
         if (!(condition)) {                                                                                 \
@@ -198,6 +210,9 @@
             exit(EXIT_FAILURE);                                                                             \
         }                                                                                                   \
     } while (0)
+#else
+#define SZ_ASSERT(condition, message, ...) ((void)0)
+#endif
 
 /**
  *  @brief  Compile-time assert macro similar to `static_assert` in C++.
@@ -1560,7 +1575,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_siz
     // Quick Search: https://www-igm.univ-mlv.fr/~lecroq/string/node19.html
     // Smith: https://www-igm.univ-mlv.fr/~lecroq/string/node21.html
     sz_u8_t bad_shift_table[256] = {(sz_u8_t)n_length};
-    for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n[i]] = (sz_u8_t)(n_length - i - 1);
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
+    for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n_unsigned[i]] = (sz_u8_t)(n_length - i - 1);
 
     // Another common heuristic is to match a few characters from different parts of a string.
     // Raita suggests to use the first two, the last, and the middle character of the pattern.
@@ -1586,7 +1602,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_siz
 SZ_INTERNAL sz_cptr_t _sz_find_last_horspool_upto_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                                   sz_size_t n_length) {
     sz_u8_t bad_shift_table[256] = {(sz_u8_t)n_length};
-    for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n[i]] = (sz_u8_t)(i + 1);
+    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
+    for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n_unsigned[i]] = (sz_u8_t)(i + 1);
 
     sz_size_t n_midpoint = n_length / 2;
     sz_u32_vec_t h_vec, n_vec;
