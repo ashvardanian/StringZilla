@@ -105,6 +105,122 @@ static void test_constructors() {
     assert(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
+#include <cstdarg>
+#include <memory>
+
+struct accounting_allocator : protected std::allocator<char> {
+    static bool verbose;
+    static size_t current_bytes_alloced;
+
+    static void dprintf(const char *fmt, ...) {
+        if (!verbose) return;
+        va_list args;
+        va_start(args, fmt);
+        vprintf(fmt, args);
+        va_end(args);
+    }
+
+    char *allocate(size_t n) {
+        current_bytes_alloced += n;
+        dprintf("alloc %zd -> %zd\n", n, current_bytes_alloced);
+        return std::allocator<char>::allocate(n);
+    }
+    void deallocate(char *val, size_t n) {
+        assert(n <= current_bytes_alloced);
+        current_bytes_alloced -= n;
+        dprintf("dealloc: %zd -> %zd\n", n, current_bytes_alloced);
+        std::allocator<char>::deallocate(val, n);
+    }
+
+    template <typename Lambda>
+    static size_t account_block(Lambda lambda) {
+        auto before = accounting_allocator::current_bytes_alloced;
+        dprintf("starting block: %zd\n", before);
+        lambda();
+        auto after = accounting_allocator::current_bytes_alloced;
+        dprintf("ending block: %zd\n", after);
+        return after - before;
+    }
+};
+
+bool accounting_allocator::verbose = false;
+size_t accounting_allocator::current_bytes_alloced;
+
+template <typename Lambda>
+static void assert_balanced_memory(Lambda lambda) {
+    auto bytes = accounting_allocator::account_block(lambda);
+    assert(bytes == 0);
+}
+
+static void test_memory_stability_len(int len = 1 << 10) {
+    int iters(4);
+
+    assert(accounting_allocator::current_bytes_alloced == 0);
+    using string_t = sz::basic_string<accounting_allocator>;
+    string_t base;
+
+    for (auto i = 0; i < len; i++) base.push_back('c');
+    assert(base.length() == len);
+
+    // Do copies leak?
+    assert_balanced_memory([&]() {
+        for (auto i = 0; i < iters; i++) {
+            string_t copy(base);
+            assert(copy.length() == len);
+            assert(copy == base);
+        }
+    });
+
+    // How about assignments?
+    assert_balanced_memory([&]() {
+        for (auto i = 0; i < iters; i++) {
+            string_t copy;
+            copy = base;
+            assert(copy.length() == len);
+            assert(copy == base);
+        }
+    });
+
+    // How about the move ctor?
+    assert_balanced_memory([&]() {
+        for (auto i = 0; i < iters; i++) {
+            string_t unique_item(base);
+            assert(unique_item.length() == len);
+            assert(unique_item == base);
+            string_t copy(std::move(unique_item));
+            assert(copy.length() == len);
+            assert(copy == base);
+        }
+    });
+
+    // And the move assignment operator with an empty target payload?
+    assert_balanced_memory([&]() {
+        for (auto i = 0; i < iters; i++) {
+            string_t unique_item(base);
+            string_t copy;
+            copy = std::move(unique_item);
+            assert(copy.length() == len);
+            assert(copy == base);
+        }
+    });
+
+    // And move assignment where the target had a payload?
+    assert_balanced_memory([&]() {
+        for (auto i = 0; i < iters; i++) {
+            string_t unique_item(base);
+            string_t copy;
+            for (auto j = 0; j < 317; j++) copy.push_back('q');
+            copy = std::move(unique_item);
+            assert(copy.length() == len);
+            assert(copy == base);
+        }
+    });
+
+    // Now let's clear the base and check that we're back to zero
+    base = string_t();
+    assert(accounting_allocator::current_bytes_alloced == 0);
+}
+
 static void test_updates() {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
@@ -457,6 +573,8 @@ int main(int argc, char const **argv) {
 
     // The string class implementation
     test_constructors();
+    test_memory_stability_len(1024);
+    test_memory_stability_len(14);
     test_updates();
 
     // Advanced search operations

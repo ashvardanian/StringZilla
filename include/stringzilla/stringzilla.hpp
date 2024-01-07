@@ -1174,6 +1174,26 @@ class basic_string {
         SZ_ASSERT(*this == other, "");
     }
 
+  protected:
+    void move(basic_string &other) noexcept {
+        // We can't just assign the other string state, as its start address may be somewhere else on the stack.
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_size_t string_space;
+        sz_bool_t string_is_on_heap;
+        sz_string_unpack(&other.string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+
+        // Acquire the old string's value bitwise
+        *(&string_) = *(&other.string_);
+        if (!string_is_on_heap) {
+            // Reposition the string start pointer to the stack if it fits.
+            string_.on_stack.start = &string_.on_stack.chars[0];
+        }
+        sz_string_init(&other.string_); // Discard the other string.
+    }
+
+    bool is_sso() const { return string_.on_stack.start == &string_.on_stack.chars[0]; }
+
   public:
     // Member types
     using traits_type = std::char_traits<char>;
@@ -1210,32 +1230,16 @@ class basic_string {
         });
     }
 
-    basic_string(basic_string &&other) noexcept : string_(other.string_) {
-        // We can't just assign the other string state, as its start address may be somewhere else on the stack.
-        sz_ptr_t string_start;
-        sz_size_t string_length;
-        sz_size_t string_space;
-        sz_bool_t string_is_on_heap;
-        sz_string_unpack(&other.string_, &string_start, &string_length, &string_space, &string_is_on_heap);
-
-        // Reposition the string start pointer to the stack if it fits.
-        string_.on_stack.start = string_is_on_heap ? string_start : &string_.on_stack.chars[0];
-        // XXX: memory leak
-        sz_string_init(&other.string_); // Discard the other string.
-    }
+    basic_string(basic_string &&other) noexcept : string_(other.string_) { move(other); }
 
     basic_string &operator=(basic_string &&other) noexcept {
-        // We can't just assign the other string state, as its start address may be somewhere else on the stack.
-        sz_ptr_t string_start;
-        sz_size_t string_length;
-        sz_size_t string_space;
-        sz_bool_t string_is_on_heap;
-        sz_string_unpack(&other.string_, &string_start, &string_length, &string_space, &string_is_on_heap);
-
-        // Reposition the string start pointer to the stack if it fits.
-        string_.on_stack.start = string_is_on_heap ? string_start : &string_.on_stack.chars[0];
-        // XXX: memory leak
-        sz_string_init(&other.string_); // Discard the other string.
+        if (!is_sso()) {
+            with_alloc([&](alloc_t &alloc) {
+                sz_string_free(&string_, &alloc);
+                return sz_true_k;
+            });
+        }
+        move(other);
         return *this;
     }
 
