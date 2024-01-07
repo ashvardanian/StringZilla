@@ -1,11 +1,12 @@
 /**
  *  @brief  Helper structures and functions for C++ benchmarks.
  */
+#pragma once
 #include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <fstream>
-#include <functional>
+#include <functional> // `std::equal_to`
 #include <iostream>
 #include <limits>
 #include <numeric>
@@ -115,11 +116,13 @@ inline std::vector<std::string_view> tokenize(std::string_view str) {
     return words;
 }
 
-template <typename result_string_type = std::string_view, typename from_string_type = result_string_type>
-inline std::vector<result_string_type> filter_by_length(std::vector<from_string_type> tokens, std::size_t n) {
+template <typename result_string_type = std::string_view, typename from_string_type = result_string_type,
+          typename comparator_type = std::equal_to<std::size_t>>
+inline std::vector<result_string_type> filter_by_length(std::vector<from_string_type> tokens, std::size_t n,
+                                                        comparator_type &&comparator = {}) {
     std::vector<result_string_type> result;
     for (auto const &str : tokens)
-        if (str.length() == n) result.push_back({str.data(), str.length()});
+        if (comparator(str.length(), n)) result.push_back({str.data(), str.length()});
     return result;
 }
 

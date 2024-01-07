@@ -7,19 +7,20 @@
  *  alignment scores, and fingerprinting techniques combined with the Hamming distance.
  */
 #include <bench.hpp>
+#include <test.hpp> // `levenshtein_baseline`
 
 using namespace ashvardanian::stringzilla::scripts;
 
 using temporary_memory_t = std::vector<char>;
 temporary_memory_t temporary_memory;
 
-static void* allocate_from_vector(sz_size_t length, void *handle) {
+static void *allocate_from_vector(sz_size_t length, void *handle) {
     temporary_memory_t &vec = *reinterpret_cast<temporary_memory_t *>(handle);
     if (vec.size() < length) vec.resize(length);
     return vec.data();
 }
 
-static void free_from_vector(void* buffer, sz_size_t length, void *handle) {}
+static void free_from_vector(void *buffer, sz_size_t length, void *handle) {}
 
 tracked_binary_functions_t distance_functions() {
     // Populate the unary substitutions matrix
@@ -51,16 +52,16 @@ tracked_binary_functions_t distance_functions() {
             sz_string_view_t b = to_c(b_str);
             a.length = sz_min_of_two(a.length, max_length);
             b.length = sz_min_of_two(b.length, max_length);
-            return function(a.start, a.length, b.start, b.length, 1, unary_substitution_costs.data(),
-                                        &alloc);
+            return function(a.start, a.length, b.start, b.length, 1, unary_substitution_costs.data(), &alloc);
         });
     };
     tracked_binary_functions_t result = {
-        {"sz_edit_distance", wrap_sz_distance(sz_edit_distance_serial)},
-        {"sz_alignment_score", wrap_sz_scoring(sz_alignment_score_serial), true},
+        {"naive", &levenshtein_baseline},
+        {"sz_edit_distance", wrap_sz_distance(sz_edit_distance_serial), true},
 #if SZ_USE_X86_AVX512
         {"sz_edit_distance_avx512", wrap_sz_distance(sz_edit_distance_avx512), true},
 #endif
+        {"sz_alignment_score", wrap_sz_scoring(sz_alignment_score_serial), true},
     };
     return result;
 }
@@ -81,9 +82,9 @@ int main(int argc, char const **argv) {
     bench_similarity(dataset.tokens);
 
     // Run benchmarks on tokens of different length
-    for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
-        std::printf("Benchmarking on real words of length %zu:\n", token_length);
-        bench_similarity(filter_by_length(dataset.tokens, token_length));
+    for (std::size_t token_length : {20}) {
+        std::printf("Benchmarking on real words of length %zu and longer:\n", token_length);
+        bench_similarity(filter_by_length(dataset.tokens, token_length, std::greater_equal<std::size_t> {}));
     }
 
     std::printf("All benchmarks passed.\n");
