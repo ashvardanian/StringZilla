@@ -270,16 +270,16 @@ int main(int argc, char const **argv) {
 
     // Typical ASCII tokenization and validation benchmarks
     std::printf("Benchmarking for whitespaces:\n");
-    bench_finds(dataset.text, {sz::whitespace}, find_character_set_functions());
-    bench_rfinds(dataset.text, {sz::whitespace}, rfind_character_set_functions());
+    bench_finds(dataset.text, {sz::whitespaces}, find_character_set_functions());
+    bench_rfinds(dataset.text, {sz::whitespaces}, rfind_character_set_functions());
 
     std::printf("Benchmarking for punctuation marks:\n");
     bench_finds(dataset.text, {sz::punctuation}, find_character_set_functions());
     bench_rfinds(dataset.text, {sz::punctuation}, rfind_character_set_functions());
 
     std::printf("Benchmarking for non-printable characters:\n");
-    bench_finds(dataset.text, {sz::non_printable}, find_character_set_functions());
-    bench_rfinds(dataset.text, {sz::non_printable}, rfind_character_set_functions());
+    bench_finds(dataset.text, {sz::ascii_controls}, find_character_set_functions());
+    bench_rfinds(dataset.text, {sz::ascii_controls}, rfind_character_set_functions());
 
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");
