@@ -28,33 +28,150 @@ namespace ashvardanian {
 namespace stringzilla {
 
 /**
+ *  @brief  The concatenation of the `ascii_lowercase` and `ascii_uppercase`. This value is not locale-dependent.
+ *          https://docs.python.org/3/library/string.html#string.ascii_letters
+ */
+inline constexpr static char ascii_letters[52] = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+                                                  'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+                                                  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+                                                  'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
+
+/**
+ *  @brief  The lowercase letters "abcdefghijklmnopqrstuvwxyz". This value is not locale-dependent.
+ *          https://docs.python.org/3/library/string.html#string.ascii_lowercase
+ */
+inline constexpr static char ascii_lowercase[26] = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+                                                    'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
+
+/**
+ *  @brief  The uppercase letters "ABCDEFGHIJKLMNOPQRSTUVWXYZ". This value is not locale-dependent.
+ *          https://docs.python.org/3/library/string.html#string.ascii_uppercase
+ */
+inline constexpr static char ascii_uppercase[26] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+                                                    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
+
+/**
+ *  @brief  ASCII characters which are considered printable.
+ *          A combination of `digits`, `ascii_letters`, `punctuation`, and `whitespace`.
+ *          https://docs.python.org/3/library/string.html#string.printable
+ */
+inline constexpr static char ascii_printables[100] = {
+    '0', '1', '2', '3', '4', '5',  '6', '7', '8',  '9', 'a', 'b', 'c', 'd', 'e', 'f',  'g',  'h',  'i',  'j',
+    'k', 'l', 'm', 'n', 'o', 'p',  'q', 'r', 's',  't', 'u', 'v', 'w', 'x', 'y', 'z',  'A',  'B',  'C',  'D',
+    'E', 'F', 'G', 'H', 'I', 'J',  'K', 'L', 'M',  'N', 'O', 'P', 'Q', 'R', 'S', 'T',  'U',  'V',  'W',  'X',
+    'Y', 'Z', '!', '"', '#', '$',  '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.',  '/',  ':',  ';',  '<',
+    '=', '>', '?', '@', '[', '\\', ']', '^', '_',  '`', '{', '|', '}', '~', ' ', '\t', '\n', '\r', '\f', '\v'};
+
+/**
+ *  @brief  Non-printable ASCII control characters.
+ *          Includes all codes from 0 to 31 and 127.
+ */
+inline constexpr static char ascii_controls[33] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16,
+                                                   17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 127};
+
+/**
+ *  @brief  The digits "0123456789".
+ *          https://docs.python.org/3/library/string.html#string.digits
+ */
+inline constexpr static char digits[10] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+
+/**
+ *  @brief  The letters "0123456789abcdefABCDEF".
+ *          https://docs.python.org/3/library/string.html#string.hexdigits
+ */
+inline constexpr static char hexdigits[22] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', //
+                                              'a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F'};
+
+/**
+ *  @brief  The letters "01234567".
+ *          https://docs.python.org/3/library/string.html#string.octdigits
+ */
+inline constexpr static char octdigits[8] = {'0', '1', '2', '3', '4', '5', '6', '7'};
+
+/**
+ *  @brief  ASCII characters considered punctuation characters in the C locale:
+ *          !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~.
+ *          https://docs.python.org/3/library/string.html#string.punctuation
+ */
+inline constexpr static char punctuation[32] = { //
+    '!', '"', '#', '$', '%', '&', '\'', '(',  ')', '*', '+', ',', '-', '.', '/', ':',
+    ';', '<', '=', '>', '?', '@', '[',  '\\', ']', '^', '_', '`', '{', '|', '}', '~'};
+
+/**
+ *  @brief  ASCII characters that are considered whitespace.
+ *          This includes space, tab, linefeed, return, formfeed, and vertical tab.
+ *          https://docs.python.org/3/library/string.html#string.whitespace
+ */
+inline constexpr static char whitespaces[6] = {' ', '\t', '\n', '\r', '\f', '\v'};
+
+/**
+ *  @brief  ASCII characters that are considered line delimiters.
+ *          https://docs.python.org/3/library/stdtypes.html#str.splitlines
+ */
+inline constexpr static char newlines[8] = {'\n', '\r', '\f', '\v', '\x1C', '\x1D', '\x1E', '\x85'};
+
+/**
  *  @brief  A set of characters represented as a bitset with 256 slots.
  */
 class character_set {
     sz_u8_set_t bitset_;
 
   public:
-    character_set() noexcept { sz_u8_set_init(&bitset_); }
-    character_set(character_set const &other) noexcept : bitset_(other.bitset_) {}
-    character_set &operator=(character_set const &other) noexcept {
+    constexpr character_set() noexcept {
+        // ! Instead of relying on the `sz_u8_set_init`, we have to reimplement it to support `constexpr`.
+        bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
+    }
+    constexpr explicit character_set(std::initializer_list<char> chars) noexcept : character_set() {
+        // ! Instead of relying on the `sz_u8_set_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
+        for (auto c : chars) bitset_._u64s[c >> 6] |= (1ull << (c & 63u));
+    }
+    template <std::size_t count_characters>
+    constexpr explicit character_set(char const (&chars)[count_characters]) noexcept : character_set() {
+        static_assert(count_characters > 0, "Character array cannot be empty");
+        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+            char c = chars[i];
+            bitset_._u64s[c >> 6] |= (1ull << (c & 63u));
+        }
+    }
+
+    constexpr character_set(character_set const &other) noexcept : bitset_(other.bitset_) {}
+    constexpr character_set &operator=(character_set const &other) noexcept {
         bitset_ = other.bitset_;
         return *this;
     }
-    explicit character_set(char const *chars) noexcept : character_set() {
-        for (std::size_t i = 0; chars[i]; ++i) add(chars[i]);
+
+    constexpr character_set operator|(character_set other) const noexcept {
+        character_set result = *this;
+        result.bitset_._u64s[0] |= other.bitset_._u64s[0], result.bitset_._u64s[1] |= other.bitset_._u64s[1],
+            result.bitset_._u64s[2] |= other.bitset_._u64s[2], result.bitset_._u64s[3] |= other.bitset_._u64s[3];
+        return *this;
     }
 
-    sz_u8_set_t &raw() noexcept { return bitset_; }
-    bool contains(char c) const noexcept { return sz_u8_set_contains(&bitset_, c); }
-    character_set &add(char c) noexcept {
+    inline character_set &add(char c) noexcept {
         sz_u8_set_add(&bitset_, c);
         return *this;
     }
-    character_set &invert() noexcept {
-        sz_u8_set_invert(&bitset_);
-        return *this;
+    inline sz_u8_set_t &raw() noexcept { return bitset_; }
+    inline sz_u8_set_t const &raw() const noexcept { return bitset_; }
+    inline bool contains(char c) const noexcept { return sz_u8_set_contains(&bitset_, c); }
+    inline character_set inverted() const noexcept {
+        character_set result = *this;
+        sz_u8_set_invert(&result.bitset_);
+        return result;
     }
 };
+
+inline constexpr static character_set ascii_letters_set {ascii_letters};
+inline constexpr static character_set ascii_lowercase_set {ascii_lowercase};
+inline constexpr static character_set ascii_uppercase_set {ascii_uppercase};
+inline constexpr static character_set ascii_printables_set {ascii_printables};
+inline constexpr static character_set ascii_controls_set {ascii_controls};
+inline constexpr static character_set digits_set {digits};
+inline constexpr static character_set hexdigits_set {hexdigits};
+inline constexpr static character_set octdigits_set {octdigits};
+inline constexpr static character_set punctuation_set {punctuation};
+inline constexpr static character_set whitespaces_set {whitespaces};
+inline constexpr static character_set newlines_set {newlines};
 
 /**
  *  @brief  A result of split a string once, containing the string slice ::before,
@@ -906,7 +1023,7 @@ class string_view {
     inline size_type find(character_set set) const noexcept { return find_first_of(set); }
 
     /** @brief  Find the first occurrence of a character outside of the set. */
-    inline size_type find_first_not_of(character_set set) const noexcept { return find_first_of(set.invert()); }
+    inline size_type find_first_not_of(character_set set) const noexcept { return find_first_of(set.inverted()); }
 
     /** @brief  Find the last occurrence of a character from a set. */
     inline size_type find_last_of(character_set set) const noexcept {
@@ -918,7 +1035,7 @@ class string_view {
     inline size_type rfind(character_set set) const noexcept { return find_last_of(set); }
 
     /** @brief  Find the last occurrence of a character outside of the set. */
-    inline size_type find_last_not_of(character_set set) const noexcept { return find_last_of(set.invert()); }
+    inline size_type find_last_not_of(character_set set) const noexcept { return find_last_of(set.inverted()); }
 
     /** @brief  Find all occurrences of a given string.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
@@ -955,15 +1072,26 @@ class string_view {
     inline range_rsplits<string_view, matcher_rfind> rsplit(string_view) const noexcept;
 
     /** @brief  Find all occurrences of given characters. */
-    inline range_splits<string_view, matcher_find_first_of> split(character_set) const noexcept;
+    inline range_splits<string_view, matcher_find_first_of> split(character_set = whitespaces_set) const noexcept;
 
     /** @brief  Find all occurrences of given characters in @b reverse order. */
-    inline range_rsplits<string_view, matcher_find_last_of> rsplit(character_set) const noexcept;
+    inline range_rsplits<string_view, matcher_find_last_of> rsplit(character_set = whitespaces_set) const noexcept;
 
     inline size_type copy(pointer destination, size_type count, size_type pos = 0) const noexcept = delete;
 
     /** @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     inline size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }
+
+    inline bool contains_only(character_set set) const noexcept { return find_first_not_of(set) == npos; }
+    inline bool isalpha() const noexcept { return !empty() && contains_only(ascii_letters_set); }
+    inline bool isalnum() const noexcept { return !empty() && contains_only(ascii_letters_set | digits_set); }
+    inline bool isascii() const noexcept { return empty() || contains_only(ascii_controls_set | ascii_printables_set); }
+    inline bool isdigit() const noexcept { return !empty() && contains_only(digits_set); }
+    inline bool islower() const noexcept { return !empty() && contains_only(ascii_lowercase_set); }
+    inline bool isprintable() const noexcept { return empty() || contains_only(ascii_printables_set); }
+    inline bool isspace() const noexcept { return !empty() && contains_only(whitespaces_set); }
+    inline bool isupper() const noexcept { return !empty() && contains_only(ascii_uppercase_set); }
+    inline range_splits<string_view, matcher_find_first_of> splitlines() const noexcept;
 
     inline character_set as_set() const noexcept {
         character_set set;
@@ -1057,7 +1185,7 @@ class basic_string {
     static constexpr size_type npos = size_type(-1);
 
     constexpr basic_string() noexcept {
-        // Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
+        // ! Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
         string_.on_stack.start = &string_.on_stack.chars[0];
         string_.u64s[1] = 0;
         string_.u64s[2] = 0;
@@ -1416,7 +1544,7 @@ class basic_string {
     inline size_type find(character_set set) const noexcept { return find_first_of(set); }
 
     /** @brief  Find the first occurrence of a character outside of the set. */
-    inline size_type find_first_not_of(character_set set) const noexcept { return find_first_of(set.invert()); }
+    inline size_type find_first_not_of(character_set set) const noexcept { return find_first_of(set.inverted()); }
 
     /** @brief  Find the last occurrence of a character from a set. */
     inline size_type find_last_of(character_set set) const noexcept { return view().find_last_of(set); }
@@ -1425,7 +1553,7 @@ class basic_string {
     inline size_type rfind(character_set set) const noexcept { return find_last_of(set); }
 
     /** @brief  Find the last occurrence of a character outside of the set. */
-    inline size_type find_last_not_of(character_set set) const noexcept { return find_last_of(set.invert()); }
+    inline size_type find_last_not_of(character_set set) const noexcept { return find_last_of(set.inverted()); }
 
     /** @brief  Find all occurrences of a given string.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
@@ -1456,91 +1584,36 @@ class basic_string {
 
     /** @brief  Find all occurrences of a given string.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
-    inline range_splits<string_view, matcher_find> split(string_view pattern) const noexcept;
+    inline range_splits<string_view, matcher_find> split(string_view pattern, bool interleave = true) const noexcept;
 
     /** @brief  Find all occurrences of a given string in @b reverse order.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
-    inline range_rsplits<string_view, matcher_rfind> rsplit(string_view pattern) const noexcept;
+    inline range_rsplits<string_view, matcher_rfind> rsplit(string_view pattern, bool interleave = true) const noexcept;
 
     /** @brief  Find all occurrences of given characters. */
-    inline range_splits<string_view, matcher_find_first_of> split(character_set pattern) const noexcept;
+    inline range_splits<string_view, matcher_find_first_of> split(character_set = whitespaces_set) const noexcept;
 
     /** @brief  Find all occurrences of given characters in @b reverse order. */
-    inline range_rsplits<string_view, matcher_find_last_of> rsplit(character_set pattern) const noexcept;
+    inline range_rsplits<string_view, matcher_find_last_of> rsplit(character_set = whitespaces_set) const noexcept;
 
     /** @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     inline size_type hash() const noexcept { return view().hash(); }
+
+    inline bool contains_only(character_set set) const noexcept { return find_first_not_of(set) == npos; }
+    inline bool isalpha() const noexcept { return !empty() && contains_only(ascii_letters_set); }
+    inline bool isalnum() const noexcept { return !empty() && contains_only(ascii_letters_set | digits_set); }
+    inline bool isascii() const noexcept { return empty() || contains_only(ascii_controls_set | ascii_printables_set); }
+    inline bool isdigit() const noexcept { return !empty() && contains_only(digits_set); }
+    inline bool islower() const noexcept { return !empty() && contains_only(ascii_lowercase_set); }
+    inline bool isprintable() const noexcept { return empty() || contains_only(ascii_printables_set); }
+    inline bool isspace() const noexcept { return !empty() && contains_only(whitespaces_set); }
+    inline bool isupper() const noexcept { return !empty() && contains_only(ascii_uppercase_set); }
+    inline range_splits<string_view, matcher_find_first_of> splitlines() const noexcept;
 };
 
 using string = basic_string<>;
 
 static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 pointers.");
-
-/**
- *  @brief  The concatenation of the `ascii_lowercase` and `ascii_uppercase`. This value is not locale-dependent.
- *          https://docs.python.org/3/library/string.html#string.ascii_letters
- */
-inline static string_view ascii_letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-/**
- *  @brief  The lowercase letters "abcdefghijklmnopqrstuvwxyz". This value is not locale-dependent.
- *          https://docs.python.org/3/library/string.html#string.ascii_letters
- */
-inline static string_view ascii_lowercase = "abcdefghijklmnopqrstuvwxyz";
-
-/**
- *  @brief  The lowercase letters "ABCDEFGHIJKLMNOPQRSTUVWXYZ". This value is not locale-dependent.
- *          https://docs.python.org/3/library/string.html#string.ascii_uppercase
- */
-inline static string_view ascii_uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-/**
- *  @brief  The letters "0123456789".
- *          https://docs.python.org/3/library/string.html#string.digits
- */
-inline static string_view digits = "0123456789";
-
-/**
- *  @brief  The letters "0123456789abcdefABCDEF".
- *          https://docs.python.org/3/library/string.html#string.hexdigits
- */
-inline static string_view hexdigits = "0123456789abcdefABCDEF";
-
-/**
- *  @brief  The letters "01234567".
- *          https://docs.python.org/3/library/string.html#string.octdigits
- */
-inline static string_view octdigits = "01234567";
-
-/**
- *  @brief  A string containing all ASCII characters that are considered whitespace.
- *          This includes space, tab, linefeed, return, formfeed, and vertical tab.
- *          https://docs.python.org/3/library/string.html#string.whitespace
- */
-inline static string_view whitespace = " \t\n\r\f\v";
-
-/**
- *  @brief  ASCII characters considered punctuation characters in the C locale:
- *          !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~.
- *          https://docs.python.org/3/library/string.html#string.punctuation
- */
-inline static string_view punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
-
-/**
- *  @brief  ASCII characters which are considered printable.
- *          A combination of `digits`, `ascii_letters`, `punctuation`, and `whitespace`.
- *          https://docs.python.org/3/library/string.html#string.printable
- */
-inline static string_view printable =
-    "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ \t\n\r\f\v";
-
-/**
- *  @brief  A string containing all non-printable ASCII characters.
- *          Putting the zero character at the end makes it compatible with `strcspn`.
- */
-inline static string_view non_printable = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F"
-                                          "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F"
-                                          "\x7F\x00";
 
 namespace literals {
 constexpr string_view operator""_sz(char const *str, std::size_t length) noexcept { return {str, length}; }
@@ -1602,12 +1675,12 @@ inline range_rmatches<string_view, matcher_rfind> string_view::rfind_all(string_
     return {*this, {n, i}};
 }
 
-inline range_matches<string_view, matcher_find_first_of> string_view::find_all(character_set n) const noexcept {
-    return {*this, {n}};
+inline range_matches<string_view, matcher_find_first_of> string_view::find_all(character_set set) const noexcept {
+    return {*this, {set}};
 }
 
-inline range_rmatches<string_view, matcher_find_last_of> string_view::rfind_all(character_set n) const noexcept {
-    return {*this, {n}};
+inline range_rmatches<string_view, matcher_find_last_of> string_view::rfind_all(character_set set) const noexcept {
+    return {*this, {set}};
 }
 
 inline range_splits<string_view, matcher_find> string_view::split(string_view n) const noexcept { return {*this, {n}}; }
@@ -1616,12 +1689,21 @@ inline range_rsplits<string_view, matcher_rfind> string_view::rsplit(string_view
     return {*this, {n}};
 }
 
-inline range_splits<string_view, matcher_find_first_of> string_view::split(character_set n) const noexcept {
-    return {*this, {n}};
+inline range_splits<string_view, matcher_find_first_of> string_view::split(character_set set) const noexcept {
+    return {*this, {set}};
 }
 
-inline range_rsplits<string_view, matcher_find_last_of> string_view::rsplit(character_set n) const noexcept {
-    return {*this, {n}};
+inline range_rsplits<string_view, matcher_find_last_of> string_view::rsplit(character_set set) const noexcept {
+    return {*this, {set}};
+}
+
+inline range_splits<string_view, matcher_find_first_of> string_view::splitlines() const noexcept {
+    return split(newlines_set);
+}
+
+template <typename allocator_>
+inline range_splits<string_view, matcher_find_first_of> basic_string<allocator_>::splitlines() const noexcept {
+    return split(newlines_set);
 }
 
 template <typename allocator_>
@@ -1649,25 +1731,27 @@ inline range_rmatches<string_view, matcher_find_last_of> basic_string<allocator_
 }
 
 template <typename allocator_>
-inline range_splits<string_view, matcher_find> basic_string<allocator_>::split(string_view pattern) const noexcept {
-    return view().split(pattern);
+inline range_splits<string_view, matcher_find> basic_string<allocator_>::split(string_view pattern,
+                                                                               bool interleave) const noexcept {
+    return view().split(pattern, interleave);
 }
 
 template <typename allocator_>
-inline range_rsplits<string_view, matcher_rfind> basic_string<allocator_>::rsplit(string_view pattern) const noexcept {
-    return view().rsplit(pattern);
+inline range_rsplits<string_view, matcher_rfind> basic_string<allocator_>::rsplit(string_view pattern,
+                                                                                  bool interleave) const noexcept {
+    return view().rsplit(pattern, interleave);
 }
 
 template <typename allocator_>
 inline range_splits<string_view, matcher_find_first_of> basic_string<allocator_>::split(
-    character_set pattern) const noexcept {
-    return view().split(pattern);
+    character_set set) const noexcept {
+    return view().split(set);
 }
 
 template <typename allocator_>
 inline range_rsplits<string_view, matcher_find_last_of> basic_string<allocator_>::rsplit(
-    character_set pattern) const noexcept {
-    return view().rsplit(pattern);
+    character_set set) const noexcept {
+    return view().rsplit(set);
 }
 
 } // namespace stringzilla
