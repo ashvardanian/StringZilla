@@ -1,0 +1,11 @@
+{
+    "recommendations": [
+        "ms-vscode.cpptools-themes",
+        "ms-vscode.cmake-tools",
+        "ms-python.python",
+        "ms-python.black-formatter",
+        "yzhang.markdown-all-in-one",
+        "aaron-bond.better-comments",
+        "cheshirekow.cmake-format",
+    ]
+}

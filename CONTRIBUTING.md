@@ -38,9 +38,28 @@ The role of Python benchmarks is less to provide absolute number, but to compare
 
 For presentation purposes, we also 
 
+
 ## IDE Integrations
 
-The project is developed in VS Code, and comes with debugger launchers in `.vscode/launch.json`.
+The project was originally developed in VS Code, and contains a set of configuration files for that IDE under `.vscode/`.
+
+- `tasks.json` - build tasks for CMake.
+- `launch.json` - debugger launchers for CMake.
+- `extensions.json` - recommended extensions for VS Code, including:
+  - `ms-vscode.cpptools-themes` - C++ language support.
+  - `ms-vscode.cmake-tools`, `cheshirekow.cmake-format` - CMake integration.
+  - `ms-python.python`, `ms-python.black-formatter` - Python language support.
+  - `yzhang.markdown-all-in-one` - formatting Markdown.
+  - `aaron-bond.better-comments` - color-coded comments.
+
+## Code Styling
+
+The project uses `.clang-format` to enforce a consistent code style.
+Modern IDEs, like VS Code, can be configured to automatically format the code on save.
+
+- East const over const West. Write `char const*` instead of `const char*`.
+- Explicitly use `std::` or `sz::` namespaces over global `memcpy`, `uint64_t`, etc.
+- For color-coded comments start the line with `!` for warnings or `?` for questions.
 
 ## Contributing in C++ and C
 
