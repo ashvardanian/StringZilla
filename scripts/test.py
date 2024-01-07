@@ -1,8 +1,12 @@
+from random import choice, randint
+from string import ascii_lowercase
+from typing import Optional
+import numpy as np
+
 import pytest
 
 import stringzilla as sz
-from stringzilla import Str
-from typing import Optional
+from stringzilla import Str, Strs
 
 
 def test_unit_construct():
@@ -120,6 +124,36 @@ def is_equal_strings(native_strings, big_strings):
         ), f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
 
 
+def baseline_edit_distance(s1, s2) -> int:
+    """
+    Compute the Levenshtein distance between two strings.
+    """
+    # Create a matrix of size (len(s1)+1) x (len(s2)+1)
+    matrix = np.zeros((len(s1) + 1, len(s2) + 1), dtype=int)
+
+    # Initialize the first column and first row of the matrix
+    for i in range(len(s1) + 1):
+        matrix[i, 0] = i
+    for j in range(len(s2) + 1):
+        matrix[0, j] = j
+
+    # Compute Levenshtein distance
+    for i in range(1, len(s1) + 1):
+        for j in range(1, len(s2) + 1):
+            if s1[i - 1] == s2[j - 1]:
+                cost = 0
+            else:
+                cost = 1
+            matrix[i, j] = min(
+                matrix[i - 1, j] + 1,  # Deletion
+                matrix[i, j - 1] + 1,  # Insertion
+                matrix[i - 1, j - 1] + cost,  # Substitution
+            )
+
+    # Return the Levenshtein distance
+    return matrix[len(s1), len(s2)]
+
+
 def check_identical(
     native: str,
     big: Str,
@@ -199,7 +233,7 @@ def test_edit_distance_insertions(max_edit_distance: int, iters: int):
 def test_edit_distance_randos(iters: int):
     a = get_random_string(length=20)
     b = get_random_string(length=20)
-    assert sz.edit_distance(a, b, 200) == edit_distance(a, b)
+    assert sz.edit_distance(a, b, 200) == baseline_edit_distance(a, b)
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])

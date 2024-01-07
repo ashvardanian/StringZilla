@@ -295,26 +295,43 @@ printf("%.*s\n", (int)string_length, string_start);
 ### Beyond the Standard Templates Library
 
 Aside from conventional `std::string` interfaces, non-STL extensions are available.
+Often, inspired by the Python `str` interface.
+For example, when parsing documents, it is often useful to split it into substrings.
+Most often, after that, you would compute the length of the skipped part, the offset and the length of the remaining part.
+StringZilla provides a convenient `partition` function, which returns a tuple of three string views, making the code cleaner.
 
 ```cpp
-haystack.count(needle) == 1; // Why is this not in STL?!
+auto [before, match, after] = haystack.partition(':'); // Character argument
+auto [before, match, after] = haystack.partition(character_set(":;")); // Character-set argument
+auto [before, match, after] = haystack.partition(" : "); // String argument
+```
 
-haystack.edit_distance(needle) == 7;
+The other examples of non-STL Python-inspired interfaces are:
+
+- `isalnum`, `isalpha`, `isascii`, `isdigit`, `islower`, `isspace`,`isupper`.
+- `lstrip`, `rstrip`, `strip`, `ltrim`, `rtrim`, `trim`.
+- `lower`, `upper`, `capitalize`, `title`, `swapcase`.
+- `splitlines`, `split`, `rsplit`.
+
+Some of the StringZilla interfaces are not available even Python's native `str` class.
+
+```cpp
+haystack.hash(); // -> std::size_t 
+haystack.count(needle) == 1; // Why is this not in STL?!
+haystack.contains_only(" \w\t"); // == haystack.count(character_set(" \w\t")) == haystack.size();
+
+haystack.push_back_unchecked('x'); // No bounds checking
+haystack.try_push_back('x'); // Returns false if the string is full and allocation failed
+
+haystack.concatenated("@", domain, ".", tld); // No allocations
+haystack + "@" + domain + "." + tld; // No allocations, if `SZ_LAZY_CONCAT` is defined
+
+haystack.edit_distance(needle) == 7; // May perform a memory allocation
 haystack.find_similar(needle, bound);
 haystack.rfind_similar(needle, bound);
 ```
 
-When parsing documents, it is often useful to split it into substrings.
-Most often, after that, you would compute the length of the skipped part, the offset and the length of the remaining part.
-StringZilla provides a convenient `split` function, which returns a tuple of three string views, making the code cleaner.
-
-```cpp
-auto [before, match, after] = haystack.split(':');
-auto [before, match, after] = haystack.split(character_set(":;"));
-auto [before, match, after] = haystack.split(" : ");
-```
-
-### Ranges
+### Splits and Ranges
 
 One of the most common use cases is to split a string into a collection of substrings.
 Which would often result in [StackOverflow lookups][so-split] and snippets like the one below.
@@ -322,8 +339,8 @@ Which would often result in [StackOverflow lookups][so-split] and snippets like 
 [so-split]: https://stackoverflow.com/questions/14265581/parse-split-a-string-in-c-using-string-delimiter-standard-c
 
 ```cpp
-std::vector<std::string> lines = your_split_by_substrings(haystack, "\r\n");
-std::vector<std::string> words = your_split_by_character(lines, ' ');
+std::vector<std::string> lines = split_substring(haystack, "\r\n");
+std::vector<std::string> words = split_character(lines, ' ');
 ```
 
 Those allocate memory for each string and the temporary vectors.
@@ -333,8 +350,8 @@ To avoid those, StringZilla provides lazily-evaluated ranges, compatible with th
 [range-v3]: https://github.com/ericniebler/range-v3
 
 ```cpp
-for (auto line : haystack.split_all("\r\n"))
-    for (auto word : line.split_all(character_set(" \w\t.,;:!?")))
+for (auto line : haystack.split("\r\n"))
+    for (auto word : line.split(character_set(" \w\t.,;:!?")))
         std::cout << word << std::endl;
 ```
 
@@ -344,8 +361,8 @@ Debugging pointer offsets is not a pleasant exercise, so keep the following func
 
 - `haystack.[r]find_all(needle, interleaving)`
 - `haystack.[r]find_all(character_set(""))`
-- `haystack.[r]split_all(needle)`
-- `haystack.[r]split_all(character_set(""))`
+- `haystack.[r]split(needle)`
+- `haystack.[r]split(character_set(""))`
 
 For $N$ matches the split functions will report $N+1$ matches, potentially including empty strings.
 Ranges have a few convinience methods as well:
@@ -357,7 +374,7 @@ range.template to<std::set<std::sting>>();
 range.template to<std::vector<std::sting_view>>(); 
 ```
 
-### TODO: STL Containers with String Keys
+### Standard C++ Containers with String Keys
 
 The C++ Standard Templates Library provides several associative containers, often used with string keys.
 
@@ -382,7 +399,7 @@ std::map<sz::string, int> sorted_words;
 std::unordered_map<sz::string, int> words;
 ```
 
-### TODO: Concatenating Strings
+### Concatenating Strings
 
 Ansother common string operation is concatenation.
 The STL provides `std::string::operator+` and `std::string::append`, but those are not the most efficient, if multiple invocations are performed.
@@ -405,6 +422,7 @@ StringZilla provides a more convenient `concat` function, which takes a variadic
 
 ```cpp
 auto email = sz::concat(name, "@", domain, ".", tld);
+auto email = name.concatenated("@", domain, ".", tld);
 ```
 
 Moreover, if the first or second argument of the expression is a StringZilla string, the concatenation can be poerformed lazily using the same `operator+` syntax.

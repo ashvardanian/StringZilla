@@ -151,11 +151,43 @@ Future development plans include:
 - [ ] [Faster string sorting algorithm](https://github.com/ashvardanian/StringZilla/issues/45).
 - [ ] [Splitting with multiple separators at once](https://github.com/ashvardanian/StringZilla/issues/29).
 - [ ] Universal hashing solution.
-- [ ] Add `.pyi` interface fior Python.
+- [ ] Add `.pyi` interface for Python.
 - [ ] Arm NEON backend.
 - [ ] Bindings for Rust.
 - [ ] Arm SVE backend.
 - [ ] Stateful automata-based search.
+
+## General Performance Observations
+
+### Unaligned Loads
+
+One common surface of attach for performance optimizations is minimizing unaligned loads.
+Such solutions are beutiful from the algorithmic perspective, but often lead to worse performance.
+It's oftern cheaper to issue two interleaving wide-register loads, than try minimizing those loads at the cost of juggling registers.
+
+### Register Pressure
+
+Byte-level comparisons are simpler and often faster, than n-gram comparisons with subsequent interleaving.
+In the following example we search for 4-byte needles in a haystack, loading at different offsets, and comparing then as arrays of 32-bit integers.
+
+```c
+h0_vec.zmm = _mm512_loadu_epi8(h);
+h1_vec.zmm = _mm512_loadu_epi8(h + 1);
+h2_vec.zmm = _mm512_loadu_epi8(h + 2);
+h3_vec.zmm = _mm512_loadu_epi8(h + 3);
+matches0 = _mm512_cmpeq_epi32_mask(h0_vec.zmm, n_vec.zmm);
+matches1 = _mm512_cmpeq_epi32_mask(h1_vec.zmm, n_vec.zmm);
+matches2 = _mm512_cmpeq_epi32_mask(h2_vec.zmm, n_vec.zmm);
+matches3 = _mm512_cmpeq_epi32_mask(h3_vec.zmm, n_vec.zmm);
+if (matches0 | matches1 | matches2 | matches3)
+    return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
+                          _pdep_u64(matches1, 0x2222222222222222) | //
+                          _pdep_u64(matches2, 0x4444444444444444) | //
+                          _pdep_u64(matches3, 0x8888888888888888));
+```
+
+A simpler solution would be to compare byte-by-byte, but in that case we would need to populate multiple registers, broadcasting different letters of the needle into them.
+That may not be noticeable on a microbenchmark, but it would be noticeable on real-world workloads, where the CPU will speculatively interleave those search operations with something else happening in that context.
 
 ## Working on Alternative Hardware Backends
 

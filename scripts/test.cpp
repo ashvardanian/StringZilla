@@ -6,7 +6,7 @@
 #include <vector>    // `std::vector`
 
 #define SZ_USE_X86_AVX2 0
-#define SZ_USE_X86_AVX512 0
+#define SZ_USE_X86_AVX512 1
 #define SZ_USE_ARM_NEON 0
 #define SZ_USE_ARM_SVE 0
 
@@ -282,15 +282,9 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
     eval(haystack_pattern, needle_stl, 33);
 }
 
-static const char* USER_NAME = 
-#define str(s) #s
-#define xstr(s) str(s)
-  xstr(DEV_USER_NAME);
+
 
 int main(int argc, char const **argv) {
-    std::printf("Hi " xstr(DEV_USER_NAME)"! You look nice today!\n");
-#undef str
-#undef xstr
 
     test_util();
     explicit_test_cases_run();
@@ -298,6 +292,34 @@ int main(int argc, char const **argv) {
     std::string_view alphabet = "abcdefghijklmnopqrstuvwxyz";                                         // 26 characters
     std::string_view base64 = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";     // 64 characters
     std::string_view common = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-=@$%"; // 68 characters
+
+    assert(sz::string_view("a").find_first_of("az") == 0);
+    assert(sz::string_view("a").find_last_of("az") == 0);
+    assert(sz::string_view("a").find_first_of("xz") == sz::string_view::npos);
+    assert(sz::string_view("a").find_last_of("xz") == sz::string_view::npos);
+
+    assert(sz::string_view("a").find_first_not_of("xz") == 0);
+    assert(sz::string_view("a").find_last_not_of("xz") == 0);
+    assert(sz::string_view("a").find_first_not_of("az") == sz::string_view::npos);
+    assert(sz::string_view("a").find_last_not_of("az") == sz::string_view::npos);
+
+    // Comparing relative order of the strings
+    assert("a"_sz.compare("a") == 0);
+    assert("a"_sz.compare("ab") == -1);
+    assert("ab"_sz.compare("a") == 1);
+    assert("a"_sz.compare("a\0"_sz) == -1);
+    assert("a\0"_sz.compare("a") == 1);
+    assert("a\0"_sz.compare("a\0"_sz) == 0);
+    assert("a"_sz == "a"_sz);
+    assert("a"_sz != "a\0"_sz);
+    assert("a\0"_sz == "a\0"_sz);
+    assert(sz::string_view("aXbYaXbY").find_first_of("XY") == 1);
+    assert(sz::string_view("axbYaxbY").find_first_of("Y") == 3);
+    assert(sz::string_view("YbXaYbXa").find_last_of("XY") == 6);
+    assert(sz::string_view("YbxaYbxa").find_last_of("Y") == 4);
+    assert(sz::string_view(common).find_first_of("_") == sz::string_view::npos);
+    assert(sz::string_view(common).find_first_of("+") == 62);
+    assert(sz::string_view(common).find_first_of("=") == 64);
 
     // Make sure copy constructors work as expected:
     {
@@ -354,12 +376,12 @@ int main(int argc, char const **argv) {
     eval("abcd", "da");
 
     // Check more advanced composite operations:
-    assert("abbccc"_sz.split("bb").before.size() == 1);
-    assert("abbccc"_sz.split("bb").match.size() == 2);
-    assert("abbccc"_sz.split("bb").after.size() == 3);
-    assert("abbccc"_sz.split("bb").before == "a");
-    assert("abbccc"_sz.split("bb").match == "bb");
-    assert("abbccc"_sz.split("bb").after == "ccc");
+    assert("abbccc"_sz.partition("bb").before.size() == 1);
+    assert("abbccc"_sz.partition("bb").match.size() == 2);
+    assert("abbccc"_sz.partition("bb").after.size() == 3);
+    assert("abbccc"_sz.partition("bb").before == "a");
+    assert("abbccc"_sz.partition("bb").match == "bb");
+    assert("abbccc"_sz.partition("bb").after == "ccc");
 
     assert(""_sz.find_all(".").size() == 0);
     assert("a.b.c.d"_sz.find_all(".").size() == 3);
@@ -376,20 +398,20 @@ int main(int argc, char const **argv) {
     assert(rfinds.size() == 3);
     assert(rfinds[0] == "c");
 
-    auto splits = ".a..c."_sz.split_all(sz::character_set(".")).template to<std::vector<std::string>>();
+    auto splits = ".a..c."_sz.split(sz::character_set(".")).template to<std::vector<std::string>>();
     assert(splits.size() == 5);
     assert(splits[0] == "");
     assert(splits[1] == "a");
     assert(splits[4] == "");
 
-    assert(""_sz.split_all(".").size() == 1);
-    assert(""_sz.rsplit_all(".").size() == 1);
-    assert("a.b.c.d"_sz.split_all(".").size() == 4);
-    assert("a.b.c.d"_sz.rsplit_all(".").size() == 4);
-    assert("a.b.,c,d"_sz.split_all(".,").size() == 2);
-    assert("a.b,c.d"_sz.split_all(sz::character_set(".,")).size() == 4);
+    assert(""_sz.split(".").size() == 1);
+    assert(""_sz.rsplit(".").size() == 1);
+    assert("a.b.c.d"_sz.split(".").size() == 4);
+    assert("a.b.c.d"_sz.rsplit(".").size() == 4);
+    assert("a.b.,c,d"_sz.split(".,").size() == 2);
+    assert("a.b,c.d"_sz.split(sz::character_set(".,")).size() == 4);
 
-    auto rsplits = ".a..c."_sz.rsplit_all(sz::character_set(".")).template to<std::vector<std::string>>();
+    auto rsplits = ".a..c."_sz.rsplit(sz::character_set(".")).template to<std::vector<std::string>>();
     assert(rsplits.size() == 5);
     assert(rsplits[0] == "");
     assert(rsplits[1] == "c");

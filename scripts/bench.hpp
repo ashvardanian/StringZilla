@@ -115,11 +115,11 @@ inline std::vector<std::string_view> tokenize(std::string_view str) {
     return words;
 }
 
-template <typename string_type>
-inline std::vector<string_type> filter_by_length(std::vector<string_type> tokens, std::size_t n) {
-    std::vector<string_type> result;
+template <typename result_string_type = std::string_view, typename from_string_type = result_string_type>
+inline std::vector<result_string_type> filter_by_length(std::vector<from_string_type> tokens, std::size_t n) {
+    std::vector<result_string_type> result;
     for (auto const &str : tokens)
-        if (str.length() == n) result.push_back(str);
+        if (str.length() == n) result.push_back({str.data(), str.length()});
     return result;
 }
 

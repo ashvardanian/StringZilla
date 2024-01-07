@@ -48,10 +48,13 @@
       }
     },
     {
-      "name": "Debug Benchmarks",
+      "name": "Current C++ Benchmark",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build_debug/stringzilla_search_bench",
+      "program": "${workspaceFolder}/build_debug/stringzilla_${fileBasenameNoExtension}",
+      "args": [
+        "leipzig1M.txt"
+      ],
       "cwd": "${workspaceFolder}",
       "environment": [
         {
