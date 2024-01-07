@@ -19,7 +19,10 @@
 #include <string_view>                 // Baseline
 #include <stringzilla/stringzilla.hpp> // Contender
 
+#include <test.hpp> // `levenshtein_baseline`
+
 namespace sz = ashvardanian::stringzilla;
+using namespace sz::scripts;
 using sz::literals::operator""_sz;
 
 /**
@@ -84,7 +87,7 @@ static void test_arithmetical_utilities() {
 }
 
 static void test_constructors() {
-    std::string alphabet {sz::ascii_printables};
+    std::string alphabet {sz::ascii_printables, sizeof(sz::ascii_printables)};
     std::vector<sz::string> strings;
     for (std::size_t alphabet_slice = 0; alphabet_slice != alphabet.size(); ++alphabet_slice)
         strings.push_back(alphabet.substr(0, alphabet_slice));
@@ -333,8 +336,10 @@ void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("ab", "ab");
     test_search_with_misaligned_repetitions("abc", "abc");
     test_search_with_misaligned_repetitions("abcd", "abcd");
-    test_search_with_misaligned_repetitions(sz::ascii_lowercase, sz::ascii_lowercase);
-    test_search_with_misaligned_repetitions(sz::ascii_printables, sz::ascii_printables);
+    test_search_with_misaligned_repetitions({sz::ascii_lowercase, sizeof(sz::ascii_lowercase)},
+                                            {sz::ascii_lowercase, sizeof(sz::ascii_lowercase)});
+    test_search_with_misaligned_repetitions({sz::ascii_printables, sizeof(sz::ascii_printables)},
+                                            {sz::ascii_printables, sizeof(sz::ascii_printables)});
 
     // When we are dealing with NULL characters inside the string
     test_search_with_misaligned_repetitions("\0", "\0");
@@ -354,31 +359,6 @@ void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("ab", "ba");
     test_search_with_misaligned_repetitions("abc", "ca");
     test_search_with_misaligned_repetitions("abcd", "da");
-}
-
-std::size_t levenshtein_baseline(std::string_view s1, std::string_view s2) {
-    std::size_t len1 = s1.size();
-    std::size_t len2 = s2.size();
-
-    std::vector<std::vector<std::size_t>> dp(len1 + 1, std::vector<std::size_t>(len2 + 1));
-
-    // Initialize the borders of the matrix.
-    for (std::size_t i = 0; i <= len1; ++i) dp[i][0] = i;
-    for (std::size_t j = 0; j <= len2; ++j) dp[0][j] = j;
-
-    for (std::size_t i = 1; i <= len1; ++i) {
-        for (std::size_t j = 1; j <= len2; ++j) {
-            std::size_t cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
-            // dp[i][j] is the minimum of deletion, insertion, or substitution
-            dp[i][j] = std::min({
-                dp[i - 1][j] + 1,       // Deletion
-                dp[i][j - 1] + 1,       // Insertion
-                dp[i - 1][j - 1] + cost // Substitution
-            });
-        }
-    }
-
-    return dp[len1][len2];
 }
 
 static void test_levenshtein_distances() {
