@@ -79,7 +79,7 @@ napi_value countAPI(napi_env env, napi_callback_info info) {
         while (haystack.length) {
             sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
-            sz_size_t offset = found ? ptr - haystack.start : haystack.length;
+            sz_size_t offset = found ? (sz_size_t)(ptr - haystack.start) : haystack.length;
             count += found;
             haystack.start += offset + found;
             haystack.length -= offset + found;
@@ -89,7 +89,7 @@ napi_value countAPI(napi_env env, napi_callback_info info) {
         while (haystack.length) {
             sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
-            sz_size_t offset = found ? ptr - haystack.start : haystack.length;
+            sz_size_t offset = found ? (sz_size_t)(ptr - haystack.start) : haystack.length;
             count += found;
             haystack.start += offset + needle.length;
             haystack.length -= offset + needle.length * found;
