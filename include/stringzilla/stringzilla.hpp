@@ -1141,10 +1141,10 @@ class basic_string {
 
     using alloc_t = sz_memory_allocator_t;
 
-    static sz_ptr_t call_allocate(sz_size_t n, void *allocator_state) noexcept {
+    static void* call_allocate(sz_size_t n, void *allocator_state) noexcept {
         return reinterpret_cast<allocator_ *>(allocator_state)->allocate(n);
     }
-    static void call_free(sz_ptr_t ptr, sz_size_t n, void *allocator_state) noexcept {
+    static void call_free(void* ptr, sz_size_t n, void *allocator_state) noexcept {
         return reinterpret_cast<allocator_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
     }
     template <typename allocator_callback>
@@ -1161,6 +1161,8 @@ class basic_string {
         if (!with_alloc(
                 [&](alloc_t &alloc) { return sz_string_init_from(&string_, other.data(), other.size(), &alloc); }))
             throw std::bad_alloc();
+        SZ_ASSERT(size() == other.size(), "");
+        SZ_ASSERT(*this == other, "");
     }
 
   public:
@@ -1209,7 +1211,8 @@ class basic_string {
 
         // Reposition the string start pointer to the stack if it fits.
         string_.on_stack.start = string_is_on_heap ? string_start : &string_.on_stack.chars[0];
-        sz_string_init(&other.string_); // Discrad the other string.
+        // XXX: memory leak
+        sz_string_init(&other.string_); // Discard the other string.
     }
 
     basic_string &operator=(basic_string &&other) noexcept {
@@ -1222,7 +1225,8 @@ class basic_string {
 
         // Reposition the string start pointer to the stack if it fits.
         string_.on_stack.start = string_is_on_heap ? string_start : &string_.on_stack.chars[0];
-        sz_string_init(&other.string_); // Discrad the other string.
+        // XXX: memory leak
+        sz_string_init(&other.string_); // Discard the other string.
         return *this;
     }
 
@@ -1320,8 +1324,7 @@ class basic_string {
     size_type edit_distance(string_view other, size_type bound = npos) const noexcept {
         size_type distance;
         with_alloc([&](alloc_t &alloc) {
-            distance = sz_edit_distance(string_.on_stack.start, string_.on_stack.length, other.data(), other.size(),
-                                        bound, &alloc);
+            distance = sz_edit_distance(data(), size(), other.data(), other.size(), bound, &alloc);
             return sz_true_k;
         });
         return distance;
