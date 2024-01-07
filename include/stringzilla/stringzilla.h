@@ -699,13 +699,13 @@ SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t haystack, sz_size_t h_length, sz
  *  @param accepted Set of accepted characters.
  *  @return         Number of bytes forming the prefix.
  */
-SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /** @copydoc sz_find_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /** @copydoc sz_find_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /**
  *  @brief  Finds the last character present from the ::set, present in ::text.
@@ -722,13 +722,13 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz
  *  @param rejected Set of rejected characters.
  *  @return         Number of bytes forming the prefix.
  */
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /** @copydoc sz_find_last_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /** @copydoc sz_find_last_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set);
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 #pragma endregion
 
@@ -1209,13 +1209,13 @@ SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
     return (sz_bool_t)(a_end == a);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
     for (sz_cptr_t const end = text + length; text != end; ++text)
         if (sz_u8_set_contains(set, *text)) return text;
     return NULL;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
     sz_cptr_t const end = text;
     for (text += length; text != end; --text)
         if (sz_u8_set_contains(set, *(text - 1))) return text - 1;
@@ -3077,14 +3077,14 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
         (n_length > 1) + (n_length > 66)](h, h_length, n, n_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t *filter) {
+SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *filter) {
 
     sz_size_t load_length;
     __mmask32 load_mask, matches_mask;
     // To store the set in the register we need just 256 bits, but the `VPERMB` instruction
     // we are going to invoke is surprisingly cheaper on ZMM registers.
     sz_u512_vec_t text_vec, filter_vec;
-    filter_vec.ymms[0] = _mm256_load_epi64(&filter->_u64s[0]);
+    filter_vec.ymms[0] = _mm256_loadu_epi64(&filter->_u64s[0]);
 
     // We are going to view the `filter` at 8-bit word granularity.
     sz_u512_vec_t filter_slice_offsets_vec;
@@ -3121,7 +3121,7 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz
         mask_in_filter_slice_vec.zmm = _mm512_sllv_epi16(_mm512_set1_epi16(1), offset_within_slice_vec.zmm);
         matches_vec.zmm = _mm512_and_si512(filter_slice_vec.zmm, mask_in_filter_slice_vec.zmm);
 
-        matches_mask = _mm512_cmpneq_epi16_mask(matches_vec.zmm, _mm512_setzero_si512());
+        matches_mask = _mm512_mask_cmpneq_epi16_mask(load_mask, matches_vec.zmm, _mm512_setzero_si512());
         if (matches_mask) {
             int offset = sz_u32_ctz(matches_mask);
             return text + offset;
@@ -3132,14 +3132,14 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz
     return NULL;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t *filter) {
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *filter) {
 
     sz_size_t load_length;
     __mmask32 load_mask, matches_mask;
     // To store the set in the register we need just 256 bits, but the `VPERMB` instruction
     // we are going to invoke is surprisingly cheaper on ZMM registers.
     sz_u512_vec_t text_vec, filter_vec;
-    filter_vec.ymms[0] = _mm256_load_epi64(&filter->_u64s[0]);
+    filter_vec.ymms[0] = _mm256_loadu_epi64(&filter->_u64s[0]);
 
     // We are going to view the `filter` at 8-bit word granularity.
     sz_u512_vec_t filter_slice_offsets_vec;
@@ -3176,7 +3176,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t lengt
         mask_in_filter_slice_vec.zmm = _mm512_sllv_epi16(_mm512_set1_epi16(1), offset_within_slice_vec.zmm);
         matches_vec.zmm = _mm512_and_si512(filter_slice_vec.zmm, mask_in_filter_slice_vec.zmm);
 
-        matches_mask = _mm512_cmpneq_epi16_mask(matches_vec.zmm, _mm512_setzero_si512());
+        matches_mask = _mm512_mask_cmpneq_epi16_mask(load_mask, matches_vec.zmm, _mm512_setzero_si512());
         if (matches_mask) {
             int offset = sz_u32_clz(matches_mask);
             return text + length - load_length + 32 - offset - 1;
@@ -3274,7 +3274,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 #endif
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_find_from_set_avx512(text, length, set);
 #else
@@ -3282,7 +3282,7 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set
 #endif
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t *set) {
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_find_last_from_set_avx512(text, length, set);
 #else

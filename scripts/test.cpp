@@ -140,6 +140,16 @@ void eval(std::string_view haystack_pattern, std::string_view needle_stl) {
 int main(int argc, char const **argv) {
     std::printf("Hi Ash! ... or is it someone else?!\n");
 
+    assert(sz::string_view("a").find_first_of("az") == 0);
+    assert(sz::string_view("a").find_last_of("az") == 0);
+    assert(sz::string_view("a").find_first_of("xz") == sz::string_view::npos);
+    assert(sz::string_view("a").find_last_of("xz") == sz::string_view::npos);
+
+    assert(sz::string_view("a").find_first_not_of("xz") == 0);
+    assert(sz::string_view("a").find_last_not_of("xz") == 0);
+    assert(sz::string_view("a").find_first_not_of("az") == sz::string_view::npos);
+    assert(sz::string_view("a").find_last_not_of("az") == sz::string_view::npos);
+
 #if 1
     // Comparing relative order of the strings
     assert("a"_sz.compare("a") == 0);
