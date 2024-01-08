@@ -108,6 +108,7 @@ lines.sort()
 lines.shuffle(seed=42)
 ```
 
+Assuming superior search speed splitting should also work 3x faster than with native Python strings.
 Need copies?
 
 ```python
@@ -121,6 +122,13 @@ Basic `list`-like operations are also supported:
 lines.append('Pythonic string')
 lines.extend(shuffled_copy)
 ```
+
+Those collections of `Strs` are designed to keep the memory consumption low.
+If all the chunks are located in consecutive memory regions, the memory overhead can be as low as 4 bytes per chunk.
+That's designed to handle very large datasets, like [RedPajama][redpajama].
+To address all 20 Billion annotated english documents in it, one will need only 160 GB of RAM instead of Terabytes.
+
+[redpajama]: https://github.com/togethercomputer/RedPajama-Data
 
 ### Low-Level Python API
 
@@ -222,6 +230,8 @@ Most operations in StringZilla don't assume any memory ownership.
 But in addition to the read-only search-like operations StringZilla provides a minimalistic C and C++ implementations for a memory owning string "class".
 Like other efficient string implementations, it uses the [Small String Optimization][faq-sso] to avoid heap allocations for short strings.
 
+[faq-sso]: https://cpp-optimizations.netlify.app/small_strings/
+
 ```c
 typedef union sz_string_t {
     struct on_stack {
@@ -312,23 +322,25 @@ The other examples of non-STL Python-inspired interfaces are:
 - `lstrip`, `rstrip`, `strip`, `ltrim`, `rtrim`, `trim`.
 - `lower`, `upper`, `capitalize`, `title`, `swapcase`.
 - `splitlines`, `split`, `rsplit`.
+- `count` for the number of non-overlapping matches.
 
 Some of the StringZilla interfaces are not available even Python's native `str` class.
 
 ```cpp
-haystack.hash(); // -> std::size_t 
-haystack.count(needle) == 1; // Why is this not in STL?!
-haystack.contains_only(" \w\t"); // == haystack.count(character_set(" \w\t")) == haystack.size();
+text.hash(); // -> std::size_t 
+text.contains_only(" \w\t"); // == text.count(character_set(" \w\t")) == text.size();
 
-haystack.push_back_unchecked('x'); // No bounds checking
-haystack.try_push_back('x'); // Returns false if the string is full and allocation failed
+// Incremental construction:
+text.push_back_unchecked('x'); // No bounds checking
+text.try_push_back('x'); // Returns false if the string is full and allocation failed
 
-haystack.concatenated("@", domain, ".", tld); // No allocations
-haystack + "@" + domain + "." + tld; // No allocations, if `SZ_LAZY_CONCAT` is defined
+text.concatenated("@", domain, ".", tld); // No allocations
+text + "@" + domain + "." + tld; // No allocations, if `SZ_LAZY_CONCAT` is defined
 
-haystack.edit_distance(needle) == 7; // May perform a memory allocation
-haystack.find_similar(needle, bound);
-haystack.rfind_similar(needle, bound);
+// For Levenshtein distance, the following are available:
+text.edit_distance(other[, upper_bound]) == 7; // May perform a memory allocation
+text.find_similar(other[, upper_bound]);
+text.rfind_similar(other[, upper_bound]);
 ```
 
 ### Splits and Ranges
@@ -339,8 +351,8 @@ Which would often result in [StackOverflow lookups][so-split] and snippets like 
 [so-split]: https://stackoverflow.com/questions/14265581/parse-split-a-string-in-c-using-string-delimiter-standard-c
 
 ```cpp
-std::vector<std::string> lines = split_substring(haystack, "\r\n");
-std::vector<std::string> words = split_character(lines, ' ');
+std::vector<std::string> lines = split(haystack, "\r\n"); // string delimiter
+std::vector<std::string> words = split(lines, ' '); // character delimiter
 ```
 
 Those allocate memory for each string and the temporary vectors.
@@ -434,18 +446,111 @@ auto email_expression = name + "@" + domain + "." + tld;    // 0 allocations
 sz::string email = name + "@" + domain + "." + tld;         // 1 allocations
 ```
 
-### Debugging
+### Random Strings
 
-For maximal performance, the library does not perform any bounds checking in Release builds.
-That behavior is controllable for both C and C++ interfaces via the `STRINGZILLA_DEBUG` macro.
+Software developers often need to generate random strings for testing purposes.
+The STL provides `std::generate` and `std::random_device`, that can be used with StringZilla.
 
-[faq-sso]: https://cpp-optimizations.netlify.app/small_strings/
+```cpp
+sz::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
+    sz::string result(length, '\0');
+    static std::random_device seed_source; // Too expensive to construct every time
+    std::mt19937 generator(seed_source());
+    std::uniform_int_distribution<std::size_t> distribution(1, cardinality);
+    std::generate(result.begin(), result.end(), [&]() { return alphabet[distribution(generator)]; });
+    return result;
+}
+```
 
-## Algorithms 📚
+Mouthful and slow.
+StringZilla provides a C native method - `sz_generate` and a convenient C++ wrapper - `sz::generate`.
+Similar to Python it also defines the commonly used character sets.
+
+```cpp
+sz::string word = sz::generate(5, sz::ascii_letters);
+sz::string packet = sz::generate(length, sz::base64);
+
+auto protein = sz::string::random(300, "ARNDCQEGHILKMFPSTWYV"); // static method
+auto dna = sz::basic_string<custom_allocator>::random(3_000_000_000, "ACGT");
+
+dna.randomize("ACGT"); // `noexcept` pre-allocated version
+dna.randomize(&std::rand, "ACGT"); // custom distribution
+```
+
+Recent benchmarks suggest the following numbers for strings of different lengths.
+
+| Length | `std::generate` → `std::string` | `sz::generate` → `sz::string` |
+| -----: | ------------------------------: | ----------------------------: |
+|      5 |                        0.5 GB/s |                      1.5 GB/s |
+|     20 |                        0.3 GB/s |                      1.5 GB/s |
+|    100 |                        0.2 GB/s |                      1.5 GB/s |
+
+### Compilation Settings and Debugging
+
+__`SZ_DEBUG`__:
+
+> For maximal performance, the library does not perform any bounds checking in Release builds.
+> That behavior is controllable for both C and C++ interfaces via the `SZ_DEBUG` macro.
+
+__`SZ_USE_X86_AVX512`, `SZ_USE_ARM_NEON`__:
+
+> One can explicitly disable certain families of SIMD instructions for compatibility purposes.
+> Default values are inferred at compile time.
+
+__`SZ_INCLUDE_STL_CONVERSIONS`__:
+
+> When using the C++ interface one can disable conversions from `std::string` to `sz::string` and back.
+> If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
+
+__`SZ_LAZY_CONCAT`__:
+
+> When using the C++ interface one can enable lazy concatenation of `sz::string` objects.
+> That will allow using the `+` operator for concatenation, but is not compatible with the STL.
+
+## Algorithms & Design Decisions 📚
 
 ### Hashing
 
 ### Substring Search
+
+### Levenshtein Edit Distance
+
+StringZilla can compute the Levenshtein edit distance between two strings.
+For that the two-row Wagner-Fisher algorithm is used, which is a space-efficient variant of the Needleman-Wunsch algorithm.
+The algorithm is implemented in C and C++ and is available in the `stringzilla.h` and `stringzilla.hpp` headers respectively.
+It's also available in Python via the `Str.edit_distance` method and as a global function in the `stringzilla` module.
+
+```py
+import stringzilla as sz
+
+words = open('leipzig1M').read().split(' ')
+
+for word in words:
+    sz.edit_distance(word, "rebel")
+    sz.edit_distance(word, "statement")
+    sz.edit_distance(word, "sent")
+```
+
+Even without SIMD optimizations, one can expect the following evaluation time for the main `for`-loop on short word-like tokens on a modern CPU core.
+
+- [EditDistance](https://github.com/roy-ht/editdistance): 28.7s
+- [JellyFish](https://github.com/jamesturk/jellyfish/): 26.8s
+- [Levenshtein](https://github.com/maxbachmann/Levenshtein): 8.6s
+- StringZilla: __4.2s__
+
+### Needleman-Wunsch Alignment Score for Bioinformatics
+
+Similar to the conventional Levenshtein edit distance, StringZilla can compute the Needleman-Wunsch alignment score.
+It's practically the same, but parameterized with a scoring matrix for different substitutions and tunable penalties for insertions and deletions.
+
+### Unicode, UTF-8, and Wide Characters
+
+UTF-8 is the most common encoding for Unicode characters.
+Yet, some programming languages use wide characters (`wchar`) - two byte long codes.
+These include Java, JavaScript, Python 2, C#, and Objective-C, to name a few.
+This leads [to all kinds of offset-counting issues][wide-char-offsets] when facing four-byte long Unicode characters.
+
+[wide-char-offsets]: https://josephg.com/blog/string-length-lies/
 
 ## Contributing 👾
 
