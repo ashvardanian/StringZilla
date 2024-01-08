@@ -86,6 +86,34 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
 }
 
+/**
+ *  Invokes different C++ member methods of the string class to make sure they all pass compilation.
+ */
+static void test_compilation() {
+    assert(sz::string().empty());                                                 // Test default constructor
+    assert(sz::string("hello").size() == 5);                                      // Test constructor with c-string
+    assert(sz::string("hello", 4) == "hell");                                     // Construct from substring
+    assert(sz::string(5, 'a') == "aaaaa");                                        // Construct with count and character
+    assert(sz::string({'h', 'e', 'l', 'l', 'o'}) == "hello");                     // Construct from initializer list
+    assert(sz::string(sz::string("hello"), 2, std::allocator<char> {}) == "llo"); // Construct from another string
+
+    // TODO: Add `sz::basic_stirng` templates with custom allocators
+
+    assert(sz::string("test").clear().empty());                  // Test clear method
+    assert(sz::string().append("test") == "test");               // Test append method
+    assert(sz::string("test") + "ing" == "testing");             // Test operator+
+    assert(sz::string("hello world").substr(0, 5) == "hello");   // Test substr method
+    assert(sz::string("hello").find("ell") != sz::string::npos); // Test find method
+    assert(sz::string("hello").replace(0, 1, "j") == "jello");   // Test replace method
+    assert(sz::string("test") == sz::string("test"));            // Test copy constructor and equality
+    assert(sz::string("a") != sz::string("b"));                  // Test inequality
+    assert(sz::string("test").c_str()[0] == 't');                // Test c_str method
+    assert(sz::string("test")[0] == 't');                        // Test operator[]
+}
+
+/**
+ *  Tests copy constructor and copy-assignment constructor of `sz::string` on arrays of different length strings.
+ */
 static void test_constructors() {
     std::string alphabet {sz::ascii_printables, sizeof(sz::ascii_printables)};
     std::vector<sz::string> strings;

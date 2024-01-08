@@ -10,12 +10,29 @@
 #ifndef STRINGZILLA_HPP_
 #define STRINGZILLA_HPP_
 
+/**
+ *  @brief  When set to 1, the library will include the C++ STL headers and implement
+ *          automatic conversion from and to `std::stirng_view` and `std::basic_string<any_allocator>`.
+ */
 #ifndef SZ_INCLUDE_STL_CONVERSIONS
 #define SZ_INCLUDE_STL_CONVERSIONS 1
 #endif
 
+/**
+ *  @brief  When set to 1, the strings `+` will return an expression template rather than a temporary string.
+ *          This will improve performance, but may break some STL-specific code, so it's disabled by default.
+ */
 #ifndef SZ_LAZY_CONCAT
 #define SZ_LAZY_CONCAT 0
+#endif
+
+/**
+ *  @brief  When set to 1, the library will change `substr` and several other member methods of `string`
+ *          to return a view of its slice, rather than a copy, if the lifetime of the object is guaranteed.
+ *          This will improve performance, but may break some STL-specific code, so it's disabled by default.
+ */
+#ifndef SZ_PREFER_VIEWS
+#define SZ_PREFER_VIEWS 0
 #endif
 
 #if SZ_INCLUDE_STL_CONVERSIONS
@@ -1647,8 +1664,7 @@ class basic_string {
      *  @param  alphabet   A string of characters to choose from.
      */
     static basic_string random(size_type length, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept(false) {
-        // TODO: return basic_string(length, '\0').randomize(alphabet);
-        return {};
+        return basic_string(length, '\0').randomize(alphabet);
     }
 
     inline bool contains_only(character_set set) const noexcept { return find_first_not_of(set) == npos; }
