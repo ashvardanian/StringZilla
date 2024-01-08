@@ -189,10 +189,11 @@ benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&funct
     while (true) {
         // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
         {
-            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask]);
-            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask]);
-            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask]);
-            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask]);
+            result.bytes_passed += function(strings[(result.iterations + 0) & lookup_mask]) +
+                                   function(strings[(result.iterations + 1) & lookup_mask]) +
+                                   function(strings[(result.iterations + 2) & lookup_mask]) +
+                                   function(strings[(result.iterations + 3) & lookup_mask]);
+            result.iterations += 4;
         }
 
         stdcc::time_point t2 = stdcc::now();
@@ -224,14 +225,12 @@ benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&
     while (true) {
         // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
         {
-            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask],
-                                            strings[(result.iterations * largest_prime) & lookup_mask]);
-            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask],
-                                            strings[(result.iterations * largest_prime) & lookup_mask]);
-            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask],
-                                            strings[(result.iterations * largest_prime) & lookup_mask]);
-            result.bytes_passed += function(strings[(++result.iterations) & lookup_mask],
-                                            strings[(result.iterations * largest_prime) & lookup_mask]);
+            auto second = (result.iterations * largest_prime) & lookup_mask;
+            result.bytes_passed += function(strings[(result.iterations + 0) & lookup_mask], strings[second]) +
+                                   function(strings[(result.iterations + 1) & lookup_mask], strings[second]) +
+                                   function(strings[(result.iterations + 2) & lookup_mask], strings[second]) +
+                                   function(strings[(result.iterations + 3) & lookup_mask], strings[second]);
+            result.iterations += 4;
         }
 
         stdcc::time_point t2 = stdcc::now();
