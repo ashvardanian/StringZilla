@@ -2091,27 +2091,26 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
     string->u64s[3] = 0;
 }
 
-SZ_PUBLIC sz_bool_t sz_string_init_from(sz_string_t *string, sz_cptr_t added_start, sz_size_t added_length,
+SZ_PUBLIC sz_bool_t sz_string_init_from(sz_string_t *string, sz_cptr_t start, sz_size_t length,
                                         sz_memory_allocator_t *allocator) {
-
+    size_t space_needed = length + 1; // space for trailing \0
     SZ_ASSERT(string && allocator, "String and allocator can't be NULL.");
     // If we are lucky, no memory allocations will be needed.
-    if (added_length + 1 <= sz_string_stack_space) {
+    if (space_needed <= sz_string_stack_space) {
         string->on_stack.start = &string->on_stack.chars[0];
-        sz_copy(string->on_stack.start, added_start, added_length);
-        string->on_stack.start[added_length] = 0;
-        string->on_stack.length = added_length;
-        return sz_true_k;
+        string->on_stack.length = length;
     }
-    // If we are not lucky, we need to allocate memory.
-    sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(added_length + 1, allocator->handle);
-    if (!new_start) return sz_false_k;
-
+    else {
+        // If we are not lucky, we need to allocate memory.
+        string->on_heap.start = (sz_ptr_t)allocator->allocate(space_needed, allocator->handle);
+        if (!string->on_heap.start) return sz_false_k;
+        string->on_heap.length = length;
+        string->on_heap.space = space_needed;
+    }
+    SZ_ASSERT(&string->on_stack.start == &string->on_heap.start, "Alignment confusion");
     // Copy into the new buffer.
-    string->on_heap.start = new_start;
-    sz_copy(string->on_heap.start, added_start, added_length);
-    string->on_heap.start[added_length] = 0;
-    string->on_heap.length = added_length;
+    sz_copy(string->on_heap.start, start, length);
+    string->on_heap.start[length] = 0;
     return sz_true_k;
 }
 
