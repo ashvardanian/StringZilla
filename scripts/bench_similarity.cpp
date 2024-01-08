@@ -24,14 +24,12 @@ static void free_from_vector(void *buffer, sz_size_t length, void *handle) {}
 
 tracked_binary_functions_t distance_functions() {
     // Populate the unary substitutions matrix
-    static constexpr std::size_t max_length = 256;
     static std::vector<sz_error_cost_t> unary_substitution_costs;
-    unary_substitution_costs.resize(max_length * max_length);
-    for (std::size_t i = 0; i != max_length; ++i)
-        for (std::size_t j = 0; j != max_length; ++j) unary_substitution_costs[i * max_length + j] = (i == j ? 0 : 1);
+    unary_substitution_costs.resize(256 * 256);
+    for (std::size_t i = 0; i != 256; ++i)
+        for (std::size_t j = 0; j != 256; ++j) unary_substitution_costs[i * 256 + j] = (i == j ? 0 : 1);
 
     // Two rows of the Levenshtein matrix will occupy this much:
-    temporary_memory.resize((max_length + 1) * 2 * sizeof(sz_size_t));
     sz_memory_allocator_t alloc;
     alloc.allocate = &allocate_from_vector;
     alloc.free = &free_from_vector;
@@ -41,26 +39,19 @@ tracked_binary_functions_t distance_functions() {
         return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) {
             sz_string_view_t a = to_c(a_str);
             sz_string_view_t b = to_c(b_str);
-            a.length = sz_min_of_two(a.length, max_length);
-            b.length = sz_min_of_two(b.length, max_length);
-            return function(a.start, a.length, b.start, b.length, max_length, &alloc);
+            return function(a.start, a.length, b.start, b.length, 0, &alloc);
         });
     };
     auto wrap_sz_scoring = [alloc](auto function) -> binary_function_t {
         return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) {
             sz_string_view_t a = to_c(a_str);
             sz_string_view_t b = to_c(b_str);
-            a.length = sz_min_of_two(a.length, max_length);
-            b.length = sz_min_of_two(b.length, max_length);
             return function(a.start, a.length, b.start, b.length, 1, unary_substitution_costs.data(), &alloc);
         });
     };
     tracked_binary_functions_t result = {
         {"naive", &levenshtein_baseline},
         {"sz_edit_distance", wrap_sz_distance(sz_edit_distance_serial), true},
-#if SZ_USE_X86_AVX512
-        {"sz_edit_distance_avx512", wrap_sz_distance(sz_edit_distance_avx512), true},
-#endif
         {"sz_alignment_score", wrap_sz_scoring(sz_alignment_score_serial), true},
     };
     return result;
@@ -72,8 +63,40 @@ void bench_similarity(strings_at &&strings) {
     bench_binary_functions(strings, distance_functions());
 }
 
-int main(int argc, char const **argv) {
-    std::printf("StringZilla. Starting similarity benchmarks.\n");
+void bench_similarity_on_bio_data() {
+    std::vector<std::string> proteins;
+
+    // A typical protein is 100-1000 amino acids long.
+    // The alphabet is generally 20 amino acids, but that won't affect the throughput.
+    char alphabet[2] = {'a', 'b'};
+    constexpr std::size_t bio_samples = 128;
+    struct {
+        std::size_t length_lower_bound;
+        std::size_t length_upper_bound;
+        char const *name;
+    } bio_cases[] = {
+        {60, 60, "60 aminoacids"},       {100, 100, "100 aminoacids"},       {300, 300, "300 aminoacids"},
+        {1000, 1000, "1000 aminoacids"}, {100, 1000, "100-1000 aminoacids"}, {1000, 10000, "1000-10000 aminoacids"},
+    };
+    std::random_device random_device;
+    std::mt19937 generator(random_device());
+    for (auto bio_case : bio_cases) {
+        std::uniform_int_distribution<std::size_t> length_distribution(bio_case.length_lower_bound,
+                                                                       bio_case.length_upper_bound);
+        for (std::size_t i = 0; i != bio_samples; ++i) {
+            std::size_t length = length_distribution(generator);
+            std::string protein(length, 'a');
+            std::generate(protein.begin(), protein.end(), [&]() { return alphabet[generator() % 2]; });
+            proteins.push_back(protein);
+        }
+
+        std::printf("Benchmarking on protein-like sequences with %s:\n", bio_case.name);
+        bench_similarity(proteins);
+        proteins.clear();
+    }
+}
+
+void bench_similarity_on_input_data(int argc, char const **argv) {
 
     dataset_t dataset = make_dataset(argc, argv);
 
@@ -86,6 +109,13 @@ int main(int argc, char const **argv) {
         std::printf("Benchmarking on real words of length %zu and longer:\n", token_length);
         bench_similarity(filter_by_length(dataset.tokens, token_length, std::greater_equal<std::size_t> {}));
     }
+}
+
+int main(int argc, char const **argv) {
+    std::printf("StringZilla. Starting similarity benchmarks.\n");
+
+    if (argc < 2) { bench_similarity_on_bio_data(); }
+    else { bench_similarity_on_input_data(argc, argv); }
 
     std::printf("All benchmarks passed.\n");
     return 0;

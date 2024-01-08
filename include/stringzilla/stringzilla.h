@@ -1016,6 +1016,15 @@ SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
 }
 
 /**
+ *  @brief  Helper, that swaps two 64-bit integers representing the order of elements in the sequence.
+ */
+SZ_INTERNAL void sz_u64_swap(sz_u64_t *a, sz_u64_t *b) {
+    sz_u64_t t = *a;
+    *a = *b;
+    *b = t;
+}
+
+/**
  *  @brief  Helper structure to simplify work with 16-bit words.
  *  @see    sz_u16_load
  */
@@ -1738,178 +1747,139 @@ SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
         (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
 }
 
-SZ_INTERNAL sz_size_t _sz_edit_distance_serial_upto256bytes( //
-    sz_cptr_t a, sz_size_t a_length,                         //
-    sz_cptr_t b, sz_size_t b_length,                         //
-    sz_size_t bound, sz_memory_allocator_t const *alloc) {
-
-    // When dealing with short strings, we won't need to allocate memory on heap,
-    // as everything would easily fit on the stack. Let's just make sure that
-    // we use the amount proportional to the number of elements in the shorter string,
-    // not the larger.
-    if (b_length > a_length) return _sz_edit_distance_serial_upto256bytes(b, b_length, a, a_length, bound, alloc);
-
-    // If the strings are under 256-bytes long, the distance can never exceed 256,
-    // and will fit into `sz_u8_t` reducing our memory requirements.
-    sz_u8_t levenshtein_matrix_rows[(b_length + 1) * 2];
-    sz_u8_t *previous_distances = &levenshtein_matrix_rows[0];
-    sz_u8_t *current_distances = &levenshtein_matrix_rows[b_length + 1];
-
-    // The very first row of the matrix is equivalent to `std::iota` outputs.
-    for (sz_size_t idx_b = 0; idx_b != (b_length + 1); ++idx_b) previous_distances[idx_b] = idx_b;
-
-    for (sz_size_t idx_a = 0; idx_a != a_length; ++idx_a) {
-        current_distances[0] = idx_a + 1;
-
-        // Initialize min_distance with a value greater than bound.
-        sz_size_t min_distance = bound - 1;
-
-        // In case the next few characters match between a[idx_a:] and b[idx_b:]
-        // we can skip part of enumeration.
-
-        for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
-            sz_u8_t cost_deletion = previous_distances[idx_b + 1] + 1;
-            sz_u8_t cost_insertion = current_distances[idx_b] + 1;
-            sz_u8_t cost_substitution = previous_distances[idx_b] + (a[idx_a] != b[idx_b]);
-            current_distances[idx_b + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
-
-            // Keep track of the minimum distance seen so far in this row.
-            min_distance = sz_min_of_two(current_distances[idx_b + 1], min_distance);
-        }
-
-        // If the minimum distance in this row exceeded the bound, return early
-        if (min_distance >= bound) return bound;
-
-        // Swap previous_distances and current_distances pointers
-        sz_u8_t *temp = previous_distances;
-        previous_distances = current_distances;
-        current_distances = temp;
-    }
-
-    return previous_distances[b_length] < bound ? previous_distances[b_length] : bound;
-}
-
-SZ_INTERNAL sz_size_t _sz_edit_distance_serial_over256bytes( //
-    sz_cptr_t a, sz_size_t a_length,                         //
-    sz_cptr_t b, sz_size_t b_length,                         //
-    sz_size_t bound, sz_memory_allocator_t const *alloc) {
-
-    // Let's make sure that we use the amount proportional to the number of elements in the shorter string,
-    // not the larger.
-    if (b_length > a_length) return _sz_edit_distance_serial_over256bytes(b, b_length, a, a_length, bound, alloc);
-
-    sz_size_t buffer_length = sizeof(sz_size_t) * ((b_length + 1) * 2);
-    sz_size_t *distances = (sz_size_t *)alloc->allocate(buffer_length, alloc->handle);
-    sz_size_t *previous_distances = distances;
-    sz_size_t *current_distances = previous_distances + b_length + 1;
-
-    for (sz_size_t idx_b = 0; idx_b != (b_length + 1); ++idx_b) previous_distances[idx_b] = idx_b;
-
-    for (sz_size_t idx_a = 0; idx_a != a_length; ++idx_a) {
-        current_distances[0] = idx_a + 1;
-
-        // Initialize min_distance with a value greater than bound
-        sz_size_t min_distance = bound - 1;
-
-        for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
-            sz_size_t cost_deletion = previous_distances[idx_b + 1] + 1;
-            sz_size_t cost_insertion = current_distances[idx_b] + 1;
-            sz_size_t cost_substitution = previous_distances[idx_b] + (a[idx_a] != b[idx_b]);
-            current_distances[idx_b + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
-
-            // Keep track of the minimum distance seen so far in this row
-            min_distance = sz_min_of_two(current_distances[idx_b + 1], min_distance);
-        }
-
-        // If the minimum distance in this row exceeded the bound, return early
-        if (min_distance >= bound) {
-            alloc->free(distances, buffer_length, alloc->handle);
-            return bound;
-        }
-
-        // Swap previous_distances and current_distances pointers
-        sz_size_t *temp = previous_distances;
-        previous_distances = current_distances;
-        current_distances = temp;
-    }
-
-    sz_size_t result = previous_distances[b_length] < bound ? previous_distances[b_length] : bound;
-    alloc->free(distances, buffer_length, alloc->handle);
-    return result;
-}
-
-SZ_PUBLIC sz_size_t sz_edit_distance_serial( //
-    sz_cptr_t a, sz_size_t a_length,         //
-    sz_cptr_t b, sz_size_t b_length,         //
+SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
+    sz_cptr_t longer, sz_size_t longer_length,   //
+    sz_cptr_t shorter, sz_size_t shorter_length, //
     sz_size_t bound, sz_memory_allocator_t const *alloc) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one.
-    if (a_length == 0) return b_length <= bound ? b_length : bound;
-    if (b_length == 0) return a_length <= bound ? a_length : bound;
+    if (longer_length == 0) return shorter_length <= bound ? shorter_length : bound;
+    if (shorter_length == 0) return longer_length <= bound ? longer_length : bound;
+
+    // Let's make sure that we use the amount proportional to the
+    // number of elements in the shorter string, not the larger.
+    if (shorter_length > longer_length) {
+        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
+        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+    }
 
     // If the difference in length is beyond the `bound`, there is no need to check at all.
-    if (a_length > b_length) {
-        if (a_length - b_length > bound) return bound;
+    if (bound && longer_length - shorter_length > bound) return bound;
+
+    // Skip the matching prefixes and suffixes, they won't affect the distance.
+    for (sz_cptr_t a_end = longer + longer_length, b_end = shorter + shorter_length;
+         longer != a_end && shorter != b_end && *longer == *shorter;
+         ++longer, ++shorter, --longer_length, --shorter_length)
+        ;
+    for (; longer_length && shorter_length && longer[longer_length - 1] == shorter[shorter_length - 1];
+         --longer_length, --shorter_length)
+        ;
+
+    // If a buffering memory-allocator is provided, this operation is practically free,
+    // and cheaper than allocating even 512 bytes (for small distance matrices) on stack.
+    sz_size_t buffer_length = sizeof(sz_size_t) * ((shorter_length + 1) * 2);
+    sz_size_t *distances = (sz_size_t *)alloc->allocate(buffer_length, alloc->handle);
+    sz_size_t *previous_distances = distances;
+    sz_size_t *current_distances = previous_distances + shorter_length + 1;
+
+    for (sz_size_t idx_shorter = 0; idx_shorter != (shorter_length + 1); ++idx_shorter)
+        previous_distances[idx_shorter] = idx_shorter;
+
+    // Keeping track of the bound parameter introduces a very noticeable performance penalty.
+    // So if it's not provided, we can skip the check altogether.
+    if (!bound) {
+        for (sz_size_t idx_longer = 0; idx_longer != longer_length; ++idx_longer) {
+            current_distances[0] = idx_longer + 1;
+            for (sz_size_t idx_shorter = 0; idx_shorter != shorter_length; ++idx_shorter) {
+                sz_size_t cost_deletion = previous_distances[idx_shorter + 1] + 1;
+                sz_size_t cost_insertion = current_distances[idx_shorter] + 1;
+                sz_size_t cost_substitution =
+                    previous_distances[idx_shorter] + (longer[idx_longer] != shorter[idx_shorter]);
+                current_distances[idx_shorter + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
+            }
+            sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
+        }
+        sz_size_t result = previous_distances[shorter_length];
+        alloc->free(distances, buffer_length, alloc->handle);
+        return result;
     }
+    //
     else {
-        if (b_length - a_length > bound) return bound;
+        for (sz_size_t idx_longer = 0; idx_longer != longer_length; ++idx_longer) {
+            current_distances[0] = idx_longer + 1;
+
+            // Initialize min_distance with a value greater than bound
+            sz_size_t min_distance = bound - 1;
+
+            for (sz_size_t idx_shorter = 0; idx_shorter != shorter_length; ++idx_shorter) {
+                sz_size_t cost_deletion = previous_distances[idx_shorter + 1] + 1;
+                sz_size_t cost_insertion = current_distances[idx_shorter] + 1;
+                sz_size_t cost_substitution =
+                    previous_distances[idx_shorter] + (longer[idx_longer] != shorter[idx_shorter]);
+                current_distances[idx_shorter + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
+
+                // Keep track of the minimum distance seen so far in this row
+                min_distance = sz_min_of_two(current_distances[idx_shorter + 1], min_distance);
+            }
+
+            // If the minimum distance in this row exceeded the bound, return early
+            if (min_distance >= bound) {
+                alloc->free(distances, buffer_length, alloc->handle);
+                return bound;
+            }
+
+            // Swap previous_distances and current_distances pointers
+            sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
+        }
+        sz_size_t result = previous_distances[shorter_length] < bound ? previous_distances[shorter_length] : bound;
+        alloc->free(distances, buffer_length, alloc->handle);
+        return result;
     }
-
-    // Skip the matching prefixes and suffixes.
-    for (sz_cptr_t a_end = a + a_length, b_end = b + b_length; a != a_end && b != b_end && *a == *b;
-         ++a, ++b, --a_length, --b_length)
-        ;
-    for (; a_length && b_length && a[a_length - 1] == b[b_length - 1]; --a_length, --b_length)
-        ;
-
-    // Depending on the length, we may be able to use the optimized implementation.
-    if (a_length < 256 && b_length < 256)
-        return _sz_edit_distance_serial_upto256bytes(a, a_length, b, b_length, bound, alloc);
-    else
-        return _sz_edit_distance_serial_over256bytes(a, a_length, b, b_length, bound, alloc);
 }
 
 SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
-    sz_cptr_t a, sz_size_t a_length,                  //
-    sz_cptr_t b, sz_size_t b_length,                  //
+    sz_cptr_t longer, sz_size_t longer_length,        //
+    sz_cptr_t shorter, sz_size_t shorter_length,      //
     sz_error_cost_t gap, sz_error_cost_t const *subs, //
     sz_memory_allocator_t const *alloc) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one
-    if (a_length == 0) return b_length;
-    if (b_length == 0) return a_length;
+    if (longer_length == 0) return shorter_length;
+    if (shorter_length == 0) return longer_length;
 
-    // Let's make sure that we use the amount proportional to the number of elements in the shorter string,
-    // not the larger.
-    if (b_length > a_length) return sz_alignment_score_serial(b, b_length, a, a_length, gap, subs, alloc);
+    // Let's make sure that we use the amount proportional to the
+    // number of elements in the shorter string, not the larger.
+    if (shorter_length > longer_length) {
+        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
+        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+    }
 
-    sz_size_t buffer_length = sizeof(sz_ssize_t) * (b_length + 1) * 2;
+    sz_size_t buffer_length = sizeof(sz_ssize_t) * (shorter_length + 1) * 2;
     sz_ssize_t *distances = (sz_ssize_t *)alloc->allocate(buffer_length, alloc->handle);
     sz_ssize_t *previous_distances = distances;
-    sz_ssize_t *current_distances = previous_distances + b_length + 1;
+    sz_ssize_t *current_distances = previous_distances + shorter_length + 1;
 
-    for (sz_size_t idx_b = 0; idx_b != (b_length + 1); ++idx_b) previous_distances[idx_b] = idx_b;
+    for (sz_size_t idx_shorter = 0; idx_shorter != (shorter_length + 1); ++idx_shorter)
+        previous_distances[idx_shorter] = idx_shorter;
 
-    for (sz_size_t idx_a = 0; idx_a != a_length; ++idx_a) {
-        current_distances[0] = idx_a + 1;
+    for (sz_size_t idx_longer = 0; idx_longer != longer_length; ++idx_longer) {
+        current_distances[0] = idx_longer + 1;
 
         // Initialize min_distance with a value greater than bound
-        sz_error_cost_t const *a_subs = subs + a[idx_a] * 256ul;
-        for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
-            sz_ssize_t cost_deletion = previous_distances[idx_b + 1] + gap;
-            sz_ssize_t cost_insertion = current_distances[idx_b] + gap;
-            sz_ssize_t cost_substitution = previous_distances[idx_b] + a_subs[b[idx_b]];
-            current_distances[idx_b + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
+        sz_error_cost_t const *a_subs = subs + longer[idx_longer] * 256ul;
+        for (sz_size_t idx_shorter = 0; idx_shorter != shorter_length; ++idx_shorter) {
+            sz_ssize_t cost_deletion = previous_distances[idx_shorter + 1] + gap;
+            sz_ssize_t cost_insertion = current_distances[idx_shorter] + gap;
+            sz_ssize_t cost_substitution = previous_distances[idx_shorter] + a_subs[shorter[idx_shorter]];
+            current_distances[idx_shorter + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
         }
 
         // Swap previous_distances and current_distances pointers
-        sz_ssize_t *temp = previous_distances;
-        previous_distances = current_distances;
-        current_distances = temp;
+        sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
     }
 
     alloc->free(distances, buffer_length, alloc->handle);
-    return previous_distances[b_length];
+    return previous_distances[shorter_length];
 }
 
 /**
@@ -2304,15 +2274,6 @@ SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
  */
 #pragma region Serial Implementation for Sequences
 
-/**
- *  @brief  Helper, that swaps two 64-bit integers representing the order of elements in the sequence.
- */
-SZ_INTERNAL void _sz_swap_order(sz_u64_t *a, sz_u64_t *b) {
-    sz_u64_t t = *a;
-    *a = *b;
-    *b = t;
-}
-
 SZ_PUBLIC sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate) {
 
     sz_size_t matches = 0;
@@ -2320,7 +2281,7 @@ SZ_PUBLIC sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_
 
     for (sz_size_t i = matches + 1; i < sequence->count; ++i)
         if (predicate(sequence, sequence->order[i]))
-            _sz_swap_order(sequence->order + i, sequence->order + matches), ++matches;
+            sz_u64_swap(sequence->order + i, sequence->order + matches), ++matches;
 
     return matches;
 }
@@ -2372,7 +2333,7 @@ SZ_INTERNAL void _sz_sift_down(sz_sequence_t *sequence, sz_sequence_comparator_t
         sz_size_t child = 2 * root + 1;
         if (child + 1 <= end && less(sequence, order[child], order[child + 1])) { child++; }
         if (!less(sequence, order[root], order[child])) { return; }
-        _sz_swap_order(order + root, order + child);
+        sz_u64_swap(order + root, order + child);
         root = child;
     }
 }
@@ -2392,7 +2353,7 @@ SZ_INTERNAL void _sz_heapsort(sz_sequence_t *sequence, sz_sequence_comparator_t 
     _sz_heapify(sequence, less, order + first, count);
     sz_size_t end = count - 1;
     while (end > 0) {
-        _sz_swap_order(order + first, order + first + end);
+        sz_u64_swap(order + first, order + first + end);
         end--;
         _sz_sift_down(sequence, less, order + first, 0, end);
     }
@@ -2407,15 +2368,15 @@ SZ_INTERNAL void _sz_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t
     case 1: return;
     case 2:
         if (less(sequence, sequence->order[first + 1], sequence->order[first]))
-            _sz_swap_order(&sequence->order[first], &sequence->order[first + 1]);
+            sz_u64_swap(&sequence->order[first], &sequence->order[first + 1]);
         return;
     case 3: {
         sz_u64_t a = sequence->order[first];
         sz_u64_t b = sequence->order[first + 1];
         sz_u64_t c = sequence->order[first + 2];
-        if (less(sequence, b, a)) _sz_swap_order(&a, &b);
-        if (less(sequence, c, b)) _sz_swap_order(&c, &b);
-        if (less(sequence, b, a)) _sz_swap_order(&a, &b);
+        if (less(sequence, b, a)) sz_u64_swap(&a, &b);
+        if (less(sequence, c, b)) sz_u64_swap(&c, &b);
+        if (less(sequence, b, a)) sz_u64_swap(&a, &b);
         sequence->order[first] = a;
         sequence->order[first + 1] = b;
         sequence->order[first + 2] = c;
@@ -2442,11 +2403,11 @@ SZ_INTERNAL void _sz_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t
     // Median-of-three logic to choose pivot
     sz_size_t median = first + length / 2;
     if (less(sequence, sequence->order[median], sequence->order[first]))
-        _sz_swap_order(&sequence->order[first], &sequence->order[median]);
+        sz_u64_swap(&sequence->order[first], &sequence->order[median]);
     if (less(sequence, sequence->order[last - 1], sequence->order[first]))
-        _sz_swap_order(&sequence->order[first], &sequence->order[last - 1]);
+        sz_u64_swap(&sequence->order[first], &sequence->order[last - 1]);
     if (less(sequence, sequence->order[median], sequence->order[last - 1]))
-        _sz_swap_order(&sequence->order[median], &sequence->order[last - 1]);
+        sz_u64_swap(&sequence->order[median], &sequence->order[last - 1]);
 
     // Partition using the median-of-three as the pivot
     sz_u64_t pivot = sequence->order[median];
@@ -2456,7 +2417,7 @@ SZ_INTERNAL void _sz_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t
         while (less(sequence, sequence->order[left], pivot)) left++;
         while (less(sequence, pivot, sequence->order[right])) right--;
         if (left >= right) break;
-        _sz_swap_order(&sequence->order[left], &sequence->order[right]);
+        sz_u64_swap(&sequence->order[left], &sequence->order[right]);
         left++;
         right--;
     }
@@ -2485,7 +2446,7 @@ SZ_INTERNAL void _sz_sort_recursion( //
         sz_u64_t mask = (1ull << 63) >> bit_idx;
         while (split != sequence->count && !(sequence->order[split] & mask)) ++split;
         for (sz_size_t i = split + 1; i < sequence->count; ++i)
-            if (!(sequence->order[i] & mask)) _sz_swap_order(sequence->order + i, sequence->order + split), ++split;
+            if (!(sequence->order[i] & mask)) sz_u64_swap(sequence->order + i, sequence->order + split), ++split;
     }
 
     // Go down recursively
@@ -3196,6 +3157,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
                                        31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
                                        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
 
+    // Shifting bytes across the whole ZMM register is quite complicated, so let's use a permutation for that.
     permutation_vec.zmm = _mm512_set_epi8(62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, //
                                           46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, //
                                           30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, //
@@ -3222,23 +3184,22 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
         // Now we need to compute the inclusive prefix sums using the minimum operator
         // In one line:
         //      current_vec.u8s[idx_b + 1] = sz_min_of_two(current_vec.u8s[idx_b + 1], current_vec.u8s[idx_b] + 1)
+        //
         // Unrolling this:
         //      current_vec.u8s[0 + 1] = sz_min_of_two(current_vec.u8s[0 + 1], current_vec.u8s[0] + 1)
         //      current_vec.u8s[1 + 1] = sz_min_of_two(current_vec.u8s[1 + 1], current_vec.u8s[1] + 1)
         //      current_vec.u8s[2 + 1] = sz_min_of_two(current_vec.u8s[2 + 1], current_vec.u8s[2] + 1)
         //      current_vec.u8s[3 + 1] = sz_min_of_two(current_vec.u8s[3 + 1], current_vec.u8s[3] + 1)
+        //
         // Alternatively, using a tree-like reduction in log2 steps:
-        //      - 6 cycles of reductions shifting by 1, 2, 4, 8, 16, 32, 64 bytes
-        //      - with each cycle containing at least one shift, min, add, blend
+        //      - 6 cycles of reductions shifting by 1, 2, 4, 8, 16, 32, 64 bytes;
+        //      - with each cycle containing at least one shift, min, add, blend.
+        //
         // Which adds meaningless complexity without any performance gains.
         for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
             sz_u8_t cost_insertion = current_vec.u8s[idx_b] + 1;
             current_vec.u8s[idx_b + 1] = sz_min_of_two(current_vec.u8s[idx_b + 1], cost_insertion);
-            min_distance = sz_min_of_two(min_distance, current_vec.u8s[idx_b + 1]);
         }
-
-        // If the minimum distance in this row exceeded the bound, return early
-        if (min_distance >= bound) return bound;
 
         // Swap previous_distances and current_distances pointers
         sz_u512_vec_t temp_vec;
@@ -3375,7 +3336,6 @@ SZ_PUBLIC sz_size_t sz_edit_distance( //
 SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
                                         sz_error_cost_t gap, sz_error_cost_t const *subs,
                                         sz_memory_allocator_t const *alloc) {
-
     return sz_alignment_score_serial(a, a_length, b, b_length, gap, subs, alloc);
 }
 
