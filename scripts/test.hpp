@@ -2,12 +2,23 @@
  *  @brief  Helper structures and functions for C++ tests.
  */
 #pragma once
+#include <random>      // `std::random_device`
+#include <string>      // `std::string`
 #include <string_view> // `std::string_view`
 #include <vector>      // `std::vector`
 
 namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
+
+inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
+    std::string result(length, '\0');
+    static std::random_device seed_source; // Too expensive to construct every time
+    std::mt19937 generator(seed_source());
+    std::uniform_int_distribution<std::size_t> distribution(1, cardinality);
+    std::generate(result.begin(), result.end(), [&]() { return alphabet[distribution(generator)]; });
+    return result;
+}
 
 inline std::size_t levenshtein_baseline(std::string_view s1, std::string_view s2) {
     std::size_t len1 = s1.size();

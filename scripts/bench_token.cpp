@@ -5,6 +5,7 @@
  *  This file is the sibling of `bench_sort.cpp`, `bench_search.cpp` and `bench_similarity.cpp`.
  */
 #include <bench.hpp>
+#include <test.hpp> // `random_string`
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -21,6 +22,21 @@ tracked_unary_functions_t hashing_functions() {
         {"sz_hash_neon", wrap_sz(sz_hash_neon), true},
 #endif
         {"std::hash", [](std::string_view s) { return std::hash<std::string_view> {}(s); }},
+    };
+    return result;
+}
+
+tracked_unary_functions_t random_generation_functions(std::size_t token_length) {
+
+    tracked_unary_functions_t result = {
+        {"random std::string" + std::to_string(token_length),
+         unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
+             return random_string(token_length, alphabet.data(), alphabet.size()).size();
+         })},
+        {"random sz::string" + std::to_string(token_length),
+         unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
+             return sz::string::random(token_length, alphabet).size();
+         })},
     };
     return result;
 }
@@ -69,29 +85,58 @@ tracked_binary_functions_t ordering_functions() {
     return result;
 }
 
-template <typename strings_at>
-void evaluate_all(strings_at &&strings) {
+template <typename string_type>
+void bench_dereferencing(std::string name, std::vector<string_type> strings) {
+    auto func = unary_function_t([](std::string_view s) { return s.size(); });
+    tracked_unary_functions_t converts = {{name, func}};
+    bench_unary_functions(strings, converts);
+}
+
+template <typename strings_type>
+void bench(strings_type &&strings) {
     if (strings.size() == 0) return;
 
+    // Benchmark the cost of converting `std::string` and `sz::string` to `std::string_view`.
+    // ! The results on a mixture of short and long strings should be similar.
+    // ! If the dataset is made of exclusively short or long strings, STL will look much better
+    // ! in this microbenchmark, as the correct branch of the SSO will be predicted every time.
+    bench_dereferencing<std::string>("std::string -> std::string_view", {strings.begin(), strings.end()});
+    bench_dereferencing<sz::string>("sz::string -> std::string_view", {strings.begin(), strings.end()});
+
+    // Benchmark generating strings of different length using those tokens as alphabets
+    bench_unary_functions(strings, random_generation_functions(5));
+    bench_unary_functions(strings, random_generation_functions(20));
+    bench_unary_functions(strings, random_generation_functions(100));
+
+    // Benchmark logical operations
     bench_unary_functions(strings, hashing_functions());
     bench_binary_functions(strings, equality_functions());
     bench_binary_functions(strings, ordering_functions());
 }
 
-int main(int argc, char const **argv) {
-    std::printf("StringZilla. Starting token-level benchmarks.\n");
-
+void bench_on_input_data(int argc, char const **argv) {
     dataset_t dataset = make_dataset(argc, argv);
 
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");
-    evaluate_all(dataset.tokens);
+    bench(dataset.tokens);
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
         std::printf("Benchmarking on real words of length %zu:\n", token_length);
-        evaluate_all(filter_by_length(dataset.tokens, token_length));
+        bench(filter_by_length(dataset.tokens, token_length));
     }
+}
+
+void bench_on_synthetic_data() {
+    // Generate some random words
+}
+
+int main(int argc, char const **argv) {
+    std::printf("StringZilla. Starting token-level benchmarks.\n");
+
+    if (argc < 2) { bench_on_synthetic_data(); }
+    else { bench_on_input_data(argc, argv); }
 
     std::printf("All benchmarks passed.\n");
     return 0;

@@ -14,6 +14,10 @@
 #define SZ_INCLUDE_STL_CONVERSIONS 1
 #endif
 
+#ifndef SZ_LAZY_CONCAT
+#define SZ_LAZY_CONCAT 0
+#endif
+
 #if SZ_INCLUDE_STL_CONVERSIONS
 #include <string>
 #include <string_view>
@@ -1612,6 +1616,41 @@ class basic_string {
     /** @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     inline size_type hash() const noexcept { return view().hash(); }
 
+    /**
+     *  @brief  Overwrites the string with random characters from the given alphabet using the random generator.
+     *
+     *  @param  generator  A random generator function object that returns a random number in the range [0, 2^64).
+     *  @param  alphabet   A string of characters to choose from.
+     */
+    template <typename generator_type>
+    basic_string &randomize(generator_type &&generator, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+        sz_random_generator_t sz_generator = &random_generator<generator_type>;
+        sz_generate(alphabet.data(), alphabet.size(), data(), size(), &sz_generator, &generator);
+        return *this;
+    }
+
+    /**
+     *  @brief  Overwrites the string with random characters from the given alphabet
+     *          using `std::rand` as the random generator.
+     *
+     *  @param  alphabet   A string of characters to choose from.
+     */
+    basic_string &randomize(string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+        return randomize(&std::rand, alphabet);
+    }
+
+    /**
+     *  @brief  Generate a new random string of given length using `std::rand` as the random generator.
+     *          May throw exceptions if the memory allocation fails.
+     *
+     *  @param  length     The length of the generated string.
+     *  @param  alphabet   A string of characters to choose from.
+     */
+    static basic_string random(size_type length, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept(false) {
+        // TODO: return basic_string(length, '\0').randomize(alphabet);
+        return {};
+    }
+
     inline bool contains_only(character_set set) const noexcept { return find_first_not_of(set) == npos; }
     inline bool isalpha() const noexcept { return !empty() && contains_only(ascii_letters_set); }
     inline bool isalnum() const noexcept { return !empty() && contains_only(ascii_letters_set | digits_set); }
@@ -1622,6 +1661,13 @@ class basic_string {
     inline bool isspace() const noexcept { return !empty() && contains_only(whitespaces_set); }
     inline bool isupper() const noexcept { return !empty() && contains_only(ascii_uppercase_set); }
     inline range_splits<string_view, matcher_find_first_of> splitlines() const noexcept;
+
+  private:
+    template <typename generator_type>
+    static sz_u64_t random_generator(void *state) noexcept {
+        generator_type &generator = *reinterpret_cast<generator_type *>(state);
+        return generator();
+    }
 };
 
 using string = basic_string<>;
