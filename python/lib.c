@@ -1076,9 +1076,9 @@ static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwa
             }
     }
 
-    int bound = 255; // Default value for bound
-    if (bound_obj && ((bound = PyLong_AsLong(bound_obj)) > 255 || bound < 0)) {
-        PyErr_Format(PyExc_ValueError, "Bound must be an integer between 0 and 255");
+    Py_ssize_t bound = 0; // Default value for bound
+    if (bound_obj && ((bound = PyLong_AsSsize_t(bound_obj)) < 0)) {
+        PyErr_Format(PyExc_ValueError, "Bound must be a non-negative integer");
         return NULL;
     }
 
