@@ -1195,7 +1195,6 @@ class basic_string {
         SZ_ASSERT(*this == other, "");
     }
 
-  protected:
     void move(basic_string &other) noexcept {
         // We can't just assign the other string state, as its start address may be somewhere else on the stack.
         sz_ptr_t string_start;
@@ -1206,14 +1205,13 @@ class basic_string {
 
         // Acquire the old string's value bitwise
         *(&string_) = *(&other.string_);
-        if (!string_is_on_heap) {
-            // Reposition the string start pointer to the stack if it fits.
-            string_.on_stack.start = &string_.on_stack.chars[0];
-        }
+        // Reposition the string start pointer to the stack if it fits.
+        // Ternary condition may be optimized to a branchless version.
+        string_.on_stack.start = string_is_on_heap ? string_.on_stack.start : &string_.on_stack.chars[0];
         sz_string_init(&other.string_); // Discard the other string.
     }
 
-    bool is_sso() const { return string_.on_stack.start == &string_.on_stack.chars[0]; }
+    bool is_sso() const noexcept { return sz_string_is_on_stack(&string_); }
 
   public:
     // Member types
@@ -1273,6 +1271,18 @@ class basic_string {
     basic_string(const_pointer c_string, size_type length) noexcept(false)
         : basic_string(string_view(c_string, length)) {}
     basic_string(std::nullptr_t) = delete;
+
+    /** @brief  Construct a string by repeating a certain ::character ::count times. */
+    basic_string(size_type count, value_type character) noexcept(false) : basic_string() { resize(count, character); }
+
+    basic_string(basic_string const &other, size_type pos) noexcept(false) { init(string_view(other).substr(pos)); }
+    basic_string(basic_string const &other, size_type pos, size_type count) noexcept(false) {
+        init(string_view(other).substr(pos, count));
+    }
+
+    basic_string(std::initializer_list<value_type> list) noexcept(false) {
+        init(string_view(list.begin(), list.size()));
+    }
 
     operator string_view() const noexcept { return view(); }
     string_view view() const noexcept {
@@ -1334,11 +1344,40 @@ class basic_string {
         if (!try_push_back(c)) throw std::bad_alloc();
     }
 
+    void resize(size_type count, value_type character = '\0') noexcept(false) {
+        if (!try_resize(count, character)) throw std::bad_alloc();
+    }
+
     void clear() noexcept { sz_string_erase(&string_, 0, sz_size_max); }
 
     basic_string &erase(std::size_t pos = 0, std::size_t count = sz_size_max) noexcept {
         sz_string_erase(&string_, pos, count);
         return *this;
+    }
+
+    bool try_resize(size_type count, value_type character = '\0') noexcept {
+        sz_ptr_t string_start;
+        sz_size_t string_length;
+        sz_size_t string_space;
+        sz_bool_t string_is_on_heap;
+        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+
+        // Allocate more space if needed.
+        if (count >= string_space) {
+            if (!with_alloc([&](alloc_t &alloc) { return sz_string_grow(&string_, count + 1, &alloc); })) return false;
+            sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+        }
+
+        // Fill the trailing characters.
+        if (count > string_length) {
+            sz_fill(string_start + string_length, count - string_length, character);
+            string_start[count] = '\0';
+            // Knowing the layout of the string, we can perform this operation safely,
+            // even if its located on stack.
+            string_.on_heap.length += count - string_length;
+        }
+        else { sz_string_erase(&string_, count, sz_size_max); }
+        return true;
     }
 
     bool try_assign(string_view other) noexcept {
@@ -1434,6 +1473,7 @@ class basic_string {
 
     /** @brief  Checks if the string is equal to the other string. */
     inline bool operator==(string_view other) const noexcept { return view() == other; }
+    inline bool operator==(const_pointer other) const noexcept { return view() == other; }
 
     /** @brief  Checks if the string is equal to the other string. */
     inline bool operator==(basic_string const &other) const noexcept {
@@ -1448,6 +1488,7 @@ class basic_string {
 
     /** @brief  Checks if the string is not equal to the other string. */
     sz_deprecate_compare inline bool operator!=(string_view other) const noexcept { return !(operator==(other)); }
+    sz_deprecate_compare inline bool operator!=(const_pointer other) const noexcept { return !(operator==(other)); }
 
     /** @brief  Checks if the string is not equal to the other string. */
     sz_deprecate_compare inline bool operator!=(basic_string const &other) const noexcept {
@@ -1645,8 +1686,11 @@ class basic_string {
      */
     template <typename generator_type>
     basic_string &randomize(generator_type &&generator, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
-        sz_random_generator_t sz_generator = &random_generator<generator_type>;
-        sz_generate(alphabet.data(), alphabet.size(), data(), size(), &sz_generator, &generator);
+        sz_ptr_t start;
+        sz_size_t length;
+        sz_string_range(&string_, &start, &length);
+        sz_random_generator_t generator_callback = &random_generator<generator_type>;
+        sz_generate(alphabet.data(), alphabet.size(), start, length, generator_callback, &generator);
         return *this;
     }
 

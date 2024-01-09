@@ -58,8 +58,19 @@ The project uses `.clang-format` to enforce a consistent code style.
 Modern IDEs, like VS Code, can be configured to automatically format the code on save.
 
 - East const over const West. Write `char const*` instead of `const char*`.
-- Explicitly use `std::` or `sz::` namespaces over global `memcpy`, `uint64_t`, etc.
 - For color-coded comments start the line with `!` for warnings or `?` for questions.
+- Sort the includes: standard libraries, third-party libraries, and only then internal project headers.
+
+For C++ code:
+
+- Explicitly use `std::` or `sz::` namespaces over global `memcpy`, `uint64_t`, etc.
+- In C++ code avoid C-style variadic arguments in favor of templates.
+- In C++ code avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, etc.
+- Use lower-case names for everything, except macros.
+
+For Python code:
+
+- Use lower-case names for functions and variables.
 
 ## Contributing in C++ and C
 
