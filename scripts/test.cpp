@@ -88,32 +88,126 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
 }
 
+#define assert_scoped(init, operation, condition) \
+    {                                             \
+        init;                                     \
+        operation;                                \
+        assert(condition);                        \
+    }
+
 /**
  *  @brief  Invokes different C++ member methods of the string class to make sure they all pass compilation.
  *          This test guarantees API compatibility with STL `std::basic_string` template.
  */
+template <typename string_type>
 static void test_compilation() {
-    assert(sz::string().empty());                             // Test default constructor
-    assert(sz::string("hello").size() == 5);                  // Test constructor with c-string
-    assert(sz::string("hello", 4) == "hell");                 // Construct from substring
-    assert(sz::string(5, 'a') == "aaaaa");                    // Construct with count and character
-    assert(sz::string({'h', 'e', 'l', 'l', 'o'}) == "hello"); // Construct from initializer list
-    assert(sz::string(sz::string("hello"), 2) == "llo");      // Construct from another string suffix
-    assert(sz::string(sz::string("hello"), 2, 2) == "ll");    // Construct from another string range
 
-    // TODO: Add `sz::basic_stirng` templates with custom allocators
-#if 0
-    assert(sz::string("test").clear().empty());                  // Test clear method
-    assert(sz::string().append("test") == "test");               // Test append method
-    assert(sz::string("test") + "ing" == "testing");             // Test operator+
-    assert(sz::string("hello world").substr(0, 5) == "hello");   // Test substr method
-    assert(sz::string("hello").find("ell") != sz::string::npos); // Test find method
-    assert(sz::string("hello").replace(0, 1, "j") == "jello");   // Test replace method
-    assert(sz::string("test") == sz::string("test"));            // Test copy constructor and equality
-    assert(sz::string("a") != sz::string("b"));                  // Test inequality
-    assert(sz::string("test").c_str()[0] == 't');                // Test c_str method
-    assert(sz::string("test")[0] == 't');                        // Test operator[]
-#endif
+    using str = string_type;
+
+    // Constructors
+    assert(str().empty());                             // Test default constructor
+    assert(str("hello").size() == 5);                  // Test constructor with c-string
+    assert(str("hello", 4) == "hell");                 // Construct from substring
+    assert(str(5, 'a') == "aaaaa");                    // Construct with count and character
+    assert(str({'h', 'e', 'l', 'l', 'o'}) == "hello"); // Construct from initializer list
+    assert(str(str("hello"), 2) == "llo");             // Construct from another string suffix
+    assert(str(str("hello"), 2, 2) == "ll");           // Construct from another string range
+
+    // Assignments
+    assert_scoped(str s, s = "hello", s == "hello");
+    assert_scoped(str s, s.assign("hello"), s == "hello");
+    assert_scoped(str s, s.assign("hello", 4), s == "hell");
+    assert_scoped(str s, s.assign(5, 'a'), s == "aaaaa");
+    assert_scoped(str s, s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
+    assert_scoped(str s, s.assign(str("hello")), s == "hello");
+    assert_scoped(str s, s.assign(str("hello"), 2), s == "llo");
+    assert_scoped(str s, s.assign(str("hello"), 2, 2), s == "ll");
+
+    // Comparisons
+    assert(str("a") != str("b"));
+    assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
+    assert(str("a") < str("b"));
+    assert(str("a") <= str("b"));
+    assert(str("b") > str("a"));
+    assert(str("b") >= str("a"));
+    assert(str("a") < str("aa"));
+
+    // Allocations, capacity and memory management
+    assert_scoped(str s, s.reserve(10), s.capacity() >= 10);
+    assert_scoped(str s, s.resize(10), s.size() == 10);
+    assert_scoped(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
+    assert(str("size").size() == 4 && str("length").length() == 6);
+    assert(str().max_size() > 0);
+    assert(str().get_allocator() == std::allocator<char>());
+
+    // Incremental construction
+    assert(str().append("test") == "test");
+    assert(str("test") + "ing" == "testing");
+    assert(str("test") + str("ing") == "testing");
+    assert(str("test") + str("ing") + str("123") == "testing123");
+    assert_scoped(str s = "__", s.insert(1, "test"), s == "_test_");
+    assert_scoped(str s = "__", s.insert(1, "test", 2), s == "_te_");
+    assert_scoped(str s = "__", s.insert(1, 5, 'a'), s == "_aaaaa_");
+    assert_scoped(str s = "__", s.insert(1, {'a', 'b', 'c'}), s == "_abc_");
+    assert_scoped(str s = "__", s.insert(1, str("test")), s == "_test_");
+    assert_scoped(str s = "__", s.insert(1, str("test"), 2), s == "_st_");
+    assert_scoped(str s = "__", s.insert(1, str("test"), 2, 1), s == "_s_");
+    assert_scoped(str s = "test", s.erase(1, 2), s == "tt");
+    assert_scoped(str s = "test", s.erase(1), s == "t");
+    assert_scoped(str s = "test", s.erase(s.begin() + 1), s == "tst");
+    assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
+    assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
+    assert_scoped(str s = "!?", s.push_back('a'), s == "!?a");
+    assert_scoped(str s = "!?", s.pop_back(), s == "!");
+
+    // Following are missing in strings, but are present in vectors.
+    // assert_scoped(str s = "!?", s.push_front('a'), s == "a!?");
+    // assert_scoped(str s = "!?", s.pop_front(), s == "?");
+
+    // Element access
+    assert(str("test")[0] == 't');
+    assert(str("test").at(1) == 'e');
+    assert(str("front").front() == 'f');
+    assert(str("back").back() == 'k');
+    assert(*str("data").data() == 'd');
+
+    // Iterators
+    assert(*str("begin").begin() == 'b' && *str("cbegin").cbegin() == 'c');
+    assert(*str("rbegin").rbegin() == 'n' && *str("crbegin").crbegin() == 'n');
+
+    // Slices
+    assert(str("hello world").substr(0, 5) == "hello");
+    assert(str("hello world").substr(6, 5) == "world");
+    assert(str("hello world").substr(6) == "world");
+    assert(str("hello world").substr(6, 100) == "world");
+
+    // Substring and character search in normal and reverse directions
+    assert(str("hello").find("ell") == 1);
+    assert(str("hello").find("ell", 1) == 1);
+    assert(str("hello").find("ell", 2) == str::npos);
+    assert(str("hello").find("ell", 1, 2) == 1);
+    assert(str("hello").rfind("l") == 3);
+    assert(str("hello").rfind("l", 2) == 2);
+    assert(str("hello").rfind("l", 1) == str::npos);
+
+    // ! `rfind` and `find_last_of` are not consitent in meaning of their arguments.
+    assert(str("hello").find_first_of("le") == 1);
+    assert(str("hello").find_first_of("le", 1) == 1);
+    assert(str("hello").find_last_of("le") == 3);
+    assert(str("hello").find_last_of("le", 2) == 2);
+    assert(str("hello").find_first_not_of("hel") == 4);
+    assert(str("hello").find_first_not_of("hel", 1) == 4);
+    assert(str("hello").find_last_not_of("hel") == 4);
+    assert(str("hello").find_last_not_of("hel", 4) == 4);
+
+    // Substitutions
+    assert(str("hello").replace(1, 2, "123") == "h123lo");
+    assert(str("hello").replace(1, 2, str("123"), 1) == "h23lo");
+    assert(str("hello").replace(1, 2, "123", 1) == "h1lo");
+    assert(str("hello").replace(1, 2, "123", 1, 1) == "h2lo");
+    assert(str("hello").replace(1, 2, str("123"), 1, 1) == "h2lo");
+    assert(str("hello").replace(1, 2, 3, 'a') == "haaalo");
+    assert(str("hello").replace(1, 2, {'a', 'b'}) == "hablo");
 }
 
 /**
@@ -594,6 +688,10 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
+
+    // Compatibility with STL
+    test_compilation<std::string>(); // Make sure the test itself is reasonable
+    // test_compilation<sz::string>(); // To early for this...
 
     // The string class implementation
     test_constructors();
