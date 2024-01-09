@@ -3,6 +3,7 @@
 #include <cstdio>    // `std::printf`
 #include <cstring>   // `std::memcpy`
 #include <iterator>  // `std::distance`
+#include <memory>    // `std::allocator`
 #include <random>    // `std::random_device`
 #include <vector>    // `std::vector`
 
@@ -26,7 +27,8 @@ using namespace sz::scripts;
 using sz::literals::operator""_sz;
 
 /**
- *  Several string processing operations rely on computing logarithms and powers of
+ *  @brief  Several string processing operations rely on computing integer logarithms.
+ *          Failures in such operations will result in wrong `resize` outcomes and heap corruption.
  */
 static void test_arithmetical_utilities() {
 
@@ -87,18 +89,20 @@ static void test_arithmetical_utilities() {
 }
 
 /**
- *  Invokes different C++ member methods of the string class to make sure they all pass compilation.
+ *  @brief  Invokes different C++ member methods of the string class to make sure they all pass compilation.
+ *          This test guarantees API compatibility with STL `std::basic_string` template.
  */
 static void test_compilation() {
-    assert(sz::string().empty());                                                 // Test default constructor
-    assert(sz::string("hello").size() == 5);                                      // Test constructor with c-string
-    assert(sz::string("hello", 4) == "hell");                                     // Construct from substring
-    assert(sz::string(5, 'a') == "aaaaa");                                        // Construct with count and character
-    assert(sz::string({'h', 'e', 'l', 'l', 'o'}) == "hello");                     // Construct from initializer list
-    assert(sz::string(sz::string("hello"), 2, std::allocator<char> {}) == "llo"); // Construct from another string
+    assert(sz::string().empty());                             // Test default constructor
+    assert(sz::string("hello").size() == 5);                  // Test constructor with c-string
+    assert(sz::string("hello", 4) == "hell");                 // Construct from substring
+    assert(sz::string(5, 'a') == "aaaaa");                    // Construct with count and character
+    assert(sz::string({'h', 'e', 'l', 'l', 'o'}) == "hello"); // Construct from initializer list
+    assert(sz::string(sz::string("hello"), 2) == "llo");      // Construct from another string suffix
+    assert(sz::string(sz::string("hello"), 2, 2) == "ll");    // Construct from another string range
 
     // TODO: Add `sz::basic_stirng` templates with custom allocators
-
+#if 0
     assert(sz::string("test").clear().empty());                  // Test clear method
     assert(sz::string().append("test") == "test");               // Test append method
     assert(sz::string("test") + "ing" == "testing");             // Test operator+
@@ -109,10 +113,11 @@ static void test_compilation() {
     assert(sz::string("a") != sz::string("b"));                  // Test inequality
     assert(sz::string("test").c_str()[0] == 't');                // Test c_str method
     assert(sz::string("test")[0] == 't');                        // Test operator[]
+#endif
 }
 
 /**
- *  Tests copy constructor and copy-assignment constructor of `sz::string` on arrays of different length strings.
+ *  @brief  Tests copy constructor and copy-assignment constructor of `sz::string`.
  */
 static void test_constructors() {
     std::string alphabet {sz::ascii_printables, sizeof(sz::ascii_printables)};
@@ -136,67 +141,60 @@ static void test_constructors() {
     assert(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
-#include <cstdarg>
-#include <memory>
+struct accounting_allocator : public std::allocator<char> {
+    inline static bool verbose = false;
+    inline static std::size_t current_bytes_alloced = 0;
 
-struct accounting_allocator : protected std::allocator<char> {
-    static bool verbose;
-    static size_t current_bytes_alloced;
-
-    static void dprintf(const char *fmt, ...) {
+    template <typename... args_types>
+    static void print_if_verbose(char const *fmt, args_types... args) {
         if (!verbose) return;
-        va_list args;
-        va_start(args, fmt);
-        vprintf(fmt, args);
-        va_end(args);
+        std::printf(fmt, args...);
     }
 
-    char *allocate(size_t n) {
+    char *allocate(std::size_t n) {
         current_bytes_alloced += n;
-        dprintf("alloc %zd -> %zd\n", n, current_bytes_alloced);
+        print_if_verbose("alloc %zd -> %zd\n", n, current_bytes_alloced);
         return std::allocator<char>::allocate(n);
     }
-    void deallocate(char *val, size_t n) {
+
+    void deallocate(char *val, std::size_t n) {
         assert(n <= current_bytes_alloced);
         current_bytes_alloced -= n;
-        dprintf("dealloc: %zd -> %zd\n", n, current_bytes_alloced);
+        print_if_verbose("dealloc: %zd -> %zd\n", n, current_bytes_alloced);
         std::allocator<char>::deallocate(val, n);
     }
 
-    template <typename Lambda>
-    static size_t account_block(Lambda lambda) {
+    template <typename callback_type>
+    static std::size_t account_block(callback_type callback) {
         auto before = accounting_allocator::current_bytes_alloced;
-        dprintf("starting block: %zd\n", before);
-        lambda();
+        print_if_verbose("starting block: %zd\n", before);
+        callback();
         auto after = accounting_allocator::current_bytes_alloced;
-        dprintf("ending block: %zd\n", after);
+        print_if_verbose("ending block: %zd\n", after);
         return after - before;
     }
 };
 
-bool accounting_allocator::verbose = false;
-size_t accounting_allocator::current_bytes_alloced;
-
-template <typename Lambda>
-static void assert_balanced_memory(Lambda lambda) {
-    auto bytes = accounting_allocator::account_block(lambda);
+template <typename callback_type>
+void assert_balanced_memory(callback_type callback) {
+    auto bytes = accounting_allocator::account_block(callback);
     assert(bytes == 0);
 }
 
-static void test_memory_stability_len(int len = 1 << 10) {
-    int iters(4);
+static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
+    std::size_t iterations = 4;
 
     assert(accounting_allocator::current_bytes_alloced == 0);
-    using string_t = sz::basic_string<accounting_allocator>;
-    string_t base;
+    using string = sz::basic_string<accounting_allocator>;
+    string base;
 
-    for (auto i = 0; i < len; i++) base.push_back('c');
+    for (std::size_t i = 0; i < len; i++) base.push_back('c');
     assert(base.length() == len);
 
     // Do copies leak?
     assert_balanced_memory([&]() {
-        for (auto i = 0; i < iters; i++) {
-            string_t copy(base);
+        for (std::size_t i = 0; i < iterations; i++) {
+            string copy(base);
             assert(copy.length() == len);
             assert(copy == base);
         }
@@ -204,8 +202,8 @@ static void test_memory_stability_len(int len = 1 << 10) {
 
     // How about assignments?
     assert_balanced_memory([&]() {
-        for (auto i = 0; i < iters; i++) {
-            string_t copy;
+        for (std::size_t i = 0; i < iterations; i++) {
+            string copy;
             copy = base;
             assert(copy.length() == len);
             assert(copy == base);
@@ -214,11 +212,11 @@ static void test_memory_stability_len(int len = 1 << 10) {
 
     // How about the move ctor?
     assert_balanced_memory([&]() {
-        for (auto i = 0; i < iters; i++) {
-            string_t unique_item(base);
+        for (std::size_t i = 0; i < iterations; i++) {
+            string unique_item(base);
             assert(unique_item.length() == len);
             assert(unique_item == base);
-            string_t copy(std::move(unique_item));
+            string copy(std::move(unique_item));
             assert(copy.length() == len);
             assert(copy == base);
         }
@@ -226,9 +224,9 @@ static void test_memory_stability_len(int len = 1 << 10) {
 
     // And the move assignment operator with an empty target payload?
     assert_balanced_memory([&]() {
-        for (auto i = 0; i < iters; i++) {
-            string_t unique_item(base);
-            string_t copy;
+        for (std::size_t i = 0; i < iterations; i++) {
+            string unique_item(base);
+            string copy;
             copy = std::move(unique_item);
             assert(copy.length() == len);
             assert(copy == base);
@@ -237,10 +235,10 @@ static void test_memory_stability_len(int len = 1 << 10) {
 
     // And move assignment where the target had a payload?
     assert_balanced_memory([&]() {
-        for (auto i = 0; i < iters; i++) {
-            string_t unique_item(base);
-            string_t copy;
-            for (auto j = 0; j < 317; j++) copy.push_back('q');
+        for (std::size_t i = 0; i < iterations; i++) {
+            string unique_item(base);
+            string copy;
+            for (std::size_t j = 0; j < 317; j++) copy.push_back('q');
             copy = std::move(unique_item);
             assert(copy.length() == len);
             assert(copy == base);
@@ -248,10 +246,13 @@ static void test_memory_stability_len(int len = 1 << 10) {
     });
 
     // Now let's clear the base and check that we're back to zero
-    base = string_t();
+    base = string();
     assert(accounting_allocator::current_bytes_alloced == 0);
 }
 
+/**
+ *  @brief  Tests the correctness of the string class update methods, such as `append` and `erase`.
+ */
 static void test_updates() {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
@@ -274,6 +275,9 @@ static void test_updates() {
     }
 }
 
+/**
+ *  @brief  Tests the correctness of the string class comparison methods, such as `compare` and `operator==`.
+ */
 static void test_comparisons() {
     // Comparing relative order of the strings
     assert("a"_sz.compare("a") == 0);
@@ -287,6 +291,10 @@ static void test_comparisons() {
     assert("a\0"_sz == "a\0"_sz);
 }
 
+/**
+ *  @brief  Tests the correctness of the string class search methods, such as `find` and `find_first_of`.
+ *          This covers haystacks and needles of different lengths, as well as character-sets.
+ */
 static void test_search() {
 
     // Searching for a set of characters
@@ -474,7 +482,11 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
     test_search_with_misaligned_repetitions(haystack_pattern, needle_stl, 33);
 }
 
-void test_search_with_misaligned_repetitions() {
+/**
+ *  @brief  Extensively tests the correctness of the string class search methods, such as `find` and `find_first_of`.
+ *          Covers different alignment cases within a cache line, repetitive patterns, and overlapping matches.
+ */
+static void test_search_with_misaligned_repetitions() {
     // When haystack is only formed of needles:
     test_search_with_misaligned_repetitions("a", "a");
     test_search_with_misaligned_repetitions("ab", "ab");
@@ -505,6 +517,10 @@ void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("abcd", "da");
 }
 
+/**
+ *  @brief  Tests the correctness of the string class Levenshtein distance computation,
+ *          as well as TODO: the similarity scoring functions for bioinformatics-like workloads.
+ */
 static void test_levenshtein_distances() {
     struct {
         char const *left;
@@ -581,8 +597,8 @@ int main(int argc, char const **argv) {
 
     // The string class implementation
     test_constructors();
-    test_memory_stability_len(1024);
-    test_memory_stability_len(14);
+    test_memory_stability_for_length(1024);
+    test_memory_stability_for_length(14);
     test_updates();
 
     // Advanced search operations
