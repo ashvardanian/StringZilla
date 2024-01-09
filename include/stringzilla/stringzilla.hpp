@@ -1200,18 +1200,18 @@ class basic_string {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_size_t string_space;
-        sz_bool_t string_is_on_heap;
-        sz_string_unpack(&other.string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+        sz_bool_t string_is_external;
+        sz_string_unpack(&other.string_, &string_start, &string_length, &string_space, &string_is_external);
 
         // Acquire the old string's value bitwise
         *(&string_) = *(&other.string_);
         // Reposition the string start pointer to the stack if it fits.
         // Ternary condition may be optimized to a branchless version.
-        string_.on_stack.start = string_is_on_heap ? string_.on_stack.start : &string_.on_stack.chars[0];
+        string_.internal.start = string_is_external ? string_.internal.start : &string_.internal.chars[0];
         sz_string_init(&other.string_); // Discard the other string.
     }
 
-    bool is_sso() const noexcept { return sz_string_is_on_stack(&string_); }
+    bool is_internal() const noexcept { return sz_string_is_on_stack(&string_); }
 
   public:
     // Member types
@@ -1236,7 +1236,7 @@ class basic_string {
 
     constexpr basic_string() noexcept {
         // ! Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
-        string_.on_stack.start = &string_.on_stack.chars[0];
+        string_.internal.start = &string_.internal.chars[0];
         string_.u64s[1] = 0;
         string_.u64s[2] = 0;
         string_.u64s[3] = 0;
@@ -1252,7 +1252,7 @@ class basic_string {
     basic_string(basic_string &&other) noexcept : string_(other.string_) { move(other); }
 
     basic_string &operator=(basic_string &&other) noexcept {
-        if (!is_sso()) {
+        if (!is_internal()) {
             with_alloc([&](alloc_t &alloc) {
                 sz_string_free(&string_, &alloc);
                 return sz_true_k;
@@ -1317,14 +1317,14 @@ class basic_string {
     inline const_reverse_iterator crbegin() const noexcept { return view().crbegin(); }
     inline const_reverse_iterator crend() const noexcept { return view().crend(); }
 
-    inline const_reference operator[](size_type pos) const noexcept { return string_.on_stack.start[pos]; }
-    inline const_reference at(size_type pos) const noexcept { return string_.on_stack.start[pos]; }
-    inline const_reference front() const noexcept { return string_.on_stack.start[0]; }
-    inline const_reference back() const noexcept { return string_.on_stack.start[size() - 1]; }
-    inline const_pointer data() const noexcept { return string_.on_stack.start; }
-    inline const_pointer c_str() const noexcept { return string_.on_stack.start; }
+    inline const_reference operator[](size_type pos) const noexcept { return string_.internal.start[pos]; }
+    inline const_reference at(size_type pos) const noexcept { return string_.internal.start[pos]; }
+    inline const_reference front() const noexcept { return string_.internal.start[0]; }
+    inline const_reference back() const noexcept { return string_.internal.start[size() - 1]; }
+    inline const_pointer data() const noexcept { return string_.internal.start; }
+    inline const_pointer c_str() const noexcept { return string_.internal.start; }
 
-    inline bool empty() const noexcept { return string_.on_heap.length == 0; }
+    inline bool empty() const noexcept { return string_.external.length == 0; }
     inline size_type size() const noexcept { return view().size(); }
 
     inline size_type length() const noexcept { return size(); }
@@ -1359,13 +1359,13 @@ class basic_string {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_size_t string_space;
-        sz_bool_t string_is_on_heap;
-        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+        sz_bool_t string_is_external;
+        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
 
         // Allocate more space if needed.
         if (count >= string_space) {
             if (!with_alloc([&](alloc_t &alloc) { return sz_string_grow(&string_, count + 1, &alloc); })) return false;
-            sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_on_heap);
+            sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
         }
 
         // Fill the trailing characters.
@@ -1374,7 +1374,7 @@ class basic_string {
             string_start[count] = '\0';
             // Knowing the layout of the string, we can perform this operation safely,
             // even if its located on stack.
-            string_.on_heap.length += count - string_length;
+            string_.external.length += count - string_length;
         }
         else { sz_string_erase(&string_, count, sz_size_max); }
         return true;

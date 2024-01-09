@@ -323,19 +323,19 @@ typedef struct sz_memory_allocator_t {
  */
 typedef union sz_string_t {
 
-    struct on_stack {
+    struct internal {
         sz_ptr_t start;
         sz_u8_t length;
         char chars[sz_string_stack_space];
-    } on_stack;
+    } internal;
 
-    struct on_heap {
+    struct external {
         sz_ptr_t start;
         sz_size_t length;
         /// @brief Number of bytes, that have been allocated for this string, equals to (capacity + 1).
         sz_size_t space;
         sz_size_t padding;
-    } on_heap;
+    } external;
 
     sz_u64_t u64s[4];
 
@@ -543,8 +543,8 @@ SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 SZ_PUBLIC void sz_string_init(sz_string_t *string);
 
 /**
- *  @brief  Convenience function checking if the provided string is located on the stack,
- *          as opposed to being allocated on the heap, or in the constant address range.
+ *  @brief  Convenience function checking if the provided string is stored inside of the ::string instance itself,
+ *          alternative being - allocated in a remote region of the heap.
  */
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
 
@@ -556,10 +556,10 @@ SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
  *  @param start        Pointer to the start of the string.
  *  @param length       Number of bytes in the string, before the NULL character.
  *  @param space        Number of bytes allocated for the string (heap or stack), including the NULL character.
- *  @param is_on_heap   Whether the string is allocated on the heap.
+ *  @param is_external  Whether the string is allocated on the heap externally, or fits withing ::string instance.
  */
 SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space,
-                                sz_bool_t *is_on_heap);
+                                sz_bool_t *is_external);
 
 /**
  *  @brief  Upacks only the start and length of the string.
@@ -2022,33 +2022,33 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
 
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
     // It doesn't matter if it's on stack or heap, the pointer location is the same.
-    return (sz_bool_t)((sz_cptr_t)string->on_stack.start == (sz_cptr_t)&string->on_stack.chars[0]);
+    return (sz_bool_t)((sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0]);
 }
 
 SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length) {
-    sz_size_t is_small = (sz_cptr_t)string->on_stack.start == (sz_cptr_t)&string->on_stack.chars[0];
+    sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
     sz_size_t is_big_mask = is_small - 1ull;
-    *start = string->on_heap.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
+    *start = string->external.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
-    *length = string->on_heap.length & (0x00000000000000FFull | is_big_mask);
+    *length = string->external.length & (0x00000000000000FFull | is_big_mask);
 }
 
 SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space,
-                                sz_bool_t *is_on_heap) {
-    sz_size_t is_small = (sz_cptr_t)string->on_stack.start == (sz_cptr_t)&string->on_stack.chars[0];
+                                sz_bool_t *is_external) {
+    sz_size_t is_small = (sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0];
     sz_size_t is_big_mask = is_small - 1ull;
-    *start = string->on_heap.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
+    *start = string->external.start; // It doesn't matter if it's on stack or heap, the pointer location is the same.
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
-    *length = string->on_heap.length & (0x00000000000000FFull | is_big_mask);
+    *length = string->external.length & (0x00000000000000FFull | is_big_mask);
     // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
-    *space = sz_u64_blend(sz_string_stack_space, string->on_heap.space, is_big_mask);
-    *is_on_heap = (sz_bool_t)!is_small;
+    *space = sz_u64_blend(sz_string_stack_space, string->external.space, is_big_mask);
+    *is_external = (sz_bool_t)!is_small;
 }
 
 SZ_PUBLIC sz_bool_t sz_string_equal(sz_string_t const *a, sz_string_t const *b) {
-    // Tempting to say that the on_heap.length is bitwise the same even if it includes
+    // Tempting to say that the external.length is bitwise the same even if it includes
     // some bytes of the on-stack payload, but we don't at this writing maintain that invariant.
-    // (An on-stack string includes noise bytes in the high-order bits of on_heap.length. So do this
+    // (An on-stack string includes noise bytes in the high-order bits of external.length. So do this
     // the hard/correct way.
 
 #if SZ_USE_MISALIGNED_LOADS
@@ -2082,10 +2082,10 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
     SZ_ASSERT(string, "String can't be NULL.");
 
     // Only 8 + 1 + 1 need to be initialized.
-    string->on_stack.start = &string->on_stack.chars[0];
+    string->internal.start = &string->internal.chars[0];
     // But for safety let's initialize the entire structure to zeros.
-    // string->on_stack.chars[0] = 0;
-    // string->on_stack.length = 0;
+    // string->internal.chars[0] = 0;
+    // string->internal.length = 0;
     string->u64s[1] = 0;
     string->u64s[2] = 0;
     string->u64s[3] = 0;
@@ -2097,20 +2097,20 @@ SZ_PUBLIC sz_bool_t sz_string_init_from(sz_string_t *string, sz_cptr_t start, sz
     SZ_ASSERT(string && allocator, "String and allocator can't be NULL.");
     // If we are lucky, no memory allocations will be needed.
     if (space_needed <= sz_string_stack_space) {
-        string->on_stack.start = &string->on_stack.chars[0];
-        string->on_stack.length = length;
+        string->internal.start = &string->internal.chars[0];
+        string->internal.length = length;
     }
     else {
         // If we are not lucky, we need to allocate memory.
-        string->on_heap.start = (sz_ptr_t)allocator->allocate(space_needed, allocator->handle);
-        if (!string->on_heap.start) return sz_false_k;
-        string->on_heap.length = length;
-        string->on_heap.space = space_needed;
+        string->external.start = (sz_ptr_t)allocator->allocate(space_needed, allocator->handle);
+        if (!string->external.start) return sz_false_k;
+        string->external.length = length;
+        string->external.space = space_needed;
     }
-    SZ_ASSERT(&string->on_stack.start == &string->on_heap.start, "Alignment confusion");
+    SZ_ASSERT(&string->internal.start == &string->external.start, "Alignment confusion");
     // Copy into the new buffer.
-    sz_copy(string->on_heap.start, start, length);
-    string->on_heap.start[length] = 0;
+    sz_copy(string->external.start, start, length);
+    string->external.start[length] = 0;
     return sz_true_k;
 }
 
@@ -2122,20 +2122,20 @@ SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_
     sz_ptr_t string_start;
     sz_size_t string_length;
     sz_size_t string_space;
-    sz_bool_t string_is_on_heap;
-    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
+    sz_bool_t string_is_external;
+    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return sz_false_k;
 
     sz_copy(new_start, string_start, string_length);
-    string->on_heap.start = new_start;
-    string->on_heap.space = new_space;
-    string->on_heap.padding = 0;
-    string->on_heap.length = string_length;
+    string->external.start = new_start;
+    string->external.space = new_space;
+    string->external.padding = 0;
+    string->external.length = string_length;
 
     // Deallocate the old string.
-    if (string_is_on_heap) allocator->free(string_start, string_space, allocator->handle);
+    if (string_is_external) allocator->free(string_start, string_space, allocator->handle);
     return sz_true_k;
 }
 
@@ -2148,15 +2148,15 @@ SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start,
     sz_ptr_t string_start;
     sz_size_t string_length;
     sz_size_t string_space;
-    sz_bool_t string_is_on_heap;
-    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
+    sz_bool_t string_is_external;
+    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
 
     // If we are lucky, no memory allocations will be needed.
     if (string_length + added_length + 1 <= string_space) {
         sz_copy(string_start + string_length, added_start, added_length);
         string_start[string_length + added_length] = 0;
         // Even if the string is on the stack, the `+=` won't affect the tail of the string.
-        string->on_heap.length += added_length;
+        string->external.length += added_length;
     }
     // If we are not lucky, we need to allocate more memory.
     else {
@@ -2166,10 +2166,10 @@ SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start,
         if (!sz_string_grow(string, new_space, allocator)) return sz_false_k;
 
         // Copy into the new buffer.
-        string_start = string->on_heap.start;
+        string_start = string->external.start;
         sz_copy(string_start + string_length, added_start, added_length);
         string_start[string_length + added_length] = 0;
-        string->on_heap.length = string_length + added_length;
+        string->external.length = string_length + added_length;
     }
 
     return sz_true_k;
@@ -2182,8 +2182,8 @@ SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t 
     sz_ptr_t string_start;
     sz_size_t string_length;
     sz_size_t string_space;
-    sz_bool_t string_is_on_heap;
-    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
+    sz_bool_t string_is_external;
+    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
 
     // Normalize the offset, it can't be larger than the length.
     offset = sz_min_of_two(offset, string_length);
@@ -2204,15 +2204,15 @@ SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t 
     if (offset + length < string_length)
         sz_move(string_start + offset, string_start + offset + length, string_length - offset - length);
 
-    // The `string->on_heap.length = offset` assignment would discard last characters
+    // The `string->external.length = offset` assignment would discard last characters
     // of the on-the-stack string, but inplace subtraction would work.
-    string->on_heap.length -= length;
+    string->external.length -= length;
     string_start[string_length - length] = 0;
 }
 
 SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
     if (!sz_string_is_on_stack(string))
-        allocator->free(string->on_heap.start, string->on_heap.space, allocator->handle);
+        allocator->free(string->external.start, string->external.space, allocator->handle);
     sz_string_init(string);
 }
 

@@ -234,23 +234,23 @@ Like other efficient string implementations, it uses the [Small String Optimizat
 
 ```c
 typedef union sz_string_t {
-    struct on_stack {
+    struct internal {
         sz_ptr_t start;
         sz_u8_t length;
         char chars[sz_string_stack_space]; /// Ends with a null-terminator.
-    } on_stack;
+    } internal;
 
-    struct on_heap {
+    struct external {
         sz_ptr_t start;
         sz_size_t length;        
         sz_size_t space; /// The length of the heap-allocated buffer.
         sz_size_t padding;
-    } on_heap;
+    } external;
 
 } sz_string_t;
 ```
 
-As one can see, a short string can be kept on the stack, if it fits within `on_stack.chars` array.
+As one can see, a short string can be kept on the stack, if it fits within `internal.chars` array.
 Before 2015 GCC string implementation was just 8 bytes.
 Today, practically all variants are at least 32 bytes, so two of them fit in a cache line.
 Practically all of them can only store 15 bytes of the "Small String" on the stack.
@@ -286,8 +286,8 @@ sz_string_erase(&string, 0, 1);
 sz_ptr_t string_start;
 sz_size_t string_length;
 sz_size_t string_space;
-sz_bool_t string_is_on_heap;
-sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_on_heap);
+sz_bool_t string_is_external;
+sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
 sz_equal(string_start, "Hello_world", 11); // == sz_true_k
 
 // Reclaim some memory.
