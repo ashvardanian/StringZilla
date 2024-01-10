@@ -1067,6 +1067,43 @@ class string_view {
     /** @brief  Find the last occurrence of a character outside of the set. */
     inline size_type find_last_not_of(character_set set) const noexcept { return find_last_of(set.inverted()); }
 
+    /** @brief  Python-like convinience function, dropping the matching prefix. */
+    inline string_view remove_prefix(string_view other) const noexcept {
+        return starts_with(other) ? string_view {start_ + other.length_, length_ - other.length_} : *this;
+    }
+
+    /** @brief  Python-like convinience function, dropping the matching suffix. */
+    inline string_view remove_suffix(string_view other) const noexcept {
+        return ends_with(other) ? string_view {start_, length_ - other.length_} : *this;
+    }
+
+    /** @brief  Python-like convinience function, dropping prefix formed of given characters. */
+    inline string_view lstrip(character_set set) const noexcept {
+        set = set.inverted();
+        auto new_start = sz_find_from_set(start_, length_, &set.raw());
+        return new_start ? string_view {new_start, length_ - static_cast<size_type>(new_start - start_)}
+                         : string_view();
+    }
+
+    /** @brief  Python-like convinience function, dropping suffix formed of given characters. */
+    inline string_view rstrip(character_set set) const noexcept {
+        set = set.inverted();
+        auto new_end = sz_find_last_from_set(start_, length_, &set.raw());
+        return new_end ? string_view {start_, static_cast<size_type>(new_end - start_ + 1)} : string_view();
+    }
+
+    /** @brief  Python-like convinience function, dropping both the prefix & the suffix formed of given characters. */
+    inline string_view strip(character_set set) const noexcept {
+        set = set.inverted();
+        auto new_start = sz_find_from_set(start_, length_, &set.raw());
+        return new_start
+                   ? string_view {new_start,
+                                  static_cast<size_type>(
+                                      sz_find_last_from_set(new_start, length_ - (new_start - start_), &set.raw()) -
+                                      new_start + 1)}
+                   : string_view();
+    }
+
     /** @brief  Find all occurrences of a given string.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
     inline range_matches<string_view, matcher_find> find_all(string_view, bool interleave = true) const noexcept;

@@ -437,6 +437,12 @@ static void test_search() {
     assert(sz::string_view(sz::base64).find_first_of("+") == 62);
     assert(sz::string_view(sz::ascii_printables).find_first_of("~") != sz::string_view::npos);
 
+    assert("aabaa"_sz.remove_prefix("a") == "abaa");
+    assert("aabaa"_sz.remove_suffix("a") == "aaba");
+    assert("aabaa"_sz.lstrip(sz::character_set {"a"}) == "baa");
+    assert("aabaa"_sz.rstrip(sz::character_set {"a"}) == "aab");
+    assert("aabaa"_sz.strip(sz::character_set {"a"}) == "b");
+
     // Check more advanced composite operations:
     assert("abbccc"_sz.partition("bb").before.size() == 1);
     assert("abbccc"_sz.partition("bb").match.size() == 2);
