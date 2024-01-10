@@ -1,0 +1,11 @@
+[package]
+name = "StringZilla"
+version = "0.1.0"
+
+[lib]
+path = "rust/lib.rs"
+name = "stringzilla"
+
+[build-dependencies]
+bindgen = "0.69.1"
+cc = { version = "1.0.83", features = ["parallel"] }
