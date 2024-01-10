@@ -95,6 +95,18 @@ static void test_arithmetical_utilities() {
         assert(condition);                        \
     }
 
+#define assert_throws(expression, exception_type) \
+    {                                             \
+        bool threw = false;                       \
+        try {                                     \
+            expression;                           \
+        }                                         \
+        catch (exception_type const &) {          \
+            threw = true;                         \
+        }                                         \
+        assert(threw);                            \
+    }
+
 /**
  *  @brief  Invokes different C++ member methods of the string class to make sure they all pass compilation.
  *          This test guarantees API compatibility with STL `std::basic_string` template.
@@ -104,7 +116,7 @@ static void test_compilation() {
 
     using str = string_type;
 
-    // Constructors
+    // Constructors.
     assert(str().empty());                             // Test default constructor
     assert(str("hello").size() == 5);                  // Test constructor with c-string
     assert(str("hello", 4) == "hell");                 // Construct from substring
@@ -113,7 +125,7 @@ static void test_compilation() {
     assert(str(str("hello"), 2) == "llo");             // Construct from another string suffix
     assert(str(str("hello"), 2, 2) == "ll");           // Construct from another string range
 
-    // Assignments
+    // Assignments.
     assert_scoped(str s, s = "hello", s == "hello");
     assert_scoped(str s, s.assign("hello"), s == "hello");
     assert_scoped(str s, s.assign("hello", 4), s == "hell");
@@ -123,7 +135,7 @@ static void test_compilation() {
     assert_scoped(str s, s.assign(str("hello"), 2), s == "llo");
     assert_scoped(str s, s.assign(str("hello"), 2, 2), s == "ll");
 
-    // Comparisons
+    // Comparisons.
     assert(str("a") != str("b"));
     assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
     assert(str("a") < str("b"));
@@ -132,7 +144,7 @@ static void test_compilation() {
     assert(str("b") >= str("a"));
     assert(str("a") < str("aa"));
 
-    // Allocations, capacity and memory management
+    // Allocations, capacity and memory management.
     assert_scoped(str s, s.reserve(10), s.capacity() >= 10);
     assert_scoped(str s, s.resize(10), s.size() == 10);
     assert_scoped(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
@@ -140,11 +152,20 @@ static void test_compilation() {
     assert(str().max_size() > 0);
     assert(str().get_allocator() == std::allocator<char>());
 
-    // Incremental construction
+    // Concatenation.
+    // Following are missing in strings, but are present in vectors.
+    // assert_scoped(str s = "!?", s.push_front('a'), s == "a!?");
+    // assert_scoped(str s = "!?", s.pop_front(), s == "?");
     assert(str().append("test") == "test");
     assert(str("test") + "ing" == "testing");
     assert(str("test") + str("ing") == "testing");
     assert(str("test") + str("ing") + str("123") == "testing123");
+    assert_scoped(str s = "!?", s.push_back('a'), s == "!?a");
+    assert_scoped(str s = "!?", s.pop_back(), s == "!");
+
+    // Incremental construction.
+    // The `length_error` might be difficult to catch due to a large `max_size()`.
+    // assert_throws(large_string.insert(large_string.size() - 1, large_number_of_chars, 'a'), std::length_error);
     assert_scoped(str s = "__", s.insert(1, "test"), s == "_test_");
     assert_scoped(str s = "__", s.insert(1, "test", 2), s == "_te_");
     assert_scoped(str s = "__", s.insert(1, 5, 'a'), s == "_aaaaa_");
@@ -152,36 +173,38 @@ static void test_compilation() {
     assert_scoped(str s = "__", s.insert(1, str("test")), s == "_test_");
     assert_scoped(str s = "__", s.insert(1, str("test"), 2), s == "_st_");
     assert_scoped(str s = "__", s.insert(1, str("test"), 2, 1), s == "_s_");
+    assert_throws(str("hello").insert(6, "world"), std::out_of_range);         // index > size()
+    assert_throws(str("hello").insert(5, str("world"), 6), std::out_of_range); // s_index > str.size()
+
+    // Erasure.
     assert_scoped(str s = "test", s.erase(1, 2), s == "tt");
     assert_scoped(str s = "test", s.erase(1), s == "t");
     assert_scoped(str s = "test", s.erase(s.begin() + 1), s == "tst");
     assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
     assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
-    assert_scoped(str s = "!?", s.push_back('a'), s == "!?a");
-    assert_scoped(str s = "!?", s.pop_back(), s == "!");
 
-    // Following are missing in strings, but are present in vectors.
-    // assert_scoped(str s = "!?", s.push_front('a'), s == "a!?");
-    // assert_scoped(str s = "!?", s.pop_front(), s == "?");
-
-    // Element access
+    // Element access.
     assert(str("test")[0] == 't');
     assert(str("test").at(1) == 'e');
     assert(str("front").front() == 'f');
     assert(str("back").back() == 'k');
     assert(*str("data").data() == 'd');
 
-    // Iterators
+    // Iterators.
     assert(*str("begin").begin() == 'b' && *str("cbegin").cbegin() == 'c');
     assert(*str("rbegin").rbegin() == 'n' && *str("crbegin").crbegin() == 'n');
 
-    // Slices
+    // Slices... out-of-bounds exceptions are asymetric!
     assert(str("hello world").substr(0, 5) == "hello");
     assert(str("hello world").substr(6, 5) == "world");
     assert(str("hello world").substr(6) == "world");
-    assert(str("hello world").substr(6, 100) == "world");
+    assert(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
+    assert_throws(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
+    assert_throws(str("hello world").substr(20, 5), std::out_of_range); // 20 is byond the length of the string
+    assert_throws(str("hello world").substr(-1, 5), std::out_of_range); // -1 casts to unsigned without any warnings...
+    assert(str("hello world").substr(0, -1) == "hello world");          // -1 casts to unsigned without any warnings...
 
-    // Substring and character search in normal and reverse directions
+    // Substring and character search in normal and reverse directions.
     assert(str("hello").find("ell") == 1);
     assert(str("hello").find("ell", 1) == 1);
     assert(str("hello").find("ell", 2) == str::npos);
@@ -200,7 +223,7 @@ static void test_compilation() {
     assert(str("hello").find_last_not_of("hel") == 4);
     assert(str("hello").find_last_not_of("hel", 4) == 4);
 
-    // Substitutions
+    // Substitutions.
     assert(str("hello").replace(1, 2, "123") == "h123lo");
     assert(str("hello").replace(1, 2, str("123"), 1) == "h23lo");
     assert(str("hello").replace(1, 2, "123", 1) == "h1lo");
@@ -208,6 +231,10 @@ static void test_compilation() {
     assert(str("hello").replace(1, 2, str("123"), 1, 1) == "h2lo");
     assert(str("hello").replace(1, 2, 3, 'a') == "haaalo");
     assert(str("hello").replace(1, 2, {'a', 'b'}) == "hablo");
+
+    // Some nice "tweetable" examples :)
+    assert(str("Loose").replace(2, 2, str("vath"), 1) == "Loathe");
+    assert(str("Loose").replace(2, 2, "vath", 1) == "Love");
 }
 
 /**
