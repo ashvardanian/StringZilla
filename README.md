@@ -319,28 +319,51 @@ auto [before, match, after] = haystack.partition(" : "); // String argument
 The other examples of non-STL Python-inspired interfaces are:
 
 - `isalnum`, `isalpha`, `isascii`, `isdigit`, `islower`, `isspace`,`isupper`.
-- `lstrip`, `rstrip`, `strip`, `ltrim`, `rtrim`, `trim`.
+- TODO: `lstrip`, `rstrip`, `strip`.
+- TODO: `removeprefix`, `removesuffix`.
 - `lower`, `upper`, `capitalize`, `title`, `swapcase`.
 - `splitlines`, `split`, `rsplit`.
 - `count` for the number of non-overlapping matches.
 
 Some of the StringZilla interfaces are not available even Python's native `str` class.
+Here is a sneak peek of the most useful ones.
 
 ```cpp
-text.hash(); // -> std::size_t 
-text.contains_only(" \w\t"); // == text.count(character_set(" \w\t")) == text.size();
+text.hash(); // -> 64 bit unsigned integer 
+text.contains_only(" \w\t"); // == text.find_first_not_of(character_set(" \w\t")) == npos;
+text.contains(sz::whitespaces); // == text.find(character_set(sz::whitespaces)) != npos;
 
-// Incremental construction:
-text.push_back_unchecked('x'); // No bounds checking
-text.try_push_back('x'); // Returns false if the string is full and allocation failed
+// Simpler slicing than `substr`
+text.front(10); // -> sz::string_view
+text.back(10); // -> sz::string_view
 
-text.concatenated("@", domain, ".", tld); // No allocations
+// Safe variants, which clamp the range into the string bounds
+using sz::string::cap;
+text.front(10, cap) == text.front(std::min(10, text.size()));
+text.back(10, cap) == text.back(std::min(10, text.size()));
+
+// Character set filtering
+text.lstrip(sz::whitespaces).rstrip(sz::newlines); // like Python
+text.front(sz::whitespaces); // all leading whitespaces
+text.back(sz::digits); // all numerical symbols forming the suffix
+
+// Incremental construction
+using sz::string::unchecked;
+text.push_back('x'); // no surprises here
+text.push_back('x', unchecked); // no bounds checking, Rust style
+text.try_push_back('x'); // returns `false` if the string is full and the allocation failed
+
+sz::concatenate(text, "@", domain, ".", tld); // No allocations
 text + "@" + domain + "." + tld; // No allocations, if `SZ_LAZY_CONCAT` is defined
 
 // For Levenshtein distance, the following are available:
 text.edit_distance(other[, upper_bound]) == 7; // May perform a memory allocation
 text.find_similar(other[, upper_bound]);
 text.rfind_similar(other[, upper_bound]);
+
+// Ranges of search results in either order
+for (auto word : text.split(sz::punctuation)) // No allocations
+    std::cout << word << std::endl;
 ```
 
 ### Splits and Ranges
