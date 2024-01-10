@@ -572,49 +572,66 @@ SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_s
 SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
 
 /**
- *  @brief  Grows the string to a given capacity, that must be bigger than current capacity.
- *          If the string is on the stack, it will be moved to the heap.
+ *  @brief  Constructs a string of a given ::length with noisy contents.
+ *          Use the returned character pointer to populate the string.
+ *
+ *  @param string       String to initialize.
+ *  @param length       Number of bytes in the string, before the NULL character.
+ *  @param allocator    Memory allocator to use for the allocation.
+ *  @return             NULL if the operation failed, pointer to the start of the string otherwise.
+ */
+SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator);
+
+/**
+ *  @brief  Doesn't change the contents or the length of the string, but grows the available memory capacity.
+ *          This is benefitial, if several insertions are expected, and we want to minimize allocations.
  *
  *  @param string       String to grow.
- *  @param new_space    New capacity of the string, including the NULL character.
+ *  @param new_capacity The number of characters to reserve space for, including exsting ones.
  *  @param allocator    Memory allocator to use for the allocation.
- *  @return             Whether the operation was successful. The only failures can come from the allocator.
+ *  @return             True if the operation succeeded. False if memory allocation failed.
  */
-SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_memory_allocator_t *allocator);
+SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator);
 
 /**
- *  @brief  Appends a given string to the end of the string class instance.
+ *  @brief  Grows the string by adding an unitialized region of ::added_length at the given ::offset.
+ *          Would often be used in conjunction with one or more `sz_copy` calls to populate the allocated region.
+ *          Similar to `sz_string_reserve`, but changes the length of the ::string.
  *
- *  @param string       String to append to.
- *  @param added_start  Start of the string to append.
- *  @param added_length Number of bytes in the string to append, before the NULL character.
+ *  @param string       String to grow.
+ *  @param offset       Offset of the first byte to reserve space for.
+ *                      If provided offset is larger than the length, it will be capped.
+ *  @param added_length The number of new characters to reserve space for.
  *  @param allocator    Memory allocator to use for the allocation.
- *  @return             Whether the operation was successful. The only failures can come from the allocator.
+ *  @return             NULL if the operation failed, pointer to the new start of the string otherwise.
  */
-SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start, sz_size_t added_length,
-                                     sz_memory_allocator_t *allocator);
+SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_size_t added_length,
+                                    sz_memory_allocator_t *allocator);
 
 /**
- *  @brief  Removes a range from a string.
+ *  @brief  Removes a range from a string. Changes the length, but not the capacity.
+ *          Performs no allocations or deallocations and can't fail.
  *
  *  @param string       String to clean.
  *  @param offset       Offset of the first byte to remove.
  *  @param length       Number of bytes to remove.
- */
+ *                      Out-of-bound ranges will be capped.
+ * /
 SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
 
 /**
  *  @brief  Shrinks the string to fit the current length, if it's allocated on the heap.
+ *          Teh reverse operation of ::sz_string_reserve.
  *
  *  @param string       String to shrink.
  *  @param allocator    Memory allocator to use for the allocation.
  *  @return             Whether the operation was successful. The only failures can come from the allocator.
  */
-SZ_PUBLIC sz_bool_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator);
+SZ_PUBLIC sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator);
 
 /**
  *  @brief  Frees the string, if it's allocated on the heap.
- *          If the string is on the stack, this function does nothing.
+ *          If the string is on the stack, the function clears/resets the state.
  */
 SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator);
 
@@ -2091,8 +2108,7 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
     string->u64s[3] = 0;
 }
 
-SZ_PUBLIC sz_bool_t sz_string_init_from(sz_string_t *string, sz_cptr_t start, sz_size_t length,
-                                        sz_memory_allocator_t *allocator) {
+SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
     SZ_ASSERT(string && allocator, "String and allocator can't be NULL.");
     // If we are lucky, no memory allocations will be needed.
@@ -2103,27 +2119,28 @@ SZ_PUBLIC sz_bool_t sz_string_init_from(sz_string_t *string, sz_cptr_t start, sz
     else {
         // If we are not lucky, we need to allocate memory.
         string->external.start = (sz_ptr_t)allocator->allocate(space_needed, allocator->handle);
-        if (!string->external.start) return sz_false_k;
+        if (!string->external.start) return NULL;
         string->external.length = length;
         string->external.space = space_needed;
     }
     SZ_ASSERT(&string->internal.start == &string->external.start, "Alignment confusion");
-    // Copy into the new buffer.
-    sz_copy(string->external.start, start, length);
     string->external.start[length] = 0;
-    return sz_true_k;
+    return string->external.start;
 }
 
-SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_memory_allocator_t *allocator) {
+SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator) {
 
     SZ_ASSERT(string, "String can't be NULL.");
-    SZ_ASSERT(new_space > sz_string_stack_space, "New space must be larger than current.");
+
+    sz_size_t new_space = new_capacity + 1;
+    SZ_ASSERT(new_space >= sz_string_stack_space, "New space must be larger than the SSO buffer.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
     sz_size_t string_space;
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
+    SZ_ASSERT(new_space > string_space, "New space must be larger than current.");
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return sz_false_k;
@@ -2139,11 +2156,10 @@ SZ_PUBLIC sz_bool_t sz_string_grow(sz_string_t *string, sz_size_t new_space, sz_
     return sz_true_k;
 }
 
-SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start, sz_size_t added_length,
-                                     sz_memory_allocator_t *allocator) {
+SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_size_t added_length,
+                                    sz_memory_allocator_t *allocator) {
 
     SZ_ASSERT(string && allocator, "String and allocator can't be NULL.");
-    if (!added_length) return sz_true_k;
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -2151,9 +2167,12 @@ SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start,
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
 
+    // The user integed to extend the string.
+    offset = sz_min_of_two(offset, string_length);
+
     // If we are lucky, no memory allocations will be needed.
-    if (string_length + added_length + 1 <= string_space) {
-        sz_copy(string_start + string_length, added_start, added_length);
+    if (offset + string_length + added_length < string_space) {
+        sz_move(string_start + offset + added_length, string_start + offset, string_length - offset);
         string_start[string_length + added_length] = 0;
         // Even if the string is on the stack, the `+=` won't affect the tail of the string.
         string->external.length += added_length;
@@ -2161,18 +2180,18 @@ SZ_PUBLIC sz_bool_t sz_string_append(sz_string_t *string, sz_cptr_t added_start,
     // If we are not lucky, we need to allocate more memory.
     else {
         sz_size_t next_planned_size = sz_max_of_two(64ull, string_space * 2ull);
-        sz_size_t min_needed_space = sz_size_bit_ceil(string_length + added_length + 1);
+        sz_size_t min_needed_space = sz_size_bit_ceil(offset + string_length + added_length + 1);
         sz_size_t new_space = sz_max_of_two(min_needed_space, next_planned_size);
-        if (!sz_string_grow(string, new_space, allocator)) return sz_false_k;
+        if (!sz_string_reserve(string, new_space - 1, allocator)) return NULL;
 
         // Copy into the new buffer.
         string_start = string->external.start;
-        sz_copy(string_start + string_length, added_start, added_length);
+        sz_move(string_start + offset + added_length, string_start + offset, string_length - offset);
         string_start[string_length + added_length] = 0;
         string->external.length = string_length + added_length;
     }
 
-    return sz_true_k;
+    return string_start;
 }
 
 SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {

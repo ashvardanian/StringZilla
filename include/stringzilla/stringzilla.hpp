@@ -1165,34 +1165,54 @@ class string_view {
  *  Copy constructor and copy assignment operator are not! They may throw `std::bad_alloc` if the memory
  *  allocation fails. Alternatively, if exceptions are disabled, they may call `std::terminate`.
  */
-template <typename allocator_ = std::allocator<char>>
+template <typename allocator_type_ = std::allocator<char>>
 class basic_string {
+
+    using calloc_type = sz_memory_allocator_t;
+
     sz_string_t string_;
 
-    using alloc_t = sz_memory_allocator_t;
+    /**
+     *  Stateful allocators and their support in C++ strings is extremely error-prone by design.
+     *  Depending on traits like `propagate_on_container_copy_assignment` and `propagate_on_container_move_assignment`,
+     *  its state will be copied from one string to another. It goes against the design of most string constructors,
+     *  as they also receive allocator as the last argument!
+     */
+    static_assert(std::is_empty<allocator_type_>::value, "We currently only support stateless allocators");
 
     static void *call_allocate(sz_size_t n, void *allocator_state) noexcept {
-        return reinterpret_cast<allocator_ *>(allocator_state)->allocate(n);
+        return reinterpret_cast<allocator_type_ *>(allocator_state)->allocate(n);
     }
+
     static void call_free(void *ptr, sz_size_t n, void *allocator_state) noexcept {
-        return reinterpret_cast<allocator_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
+        return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
     }
+
     template <typename allocator_callback>
-    static bool with_alloc(allocator_callback &&callback) noexcept {
-        allocator_ allocator;
+    bool with_alloc(allocator_callback &&callback) const noexcept {
+        allocator_type_ allocator;
         sz_memory_allocator_t alloc;
         alloc.allocate = &call_allocate;
         alloc.free = &call_free;
         alloc.handle = &allocator;
-        return callback(alloc) == sz_true_k;
+        return callback(alloc);
+    }
+
+    bool is_internal() const noexcept { return sz_string_is_on_stack(&string_); }
+
+    void init(std::size_t length, char value) noexcept(false) {
+        sz_ptr_t start;
+        if (!with_alloc([&](calloc_type &alloc) { return (start = sz_string_init_length(&string_, length, &alloc)); }))
+            throw std::bad_alloc();
+        sz_fill(start, length, value);
     }
 
     void init(string_view other) noexcept(false) {
+        sz_ptr_t start;
         if (!with_alloc(
-                [&](alloc_t &alloc) { return sz_string_init_from(&string_, other.data(), other.size(), &alloc); }))
+                [&](calloc_type &alloc) { return (start = sz_string_init_length(&string_, other.size(), &alloc)); }))
             throw std::bad_alloc();
-        SZ_ASSERT(size() == other.size(), "");
-        SZ_ASSERT(*this == other, "");
+        sz_copy(start, other.data(), other.size());
     }
 
     void move(basic_string &other) noexcept {
@@ -1211,8 +1231,6 @@ class basic_string {
         sz_string_init(&other.string_); // Discard the other string.
     }
 
-    bool is_internal() const noexcept { return sz_string_is_on_stack(&string_); }
-
   public:
     // Member types
     using traits_type = std::char_traits<char>;
@@ -1228,7 +1246,7 @@ class basic_string {
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
 
-    using allocator_type = allocator_;
+    using allocator_type = allocator_type_;
     using partition_result = string_partition_result<string_view>;
 
     /** @brief  Special value for missing matches. */
@@ -1243,19 +1261,18 @@ class basic_string {
     }
 
     ~basic_string() noexcept {
-        with_alloc([&](alloc_t &alloc) {
+        with_alloc([&](calloc_type &alloc) {
             sz_string_free(&string_, &alloc);
-            return sz_true_k;
+            return true;
         });
     }
 
-    basic_string(basic_string &&other) noexcept : string_(other.string_) { move(other); }
-
+    basic_string(basic_string &&other) noexcept { move(other); }
     basic_string &operator=(basic_string &&other) noexcept {
         if (!is_internal()) {
-            with_alloc([&](alloc_t &alloc) {
+            with_alloc([&](calloc_type &alloc) {
                 sz_string_free(&string_, &alloc);
-                return sz_true_k;
+                return true;
             });
         }
         move(other);
@@ -1273,7 +1290,7 @@ class basic_string {
     basic_string(std::nullptr_t) = delete;
 
     /** @brief  Construct a string by repeating a certain ::character ::count times. */
-    basic_string(size_type count, value_type character) noexcept(false) : basic_string() { resize(count, character); }
+    basic_string(size_type count, value_type character) noexcept(false) { init(count, character); }
 
     basic_string(basic_string const &other, size_type pos) noexcept(false) { init(string_view(other).substr(pos)); }
     basic_string(basic_string const &other, size_type pos, size_type count) noexcept(false) {
@@ -1355,51 +1372,21 @@ class basic_string {
         return *this;
     }
 
-    bool try_resize(size_type count, value_type character = '\0') noexcept {
-        sz_ptr_t string_start;
-        sz_size_t string_length;
-        sz_size_t string_space;
-        sz_bool_t string_is_external;
-        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
+    bool try_resize(size_type count, value_type character = '\0') noexcept;
 
-        // Allocate more space if needed.
-        if (count >= string_space) {
-            if (!with_alloc([&](alloc_t &alloc) { return sz_string_grow(&string_, count + 1, &alloc); })) return false;
-            sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
-        }
+    bool try_assign(string_view other) noexcept;
 
-        // Fill the trailing characters.
-        if (count > string_length) {
-            sz_fill(string_start + string_length, count - string_length, character);
-            string_start[count] = '\0';
-            // Knowing the layout of the string, we can perform this operation safely,
-            // even if its located on stack.
-            string_.external.length += count - string_length;
-        }
-        else { sz_string_erase(&string_, count, sz_size_max); }
-        return true;
-    }
+    bool try_push_back(char c) noexcept;
 
-    bool try_assign(string_view other) noexcept {
-        clear();
-        return try_append(other);
-    }
-
-    bool try_push_back(char c) noexcept {
-        return with_alloc([&](alloc_t &alloc) { return sz_string_append(&string_, &c, 1, &alloc); });
-    }
-
-    bool try_append(char const *str, std::size_t length) noexcept {
-        return with_alloc([&](alloc_t &alloc) { return sz_string_append(&string_, str, length, &alloc); });
-    }
+    bool try_append(const_pointer str, size_type length) noexcept;
 
     bool try_append(string_view str) noexcept { return try_append(str.data(), str.size()); }
 
     size_type edit_distance(string_view other, size_type bound = npos) const noexcept {
         size_type distance;
-        with_alloc([&](alloc_t &alloc) {
+        with_alloc([&](calloc_type &alloc) {
             distance = sz_edit_distance(data(), size(), other.data(), other.size(), bound, &alloc);
-            return sz_true_k;
+            return true;
         });
         return distance;
     }
@@ -1875,6 +1862,77 @@ template <typename allocator_>
 inline range_rsplits<string_view, matcher_find_last_of> basic_string<allocator_>::rsplit(
     character_set set) const noexcept {
     return view().rsplit(set);
+}
+
+template <typename allocator_>
+bool basic_string<allocator_>::try_resize(size_type count, value_type character) noexcept {
+    sz_ptr_t string_start;
+    sz_size_t string_length;
+    sz_size_t string_space;
+    sz_bool_t string_is_external;
+    sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
+
+    // Allocate more space if needed.
+    if (count >= string_space) {
+        if (!with_alloc(
+                [&](calloc_type &alloc) { return sz_string_expand(&string_, sz_size_max, count, &alloc) != NULL; }))
+            return false;
+        sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
+    }
+
+    // Fill the trailing characters.
+    if (count > string_length) {
+        sz_fill(string_start + string_length, count - string_length, character);
+        string_start[count] = '\0';
+        // Knowing the layout of the string, we can perform this operation safely,
+        // even if its located on stack.
+        string_.external.length += count - string_length;
+    }
+    else { sz_string_erase(&string_, count, sz_size_max); }
+    return true;
+}
+
+template <typename allocator_>
+bool basic_string<allocator_>::try_assign(string_view other) noexcept {
+    // We can't just assign the other string state, as its start address may be somewhere else on the stack.
+    sz_ptr_t string_start;
+    sz_size_t string_length;
+    sz_string_range(&string_, &string_start, &string_length);
+
+    if (string_length >= other.length()) {
+        sz_string_erase(&string_, other.length(), sz_size_max);
+        sz_copy(string_start, other.data(), other.length());
+    }
+    else {
+        if (!with_alloc([&](calloc_type &alloc) {
+                string_start = sz_string_expand(&string_, sz_size_max, other.length(), &alloc);
+                if (!string_start) return false;
+                sz_copy(string_start, other.data(), other.length());
+                return true;
+            }))
+            return false;
+    }
+    return true;
+}
+
+template <typename allocator_>
+bool basic_string<allocator_>::try_push_back(char c) noexcept {
+    return with_alloc([&](calloc_type &alloc) {
+        sz_ptr_t start = sz_string_expand(&string_, sz_size_max, 1, &alloc);
+        if (!start) return false;
+        start[size() - 1] = c;
+        return true;
+    });
+}
+
+template <typename allocator_>
+bool basic_string<allocator_>::try_append(const_pointer str, size_type length) noexcept {
+    return with_alloc([&](calloc_type &alloc) {
+        sz_ptr_t start = sz_string_expand(&string_, sz_size_max, 1, &alloc);
+        if (!start) return false;
+        sz_copy(start + size() - 1, str, length);
+        return true;
+    });
 }
 
 } // namespace stringzilla
