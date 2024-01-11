@@ -5,6 +5,7 @@
 #include <iterator>  // `std::distance`
 #include <memory>    // `std::allocator`
 #include <random>    // `std::random_device`
+#include <sstream>   // `std::ostringstream`
 #include <vector>    // `std::vector`
 
 // Overload the following with caution.
@@ -108,11 +109,176 @@ static void test_arithmetical_utilities() {
     }
 
 /**
- *  @brief  Invokes different C++ member methods of the string class to make sure they all pass compilation.
- *          This test guarantees API compatibility with STL `std::basic_string` template.
+ *  @brief  Invokes different C++ member methods of the memory-owning string class to make sure they all pass
+ *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
-static void test_compilation() {
+static void test_api_readonly() {
+
+    using str = string_type;
+
+    // Constructors.
+    assert(str().empty());             // Test default constructor
+    assert(str("hello").size() == 5);  // Test constructor with c-string
+    assert(str("hello", 4) == "hell"); // Construct from substring
+
+    // Element access.
+    assert(str("test")[0] == 't');
+    assert(str("test").at(1) == 'e');
+    assert(str("front").front() == 'f');
+    assert(str("back").back() == 'k');
+    assert(*str("data").data() == 'd');
+
+    // Iterators.
+    assert(*str("begin").begin() == 'b' && *str("cbegin").cbegin() == 'c');
+    assert(*str("rbegin").rbegin() == 'n' && *str("crbegin").crbegin() == 'n');
+    assert(str("size").size() == 4 && str("length").length() == 6);
+
+    // Slices... out-of-bounds exceptions are asymetric!
+    // Moreover, `std::string` has no `remove_prefix` and `remove_suffix` methods.
+    // assert_scoped(str s = "hello", s.remove_prefix(1), s == "ello");
+    // assert_scoped(str s = "hello", s.remove_suffix(1), s == "hell");
+    assert(str("hello world").substr(0, 5) == "hello");
+    assert(str("hello world").substr(6, 5) == "world");
+    assert(str("hello world").substr(6) == "world");
+    assert(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
+    assert_throws(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
+    assert_throws(str("hello world").substr(20, 5), std::out_of_range); // 20 is beyond the length of the string
+    assert_throws(str("hello world").substr(-1, 5), std::out_of_range); // -1 casts to unsigned without any warnings...
+    assert(str("hello world").substr(0, -1) == "hello world");          // -1 casts to unsigned without any warnings...
+
+    // Substring and character search in normal and reverse directions.
+    assert(str("hello").find("ell") == 1);
+    assert(str("hello").find("ell", 1) == 1);
+    assert(str("hello").find("ell", 2) == str::npos);
+    assert(str("hello").find("ell", 1, 2) == 1);
+    assert(str("hello").rfind("l") == 3);
+    assert(str("hello").rfind("l", 2) == 2);
+    assert(str("hello").rfind("l", 1) == str::npos);
+
+    // ! `rfind` and `find_last_of` are not consitent in meaning of their arguments.
+    assert(str("hello").find_first_of("le") == 1);
+    assert(str("hello").find_first_of("le", 1) == 1);
+    assert(str("hello").find_last_of("le") == 3);
+    assert(str("hello").find_last_of("le", 2) == 2);
+    assert(str("hello").find_first_not_of("hel") == 4);
+    assert(str("hello").find_first_not_of("hel", 1) == 4);
+    assert(str("hello").find_last_not_of("hel") == 4);
+    assert(str("hello").find_last_not_of("hel", 4) == 4);
+
+    // Comparisons.
+    assert(str("a") != str("b"));
+    assert(str("a") < str("b"));
+    assert(str("a") <= str("b"));
+    assert(str("b") > str("a"));
+    assert(str("b") >= str("a"));
+    assert(str("a") < str("aa"));
+
+#if SZ_DETECT_CPP_20 && __cpp_lib_three_way_comparison
+    // Spaceship operator instead of conventional comparions.
+    assert((str("a") <=> str("b")) == std::strong_ordering::less);
+    assert((str("b") <=> str("a")) == std::strong_ordering::greater);
+    assert((str("b") <=> str("b")) == std::strong_ordering::equal);
+    assert((str("a") <=> str("aa")) == std::strong_ordering::less);
+#endif
+
+    // Compare with another `str`.
+    assert(str("test").compare(str("test")) == 0);   // Equal strings
+    assert(str("apple").compare(str("banana")) < 0); // "apple" is less than "banana"
+    assert(str("banana").compare(str("apple")) > 0); // "banana" is greater than "apple"
+
+    // Compare with a C-string.
+    assert(str("test").compare("test") == 0); // Equal to C-string "test"
+    assert(str("alpha").compare("beta") < 0); // "alpha" is less than C-string "beta"
+    assert(str("beta").compare("alpha") > 0); // "beta" is greater than C-string "alpha"
+
+    // Compare substring with another `str`.
+    assert(str("hello world").compare(0, 5, str("hello")) == 0); // Substring "hello" is equal to "hello"
+    assert(str("hello world").compare(6, 5, str("earth")) > 0);  // Substring "world" is greater than "earth"
+    assert(str("hello world").compare(6, 5, str("worlds")) < 0); // Substring "world" is less than "worlds"
+    assert_throws(str("hello world").compare(20, 5, str("worlds")), std::out_of_range);
+
+    // Compare substring with another `str`'s substring.
+    assert(str("hello world").compare(0, 5, str("say hello"), 4, 5) == 0);      // Substring "hello" in both strings
+    assert(str("hello world").compare(6, 5, str("world peace"), 0, 5) == 0);    // Substring "world" in both strings
+    assert(str("hello world").compare(6, 5, str("a better world"), 9, 5) == 0); // Both substrings are "world"
+
+    // Out of bounds cases for both compared strings.
+    assert_throws(str("hello world").compare(20, 5, str("a better world"), 9, 5), std::out_of_range);
+    assert_throws(str("hello world").compare(6, 5, str("a better world"), 90, 5), std::out_of_range);
+
+    // Compare substring with a C-string.
+    assert(str("hello world").compare(0, 5, "hello") == 0); // Substring "hello" is equal to C-string "hello"
+    assert(str("hello world").compare(6, 5, "earth") > 0);  // Substring "world" is greater than C-string "earth"
+    assert(str("hello world").compare(6, 5, "worlds") < 0); // Substring "world" is greater than C-string "worlds"
+
+    // Compare substring with a C-string's prefix.
+    assert(str("hello world").compare(0, 5, "hello Ash", 5) == 0); // Substring "hello" in both strings
+    assert(str("hello world").compare(6, 5, "worlds", 5) == 0);    // Substring "world" in both strings
+    assert(str("hello world").compare(6, 5, "worlds", 6) < 0);     // Substring "world" is less than "worlds"
+
+#if SZ_DETECT_CPP_20 && __cpp_lib_starts_ends_with
+    // Prefix and suffix checks against strings.
+    assert(str("https://cppreference.com").starts_with(str("http")) == true);
+    assert(str("https://cppreference.com").starts_with(str("ftp")) == false);
+    assert(str("https://cppreference.com").ends_with(str("com")) == true);
+    assert(str("https://cppreference.com").ends_with(str("org")) == false);
+
+    // Prefix and suffix checks against characters.
+    assert(str("C++20").starts_with('C') == true);
+    assert(str("C++20").starts_with('J') == false);
+    assert(str("C++20").ends_with('0') == true);
+    assert(str("C++20").ends_with('3') == false);
+
+    // Prefix and suffix checks against C-style strings.
+    assert(str("string_view").starts_with("string") == true);
+    assert(str("string_view").starts_with("String") == false);
+    assert(str("string_view").ends_with("view") == true);
+    assert(str("string_view").ends_with("View") == false);
+#endif
+
+#if SZ_DETECT_CPP_23 && __cpp_lib_string_contains
+    // Checking basic substring presense.
+    assert(str("hello").contains(str("ell")) == true);
+    assert(str("hello").contains(str("oll")) == false);
+    assert(str("hello").contains('l') == true);
+    assert(str("hello").contains('x') == false);
+    assert(str("hello").contains("lo") == true);
+    assert(str("hello").contains("lx") == false);
+#endif
+
+    // Exporting the contents of the string using the `str::copy` method.
+    assert_scoped(char buf[5 + 1] = {0}, str("hello").copy(buf, 5), std::strcmp(buf, "hello") == 0);
+    assert_scoped(char buf[4 + 1] = {0}, str("hello").copy(buf, 4, 1), std::strcmp(buf, "ello") == 0);
+    assert_throws(str("hello").copy(NULL, 1, 100), std::out_of_range);
+
+    // Swaps.
+    {
+        str s1 = "hello";
+        str s2 = "world";
+        s1.swap(s2);
+        assert(s1 == "world" && s2 == "hello");
+        s1.swap(s1); // Swapping with itself.
+        assert(s1 == "world");
+    }
+
+    // Make sure the standard hash and function-objects instantiate just fine.
+    assert(std::hash<str> {}("hello") != 0);
+    assert_scoped(std::ostringstream os, os << str("hello"), os.str() == "hello");
+
+#if SZ_DETECT_CPP_14
+    // Comparison function objects are a C++14 feature.
+    assert(std::equal_to<str> {}("hello", "world") == false);
+    assert(std::less<str> {}("hello", "world") == true);
+#endif
+}
+
+/**
+ *  @brief  Invokes different C++ member methods of the memory-owning string class to make sure they all pass
+ *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
+ */
+template <typename string_type>
+static void test_api_mutable() {
 
     using str = string_type;
 
@@ -135,22 +301,13 @@ static void test_compilation() {
     assert_scoped(str s, s.assign(str("hello"), 2), s == "llo");
     assert_scoped(str s, s.assign(str("hello"), 2, 2), s == "ll");
 
-    // Comparisons.
-    assert(str("a") != str("b"));
-    assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
-    assert(str("a") < str("b"));
-    assert(str("a") <= str("b"));
-    assert(str("b") > str("a"));
-    assert(str("b") >= str("a"));
-    assert(str("a") < str("aa"));
-
     // Allocations, capacity and memory management.
     assert_scoped(str s, s.reserve(10), s.capacity() >= 10);
     assert_scoped(str s, s.resize(10), s.size() == 10);
     assert_scoped(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
-    assert(str("size").size() == 4 && str("length").length() == 6);
     assert(str().max_size() > 0);
     assert(str().get_allocator() == std::allocator<char>());
+    assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
@@ -173,8 +330,8 @@ static void test_compilation() {
     assert_scoped(str s = "__", s.insert(1, str("test")), s == "_test_");
     assert_scoped(str s = "__", s.insert(1, str("test"), 2), s == "_st_");
     assert_scoped(str s = "__", s.insert(1, str("test"), 2, 1), s == "_s_");
-    assert_throws(str("hello").insert(6, "world"), std::out_of_range);         // index > size()
-    assert_throws(str("hello").insert(5, str("world"), 6), std::out_of_range); // s_index > str.size()
+    assert_throws(str("hello").insert(6, "world"), std::out_of_range);         // `index > size()` case from STL
+    assert_throws(str("hello").insert(5, str("world"), 6), std::out_of_range); // `s_index > str.size()` case from STL
 
     // Erasure.
     assert_scoped(str s = "test", s.erase(1, 2), s == "tt");
@@ -182,46 +339,6 @@ static void test_compilation() {
     assert_scoped(str s = "test", s.erase(s.begin() + 1), s == "tst");
     assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
     assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
-
-    // Element access.
-    assert(str("test")[0] == 't');
-    assert(str("test").at(1) == 'e');
-    assert(str("front").front() == 'f');
-    assert(str("back").back() == 'k');
-    assert(*str("data").data() == 'd');
-
-    // Iterators.
-    assert(*str("begin").begin() == 'b' && *str("cbegin").cbegin() == 'c');
-    assert(*str("rbegin").rbegin() == 'n' && *str("crbegin").crbegin() == 'n');
-
-    // Slices... out-of-bounds exceptions are asymetric!
-    assert(str("hello world").substr(0, 5) == "hello");
-    assert(str("hello world").substr(6, 5) == "world");
-    assert(str("hello world").substr(6) == "world");
-    assert(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
-    assert_throws(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
-    assert_throws(str("hello world").substr(20, 5), std::out_of_range); // 20 is byond the length of the string
-    assert_throws(str("hello world").substr(-1, 5), std::out_of_range); // -1 casts to unsigned without any warnings...
-    assert(str("hello world").substr(0, -1) == "hello world");          // -1 casts to unsigned without any warnings...
-
-    // Substring and character search in normal and reverse directions.
-    assert(str("hello").find("ell") == 1);
-    assert(str("hello").find("ell", 1) == 1);
-    assert(str("hello").find("ell", 2) == str::npos);
-    assert(str("hello").find("ell", 1, 2) == 1);
-    assert(str("hello").rfind("l") == 3);
-    assert(str("hello").rfind("l", 2) == 2);
-    assert(str("hello").rfind("l", 1) == str::npos);
-
-    // ! `rfind` and `find_last_of` are not consitent in meaning of their arguments.
-    assert(str("hello").find_first_of("le") == 1);
-    assert(str("hello").find_first_of("le", 1) == 1);
-    assert(str("hello").find_last_of("le") == 3);
-    assert(str("hello").find_last_of("le", 2) == 2);
-    assert(str("hello").find_first_not_of("hel") == 4);
-    assert(str("hello").find_first_not_of("hel", 1) == 4);
-    assert(str("hello").find_last_not_of("hel") == 4);
-    assert(str("hello").find_last_not_of("hel", 4) == 4);
 
     // Substitutions.
     assert(str("hello").replace(1, 2, "123") == "h123lo");
@@ -723,8 +840,14 @@ int main(int argc, char const **argv) {
     test_arithmetical_utilities();
 
     // Compatibility with STL
-    test_compilation<std::string>(); // Make sure the test itself is reasonable
-    // test_compilation<sz::string>(); // To early for this...
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+    test_api_readonly<std::string_view>();
+#endif
+    test_api_readonly<sz::string_view>();
+    test_api_readonly<std::string>();
+    // test_api_readonly<sz::string>();
+    test_api_mutable<std::string>(); // Make sure the test itself is reasonable
+    // test_api_mutable<sz::string>();  // The fact that this compiles is already a miracle :)
 
     // The string class implementation
     test_constructors();
