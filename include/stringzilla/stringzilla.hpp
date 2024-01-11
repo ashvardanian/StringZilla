@@ -35,6 +35,16 @@
 #define SZ_PREFER_VIEWS 0
 #endif
 
+/*  We need to detect the version of the C++ language we are compiled with.
+ *  This will affect recent features like `operator<=>` and tests against STL.
+ */
+#define SZ_DETECT_CPP_23 (__cplusplus >= 202101L)
+#define SZ_DETECT_CPP_20 (__cplusplus >= 202002L)
+#define SZ_DETECT_CPP_17 (__cplusplus >= 201703L)
+#define SZ_DETECT_CPP_14 (__cplusplus >= 201402L)
+#define SZ_DETECT_CPP_11 (__cplusplus >= 201103L)
+#define SZ_DETECT_CPP_98 (__cplusplus >= 199711L)
+
 #if SZ_INCLUDE_STL_CONVERSIONS
 #include <string>
 #include <string_view>
@@ -42,11 +52,14 @@
 
 #include <cassert> // `assert`
 #include <cstddef> // `std::size_t`
+#include <iosfwd>  // `std::basic_ostream`
 
 #include <stringzilla/stringzilla.h>
 
 namespace ashvardanian {
 namespace stringzilla {
+
+#pragma region Character Sets
 
 /**
  *  @brief  The concatenation of the `ascii_lowercase` and `ascii_uppercase`. This value is not locale-dependent.
@@ -203,16 +216,9 @@ inline constexpr static character_set whitespaces_set {whitespaces};
 inline constexpr static character_set newlines_set {newlines};
 inline constexpr static character_set base64_set {base64};
 
-/**
- *  @brief  A result of split a string once, containing the string slice ::before,
- *          the ::match itself, and the slice ::after.
- */
-template <typename string_>
-struct string_partition_result {
-    string_ before;
-    string_ match;
-    string_ after;
-};
+#pragma endregion
+
+#pragma region Ranges of Search Matches
 
 /**
  *  @brief  Zero-cost wrapper around the `.find` member function of string-like classes.
@@ -705,6 +711,21 @@ range_rsplits<string, matcher_find_last_not_of> rsplit_other_characters(string h
     return {h, n};
 }
 
+#pragma endregion
+
+#pragma region Helper Template Classes
+
+/**
+ *  @brief  A result of split a string once, containing the string slice ::before,
+ *          the ::match itself, and the slice ::after.
+ */
+template <typename string_>
+struct string_partition_result {
+    string_ before;
+    string_ match;
+    string_ after;
+};
+
 /**
  *  @brief  A reverse iterator for mutable and immutable character buffers.
  *          Replaces `std::reverse_iterator` to avoid including `<iterator>`.
@@ -754,6 +775,10 @@ class reversed_iterator_for {
     value_type_ *ptr_;
 };
 
+#pragma endregion
+
+#pragma region String Views/Spans
+
 /**
  *  @brief  A string view class implementing with the superset of C++23 functionality
  *          with much faster SIMD-accelerated substring search and approximate matching.
@@ -783,6 +808,8 @@ class string_view {
     /** @brief  Special value for missing matches. */
     static constexpr size_type npos = size_type(-1);
 
+#pragma region Constructors and Converters
+
     constexpr string_view() noexcept : start_(nullptr), length_(0) {}
     constexpr string_view(const_pointer c_string) noexcept
         : start_(c_string), length_(null_terminated_length(c_string)) {}
@@ -811,14 +838,18 @@ class string_view {
     inline operator std::string_view() const noexcept { return {data(), size()}; }
 #endif
 
-    inline const_iterator begin() const noexcept { return const_iterator(start_); }
-    inline const_iterator end() const noexcept { return const_iterator(start_ + length_); }
+#pragma endregion
+
+#pragma region Iterators and Element Access
+
+    inline iterator begin() const noexcept { return iterator(start_); }
+    inline iterator end() const noexcept { return iterator(start_ + length_); }
     inline const_iterator cbegin() const noexcept { return const_iterator(start_); }
     inline const_iterator cend() const noexcept { return const_iterator(start_ + length_); }
-    inline const_reverse_iterator rbegin() const noexcept;
-    inline const_reverse_iterator rend() const noexcept;
-    inline const_reverse_iterator crbegin() const noexcept;
-    inline const_reverse_iterator crend() const noexcept;
+    inline reverse_iterator rbegin() const noexcept { return reverse_iterator(end() - 1); }
+    inline reverse_iterator rend() const noexcept { return reverse_iterator(begin() - 1); }
+    inline const_reverse_iterator crbegin() const noexcept { return const_reverse_iterator(end() - 1); }
+    inline const_reverse_iterator crend() const noexcept { return const_reverse_iterator(begin() - 1); }
 
     inline const_reference operator[](size_type pos) const noexcept { return start_[pos]; }
     inline const_reference at(size_type pos) const noexcept { return start_[pos]; }
@@ -831,29 +862,56 @@ class string_view {
     inline size_type max_size() const noexcept { return sz_size_max; }
     inline bool empty() const noexcept { return length_ == 0; }
 
-    /** @brief Removes the first `n` characters from the view. The behavior is undefined if `n > size()`. */
+#pragma endregion
+
+#pragma region Slicing
+
+    /** @brief Removes the first `n` characters from the view. The behavior is @b undefined if `n > size()`. */
     inline void remove_prefix(size_type n) noexcept { assert(n <= size()), start_ += n, length_ -= n; }
 
-    /** @brief Removes the last `n` characters from the view. The behavior is undefined if `n > size()`. */
+    /** @brief Removes the last `n` characters from the view. The behavior is @b undefined if `n > size()`. */
     inline void remove_suffix(size_type n) noexcept { assert(n <= size()), length_ -= n; }
-
-    /** @brief Exchanges the view with that of the `other`. */
-    inline void swap(string_view &other) noexcept {
-        std::swap(start_, other.start_), std::swap(length_, other.length_);
-    }
 
     /** @brief  Added for STL compatibility. */
     inline string_view substr() const noexcept { return *this; }
 
-    /** @brief  Equivalent of `remove_prefix(pos)`. The behavior is undefined if `pos > size()`. */
-    inline string_view substr(size_type pos) const noexcept { return string_view(start_ + pos, length_ - pos); }
-
-    /** @brief  Returns a sub-view [pos, pos + rlen), where `rlen` is the smaller of count and `size() - pos`.
-     *          Equivalent to `substr(pos).substr(0, count)` or combining `remove_prefix` and `remove_suffix`.
-     *          The behavior is undefined if `pos > size()`.  */
-    inline string_view substr(size_type pos, size_type count) const noexcept {
-        return string_view(start_ + pos, sz_min_of_two(count, length_ - pos));
+    /**
+     *  @brief  Return a slice of this view after first `skip` bytes.
+     *  @throws `std::out_of_range` if `skip > size()`.
+     *  @see    `sub` for a cleaner exception-less alternative.
+     */
+    inline string_view substr(size_type skip) const noexcept(false) {
+        if (skip > size()) throw std::out_of_range("string_view::substr");
+        return string_view(start_ + skip, length_ - skip);
     }
+
+    /**
+     *  @brief  Return a slice of this view after first `skip` bytes, taking at most `count` bytes.
+     *  @throws `std::out_of_range` if `skip > size()`.
+     *  @see    `sub` for a cleaner exception-less alternative.
+     */
+    inline string_view substr(size_type skip, size_type count) const noexcept(false) {
+        if (skip > size()) throw std::out_of_range("string_view::substr");
+        return string_view(start_ + skip, sz_min_of_two(count, length_ - skip));
+    }
+
+    /**
+     *  @brief  Exports a slice of this view after first `skip` bytes, taking at most `count` bytes.
+     *  @throws `std::out_of_range` if `skip > size()`.
+     *  @see    `sub` for a cleaner exception-less alternative.
+     */
+    inline size_type copy(pointer destination, size_type count, size_type skip = 0) const noexcept(false) {
+        if (skip > size()) throw std::out_of_range("string_view::copy");
+        count = sz_min_of_two(count, length_ - skip);
+        sz_copy(destination, start_ + skip, count);
+        return count;
+    }
+
+#pragma endregion
+
+#pragma region Comparisons
+
+#pragma region Whole String Comparisons
 
     /**
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
@@ -865,18 +923,22 @@ class string_view {
 
     /**
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
+     *          Equivalent to `substr(pos1, count1).compare(other)`.
      *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
+     *  @throw  `std::out_of_range` if `pos1 > size()`.
      */
-    inline int compare(size_type pos1, size_type count1, string_view other) const noexcept {
+    inline int compare(size_type pos1, size_type count1, string_view other) const noexcept(false) {
         return substr(pos1, count1).compare(other);
     }
 
     /**
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
+     *          Equivalent to `substr(pos1, count1).compare(other.substr(pos2, count2))`.
      *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
+     *  @throw  `std::out_of_range` if `pos1 > size()` or if `pos2 > other.size()`.
      */
-    inline int compare(size_type pos1, size_type count1, string_view other, size_type pos2,
-                       size_type count2) const noexcept {
+    inline int compare(size_type pos1, size_type count1, string_view other, size_type pos2, size_type count2) const
+        noexcept(false) {
         return substr(pos1, count1).compare(other.substr(pos2, count2));
     }
 
@@ -888,17 +950,21 @@ class string_view {
 
     /**
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
+     *          Equivalent to substr(pos1, count1).compare(other).
      *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
+     *  @throw  `std::out_of_range` if `pos1 > size()`.
      */
-    inline int compare(size_type pos1, size_type count1, const_pointer other) const noexcept {
+    inline int compare(size_type pos1, size_type count1, const_pointer other) const noexcept(false) {
         return substr(pos1, count1).compare(string_view(other));
     }
 
     /**
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
+     *          Equivalent to `substr(pos1, count1).compare({s, count2})`.
      *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
+     *  @throw  `std::out_of_range` if `pos1 > size()`.
      */
-    inline int compare(size_type pos1, size_type count1, const_pointer other, size_type count2) const noexcept {
+    inline int compare(size_type pos1, size_type count1, const_pointer other, size_type count2) const noexcept(false) {
         return substr(pos1, count1).compare(string_view(other, count2));
     }
 
@@ -907,40 +973,36 @@ class string_view {
         return length_ == other.length_ && sz_equal(start_, other.start_, other.length_) == sz_true_k;
     }
 
-#if __cplusplus >= 201402L
-#define sz_deprecate_compare [[deprecated("Use the three-way comparison operator (<=>) in C++20 and later")]]
+#if SZ_DETECT_CPP_20
+
+    /** @brief  Computes the lexicographic ordering between this and the ::other string. */
+    inline std::strong_ordering operator<=>(string_view other) const noexcept {
+        std::strong_ordering orders[3] {std::strong_ordering::less, std::strong_ordering::equal,
+                                        std::strong_ordering::greater};
+        return orders[compare(other) + 1];
+    }
+
 #else
-#define sz_deprecate_compare
-#endif
 
     /** @brief  Checks if the string is not equal to the other string. */
-    sz_deprecate_compare inline bool operator!=(string_view other) const noexcept {
-        return length_ != other.length_ || sz_equal(start_, other.start_, other.length_) == sz_false_k;
-    }
+    inline bool operator!=(string_view other) const noexcept { return !operator==(other); }
 
     /** @brief  Checks if the string is lexicographically smaller than the other string. */
-    sz_deprecate_compare inline bool operator<(string_view other) const noexcept { return compare(other) == sz_less_k; }
+    inline bool operator<(string_view other) const noexcept { return compare(other) == sz_less_k; }
 
     /** @brief  Checks if the string is lexicographically equal or smaller than the other string. */
-    sz_deprecate_compare inline bool operator<=(string_view other) const noexcept {
-        return compare(other) != sz_greater_k;
-    }
+    inline bool operator<=(string_view other) const noexcept { return compare(other) != sz_greater_k; }
 
     /** @brief  Checks if the string is lexicographically greater than the other string. */
-    sz_deprecate_compare inline bool operator>(string_view other) const noexcept {
-        return compare(other) == sz_greater_k;
-    }
+    inline bool operator>(string_view other) const noexcept { return compare(other) == sz_greater_k; }
 
     /** @brief  Checks if the string is lexicographically equal or greater than the other string. */
-    sz_deprecate_compare inline bool operator>=(string_view other) const noexcept {
-        return compare(other) != sz_less_k;
-    }
+    inline bool operator>=(string_view other) const noexcept { return compare(other) != sz_less_k; }
 
-#if __cplusplus >= 202002L
-
-    /** @brief  Checks if the string is not equal to the other string. */
-    inline int operator<=>(string_view other) const noexcept { return compare(other); }
 #endif
+
+#pragma endregion
+#pragma region Prefix and Suffix Comparisons
 
     /** @brief  Checks if the string starts with the other string. */
     inline bool starts_with(string_view other) const noexcept {
@@ -971,102 +1033,6 @@ class string_view {
     /** @brief  Checks if the string ends with the other character. */
     inline bool ends_with(value_type other) const noexcept { return length_ && start_[length_ - 1] == other; }
 
-    /** @brief  Find the first occurrence of a substring. */
-    inline size_type find(string_view other) const noexcept {
-        auto ptr = sz_find(start_, length_, other.start_, other.length_);
-        return ptr ? ptr - start_ : npos;
-    }
-
-    /** @brief  Find the first occurrence of a substring. The behavior is undefined if `pos > size()`. */
-    inline size_type find(string_view other, size_type pos) const noexcept { return substr(pos).find(other); }
-
-    /** @brief  Find the first occurrence of a character. */
-    inline size_type find(value_type character) const noexcept {
-        auto ptr = sz_find_byte(start_, length_, &character);
-        return ptr ? ptr - start_ : npos;
-    }
-
-    /** @brief  Find the first occurrence of a character. The behavior is undefined if `pos > size()`. */
-    inline size_type find(value_type character, size_type pos) const noexcept { return substr(pos).find(character); }
-
-    /** @brief  Find the first occurrence of a substring. The behavior is undefined if `pos > size()`. */
-    inline size_type find(const_pointer other, size_type pos, size_type count) const noexcept {
-        return substr(pos).find(string_view(other, count));
-    }
-
-    /** @brief  Find the first occurrence of a substring. The behavior is undefined if `pos > size()`. */
-    inline size_type find(const_pointer other, size_type pos = 0) const noexcept {
-        return substr(pos).find(string_view(other));
-    }
-
-    /** @brief  Find the first occurrence of a substring. */
-    inline size_type rfind(string_view other) const noexcept {
-        auto ptr = sz_find_last(start_, length_, other.start_, other.length_);
-        return ptr ? ptr - start_ : npos;
-    }
-
-    /** @brief  Find the first occurrence of a substring. The behavior is undefined if `pos > size()`. */
-    inline size_type rfind(string_view other, size_type pos) const noexcept { return substr(pos).rfind(other); }
-
-    /** @brief  Find the first occurrence of a character. */
-    inline size_type rfind(value_type character) const noexcept {
-        auto ptr = sz_find_last_byte(start_, length_, &character);
-        return ptr ? ptr - start_ : npos;
-    }
-
-    /** @brief  Find the first occurrence of a character. The behavior is undefined if `pos > size()`. */
-    inline size_type rfind(value_type character, size_type pos) const noexcept { return substr(pos).rfind(character); }
-
-    /** @brief  Find the first occurrence of a substring. The behavior is undefined if `pos > size()`. */
-    inline size_type rfind(const_pointer other, size_type pos, size_type count) const noexcept {
-        return substr(pos).rfind(string_view(other, count));
-    }
-
-    /** @brief  Find the first occurrence of a substring. The behavior is undefined if `pos > size()`. */
-    inline size_type rfind(const_pointer other, size_type pos = 0) const noexcept {
-        return substr(pos).rfind(string_view(other));
-    }
-
-    inline bool contains(string_view other) const noexcept { return find(other) != npos; }
-    inline bool contains(value_type character) const noexcept { return find(character) != npos; }
-    inline bool contains(const_pointer other) const noexcept { return find(other) != npos; }
-
-    /** @brief  Find the first occurrence of a character from a set. */
-    inline size_type find_first_of(string_view other) const noexcept { return find_first_of(other.as_set()); }
-
-    /** @brief  Find the first occurrence of a character outside of the set. */
-    inline size_type find_first_not_of(string_view other) const noexcept { return find_first_not_of(other.as_set()); }
-
-    /** @brief  Find the last occurrence of a character from a set. */
-    inline size_type find_last_of(string_view other) const noexcept { return find_last_of(other.as_set()); }
-
-    /** @brief  Find the last occurrence of a character outside of the set. */
-    inline size_type find_last_not_of(string_view other) const noexcept { return find_last_not_of(other.as_set()); }
-
-    /** @brief  Find the first occurrence of a character from a set. */
-    inline size_type find_first_of(character_set set) const noexcept {
-        auto ptr = sz_find_from_set(start_, length_, &set.raw());
-        return ptr ? ptr - start_ : npos;
-    }
-
-    /** @brief  Find the first occurrence of a character from a set. */
-    inline size_type find(character_set set) const noexcept { return find_first_of(set); }
-
-    /** @brief  Find the first occurrence of a character outside of the set. */
-    inline size_type find_first_not_of(character_set set) const noexcept { return find_first_of(set.inverted()); }
-
-    /** @brief  Find the last occurrence of a character from a set. */
-    inline size_type find_last_of(character_set set) const noexcept {
-        auto ptr = sz_find_last_from_set(start_, length_, &set.raw());
-        return ptr ? ptr - start_ : npos;
-    }
-
-    /** @brief  Find the last occurrence of a character from a set. */
-    inline size_type rfind(character_set set) const noexcept { return find_last_of(set); }
-
-    /** @brief  Find the last occurrence of a character outside of the set. */
-    inline size_type find_last_not_of(character_set set) const noexcept { return find_last_of(set.inverted()); }
-
     /** @brief  Python-like convinience function, dropping the matching prefix. */
     inline string_view remove_prefix(string_view other) const noexcept {
         return starts_with(other) ? string_view {start_ + other.length_, length_ - other.length_} : *this;
@@ -1076,6 +1042,252 @@ class string_view {
     inline string_view remove_suffix(string_view other) const noexcept {
         return ends_with(other) ? string_view {start_, length_ - other.length_} : *this;
     }
+
+#pragma endregion
+#pragma endregion
+
+#pragma region Matching Substrings
+
+    inline bool contains(string_view other) const noexcept { return find(other) != npos; }
+    inline bool contains(value_type character) const noexcept { return find(character) != npos; }
+    inline bool contains(const_pointer other) const noexcept { return find(other) != npos; }
+
+#pragma region Returning offsets
+
+    /**
+     *  @brief  Find the first occurrence of a substring, skipping the first `skip` characters.
+     *          The behavior is @b undefined if `skip > size()`.
+     *  @return The offset of the first character of the match, or `npos` if not found.
+     */
+    inline size_type find(string_view other, size_type skip = 0) const noexcept {
+        auto ptr = sz_find(start_ + skip, length_ - skip, other.start_, other.length_);
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief  Find the first occurrence of a character, skipping the first `skip` characters.
+     *          The behavior is @b undefined if `skip > size()`.
+     *  @return The offset of the match, or `npos` if not found.
+     */
+    inline size_type find(value_type character, size_type skip = 0) const noexcept {
+        auto ptr = sz_find_byte(start_ + skip, length_ - skip, &character);
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief  Find the first occurrence of a substring, skipping the first `skip` characters.
+     *          The behavior is @b undefined if `skip > size()`.
+     *  @return The offset of the first character of the match, or `npos` if not found.
+     */
+    inline size_type find(const_pointer other, size_type pos, size_type count) const noexcept {
+        return find(string_view(other, count), pos);
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a substring.
+     *  @return The offset of the first character of the match, or `npos` if not found.
+     */
+    inline size_type rfind(string_view other) const noexcept {
+        auto ptr = sz_find_last(start_, length_, other.start_, other.length_);
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a substring, within first `until` characters.
+     *  @return The offset of the first character of the match, or `npos` if not found.
+     */
+    inline size_type rfind(string_view other, size_type until) const noexcept {
+        return until < length_ ? substr(0, until + 1).rfind(other) : rfind(other);
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a character.
+     *  @return The offset of the match, or `npos` if not found.
+     */
+    inline size_type rfind(value_type character) const noexcept {
+        auto ptr = sz_find_last_byte(start_, length_, &character);
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a character, within first `until` characters.
+     *  @return The offset of the match, or `npos` if not found.
+     */
+    inline size_type rfind(value_type character, size_type until) const noexcept {
+        return until < length_ ? substr(0, until + 1).rfind(character) : rfind(character);
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a substring, within first `until` characters.
+     *  @return The offset of the first character of the match, or `npos` if not found.
+     */
+    inline size_type rfind(const_pointer other, size_type until, size_type count) const noexcept {
+        return rfind(string_view(other, count), until);
+    }
+
+    /** @brief  Find the first occurrence of a character from a set. */
+    inline size_type find(character_set set) const noexcept { return find_first_of(set); }
+
+    /** @brief  Find the last occurrence of a character from a set. */
+    inline size_type rfind(character_set set) const noexcept { return find_last_of(set); }
+
+#pragma endregion
+#pragma region Returning Partitions
+
+    /** @brief  Split the string into three parts, before the match, the match itself, and after it. */
+    inline partition_result partition(string_view pattern) const noexcept {
+        return partition_(pattern, pattern.length());
+    }
+
+    /** @brief  Split the string into three parts, before the match, the match itself, and after it. */
+    inline partition_result partition(character_set pattern) const noexcept { return partition_(pattern, 1); }
+
+    /** @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
+    inline partition_result rpartition(string_view pattern) const noexcept {
+        return rpartition_(pattern, pattern.length());
+    }
+
+    /** @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
+    inline partition_result rpartition(character_set pattern) const noexcept { return rpartition_(pattern, 1); }
+
+#pragma endregion
+#pragma endregion
+
+#pragma region Matching Character Sets
+
+    inline bool contains_only(character_set set) const noexcept { return find_first_not_of(set) == npos; }
+    inline bool isalpha() const noexcept { return !empty() && contains_only(ascii_letters_set); }
+    inline bool isalnum() const noexcept { return !empty() && contains_only(ascii_letters_set | digits_set); }
+    inline bool isascii() const noexcept { return empty() || contains_only(ascii_controls_set | ascii_printables_set); }
+    inline bool isdigit() const noexcept { return !empty() && contains_only(digits_set); }
+    inline bool islower() const noexcept { return !empty() && contains_only(ascii_lowercase_set); }
+    inline bool isspace() const noexcept { return !empty() && contains_only(whitespaces_set); }
+    inline bool isupper() const noexcept { return !empty() && contains_only(ascii_uppercase_set); }
+    inline bool isprintable() const noexcept { return empty() || contains_only(ascii_printables_set); }
+
+#pragma region Character Set Arguments
+    /**
+     *  @brief  Find the first occurrence of a character from a set.
+     *  @param  skip Number of characters to skip before the search.
+     *  @warning The behavior is @b undefined if `skip > size()`.
+     */
+    inline size_type find_first_of(character_set set, size_type skip = 0) const noexcept {
+        auto ptr = sz_find_from_set(start_ + skip, length_ - skip, &set.raw());
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief  Find the first occurrence of a character outside a set.
+     *  @param  skip  The number of first characters to be skipped.
+     *  @warning The behavior is @b undefined if `skip > size()`.
+     */
+    inline size_type find_first_not_of(character_set set, size_type skip = 0) const noexcept {
+        return find_first_of(set.inverted(), skip);
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a character from a set.
+     */
+    inline size_type find_last_of(character_set set) const noexcept {
+        auto ptr = sz_find_last_from_set(start_, length_, &set.raw());
+        return ptr ? ptr - start_ : npos;
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a character outside a set.
+     */
+    inline size_type find_last_not_of(character_set set) const noexcept { return find_last_of(set.inverted()); }
+
+    /**
+     *  @brief  Find the last occurrence of a character from a set.
+     *  @param  until  The offset of the last character to be considered.
+     */
+    inline size_type find_last_of(character_set set, size_type until) const noexcept {
+        return until < length_ ? substr(0, until + 1).find_last_of(set) : find_last_of(set);
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a character outside a set.
+     *  @param  until  The offset of the last character to be considered.
+     */
+    inline size_type find_last_not_of(character_set set, size_type until) const noexcept {
+        return find_last_of(set.inverted(), until);
+    }
+
+#pragma endregion
+#pragma region String Arguments
+
+    /**
+     *  @brief  Find the first occurrence of a character from a ::set.
+     *  @param  skip  The number of first characters to be skipped.
+     */
+    inline size_type find_first_of(string_view other, size_type skip = 0) const noexcept {
+        return find_first_of(other.as_set(), skip);
+    }
+
+    /**
+     *  @brief  Find the first occurrence of a character outside a ::set.
+     *  @param  skip  The number of first characters to be skipped.
+     */
+    inline size_type find_first_not_of(string_view other, size_type skip = 0) const noexcept {
+        return find_first_not_of(other.as_set());
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a character from a ::set.
+     *  @param  until  The offset of the last character to be considered.
+     */
+    inline size_type find_last_of(string_view other, size_type until = npos) const noexcept {
+        return find_last_of(other.as_set(), until);
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a character outside a ::set.
+     *  @param  until  The offset of the last character to be considered.
+     */
+    inline size_type find_last_not_of(string_view other, size_type until = npos) const noexcept {
+        return find_last_not_of(other.as_set(), until);
+    }
+
+#pragma endregion
+#pragma region C-Style Arguments
+
+    /**
+     *  @brief  Find the first occurrence of a character from a set.
+     *  @param  skip  The number of first characters to be skipped.
+     *  @warning The behavior is @b undefined if `skip > size()`.
+     */
+    inline size_type find_first_of(const_pointer other, size_type skip, size_type count) const noexcept {
+        return find_first_of(string_view(other, count), skip);
+    }
+
+    /**
+     *  @brief  Find the first occurrence of a character outside a set.
+     *  @param  skip  The number of first characters to be skipped.
+     *  @warning The behavior is @b undefined if `skip > size()`.
+     */
+    inline size_type find_first_not_of(const_pointer other, size_type skip, size_type count) const noexcept {
+        return find_first_not_of(string_view(other, count));
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a character from a set.
+     *  @param  until  The number of first characters to be considered.
+     */
+    inline size_type find_last_of(const_pointer other, size_type until, size_type count) const noexcept {
+        return find_last_of(string_view(other, count), until);
+    }
+
+    /**
+     *  @brief  Find the last occurrence of a character outside a set.
+     *  @param  until  The number of first characters to be considered.
+     */
+    inline size_type find_last_not_of(const_pointer other, size_type until, size_type count) const noexcept {
+        return find_last_not_of(string_view(other, count), until);
+    }
+
+#pragma endregion
+#pragma region Slicing
 
     /** @brief  Python-like convinience function, dropping prefix formed of given characters. */
     inline string_view lstrip(character_set set) const noexcept {
@@ -1103,6 +1315,10 @@ class string_view {
                                       new_start + 1)}
                    : string_view();
     }
+#pragma endregion
+#pragma endregion
+
+#pragma region Search Ranges
 
     /** @brief  Find all occurrences of a given string.
      *  @param  interleave  If true, interleaving offsets are returned as well. */
@@ -1118,48 +1334,42 @@ class string_view {
     /** @brief  Find all occurrences of given characters in @b reverse order. */
     inline range_rmatches<string_view, matcher_find_last_of> rfind_all(character_set) const noexcept;
 
-    /** @brief  Split the string into three parts, before the match, the match itself, and after it. */
-    inline partition_result partition(string_view pattern) const noexcept { return split_(pattern, pattern.length()); }
-
-    /** @brief  Split the string into three parts, before the match, the match itself, and after it. */
-    inline partition_result partition(character_set pattern) const noexcept { return split_(pattern, 1); }
-
-    /** @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
-    inline partition_result rpartition(string_view pattern) const noexcept { return split_(pattern, pattern.length()); }
-
-    /** @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
-    inline partition_result rpartition(character_set pattern) const noexcept { return split_(pattern, 1); }
-
-    /** @brief  Find all occurrences of a given string.
-     *  @param  interleave  If true, interleaving offsets are returned as well. */
+    /** @brief  Split around occurrences of a given string. */
     inline range_splits<string_view, matcher_find> split(string_view) const noexcept;
 
-    /** @brief  Find all occurrences of a given string in @b reverse order.
-     *  @param  interleave  If true, interleaving offsets are returned as well. */
+    /** @brief  Split around occurrences of a given string in @b reverse order. */
     inline range_rsplits<string_view, matcher_rfind> rsplit(string_view) const noexcept;
 
-    /** @brief  Find all occurrences of given characters. */
+    /** @brief  Split around occurrences of given characters. */
     inline range_splits<string_view, matcher_find_first_of> split(character_set = whitespaces_set) const noexcept;
 
-    /** @brief  Find all occurrences of given characters in @b reverse order. */
+    /** @brief  Split around occurrences of given characters in @b reverse order. */
     inline range_rsplits<string_view, matcher_find_last_of> rsplit(character_set = whitespaces_set) const noexcept;
 
-    inline size_type copy(pointer destination, size_type count, size_type pos = 0) const noexcept = delete;
+    /** @brief  Split around the occurences of all newline characters. */
+    inline range_splits<string_view, matcher_find_first_of> splitlines() const noexcept;
+
+#pragma endregion
+
+    /** @brief Exchanges the view with that of the `other`. */
+    inline void swap(string_view &other) noexcept {
+        std::swap(start_, other.start_), std::swap(length_, other.length_);
+    }
+
+    /**
+     *  @brief  Formatted output function for compatibility with STL's `std::basic_ostream`.
+     *  @throw  `std::ios_base::failure` if an exception occured during output.
+     */
+    template <typename stream_traits>
+    friend std::basic_ostream<char, stream_traits> &operator<<(std::basic_ostream<char, stream_traits> &os,
+                                                               string_view const &str) noexcept(false) {
+        return os.write(str.data(), str.size());
+    }
 
     /** @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     inline size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }
 
-    inline bool contains_only(character_set set) const noexcept { return find_first_not_of(set) == npos; }
-    inline bool isalpha() const noexcept { return !empty() && contains_only(ascii_letters_set); }
-    inline bool isalnum() const noexcept { return !empty() && contains_only(ascii_letters_set | digits_set); }
-    inline bool isascii() const noexcept { return empty() || contains_only(ascii_controls_set | ascii_printables_set); }
-    inline bool isdigit() const noexcept { return !empty() && contains_only(digits_set); }
-    inline bool islower() const noexcept { return !empty() && contains_only(ascii_lowercase_set); }
-    inline bool isprintable() const noexcept { return empty() || contains_only(ascii_printables_set); }
-    inline bool isspace() const noexcept { return !empty() && contains_only(whitespaces_set); }
-    inline bool isupper() const noexcept { return !empty() && contains_only(ascii_uppercase_set); }
-    inline range_splits<string_view, matcher_find_first_of> splitlines() const noexcept;
-
+    /** @brief  Populate a character set with characters present in this string. */
     inline character_set as_set() const noexcept {
         character_set set;
         for (auto c : *this) set.add(c);
@@ -1179,19 +1389,21 @@ class string_view {
     }
 
     template <typename pattern_>
-    partition_result split_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
+    partition_result partition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = find(pattern);
         if (pos == npos) return {substr(), string_view(), string_view()};
         return {substr(0, pos), substr(pos, pattern_length), substr(pos + pattern_length)};
     }
 
     template <typename pattern_>
-    partition_result rsplit_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
+    partition_result rpartition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = rfind(pattern);
         if (pos == npos) return {substr(), string_view(), string_view()};
         return {substr(0, pos), substr(pos, pattern_length), substr(pos + pattern_length)};
     }
 };
+
+#pragma endregion
 
 /**
  *  @brief  Memory-owning string class with a Small String Optimization.
