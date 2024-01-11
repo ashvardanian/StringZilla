@@ -19,10 +19,10 @@ impl String {
     pub fn count_char<'a>(&self, input: impl Into<&'a str>) -> usize {
         let value = input.into();
         unsafe {
-            bindings::si__count_char(
+            bindings::sz_count_char(
                 self.start,
                 self.length,
-                std::ffi::CString::new(value).unwrap_unchecked().as_ptr(),
+                CString::new(value).unwrap_unchecked().as_ptr(),
             ) as usize
         }
     }
@@ -34,8 +34,5 @@ mod tests {
     fn count_char() {
         let haystack = super::String::new("abba");
         assert_eq!(haystack.count_char("b"), 2);
-        // assert_eq!(haystack.count_char("a"), 2);
-        // assert_eq!(haystack.count_char("ba"), 1);
-        // assert_eq!(haystack.count_char("ab"), 1);
     }
 }
