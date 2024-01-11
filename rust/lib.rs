@@ -6,8 +6,6 @@
 )]
 #![doc = include_str!("README.md")]
 
-use std::ffi::CString;
-
 mod bindings {
     #![allow(warnings)]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
@@ -51,7 +49,7 @@ impl String {
             bindings::sz_count_char(
                 self.inner.start,
                 self.inner.length,
-                CString::new(value).unwrap_unchecked().as_ptr(),
+                value.as_ptr() as *const i8,
             ) as usize
         }
     }
