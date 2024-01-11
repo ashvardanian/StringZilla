@@ -1,4 +1,9 @@
-#![forbid(unused_unsafe, unused_allocation, arithmetic_overflow)]
+#![forbid(
+    unused_unsafe,
+    unused_allocation,
+    arithmetic_overflow,
+    temporary_cstring_as_ptr
+)]
 
 use std::ffi::CString;
 
@@ -7,14 +12,21 @@ mod bindings {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-pub type String = bindings::sz_string_view_t;
+pub struct String {
+    #[allow(dead_code)]
+    c_str: CString,
+    inner: bindings::sz_string_view_t,
+}
 
-impl<'a> String {
+impl String {
     pub fn new(input: impl AsRef<str>) -> Self {
-        let value = input.as_ref();
-        bindings::sz_string_view_t {
-            start: unsafe { CString::new(value).unwrap_unchecked() }.as_ptr() as *const i8,
-            length: value.len() as bindings::sz_size_t,
+        let c_str = CString::new(input.as_ref()).expect("failed to convert to CString");
+        String {
+            inner: bindings::sz_string_view_t {
+                start: c_str.as_ptr() as *const i8,
+                length: c_str.as_bytes().len() as bindings::sz_size_t,
+            },
+            c_str,
         }
     }
 
@@ -22,7 +34,7 @@ impl<'a> String {
         unimplemented!()
     }
 
-    pub fn contains(&self, input: impl Into<&'a str>, start: usize, end: usize) -> bool {
+    pub fn contains(&self, input: impl AsRef<str>, start: usize, end: usize) -> bool {
         unimplemented!()
     }
 
@@ -34,12 +46,12 @@ impl<'a> String {
         unimplemented!()
     }
 
-    pub fn count_char(&self, input: impl Into<&'a str>) -> usize {
-        let value = input.into();
+    pub fn count_char(&self, input: impl AsRef<str>) -> usize {
+        let value = input.as_ref();
         unsafe {
             bindings::sz_count_char(
-                self.start,
-                self.length,
+                self.inner.start,
+                self.inner.length,
                 CString::new(value).unwrap_unchecked().as_ptr(),
             ) as usize
         }
