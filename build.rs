@@ -13,9 +13,15 @@ fn link_static_fns(out_dir_path: PathBuf) {
         .arg(env::temp_dir().join("bindgen").join("extern.c"))
         .arg("-include")
         .arg("stringzilla/stringzilla.h")
-        .output()
-        .unwrap();
+        .output();
+    if let Err(e) = clang_output {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => panic!("command `clang` was not found in the system"),
+            _ => panic!("{}", e),
+        }
+    }
 
+    let clang_output = clang_output.ok().unwrap();
     if !clang_output.status.success() {
         panic!(
             "Could not compile object file:\n{}",
@@ -24,15 +30,27 @@ fn link_static_fns(out_dir_path: PathBuf) {
     }
 
     #[cfg(not(target_os = "windows"))]
-        let lib_output = Command::new("ar")
+    let lib_output = Command::new("ar")
         .arg("rcs")
         .arg(out_dir_path.join("libextern.a"))
         .arg(obj_path)
-        .output()
-        .unwrap();
+        .output();
     #[cfg(target_os = "windows")]
-        let lib_output = Command::new("lib").arg(&obj_path).output().unwrap();
+    let lib_output = Command::new("lib").arg(&obj_path).output();
+    if let Err(e) = lib_output {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                if !cfg!(target_os = "windows") {
+                    panic!("command `ar` was not found in the system")
+                } else {
+                    panic!("command `lib` was not found in the system")
+                }
+            }
+            _ => panic!("{}", e),
+        }
+    }
 
+    let lib_output = lib_output.ok().unwrap();
     if !lib_output.status.success() {
         panic!(
             "Could not emit library file:\n{}",
@@ -40,7 +58,10 @@ fn link_static_fns(out_dir_path: PathBuf) {
         );
     }
 
-    println!("cargo:rustc-link-search=native={}", out_dir_path.to_string_lossy());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        out_dir_path.to_string_lossy()
+    );
     println!("cargo:rustc-link-lib=static=extern");
 }
 
@@ -49,16 +70,24 @@ fn main() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     #[cfg(not(debug_assertions))]
-    env::set_var("RUSTFLAGS", "-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=lld");
+    env::set_var(
+        "RUSTFLAGS",
+        "-Clinker-plugin-lto -Clinker=clang -Clink-arg=-fuse-ld=lld",
+    );
     println!("RUSTFLAGS: {}", env::var("RUSTFLAGS").unwrap_or_default());
 
     let bindings = bindgen::Builder::default()
-        .header(format!("{}/stringzilla/stringzilla.h", root_path.to_str().unwrap()))
+        .header(format!(
+            "{}/stringzilla/stringzilla.h",
+            root_path.to_str().unwrap()
+        ))
         .wrap_static_fns(true)
         .generate_inline_functions(true)
         .generate()
         .unwrap();
 
-    bindings.write_to_file(out_path.join("bindings.rs")).unwrap();
+    bindings
+        .write_to_file(out_path.join("bindings.rs"))
+        .unwrap();
     link_static_fns(out_path);
 }

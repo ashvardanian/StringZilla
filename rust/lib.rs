@@ -67,7 +67,7 @@ const unsafe fn ptr_to_str<'a>(ptr: *const i8, len: usize) -> &'a str {
 /// A macro for generating indexing implementations for [String].
 macro_rules! impl_index_op__String {
     ($op_type:ty) => {
-        impl ::std::ops::Index<$op_type> for ::String {
+        impl ::std::ops::Index<$op_type> for String {
             type Output = str;
 
             #[inline]
