@@ -53,6 +53,7 @@
 #include <cassert> // `assert`
 #include <cstddef> // `std::size_t`
 #include <iosfwd>  // `std::basic_ostream`
+#include <utility> // `std::swap`
 
 #include <stringzilla/stringzilla.h>
 
@@ -805,10 +806,12 @@ class string_view {
 
     using partition_result = string_partition_result<string_view>;
 
-    /** @brief  Special value for missing matches. */
-    static constexpr size_type npos = size_type(-1);
+    /** @brief  Special value for missing matches.
+     *          We take the largest 63-bit unsigned integer.
+     */
+    static constexpr size_type npos = 0x7FFFFFFFFFFFFFFFull;
 
-#pragma region Constructors and Converters
+#pragma region Constructors and STL Utilities
 
     constexpr string_view() noexcept : start_(nullptr), length_(0) {}
     constexpr string_view(const_pointer c_string) noexcept
@@ -836,6 +839,21 @@ class string_view {
 
     inline operator std::string() const { return {data(), size()}; }
     inline operator std::string_view() const noexcept { return {data(), size()}; }
+
+    /** @brief Exchanges the view with that of the `other`. */
+    inline void swap(string_view &other) noexcept {
+        std::swap(start_, other.start_), std::swap(length_, other.length_);
+    }
+
+    /**
+     *  @brief  Formatted output function for compatibility with STL's `std::basic_ostream`.
+     *  @throw  `std::ios_base::failure` if an exception occured during output.
+     */
+    template <typename stream_traits>
+    friend std::basic_ostream<char, stream_traits> &operator<<(std::basic_ostream<char, stream_traits> &os,
+                                                               string_view const &str) noexcept(false) {
+        return os.write(str.data(), str.size());
+    }
 #endif
 
 #pragma endregion
@@ -866,10 +884,67 @@ class string_view {
 
 #pragma region Slicing
 
-    /** @brief Removes the first `n` characters from the view. The behavior is @b undefined if `n > size()`. */
+#pragma region Safe and Signed Extensions
+
+    inline string_view operator[](std::initializer_list<difference_type> unsigned_start_and_end_offset) const noexcept {
+        assert(unsigned_start_and_end_offset.size() == 2 && "operator[] can't take more than 2 offsets");
+        return sub(unsigned_start_and_end_offset.begin()[0], unsigned_start_and_end_offset.begin()[1]);
+    }
+
+    /**
+     *  @brief  Signed alternative to `at()`. Handy if you often write `str[str.size() - 2]`.
+     *  @warning The behavior is @b undefined if the position is beyond bounds.
+     */
+    inline value_type sat(difference_type signed_offset) const noexcept {
+        size_type pos = (signed_offset < 0) ? size() + signed_offset : signed_offset;
+        assert(pos < size() && "string_view::sat(i) out of bounds");
+        return start_[pos];
+    }
+
+    /**
+     *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
+     *  @warning The behavior is @b undefined if `n > size()`.
+     */
+    inline string_view front(size_type n) const noexcept {
+        assert(n <= size() && "string_view::front(n) out of bounds");
+        return {start_, n};
+    }
+
+    /**
+     *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
+     *  @warning The behavior is @b undefined if `n > size()`.
+     */
+    inline string_view back(size_type n) const noexcept {
+        assert(n <= size() && "string_view::back(n) out of bounds");
+        return {start_ + length_ - n, n};
+    }
+
+    /**
+     *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
+     *          Supports signed and unsigned intervals.
+     */
+    inline string_view sub(difference_type signed_start_offset,
+                           difference_type signed_end_offset = npos) const noexcept {
+        sz_size_t normalized_offset, normalized_length;
+        sz_ssize_clamp_interval(length_, signed_start_offset, signed_end_offset, &normalized_offset,
+                                &normalized_length);
+        return string_view(start_ + normalized_offset, normalized_length);
+    }
+
+#pragma endregion
+
+#pragma region STL Style
+
+    /**
+     *  @brief  Removes the first `n` characters from the view.
+     *  @warning The behavior is @b undefined if `n > size()`.
+     */
     inline void remove_prefix(size_type n) noexcept { assert(n <= size()), start_ += n, length_ -= n; }
 
-    /** @brief Removes the last `n` characters from the view. The behavior is @b undefined if `n > size()`. */
+    /**
+     *  @brief  Removes the last `n` characters from the view.
+     *  @warning The behavior is @b undefined if `n > size()`.
+     */
     inline void remove_suffix(size_type n) noexcept { assert(n <= size()), length_ -= n; }
 
     /** @brief  Added for STL compatibility. */
@@ -906,6 +981,8 @@ class string_view {
         sz_copy(destination, start_ + skip, count);
         return count;
     }
+
+#pragma endregion
 
 #pragma endregion
 
@@ -1315,6 +1392,7 @@ class string_view {
                                       new_start + 1)}
                    : string_view();
     }
+
 #pragma endregion
 #pragma endregion
 
@@ -1350,21 +1428,6 @@ class string_view {
     inline range_splits<string_view, matcher_find_first_of> splitlines() const noexcept;
 
 #pragma endregion
-
-    /** @brief Exchanges the view with that of the `other`. */
-    inline void swap(string_view &other) noexcept {
-        std::swap(start_, other.start_), std::swap(length_, other.length_);
-    }
-
-    /**
-     *  @brief  Formatted output function for compatibility with STL's `std::basic_ostream`.
-     *  @throw  `std::ios_base::failure` if an exception occured during output.
-     */
-    template <typename stream_traits>
-    friend std::basic_ostream<char, stream_traits> &operator<<(std::basic_ostream<char, stream_traits> &os,
-                                                               string_view const &str) noexcept(false) {
-        return os.write(str.data(), str.size());
-    }
 
     /** @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     inline size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }

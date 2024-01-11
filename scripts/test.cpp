@@ -109,8 +109,8 @@ static void test_arithmetical_utilities() {
     }
 
 /**
- *  @brief  Invokes different C++ member methods of the memory-owning string class to make sure they all pass
- *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
+ *  @brief  Invokes different C++ member methods of immutable strings to cover all STL APIs.
+ *          This test guarantees API compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
 static void test_api_readonly() {
@@ -271,6 +271,30 @@ static void test_api_readonly() {
     assert(std::equal_to<str> {}("hello", "world") == false);
     assert(std::less<str> {}("hello", "world") == true);
 #endif
+}
+
+/**
+ *  @brief  Invokes different C++ member methods of immutable strings to cover extensions beyond the
+ *          STL API.
+ */
+template <typename string_type>
+static void test_api_readonly_extensions() {
+    assert("hello"_sz.sat(0) == 'h');
+    assert("hello"_sz.sat(-1) == 'o');
+    assert("hello"_sz.sub(1) == "ello");
+    assert("hello"_sz.sub(-1) == "o");
+    assert("hello"_sz.sub(1, 2) == "e");
+    assert("hello"_sz.sub(1, 100) == "ello");
+    assert("hello"_sz.sub(100, 100) == "");
+    assert("hello"_sz.sub(-2, -1) == "l");
+    assert("hello"_sz.sub(-2, -2) == "");
+    assert("hello"_sz.sub(100, -100) == "");
+
+    assert(("hello"_sz[{1, 2}] == "e"));
+    assert(("hello"_sz[{1, 100}] == "ello"));
+    assert(("hello"_sz[{100, 100}] == ""));
+    assert(("hello"_sz[{100, -100}] == ""));
+    assert(("hello"_sz[{-100, -100}] == ""));
 }
 
 /**
@@ -843,11 +867,15 @@ int main(int argc, char const **argv) {
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
     test_api_readonly<std::string_view>();
 #endif
-    test_api_readonly<sz::string_view>();
     test_api_readonly<std::string>();
+    test_api_readonly<sz::string_view>();
+
     // test_api_readonly<sz::string>();
     test_api_mutable<std::string>(); // Make sure the test itself is reasonable
     // test_api_mutable<sz::string>();  // The fact that this compiles is already a miracle :)
+
+    // Cover the non-STL interfaces
+    test_api_readonly_extensions<sz::string_view>();
 
     // The string class implementation
     test_constructors();

@@ -32,12 +32,9 @@ They have the broadest coverage of the library, and are the most important to ke
 
 The role of Python benchmarks is less to provide absolute number, but to compare against popular tools in the Python ecosystem.
 
-- `bench_search.py` - compares against native Python `str`.
-- `bench_sort.py` - compares against `pandas`.
-- `bench_similarity.py` - compares against `jellyfish`, `editdistance`, etc.
-
-For presentation purposes, we also 
-
+- `bench_search.(py|ipynb)` - compares against native Python `str`.
+- `bench_sort.(py|ipynb)` - compares against `pandas`.
+- `bench_similarity.(ipynb)` - compares against `jellyfish`, `editdistance`, etc.
 
 ## IDE Integrations
 
@@ -64,6 +61,8 @@ Modern IDEs, like VS Code, can be configured to automatically format the code on
 For C++ code:
 
 - Explicitly use `std::` or `sz::` namespaces over global `memcpy`, `uint64_t`, etc.
+- Explicitly mark `noexcept` or `noexcept(false)` for all library interfaces.
+- Document all possible exceptions of an interface using `@throw` in Doxygen.
 - In C++ code avoid C-style variadic arguments in favor of templates.
 - In C++ code avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, etc.
 - Use lower-case names for everything, except macros.

@@ -979,7 +979,7 @@ SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { retur
  *  Efficiently computing the minimum and maximum of two or three values can be tricky.
  *  The simple branching baseline would be:
  *
- *      x < y ? x : y                               // 1 conditional move
+ *      x < y ? x : y                               // can replace with 1 conditional move
  *
  *  Branchless approach is well known for signed integers, but it doesn't apply to unsigned ones.
  *  https://stackoverflow.com/questions/514435/templatized-branchless-int-max-min-function
@@ -1002,9 +1002,32 @@ SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { retur
 #define sz_max_of_three(x, y, z) sz_max_of_two(x, sz_max_of_two(y, z))
 
 /**
- *  @brief Branchless minimum function for two integers.
+ *  @brief  Branchless minimum function for two integers.
  */
 SZ_INTERNAL sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
+
+/**
+ *  @brief  Clamps signed offsets in a string to a valid range. Used for Pythonic-style slicing.
+ */
+SZ_INTERNAL void sz_ssize_clamp_interval(sz_size_t length, sz_ssize_t start, sz_ssize_t end,
+                                         sz_size_t *normalized_offset, sz_size_t *normalized_length) {
+    // TODO: Remove branches.
+    // Normalize negative indices
+    if (start < 0) start += length;
+    if (end < 0) end += length;
+
+    // Clamp indices to a valid range
+    if (start < 0) start = 0;
+    if (end < 0) end = 0;
+    if (start > (sz_ssize_t)length) start = length;
+    if (end > (sz_ssize_t)length) end = length;
+
+    // Ensure start <= end
+    if (start > end) start = end;
+
+    *normalized_offset = start;
+    *normalized_length = end - start;
+}
 
 /**
  *  @brief  Compute the logarithm base 2 of a positive integer, rounding down.
@@ -1812,6 +1835,8 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
                 sz_size_t cost_insertion = current_distances[idx_shorter] + 1;
                 sz_size_t cost_substitution =
                     previous_distances[idx_shorter] + (longer[idx_longer] != shorter[idx_shorter]);
+                // ? It might be a good idea to enforce branchless execution here.
+                // ? The caveat being that the benchmarks on longer sequences backfire and more research is needed.
                 current_distances[idx_shorter + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
             }
             sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
@@ -2179,7 +2204,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
     }
     // If we are not lucky, we need to allocate more memory.
     else {
-        sz_size_t next_planned_size = sz_max_of_two(64ull, string_space * 2ull);
+        sz_size_t next_planned_size = sz_max_of_two(SZ_CACHE_LINE_WIDTH, string_space * 2ull);
         sz_size_t min_needed_space = sz_size_bit_ceil(offset + string_length + added_length + 1);
         sz_size_t new_space = sz_max_of_two(min_needed_space, next_planned_size);
         if (!sz_string_reserve(string, new_space - 1, allocator)) return NULL;
