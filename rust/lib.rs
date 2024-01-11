@@ -43,7 +43,7 @@ impl String {
         unimplemented!()
     }
 
-    pub fn count_char(&self, input: impl AsRef<str>) -> usize {
+    pub fn count(&self, input: impl AsRef<str>) -> usize {
         let value = input.as_ref();
         unsafe {
             bindings::sz_count_char(
@@ -103,7 +103,10 @@ mod tests {
     #[test]
     fn count_char() {
         let haystack = super::String::new("abba");
-        assert_eq!(haystack.count_char("b"), 2);
+        assert_eq!(haystack.count("ab"), 2);
+        assert_eq!(haystack.count("a"), 2);
+        assert_eq!(haystack.count("b"), 2);
+        assert_eq!(haystack.count("ba"), 1);
     }
 
     // #[test]
