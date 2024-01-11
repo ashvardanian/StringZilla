@@ -202,27 +202,6 @@ void apply_order(sz_string_view_t *array, sz_u64_t *order, size_t length) {
     }
 }
 
-void slice(size_t length, ssize_t start, ssize_t end, size_t *normalized_offset, size_t *normalized_length) {
-
-    // clang-format off
-    // Normalize negative indices
-    if (start < 0) start += length;
-    if (end < 0) end += length;
-
-    // Clamp indices to a valid range
-    if (start < 0) start = 0;
-    if (end < 0) end = 0;
-    if (start > (ssize_t)length) start = length;
-    if (end > (ssize_t)length) end = length;
-
-    // Ensure start <= end
-    if (start > end) start = end;
-    // clang-format on
-
-    *normalized_offset = start;
-    *normalized_length = end - start;
-}
-
 sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python str
@@ -555,7 +534,7 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
 
     // Apply slicing
     size_t normalized_offset, normalized_length;
-    slice(self->length, from, to, &normalized_offset, &normalized_length);
+    sz_ssize_clamp_interval(self->length, from, to, &normalized_offset, &normalized_length);
     self->start = ((char *)self->start) + normalized_offset;
     self->length = normalized_length;
     return 0;
@@ -894,7 +873,7 @@ static int Str_find_( //
 
     // Limit the `haystack` range
     size_t normalized_offset, normalized_length;
-    slice(haystack.length, start, end, &normalized_offset, &normalized_length);
+    sz_ssize_clamp_interval(haystack.length, start, end, &normalized_offset, &normalized_length);
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
@@ -1021,7 +1000,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     if ((start == -1 || end == -1 || allowoverlap == -1) && PyErr_Occurred()) return NULL;
 
     size_t normalized_offset, normalized_length;
-    slice(haystack.length, start, end, &normalized_offset, &normalized_length);
+    sz_ssize_clamp_interval(haystack.length, start, end, &normalized_offset, &normalized_length);
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 

@@ -302,28 +302,109 @@ To safely print those, pass the `string_length` to `printf` as well.
 printf("%.*s\n", (int)string_length, string_start);
 ```
 
-### Beyond the Standard Templates Library
+### Against the Standard Library
 
-Aside from conventional `std::string` interfaces, non-STL extensions are available.
-Often, inspired by the Python `str` interface.
+| C++ Code                             | Evaluation Result | Invoked Signature              |
+| :----------------------------------- | :---------------- | :----------------------------- |
+| `"Loose"s.replace(2, 2, "vath"s, 1)` | `"Loathe"` 🤢      | `(pos1, count1, str2, pos2)`   |
+| `"Loose"s.replace(2, 2, "vath", 1)`  | `"Love"` 🥰        | `(pos1, count1, str2, count2)` |
+
+StringZilla is designed to be a drop-in replacement for the C++ Standard Templates Library.
+That said, some of the design decisions of STL strings are highly controversial, error-prone, and expensive.
+Most notably:
+
+1. Argument order for `replace`, `insert`, `erase` and similar functions is impossible to guess.
+2. Bounds-checking exceptions for `substr`-like functions are only thrown for one side of the range.
+3. Returning string copies in `substr`-like functions results in absurd volume of allocations.
+4. Incremental construction via `push_back`-like functions goes through too many branches.
+5. Inconsistency between `string` and `string_view` methods, like the lack of `remove_prefix` and `remove_suffix`.
+
+Check the following set of asserts validating the `std::string` specification.
+It's not realistic to expect the average developer to remember the [14 overloads of `std::string::replace`][stl-replace].
+
+[stl-replace]: https://en.cppreference.com/w/cpp/string/basic_string/replace
+
+```cpp
+using str = std::string;
+
+assert(str("hello world").substr(6) == "world");
+assert(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
+assert_throws(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
+assert_throws(str("hello world").substr(20, 5), std::out_of_range); // 20 is byond the length of the string
+assert_throws(str("hello world").substr(-1, 5), std::out_of_range); // -1 casts to unsigned without any warnings...
+assert(str("hello world").substr(0, -1) == "hello world");          // -1 casts to unsigned without any warnings...
+
+assert(str("hello").replace(1, 2, "123") == "h123lo");
+assert(str("hello").replace(1, 2, str("123"), 1) == "h23lo");
+assert(str("hello").replace(1, 2, "123", 1) == "h1lo");
+assert(str("hello").replace(1, 2, "123", 1, 1) == "h2lo");
+assert(str("hello").replace(1, 2, str("123"), 1, 1) == "h2lo");
+assert(str("hello").replace(1, 2, 3, 'a') == "haaalo");
+assert(str("hello").replace(1, 2, {'a', 'b'}) == "hablo");
+```
+
+To avoid those issues, StringZilla provides an alternative consistent interface.
+It supports signed arguments, and doesn't have more than 3 arguments per function or
+The standard API and our alternative can be conditionally disabled with `SZ_SAFETY_OVER_COMPATIBILITY=1`.
+When it's enabled, the _~~subjectively~~_ risky overloads from the Standard will be disabled.
+
+```cpp
+using str = sz::string;
+
+str("a:b").front(1) == "a"; // no checks, unlike `substr`
+str("a:b").back(-1) == "b"; // accepting negative indices
+str("a:b").sub(1, -1) == ":"; // similar to Python's `"a:b"[1:-1]`
+str("a:b").sub(-2, -1) == ":"; // similar to Python's `"a:b"[-2:-1]`
+str("a:b").sub(-2, 1) == ""; // similar to Python's `"a:b"[-2:1]`
+"a:b"_sz[{-2, -1}] == ":"; // works on views and overloads `operator[]`
+```
+
+Assuming StringZilla is a header-only library you can use the full API in some translation units and gradually transition to safer restricted API in others.
+Bonus - all the bound checking is branchless, so it has a constant cost and won't hurt your branch predictor.
+
+
+### Beyond the Standard Templates Library - Learning from Python
+
+Python is arguably the most popular programming language for data science.
+In part, that's due to the simplicity of its standard interfaces.
+StringZilla brings some of thet functionality to C++.
+
+- Content checks: `isalnum`, `isalpha`, `isascii`, `isdigit`, `islower`, `isspace`, `isupper`.
+- Trimming character sets: `lstrip`, `rstrip`, `strip`.
+- Trimming string matches: `remove_prefix`, `remove_suffix`.
+- Ranges of search results: `splitlines`, `split`, `rsplit`.
+- Number of non-overlapping substring matches: `count`.
+- Partitioning: `partition`, `rpartition`.
+
 For example, when parsing documents, it is often useful to split it into substrings.
 Most often, after that, you would compute the length of the skipped part, the offset and the length of the remaining part.
+This results in a lot of pointer arithmetic and is error-prone.
 StringZilla provides a convenient `partition` function, which returns a tuple of three string views, making the code cleaner.
 
 ```cpp
-auto [before, match, after] = haystack.partition(':'); // Character argument
+auto parts = haystack.partition(':'); // Matching a character
+auto [before, match, after] = haystack.partition(':'); // Structure unpacking
 auto [before, match, after] = haystack.partition(character_set(":;")); // Character-set argument
 auto [before, match, after] = haystack.partition(" : "); // String argument
+auto [before, match, after] = haystack.rpartition(sz::whitespaces); // Split around the last whitespace
 ```
 
-The other examples of non-STL Python-inspired interfaces are:
+Combining those with the `split` function, one can easily parse a CSV file or HTTP headers.
 
-- `isalnum`, `isalpha`, `isascii`, `isdigit`, `islower`, `isspace`,`isupper`.
-- TODO: `lstrip`, `rstrip`, `strip`.
-- TODO: `removeprefix`, `removesuffix`.
-- `lower`, `upper`, `capitalize`, `title`, `swapcase`.
-- `splitlines`, `split`, `rsplit`.
-- `count` for the number of non-overlapping matches.
+```cpp
+for (auto line : haystack.split("\r\n")) {
+    auto [key, _, value] = line.partition(':');
+    headers[key.strip()] = value.strip();
+}
+```
+
+Some other extensions are not present in the Python standard library either.
+Let's go through the C++ functionality category by category.
+
+- [Splits and Ranges](#splits-and-ranges).
+- [Concatenating Strings without Allocations](#concatenating-strings-without-allocations).
+- [Random Generation](#random-generation).
+- [Edit Distances and Fuzzy Search](#levenshtein-edit-distance-and-alignment-scores).
 
 Some of the StringZilla interfaces are not available even Python's native `str` class.
 Here is a sneak peek of the most useful ones.
@@ -355,15 +436,6 @@ text.try_push_back('x'); // returns `false` if the string is full and the alloca
 
 sz::concatenate(text, "@", domain, ".", tld); // No allocations
 text + "@" + domain + "." + tld; // No allocations, if `SZ_LAZY_CONCAT` is defined
-
-// For Levenshtein distance, the following are available:
-text.edit_distance(other[, upper_bound]) == 7; // May perform a memory allocation
-text.find_similar(other[, upper_bound]);
-text.rfind_similar(other[, upper_bound]);
-
-// Ranges of search results in either order
-for (auto word : text.split(sz::punctuation)) // No allocations
-    std::cout << word << std::endl;
 ```
 
 ### Splits and Ranges
@@ -409,35 +481,10 @@ range.template to<std::set<std::sting>>();
 range.template to<std::vector<std::sting_view>>(); 
 ```
 
-### Standard C++ Containers with String Keys
-
-The C++ Standard Templates Library provides several associative containers, often used with string keys.
-
-```cpp
-std::map<std::string, int, std::less<std::string>> sorted_words;
-std::unordered_map<std::string, int, std::hash<std::string>, std::equal_to<std::string>> words;
-```
-
-The performance of those containers is often limited by the performance of the string keys, especially on reads.
-StringZilla can be used to accelerate containers with `std::string` keys, by overriding the default comparator and hash functions.
-
-```cpp
-std::map<std::string, int, sz::string_view_less> sorted_words;
-std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to> words;
-```
-
-Alternatively, a better approach would be to use the `sz::string` class as a key.
-The right hash function and comparator would be automatically selected and the performance gains would be more noticeable if the keys are short.
-
-```cpp
-std::map<sz::string, int> sorted_words;
-std::unordered_map<sz::string, int> words;
-```
-
-### Concatenating Strings
+### Concatenating Strings without Allocations
 
 Ansother common string operation is concatenation.
-The STL provides `std::string::operator+` and `std::string::append`, but those are not the most efficient, if multiple invocations are performed.
+The STL provides `std::string::operator+` and `std::string::append`, but those are not very efficient, if multiple invocations are performed.
 
 ```cpp
 std::string name, domain, tld;
@@ -457,7 +504,6 @@ StringZilla provides a more convenient `concat` function, which takes a variadic
 
 ```cpp
 auto email = sz::concat(name, "@", domain, ".", tld);
-auto email = name.concatenated("@", domain, ".", tld);
 ```
 
 Moreover, if the first or second argument of the expression is a StringZilla string, the concatenation can be poerformed lazily using the same `operator+` syntax.
@@ -469,7 +515,7 @@ auto email_expression = name + "@" + domain + "." + tld;    // 0 allocations
 sz::string email = name + "@" + domain + "." + tld;         // 1 allocations
 ```
 
-### Random Strings
+### Random Generation
 
 Software developers often need to generate random strings for testing purposes.
 The STL provides `std::generate` and `std::random_device`, that can be used with StringZilla.
@@ -507,6 +553,42 @@ Recent benchmarks suggest the following numbers for strings of different lengths
 |      5 |                        0.5 GB/s |                      1.5 GB/s |
 |     20 |                        0.3 GB/s |                      1.5 GB/s |
 |    100 |                        0.2 GB/s |                      1.5 GB/s |
+
+### Levenshtein Edit Distance and Alignment Scores
+
+### Fuzzy Search with Bounded Levenshtein Distance
+
+```cpp
+// For Levenshtein distance, the following are available:
+text.edit_distance(other[, upper_bound]) == 7; // May perform a memory allocation
+text.find_similar(other[, upper_bound]);
+text.rfind_similar(other[, upper_bound]);
+```
+
+### Standard C++ Containers with String Keys
+
+The C++ Standard Templates Library provides several associative containers, often used with string keys.
+
+```cpp
+std::map<std::string, int, std::less<std::string>> sorted_words;
+std::unordered_map<std::string, int, std::hash<std::string>, std::equal_to<std::string>> words;
+```
+
+The performance of those containers is often limited by the performance of the string keys, especially on reads.
+StringZilla can be used to accelerate containers with `std::string` keys, by overriding the default comparator and hash functions.
+
+```cpp
+std::map<std::string, int, sz::string_view_less> sorted_words;
+std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to> words;
+```
+
+Alternatively, a better approach would be to use the `sz::string` class as a key.
+The right hash function and comparator would be automatically selected and the performance gains would be more noticeable if the keys are short.
+
+```cpp
+std::map<sz::string, int> sorted_words;
+std::unordered_map<sz::string, int> words;
+```
 
 ### Compilation Settings and Debugging
 
