@@ -297,6 +297,43 @@ static void test_api_readonly_extensions() {
     assert(("hello"_sz[{-100, -100}] == ""));
 }
 
+void test_api_mutable_extensions() {
+    using str = sz::string;
+
+    // Same length replacements.
+    assert_scoped(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all("l", "1"), s == "he11o");
+    assert_scoped(str s = "hello", s.replace_all("he", "al"), s == "alllo");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), "!"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("o"), "!"), s == "hell!");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("ho"), "!"), s == "!ell!");
+
+    // Shorter replacements.
+    assert_scoped(str s = "hello", s.replace_all("xx", "x"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all("l", ""), s == "heo");
+    assert_scoped(str s = "hello", s.replace_all("h", ""), s == "ello");
+    assert_scoped(str s = "hello", s.replace_all("o", ""), s == "hell");
+    assert_scoped(str s = "hello", s.replace_all("llo", "!"), s == "he!");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), ""), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("lo"), ""), s == "he");
+
+    // Longer replacements.
+    assert_scoped(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
+    assert_scoped(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
+    assert_scoped(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
+    assert_scoped(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), "xx"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("lo"), "lo"), s == "helololo");
+
+    // Concatenation.
+    // assert(str(str("a") | str("b")) == "ab");
+    // assert(str(str("a") | str("b") | str("ab")) == "abab");
+
+    assert(str(sz::concatenate("a"_sz, "b"_sz)) == "ab");
+    assert(str(sz::concatenate("a"_sz, "b"_sz, "c"_sz)) == "abc");
+}
+
 /**
  *  @brief  Invokes different C++ member methods of the memory-owning string class to make sure they all pass
  *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
@@ -584,7 +621,7 @@ static void test_search() {
     assert("aabaa"_sz.rstrip(sz::character_set {"a"}) == "aab");
     assert("aabaa"_sz.strip(sz::character_set {"a"}) == "b");
 
-    // Check more advanced composite operations:
+    // Check more advanced composite operations
     assert("abbccc"_sz.partition("bb").before.size() == 1);
     assert("abbccc"_sz.partition("bb").match.size() == 2);
     assert("abbccc"_sz.partition("bb").after.size() == 3);
@@ -593,12 +630,29 @@ static void test_search() {
     assert("abbccc"_sz.partition("bb").after == "ccc");
 
     // Check ranges of search matches
-    assert(""_sz.find_all(".").size() == 0);
+    assert("hello"_sz.find_all("l").size() == 2);
+    assert("hello"_sz.rfind_all("l").size() == 2);
+
+    assert(""_sz.find_all(".", sz::include_overlaps).size() == 0);
+    assert(""_sz.find_all(".", sz::exclude_overlaps).size() == 0);
+    assert("."_sz.find_all(".", sz::include_overlaps).size() == 1);
+    assert("."_sz.find_all(".", sz::exclude_overlaps).size() == 1);
+    assert(".."_sz.find_all(".", sz::include_overlaps).size() == 2);
+    assert(".."_sz.find_all(".", sz::exclude_overlaps).size() == 2);
+    assert(""_sz.rfind_all(".", sz::include_overlaps).size() == 0);
+    assert(""_sz.rfind_all(".", sz::exclude_overlaps).size() == 0);
+    assert("."_sz.rfind_all(".", sz::include_overlaps).size() == 1);
+    assert("."_sz.rfind_all(".", sz::exclude_overlaps).size() == 1);
+    assert(".."_sz.rfind_all(".", sz::include_overlaps).size() == 2);
+    assert(".."_sz.rfind_all(".", sz::exclude_overlaps).size() == 2);
+
     assert("a.b.c.d"_sz.find_all(".").size() == 3);
     assert("a.,b.,c.,d"_sz.find_all(".,").size() == 3);
     assert("a.,b.,c.,d"_sz.rfind_all(".,").size() == 3);
     assert("a.b,c.d"_sz.find_all(sz::character_set(".,")).size() == 3);
-    assert("a...b...c"_sz.rfind_all("..", true).size() == 4);
+    assert("a...b...c"_sz.rfind_all("..").size() == 4);
+    assert("a...b...c"_sz.rfind_all("..", sz::include_overlaps).size() == 4);
+    assert("a...b...c"_sz.rfind_all("..", sz::exclude_overlaps).size() == 2);
 
     auto finds = "a.b.c"_sz.find_all(sz::character_set("abcd")).template to<std::vector<std::string>>();
     assert(finds.size() == 3);
@@ -616,8 +670,24 @@ static void test_search() {
 
     assert(""_sz.split(".").size() == 1);
     assert(""_sz.rsplit(".").size() == 1);
+
+    assert("hello"_sz.split("l").size() == 3);
+    assert("hello"_sz.rsplit("l").size() == 3);
+    assert(*advanced("hello"_sz.split("l").begin(), 0) == "he");
+    assert(*advanced("hello"_sz.rsplit("l").begin(), 0) == "o");
+    assert(*advanced("hello"_sz.split("l").begin(), 1) == "");
+    assert(*advanced("hello"_sz.rsplit("l").begin(), 1) == "");
+    assert(*advanced("hello"_sz.split("l").begin(), 2) == "o");
+    assert(*advanced("hello"_sz.rsplit("l").begin(), 2) == "he");
+
     assert("a.b.c.d"_sz.split(".").size() == 4);
     assert("a.b.c.d"_sz.rsplit(".").size() == 4);
+    assert(*("a.b.c.d"_sz.split(".").begin()) == "a");
+    assert(*("a.b.c.d"_sz.rsplit(".").begin()) == "d");
+    assert(*advanced("a.b.c.d"_sz.split(".").begin(), 1) == "b");
+    assert(*advanced("a.b.c.d"_sz.rsplit(".").begin(), 1) == "c");
+    assert(*advanced("a.b.c.d"_sz.split(".").begin(), 3) == "d");
+    assert(*advanced("a.b.c.d"_sz.rsplit(".").begin(), 3) == "a");
     assert("a.b.,c,d"_sz.split(".,").size() == 2);
     assert("a.b,c.d"_sz.split(sz::character_set(".,")).size() == 4);
 
@@ -709,34 +779,34 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
 void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, std::string_view needle_stl,
                                              std::size_t misalignment) {
 
-    test_search_with_misaligned_repetitions<                   //
-        sz::range_matches<std::string_view, sz::matcher_find>, //
-        sz::range_matches<sz::string_view, sz::matcher_find>>( //
+    test_search_with_misaligned_repetitions<                                     //
+        sz::range_matches<std::string_view, sz::matcher_find<std::string_view>>, //
+        sz::range_matches<sz::string_view, sz::matcher_find<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_search_with_misaligned_repetitions<                     //
-        sz::range_rmatches<std::string_view, sz::matcher_rfind>, //
-        sz::range_rmatches<sz::string_view, sz::matcher_rfind>>( //
+    test_search_with_misaligned_repetitions<                                       //
+        sz::range_rmatches<std::string_view, sz::matcher_rfind<std::string_view>>, //
+        sz::range_rmatches<sz::string_view, sz::matcher_rfind<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_search_with_misaligned_repetitions<                            //
-        sz::range_matches<std::string_view, sz::matcher_find_first_of>, //
-        sz::range_matches<sz::string_view, sz::matcher_find_first_of>>( //
+    test_search_with_misaligned_repetitions<                                              //
+        sz::range_matches<std::string_view, sz::matcher_find_first_of<std::string_view>>, //
+        sz::range_matches<sz::string_view, sz::matcher_find_first_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_search_with_misaligned_repetitions<                            //
-        sz::range_rmatches<std::string_view, sz::matcher_find_last_of>, //
-        sz::range_rmatches<sz::string_view, sz::matcher_find_last_of>>( //
+    test_search_with_misaligned_repetitions<                                              //
+        sz::range_rmatches<std::string_view, sz::matcher_find_last_of<std::string_view>>, //
+        sz::range_rmatches<sz::string_view, sz::matcher_find_last_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_search_with_misaligned_repetitions<                                //
-        sz::range_matches<std::string_view, sz::matcher_find_first_not_of>, //
-        sz::range_matches<sz::string_view, sz::matcher_find_first_not_of>>( //
+    test_search_with_misaligned_repetitions<                                                  //
+        sz::range_matches<std::string_view, sz::matcher_find_first_not_of<std::string_view>>, //
+        sz::range_matches<sz::string_view, sz::matcher_find_first_not_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 
-    test_search_with_misaligned_repetitions<                                //
-        sz::range_rmatches<std::string_view, sz::matcher_find_last_not_of>, //
-        sz::range_rmatches<sz::string_view, sz::matcher_find_last_not_of>>( //
+    test_search_with_misaligned_repetitions<                                                  //
+        sz::range_rmatches<std::string_view, sz::matcher_find_last_not_of<std::string_view>>, //
+        sz::range_rmatches<sz::string_view, sz::matcher_find_last_not_of<sz::string_view>>>(  //
         haystack_pattern, needle_stl, misalignment);
 }
 
@@ -876,6 +946,7 @@ int main(int argc, char const **argv) {
 
     // Cover the non-STL interfaces
     test_api_readonly_extensions<sz::string_view>();
+    test_api_mutable_extensions();
 
     // The string class implementation
     test_constructors();
