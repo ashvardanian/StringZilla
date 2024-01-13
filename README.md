@@ -251,15 +251,15 @@ typedef union sz_string_t {
 ```
 
 As one can see, a short string can be kept on the stack, if it fits within `internal.chars` array.
-Before 2015 GCC string implementation was just 8 bytes.
-Today, practically all variants are at least 32 bytes, so two of them fit in a cache line.
-Practically all of them can only store 15 bytes of the "Small String" on the stack.
-StringZilla can store strings up to 22 bytes long on the stack, while avoiding any branches on pointer and length lookups.
+Before 2015 GCC string implementation was just 8 bytes, and could only fit 7 characters.
+Different STL implementations today have different thresholds for the Small String Optimization.
+Similar to GCC, StringZilla is 32 bytes in size, and similar to Clang it can fit 22 characters on stack.
+Our layout might be preferential, if you want to avoid branches.
 
-|                       | GCC 13 | Clang 17 | ICX 2024 |     StringZilla |
-| :-------------------- | -----: | -------: | -------: | --------------: |
-| `sizeof(std::string)` |     32 |       32 |       32 |              32 |
-| Small String Capacity |     15 |       15 |       15 | __22__ (+ 47 %) |
+|                       | `libstdc++` in  GCC 13 | `libc++` in Clang 17 | StringZilla |
+| :-------------------- | ---------------------: | -------------------: | ----------: |
+| `sizeof(std::string)` |                     32 |                   24 |          32 |
+| Small String Capacity |                     15 |               __22__ |      __22__ |
 
 > Use the following gist to check on your compiler: https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21
 
@@ -411,6 +411,7 @@ Here is a sneak peek of the most useful ones.
 
 ```cpp
 text.hash(); // -> 64 bit unsigned integer 
+text.ssize(); // -> 64 bit signed length to avoid `static_cast<std::ssize_t>(text.size())`
 text.contains_only(" \w\t"); // == text.find_first_not_of(character_set(" \w\t")) == npos;
 text.contains(sz::whitespaces); // == text.find(character_set(sz::whitespaces)) != npos;
 
