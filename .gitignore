@@ -1,4 +1,5 @@
 build/
+build_debug/
 .DS_Store
 tmp/
 build_debug/
@@ -22,3 +23,4 @@ node_modules/
 leipzig1M.txt
 xlsum.csv
 enwik9
+.venv/*
