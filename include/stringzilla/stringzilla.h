@@ -614,10 +614,10 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
  *
  *  @param string       String to clean.
  *  @param offset       Offset of the first byte to remove.
- *  @param length       Number of bytes to remove.
- *                      Out-of-bound ranges will be capped.
- * /
-SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
+ *  @param length       Number of bytes to remove. Out-of-bound ranges will be capped.
+ *  @return             Number of bytes removed.
+ */
+SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
 
 /**
  *  @brief  Shrinks the string to fit the current length, if it's allocated on the heap.
@@ -2219,7 +2219,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
     return string_start;
 }
 
-SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
+SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
 
     SZ_ASSERT(string, "String can't be NULL.");
 
@@ -2252,6 +2252,7 @@ SZ_PUBLIC void sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t 
     // of the on-the-stack string, but inplace subtraction would work.
     string->external.length -= length;
     string_start[string_length - length] = 0;
+    return length;
 }
 
 SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
