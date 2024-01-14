@@ -64,7 +64,7 @@ For C++ code:
 - Explicitly mark `noexcept` or `noexcept(false)` for all library interfaces.
 - Document all possible exceptions of an interface using `@throw` in Doxygen.
 - In C++ code avoid C-style variadic arguments in favor of templates.
-- In C++ code avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, etc.
+- In C++ code avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, and `const_cast`, except for places where a C function is called.
 - Use lower-case names for everything, except macros.
 
 For Python code:
