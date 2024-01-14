@@ -276,94 +276,6 @@ static void test_api_readonly() {
 }
 
 /**
- *  @brief  Invokes different C++ member methods of immutable strings to cover extensions beyond the
- *          STL API.
- */
-template <typename string_type>
-static void test_api_readonly_extensions() {
-    assert("hello"_sz.sat(0) == 'h');
-    assert("hello"_sz.sat(-1) == 'o');
-    assert("hello"_sz.sub(1) == "ello");
-    assert("hello"_sz.sub(-1) == "o");
-    assert("hello"_sz.sub(1, 2) == "e");
-    assert("hello"_sz.sub(1, 100) == "ello");
-    assert("hello"_sz.sub(100, 100) == "");
-    assert("hello"_sz.sub(-2, -1) == "l");
-    assert("hello"_sz.sub(-2, -2) == "");
-    assert("hello"_sz.sub(100, -100) == "");
-
-    assert(("hello"_sz[{1, 2}] == "e"));
-    assert(("hello"_sz[{1, 100}] == "ello"));
-    assert(("hello"_sz[{100, 100}] == ""));
-    assert(("hello"_sz[{100, -100}] == ""));
-    assert(("hello"_sz[{-100, -100}] == ""));
-}
-
-void test_api_mutable_extensions() {
-    using str = sz::string;
-
-    // Same length replacements.
-    assert_scoped(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("l", "1"), s == "he11o");
-    assert_scoped(str s = "hello", s.replace_all("he", "al"), s == "alllo");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), "!"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("o"), "!"), s == "hell!");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("ho"), "!"), s == "!ell!");
-
-    // Shorter replacements.
-    assert_scoped(str s = "hello", s.replace_all("xx", "x"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("l", ""), s == "heo");
-    assert_scoped(str s = "hello", s.replace_all("h", ""), s == "ello");
-    assert_scoped(str s = "hello", s.replace_all("o", ""), s == "hell");
-    assert_scoped(str s = "hello", s.replace_all("llo", "!"), s == "he!");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), ""), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("lo"), ""), s == "he");
-
-    // Longer replacements.
-    assert_scoped(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
-    assert_scoped(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
-    assert_scoped(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
-    assert_scoped(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), "xx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("lo"), "lo"), s == "helololo");
-
-    // Concatenation.
-    // assert(str(str("a") | str("b")) == "ab");
-    // assert(str(str("a") | str("b") | str("ab")) == "abab");
-
-    assert(str(sz::concatenate("a"_sz, "b"_sz)) == "ab");
-    assert(str(sz::concatenate("a"_sz, "b"_sz, "c"_sz)) == "abc");
-}
-
-static void test_stl_conversion_api() {
-    // From a mutable STL string to StringZilla and vice-versa.
-    {
-        std::string stl {"hello"};
-        sz::string sz = stl;
-        sz::string_view szv = stl;
-        sz::string_span szs = stl;
-        stl = sz;
-        stl = szv;
-        stl = szs;
-    }
-    // From an immutable STL string to StringZilla.
-    {
-        std::string const stl {"hello"};
-        sz::string sz = stl;
-        sz::string_view szv = stl;
-    }
-    // From STL `string_view` to StringZilla and vice-versa.
-    {
-        std::string_view stl {"hello"};
-        sz::string sz = stl;
-        sz::string_view szv = stl;
-        stl = sz;
-        stl = szv;
-    }
-}
-
-/**
  *  @brief  Invokes different C++ member methods of the memory-owning string class to make sure they all pass
  *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
  */
@@ -382,14 +294,19 @@ static void test_api_mutable() {
     assert(str(str("hello"), 2, 2) == "ll");           // Construct from another string range
 
     // Assignments.
-    // assert_scoped(str s = "obsolete", s = "hello", s == "hello");
-    // assert_scoped(str s = "obsolete", s.assign("hello"), s == "hello");
-    // assert_scoped(str s = "obsolete", s.assign("hello", 4), s == "hell");
-    // assert_scoped(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
-    // assert_scoped(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
-    // assert_scoped(str s = "obsolete", s.assign(str("hello")), s == "hello");
-    // assert_scoped(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
-    // assert_scoped(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
+    assert_scoped(str s = "obsolete", s = "hello", s == "hello");
+    assert_scoped(str s = "obsolete", s.assign("hello"), s == "hello");
+    assert_scoped(str s = "obsolete", s.assign("hello", 4), s == "hell");
+    assert_scoped(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
+    assert_scoped(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
+    assert_scoped(str s = "obsolete", s.assign(str("hello")), s == "hello");
+    assert_scoped(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
+    assert_scoped(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
+    assert_scoped(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
+    assert_scoped(str s = "obsolete", s.assign(s), s == "obsolete");                  // Self-assignment
+    assert_scoped(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete"); // Self-assignment
+    assert_scoped(str s = "obsolete", s.assign(s, 4), s == "lete");                   // Partial self-assignment
+    assert_scoped(str s = "obsolete", s.assign(s, 4, 3), s == "let");                 // Partial self-assignment
 
     // Allocations, capacity and memory management.
     assert_scoped(str s, s.reserve(10), s.capacity() >= 10);
@@ -456,6 +373,105 @@ static void test_api_mutable() {
     // Some nice "tweetable" examples :)
     assert(str("Loose").replace(2, 2, str("vath"), 1) == "Loathe");
     assert(str("Loose").replace(2, 2, "vath", 1) == "Love");
+
+    // Insertion is a special case of replacement.
+    // Appending and assigning are special cases of insertion.
+    // Still, we test them separately to make sure they are not broken.
+    assert(str("hello").append("123") == "hello123");
+    assert(str("hello").append(str("123")) == "hello123");
+    assert(str("hello").append(str("123"), 1) == "hello23");
+    assert(str("hello").append(str("123"), 1, 1) == "hello2");
+    assert(str("hello").append({'1', '2'}) == "hello12");
+    assert(str("hello").append(2, '!') == "hello!!");
+    assert_scoped(str s = "123", (void)0, str("hello").append(s.begin(), s.end()) == "hello123");
+}
+
+static void test_stl_conversion_api() {
+    // From a mutable STL string to StringZilla and vice-versa.
+    {
+        std::string stl {"hello"};
+        sz::string sz = stl;
+        sz::string_view szv = stl;
+        sz::string_span szs = stl;
+        stl = sz;
+        stl = szv;
+        stl = szs;
+    }
+    // From an immutable STL string to StringZilla.
+    {
+        std::string const stl {"hello"};
+        sz::string sz = stl;
+        sz::string_view szv = stl;
+    }
+    // From STL `string_view` to StringZilla and vice-versa.
+    {
+        std::string_view stl {"hello"};
+        sz::string sz = stl;
+        sz::string_view szv = stl;
+        stl = sz;
+        stl = szv;
+    }
+}
+
+/**
+ *  @brief  Invokes different C++ member methods of immutable strings to cover extensions beyond the
+ *          STL API.
+ */
+template <typename string_type>
+static void test_api_readonly_extensions() {
+    assert("hello"_sz.sat(0) == 'h');
+    assert("hello"_sz.sat(-1) == 'o');
+    assert("hello"_sz.sub(1) == "ello");
+    assert("hello"_sz.sub(-1) == "o");
+    assert("hello"_sz.sub(1, 2) == "e");
+    assert("hello"_sz.sub(1, 100) == "ello");
+    assert("hello"_sz.sub(100, 100) == "");
+    assert("hello"_sz.sub(-2, -1) == "l");
+    assert("hello"_sz.sub(-2, -2) == "");
+    assert("hello"_sz.sub(100, -100) == "");
+
+    assert(("hello"_sz[{1, 2}] == "e"));
+    assert(("hello"_sz[{1, 100}] == "ello"));
+    assert(("hello"_sz[{100, 100}] == ""));
+    assert(("hello"_sz[{100, -100}] == ""));
+    assert(("hello"_sz[{-100, -100}] == ""));
+}
+
+void test_api_mutable_extensions() {
+    using str = sz::string;
+
+    // Same length replacements.
+    assert_scoped(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all("l", "1"), s == "he11o");
+    assert_scoped(str s = "hello", s.replace_all("he", "al"), s == "alllo");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), "!"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("o"), "!"), s == "hell!");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("ho"), "!"), s == "!ell!");
+
+    // Shorter replacements.
+    assert_scoped(str s = "hello", s.replace_all("xx", "x"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all("l", ""), s == "heo");
+    assert_scoped(str s = "hello", s.replace_all("h", ""), s == "ello");
+    assert_scoped(str s = "hello", s.replace_all("o", ""), s == "hell");
+    assert_scoped(str s = "hello", s.replace_all("llo", "!"), s == "he!");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), ""), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("lo"), ""), s == "he");
+
+    // Longer replacements.
+    assert_scoped(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
+    assert_scoped(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
+    assert_scoped(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
+    assert_scoped(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), "xx"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all(sz::character_set("lo"), "lo"), s == "helololo");
+
+    // Concatenation.
+    assert(str(str("a") | str("b")) == "ab");
+    assert(str(str("a") | str("b") | str("ab")) == "abab");
+
+    assert(str(sz::concatenate("a"_sz, "b"_sz)) == "ab");
+    assert(str(sz::concatenate("a"_sz, "b"_sz, "c"_sz)) == "abc");
 }
 
 /**

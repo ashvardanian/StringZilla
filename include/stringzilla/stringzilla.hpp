@@ -2617,9 +2617,9 @@ class basic_string {
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
      */
-    basic_string &insert(size_type offset, basic_string const &other, size_type other_index,
+    basic_string &insert(size_type offset, string_view other, size_type other_index,
                          size_type count = npos) noexcept(false) {
-        return insert(offset, other.view().substr(other_index, count));
+        return insert(offset, other.substr(other_index, count));
     }
 
     /**
@@ -2855,13 +2855,137 @@ class basic_string {
      */
     void pop_back() noexcept { sz_string_erase(&string_, size() - 1, 1); }
 
+    /**
+     *  @brief  Overwrites the string with the given string.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_assign` for a cleaner exception-less alternative.
+     */
     basic_string &assign(string_view other) noexcept(false) {
         if (!try_assign(other)) throw std::bad_alloc();
         return *this;
     }
 
-    basic_string &append(string_view other) noexcept(false) {
-        if (!try_append(other)) throw std::bad_alloc();
+    /**
+     *  @brief  Overwrites the string with the given repeated character.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_assign` for a cleaner exception-less alternative.
+     */
+    basic_string &assign(size_type repeats, char_type character) noexcept(false) {
+        resize(repeats, character);
+        sz_fill(data(), repeats, *(sz_u8_t *)&character);
+        return *this;
+    }
+
+    /**
+     *  @brief  Overwrites the string with the given string.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_assign` for a cleaner exception-less alternative.
+     */
+    basic_string &assign(const_pointer other, size_type length) noexcept(false) { return assign({other, length}); }
+
+    /**
+     *  @brief  Overwrites the string with the given string.
+     *  @throw  `std::length_error` if the string is too long or `pos > str.size()`.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_assign` for a cleaner exception-less alternative.
+     */
+    basic_string &assign(string_view str, size_type pos, size_type count = npos) noexcept(false) {
+        return assign(str.substr(pos, count));
+    }
+
+    /**
+     *  @brief  Overwrites the string with the given iterator range.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_assign` for a cleaner exception-less alternative.
+     */
+    template <typename input_iterator>
+    basic_string &assign(input_iterator first, input_iterator last) noexcept(false) {
+        resize(std::distance(first, last));
+        for (iterator output = begin(); first != last; ++first, ++output) *output = *first;
+        return *this;
+    }
+
+    /**
+     *  @brief  Overwrites the string with the given initializer list.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_assign` for a cleaner exception-less alternative.
+     */
+    basic_string &assign(std::initializer_list<char_type> ilist) noexcept(false) {
+        return assign(ilist.begin(), ilist.end());
+    }
+
+    /**
+     *  @brief  Appends to the end of the current string.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_append` for a cleaner exception-less alternative.
+     */
+    basic_string &append(string_view str) noexcept(false) {
+        if (!try_append(str)) throw std::bad_alloc();
+        return *this;
+    }
+
+    /**
+     *  @brief  Appends to the end of the current string.
+     *  @throw  `std::length_error` if the string is too long or `pos > str.size()`.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_append` for a cleaner exception-less alternative.
+     */
+    basic_string &append(string_view str, size_type pos, size_type length = npos) noexcept(false) {
+        return append(str.substr(pos, length));
+    }
+
+    /**
+     *  @brief  Appends to the end of the current string.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_append` for a cleaner exception-less alternative.
+     */
+    basic_string &append(const_pointer str, size_type length) noexcept(false) { return append({str, length}); }
+
+    /**
+     *  @brief  Appends to the end of the current string.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_append` for a cleaner exception-less alternative.
+     */
+    basic_string &append(const_pointer str) noexcept(false) { return append(string_view(str)); }
+
+    /**
+     *  @brief  Appends a repeated character to the end of the current string.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_append` for a cleaner exception-less alternative.
+     */
+    basic_string &append(size_type repeats, char_type ch) noexcept(false) {
+        resize(size() + repeats, ch);
+        return *this;
+    }
+
+    /**
+     *  @brief  Appends to the end of the current string.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_append` for a cleaner exception-less alternative.
+     */
+    basic_string &append(std::initializer_list<char_type> other) noexcept(false) {
+        return append(other.begin(), other.end());
+    }
+
+    /**
+     *  @brief  Appends to the end of the current string.
+     *  @throw  `std::length_error` if the string is too long.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @see    `try_append` for a cleaner exception-less alternative.
+     */
+    template <typename input_iterator>
+    basic_string &append(input_iterator first, input_iterator last) noexcept(false) {
+        insert<input_iterator>(cend(), first, last);
         return *this;
     }
 
@@ -3044,8 +3168,8 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
     sz_string_range(&string_, &string_start, &string_length);
 
     if (string_length >= other.length()) {
-        sz_string_erase(&string_, other.length(), sz_size_max);
         other.copy(string_start, other.length());
+        sz_string_erase(&string_, other.length(), sz_size_max);
     }
     else {
         if (!with_alloc([&](calloc_type &alloc) {
