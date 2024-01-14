@@ -63,9 +63,10 @@ For C++ code:
 - Explicitly use `std::` or `sz::` namespaces over global `memcpy`, `uint64_t`, etc.
 - Explicitly mark `noexcept` or `noexcept(false)` for all library interfaces.
 - Document all possible exceptions of an interface using `@throw` in Doxygen.
-- In C++ code avoid C-style variadic arguments in favor of templates.
-- In C++ code avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, and `const_cast`, except for places where a C function is called.
+- Avoid C-style variadic arguments in favor of templates.
+- Avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, and `const_cast`, except for places where a C function is called.
 - Use lower-case names for everything, except macros.
+- In templates prefer `typename` over `class`.
 
 For Python code:
 

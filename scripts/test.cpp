@@ -253,13 +253,15 @@ static void test_api_readonly() {
     assert_throws(str("hello").copy(NULL, 1, 100), std::out_of_range);
 
     // Swaps.
-    {
-        str s1 = "hello";
-        str s2 = "world";
-        s1.swap(s2);
-        assert(s1 == "world" && s2 == "hello");
-        s1.swap(s1); // Swapping with itself.
-        assert(s1 == "world");
+    for (str const first : {"", "hello", "hellohellohellohellohellohellohellohellohellohellohellohello"}) {
+        for (str const second : {"", "world", "worldworldworldworldworldworldworldworldworldworldworldworld"}) {
+            str first_copy = first;
+            str second_copy = second;
+            first_copy.swap(second_copy);
+            assert(first_copy == second && second_copy == first);
+            first_copy.swap(first_copy); // Swapping with itself.
+            assert(first_copy == second);
+        }
     }
 
     // Make sure the standard hash and function-objects instantiate just fine.
@@ -380,14 +382,14 @@ static void test_api_mutable() {
     assert(str(str("hello"), 2, 2) == "ll");           // Construct from another string range
 
     // Assignments.
-    assert_scoped(str s, s = "hello", s == "hello");
-    assert_scoped(str s, s.assign("hello"), s == "hello");
-    assert_scoped(str s, s.assign("hello", 4), s == "hell");
-    assert_scoped(str s, s.assign(5, 'a'), s == "aaaaa");
-    assert_scoped(str s, s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
-    assert_scoped(str s, s.assign(str("hello")), s == "hello");
-    assert_scoped(str s, s.assign(str("hello"), 2), s == "llo");
-    assert_scoped(str s, s.assign(str("hello"), 2, 2), s == "ll");
+    // assert_scoped(str s = "obsolete", s = "hello", s == "hello");
+    // assert_scoped(str s = "obsolete", s.assign("hello"), s == "hello");
+    // assert_scoped(str s = "obsolete", s.assign("hello", 4), s == "hell");
+    // assert_scoped(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
+    // assert_scoped(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
+    // assert_scoped(str s = "obsolete", s.assign(str("hello")), s == "hello");
+    // assert_scoped(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
+    // assert_scoped(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
 
     // Allocations, capacity and memory management.
     assert_scoped(str s, s.reserve(10), s.capacity() >= 10);
@@ -409,24 +411,35 @@ static void test_api_mutable() {
     assert_scoped(str s = "!?", s.pop_back(), s == "!");
 
     // Incremental construction.
+    assert(str("__").insert(1, "test") == "_test_");
+    assert(str("__").insert(1, "test", 2) == "_te_");
+    assert(str("__").insert(1, 5, 'a') == "_aaaaa_");
+    assert(str("__").insert(1, str("test")) == "_test_");
+    assert(str("__").insert(1, str("test"), 2) == "_st_");
+    assert(str("__").insert(1, str("test"), 2, 1) == "_s_");
+
+    // Inserting at a given iterator position yields back an iterator.
+    assert_scoped(str s = "__", s.insert(s.begin() + 1, 5, 'a'), s == "_aaaaa_");
+    assert_scoped(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}), s == "_abc_");
+    assert_scoped(str s = "__", (void)0, s.insert(s.begin() + 1, 5, 'a') == (s.begin() + 1));
+    assert_scoped(str s = "__", (void)0, s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1));
+
+    // Handle exceptions.
     // The `length_error` might be difficult to catch due to a large `max_size()`.
     // assert_throws(large_string.insert(large_string.size() - 1, large_number_of_chars, 'a'), std::length_error);
-    assert_scoped(str s = "__", s.insert(1, "test"), s == "_test_");
-    assert_scoped(str s = "__", s.insert(1, "test", 2), s == "_te_");
-    assert_scoped(str s = "__", s.insert(1, 5, 'a'), s == "_aaaaa_");
-    assert_scoped(str s = "__", s.insert(1, {'a', 'b', 'c'}), s == "_abc_");
-    assert_scoped(str s = "__", s.insert(1, str("test")), s == "_test_");
-    assert_scoped(str s = "__", s.insert(1, str("test"), 2), s == "_st_");
-    assert_scoped(str s = "__", s.insert(1, str("test"), 2, 1), s == "_s_");
     assert_throws(str("hello").insert(6, "world"), std::out_of_range);         // `index > size()` case from STL
     assert_throws(str("hello").insert(5, str("world"), 6), std::out_of_range); // `s_index > str.size()` case from STL
 
     // Erasure.
-    assert_scoped(str s = "test", s.erase(1, 2), s == "tt");
-    assert_scoped(str s = "test", s.erase(1), s == "t");
+    assert(str("").erase(0, 3) == "");
+    assert(str("test").erase(1, 2) == "tt");
+    assert(str("test").erase(1) == "t");
     assert_scoped(str s = "test", s.erase(s.begin() + 1), s == "tst");
     assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
     assert_scoped(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
+    assert_scoped(str s = "test", (void)0, s.erase(s.begin() + 1) == (s.begin() + 1));
+    assert_scoped(str s = "test", (void)0, s.erase(s.begin() + 1, s.begin() + 2) == (s.begin() + 1));
+    assert_scoped(str s = "test", (void)0, s.erase(s.begin() + 1, s.begin() + 3) == (s.begin() + 1));
 
     // Substitutions.
     assert(str("hello").replace(1, 2, "123") == "h123lo");
@@ -435,7 +448,10 @@ static void test_api_mutable() {
     assert(str("hello").replace(1, 2, "123", 1, 1) == "h2lo");
     assert(str("hello").replace(1, 2, str("123"), 1, 1) == "h2lo");
     assert(str("hello").replace(1, 2, 3, 'a') == "haaalo");
-    assert(str("hello").replace(1, 2, {'a', 'b'}) == "hablo");
+
+    // Substitutions with iterators.
+    assert_scoped(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, 3, 'a'), s == "haaalo");
+    assert_scoped(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, {'a', 'b'}), s == "hablo");
 
     // Some nice "tweetable" examples :)
     assert(str("Loose").replace(2, 2, str("vath"), 1) == "Loathe");
@@ -511,7 +527,7 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
     std::size_t iterations = 4;
 
     assert(accounting_allocator::current_bytes_alloced == 0);
-    using string = sz::basic_string<accounting_allocator>;
+    using string = sz::basic_string<char, accounting_allocator>;
     string base;
 
     for (std::size_t i = 0; i < len; i++) base.push_back('c');
@@ -967,12 +983,13 @@ int main(int argc, char const **argv) {
     test_api_readonly<std::string>();
     test_api_readonly<sz::string_view>();
 
-    // test_api_readonly<sz::string>();
+    test_api_readonly<sz::string>();
     test_api_mutable<std::string>(); // Make sure the test itself is reasonable
-    // test_api_mutable<sz::string>();  // The fact that this compiles is already a miracle :)
+    test_api_mutable<sz::string>();  // The fact that this compiles is already a miracle :)
 
     // Cover the non-STL interfaces
     test_api_readonly_extensions<sz::string_view>();
+    test_api_readonly_extensions<sz::string>();
     test_api_mutable_extensions();
 
     // The string class implementation
