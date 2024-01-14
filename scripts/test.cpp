@@ -334,6 +334,33 @@ void test_api_mutable_extensions() {
     assert(str(sz::concatenate("a"_sz, "b"_sz, "c"_sz)) == "abc");
 }
 
+static void test_stl_conversion_api() {
+    // From a mutable STL string to StringZilla and vice-versa.
+    {
+        std::string stl {"hello"};
+        sz::string sz = stl;
+        sz::string_view szv = stl;
+        sz::string_span szs = stl;
+        stl = sz;
+        stl = szv;
+        stl = szs;
+    }
+    // From an immutable STL string to StringZilla.
+    {
+        std::string const stl {"hello"};
+        sz::string sz = stl;
+        sz::string_view szv = stl;
+    }
+    // From STL `string_view` to StringZilla and vice-versa.
+    {
+        std::string_view stl {"hello"};
+        sz::string sz = stl;
+        sz::string_view szv = stl;
+        stl = sz;
+        stl = szv;
+    }
+}
+
 /**
  *  @brief  Invokes different C++ member methods of the memory-owning string class to make sure they all pass
  *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
@@ -955,6 +982,7 @@ int main(int argc, char const **argv) {
     test_updates();
 
     // Advanced search operations
+    test_stl_conversion_api();
     test_comparisons();
     test_search();
     test_search_with_misaligned_repetitions();
