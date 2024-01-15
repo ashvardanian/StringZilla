@@ -330,7 +330,7 @@ using str = std::string;
 assert(str("hello world").substr(6) == "world");
 assert(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
 assert_throws(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
-assert_throws(str("hello world").substr(20, 5), std::out_of_range); // 20 is byond the length of the string
+assert_throws(str("hello world").substr(20, 5), std::out_of_range); // 20 is beyond the length of the string
 assert_throws(str("hello world").substr(-1, 5), std::out_of_range); // -1 casts to unsigned without any warnings...
 assert(str("hello world").substr(0, -1) == "hello world");          // -1 casts to unsigned without any warnings...
 
@@ -473,7 +473,7 @@ Debugging pointer offsets is not a pleasant exercise, so keep the following func
 - `haystack.[r]split(char_set(""))`
 
 For $N$ matches the split functions will report $N+1$ matches, potentially including empty strings.
-Ranges have a few convinience methods as well:
+Ranges have a few convenience methods as well:
 
 ```cpp
 range.size(); // -> std::size_t
@@ -484,7 +484,7 @@ range.template to<std::vector<std::sting_view>>();
 
 ### Concatenating Strings without Allocations
 
-Ansother common string operation is concatenation.
+Another common string operation is concatenation.
 The STL provides `std::string::operator+` and `std::string::append`, but those are not very efficient, if multiple invocations are performed.
 
 ```cpp
@@ -501,19 +501,13 @@ email.append(name), email.append("@"), email.append(domain), email.append("."), 
 ```
 
 That's mouthful and error-prone.
-StringZilla provides a more convenient `concat` function, which takes a variadic number of arguments.
+StringZilla provides a more convenient `concatenate` function, which takes a variadic number of arguments.
+It also overrides the `operator|` to concatenate strings lazily, without any allocations.
 
 ```cpp
-auto email = sz::concat(name, "@", domain, ".", tld);
-```
-
-Moreover, if the first or second argument of the expression is a StringZilla string, the concatenation can be poerformed lazily using the same `operator+` syntax.
-That behavior is disabled for compatibility by default, but can be enabled by defining `SZ_LAZY_CONCAT` macro.
-
-```cpp
-sz::string name, domain, tld;
-auto email_expression = name + "@" + domain + "." + tld;    // 0 allocations
-sz::string email = name + "@" + domain + "." + tld;         // 1 allocations
+auto email = sz::concatenate(name, "@", domain, ".", tld);   // 0 allocations
+auto email = name | "@" | domain | "." | tld;                // 0 allocations
+sz::string email = name | "@" | domain | "." | tld;          // 1 allocations
 ```
 
 ### Random Generation
@@ -607,11 +601,6 @@ __`SZ_INCLUDE_STL_CONVERSIONS`__:
 
 > When using the C++ interface one can disable conversions from `std::string` to `sz::string` and back.
 > If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
-
-__`SZ_LAZY_CONCAT`__:
-
-> When using the C++ interface one can enable lazy concatenation of `sz::string` objects.
-> That will allow using the `+` operator for concatenation, but is not compatible with the STL.
 
 ## Algorithms & Design Decisions 📚
 
