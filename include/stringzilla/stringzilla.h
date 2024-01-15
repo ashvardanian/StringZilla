@@ -1296,10 +1296,13 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
     sz_cptr_t const end = text;
-    for (text += length; text != end; --text)
-        if (sz_u8_set_contains(set, *(text - 1))) return text - 1;
+    for (text += length; text != end;)
+        if (sz_u8_set_contains(set, *(text -= 1))) return text;
     return NULL;
+#pragma GCC diagnostic pop
 }
 
 /**
@@ -2693,6 +2696,27 @@ SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
 
 SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
     if (n_length == 1) return sz_find_last_byte_avx2(h, h_length, n);
+
+    int matches;
+    sz_u256_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
+    n_first_vec.ymm = _mm256_set1_epi8(n[0]);
+    n_mid_vec.ymm = _mm256_set1_epi8(n[n_length / 2]);
+    n_last_vec.ymm = _mm256_set1_epi8(n[n_length - 1]);
+
+    for (; h_length >= n_length + 32; h_length -= 32) {
+        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + h_length - n_length - 32 + 1));
+        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + h_length - n_length - 32 + 1 + n_length / 2));
+        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + h_length - 32));
+        matches = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_first_vec.ymm, n_first_vec.ymm)) &
+                  _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_mid_vec.ymm, n_mid_vec.ymm)) &
+                  _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
+        while (matches) {
+            int potential_offset = sz_u32_clz(matches);
+            if (sz_equal(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
+                return h + h_length - n_length - potential_offset;
+            matches &= ~(1 << (31 - potential_offset));
+        }
+    }
 
     return sz_find_last_serial(h, h_length, n, n_length);
 }

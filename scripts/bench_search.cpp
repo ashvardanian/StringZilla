@@ -28,6 +28,9 @@ tracked_binary_functions_t find_functions() {
 #if SZ_USE_X86_AVX512
         {"sz_find_avx512", wrap_sz(sz_find_avx512), true},
 #endif
+#if SZ_USE_X86_AVX2
+        {"sz_find_avx2", wrap_sz(sz_find_avx2), true},
+#endif
 #if SZ_USE_ARM_NEON
         {"sz_find_neon", wrap_sz(sz_find_neon), true},
 #endif
@@ -74,6 +77,9 @@ tracked_binary_functions_t rfind_functions() {
         {"sz_find_last_serial", wrap_sz(sz_find_last_serial), true},
 #if SZ_USE_X86_AVX512
         {"sz_find_last_avx512", wrap_sz(sz_find_last_avx512), true},
+#endif
+#if SZ_USE_X86_AVX2
+        {"sz_find_last_avx2", wrap_sz(sz_find_last_avx2), true},
 #endif
 #if SZ_USE_ARM_NEON
         {"sz_find_last_neon", wrap_sz(sz_find_last_neon), true},
