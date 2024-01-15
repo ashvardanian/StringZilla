@@ -2329,7 +2329,7 @@ SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 #if SZ_USE_MISALIGNED_LOADS
         while (length >= 8) *(sz_u64_t *)(target -= 8) = *(sz_u64_t *)(source -= 8), length -= 8;
 #endif
-        while (length--) *(target--) = *(source--);
+        while (length--) *(--target) = *(--source);
     }
 }
 
