@@ -43,11 +43,11 @@ The project was originally developed in VS Code, and contains a set of configura
 - `tasks.json` - build tasks for CMake.
 - `launch.json` - debugger launchers for CMake.
 - `extensions.json` - recommended extensions for VS Code, including:
-  - `ms-vscode.cpptools-themes` - C++ language support.
-  - `ms-vscode.cmake-tools`, `cheshirekow.cmake-format` - CMake integration.
-  - `ms-python.python`, `ms-python.black-formatter` - Python language support.
-  - `yzhang.markdown-all-in-one` - formatting Markdown.
-  - `aaron-bond.better-comments` - color-coded comments.
+    - `ms-vscode.cpptools-themes` - C++ language support.
+    - `ms-vscode.cmake-tools`, `cheshirekow.cmake-format` - CMake integration.
+    - `ms-python.python`, `ms-python.black-formatter` - Python language support.
+    - `yzhang.markdown-all-in-one` - formatting Markdown.
+    - `aaron-bond.better-comments` - color-coded comments.
 
 ## Code Styling
 
