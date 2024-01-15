@@ -123,6 +123,14 @@ function(set_compiler_flags target cpp_standard)
       "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=${STRINGZILLA_TARGET_ARCH}>"
       "$<$<CXX_COMPILER_ID:MSVC>:/arch:${STRINGZILLA_TARGET_ARCH}>"
     )
+
+    # Sanitizer options for Debug mode
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+      target_compile_options(${target} PRIVATE
+        "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=address;-fsanitize=leak>"
+        "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>"
+      )
+    endif()
   endif()
 endfunction()
 
