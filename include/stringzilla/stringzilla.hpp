@@ -1069,7 +1069,7 @@ class basic_string_slice {
 
     /**
      *  @brief  Formatted output function for compatibility with STL's `std::basic_ostream`.
-     *  @throw  `std::ios_base::failure` if an exception occured during output.
+     *  @throw  `std::ios_base::failure` if an exception occurred during output.
      */
     template <typename stream_traits>
     friend std::basic_ostream<value_type, stream_traits> &operator<<(std::basic_ostream<value_type, stream_traits> &os,
@@ -1366,12 +1366,12 @@ class basic_string_slice {
     /**  @brief  Checks if the string ends with the other character. */
     bool ends_with(value_type other) const noexcept { return length_ && start_[length_ - 1] == other; }
 
-    /**  @brief  Python-like convinience function, dropping the matching prefix. */
+    /**  @brief  Python-like convenience function, dropping the matching prefix. */
     string_slice remove_prefix(string_view other) const noexcept {
         return starts_with(other) ? string_slice {start_ + other.length_, length_ - other.length_} : *this;
     }
 
-    /**  @brief  Python-like convinience function, dropping the matching suffix. */
+    /**  @brief  Python-like convenience function, dropping the matching suffix. */
     string_slice remove_suffix(string_view other) const noexcept {
         return ends_with(other) ? string_slice {start_, length_ - other.length_} : *this;
     }
@@ -1619,7 +1619,7 @@ class basic_string_slice {
 #pragma region Slicing
 
     /**
-     *  @brief  Python-like convinience function, dropping prefix formed of given characters.
+     *  @brief  Python-like convenience function, dropping prefix formed of given characters.
      *          Similar to `boost::algorithm::trim_left_if(str, is_any_of(set))`.
      */
     string_slice lstrip(char_set set) const noexcept {
@@ -1630,7 +1630,7 @@ class basic_string_slice {
     }
 
     /**
-     *  @brief  Python-like convinience function, dropping suffix formed of given characters.
+     *  @brief  Python-like convenience function, dropping suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_right_if(str, is_any_of(set))`.
      */
     string_slice rstrip(char_set set) const noexcept {
@@ -1640,7 +1640,7 @@ class basic_string_slice {
     }
 
     /**
-     *  @brief  Python-like convinience function, dropping both the prefix & the suffix formed of given characters.
+     *  @brief  Python-like convenience function, dropping both the prefix & the suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_if(str, is_any_of(set))`.
      */
     string_slice strip(char_set set) const noexcept {
@@ -1704,7 +1704,7 @@ class basic_string_slice {
     /**  @brief  Split around occurrences of given characters in @b reverse order. */
     rsplit_chars_type rsplit(char_set set = whitespaces_set) const noexcept { return {*this, {set}}; }
 
-    /**  @brief  Split around the occurences of all newline characters. */
+    /**  @brief  Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set); }
 
 #pragma endregion
@@ -1963,12 +1963,12 @@ class basic_string {
     basic_string &operator=(std::string const &other) noexcept(false) { return assign({other.data(), other.size()}); }
 
     // As we are need both `data()` and `size()`, going through `operator string_view()`
-    // and `sz_string_unpack` is faster than separate invokations.
+    // and `sz_string_unpack` is faster than separate invocations.
     operator std::string() const { return view(); }
 
     /**
      *  @brief  Formatted output function for compatibility with STL's `std::basic_ostream`.
-     *  @throw  `std::ios_base::failure` if an exception occured during output.
+     *  @throw  `std::ios_base::failure` if an exception occurred during output.
      */
     template <typename stream_traits>
     friend std::basic_ostream<value_type, stream_traits> &operator<<(std::basic_ostream<value_type, stream_traits> &os,
@@ -2011,7 +2011,7 @@ class basic_string {
     const_iterator cbegin() const noexcept { return const_iterator(data()); }
 
     // As we are need both `data()` and `size()`, going through `operator string_view()`
-    // and `sz_string_unpack` is faster than separate invokations.
+    // and `sz_string_unpack` is faster than separate invocations.
     iterator end() noexcept { return span().end(); }
     const_iterator end() const noexcept { return view().end(); }
     const_iterator cend() const noexcept { return view().end(); }
@@ -2474,7 +2474,7 @@ class basic_string {
 #pragma region Slicing
 
     /**
-     *  @brief  Python-like convinience function, dropping prefix formed of given characters.
+     *  @brief  Python-like convenience function, dropping prefix formed of given characters.
      *          Similar to `boost::algorithm::trim_left_if(str, is_any_of(set))`.
      */
     basic_string &lstrip(char_set set) noexcept {
@@ -2484,7 +2484,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Python-like convinience function, dropping suffix formed of given characters.
+     *  @brief  Python-like convenience function, dropping suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_right_if(str, is_any_of(set))`.
      */
     basic_string &rstrip(char_set set) noexcept {
@@ -2494,7 +2494,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Python-like convinience function, dropping both the prefix & the suffix formed of given characters.
+     *  @brief  Python-like convenience function, dropping both the prefix & the suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_if(str, is_any_of(set))`.
      */
     basic_string &strip(char_set set) noexcept { return lstrip(set).rstrip(set); }
@@ -3082,7 +3082,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurences of a given string with the ::replacement string.
+     *  @brief  Replaces ( @b in-place ) all occurrences of a given string with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3095,7 +3095,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurences of a given character set with the ::replacement string.
+     *  @brief  Replaces ( @b in-place ) all occurrences of a given character set with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3108,7 +3108,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurences of a given string with the ::replacement string.
+     *  @brief  Replaces ( @b in-place ) all occurrences of a given string with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3120,7 +3120,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurences of a given character set with the ::replacement string.
+     *  @brief  Replaces ( @b in-place ) all occurrences of a given character set with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3289,7 +3289,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
         using rmatches_type = range_rmatches<string_view, rmatcher_type>;
         rmatches_type rmatches = rmatches_type(this_view, {pattern});
 
-        // It's cheaper to iterate through the whole string once, countinging the number of matches,
+        // It's cheaper to iterate through the whole string once, counting the number of matches,
         // reserving memory once, than re-allocating and copying the string multiple times.
         auto matches_count = rmatches.size();
         if (matches_count == 0) return true; // No matches.
@@ -3307,7 +3307,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
         rsplits_type splits = rsplits_type(this_view, {pattern});
         auto splits_iterator = splits.begin();
 
-        // Put the compacted pointer to the end of the new string, and walg left.
+        // Put the compacted pointer to the end of the new string, and walk left.
         auto compacted_begin = this_view.data() + new_length;
 
         // By now we know that at least one match exists, which means the splits .
