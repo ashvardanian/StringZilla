@@ -87,15 +87,15 @@ brew install libomp llvm # MacOS
 Using modern syntax, this is how you build and run the test suite:
 
 ```bash
-cmake -DSTRINGZILLA_BUILD_TEST=1 -B ./build_debug
-cmake --build ./build_debug --config Debug  # Which will produce the following targets:
-./build_debug/stringzilla_test_cpp20              # Unit test for the entire library
+cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
+cmake --build ./build_debug --config Debug          # Which will produce the following targets:
+./build_debug/stringzilla_test_cpp20                # Unit test for the entire library
 ```
 
 For benchmarks, you can use the following commands:
 
 ```bash
-cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -B ./build_release
+cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -B build_release
 cmake --build ./build_release --config Release      # Which will produce the following targets:
 ./build_release/stringzilla_bench_search <path>     # for substring search
 ./build_release/stringzilla_bench_token <path>      # for hashing, equality comparisons, etc.
@@ -110,14 +110,14 @@ On x86_64, you can use the following commands to compile for Sandy Bridge, Haswe
 
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DCMAKE_CXX_FLAGS="-march=sandybridge" -DCMAKE_C_FLAGS="-march=sandybridge" \
-    -B ./build_release/sandybridge && cmake --build build_release/sandybridge --config Release
+    -DSTRINGZILLA_TARGET_ARCH="sandybridge" -B build_release/sandybridge && \
+    cmake --build build_release/sandybridge --config Release
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DCMAKE_CXX_FLAGS="-march=haswell" -DCMAKE_C_FLAGS="-march=haswell" \
-    -B ./build_release/haswell && cmake --build build_release/haswell --config Release
+    -DSTRINGZILLA_TARGET_ARCH="haswell" -B build_release/haswell && \
+    cmake --build build_release/haswell --config Release
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DCMAKE_CXX_FLAGS="-march=sapphirerapids" -DCMAKE_C_FLAGS="-march=sapphirerapids" \
-    -B ./build_release/sapphirerapids && cmake --build build_release/sapphirerapids --config Release
+    -DSTRINGZILLA_TARGET_ARCH="sapphirerapids" -B build_release/sapphirerapids && \
+    cmake --build build_release/sapphirerapids --config Release
 ```
 
 Alternatively, you may want to compare the performance of the code compiled with different compilers.
@@ -126,10 +126,10 @@ On x86_64, you may want to compare GCC, Clang, and ICX.
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_C_COMPILER=gcc-12 \
-    -B ./build_release/gcc && cmake --build build_release/gcc --config Release
+    -B build_release/gcc && cmake --build build_release/gcc --config Release
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     -DCMAKE_CXX_COMPILER=clang++-14 -DCMAKE_C_COMPILER=clang-14 \
-    -B ./build_release/clang && cmake --build build_release/clang --config Release
+    -B build_release/clang && cmake --build build_release/clang --config Release
 ```
 
 ## Contibuting in Python

@@ -252,7 +252,7 @@ static void test_api_readonly() {
     // Exporting the contents of the string using the `str::copy` method.
     assert_scoped(char buf[5 + 1] = {0}, str("hello").copy(buf, 5), std::strcmp(buf, "hello") == 0);
     assert_scoped(char buf[4 + 1] = {0}, str("hello").copy(buf, 4, 1), std::strcmp(buf, "ello") == 0);
-    assert_throws(str("hello").copy(NULL, 1, 100), std::out_of_range);
+    assert_throws(str("hello").copy((char *)"", 1, 100), std::out_of_range);
 
     // Swaps.
     for (str const first : {"", "hello", "hellohellohellohellohellohellohellohellohellohellohellohello"}) {
@@ -1036,5 +1036,6 @@ int main(int argc, char const **argv) {
     // Similarity measures and fuzzy search
     test_levenshtein_distances();
 
+    std::printf("All tests passed... Unbelievable!\n");
     return 0;
 }
