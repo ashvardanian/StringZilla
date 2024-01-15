@@ -91,6 +91,35 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
 }
 
+/**
+ *  @brief  Validates that `sz_move` and `sz_copy` work as expected,
+ *          comparing them to `std::memmove` and `std::memcpy`.
+ */
+static void test_memory_utilities() {
+    constexpr std::size_t size = 1024;
+    char body_stl[size];
+    char body_sz[size];
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, 255);
+
+    std::generate(body_stl, body_stl + size, [&]() { return static_cast<char>(dis(gen)); });
+    std::copy(body_stl, body_stl + size, body_sz);
+
+    // Move the contents of both strings around, validating overall
+    // equivalency after every random iteration.
+    for (std::size_t i = 0; i < size; i++) {
+        std::size_t offset = gen() % size;
+        std::size_t length = gen() % (size - offset);
+        std::size_t destination = gen() % (size - length);
+
+        std::memmove(body_stl + destination, body_stl + offset, length);
+        sz_move(body_sz + destination, body_sz + offset, length);
+        assert(std::memcmp(body_stl, body_sz, size) == 0);
+    }
+}
+
 #define assert_scoped(init, operation, condition) \
     {                                             \
         init;                                     \
@@ -1002,6 +1031,7 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
+    test_memory_utilities();
 
     // Compatibility with STL
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
