@@ -197,6 +197,14 @@ static void test_api_readonly() {
     assert(str("hello").find_last_not_of("hel") == 4);
     assert(str("hello").find_last_not_of("hel", 4) == 4);
 
+    // Boundary consitions.
+    assert(str("hello").find_first_of("ox", 4) == 4);
+    assert(str("hello").find_first_of("ox", 5) == str::npos);
+    assert(str("hello").find_last_of("ox", 4) == 4);
+    assert(str("hello").find_last_of("ox", 5) == 4);
+    assert(str("hello").find_first_of("hx", 0) == 0);
+    assert(str("hello").find_last_of("hx", 0) == 0);
+
     // Comparisons.
     assert(str("a") != str("b"));
     assert(str("a") < str("b"));
@@ -955,6 +963,10 @@ static void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("ab", "ba");
     test_search_with_misaligned_repetitions("abc", "ca");
     test_search_with_misaligned_repetitions("abcd", "da");
+
+    // When intermediate false-positives may appear
+    test_search_with_misaligned_repetitions("axbxcaybyc", "aybyc");
+    test_search_with_misaligned_repetitions("axbxcabcde", "abcde");
 }
 
 #endif

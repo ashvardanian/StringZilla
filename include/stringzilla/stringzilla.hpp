@@ -1532,7 +1532,9 @@ class basic_string_slice {
      *  @param  until  The offset of the last character to be considered.
      */
     size_type find_last_of(char_set set, size_type until) const noexcept {
-        return until < length_ ? substr(0, until + 1).find_last_of(set) : find_last_of(set);
+        auto len = sz_min_of_two(until + 1, length_);
+        auto ptr = sz_find_last_from_set(start_, len, &set.raw());
+        return ptr ? ptr - start_ : npos;
     }
 
     /**
