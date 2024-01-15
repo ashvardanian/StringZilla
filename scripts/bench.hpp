@@ -12,6 +12,7 @@
 #include <numeric>
 #include <random>
 #include <string>
+#include <string_view> // Require C++17
 #include <vector>
 
 #include <stringzilla/stringzilla.h>
@@ -49,9 +50,15 @@ struct tracked_function_gt {
     function_type function {nullptr};
     bool needs_testing {false};
 
-    std::size_t failed_count {0};
+    std::size_t failed_count;
     std::vector<std::string> failed_strings;
     benchmark_result_t results;
+
+    tracked_function_gt(std::string name = "", function_type function = nullptr, bool needs_testing = false)
+        : name(name), function(function), needs_testing(needs_testing), failed_count(0), failed_strings(), results() {}
+
+    tracked_function_gt(tracked_function_gt const &) = default;
+    tracked_function_gt &operator=(tracked_function_gt const &) = default;
 
     void print() const {
         char const *format;

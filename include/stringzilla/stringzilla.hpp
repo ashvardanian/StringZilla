@@ -15,7 +15,7 @@
  *          automatic conversion from and to `std::stirng_view` and `std::basic_string<any_allocator>`.
  */
 #ifndef SZ_INCLUDE_STL_CONVERSIONS
-#define SZ_INCLUDE_STL_CONVERSIONS 1
+#define SZ_INCLUDE_STL_CONVERSIONS (1)
 #endif
 
 /**
@@ -23,7 +23,7 @@
  *          This will improve performance, but may break some STL-specific code, so it's disabled by default.
  */
 #ifndef SZ_LAZY_CONCAT
-#define SZ_LAZY_CONCAT 0
+#define SZ_LAZY_CONCAT (0)
 #endif
 
 /**
@@ -32,24 +32,24 @@
  *          This will improve performance, but may break some STL-specific code, so it's disabled by default.
  */
 #ifndef SZ_PREFER_VIEWS
-#define SZ_PREFER_VIEWS 0
+#define SZ_PREFER_VIEWS (0)
 #endif
 
 /*  We need to detect the version of the C++ language we are compiled with.
  *  This will affect recent features like `operator<=>` and tests against STL.
  */
 #define SZ_DETECT_CPP_23 (__cplusplus >= 202101L)
-#define SZ_DETECT_CPP_20 (__cplusplus >= 202002L)
+#define SZ_DETECT_CPP20 (__cplusplus >= 202002L)
 #define SZ_DETECT_CPP_17 (__cplusplus >= 201703L)
-#define SZ_DETECT_CPP_14 (__cplusplus >= 201402L)
+#define SZ_DETECT_CPP14 (__cplusplus >= 201402L)
 #define SZ_DETECT_CPP_11 (__cplusplus >= 201103L)
 #define SZ_DETECT_CPP_98 (__cplusplus >= 199711L)
 
 /**
- *  @brief  Defines `constexpr` if the compiler supports C++20, otherwise defines it as empty.
+ *  @brief  The `constexpr` keyword has different applicability scope in different C++ versions.
  *          Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
  */
-#if SZ_DETECT_CPP_20
+#if SZ_DETECT_CPP20
 #define sz_constexpr_if_cpp20 constexpr
 #else
 #define sz_constexpr_if_cpp20
@@ -57,7 +57,9 @@
 
 #if SZ_INCLUDE_STL_CONVERSIONS
 #include <string>
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
 #include <string_view>
+#endif
 #endif
 
 #include <cassert> // `assert`
@@ -70,11 +72,12 @@
 namespace ashvardanian {
 namespace stringzilla {
 
-class character_set;
-template <typename, typename>
-class basic_string;
+template <typename>
+class basic_char_set;
 template <typename>
 class basic_string_slice;
+template <typename, typename>
+class basic_string;
 
 using string_span = basic_string_slice<char>;
 using string_view = basic_string_slice<char const>;
@@ -175,66 +178,71 @@ inline static constexpr char base64[64] = { //
 /**
  *  @brief  A set of characters represented as a bitset with 256 slots.
  */
-class character_set {
+template <typename char_type_ = char>
+class basic_char_set {
     sz_u8_set_t bitset_;
 
   public:
-    constexpr character_set() noexcept {
+    using char_type = char_type_;
+
+    basic_char_set() noexcept {
         // ! Instead of relying on the `sz_u8_set_init`, we have to reimplement it to support `constexpr`.
         bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
     }
-    constexpr explicit character_set(std::initializer_list<char> chars) noexcept : character_set() {
+    explicit basic_char_set(std::initializer_list<char_type> chars) noexcept : basic_char_set() {
         // ! Instead of relying on the `sz_u8_set_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
-        for (auto c : chars) bitset_._u64s[c >> 6] |= (1ull << (c & 63u));
+        for (auto c : chars) bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
     }
     template <std::size_t count_characters>
-    constexpr explicit character_set(char const (&chars)[count_characters]) noexcept : character_set() {
+    explicit basic_char_set(char_type const (&chars)[count_characters]) noexcept : basic_char_set() {
         static_assert(count_characters > 0, "Character array cannot be empty");
         for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
-            char c = chars[i];
-            bitset_._u64s[c >> 6] |= (1ull << (c & 63u));
+            char_type c = chars[i];
+            bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
         }
     }
 
-    constexpr character_set(character_set const &other) noexcept : bitset_(other.bitset_) {}
-    constexpr character_set &operator=(character_set const &other) noexcept {
+    basic_char_set(basic_char_set const &other) noexcept : bitset_(other.bitset_) {}
+    basic_char_set &operator=(basic_char_set const &other) noexcept {
         bitset_ = other.bitset_;
         return *this;
     }
 
-    constexpr character_set operator|(character_set other) const noexcept {
-        character_set result = *this;
+    basic_char_set operator|(basic_char_set other) const noexcept {
+        basic_char_set result = *this;
         result.bitset_._u64s[0] |= other.bitset_._u64s[0], result.bitset_._u64s[1] |= other.bitset_._u64s[1],
             result.bitset_._u64s[2] |= other.bitset_._u64s[2], result.bitset_._u64s[3] |= other.bitset_._u64s[3];
         return *this;
     }
 
-    inline character_set &add(char c) noexcept {
-        sz_u8_set_add(&bitset_, c);
+    inline basic_char_set &add(char_type c) noexcept {
+        sz_u8_set_add(&bitset_, sz_bitcast(sz_u8_t, c));
         return *this;
     }
     inline sz_u8_set_t &raw() noexcept { return bitset_; }
     inline sz_u8_set_t const &raw() const noexcept { return bitset_; }
-    inline bool contains(char c) const noexcept { return sz_u8_set_contains(&bitset_, c); }
-    inline character_set inverted() const noexcept {
-        character_set result = *this;
+    inline bool contains(char_type c) const noexcept { return sz_u8_set_contains(&bitset_, sz_bitcast(sz_u8_t, c)); }
+    inline basic_char_set inverted() const noexcept {
+        basic_char_set result = *this;
         sz_u8_set_invert(&result.bitset_);
         return result;
     }
 };
 
-inline static constexpr character_set ascii_letters_set {ascii_letters};
-inline static constexpr character_set ascii_lowercase_set {ascii_lowercase};
-inline static constexpr character_set ascii_uppercase_set {ascii_uppercase};
-inline static constexpr character_set ascii_printables_set {ascii_printables};
-inline static constexpr character_set ascii_controls_set {ascii_controls};
-inline static constexpr character_set digits_set {digits};
-inline static constexpr character_set hexdigits_set {hexdigits};
-inline static constexpr character_set octdigits_set {octdigits};
-inline static constexpr character_set punctuation_set {punctuation};
-inline static constexpr character_set whitespaces_set {whitespaces};
-inline static constexpr character_set newlines_set {newlines};
-inline static constexpr character_set base64_set {base64};
+using char_set = basic_char_set<char>;
+
+inline static char_set const ascii_letters_set {ascii_letters};
+inline static char_set const ascii_lowercase_set {ascii_lowercase};
+inline static char_set const ascii_uppercase_set {ascii_uppercase};
+inline static char_set const ascii_printables_set {ascii_printables};
+inline static char_set const ascii_controls_set {ascii_controls};
+inline static char_set const digits_set {digits};
+inline static char_set const hexdigits_set {hexdigits};
+inline static char_set const octdigits_set {octdigits};
+inline static char_set const punctuation_set {punctuation};
+inline static char_set const whitespaces_set {whitespaces};
+inline static char_set const newlines_set {newlines};
+inline static char_set const base64_set {base64};
 
 #pragma endregion
 
@@ -862,6 +870,12 @@ iterator_type advanced(iterator_type &&it, distance_type n) {
     return it;
 }
 
+/**  @brief  Helper function using `range_length` to compute the unsigned distance. */
+template <typename iterator_type>
+std::size_t range_length(iterator_type first, iterator_type last) {
+    return static_cast<std::size_t>(std::distance(first, last));
+}
+
 #pragma endregion
 
 #pragma region Helper Template Classes
@@ -1025,6 +1039,7 @@ class basic_string_slice {
 
     constexpr basic_string_slice(basic_string_slice const &other) noexcept = default;
     constexpr basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
+
     basic_string_slice(std::nullptr_t) = delete;
 
     /**  @brief Exchanges the view with that of the `other`. */
@@ -1041,10 +1056,6 @@ class basic_string_slice {
         : basic_string_slice(other.data(), other.size()) {}
 
     template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
-    sz_constexpr_if_cpp20 basic_string_slice(std::string_view const &other) noexcept
-        : basic_string_slice(other.data(), other.size()) {}
-
-    template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
     sz_constexpr_if_cpp20 string_slice &operator=(std::string const &other) noexcept {
         return assign({other.data(), other.size()});
     }
@@ -1054,13 +1065,7 @@ class basic_string_slice {
         return assign({other.data(), other.size()});
     }
 
-    template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
-    sz_constexpr_if_cpp20 string_slice &operator=(std::string_view const &other) noexcept {
-        return assign({other.data(), other.size()});
-    }
-
     operator std::string() const { return {data(), size()}; }
-    operator std::string_view() const noexcept { return {data(), size()}; }
 
     /**
      *  @brief  Formatted output function for compatibility with STL's `std::basic_ostream`.
@@ -1071,6 +1076,20 @@ class basic_string_slice {
                                                                      string_slice const &str) noexcept(false) {
         return os.write(str.data(), str.size());
     }
+
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+
+    template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
+    sz_constexpr_if_cpp20 basic_string_slice(std::string_view const &other) noexcept
+        : basic_string_slice(other.data(), other.size()) {}
+
+    template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
+    sz_constexpr_if_cpp20 string_slice &operator=(std::string_view const &other) noexcept {
+        return assign({other.data(), other.size()});
+    }
+    operator std::string_view() const noexcept { return {data(), size()}; }
+
+#endif
 
 #endif
 
@@ -1287,7 +1306,7 @@ class basic_string_slice {
                sz_equal(start_ + other.first.length(), other.second.data(), other.second.length()) == sz_true_k;
     }
 
-#if SZ_DETECT_CPP_20
+#if SZ_DETECT_CPP20
 
     /**  @brief  Computes the lexicographic ordering between this and the ::other string. */
     std::strong_ordering operator<=>(string_view other) const noexcept {
@@ -1440,10 +1459,10 @@ class basic_string_slice {
     }
 
     /**  @brief  Find the first occurrence of a character from a set. */
-    size_type find(character_set set) const noexcept { return find_first_of(set); }
+    size_type find(char_set set) const noexcept { return find_first_of(set); }
 
     /**  @brief  Find the last occurrence of a character from a set. */
-    size_type rfind(character_set set) const noexcept { return find_last_of(set); }
+    size_type rfind(char_set set) const noexcept { return find_last_of(set); }
 
 #pragma endregion
 #pragma region Returning Partitions
@@ -1452,20 +1471,20 @@ class basic_string_slice {
     partition_type partition(string_view pattern) const noexcept { return partition_(pattern, pattern.length()); }
 
     /**  @brief  Split the string into three parts, before the match, the match itself, and after it. */
-    partition_type partition(character_set pattern) const noexcept { return partition_(pattern, 1); }
+    partition_type partition(char_set pattern) const noexcept { return partition_(pattern, 1); }
 
     /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
     partition_type rpartition(string_view pattern) const noexcept { return rpartition_(pattern, pattern.length()); }
 
     /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
-    partition_type rpartition(character_set pattern) const noexcept { return rpartition_(pattern, 1); }
+    partition_type rpartition(char_set pattern) const noexcept { return rpartition_(pattern, 1); }
 
 #pragma endregion
 #pragma endregion
 
 #pragma region Matching Character Sets
 
-    bool contains_only(character_set set) const noexcept { return find_first_not_of(set) == npos; }
+    bool contains_only(char_set set) const noexcept { return find_first_not_of(set) == npos; }
     bool isalpha() const noexcept { return !empty() && contains_only(ascii_letters_set); }
     bool isalnum() const noexcept { return !empty() && contains_only(ascii_letters_set | digits_set); }
     bool isascii() const noexcept { return empty() || contains_only(ascii_controls_set | ascii_printables_set); }
@@ -1481,7 +1500,7 @@ class basic_string_slice {
      *  @param  skip Number of characters to skip before the search.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
-    size_type find_first_of(character_set set, size_type skip = 0) const noexcept {
+    size_type find_first_of(char_set set, size_type skip = 0) const noexcept {
         auto ptr = sz_find_from_set(start_ + skip, length_ - skip, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
@@ -1491,14 +1510,14 @@ class basic_string_slice {
      *  @param  skip  The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
-    size_type find_first_not_of(character_set set, size_type skip = 0) const noexcept {
+    size_type find_first_not_of(char_set set, size_type skip = 0) const noexcept {
         return find_first_of(set.inverted(), skip);
     }
 
     /**
      *  @brief  Find the last occurrence of a character from a set.
      */
-    size_type find_last_of(character_set set) const noexcept {
+    size_type find_last_of(char_set set) const noexcept {
         auto ptr = sz_find_last_from_set(start_, length_, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
@@ -1506,13 +1525,13 @@ class basic_string_slice {
     /**
      *  @brief  Find the last occurrence of a character outside a set.
      */
-    size_type find_last_not_of(character_set set) const noexcept { return find_last_of(set.inverted()); }
+    size_type find_last_not_of(char_set set) const noexcept { return find_last_of(set.inverted()); }
 
     /**
      *  @brief  Find the last occurrence of a character from a set.
      *  @param  until  The offset of the last character to be considered.
      */
-    size_type find_last_of(character_set set, size_type until) const noexcept {
+    size_type find_last_of(char_set set, size_type until) const noexcept {
         return until < length_ ? substr(0, until + 1).find_last_of(set) : find_last_of(set);
     }
 
@@ -1520,7 +1539,7 @@ class basic_string_slice {
      *  @brief  Find the last occurrence of a character outside a set.
      *  @param  until  The offset of the last character to be considered.
      */
-    size_type find_last_not_of(character_set set, size_type until) const noexcept {
+    size_type find_last_not_of(char_set set, size_type until) const noexcept {
         return find_last_of(set.inverted(), until);
     }
 
@@ -1540,7 +1559,7 @@ class basic_string_slice {
      *  @param  skip  The number of first characters to be skipped.
      */
     size_type find_first_not_of(string_view other, size_type skip = 0) const noexcept {
-        return find_first_not_of(other.as_set());
+        return find_first_not_of(other.as_set(), skip);
     }
 
     /**
@@ -1577,7 +1596,7 @@ class basic_string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_not_of(const_pointer other, size_type skip, size_type count) const noexcept {
-        return find_first_not_of(string_view(other, count));
+        return find_first_not_of(string_view(other, count), skip);
     }
 
     /**
@@ -1603,7 +1622,7 @@ class basic_string_slice {
      *  @brief  Python-like convinience function, dropping prefix formed of given characters.
      *          Similar to `boost::algorithm::trim_left_if(str, is_any_of(set))`.
      */
-    string_slice lstrip(character_set set) const noexcept {
+    string_slice lstrip(char_set set) const noexcept {
         set = set.inverted();
         auto new_start = sz_find_from_set(start_, length_, &set.raw());
         return new_start ? string_slice {new_start, length_ - static_cast<size_type>(new_start - start_)}
@@ -1614,7 +1633,7 @@ class basic_string_slice {
      *  @brief  Python-like convinience function, dropping suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_right_if(str, is_any_of(set))`.
      */
-    string_slice rstrip(character_set set) const noexcept {
+    string_slice rstrip(char_set set) const noexcept {
         set = set.inverted();
         auto new_end = sz_find_last_from_set(start_, length_, &set.raw());
         return new_end ? string_slice {start_, static_cast<size_type>(new_end - start_ + 1)} : string_slice();
@@ -1624,7 +1643,7 @@ class basic_string_slice {
      *  @brief  Python-like convinience function, dropping both the prefix & the suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_if(str, is_any_of(set))`.
      */
-    string_slice strip(character_set set) const noexcept {
+    string_slice strip(char_set set) const noexcept {
         set = set.inverted();
         auto new_start = sz_find_from_set(start_, length_, &set.raw());
         return new_start
@@ -1646,8 +1665,8 @@ class basic_string_slice {
     using find_disjoint_type = range_matches<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rfind_disjoint_type = range_rmatches<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
 
-    using find_all_chars_type = range_matches<string_slice, matcher_find_first_of<string_view, character_set>>;
-    using rfind_all_chars_type = range_rmatches<string_slice, matcher_find_last_of<string_view, character_set>>;
+    using find_all_chars_type = range_matches<string_slice, matcher_find_first_of<string_view, char_set>>;
+    using rfind_all_chars_type = range_rmatches<string_slice, matcher_find_last_of<string_view, char_set>>;
 
     /**  @brief  Find all potentially @b overlapping occurrences of a given string. */
     find_all_type find_all(string_view needle, include_overlaps_type = {}) const noexcept { return {*this, needle}; }
@@ -1662,16 +1681,16 @@ class basic_string_slice {
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief  Find all occurrences of given characters. */
-    find_all_chars_type find_all(character_set set) const noexcept { return {*this, {set}}; }
+    find_all_chars_type find_all(char_set set) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Find all occurrences of given characters in @b reverse order. */
-    rfind_all_chars_type rfind_all(character_set set) const noexcept { return {*this, {set}}; }
+    rfind_all_chars_type rfind_all(char_set set) const noexcept { return {*this, {set}}; }
 
     using split_type = range_splits<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rsplit_type = range_rsplits<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
 
-    using split_chars_type = range_splits<string_slice, matcher_find_first_of<string_view, character_set>>;
-    using rsplit_chars_type = range_rsplits<string_slice, matcher_find_last_of<string_view, character_set>>;
+    using split_chars_type = range_splits<string_slice, matcher_find_first_of<string_view, char_set>>;
+    using rsplit_chars_type = range_rsplits<string_slice, matcher_find_last_of<string_view, char_set>>;
 
     /**  @brief  Split around occurrences of a given string. */
     split_type split(string_view delimiter) const noexcept { return {*this, delimiter}; }
@@ -1680,10 +1699,10 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief  Split around occurrences of given characters. */
-    split_chars_type split(character_set set = whitespaces_set) const noexcept { return {*this, {set}}; }
+    split_chars_type split(char_set set = whitespaces_set) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(character_set set = whitespaces_set) const noexcept { return {*this, {set}}; }
+    rsplit_chars_type rsplit(char_set set = whitespaces_set) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Split around the occurences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set); }
@@ -1694,8 +1713,8 @@ class basic_string_slice {
     size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }
 
     /**  @brief  Populate a character set with characters present in this string. */
-    character_set as_set() const noexcept {
-        character_set set;
+    char_set as_set() const noexcept {
+        char_set set;
         for (auto c : *this) set.add(c);
         return set;
     }
@@ -1941,14 +1960,11 @@ class basic_string {
 #if SZ_INCLUDE_STL_CONVERSIONS
 
     basic_string(std::string const &other) noexcept(false) : basic_string(other.data(), other.size()) {}
-    basic_string(std::string_view other) noexcept(false) : basic_string(other.data(), other.size()) {}
     basic_string &operator=(std::string const &other) noexcept(false) { return assign({other.data(), other.size()}); }
-    basic_string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
 
     // As we are need both `data()` and `size()`, going through `operator string_view()`
     // and `sz_string_unpack` is faster than separate invokations.
     operator std::string() const { return view(); }
-    operator std::string_view() const noexcept { return view(); }
 
     /**
      *  @brief  Formatted output function for compatibility with STL's `std::basic_ostream`.
@@ -1959,6 +1975,14 @@ class basic_string {
                                                                      basic_string const &str) noexcept(false) {
         return os.write(str.data(), str.size());
     }
+
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+
+    basic_string(std::string_view other) noexcept(false) : basic_string(other.data(), other.size()) {}
+    basic_string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
+    operator std::string_view() const noexcept { return view(); }
+
+#endif
 
 #endif
 
@@ -2194,12 +2218,16 @@ class basic_string {
     }
 
     /**  @brief  Checks if the string is equal to the other string. */
+    bool operator==(basic_string const &other) const noexcept { return view() == other.view(); }
     bool operator==(string_view other) const noexcept { return view() == other; }
+    bool operator==(const_pointer other) const noexcept { return view() == string_view(other); }
 
-#if SZ_DETECT_CPP_20
+#if SZ_DETECT_CPP20
 
     /**  @brief  Computes the lexicographic ordering between this and the ::other string. */
+    std::strong_ordering operator<=>(basic_string const &other) const noexcept { return view() <=> other.view(); }
     std::strong_ordering operator<=>(string_view other) const noexcept { return view() <=> other; }
+    std::strong_ordering operator<=>(const_pointer other) const noexcept { return view() <=> string_view(other); }
 
 #else
 
@@ -2308,17 +2336,17 @@ class basic_string {
     }
 
     /**  @brief  Find the first occurrence of a character from a set. */
-    size_type find(character_set set) const noexcept { return view().find(set); }
+    size_type find(char_set set) const noexcept { return view().find(set); }
 
     /**  @brief  Find the last occurrence of a character from a set. */
-    size_type rfind(character_set set) const noexcept { return view().rfind(set); }
+    size_type rfind(char_set set) const noexcept { return view().rfind(set); }
 
 #pragma endregion
 #pragma endregion
 
 #pragma region Matching Character Sets
 
-    bool contains_only(character_set set) const noexcept { return find_first_not_of(set) == npos; }
+    bool contains_only(char_set set) const noexcept { return find_first_not_of(set) == npos; }
     bool isalpha() const noexcept { return !empty() && contains_only(ascii_letters_set); }
     bool isalnum() const noexcept { return !empty() && contains_only(ascii_letters_set | digits_set); }
     bool isascii() const noexcept { return empty() || contains_only(ascii_controls_set | ascii_printables_set); }
@@ -2335,42 +2363,38 @@ class basic_string {
      *  @param  skip Number of characters to skip before the search.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
-    size_type find_first_of(character_set set, size_type skip = 0) const noexcept {
-        return view().find_first_of(set, skip);
-    }
+    size_type find_first_of(char_set set, size_type skip = 0) const noexcept { return view().find_first_of(set, skip); }
 
     /**
      *  @brief  Find the first occurrence of a character outside a set.
      *  @param  skip  The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
-    size_type find_first_not_of(character_set set, size_type skip = 0) const noexcept {
+    size_type find_first_not_of(char_set set, size_type skip = 0) const noexcept {
         return view().find_first_not_of(set, skip);
     }
 
     /**
      *  @brief  Find the last occurrence of a character from a set.
      */
-    size_type find_last_of(character_set set) const noexcept { return view().find_last_of(set); }
+    size_type find_last_of(char_set set) const noexcept { return view().find_last_of(set); }
 
     /**
      *  @brief  Find the last occurrence of a character outside a set.
      */
-    size_type find_last_not_of(character_set set) const noexcept { return view().find_last_not_of(set); }
+    size_type find_last_not_of(char_set set) const noexcept { return view().find_last_not_of(set); }
 
     /**
      *  @brief  Find the last occurrence of a character from a set.
      *  @param  until  The offset of the last character to be considered.
      */
-    size_type find_last_of(character_set set, size_type until) const noexcept {
-        return view().find_last_of(set, until);
-    }
+    size_type find_last_of(char_set set, size_type until) const noexcept { return view().find_last_of(set, until); }
 
     /**
      *  @brief  Find the last occurrence of a character outside a set.
      *  @param  until  The offset of the last character to be considered.
      */
-    size_type find_last_not_of(character_set set, size_type until) const noexcept {
+    size_type find_last_not_of(char_set set, size_type until) const noexcept {
         return view().find_last_not_of(set, until);
     }
 
@@ -2453,7 +2477,7 @@ class basic_string {
      *  @brief  Python-like convinience function, dropping prefix formed of given characters.
      *          Similar to `boost::algorithm::trim_left_if(str, is_any_of(set))`.
      */
-    basic_string &lstrip(character_set set) noexcept {
+    basic_string &lstrip(char_set set) noexcept {
         auto remaining = view().lstrip(set);
         remove_prefix(size() - remaining.size());
         return *this;
@@ -2463,7 +2487,7 @@ class basic_string {
      *  @brief  Python-like convinience function, dropping suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_right_if(str, is_any_of(set))`.
      */
-    basic_string &rstrip(character_set set) noexcept {
+    basic_string &rstrip(char_set set) noexcept {
         auto remaining = view().rstrip(set);
         remove_suffix(size() - remaining.size());
         return *this;
@@ -2473,7 +2497,7 @@ class basic_string {
      *  @brief  Python-like convinience function, dropping both the prefix & the suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_if(str, is_any_of(set))`.
      */
-    basic_string &strip(character_set set) noexcept { return lstrip(set).rstrip(set); }
+    basic_string &strip(char_set set) noexcept { return lstrip(set).rstrip(set); }
 
 #pragma endregion
 #pragma endregion
@@ -2547,7 +2571,7 @@ class basic_string {
     /**
      *  @brief  Clears the string contents, but @b no deallocations happen.
      */
-    void clear() noexcept { sz_string_erase(&string_, 0, sz_size_max); }
+    void clear() noexcept { sz_string_erase(&string_, 0, SZ_SIZE_MAX); }
 
     /**
      *  @brief  Resizes the string to the given size, filling the new space with the given character,
@@ -2629,7 +2653,7 @@ class basic_string {
      *  @throw  `std::bad_alloc` if the allocation fails.
      */
     iterator insert(const_iterator it, char_type character) noexcept(false) {
-        auto pos = it - begin();
+        auto pos = range_length(cbegin(), it);
         insert(pos, string_view(&character, 1));
         return begin() + pos;
     }
@@ -2641,7 +2665,7 @@ class basic_string {
      *  @throw  `std::bad_alloc` if the allocation fails.
      */
     iterator insert(const_iterator it, size_type repeats, char_type character) noexcept(false) {
-        auto pos = it - begin();
+        auto pos = range_length(cbegin(), it);
         insert(pos, repeats, character);
         return begin() + pos;
     }
@@ -2655,10 +2679,10 @@ class basic_string {
     template <typename input_iterator>
     iterator insert(const_iterator it, input_iterator first, input_iterator last) noexcept(false) {
 
-        auto pos = it - begin();
+        auto pos = range_length(cbegin(), it);
         if (pos > size()) throw std::out_of_range("sz::basic_string::insert");
 
-        auto added_length = std::distance(first, last);
+        auto added_length = range_length(first, last);
         if (size() + added_length > max_size()) throw std::length_error("sz::basic_string::insert");
 
         if (!with_alloc([&](calloc_type &alloc) { return sz_string_expand(&string_, pos, added_length, &alloc); }))
@@ -2729,7 +2753,7 @@ class basic_string {
      *  @see    `try_replace` for a cleaner exception-less alternative.
      */
     basic_string &replace(const_iterator first, const_iterator last, string_view const &str) noexcept(false) {
-        return replace(first - begin(), last - first, str);
+        return replace(range_length(cbegin(), first), last - first, str);
     }
 
     /**
@@ -2761,7 +2785,7 @@ class basic_string {
      */
     basic_string &replace(const_iterator first, const_iterator last, const_pointer cstr,
                           size_type count2) noexcept(false) {
-        return replace(first - begin(), last - first, string_view(cstr, count2));
+        return replace(range_length(cbegin(), first), last - first, string_view(cstr, count2));
     }
 
     /**
@@ -2781,7 +2805,7 @@ class basic_string {
      *  @see    `try_replace` for a cleaner exception-less alternative.
      */
     basic_string &replace(const_iterator first, const_iterator last, const_pointer cstr) noexcept(false) {
-        return replace(first - begin(), last - first, string_view(cstr));
+        return replace(range_length(cbegin(), first), last - first, string_view(cstr));
     }
 
     /**
@@ -2806,7 +2830,7 @@ class basic_string {
      */
     basic_string &replace(const_iterator first, const_iterator last, size_type count2,
                           char_type character) noexcept(false) {
-        return replace(first - begin(), last - first, count2, character);
+        return replace(range_length(cbegin(), first), last - first, count2, character);
     }
 
     /**
@@ -2818,9 +2842,9 @@ class basic_string {
     template <typename input_iterator>
     basic_string &replace(const_iterator first, const_iterator last, input_iterator first2,
                           input_iterator last2) noexcept(false) {
-        auto pos = first - begin();
-        auto count = std::distance(first, last);
-        auto count2 = std::distance(first2, last2);
+        auto pos = range_length(cbegin(), first);
+        auto count = range_length(first, last);
+        auto count2 = range_length(first2, last2);
         if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
         if (size() - count + count2 > max_size()) throw std::length_error("sz::basic_string::replace");
         if (!try_preparing_replacement(pos, count, count2)) throw std::bad_alloc();
@@ -2904,7 +2928,7 @@ class basic_string {
      */
     template <typename input_iterator>
     basic_string &assign(input_iterator first, input_iterator last) noexcept(false) {
-        resize(std::distance(first, last));
+        resize(range_length(first, last));
         for (iterator output = begin(); first != last; ++first, ++output) *output = *first;
         return *this;
     }
@@ -2994,13 +3018,13 @@ class basic_string {
     basic_string &operator+=(char_type character) noexcept(false) { return operator+=(string_view(&character, 1)); }
     basic_string &operator+=(const_pointer other) noexcept(false) { return operator+=(string_view(other)); }
 
-    basic_string operator+(char_type character) noexcept(false) { return operator+(string_view(&character, 1)); }
-    basic_string operator+(const_pointer other) noexcept(false) { return operator+(string_view(other)); }
-    basic_string operator+(string_view other) noexcept(false) {
-        return basic_string {concatenation<string_view, string_view>(*this, other)};
+    basic_string operator+(char_type character) const noexcept(false) { return operator+(string_view(&character, 1)); }
+    basic_string operator+(const_pointer other) const noexcept(false) { return operator+(string_view(other)); }
+    basic_string operator+(string_view other) const noexcept(false) {
+        return basic_string {concatenation<string_view, string_view> {view(), other}};
     }
-    basic_string operator+(std::initializer_list<char_type> other) noexcept(false) {
-        return basic_string {concatenation<string_view, string_view>(*this, other)};
+    basic_string operator+(std::initializer_list<char_type> other) const noexcept(false) {
+        return basic_string {concatenation<string_view, string_view> {view(), other}};
     }
 
 #pragma endregion
@@ -3078,7 +3102,7 @@ class basic_string {
      *  and might be suboptimal, if you are exporting the cleaned-up string to another buffer.
      *  The algorithm is suboptimal when this string is made exclusively of the pattern.
      */
-    basic_string &replace_all(character_set pattern, string_view replacement) noexcept(false) {
+    basic_string &replace_all(char_set pattern, string_view replacement) noexcept(false) {
         if (!try_replace_all(pattern, replacement)) throw std::bad_alloc();
         return *this;
     }
@@ -3103,8 +3127,8 @@ class basic_string {
      *  and might be suboptimal, if you are exporting the cleaned-up string to another buffer.
      *  The algorithm is suboptimal when this string is made exclusively of the pattern.
      */
-    bool try_replace_all(character_set pattern, string_view replacement) noexcept {
-        return try_replace_all_<character_set>(pattern, replacement);
+    bool try_replace_all(char_set pattern, string_view replacement) noexcept {
+        return try_replace_all_<char_set>(pattern, replacement);
     }
 
   private:
@@ -3143,7 +3167,7 @@ bool basic_string<char_type_, allocator_>::try_resize(size_type count, value_typ
     // Allocate more space if needed.
     if (count >= string_space) {
         if (!with_alloc(
-                [&](calloc_type &alloc) { return sz_string_expand(&string_, sz_size_max, count, &alloc) != NULL; }))
+                [&](calloc_type &alloc) { return sz_string_expand(&string_, SZ_SIZE_MAX, count, &alloc) != NULL; }))
             return false;
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
     }
@@ -3156,7 +3180,7 @@ bool basic_string<char_type_, allocator_>::try_resize(size_type count, value_typ
         // even if its located on stack.
         string_.external.length += count - string_length;
     }
-    else { sz_string_erase(&string_, count, sz_size_max); }
+    else { sz_string_erase(&string_, count, SZ_SIZE_MAX); }
     return true;
 }
 
@@ -3169,11 +3193,11 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
 
     if (string_length >= other.length()) {
         other.copy(string_start, other.length());
-        sz_string_erase(&string_, other.length(), sz_size_max);
+        sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
     }
     else {
         if (!with_alloc([&](calloc_type &alloc) {
-                string_start = sz_string_expand(&string_, sz_size_max, other.length(), &alloc);
+                string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
                 if (!string_start) return false;
                 other.copy(string_start, other.length());
                 return true;
@@ -3187,7 +3211,7 @@ template <typename char_type_, typename allocator_>
 bool basic_string<char_type_, allocator_>::try_push_back(char_type c) noexcept {
     return with_alloc([&](calloc_type &alloc) {
         auto old_size = size();
-        sz_ptr_t start = sz_string_expand(&string_, sz_size_max, 1, &alloc);
+        sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, 1, &alloc);
         if (!start) return false;
         start[old_size] = c;
         return true;
@@ -3198,7 +3222,7 @@ template <typename char_type_, typename allocator_>
 bool basic_string<char_type_, allocator_>::try_append(const_pointer str, size_type length) noexcept {
     return with_alloc([&](calloc_type &alloc) {
         auto old_size = size();
-        sz_ptr_t start = sz_string_expand(&string_, sz_size_max, length, &alloc);
+        sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
         if (!start) return false;
         sz_copy(start + old_size, str, length);
         return true;
@@ -3213,10 +3237,10 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
     // 1. The pattern and the replacement are of the same length. Piece of cake!
     // 2. The pattern is longer than the replacement. We need to compact the strings.
     // 3. The pattern is shorter than the replacement. We may have to allocate more memory.
-    using matcher_type = typename std::conditional<std::is_same<pattern_type, character_set>::value,
+    using matcher_type = typename std::conditional<std::is_same<pattern_type, char_set>::value,
                                                    matcher_find_first_of<string_view, pattern_type>,
                                                    matcher_find<string_view, exclude_overlaps_type>>::type;
-    matcher_type matcher(pattern);
+    matcher_type matcher({pattern});
     string_view this_view = view();
 
     // 1. The pattern and the replacement are of the same length.
@@ -3259,7 +3283,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
 
     // 3. The pattern is shorter than the replacement. We may have to allocate more memory.
     else {
-        using rmatcher_type = typename std::conditional<std::is_same<pattern_type, character_set>::value,
+        using rmatcher_type = typename std::conditional<std::is_same<pattern_type, char_set>::value,
                                                         matcher_find_last_of<string_view, pattern_type>,
                                                         matcher_rfind<string_view, exclude_overlaps_type>>::type;
         using rmatches_type = range_rmatches<string_view, rmatcher_type>;
@@ -3309,12 +3333,12 @@ bool basic_string<char_type_, allocator_>::try_assign(concatenation<first_type, 
     sz_string_range(&string_, &string_start, &string_length);
 
     if (string_length >= other.length()) {
-        sz_string_erase(&string_, other.length(), sz_size_max);
+        sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
         other.copy(string_start, other.length());
     }
     else {
         if (!with_alloc([&](calloc_type &alloc) {
-                string_start = sz_string_expand(&string_, sz_size_max, other.length(), &alloc);
+                string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
                 if (!string_start) return false;
                 other.copy(string_start, other.length());
                 return true;

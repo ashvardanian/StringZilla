@@ -155,6 +155,19 @@
 #define SZ_SWAR_THRESHOLD (24) // bytes
 #endif
 
+/**
+ *  @brief  Analogous to `size_t` and `std::size_t`, unsigned integer, identical to pointer size.
+ *          64-bit on most platforms where pointers are 64-bit.
+ *          32-bit on platforms where pointers are 32-bit.
+ */
+#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
+#define SZ_DETECT_64_BIT (1)
+#define SZ_SIZE_MAX (0xFFFFFFFFFFFFFFFFull)
+#else
+#define SZ_DETECT_64_BIT (0)
+#define SZ_SIZE_MAX (0xFFFFFFFFu)
+#endif
+
 /*
  *  Hardware feature detection.
  */
@@ -202,46 +215,51 @@
 #endif
 
 #if !SZ_DEBUG
-#define SZ_ASSERT(condition, message, ...)                                                                  \
+#define sz_assert(condition)                                                                                \
     do {                                                                                                    \
         if (!(condition)) {                                                                                 \
             fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", #condition, __FILE__, __LINE__); \
-            fprintf(stderr, "Message: " message "\n", ##__VA_ARGS__);                                       \
             exit(EXIT_FAILURE);                                                                             \
         }                                                                                                   \
     } while (0)
 #else
-#define SZ_ASSERT(condition, message, ...) ((void)0)
+#define sz_assert(condition) ((void)0)
 #endif
 
 /**
  *  @brief  Compile-time assert macro similar to `static_assert` in C++.
  */
-#define SZ_STATIC_ASSERT(condition, name)                \
+#define sz_static_assert(condition, name)                \
     typedef struct {                                     \
         int static_assert_##name : (condition) ? 1 : -1; \
     } sz_static_assert_##name##_t
+
+#define sz_unused(x) ((void)(x))
+
+#define sz_bitcast(type, value) (*((type *)&(value)))
+
+#if __has_attribute(__fallthrough__)
+#define SZ_FALLTHROUGH __attribute__((__fallthrough__))
+#else
+#define SZ_FALLTHROUGH \
+    do {               \
+    } while (0) /* fallthrough */
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- *  @brief  Analogous to `size_t` and `std::size_t`, unsigned integer, identical to pointer size.
- *          64-bit on most platforms where pointers are 64-bit.
- *          32-bit on platforms where pointers are 32-bit.
- */
-#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
-#define sz_size_max 0xFFFFFFFFFFFFFFFFull
+#if SZ_DETECT_64_BIT
 typedef unsigned long long sz_size_t;
 typedef long long sz_ssize_t;
 #else
-#define sz_size_max 0xFFFFFFFFu
 typedef unsigned sz_size_t;
 typedef unsigned sz_ssize_t;
 #endif
-SZ_STATIC_ASSERT(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
-SZ_STATIC_ASSERT(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
+
+sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
+sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
 
 typedef unsigned char sz_u8_t;       /// Always 8 bits
 typedef unsigned short sz_u16_t;     /// Always 16 bits
@@ -410,7 +428,7 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length);
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
 SZ_PUBLIC sz_u64_t sz_hash_avx512(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
-SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
 
 /**
  *  @brief  Checks if two string are equal.
@@ -1033,7 +1051,7 @@ SZ_INTERNAL void sz_ssize_clamp_interval(sz_size_t length, sz_ssize_t start, sz_
  *  @brief  Compute the logarithm base 2 of a positive integer, rounding down.
  */
 SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
-    SZ_ASSERT(x > 0, "Non-positive numbers have no defined logarithm");
+    sz_assert(x > 0 && "Non-positive numbers have no defined logarithm");
     sz_size_t leading_zeros = sz_u64_clz(x);
     return 63 - leading_zeros;
 }
@@ -1158,7 +1176,9 @@ SZ_INTERNAL sz_ptr_t _sz_memory_allocate_for_static_buffer(sz_size_t length, sz_
     return (sz_ptr_t)string_view->start;
 }
 
-SZ_INTERNAL void _sz_memory_free_for_static_buffer(sz_ptr_t start, sz_size_t length, sz_string_view_t *string_view) {}
+SZ_INTERNAL void _sz_memory_free_for_static_buffer(sz_ptr_t start, sz_size_t length, sz_string_view_t *string_view) {
+    sz_unused(start && length && string_view);
+}
 
 SZ_PUBLIC void sz_memory_allocator_init_for_static_buffer(sz_string_view_t buffer, sz_memory_allocator_t *alloc) {
     alloc->allocate = (sz_memory_allocate_t)_sz_memory_allocate_for_static_buffer;
@@ -1210,26 +1230,27 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length) {
     // 17 - 128 bytes: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L4640
     // Long sequences: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L5906
     switch (length & 15) {
-    case 15: k2.u8s[6] = start[14];
-    case 14: k2.u8s[5] = start[13];
-    case 13: k2.u8s[4] = start[12];
-    case 12: k2.u8s[3] = start[11];
-    case 11: k2.u8s[2] = start[10];
-    case 10: k2.u8s[1] = start[9];
+    case 15: k2.u8s[6] = start[14]; SZ_FALLTHROUGH;
+    case 14: k2.u8s[5] = start[13]; SZ_FALLTHROUGH;
+    case 13: k2.u8s[4] = start[12]; SZ_FALLTHROUGH;
+    case 12: k2.u8s[3] = start[11]; SZ_FALLTHROUGH;
+    case 11: k2.u8s[2] = start[10]; SZ_FALLTHROUGH;
+    case 10: k2.u8s[1] = start[9]; SZ_FALLTHROUGH;
     case 9:
         k2.u8s[0] = start[8];
         k2.u64 *= c2;
         k2.u64 = sz_u64_rotl(k2.u64, 33);
         k2.u64 *= c1;
         h2 ^= k2.u64;
+        SZ_FALLTHROUGH;
 
-    case 8: k1.u8s[7] = start[7];
-    case 7: k1.u8s[6] = start[6];
-    case 6: k1.u8s[5] = start[5];
-    case 5: k1.u8s[4] = start[4];
-    case 4: k1.u8s[3] = start[3];
-    case 3: k1.u8s[2] = start[2];
-    case 2: k1.u8s[1] = start[1];
+    case 8: k1.u8s[7] = start[7]; SZ_FALLTHROUGH;
+    case 7: k1.u8s[6] = start[6]; SZ_FALLTHROUGH;
+    case 6: k1.u8s[5] = start[5]; SZ_FALLTHROUGH;
+    case 5: k1.u8s[4] = start[4]; SZ_FALLTHROUGH;
+    case 4: k1.u8s[3] = start[3]; SZ_FALLTHROUGH;
+    case 3: k1.u8s[2] = start[2]; SZ_FALLTHROUGH;
+    case 2: k1.u8s[1] = start[1]; SZ_FALLTHROUGH;
     case 1:
         k1.u8s[0] = start[0];
         k1.u64 *= c1;
@@ -1385,7 +1406,7 @@ SZ_INTERNAL sz_cptr_t sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_c
     sz_cptr_t const h_end = h + h_length;
 
     // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
-    SZ_ASSERT(h_length >= 2, "The haystack is too short.");
+    sz_assert(h_length >= 2 && "The haystack is too short.");
 
     // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
     sz_u64_vec_t h_vec, n_vec, matches_odd_vec, matches_even_vec;
@@ -1904,6 +1925,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     for (sz_size_t idx_shorter = 0; idx_shorter != (shorter_length + 1); ++idx_shorter)
         previous_distances[idx_shorter] = idx_shorter;
 
+    sz_u8_t const *shorter_unsigned = (sz_u8_t const *)shorter;
     for (sz_size_t idx_longer = 0; idx_longer != longer_length; ++idx_longer) {
         current_distances[0] = idx_longer + 1;
 
@@ -1912,7 +1934,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
         for (sz_size_t idx_shorter = 0; idx_shorter != shorter_length; ++idx_shorter) {
             sz_ssize_t cost_deletion = previous_distances[idx_shorter + 1] + gap;
             sz_ssize_t cost_insertion = current_distances[idx_shorter] + gap;
-            sz_ssize_t cost_substitution = previous_distances[idx_shorter] + a_subs[shorter[idx_shorter]];
+            sz_ssize_t cost_substitution = previous_distances[idx_shorter] + a_subs[shorter_unsigned[idx_shorter]];
             current_distances[idx_shorter + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
         }
 
@@ -2043,13 +2065,13 @@ SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t resu
 SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
                            sz_random_generator_t generator, void *generator_user_data) {
 
-    SZ_ASSERT(alphabet_size > 0 && alphabet_size <= 256, "Inadequate alphabet size");
+    sz_assert(alphabet_size > 0 && alphabet_size <= 256 && "Inadequate alphabet size");
 
     if (alphabet_size == 1)
         for (sz_cptr_t end = result + result_length; result != end; ++result) *result = *alphabet;
 
     else {
-        SZ_ASSERT(generator, "Expects a valid random generator");
+        sz_assert(generator && "Expects a valid random generator");
         for (sz_cptr_t end = result + result_length; result != end; ++result)
             *result = alphabet[sz_u8_divide(generator(generator_user_data) & 0xFF, alphabet_size)];
     }
@@ -2121,7 +2143,7 @@ SZ_PUBLIC sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const 
 }
 
 SZ_PUBLIC void sz_string_init(sz_string_t *string) {
-    SZ_ASSERT(string, "String can't be NULL.");
+    sz_assert(string && "String can't be NULL.");
 
     // Only 8 + 1 + 1 need to be initialized.
     string->internal.start = &string->internal.chars[0];
@@ -2135,7 +2157,7 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
 
 SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
-    SZ_ASSERT(string && allocator, "String and allocator can't be NULL.");
+    sz_assert(string && allocator && "String and allocator can't be NULL.");
     // If we are lucky, no memory allocations will be needed.
     if (space_needed <= sz_string_stack_space) {
         string->internal.start = &string->internal.chars[0];
@@ -2148,24 +2170,24 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
         string->external.length = length;
         string->external.space = space_needed;
     }
-    SZ_ASSERT(&string->internal.start == &string->external.start, "Alignment confusion");
+    sz_assert(&string->internal.start == &string->external.start && "Alignment confusion");
     string->external.start[length] = 0;
     return string->external.start;
 }
 
 SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator) {
 
-    SZ_ASSERT(string, "String can't be NULL.");
+    sz_assert(string && "String can't be NULL.");
 
     sz_size_t new_space = new_capacity + 1;
-    SZ_ASSERT(new_space >= sz_string_stack_space, "New space must be larger than the SSO buffer.");
+    sz_assert(new_space >= sz_string_stack_space && "New space must be larger than the SSO buffer.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
     sz_size_t string_space;
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
-    SZ_ASSERT(new_space > string_space, "New space must be larger than current.");
+    sz_assert(new_space > string_space && "New space must be larger than current.");
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return sz_false_k;
@@ -2184,7 +2206,7 @@ SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacit
 SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_size_t added_length,
                                     sz_memory_allocator_t *allocator) {
 
-    SZ_ASSERT(string && allocator, "String and allocator can't be NULL.");
+    sz_assert(string && allocator && "String and allocator can't be NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -2221,7 +2243,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
 
 SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
 
-    SZ_ASSERT(string, "String can't be NULL.");
+    sz_assert(string && "String can't be NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -2233,7 +2255,7 @@ SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_si
     offset = sz_min_of_two(offset, string_length);
 
     // We shouldn't normalize the length, to avoid overflowing on `offset + length >= string_length`,
-    // if receiving `length == sz_size_max`. After following expression the `length` will contain
+    // if receiving `length == SZ_SIZE_MAX`. After following expression the `length` will contain
     // exactly the delta between original and final length of this `string`.
     length = sz_min_of_two(length, string_length - offset);
 
@@ -2862,7 +2884,7 @@ SZ_INTERNAL sz_cptr_t sz_find_over66byte_avx512(sz_cptr_t h, sz_size_t h_length,
 
     __mmask64 mask;
     __mmask64 matches;
-    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, h_body_vec, n_first_vec, n_mid_vec, n_last_vec, n_body_vec;
+    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
     n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
@@ -3010,13 +3032,12 @@ SZ_INTERNAL sz_cptr_t sz_find_last_under66byte_avx512(sz_cptr_t h, sz_size_t h_l
  */
 SZ_INTERNAL sz_cptr_t sz_find_last_over66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
-    __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
+    __mmask64 mask;
     __mmask64 matches;
-    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, h_body_vec, n_first_vec, n_mid_vec, n_last_vec, n_body_vec;
+    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
     n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
-    n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
 
     while (h_length >= n_length + 64) {
         h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
@@ -3027,8 +3048,6 @@ SZ_INTERNAL sz_cptr_t sz_find_last_over66byte_avx512(sz_cptr_t h, sz_size_t h_le
                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_clz(matches);
-            h_body_vec.zmm =
-                _mm512_maskz_loadu_epi8(n_length_body_mask, h + h_length - n_length - potential_offset + 1);
             if (sz_equal_avx512(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
                 return h + h_length - n_length - potential_offset;
             h_length -= potential_offset + 1;
@@ -3046,7 +3065,6 @@ SZ_INTERNAL sz_cptr_t sz_find_last_over66byte_avx512(sz_cptr_t h, sz_size_t h_le
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
         if (matches) {
             int potential_offset = sz_u64_clz(matches);
-            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + 64 - potential_offset);
             if (sz_equal_avx512(h + 64 - potential_offset, n + 1, n_length - 2)) return h + 64 - potential_offset - 1;
             h_length = 64 - potential_offset - 1;
         }
@@ -3186,6 +3204,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t lengt
     return NULL;
 }
 
+#if 0
 SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
     sz_cptr_t const a, sz_size_t const a_length, //
     sz_cptr_t const b, sz_size_t const b_length, //
@@ -3254,6 +3273,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
 
     return previous_vec.u8s[b_length] < bound ? previous_vec.u8s[b_length] : bound;
 }
+#endif
 
 #endif
 

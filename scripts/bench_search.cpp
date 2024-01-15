@@ -104,7 +104,7 @@ tracked_binary_functions_t find_character_set_functions() {
     // ! Despite receiving string-views, following functions are assuming the strings are null-terminated.
     auto wrap_sz = [](auto function) -> binary_function_t {
         return binary_function_t([function](std::string_view h, std::string_view n) {
-            sz::character_set set;
+            sz::char_set set;
             for (auto c : n) set.add(c);
             sz_cptr_t match = function(h.data(), h.size(), &set.raw());
             return (match ? match - h.data() : h.size());
@@ -132,7 +132,7 @@ tracked_binary_functions_t rfind_character_set_functions() {
     // ! Despite receiving string-views, following functions are assuming the strings are null-terminated.
     auto wrap_sz = [](auto function) -> binary_function_t {
         return binary_function_t([function](std::string_view h, std::string_view n) {
-            sz::character_set set;
+            sz::char_set set;
             for (auto c : n) set.add(c);
             sz_cptr_t match = function(h.data(), h.size(), &set.raw());
             return (match ? match - h.data() : 0);
