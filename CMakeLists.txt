@@ -5,15 +5,18 @@ project(
   LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 99)
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_COMPILE_WARNING_AS_ERROR)
 set(DEV_USER_NAME $ENV{USER})
 
 # Set a default build type to "Release" if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
-  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+  set(CMAKE_BUILD_TYPE
+    Release
+    CACHE STRING "Choose the type of build." FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
+    "MinSizeRel" "RelWithDebInfo")
 endif()
 
 # Determine if StringZilla is built as a subproject (using `add_subdirectory`)
@@ -30,7 +33,7 @@ option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++"
   ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_BENCHMARK "Compile a native benchmark in C++"
   ${STRINGZILLA_IS_MAIN_PROJECT})
-option(STRINGZILLA_BUILD_WOLFRAM "Compile Wolfram Language bindings" OFF)
+set(STRINGZILLA_TARGET_ARCH "" CACHE STRING "Architecture to tell gcc to optimize for (-march)")
 
 # Includes
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
@@ -73,55 +76,73 @@ if(STRINGZILLA_INSTALL)
     DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR})
 endif()
 
-if(${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER
-  3.13)
+if(${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER 3.13)
   include(CTest)
   enable_testing()
 endif()
 
 # Function to set compiler-specific flags
-function(set_compiler_flags target)
+function(set_compiler_flags target cpp_standard)
   target_include_directories(${target} PRIVATE scripts)
   target_link_libraries(${target} PRIVATE ${STRINGZILLA_TARGET_NAME})
   target_compile_definitions(${target} PUBLIC DEV_USER_NAME=${DEV_USER_NAME})
   set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY
     ${CMAKE_BINARY_DIR})
 
+  # Set the C++ standard
+  target_compile_features(${target} PUBLIC cxx_std_${cpp_standard})
+
   # Maximum warnings level & warnings as error
-  # add_compile_options(
-  # "$<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>"
-  # "$<$<CXX_COMPILER_ID:GNU>:-Wall;-Wextra;-pedantic;-Werror>"
-  # "$<$<CXX_COMPILER_ID:Clang>:-Wall;-Wextra;-pedantic;-Werror>"
-  # "$<$<CXX_COMPILER_ID:AppleClang>:-Wall;-Wextra;-pedantic;-Werror>"
-  # )
-  if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_CXX_COMPILER_ID} MATCHES "Clang")
-    target_compile_options(${target} PRIVATE "-march=native")
-    target_compile_options(${target} PRIVATE "-fmax-errors=1")
+  # Allow unknown pragmas
+  target_compile_options(${target} PRIVATE
+    "$<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>" # For MSVC, /WX is sufficient
+    "$<$<CXX_COMPILER_ID:GNU>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function>"
+    "$<$<CXX_COMPILER_ID:Clang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
+    "$<$<CXX_COMPILER_ID:AppleClang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>")
+
+  # Set optimization options for different compilers differently
+  target_compile_options(${target} PRIVATE
+    "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<CONFIG:Release>>:-O3>"
+    "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-g>"
+
+    "$<$<AND:$<CXX_COMPILER_ID:Clang>,$<CONFIG:Release>>:-O3>"
+    "$<$<AND:$<CXX_COMPILER_ID:Clang>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-g>"
+
+    "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>"
+    "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/Zi>"
+  )
+
+  # Check for STRINGZILLA_TARGET_ARCH and set it or use "march=native" if not defined
+  if(STRINGZILLA_TARGET_ARCH STREQUAL "")
+    # MSVC does not have a direct equivalent to -march=native
     target_compile_options(${target} PRIVATE
-      "$<$<CONFIG:Release>:-O3>"
-      "$<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-g>")
-  elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "Intel")
-    target_compile_options(${target} PRIVATE "-xHost")
-  elseif(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
-    # MSVC specific flags or other settings
+      "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=native>"
+    )
+  else()
+    target_compile_options(${target} PRIVATE
+      "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=${STRINGZILLA_TARGET_ARCH}>"
+      "$<$<CXX_COMPILER_ID:MSVC>:/arch:${STRINGZILLA_TARGET_ARCH}>"
+    )
   endif()
 endfunction()
 
-function(define_test exec_name source)
+function(define_launcher exec_name source cpp_standard)
   add_executable(${exec_name} ${source})
-  set_compiler_flags(${exec_name})
+  set_compiler_flags(${exec_name} ${cpp_standard})
   add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction()
 
 if(${STRINGZILLA_BUILD_BENCHMARK})
-  define_test(stringzilla_bench_search scripts/bench_search.cpp)
-  define_test(stringzilla_bench_similarity scripts/bench_similarity.cpp)
-  define_test(stringzilla_bench_sort scripts/bench_sort.cpp)
-  define_test(stringzilla_bench_token scripts/bench_token.cpp)
-  define_test(stringzilla_bench_container scripts/bench_container.cpp)
+  define_launcher(stringzilla_bench_search scripts/bench_search.cpp 17)
+  define_launcher(stringzilla_bench_similarity scripts/bench_similarity.cpp 17)
+  define_launcher(stringzilla_bench_sort scripts/bench_sort.cpp 17)
+  define_launcher(stringzilla_bench_token scripts/bench_token.cpp 17)
+  define_launcher(stringzilla_bench_container scripts/bench_container.cpp 17)
 endif()
 
 if(${STRINGZILLA_BUILD_TEST})
-  # Test target
-  define_test(stringzilla_test scripts/test.cpp)
+  define_launcher(stringzilla_test_cpp11 scripts/test.cpp 11)
+  define_launcher(stringzilla_test_cpp14 scripts/test.cpp 14)
+  define_launcher(stringzilla_test_cpp17 scripts/test.cpp 17)
+  define_launcher(stringzilla_test_cpp20 scripts/test.cpp 20)
 endif()

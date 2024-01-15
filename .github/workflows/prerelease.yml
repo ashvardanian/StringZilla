@@ -37,7 +37,7 @@ jobs:
           cmake -B build_artifacts -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_TEST=1
           cmake --build build_artifacts --config RelWithDebInfo
       - name: Test C++
-        run: ./build_artifacts/stringzilla_test
+        run: ./build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data
         run: |
           ./build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search

@@ -89,7 +89,7 @@ Using modern syntax, this is how you build and run the test suite:
 ```bash
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B ./build_debug
 cmake --build ./build_debug --config Debug  # Which will produce the following targets:
-./build_debug/stringzilla_test              # Unit test for the entire library
+./build_debug/stringzilla_test_cpp20              # Unit test for the entire library
 ```
 
 For benchmarks, you can use the following commands:
