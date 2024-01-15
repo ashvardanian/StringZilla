@@ -580,7 +580,7 @@ SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_s
                                 sz_bool_t *is_external);
 
 /**
- *  @brief  Upacks only the start and length of the string.
+ *  @brief  Unpacks only the start and length of the string.
  *          Recommended to use only in read-only operations.
  *
  * @param string       String to unpack.
@@ -602,17 +602,17 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
 
 /**
  *  @brief  Doesn't change the contents or the length of the string, but grows the available memory capacity.
- *          This is benefitial, if several insertions are expected, and we want to minimize allocations.
+ *          This is beneficial, if several insertions are expected, and we want to minimize allocations.
  *
  *  @param string       String to grow.
- *  @param new_capacity The number of characters to reserve space for, including exsting ones.
+ *  @param new_capacity The number of characters to reserve space for, including existing ones.
  *  @param allocator    Memory allocator to use for the allocation.
  *  @return             True if the operation succeeded. False if memory allocation failed.
  */
 SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator);
 
 /**
- *  @brief  Grows the string by adding an unitialized region of ::added_length at the given ::offset.
+ *  @brief  Grows the string by adding an uninitialized region of ::added_length at the given ::offset.
  *          Would often be used in conjunction with one or more `sz_copy` calls to populate the allocated region.
  *          Similar to `sz_string_reserve`, but changes the length of the ::string.
  *

@@ -795,7 +795,7 @@ static void test_search() {
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
 
 /**
- *  Evaluates the correctness of a "matcher", searching for all the occurences of the `needle_stl`
+ *  Evaluates the correctness of a "matcher", searching for all the occurrences of the `needle_stl`
  *  in a haystack formed of `haystack_pattern` repeated from one to `max_repeats` times.
  *
  *  @param misalignment The number of bytes to misalign the haystack within the cacheline.
@@ -875,7 +875,7 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
 }
 
 /**
- *  Evaluates the correctness of a "matcher", searching for all the occurences of the `needle_stl`,
+ *  Evaluates the correctness of a "matcher", searching for all the occurrences of the `needle_stl`,
  *  as a substring, as a set of allowed characters, or as a set of disallowed characters, in a haystack.
  */
 void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, std::string_view needle_stl,
