@@ -1025,7 +1025,7 @@ class basic_string_slice {
     using string_view = basic_string_slice<immutable_char_type>;
     using partition_type = string_partition_result<string_slice>;
 
-    /**  @brief  Special value for missing matches.
+    /** @brief  Special value for missing matches.
      *          We take the largest 63-bit unsigned integer.
      */
     inline static constexpr size_type npos = 0x7FFFFFFFFFFFFFFFull;
@@ -1868,7 +1868,7 @@ class basic_string {
     using string_view = basic_string_slice<typename std::add_const<char_type>::type>;
     using partition_type = string_partition_result<string_view>;
 
-    /**  @brief  Special value for missing matches.
+    /** @brief  Special value for missing matches.
      *          We take the largest 63-bit unsigned integer.
      */
     inline static constexpr size_type npos = 0x7FFFFFFFFFFFFFFFull;

@@ -36,6 +36,11 @@ tracked_binary_functions_t find_functions() {
              sz_cptr_t match = strstr(h.data(), n.data());
              return (match ? match - h.data() : h.size());
          }},
+        {"memmem",
+         [](std::string_view h, std::string_view n) {
+             sz_cptr_t match = (sz_cptr_t)memmem(h.data(), h.size(), n.data(), n.size());
+             return (match ? match - h.data() : h.size());
+         }},
         {"std::search",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.data(), h.data() + h.size(), n.data(), n.data() + n.size());
