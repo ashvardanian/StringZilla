@@ -25,9 +25,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-        with:
-          ref: main-dev
-      - run: git submodule update --init --recursive
 
         # C/C++
       - name: Build C/C++
