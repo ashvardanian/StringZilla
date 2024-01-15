@@ -2158,6 +2158,10 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
 SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
     sz_assert(string && allocator && "String and allocator can't be NULL.");
+    // Initialize the string to zeros for safety.
+    string->u64s[1] = 0;
+    string->u64s[2] = 0;
+    string->u64s[3] = 0;
     // If we are lucky, no memory allocations will be needed.
     if (space_needed <= sz_string_stack_space) {
         string->internal.start = &string->internal.chars[0];
