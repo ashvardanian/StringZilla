@@ -531,6 +531,7 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t t
 SZ_PUBLIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
  *  @brief  Similar to `memmove`, copies (moves) contents of one string into another.
@@ -543,6 +544,7 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 SZ_PUBLIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
  *  @brief  Similar to `memset`, fills a string with a given value.
@@ -554,6 +556,7 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 SZ_PUBLIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_PUBLIC void sz_fill_avx2(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 /**
  *  @brief  Initializes a string class instance to an empty value.
@@ -679,6 +682,9 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t h_length, 
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
+/** @copydoc sz_find_byte */
+SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+
 /**
  *  @brief  Locates last matching byte in a string. Equivalent to `memrchr(haystack, *needle, h_length)` in LibC.
  *
@@ -697,6 +703,9 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_serial(sz_cptr_t haystack, sz_size_t h_len
 
 /** @copydoc sz_find_last_byte */
 SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+
+/** @copydoc sz_find_last_byte */
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
 /**
  *  @brief  Locates first matching substring.
@@ -718,6 +727,9 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cp
 SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /** @copydoc sz_find */
+SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+/** @copydoc sz_find */
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /**
@@ -736,6 +748,9 @@ SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t haystack, sz_size_t h_length, 
 
 /** @copydoc sz_find_last */
 SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+/** @copydoc sz_find_last */
+SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /** @copydoc sz_find_last */
 SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
@@ -2571,6 +2586,117 @@ SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequ
 #pragma endregion
 
 /*
+ *  @brief  AVX2 implementation of the string search algorithms.
+ *          Very minimalistic, but still faster than the serial implementation.
+ */
+#pragma region AVX2 Implementation
+
+#if SZ_USE_X86_AVX2
+#include <x86intrin.h>
+
+/**
+ *  @brief  Helper structure to simplify work with 256-bit registers.
+ */
+typedef union sz_u256_vec_t {
+    __m256i ymm;
+    __m128i xmms[2];
+    sz_u64_t u64s[4];
+    sz_u32_t u32s[8];
+    sz_u16_t u16s[16];
+    sz_u8_t u8s[32];
+} sz_u256_vec_t;
+
+SZ_PUBLIC void sz_fill_avx2(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+    for (; length >= 32; target += 32, length -= 32) _mm256_storeu_si256((__m256i *)target, _mm256_set1_epi8(value));
+    return sz_fill_serial(target, length, value);
+}
+
+SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    for (; length >= 32; target += 32, source += 32, length -= 32)
+        _mm256_storeu_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+    return sz_copy_serial(target, source, length);
+}
+
+SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    if (target < source || target >= source + length) {
+        for (; length >= 32; target += 32, source += 32, length -= 32)
+            _mm256_storeu_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+        while (length--) *(target++) = *(source++);
+    }
+    else {
+        // Jump to the end and walk backwards.
+        for (target += length, source += length; length >= 32; length -= 32)
+            _mm256_storeu_si256((__m256i *)(target -= 32), _mm256_lddqu_si256((__m256i const *)(source -= 32)));
+        while (length--) *(--target) = *(--source);
+    }
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+    int mask;
+    sz_u256_vec_t h_vec, n_vec;
+    n_vec.ymm = _mm256_set1_epi8(n[0]);
+
+    while (h_length >= 32) {
+        h_vec.ymm = _mm256_lddqu_si256((__m256i const *)h);
+        mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_vec.ymm, n_vec.ymm));
+        if (mask) return h + sz_u32_ctz(mask);
+        h += 32, h_length -= 32;
+    }
+
+    return sz_find_byte_serial(h, h_length, n);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+    int mask;
+    sz_u256_vec_t h_vec, n_vec;
+    n_vec.ymm = _mm256_set1_epi8(n[0]);
+
+    while (h_length >= 32) {
+        h_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + h_length - 32));
+        mask = _mm256_cmpeq_epi8_mask(h_vec.ymm, n_vec.ymm);
+        if (mask) return h + h_length - 1 - sz_u32_clz(mask);
+        h_length -= 32;
+    }
+
+    return sz_find_last_byte_serial(h, h_length, n);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    if (n_length == 1) return sz_find_byte_avx2(h, h_length, n);
+
+    int matches;
+    sz_u256_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
+    n_first_vec.ymm = _mm256_set1_epi8(n[0]);
+    n_mid_vec.ymm = _mm256_set1_epi8(n[n_length / 2]);
+    n_last_vec.ymm = _mm256_set1_epi8(n[n_length - 1]);
+
+    for (; h_length >= n_length + 32; h += 32, h_length -= 32) {
+        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h));
+        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + n_length / 2));
+        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + n_length - 1));
+        matches = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_first_vec.ymm, n_first_vec.ymm)) &
+                  _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_mid_vec.ymm, n_mid_vec.ymm)) &
+                  _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
+        while (matches) {
+            int potential_offset = sz_u32_ctz(matches);
+            if (sz_equal(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+            matches &= matches - 1;
+        }
+    }
+
+    return sz_find_serial(h, h_length, n, n_length);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    if (n_length == 1) return sz_find_last_byte_avx2(h, h_length, n);
+
+    return sz_find_last_serial(h, h_length, n, n_length);
+}
+
+#endif
+#pragma endregion
+
+/*
  *  @brief  AVX-512 implementation of the string search algorithms.
  *
  *  Different subsets of AVX-512 were introduced in different years:
@@ -2585,7 +2711,7 @@ SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequ
 #include <x86intrin.h>
 
 /**
- *  @brief  Helper structure to simplify work with 64-bit words.
+ *  @brief  Helper structure to simplify work with 512-bit registers.
  */
 typedef union sz_u512_vec_t {
     __m512i zmm;
@@ -2946,9 +3072,6 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         (n_length > 4) + (n_length > 66)](h, h_length, n, n_length);
 }
 
-/**
- *  @brief  Variation of AVX-512 exact reverse-order search for patterns up to 1 bytes included.
- */
 SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     __mmask64 mask;
     sz_u512_vec_t h_vec, n_vec;
@@ -3294,30 +3417,6 @@ SZ_PUBLIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #endif
 }
 
-SZ_PUBLIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_X86_AVX512
-    sz_copy_avx512(target, source, length);
-#else
-    sz_copy_serial(target, source, length);
-#endif
-}
-
-SZ_PUBLIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_X86_AVX512
-    sz_move_avx512(target, source, length);
-#else
-    sz_move_serial(target, source, length);
-#endif
-}
-
-SZ_PUBLIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-#if SZ_USE_X86_AVX512
-    sz_fill_avx512(target, length, value);
-#else
-    sz_fill_serial(target, length, value);
-#endif
-}
-
 SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
 #if SZ_USE_X86_AVX512
     return sz_order_avx512(a, a_length, b, b_length);
@@ -3326,9 +3425,41 @@ SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, s
 #endif
 }
 
+SZ_PUBLIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+#if SZ_USE_X86_AVX512
+    sz_copy_avx512(target, source, length);
+#elif SZ_USE_X86_AVX2
+    sz_copy_avx2(target, source, length);
+#else
+    sz_copy_serial(target, source, length);
+#endif
+}
+
+SZ_PUBLIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+#if SZ_USE_X86_AVX512
+    sz_move_avx512(target, source, length);
+#elif SZ_USE_X86_AVX2
+    sz_move_avx2(target, source, length);
+#else
+    sz_move_serial(target, source, length);
+#endif
+}
+
+SZ_PUBLIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+#if SZ_USE_X86_AVX512
+    sz_fill_avx512(target, length, value);
+#elif SZ_USE_X86_AVX2
+    sz_fill_avx2(target, length, value);
+#else
+    sz_fill_serial(target, length, value);
+#endif
+}
+
 SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
 #if SZ_USE_X86_AVX512
     return sz_find_byte_avx512(haystack, h_length, needle);
+#elif SZ_USE_X86_AVX2
+    return sz_find_byte_avx2(haystack, h_length, needle);
 #else
     return sz_find_byte_serial(haystack, h_length, needle);
 #endif
@@ -3337,6 +3468,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 SZ_PUBLIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
 #if SZ_USE_X86_AVX512
     return sz_find_last_byte_avx512(haystack, h_length, needle);
+#elif SZ_USE_X86_AVX2
+    return sz_find_last_byte_avx2(haystack, h_length, needle);
 #else
     return sz_find_last_byte_serial(haystack, h_length, needle);
 #endif
@@ -3345,6 +3478,8 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz
 SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
 #if SZ_USE_X86_AVX512
     return sz_find_avx512(haystack, h_length, needle, n_length);
+#elif SZ_USE_X86_AVX2
+    return sz_find_avx2(haystack, h_length, needle, n_length);
 #elif SZ_USE_ARM_NEON
     return sz_find_neon(haystack, h_length, needle, n_length);
 #else
@@ -3355,6 +3490,8 @@ SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t ne
 SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
 #if SZ_USE_X86_AVX512
     return sz_find_last_avx512(haystack, h_length, needle, n_length);
+#elif SZ_USE_X86_AVX2
+    return sz_find_last_avx2(haystack, h_length, needle, n_length);
 #elif SZ_USE_ARM_NEON
     return sz_find_last_neon(haystack, h_length, needle, n_length);
 #else
