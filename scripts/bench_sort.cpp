@@ -26,11 +26,6 @@ static sz_size_t get_length(sz_sequence_t const *array_c, sz_size_t i) {
     return array[i].size();
 }
 
-static sz_bool_t is_less(sz_sequence_t const *array_c, sz_size_t i, sz_size_t j) {
-    strings_t const &array = *reinterpret_cast<strings_t const *>(array_c->handle);
-    return (sz_bool_t)(array[i] < array[j]);
-}
-
 static sz_bool_t has_under_four_chars(sz_sequence_t const *array_c, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c->handle);
     return (sz_bool_t)(array[i].size() < 4);

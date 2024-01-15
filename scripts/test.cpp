@@ -1,5 +1,7 @@
+#undef NDEBUG      // Enable all assertions
+#include <cassert> // assertions
+
 #include <algorithm> // `std::transform`
-#include <cassert>   // assertions
 #include <cstdio>    // `std::printf`
 #include <cstring>   // `std::memcpy`
 #include <iterator>  // `std::distance`
@@ -100,7 +102,7 @@ static void test_arithmetical_utilities() {
     {                                             \
         bool threw = false;                       \
         try {                                     \
-            expression;                           \
+            sz_unused(expression);                \
         }                                         \
         catch (exception_type const &) {          \
             threw = true;                         \
@@ -174,7 +176,7 @@ static void test_api_readonly() {
     assert(str("b") >= str("a"));
     assert(str("a") < str("aa"));
 
-#if SZ_DETECT_CPP_20 && __cpp_lib_three_way_comparison
+#if SZ_DETECT_CPP20 && __cpp_lib_three_way_comparison
     // Spaceship operator instead of conventional comparions.
     assert((str("a") <=> str("b")) == std::strong_ordering::less);
     assert((str("b") <=> str("a")) == std::strong_ordering::greater);
@@ -217,7 +219,7 @@ static void test_api_readonly() {
     assert(str("hello world").compare(6, 5, "worlds", 5) == 0);    // Substring "world" in both strings
     assert(str("hello world").compare(6, 5, "worlds", 6) < 0);     // Substring "world" is less than "worlds"
 
-#if SZ_DETECT_CPP_20 && __cpp_lib_starts_ends_with
+#if SZ_DETECT_CPP20 && __cpp_lib_starts_ends_with
     // Prefix and suffix checks against strings.
     assert(str("https://cppreference.com").starts_with(str("http")) == true);
     assert(str("https://cppreference.com").starts_with(str("ftp")) == false);
@@ -268,7 +270,7 @@ static void test_api_readonly() {
     assert(std::hash<str> {}("hello") != 0);
     assert_scoped(std::ostringstream os, os << str("hello"), os.str() == "hello");
 
-#if SZ_DETECT_CPP_14
+#if SZ_DETECT_CPP14
     // Comparison function objects are a C++14 feature.
     assert(std::equal_to<str> {}("hello", "world") == false);
     assert(std::less<str> {}("hello", "world") == true);
@@ -402,7 +404,10 @@ static void test_stl_conversion_api() {
         std::string const stl {"hello"};
         sz::string sz = stl;
         sz::string_view szv = stl;
+        sz_unused(sz);
+        sz_unused(szv);
     }
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
     // From STL `string_view` to StringZilla and vice-versa.
     {
         std::string_view stl {"hello"};
@@ -411,6 +416,7 @@ static void test_stl_conversion_api() {
         stl = sz;
         stl = szv;
     }
+#endif
 }
 
 /**
@@ -444,9 +450,9 @@ void test_api_mutable_extensions() {
     assert_scoped(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
     assert_scoped(str s = "hello", s.replace_all("l", "1"), s == "he11o");
     assert_scoped(str s = "hello", s.replace_all("he", "al"), s == "alllo");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), "!"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("o"), "!"), s == "hell!");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("ho"), "!"), s == "!ell!");
+    assert_scoped(str s = "hello", s.replace_all(sz::char_set("x"), "!"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all(sz::char_set("o"), "!"), s == "hell!");
+    assert_scoped(str s = "hello", s.replace_all(sz::char_set("ho"), "!"), s == "!ell!");
 
     // Shorter replacements.
     assert_scoped(str s = "hello", s.replace_all("xx", "x"), s == "hello");
@@ -454,8 +460,8 @@ void test_api_mutable_extensions() {
     assert_scoped(str s = "hello", s.replace_all("h", ""), s == "ello");
     assert_scoped(str s = "hello", s.replace_all("o", ""), s == "hell");
     assert_scoped(str s = "hello", s.replace_all("llo", "!"), s == "he!");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), ""), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("lo"), ""), s == "he");
+    assert_scoped(str s = "hello", s.replace_all(sz::char_set("x"), ""), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all(sz::char_set("lo"), ""), s == "he");
 
     // Longer replacements.
     assert_scoped(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
@@ -463,8 +469,8 @@ void test_api_mutable_extensions() {
     assert_scoped(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
     assert_scoped(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
     assert_scoped(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("x"), "xx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all(sz::character_set("lo"), "lo"), s == "helololo");
+    assert_scoped(str s = "hello", s.replace_all(sz::char_set("x"), "xx"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all(sz::char_set("lo"), "lo"), s == "helololo");
 
     // Concatenation.
     assert(str(str("a") | str("b")) == "ab");
@@ -676,9 +682,9 @@ static void test_search() {
 
     assert("aabaa"_sz.remove_prefix("a") == "abaa");
     assert("aabaa"_sz.remove_suffix("a") == "aaba");
-    assert("aabaa"_sz.lstrip(sz::character_set {"a"}) == "baa");
-    assert("aabaa"_sz.rstrip(sz::character_set {"a"}) == "aab");
-    assert("aabaa"_sz.strip(sz::character_set {"a"}) == "b");
+    assert("aabaa"_sz.lstrip(sz::char_set {"a"}) == "baa");
+    assert("aabaa"_sz.rstrip(sz::char_set {"a"}) == "aab");
+    assert("aabaa"_sz.strip(sz::char_set {"a"}) == "b");
 
     // Check more advanced composite operations
     assert("abbccc"_sz.partition("bb").before.size() == 1);
@@ -708,20 +714,20 @@ static void test_search() {
     assert("a.b.c.d"_sz.find_all(".").size() == 3);
     assert("a.,b.,c.,d"_sz.find_all(".,").size() == 3);
     assert("a.,b.,c.,d"_sz.rfind_all(".,").size() == 3);
-    assert("a.b,c.d"_sz.find_all(sz::character_set(".,")).size() == 3);
+    assert("a.b,c.d"_sz.find_all(sz::char_set(".,")).size() == 3);
     assert("a...b...c"_sz.rfind_all("..").size() == 4);
     assert("a...b...c"_sz.rfind_all("..", sz::include_overlaps).size() == 4);
     assert("a...b...c"_sz.rfind_all("..", sz::exclude_overlaps).size() == 2);
 
-    auto finds = "a.b.c"_sz.find_all(sz::character_set("abcd")).template to<std::vector<std::string>>();
+    auto finds = "a.b.c"_sz.find_all(sz::char_set("abcd")).template to<std::vector<std::string>>();
     assert(finds.size() == 3);
     assert(finds[0] == "a");
 
-    auto rfinds = "a.b.c"_sz.rfind_all(sz::character_set("abcd")).template to<std::vector<std::string>>();
+    auto rfinds = "a.b.c"_sz.rfind_all(sz::char_set("abcd")).template to<std::vector<std::string>>();
     assert(rfinds.size() == 3);
     assert(rfinds[0] == "c");
 
-    auto splits = ".a..c."_sz.split(sz::character_set(".")).template to<std::vector<std::string>>();
+    auto splits = ".a..c."_sz.split(sz::char_set(".")).template to<std::vector<std::string>>();
     assert(splits.size() == 5);
     assert(splits[0] == "");
     assert(splits[1] == "a");
@@ -748,14 +754,16 @@ static void test_search() {
     assert(*advanced("a.b.c.d"_sz.split(".").begin(), 3) == "d");
     assert(*advanced("a.b.c.d"_sz.rsplit(".").begin(), 3) == "a");
     assert("a.b.,c,d"_sz.split(".,").size() == 2);
-    assert("a.b,c.d"_sz.split(sz::character_set(".,")).size() == 4);
+    assert("a.b,c.d"_sz.split(sz::char_set(".,")).size() == 4);
 
-    auto rsplits = ".a..c."_sz.rsplit(sz::character_set(".")).template to<std::vector<std::string>>();
+    auto rsplits = ".a..c."_sz.rsplit(sz::char_set(".")).template to<std::vector<std::string>>();
     assert(rsplits.size() == 5);
     assert(rsplits[0] == "");
     assert(rsplits[1] == "c");
     assert(rsplits[4] == "");
 }
+
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
 
 /**
  *  Evaluates the correctness of a "matcher", searching for all the occurences of the `needle_stl`
@@ -767,11 +775,17 @@ template <typename stl_matcher_, typename sz_matcher_>
 void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, std::string_view needle_stl,
                                              std::size_t misalignment) {
     constexpr std::size_t max_repeats = 128;
-    alignas(64) char haystack[misalignment + max_repeats * haystack_pattern.size()];
-    std::vector<std::size_t> offsets_stl;
-    std::vector<std::size_t> offsets_sz;
 
-    for (std::size_t repeats = 0; repeats != 128; ++repeats) {
+    // Allocate a buffer to store the haystack with enough padding to misalign it.
+    std::size_t haystack_buffer_length = max_repeats * haystack_pattern.size() + 2 * SZ_CACHE_LINE_WIDTH;
+    std::vector<char> haystack_buffer(haystack_buffer_length, 'x');
+    char *haystack = haystack_buffer.data();
+    while (reinterpret_cast<std::uintptr_t>(haystack) % SZ_CACHE_LINE_WIDTH != misalignment) ++haystack;
+
+    /// Helper container to store the offsets of the matches. Useful during debugging :)
+    std::vector<std::size_t> offsets_stl, offsets_sz;
+
+    for (std::size_t repeats = 0; repeats != max_repeats; ++repeats) {
         std::size_t haystack_length = (repeats + 1) * haystack_pattern.size();
         std::memcpy(haystack + misalignment + repeats * haystack_pattern.size(), haystack_pattern.data(),
                     haystack_pattern.size());
@@ -914,6 +928,8 @@ static void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("abcd", "da");
 }
 
+#endif
+
 /**
  *  @brief  Tests the correctness of the string class Levenshtein distance computation,
  *          as well as TODO: the similarity scoring functions for bioinformatics-like workloads.
@@ -981,13 +997,8 @@ static void test_levenshtein_distances() {
 int main(int argc, char const **argv) {
 
     // Let's greet the user nicely
-    static const char *USER_NAME =
-#define str(s) #s
-#define xstr(s) str(s)
-        xstr(DEV_USER_NAME);
-    std::printf("Hi " xstr(DEV_USER_NAME) "! You look nice today!\n");
-#undef str
-#undef xstr
+    std::printf("Hi, dear tester! You look nice today!\n");
+    sz_unused(argc && argv);
 
     // Basic utilities
     test_arithmetical_utilities();
@@ -1018,7 +1029,11 @@ int main(int argc, char const **argv) {
     test_stl_conversion_api();
     test_comparisons();
     test_search();
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
     test_search_with_misaligned_repetitions();
+#endif
+
+    // Similarity measures and fuzzy search
     test_levenshtein_distances();
 
     return 0;

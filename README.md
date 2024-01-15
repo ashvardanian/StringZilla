@@ -384,7 +384,7 @@ StringZilla provides a convenient `partition` function, which returns a tuple of
 ```cpp
 auto parts = haystack.partition(':'); // Matching a character
 auto [before, match, after] = haystack.partition(':'); // Structure unpacking
-auto [before, match, after] = haystack.partition(character_set(":;")); // Character-set argument
+auto [before, match, after] = haystack.partition(char_set(":;")); // Character-set argument
 auto [before, match, after] = haystack.partition(" : "); // String argument
 auto [before, match, after] = haystack.rpartition(sz::whitespaces); // Split around the last whitespace
 ```
@@ -412,8 +412,8 @@ Here is a sneak peek of the most useful ones.
 ```cpp
 text.hash(); // -> 64 bit unsigned integer 
 text.ssize(); // -> 64 bit signed length to avoid `static_cast<std::ssize_t>(text.size())`
-text.contains_only(" \w\t"); // == text.find_first_not_of(character_set(" \w\t")) == npos;
-text.contains(sz::whitespaces); // == text.find(character_set(sz::whitespaces)) != npos;
+text.contains_only(" \w\t"); // == text.find_first_not_of(char_set(" \w\t")) == npos;
+text.contains(sz::whitespaces); // == text.find(char_set(sz::whitespaces)) != npos;
 
 // Simpler slicing than `substr`
 text.front(10); // -> sz::string_view
@@ -459,7 +459,7 @@ To avoid those, StringZilla provides lazily-evaluated ranges, compatible with th
 
 ```cpp
 for (auto line : haystack.split("\r\n"))
-    for (auto word : line.split(character_set(" \w\t.,;:!?")))
+    for (auto word : line.split(char_set(" \w\t.,;:!?")))
         std::cout << word << std::endl;
 ```
 
@@ -468,9 +468,9 @@ It also allows interleaving matches, if you want both inclusions of `xx` in `xxx
 Debugging pointer offsets is not a pleasant exercise, so keep the following functions in mind.
 
 - `haystack.[r]find_all(needle, interleaving)`
-- `haystack.[r]find_all(character_set(""))`
+- `haystack.[r]find_all(char_set(""))`
 - `haystack.[r]split(needle)`
-- `haystack.[r]split(character_set(""))`
+- `haystack.[r]split(char_set(""))`
 
 For $N$ matches the split functions will report $N+1$ matches, potentially including empty strings.
 Ranges have a few convinience methods as well:

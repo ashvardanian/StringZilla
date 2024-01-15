@@ -20,7 +20,7 @@ static void *allocate_from_vector(sz_size_t length, void *handle) {
     return vec.data();
 }
 
-static void free_from_vector(void *buffer, sz_size_t length, void *handle) {}
+static void free_from_vector(void *buffer, sz_size_t length, void *handle) { sz_unused(buffer && length && handle); }
 
 tracked_binary_functions_t distance_functions() {
     // Populate the unary substitutions matrix
