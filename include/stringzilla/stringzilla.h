@@ -3313,22 +3313,21 @@ typedef union sz_u128_vec_t {
 } sz_u128_vec_t;
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u8_t offsets[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-
     sz_u128_vec_t h_vec, n_vec, offsets_vec, matches_vec;
-    n_vec.u8x16 = vld1q_dup_u8(n_unsigned);
+    n_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)n);
     offsets_vec.u8x16 = vld1q_u8(offsets);
 
     while (h_length >= 16) {
-        h_vec.u8x16 = vld1q_u8(h_unsigned);
+        h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h);
         matches_vec.u8x16 = vceqq_u8(h_vec.u8x16, n_vec.u8x16);
         // In Arm NEON we don't have a `movemask` to combine it with `ctz` and get the offset of the match.
         // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise selecting)
         // the vector with a relative offsets array.
-        if (vmaxvq_u8(matches_vec.u8x16))
-            return h + vminvq_u8(vbslq_u8(vdupq_n_u8(0xFF), offsets_vec.u8x16, matches_vec.u8x16));
+        if (vmaxvq_u8(matches_vec.u8x16)) {
+            matches_vec.u8x16 = vbslq_u8(matches_vec.u8x16, offsets_vec.u8x16, vdupq_n_u8(0xFF));
+            return h + vminvq_u8(matches_vec.u8x16);
+        }
         h += 16, h_length -= 16;
     }
 
@@ -3336,22 +3335,22 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u8_t offsets[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 
     sz_u128_vec_t h_vec, n_vec, offsets_vec, matches_vec;
-    n_vec.u8x16 = vld1q_dup_u8(n_unsigned);
+    n_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)n);
     offsets_vec.u8x16 = vld1q_u8(offsets);
 
     while (h_length >= 16) {
-        h_vec.u8x16 = vld1q_u8(h_unsigned + h_length - 16);
+        h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h + h_length - 16);
         matches_vec.u8x16 = vceqq_u8(h_vec.u8x16, n_vec.u8x16);
         // In Arm NEON we don't have a `movemask` to combine it with `clz` and get the offset of the match.
         // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise selecting)
         // the vector with a relative offsets array.
-        if (vmaxvq_u8(matches_vec.u8x16))
-            return h + vminvq_u8(vbslq_u8(vdupq_n_u8(0xFF), offsets_vec.u8x16, matches_vec.u8x16));
+        if (vmaxvq_u8(matches_vec.u8x16)) {
+            matches_vec.u8x16 = vbslq_u8(matches_vec.u8x16, offsets_vec.u8x16, vdupq_n_u8(0));
+            return h + h_length - 16 + vmaxvq_u8(matches_vec.u8x16);
+        }
         h_length -= 16;
     }
 
@@ -3359,10 +3358,75 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_c
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    if (n_length == 1) return sz_find_byte_neon(h, h_length, n);
+
+    // Will contain 4 bits per character.
+    sz_u64_t matches;
+    sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
+    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
+    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length / 2]);
+    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length - 1]);
+
+    for (; h_length >= n_length + 16; h += 16, h_length -= 16) {
+        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h));
+        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + n_length / 2));
+        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + n_length - 1));
+        matches_vec.u8x16 = vandq_u8(                           //
+            vandq_u8(                                           //
+                vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
+                vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
+            vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
+        if (vmaxvq_u8(matches_vec.u8x16)) {
+            // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
+            // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
+            matches = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(matches_vec.u8x16), 4)), 0) &
+                      0x8888888888888888ull;
+            while (matches) {
+                int potential_offset = sz_u64_ctz(matches) / 4;
+                if (sz_equal(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+                matches &= matches - 1;
+            }
+        }
+    }
+
     return sz_find_serial(h, h_length, n, n_length);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    if (n_length == 1) return sz_find_last_byte_neon(h, h_length, n);
+
+    // Will contain 4 bits per character.
+    sz_u64_t matches;
+    sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
+    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
+    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length / 2]);
+    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length - 1]);
+
+    for (; h_length >= n_length + 16; h_length -= 16) {
+        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - n_length - 16 + 1));
+        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - n_length - 16 + 1 + n_length / 2));
+        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - 16));
+        matches_vec.u8x16 = vandq_u8(                           //
+            vandq_u8(                                           //
+                vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
+                vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
+            vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
+        if (vmaxvq_u8(matches_vec.u8x16)) {
+            // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
+            // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
+            matches = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(matches_vec.u8x16), 4)), 0) &
+                      0x8888888888888888ull;
+            while (matches) {
+                int potential_offset = sz_u64_clz(matches) / 4;
+                if (sz_equal(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
+                    return h + h_length - n_length - potential_offset;
+                sz_assert((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
+                          "The bit must be set before we squash it");
+                matches &= ~(1ull << (63 - potential_offset * 4));
+            }
+        }
+    }
+
     return sz_find_last_serial(h, h_length, n, n_length);
 }
 
@@ -3373,66 +3437,6 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_neon(sz_cptr_t h, sz_size_t h_length, sz_u8
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t h, sz_size_t h_length, sz_u8_set_t const *set) {
     return sz_find_last_from_set_serial(h, h_length, set);
 }
-
-#if 0
-inline static sz_string_start_t sz_find_substring_neon(sz_string_start_t const haystack,
-                                                       sz_size_t const haystack_length, sz_string_start_t const needle,
-                                                       sz_size_t const needle_length) {
-
-    // Precomputed constants
-    sz_string_start_t const end = haystack + haystack_length;
-    _sz_anomaly_t anomaly;
-    _sz_anomaly_t mask;
-    _sz_find_substring_populate_anomaly(needle, needle_length, &anomaly, &mask);
-    uint32x4_t const anomalies = vld1q_dup_u32(&anomaly.u32);
-    uint32x4_t const masks = vld1q_dup_u32(&mask.u32);
-    uint32x4_t matches, matches0, matches1, matches2, matches3;
-
-    sz_string_start_t text = haystack;
-    while (text + needle_length + 16 <= end) {
-
-        // Each of the following `matchesX` contains only 4 relevant bits - one per word.
-        // Each signifies a match at the given offset.
-        matches0 = vceqq_u32(vandq_u32(vreinterpretq_u32_u8(vld1q_u8((unsigned char *)text + 0)), masks), anomalies);
-        matches1 = vceqq_u32(vandq_u32(vreinterpretq_u32_u8(vld1q_u8((unsigned char *)text + 1)), masks), anomalies);
-        matches2 = vceqq_u32(vandq_u32(vreinterpretq_u32_u8(vld1q_u8((unsigned char *)text + 2)), masks), anomalies);
-        matches3 = vceqq_u32(vandq_u32(vreinterpretq_u32_u8(vld1q_u8((unsigned char *)text + 3)), masks), anomalies);
-        matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
-
-        if (vmaxvq_u32(matches)) {
-            // Let's isolate the match from every word
-            matches0 = vandq_u32(matches0, vdupq_n_u32(0x00000001));
-            matches1 = vandq_u32(matches1, vdupq_n_u32(0x00000002));
-            matches2 = vandq_u32(matches2, vdupq_n_u32(0x00000004));
-            matches3 = vandq_u32(matches3, vdupq_n_u32(0x00000008));
-            matches = vorrq_u32(vorrq_u32(matches0, matches1), vorrq_u32(matches2, matches3));
-
-            // By now, every 32-bit word of `matches` no more than 4 set bits.
-            // Meaning that we can narrow it down to a single 16-bit word.
-            uint16x4_t matches_u16x4 = vmovn_u32(matches);
-            uint16_t matches_u16 =                       //
-                (vget_lane_u16(matches_u16x4, 0) << 0) | //
-                (vget_lane_u16(matches_u16x4, 1) << 4) | //
-                (vget_lane_u16(matches_u16x4, 2) << 8) | //
-                (vget_lane_u16(matches_u16x4, 3) << 12);
-
-            // Find the first match
-            sz_size_t first_match_offset = ctz64(matches_u16);
-            if (needle_length > 4) {
-                if (sz_equal(text + first_match_offset + 4, needle + 4, needle_length - 4)) {
-                    return text + first_match_offset;
-                }
-                else { text += first_match_offset + 1; }
-            }
-            else { return text + first_match_offset; }
-        }
-        else { text += 16; }
-    }
-
-    // Don't forget the last (up to 16+3=19) characters.
-    return sz_find_substring_swar(text, end - text, needle, needle_length);
-}
-#endif
 
 #endif // Arm Neon
 
