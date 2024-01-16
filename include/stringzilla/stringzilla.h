@@ -214,7 +214,7 @@
 #endif
 #endif
 
-#if !SZ_DEBUG
+#if SZ_DEBUG
 #define sz_assert(condition)                                                                                \
     do {                                                                                                    \
         if (!(condition)) {                                                                                 \
@@ -2202,7 +2202,7 @@ SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacit
     sz_assert(string && "String can't be NULL.");
 
     sz_size_t new_space = new_capacity + 1;
-    sz_assert(new_space >= sz_string_stack_space && "New space must be larger than the SSO buffer.");
+    if (new_space <= sz_string_stack_space) return sz_true_k;
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -2236,7 +2236,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
 
-    // The user integed to extend the string.
+    // The user intended to extend the string.
     offset = sz_min_of_two(offset, string_length);
 
     // If we are lucky, no memory allocations will be needed.
