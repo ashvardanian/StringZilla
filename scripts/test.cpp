@@ -14,10 +14,11 @@
 // Those parameters must never be explicitly set during releases,
 // but they come handy during development, if you want to validate
 // different ISA-specific implementations.
-#define SZ_USE_X86_AVX2 0
+// #define SZ_USE_X86_AVX2 0
 // #define SZ_USE_X86_AVX512 0
 // #define SZ_USE_ARM_NEON 0
 // #define SZ_USE_ARM_SVE 0
+#define SZ_DEBUG 1
 
 #include <string>                      // Baseline
 #include <string_view>                 // Baseline
@@ -201,10 +202,10 @@ static void test_api_readonly() {
     assert(str("hello").find_last_not_of("hel", 4) == 4);
 
     // Try longer strings to enforce SIMD.
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("x") == 23);  // first byte
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("X") == 49);  // first byte
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("x") == 23); // last byte
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("X") == 49); // last byte
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('x') == 23);  // first byte
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('X') == 49);  // first byte
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('x') == 23); // last byte
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('X') == 49); // last byte
 
     assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyz") == 23);  // first match
     assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ") == 49);  // first match
@@ -977,6 +978,12 @@ static void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("ab", "ba");
     test_search_with_misaligned_repetitions("abc", "ca");
     test_search_with_misaligned_repetitions("abcd", "da");
+
+    // Examples targeted exactly against the Raita heuristic,
+    // which matches the first, the last, and the middle characters with SIMD.
+    test_search_with_misaligned_repetitions("aaabbccc", "aaabbccc");
+    test_search_with_misaligned_repetitions("axabbcxc", "aaabbccc");
+    test_search_with_misaligned_repetitions("axabbcxcaaabbccc", "aaabbccc");
 }
 
 #endif
