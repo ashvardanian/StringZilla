@@ -2687,23 +2687,20 @@ typedef union sz_u512_vec_t {
     sz_u8_t u8s[64];
 } sz_u512_vec_t;
 
-SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until(sz_size_t n) {
+SZ_INTERNAL __mmask64 _sz_u64_clamp_mask_until(sz_size_t n) {
     // The simplest approach to compute this if we know that `n` is blow or equal 64:
     //      return (1ull << n) - 1;
     // A slightly more complex approach, if we don't know that `n` is under 64:
     return _bzhi_u64(0xFFFFFFFFFFFFFFFF, n < 64 ? n : 64);
 }
 
-SZ_INTERNAL __mmask64 sz_u64_mask_until(sz_size_t n) {
+SZ_INTERNAL __mmask64 _sz_u64_mask_until(sz_size_t n) {
     // The simplest approach to compute this if we know that `n` is blow or equal 64:
     //      return (1ull << n) - 1;
     // A slightly more complex approach, if we don't know that `n` is under 64:
     return _bzhi_u64(0xFFFFFFFFFFFFFFFF, n);
 }
 
-/**
- *  @brief  Variation of AVX-512 relative order check for different length strings.
- */
 SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_ordering_t ordering_lookup[2] = {sz_greater_k, sz_less_k};
     sz_u512_vec_t a_vec, b_vec;
@@ -2725,8 +2722,8 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
 
     // In most common scenarios at least one of the strings is under 64 bytes.
     if (a_length | b_length) {
-        a_mask = sz_u64_clamp_mask_until(a_length);
-        b_mask = sz_u64_clamp_mask_until(b_length);
+        a_mask = _sz_u64_clamp_mask_until(a_length);
+        b_mask = _sz_u64_clamp_mask_until(b_length);
         a_vec.zmm = _mm512_maskz_loadu_epi8(a_mask, a);
         b_vec.zmm = _mm512_maskz_loadu_epi8(b_mask, b);
         // The AVX-512 `_mm512_mask_cmpneq_epi8_mask` intrinsics are generally handy in such environments.
@@ -2748,9 +2745,6 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
         return sz_equal_k;
 }
 
-/**
- *  @brief  Variation of AVX-512 equality check between equivalent length strings.
- */
 SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     __mmask64 mask;
     sz_u512_vec_t a_vec, b_vec;
@@ -2764,7 +2758,7 @@ SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
     }
 
     if (length) {
-        mask = sz_u64_mask_until(length);
+        mask = _sz_u64_mask_until(length);
         a_vec.zmm = _mm512_maskz_loadu_epi8(mask, a);
         b_vec.zmm = _mm512_maskz_loadu_epi8(mask, b);
         // Reuse the same `mask` variable to find the bit that doesn't match
@@ -2778,14 +2772,14 @@ SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     for (; length >= 64; target += 64, length -= 64) _mm512_storeu_epi8(target, _mm512_set1_epi8(value));
     // At this point the length is guaranteed to be under 64.
-    _mm512_mask_storeu_epi8(target, sz_u64_mask_until(length), _mm512_set1_epi8(value));
+    _mm512_mask_storeu_epi8(target, _sz_u64_mask_until(length), _mm512_set1_epi8(value));
 }
 
 SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     for (; length >= 64; target += 64, source += 64, length -= 64)
         _mm512_storeu_epi8(target, _mm512_loadu_epi8(source));
     // At this point the length is guaranteed to be under 64.
-    __mmask64 mask = sz_u64_mask_until(length);
+    __mmask64 mask = _sz_u64_mask_until(length);
     _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
 }
 
@@ -2794,7 +2788,7 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         for (; length >= 64; target += 64, source += 64, length -= 64)
             _mm512_storeu_epi8(target, _mm512_loadu_epi8(source));
         // At this point the length is guaranteed to be under 64.
-        __mmask64 mask = sz_u64_mask_until(length);
+        __mmask64 mask = _sz_u64_mask_until(length);
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     }
     else {
@@ -2802,7 +2796,7 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         for (target += length, source += length; length >= 64; length -= 64)
             _mm512_storeu_epi8(target -= 64, _mm512_loadu_epi8(source -= 64));
         // At this point the length is guaranteed to be under 64.
-        __mmask64 mask = sz_u64_mask_until(length);
+        __mmask64 mask = _sz_u64_mask_until(length);
         _mm512_mask_storeu_epi8(target - length, mask, _mm512_maskz_loadu_epi8(mask, source - length));
     }
 }
@@ -2820,7 +2814,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
     }
 
     if (h_length) {
-        mask = sz_u64_mask_until(h_length);
+        mask = _sz_u64_mask_until(h_length);
         h_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         // Reuse the same `mask` variable to find the bit that doesn't match
         mask = _mm512_mask_cmpeq_epu8_mask(mask, h_vec.zmm, n_vec.zmm);
@@ -2830,212 +2824,53 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
     return NULL;
 }
 
-/**
- *  @brief  Variation of AVX-512 exact search for patterns up to 2 bytes included.
- */
-SZ_INTERNAL sz_cptr_t sz_find_2byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
-    // A simpler approach would ahve been to use two separate registers for
-    // different characters of the needle, but that would use more registers.
-    __mmask64 mask;
-    __mmask32 matches0, matches1;
-    sz_u512_vec_t h0_vec, h1_vec, n_vec;
-    n_vec.zmm = _mm512_set1_epi16(sz_u16_load(n).u16);
-
-    while (h_length >= 65) {
-        h0_vec.zmm = _mm512_loadu_epi8(h);
-        h1_vec.zmm = _mm512_loadu_epi8(h + 1);
-        matches0 = _mm512_cmpeq_epi16_mask(h0_vec.zmm, n_vec.zmm);
-        matches1 = _mm512_cmpeq_epi16_mask(h1_vec.zmm, n_vec.zmm);
-        // https://lemire.me/blog/2018/01/08/how-fast-can-you-bit-interleave-32-bit-integers/
-        if (matches0 | matches1)
-            return h + sz_u64_ctz(_pdep_u64(matches0, 0x5555555555555555ull) | //
-                                  _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
-        h += 64, h_length -= 64;
-    }
-
-    if (h_length >= 2) {
-        mask = sz_u64_mask_until(h_length);
-        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 1, h + 1);
-        matches0 = _mm512_mask_cmpeq_epi16_mask(mask, h0_vec.zmm, n_vec.zmm);
-        matches1 = _mm512_mask_cmpeq_epi16_mask(mask, h1_vec.zmm, n_vec.zmm);
-        if (matches0 | matches1)
-            return h + sz_u64_ctz(_pdep_u64(matches0, 0x5555555555555555ull) | //
-                                  _pdep_u64(matches1, 0xAAAAAAAAAAAAAAAAull));
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Variation of AVX-512 exact search for patterns up to 4 bytes included.
- */
-SZ_INTERNAL sz_cptr_t sz_find_4byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-
-    __mmask64 mask;
-    __mmask16 matches0, matches1, matches2, matches3;
-    sz_u512_vec_t h0_vec, h1_vec, h2_vec, h3_vec, n_vec;
-    n_vec.zmm = _mm512_set1_epi32(sz_u32_load(n).u32);
-
-    while (h_length >= 64) {
-        h0_vec.zmm = _mm512_loadu_epi8(h + 0);
-        h1_vec.zmm = _mm512_loadu_epi8(h + 1);
-        h2_vec.zmm = _mm512_loadu_epi8(h + 2);
-        h3_vec.zmm = _mm512_loadu_epi8(h + 3);
-        matches0 = _mm512_cmpeq_epi32_mask(h0_vec.zmm, n_vec.zmm);
-        matches1 = _mm512_cmpeq_epi32_mask(h1_vec.zmm, n_vec.zmm);
-        matches2 = _mm512_cmpeq_epi32_mask(h2_vec.zmm, n_vec.zmm);
-        matches3 = _mm512_cmpeq_epi32_mask(h3_vec.zmm, n_vec.zmm);
-        if (matches0 | matches1 | matches2 | matches3)
-            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111) | //
-                                  _pdep_u64(matches1, 0x2222222222222222) | //
-                                  _pdep_u64(matches2, 0x4444444444444444) | //
-                                  _pdep_u64(matches3, 0x8888888888888888));
-        h += 64, h_length -= 64;
-    }
-
-    if (h_length >= 4) {
-        mask = sz_u64_mask_until(h_length);
-        h0_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 0, h + 0);
-        h1_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 1, h + 1);
-        h2_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 2, h + 2);
-        h3_vec.zmm = _mm512_maskz_loadu_epi8(mask >> 3, h + 3);
-        matches0 = _mm512_mask_cmpeq_epi32_mask(mask, h0_vec.zmm, n_vec.zmm);
-        matches1 = _mm512_mask_cmpeq_epi32_mask(mask, h1_vec.zmm, n_vec.zmm);
-        matches2 = _mm512_mask_cmpeq_epi32_mask(mask, h2_vec.zmm, n_vec.zmm);
-        matches3 = _mm512_mask_cmpeq_epi32_mask(mask, h3_vec.zmm, n_vec.zmm);
-        if (matches0 | matches1 | matches2 | matches3)
-            return h + sz_u64_ctz(_pdep_u64(matches0, 0x1111111111111111ull) | //
-                                  _pdep_u64(matches1, 0x2222222222222222ull) | //
-                                  _pdep_u64(matches2, 0x4444444444444444ull) | //
-                                  _pdep_u64(matches3, 0x8888888888888888ull));
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Variation of AVX-512 exact search for patterns up to 66 bytes included.
- */
-SZ_INTERNAL sz_cptr_t sz_find_under66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return NULL;
+    if (n_length == 1) return sz_find_byte_avx512(h, h_length, n);
 
     __mmask64 matches;
-    __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
-    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, h_body_vec, n_first_vec, n_mid_vec, n_last_vec, n_body_vec;
-    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
-    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
-    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
-    n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
-
-    while (h_length >= n_length + 64) {
-        h_first_vec.zmm = _mm512_loadu_epi8(h);
-        h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
-        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
-        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_ctz(matches);
-            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + potential_offset + 1);
-            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + potential_offset;
-            h += potential_offset + 1, h_length -= potential_offset + 1;
-        }
-        else { h += 64, h_length -= 64; }
-    }
-
-    while (h_length >= n_length) {
-        mask = sz_u64_mask_until(h_length - n_length + 1);
-        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
-        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_ctz(matches);
-            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + potential_offset + 1);
-            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + potential_offset;
-            h += potential_offset + 1, h_length -= potential_offset + 1;
-        }
-        else { break; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Variation of AVX-512 exact search for patterns longer than 66 bytes.
- */
-SZ_INTERNAL sz_cptr_t sz_find_over66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-
     __mmask64 mask;
-    __mmask64 matches;
     sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
     n_first_vec.zmm = _mm512_set1_epi8(n[0]);
     n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
     n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
 
-    while (h_length >= n_length + 64) {
+    // The main "body" of the function processes 64 possible offsets at once.
+    for (; h_length >= n_length + 64; h += 64, h_length -= 64) {
         h_first_vec.zmm = _mm512_loadu_epi8(h);
         h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
         h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
         matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
+        while (matches) {
             int potential_offset = sz_u64_ctz(matches);
-            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
-            h += potential_offset + 1, h_length -= potential_offset + 1;
+            if (n_length <= 3 || sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2))
+                return h + potential_offset;
+            matches &= matches - 1;
         }
-        else { h += 64, h_length -= 64; }
     }
-
-    while (h_length >= n_length) {
-        mask = sz_u64_mask_until(h_length - n_length + 1);
+    // The "tail" of the function uses masked loads to process the remaining bytes.
+    {
+        mask = _sz_u64_mask_until(h_length - n_length + 1);
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
         h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
         matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
                   _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
+        while (matches) {
             int potential_offset = sz_u64_ctz(matches);
-            if (sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
-            h += potential_offset + 1, h_length -= potential_offset + 1;
+            if (n_length <= 3 || sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2))
+                return h + potential_offset;
+            matches &= matches - 1;
         }
-        else { break; }
     }
-
     return NULL;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-
-    // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return NULL;
-
-    sz_find_t backends[] = {
-        // For very short strings brute-force SWAR makes sense.
-        (sz_find_t)sz_find_byte_avx512,
-        (sz_find_t)sz_find_2byte_avx512,
-        (sz_find_t)sz_find_under66byte_avx512,
-        (sz_find_t)sz_find_4byte_avx512,
-        // For longer needles we use a Two-Way heuristic with a follow-up check in-between.
-        (sz_find_t)sz_find_under66byte_avx512,
-        (sz_find_t)sz_find_over66byte_avx512,
-    };
-
-    return backends[
-        // For very short strings brute-force SWAR makes sense.
-        (n_length > 1) + (n_length > 2) + (n_length > 3) +
-        // For longer needles we use a Two-Way heuristic with a follow-up check in-between.
-        (n_length > 4) + (n_length > 66)](h, h_length, n, n_length);
-}
-
-/**
- *  @brief  Variation of AVX-512 exact reverse-order search for patterns up to 1 bytes included.
- */
 SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     __mmask64 mask;
     sz_u512_vec_t h_vec, n_vec;
@@ -3044,118 +2879,16 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz
     while (h_length >= 64) {
         h_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
         mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
-        int potential_offset = sz_u64_clz(mask);
-        if (mask) return h + h_length - 1 - potential_offset;
+        if (mask) return h + h_length - 1 - sz_u64_clz(mask);
         h_length -= 64;
     }
 
     if (h_length) {
-        mask = sz_u64_mask_until(h_length);
+        mask = _sz_u64_mask_until(h_length);
         h_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         // Reuse the same `mask` variable to find the bit that doesn't match
         mask = _mm512_mask_cmpeq_epu8_mask(mask, h_vec.zmm, n_vec.zmm);
-        int potential_offset = sz_u64_clz(mask);
-        if (mask) return h + 64 - potential_offset - 1;
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Variation of AVX-512 reverse-order exact search for patterns up to 66 bytes included.
- */
-SZ_INTERNAL sz_cptr_t sz_find_last_under66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                      sz_size_t n_length) {
-
-    __mmask64 mask, n_length_body_mask = sz_u64_mask_until(n_length - 2);
-    __mmask64 matches;
-    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, h_body_vec, n_first_vec, n_mid_vec, n_last_vec, n_body_vec;
-    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
-    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
-    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
-    n_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, n + 1);
-
-    while (h_length >= n_length + 64) {
-
-        h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
-        h_mid_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1 + n_length / 2);
-        h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
-        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_clz(matches);
-            h_body_vec.zmm =
-                _mm512_maskz_loadu_epi8(n_length_body_mask, h + h_length - n_length - potential_offset + 1);
-            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm))
-                return h + h_length - n_length - potential_offset;
-            h_length -= potential_offset + 1;
-        }
-        else { h_length -= 64; }
-    }
-
-    while (h_length >= n_length) {
-        mask = sz_u64_mask_until(h_length - n_length + 1);
-        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
-        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_clz(matches);
-            h_body_vec.zmm = _mm512_maskz_loadu_epi8(n_length_body_mask, h + 64 - potential_offset);
-            if (!_mm512_cmpneq_epi8_mask(h_body_vec.zmm, n_body_vec.zmm)) return h + 64 - potential_offset - 1;
-            h_length = 64 - potential_offset - 1;
-        }
-        else { break; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Variation of AVX-512 exact search for patterns longer than 66 bytes.
- */
-SZ_INTERNAL sz_cptr_t sz_find_last_over66byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-
-    __mmask64 mask;
-    __mmask64 matches;
-    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
-    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
-    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
-    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
-
-    while (h_length >= n_length + 64) {
-        h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
-        h_mid_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1 + n_length / 2);
-        h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
-        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_clz(matches);
-            if (sz_equal_avx512(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
-                return h + h_length - n_length - potential_offset;
-            h_length -= potential_offset + 1;
-        }
-        else { h_length -= 64; }
-    }
-
-    while (h_length >= n_length) {
-        mask = sz_u64_mask_until(h_length - n_length + 1);
-        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
-        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
-        if (matches) {
-            int potential_offset = sz_u64_clz(matches);
-            if (sz_equal_avx512(h + 64 - potential_offset, n + 1, n_length - 2)) return h + 64 - potential_offset - 1;
-            h_length = 64 - potential_offset - 1;
-        }
-        else { break; };
+        if (mask) return h + 64 - sz_u64_clz(mask) - 1;
     }
 
     return NULL;
@@ -3165,20 +2898,51 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
 
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return NULL;
+    if (n_length == 1) return sz_find_last_byte_avx512(h, h_length, n);
 
-    sz_find_t backends[] = {
-        // For very short strings brute-force SWAR makes sense.
-        (sz_find_t)sz_find_last_byte_avx512,
-        // For longer needles we use a Two-Way heuristic with a follow-up check in-between.
-        (sz_find_t)sz_find_last_under66byte_avx512,
-        (sz_find_t)sz_find_last_over66byte_avx512,
-    };
+    __mmask64 mask;
+    __mmask64 matches;
+    sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
+    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
+    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
+    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
 
-    return backends[
-        // For very short strings brute-force SWAR makes sense.
-        0 +
-        // For longer needles we use a Two-Way heuristic with a follow-up check in-between.
-        (n_length > 1) + (n_length > 66)](h, h_length, n, n_length);
+    // The main "body" of the function processes 64 possible offsets at once.
+    for (; h_length >= n_length + 64; h_length -= 64) {
+        h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
+        h_mid_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1 + n_length / 2);
+        h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
+        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
+                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
+        while (matches) {
+            int potential_offset = sz_u64_clz(matches);
+            if (n_length <= 3 || sz_equal_avx512(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
+                return h + h_length - n_length - potential_offset;
+            sz_assert((matches & (1 << (63 - potential_offset))) != 0 && "The bit must be set before we squash it");
+            matches &= ~(1 << (63 - potential_offset));
+        }
+    }
+
+    // The "tail" of the function uses masked loads to process the remaining bytes.
+    {
+        mask = _sz_u64_mask_until(h_length - n_length + 1);
+        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
+        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
+                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
+        while (matches) {
+            int potential_offset = sz_u64_clz(matches);
+            if (n_length <= 3 || sz_equal_avx512(h + 64 - potential_offset, n + 1, n_length - 2))
+                return h + 64 - potential_offset - 1;
+            sz_assert((matches & (1 << (63 - potential_offset))) != 0 && "The bit must be set before we squash it");
+            matches &= ~(1 << (63 - potential_offset));
+        }
+    }
+
+    return NULL;
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *filter) {
@@ -3202,7 +2966,7 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz
         // 1. Find corresponding word in a set.
         // 2. Produce a bitmask to check against that word.
         load_length = sz_min_of_two(length, 32);
-        load_mask = sz_u64_mask_until(load_length);
+        load_mask = _sz_u64_mask_until(load_length);
         text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text);
 
         // To shift right every byte by 3 bits we can use the GF2 affine transformations.
@@ -3257,7 +3021,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t lengt
         // 1. Find corresponding word in a set.
         // 2. Produce a bitmask to check against that word.
         load_length = sz_min_of_two(length, 32);
-        load_mask = sz_u64_mask_until(load_length);
+        load_mask = _sz_u64_mask_until(load_length);
         text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text + length - load_length);
 
         // To shift right every byte by 3 bits we can use the GF2 affine transformations.
@@ -3301,7 +3065,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
     sz_u512_vec_t cost_deletion_vec, cost_insertion_vec, cost_substitution_vec;
     sz_size_t min_distance;
 
-    b_vec.zmm = _mm512_maskz_loadu_epi8(sz_u64_mask_until(b_length), b);
+    b_vec.zmm = _mm512_maskz_loadu_epi8(_sz_u64_mask_until(b_length), b);
     previous_vec.zmm = _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, //
                                        47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, //
                                        31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
