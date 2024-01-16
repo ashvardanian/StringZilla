@@ -214,7 +214,7 @@
 #endif
 #endif
 
-#if !SZ_DEBUG
+#if SZ_DEBUG
 #define sz_assert(condition)                                                                                \
     do {                                                                                                    \
         if (!(condition)) {                                                                                 \
