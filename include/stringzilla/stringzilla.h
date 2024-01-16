@@ -779,6 +779,9 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz
 SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /** @copydoc sz_find_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_from_set_avx2(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+
+/** @copydoc sz_find_from_set */
 SZ_PUBLIC sz_cptr_t sz_find_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /**
@@ -803,6 +806,9 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t lengt
 
 /** @copydoc sz_find_last_from_set */
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+
+/** @copydoc sz_find_last_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx2(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /** @copydoc sz_find_last_from_set */
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
@@ -2807,6 +2813,14 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
     return sz_find_last_serial(h, h_length, n, n_length);
 }
 
+SZ_PUBLIC sz_cptr_t sz_find_from_set_avx2(sz_cptr_t h, sz_size_t h_length, sz_u8_set_t const *set) {
+    return sz_find_from_set_serial(h, h_length, set);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx2(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
+    return sz_find_last_from_set_serial(text, length, set);
+}
+
 #endif
 #pragma endregion
 
@@ -3767,6 +3781,10 @@ SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_find_from_set_avx512(text, length, set);
+#elif SZ_USE_X86_AVX2
+    return sz_find_from_set_avx2(text, length, set);
+#elif SZ_USE_ARM_NEON
+    return sz_find_from_set_neon(text, length, set);
 #else
     return sz_find_from_set_serial(text, length, set);
 #endif
@@ -3775,6 +3793,10 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_find_last_from_set_avx512(text, length, set);
+#elif SZ_USE_X86_AVX2
+    return sz_find_last_from_set_avx2(text, length, set);
+#elif SZ_USE_ARM_NEON
+    return sz_find_last_from_set_neon(text, length, set);
 #else
     return sz_find_last_from_set_serial(text, length, set);
 #endif

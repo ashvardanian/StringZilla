@@ -16,10 +16,10 @@
 // Those parameters must never be explicitly set during releases,
 // but they come handy during development, if you want to validate
 // different ISA-specific implementations.
-// #define SZ_USE_X86_AVX2 0
-// #define SZ_USE_X86_AVX512 0
-// #define SZ_USE_ARM_NEON 0
-// #define SZ_USE_ARM_SVE 0
+#define SZ_USE_X86_AVX2 1
+#define SZ_USE_X86_AVX512 0
+#define SZ_USE_ARM_NEON 0
+#define SZ_USE_ARM_SVE 0
 #define SZ_DEBUG 1
 
 #include <string>                      // Baseline
