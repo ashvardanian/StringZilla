@@ -189,7 +189,7 @@
 
 #ifndef SZ_USE_ARM_NEON
 #ifdef __ARM_NEON
-#define SZ_USE_ARM_NEON 0
+#define SZ_USE_ARM_NEON 1
 #else
 #define SZ_USE_ARM_NEON 0
 #endif
@@ -685,6 +685,9 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, 
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
+/** @copydoc sz_find_byte */
+SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+
 /**
  *  @brief  Locates last matching byte in a string. Equivalent to `memrchr(haystack, *needle, h_length)` in LibC.
  *
@@ -706,6 +709,9 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t haystack, sz_size_t h_len
 
 /** @copydoc sz_find_last_byte */
 SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+
+/** @copydoc sz_find_last_byte */
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
 /**
  *  @brief  Locates first matching substring.
@@ -772,6 +778,9 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz
 /** @copydoc sz_find_from_set */
 SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
+/** @copydoc sz_find_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+
 /**
  *  @brief  Finds the last character present from the ::set, present in ::text.
  *          Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
@@ -794,6 +803,9 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t lengt
 
 /** @copydoc sz_find_last_from_set */
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+
+/** @copydoc sz_find_last_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 #pragma endregion
 
@@ -1305,15 +1317,12 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t lengt
 #pragma GCC diagnostic pop
 }
 
-/**
- *  @brief  Byte-level lexicographic order comparison of two strings.
- */
 SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_ordering_t ordering_lookup[2] = {sz_greater_k, sz_less_k};
-#if SZ_USE_MISALIGNED_LOADS
     sz_bool_t a_shorter = (sz_bool_t)(a_length < b_length);
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
+#if SZ_USE_MISALIGNED_LOADS
     for (sz_u64_vec_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
         a_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(a).u64);
         b_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(b).u64);
@@ -1329,14 +1338,14 @@ SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr
  *  @brief  Byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each byte signifies a match.
  */
-SZ_INTERNAL sz_u64_t sz_u64_each_byte_equal(sz_u64_t a, sz_u64_t b) {
-    sz_u64_t match_indicators = ~(a ^ b);
+SZ_INTERNAL sz_u64_vec_t _sz_u64_each_byte_equal(sz_u64_vec_t a, sz_u64_vec_t b) {
+    sz_u64_vec_t vec;
+    vec.u64 = ~(a.u64 ^ b.u64);
     // The match is valid, if every bit within each byte is set.
     // For that take the bottom 7 bits of each byte, add one to them,
     // and if this sets the top bit to one, then all the 7 bits are ones as well.
-    match_indicators = ((match_indicators & 0x7F7F7F7F7F7F7F7Full) + 0x0101010101010101ull) &
-                       ((match_indicators & 0x8080808080808080ull));
-    return match_indicators;
+    vec.u64 = ((vec.u64 & 0x7F7F7F7F7F7F7F7Full) + 0x0101010101010101ull) & ((vec.u64 & 0x8080808080808080ull));
+    return vec;
 }
 
 /**
@@ -1349,18 +1358,21 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     if (!h_length) return NULL;
     sz_cptr_t const h_end = h + h_length;
 
+#if !SZ_USE_MISALIGNED_LOADS
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
         if (*h == *n) return h;
+#endif
 
     // Broadcast the n into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
-    sz_u64_vec_t h_vec, n_vec;
+    sz_u64_vec_t h_vec, n_vec, match_vec;
+    match_vec.u64 = 0;
     n_vec.u64 = (sz_u64_t)n[0] * 0x0101010101010101ull;
     for (; h + 8 <= h_end; h += 8) {
         h_vec.u64 = *(sz_u64_t const *)h;
-        sz_u64_t match_indicators = sz_u64_each_byte_equal(h_vec.u64, n_vec.u64);
-        if (match_indicators != 0) return h + sz_u64_ctz(match_indicators) / 8;
+        match_vec = _sz_u64_each_byte_equal(h_vec, n_vec);
+        if (match_vec.u64) return h + sz_u64_ctz(match_vec.u64) / 8;
     }
 
     // Handle the misaligned tail.
@@ -1374,7 +1386,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *          Identical to `memrchr(haystack, needle[0], haystack_length)`.
  */
-sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t needle) {
+sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
     if (!h_length) return NULL;
     sz_cptr_t const h_start = h;
@@ -1382,22 +1394,24 @@ sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t ne
     // Reposition the `h` pointer to the end, as we will be walking backwards.
     h = h + h_length - 1;
 
+#if !SZ_USE_MISALIGNED_LOADS
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)(h + 1) & 7ull) && h >= h_start; --h)
-        if (*h == *needle) return h;
+        if (*h == *n) return h;
+#endif
 
-    // Broadcast the needle into every byte of a 64-bit integer to use SWAR
+    // Broadcast the n into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
-    sz_u64_vec_t h_vec, n_vec;
-    n_vec.u64 = (sz_u64_t)needle[0] * 0x0101010101010101ull;
+    sz_u64_vec_t h_vec, n_vec, match_vec;
+    n_vec.u64 = (sz_u64_t)n[0] * 0x0101010101010101ull;
     for (; h >= h_start + 7; h -= 8) {
         h_vec.u64 = *(sz_u64_t const *)(h - 7);
-        sz_u64_t match_indicators = sz_u64_each_byte_equal(h_vec.u64, n_vec.u64);
-        if (match_indicators != 0) return h - sz_u64_clz(match_indicators) / 8;
+        match_vec = _sz_u64_each_byte_equal(h_vec, n_vec);
+        if (match_vec.u64) return h - sz_u64_clz(match_vec.u64) / 8;
     }
 
     for (; h >= h_start; --h)
-        if (*h == *needle) return h;
+        if (*h == *n) return h;
     return NULL;
 }
 
@@ -1405,47 +1419,117 @@ sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t ne
  *  @brief  2Byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each 2byte signifies a match.
  */
-SZ_INTERNAL sz_u64_t sz_u64_each_2byte_equal(sz_u64_t a, sz_u64_t b) {
-    sz_u64_t match_indicators = ~(a ^ b);
+SZ_INTERNAL sz_u64_vec_t _sz_u64_each_2byte_equal(sz_u64_vec_t a, sz_u64_vec_t b) {
+    sz_u64_vec_t vec;
+    vec.u64 = ~(a.u64 ^ b.u64);
     // The match is valid, if every bit within each 2byte is set.
     // For that take the bottom 15 bits of each 2byte, add one to them,
     // and if this sets the top bit to one, then all the 15 bits are ones as well.
-    match_indicators = ((match_indicators & 0x7FFF7FFF7FFF7FFFull) + 0x0001000100010001ull) &
-                       ((match_indicators & 0x8000800080008000ull));
-    return match_indicators;
+    vec.u64 = ((vec.u64 & 0x7FFF7FFF7FFF7FFFull) + 0x0001000100010001ull) & ((vec.u64 & 0x8000800080008000ull));
+    return vec;
 }
 
 /**
  *  @brief  Find the first occurrence of a @b two-character needle in an arbitrary length haystack.
- *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
+ *          This implementation uses hardware-agnostic SWAR technique, to process 8 offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-
-    sz_cptr_t const h_end = h + h_length;
+SZ_INTERNAL sz_cptr_t _sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
     sz_assert(h_length >= 2 && "The haystack is too short.");
+    sz_cptr_t const h_end = h + h_length;
 
-    // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
-    sz_u64_vec_t h_vec, n_vec, matches_odd_vec, matches_even_vec;
+#if !SZ_USE_MISALIGNED_LOADS
+    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+    for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
+        if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
+#endif
+
+    sz_u64_vec_t h_even_vec, h_odd_vec, n_vec, matches_even_vec, matches_odd_vec;
     n_vec.u64 = 0;
-    n_vec.u8s[0] = n[0];
-    n_vec.u8s[1] = n[1];
-    n_vec.u64 *= 0x0001000100010001ull;
+    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1];
+    n_vec.u64 *= 0x0001000100010001ull; // broadcast
 
-    for (; h + 8 <= h_end; h += 7) {
-        h_vec = sz_u64_load(h);
-        matches_even_vec.u64 = sz_u64_each_2byte_equal(h_vec.u64, n_vec.u64);
-        matches_odd_vec.u64 = sz_u64_each_2byte_equal(h_vec.u64 >> 8, n_vec.u64);
+    // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
+    for (; h + 9 <= h_end; h += 8) {
+        h_even_vec.u64 = *(sz_u64_t *)h;
+        h_odd_vec.u64 = (h_even_vec.u64 >> 8) | (*(sz_u64_t *)&h[8] << 56);
+        matches_even_vec = _sz_u64_each_2byte_equal(h_even_vec, n_vec);
+        matches_odd_vec = _sz_u64_each_2byte_equal(h_odd_vec, n_vec);
 
         if (matches_even_vec.u64 + matches_odd_vec.u64) {
-            sz_u64_t match_indicators = (matches_even_vec.u64 >> 8) | (matches_odd_vec.u64);
+            matches_even_vec.u64 >>= 8;
+            sz_u64_t match_indicators = matches_even_vec.u64 | matches_odd_vec.u64;
             return h + sz_u64_ctz(match_indicators) / 8;
         }
     }
 
     for (; h + 2 <= h_end; ++h)
-        if (h[0] == n[0] && h[1] == n[1]) return h;
+        if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
+    return NULL;
+}
+
+/**
+ *  @brief  4Byte-level equality comparison between two 64-bit integers.
+ *  @return 64-bit integer, where every top bit in each 4byte signifies a match.
+ */
+SZ_INTERNAL sz_u64_vec_t _sz_u64_each_4byte_equal(sz_u64_vec_t a, sz_u64_vec_t b) {
+    sz_u64_vec_t vec;
+    vec.u64 = ~(a.u64 ^ b.u64);
+    // The match is valid, if every bit within each 4byte is set.
+    // For that take the bottom 31 bits of each 4byte, add one to them,
+    // and if this sets the top bit to one, then all the 31 bits are ones as well.
+    vec.u64 = ((vec.u64 & 0x7FFFFFFF7FFFFFFFull) + 0x0000000100000001ull) & ((vec.u64 & 0x8000000080000000ull));
+    return vec;
+}
+
+/**
+ *  @brief  Find the first occurrence of a @b four-character needle in an arbitrary length haystack.
+ *          This implementation uses hardware-agnostic SWAR technique, to process 8 offsets at a time.
+ */
+SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+
+    // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
+    sz_assert(h_length >= 4 && "The haystack is too short.");
+    sz_cptr_t const h_end = h + h_length;
+
+#if !SZ_USE_MISALIGNED_LOADS
+    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+    for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
+        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
+#endif
+
+    sz_u64_vec_t h0_vec, h1_vec, h2_vec, h3_vec, n_vec, matches0_vec, matches1_vec, matches2_vec, matches3_vec;
+    n_vec.u64 = 0;
+    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1], n_vec.u8s[2] = n[2], n_vec.u8s[3] = n[3];
+    n_vec.u64 *= 0x0000000100000001ull; // broadcast
+
+    // This code simulates hyper-scalar execution, analyzing 8 offsets at a time using four 64-bit words.
+    // We load the subsequent word at onceto minimize the data dependency.
+    sz_u64_t h_page_current, h_page_next;
+    for (; h + 16 <= h_end; h += 8) {
+        h_page_current = *(sz_u64_t *)h;
+        h_page_next = *(sz_u64_t *)(h + 8);
+        h0_vec.u64 = (h_page_current);
+        h1_vec.u64 = (h_page_current >> 8) | (h_page_next << 56);
+        h2_vec.u64 = (h_page_current >> 16) | (h_page_next << 48);
+        h3_vec.u64 = (h_page_current >> 24) | (h_page_next << 40);
+        matches0_vec = _sz_u64_each_4byte_equal(h0_vec, n_vec);
+        matches1_vec = _sz_u64_each_4byte_equal(h1_vec, n_vec);
+        matches2_vec = _sz_u64_each_4byte_equal(h2_vec, n_vec);
+        matches3_vec = _sz_u64_each_4byte_equal(h3_vec, n_vec);
+
+        if (matches0_vec.u64 + matches1_vec.u64 + matches2_vec.u64 + matches3_vec.u64) {
+            matches0_vec.u64 >>= 24;
+            matches1_vec.u64 >>= 16;
+            matches2_vec.u64 >>= 8;
+            sz_u64_t match_indicators = matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64;
+            return h + sz_u64_ctz(match_indicators) / 8;
+        }
+    }
+
+    for (; h + 4 <= h_end; ++h)
+        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
     return NULL;
 }
 
@@ -1779,7 +1863,9 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_byte_serial,
-        (sz_find_t)sz_find_2byte_serial,
+        (sz_find_t)_sz_find_2byte_serial,
+        (sz_find_t)_sz_find_bitap_upto_8bytes_serial,
+        (sz_find_t)_sz_find_4byte_serial,
         // For needle lengths up to 64, use the Bitap algorithm variation for exact search.
         (sz_find_t)_sz_find_bitap_upto_8bytes_serial,
         (sz_find_t)_sz_find_bitap_upto_16bytes_serial,
@@ -1792,9 +1878,9 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
 
     return backends[
         // For very short strings brute-force SWAR makes sense.
-        (n_length > 1) +
+        (n_length > 1) + (n_length > 2) + (n_length > 3) +
         // For needle lengths up to 64, use the Bitap algorithm variation for exact search.
-        (n_length > 2) + (n_length > 8) + (n_length > 16) + (n_length > 32) +
+        (n_length > 4) + (n_length > 8) + (n_length > 16) + (n_length > 32) +
         // For longer needles - use skip tables.
         (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
 }
@@ -2871,9 +2957,6 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     }
 }
 
-/**
- *  @brief  Variation of AVX-512 exact search for patterns up to 1 bytes included.
- */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     __mmask64 mask;
     sz_u512_vec_t h_vec, n_vec;
@@ -3430,6 +3513,156 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
 
 #pragma endregion
 
+/*  @brief  Implementation of the string search algorithms using the Arm NEON instruction set, available on 64-bit
+ *          Arm processors. Implements: {substring search, character search, character set search} x {forward, reverse}.
+ */
+#pragma region ARM NEON
+
+#if SZ_USE_ARM_NEON
+#include <arm_neon.h>
+
+/**
+ *  @brief  Helper structure to simplify work with 64-bit words.
+ */
+typedef union sz_u128_vec_t {
+    uint8x16_t u8x16;
+    uint32x4_t u32x4;
+    sz_u64_t u64s[2];
+    sz_u32_t u32s[4];
+    sz_u16_t u16s[8];
+    sz_u8_t u8s[16];
+} sz_u128_vec_t;
+
+SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+    sz_u8_t offsets[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    sz_u128_vec_t h_vec, n_vec, offsets_vec, matches_vec;
+    n_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)n);
+    offsets_vec.u8x16 = vld1q_u8(offsets);
+
+    while (h_length >= 16) {
+        h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h);
+        matches_vec.u8x16 = vceqq_u8(h_vec.u8x16, n_vec.u8x16);
+        // In Arm NEON we don't have a `movemask` to combine it with `ctz` and get the offset of the match.
+        // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise selecting)
+        // the vector with a relative offsets array.
+        if (vmaxvq_u8(matches_vec.u8x16)) {
+            matches_vec.u8x16 = vbslq_u8(matches_vec.u8x16, offsets_vec.u8x16, vdupq_n_u8(0xFF));
+            return h + vminvq_u8(matches_vec.u8x16);
+        }
+        h += 16, h_length -= 16;
+    }
+
+    return sz_find_byte_serial(h, h_length, n);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+    sz_u8_t offsets[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+
+    sz_u128_vec_t h_vec, n_vec, offsets_vec, matches_vec;
+    n_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)n);
+    offsets_vec.u8x16 = vld1q_u8(offsets);
+
+    while (h_length >= 16) {
+        h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h + h_length - 16);
+        matches_vec.u8x16 = vceqq_u8(h_vec.u8x16, n_vec.u8x16);
+        // In Arm NEON we don't have a `movemask` to combine it with `clz` and get the offset of the match.
+        // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise selecting)
+        // the vector with a relative offsets array.
+        if (vmaxvq_u8(matches_vec.u8x16)) {
+            matches_vec.u8x16 = vbslq_u8(matches_vec.u8x16, offsets_vec.u8x16, vdupq_n_u8(0));
+            return h + h_length - 16 + vmaxvq_u8(matches_vec.u8x16);
+        }
+        h_length -= 16;
+    }
+
+    return sz_find_last_byte_serial(h, h_length, n);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    if (n_length == 1) return sz_find_byte_neon(h, h_length, n);
+
+    // Will contain 4 bits per character.
+    sz_u64_t matches;
+    sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
+    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
+    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length / 2]);
+    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length - 1]);
+
+    for (; h_length >= n_length + 16; h += 16, h_length -= 16) {
+        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h));
+        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + n_length / 2));
+        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + n_length - 1));
+        matches_vec.u8x16 = vandq_u8(                           //
+            vandq_u8(                                           //
+                vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
+                vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
+            vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
+        if (vmaxvq_u8(matches_vec.u8x16)) {
+            // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
+            // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
+            matches = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(matches_vec.u8x16), 4)), 0) &
+                      0x8888888888888888ull;
+            while (matches) {
+                int potential_offset = sz_u64_ctz(matches) / 4;
+                if (sz_equal(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+                matches &= matches - 1;
+            }
+        }
+    }
+
+    return sz_find_serial(h, h_length, n, n_length);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    if (n_length == 1) return sz_find_last_byte_neon(h, h_length, n);
+
+    // Will contain 4 bits per character.
+    sz_u64_t matches;
+    sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
+    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
+    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length / 2]);
+    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length - 1]);
+
+    for (; h_length >= n_length + 16; h_length -= 16) {
+        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - n_length - 16 + 1));
+        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - n_length - 16 + 1 + n_length / 2));
+        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - 16));
+        matches_vec.u8x16 = vandq_u8(                           //
+            vandq_u8(                                           //
+                vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
+                vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
+            vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
+        if (vmaxvq_u8(matches_vec.u8x16)) {
+            // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
+            // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
+            matches = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(matches_vec.u8x16), 4)), 0) &
+                      0x8888888888888888ull;
+            while (matches) {
+                int potential_offset = sz_u64_clz(matches) / 4;
+                if (sz_equal(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
+                    return h + h_length - n_length - potential_offset;
+                sz_assert((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
+                          "The bit must be set before we squash it");
+                matches &= ~(1ull << (63 - potential_offset * 4));
+            }
+        }
+    }
+
+    return sz_find_last_serial(h, h_length, n, n_length);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_from_set_neon(sz_cptr_t h, sz_size_t h_length, sz_u8_set_t const *set) {
+    return sz_find_from_set_serial(h, h_length, set);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t h, sz_size_t h_length, sz_u8_set_t const *set) {
+    return sz_find_last_from_set_serial(h, h_length, set);
+}
+
+#endif // Arm Neon
+
+#pragma endregion
+
 /*
  *  @brief  Pick the right implementation for the string search algorithms.
  */
@@ -3488,6 +3721,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
     return sz_find_byte_avx512(haystack, h_length, needle);
 #elif SZ_USE_X86_AVX2
     return sz_find_byte_avx2(haystack, h_length, needle);
+#elif SZ_USE_ARM_NEON
+    return sz_find_byte_neon(haystack, h_length, needle);
 #else
     return sz_find_byte_serial(haystack, h_length, needle);
 #endif
@@ -3498,6 +3733,8 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz
     return sz_find_last_byte_avx512(haystack, h_length, needle);
 #elif SZ_USE_X86_AVX2
     return sz_find_last_byte_avx2(haystack, h_length, needle);
+#elif SZ_USE_ARM_NEON
+    return sz_find_last_byte_neon(haystack, h_length, needle);
 #else
     return sz_find_last_byte_serial(haystack, h_length, needle);
 #endif
