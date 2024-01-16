@@ -153,6 +153,9 @@ static void test_api_readonly() {
 
     // Constructors.
     assert(str().empty());             // Test default constructor
+    assert(str().size() == 0);         // Test default constructor
+    assert(str("").empty());           // Test default constructor
+    assert(str("").size() == 0);       // Test default constructor
     assert(str("hello").size() == 5);  // Test constructor with c-string
     assert(str("hello", 4) == "hell"); // Construct from substring
 
@@ -168,7 +171,7 @@ static void test_api_readonly() {
     assert(*str("rbegin").rbegin() == 'n' && *str("crbegin").crbegin() == 'n');
     assert(str("size").size() == 4 && str("length").length() == 6);
 
-    // Slices... out-of-bounds exceptions are asymetric!
+    // Slices... out-of-bounds exceptions are asymmetric!
     // Moreover, `std::string` has no `remove_prefix` and `remove_suffix` methods.
     // assert_scoped(str s = "hello", s.remove_prefix(1), s == "ello");
     // assert_scoped(str s = "hello", s.remove_suffix(1), s == "hell");
@@ -181,7 +184,15 @@ static void test_api_readonly() {
     assert_throws(str("hello world").substr(-1, 5), std::out_of_range); // -1 casts to unsigned without any warnings...
     assert(str("hello world").substr(0, -1) == "hello world");          // -1 casts to unsigned without any warnings...
 
-    // Substring and character search in normal and reverse directions.
+    // Character search in normal and reverse directions.
+    assert(str("hello").find('e') == 1);
+    assert(str("hello").find('e', 1) == 1);
+    assert(str("hello").find('e', 2) == str::npos);
+    assert(str("hello").rfind('l') == 3);
+    assert(str("hello").rfind('l', 2) == 2);
+    assert(str("hello").rfind('l', 1) == str::npos);
+
+    // Substring search in normal and reverse directions.
     assert(str("hello").find("ell") == 1);
     assert(str("hello").find("ell", 1) == 1);
     assert(str("hello").find("ell", 2) == str::npos);
@@ -190,7 +201,7 @@ static void test_api_readonly() {
     assert(str("hello").rfind("l", 2) == 2);
     assert(str("hello").rfind("l", 1) == str::npos);
 
-    // ! `rfind` and `find_last_of` are not consitent in meaning of their arguments.
+    // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);
     assert(str("hello").find_first_of("le", 1) == 1);
     assert(str("hello").find_last_of("le") == 3);
@@ -199,6 +210,32 @@ static void test_api_readonly() {
     assert(str("hello").find_first_not_of("hel", 1) == 4);
     assert(str("hello").find_last_not_of("hel") == 4);
     assert(str("hello").find_last_not_of("hel", 4) == 4);
+
+    // Try longer strings to enforce SIMD.
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('x') == 23);  // first byte
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find('X') == 49);  // first byte
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('x') == 23); // last byte
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind('X') == 49); // last byte
+
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xy") == 23);  // first match
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XY") == 49);  // first match
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xy") == 23); // last match
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XY") == 49); // last match
+
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyz") == 23);  // first match
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ") == 49);  // first match
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyz") == 23); // last match
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ") == 49); // last match
+
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("xyzA") == 23);  // first match
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find("XYZ0") == 49);  // first match
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("xyzA") == 23); // last match
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").rfind("XYZ0") == 49); // last match
+
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("xyz") == 23); // sets
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_first_of("XYZ") == 49); // sets
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("xyz") == 25);  // sets
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-").find_last_of("XYZ") == 51);  // sets
 
     // Boundary consitions.
     assert(str("hello").find_first_of("ox", 4) == 4);
@@ -280,7 +317,7 @@ static void test_api_readonly() {
 #endif
 
 #if SZ_DETECT_CPP_23 && __cpp_lib_string_contains
-    // Checking basic substring presense.
+    // Checking basic substring presence.
     assert(str("hello").contains(str("ell")) == true);
     assert(str("hello").contains(str("oll")) == false);
     assert(str("hello").contains('l') == true);
@@ -328,6 +365,9 @@ static void test_api_mutable() {
 
     // Constructors.
     assert(str().empty());                             // Test default constructor
+    assert(str().size() == 0);                         // Test default constructor
+    assert(str("").empty());                           // Test default constructor
+    assert(str("").size() == 0);                       // Test default constructor
     assert(str("hello").size() == 5);                  // Test constructor with c-string
     assert(str("hello", 4) == "hell");                 // Construct from substring
     assert(str(5, 'a') == "aaaaa");                    // Construct with count and character
@@ -980,9 +1020,11 @@ static void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("abc", "ca");
     test_search_with_misaligned_repetitions("abcd", "da");
 
-    // When intermediate false-positives may appear
-    test_search_with_misaligned_repetitions("axbxcaybyc", "aybyc");
-    test_search_with_misaligned_repetitions("axbxcabcde", "abcde");
+    // Examples targeted exactly against the Raita heuristic,
+    // which matches the first, the last, and the middle characters with SIMD.
+    test_search_with_misaligned_repetitions("aaabbccc", "aaabbccc");
+    test_search_with_misaligned_repetitions("axabbcxc", "aaabbccc");
+    test_search_with_misaligned_repetitions("axabbcxcaaabbccc", "aaabbccc");
 }
 
 #endif
