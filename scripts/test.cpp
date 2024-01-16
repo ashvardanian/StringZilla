@@ -18,6 +18,7 @@
 // #define SZ_USE_X86_AVX512 0
 // #define SZ_USE_ARM_NEON 0
 // #define SZ_USE_ARM_SVE 0
+#define SZ_DEBUG 1
 
 #include <string>                      // Baseline
 #include <string_view>                 // Baseline
