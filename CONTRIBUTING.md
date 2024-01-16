@@ -104,6 +104,24 @@ cmake --build ./build_release --config Release      # Which will produce the fol
 ./build_release/stringzilla_bench_container <path>  # for STL containers with string keys
 ```
 
+You may want to download some datasets for benchmarks, like these:
+
+```sh
+# English Leipzig Corpora Collection
+# 124 MB, 1'000'000 lines of ASCII, 8'388'608 tokens of mean length 5
+wget --no-clobber -O leipzig1M.txt https://introcs.cs.princeton.edu/python/42sort/leipzig1m.txt 
+
+# Hutter Prize "enwik9" dataset for compression
+# 1 GB (0.3 GB compressed), 13'147'025 lines of ASCII, 67'108'864 tokens of mean length 6
+wget --no-clobber -O enwik9.zip http://mattmahoney.net/dc/enwik9.zip
+unzip enwik9.zip
+
+# XL Sum dataset for extractive multilingual summarization
+# 4.7 GB (1.7 GB compressed), 1'004'598 lines of UTF8, 
+wget --no-clobber -O xlsum.csv.gz https://github.com/ashvardanian/xl-sum/releases/download/v1.0.0/xlsum.csv.gz
+gzip -d xlsum.csv.gz
+```
+
 Running on modern hardware, you may want to compile the code for older generations to compare the relative performance.
 The assumption would be that newer ISA extensions would provide better performance.
 On x86_64, you can use the following commands to compile for Sandy Bridge, Haswell, and Sapphire Rapids:
