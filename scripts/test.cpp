@@ -1,6 +1,8 @@
 #undef NDEBUG      // Enable all assertions
 #include <cassert> // assertions
 
+#include <sanitizer/asan_interface.h> // ASAN
+
 #include <algorithm> // `std::transform`
 #include <cstdio>    // `std::printf`
 #include <cstring>   // `std::memcpy`
@@ -825,6 +827,14 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
 
     for (std::size_t repeats = 0; repeats != max_repeats; ++repeats) {
         std::size_t haystack_length = (repeats + 1) * haystack_pattern.size();
+        std::size_t poisoned_prefix_length = haystack - haystack_buffer.data();
+        std::size_t poisoned_suffix_length = haystack_buffer_length - haystack_length - poisoned_prefix_length;
+
+        // Let's manually poison the prefix and the suffix.
+        ASAN_POISON_MEMORY_REGION(haystack_buffer.data(), poisoned_prefix_length);
+        ASAN_POISON_MEMORY_REGION(haystack + haystack_length, poisoned_suffix_length);
+
+        // Append the new repetition to our buffer.
         std::memcpy(haystack + misalignment + repeats * haystack_pattern.size(), haystack_pattern.data(),
                     haystack_pattern.size());
 
@@ -880,6 +890,10 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
 
         offsets_stl.clear();
         offsets_sz.clear();
+
+        // Don't forget to manually unpoison the prefix and the suffix.
+        ASAN_UNPOISON_MEMORY_REGION(haystack_buffer.data(), poisoned_prefix_length);
+        ASAN_UNPOISON_MEMORY_REGION(haystack + haystack_length, poisoned_suffix_length);
     }
 }
 
@@ -941,6 +955,7 @@ static void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("ab", "ab");
     test_search_with_misaligned_repetitions("abc", "abc");
     test_search_with_misaligned_repetitions("abcd", "abcd");
+    test_search_with_misaligned_repetitions({sz::base64, sizeof(sz::base64)}, {sz::base64, sizeof(sz::base64)});
     test_search_with_misaligned_repetitions({sz::ascii_lowercase, sizeof(sz::ascii_lowercase)},
                                             {sz::ascii_lowercase, sizeof(sz::ascii_lowercase)});
     test_search_with_misaligned_repetitions({sz::ascii_printables, sizeof(sz::ascii_printables)},
