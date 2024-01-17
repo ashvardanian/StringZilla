@@ -20,5 +20,5 @@ node_modules/
 
 # Recommended datasets
 leipzig1M.txt
+enwik9.txt
 xlsum.csv
-enwik9

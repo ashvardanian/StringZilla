@@ -65,8 +65,9 @@ For C++ code:
 - Document all possible exceptions of an interface using `@throw` in Doxygen.
 - Avoid C-style variadic arguments in favor of templates.
 - Avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, and `const_cast`, except for places where a C function is called.
-- Use lower-case names for everything, except macros.
+- Use lower-case names for everything, except settings/conditions macros. Function-like macros, that take arguments, should be lowercase as well.
 - In templates prefer `typename` over `class`.
+- Prepend "private" symbols with `_` underscore.
 
 For Python code:
 
@@ -113,11 +114,11 @@ wget --no-clobber -O leipzig1M.txt https://introcs.cs.princeton.edu/python/42sor
 
 # Hutter Prize "enwik9" dataset for compression
 # 1 GB (0.3 GB compressed), 13'147'025 lines of ASCII, 67'108'864 tokens of mean length 6
-wget --no-clobber -O enwik9.zip http://mattmahoney.net/dc/enwik9.zip
-unzip enwik9.zip
+wget --no-clobber -O enwik9.txt.zip http://mattmahoney.net/dc/enwik9.zip
+unzip enwik9.txt.zip && rm enwik9.txt.zip
 
-# XL Sum dataset for extractive multilingual summarization
-# 4.7 GB (1.7 GB compressed), 1'004'598 lines of UTF8, 
+# XL Sum dataset for multilingual extractive summarization
+# 4.7 GB (1.7 GB compressed), 1'004'598 lines of UTF8, 268'435'456 tokens of mean length 8
 wget --no-clobber -O xlsum.csv.gz https://github.com/ashvardanian/xl-sum/releases/download/v1.0.0/xlsum.csv.gz
 gzip -d xlsum.csv.gz
 ```

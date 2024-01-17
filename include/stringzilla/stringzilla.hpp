@@ -14,25 +14,27 @@
  *  @brief  When set to 1, the library will include the C++ STL headers and implement
  *          automatic conversion from and to `std::stirng_view` and `std::basic_string<any_allocator>`.
  */
-#ifndef SZ_INCLUDE_STL_CONVERSIONS
-#define SZ_INCLUDE_STL_CONVERSIONS (1)
+#ifndef SZ_AVOID_STL
+#define SZ_AVOID_STL (0) // true or false
 #endif
 
 /**
  *  @brief  When set to 1, the strings `+` will return an expression template rather than a temporary string.
  *          This will improve performance, but may break some STL-specific code, so it's disabled by default.
+ *          TODO:
  */
 #ifndef SZ_LAZY_CONCAT
-#define SZ_LAZY_CONCAT (0)
+#define SZ_LAZY_CONCAT (0) // true or false
 #endif
 
 /**
  *  @brief  When set to 1, the library will change `substr` and several other member methods of `string`
  *          to return a view of its slice, rather than a copy, if the lifetime of the object is guaranteed.
  *          This will improve performance, but may break some STL-specific code, so it's disabled by default.
+ *          TODO:
  */
 #ifndef SZ_PREFER_VIEWS
-#define SZ_PREFER_VIEWS (0)
+#define SZ_PREFER_VIEWS (0) // true or false
 #endif
 
 /*  We need to detect the version of the C++ language we are compiled with.
@@ -55,7 +57,7 @@
 #define sz_constexpr_if_cpp20
 #endif
 
-#if SZ_INCLUDE_STL_CONVERSIONS
+#if !SZ_AVOID_STL
 #include <string>
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
 #include <string_view>
@@ -1045,7 +1047,7 @@ class basic_string_slice {
     /**  @brief Exchanges the view with that of the `other`. */
     void swap(string_slice &other) noexcept { std::swap(start_, other.start_), std::swap(length_, other.length_); }
 
-#if SZ_INCLUDE_STL_CONVERSIONS
+#if !SZ_AVOID_STL
 
     template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
     sz_constexpr_if_cpp20 basic_string_slice(std::string const &other) noexcept
@@ -1959,7 +1961,7 @@ class basic_string {
         if (!second_is_external) string_.internal.start = &string_.internal.chars[0];
     }
 
-#if SZ_INCLUDE_STL_CONVERSIONS
+#if !SZ_AVOID_STL
 
     basic_string(std::string const &other) noexcept(false) : basic_string(other.data(), other.size()) {}
     basic_string &operator=(std::string const &other) noexcept(false) { return assign({other.data(), other.size()}); }

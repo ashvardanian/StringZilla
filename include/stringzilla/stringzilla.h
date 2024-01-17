@@ -135,7 +135,17 @@
  *  This value will mostly affect the performance of the serial (SWAR) backend.
  */
 #ifndef SZ_USE_MISALIGNED_LOADS
-#define SZ_USE_MISALIGNED_LOADS (1) // true or false
+#define SZ_USE_MISALIGNED_LOADS (0) // true or false
+#endif
+
+/**
+ *  @brief  Removes compile-time dispatching, and replaces it with runtime dispatching.
+ *          So the `sz_find` function will invoke the most advanced backend supported by the CPU,
+ *          that runs the program, rather than the most advanced backend supported by the CPU
+ *          used to compile the library or the downstream application.
+ */
+#ifndef SZ_DYNAMIC_DISPATCH
+#define SZ_DYNAMIC_DISPATCH (0) // true or false
 #endif
 
 /**
@@ -234,8 +244,14 @@
         int static_assert_##name : (condition) ? 1 : -1; \
     } sz_static_assert_##name##_t
 
+/**
+ *  @brief  Helper-macro to mark potentially unused variables.
+ */
 #define sz_unused(x) ((void)(x))
 
+/**
+ *  @brief  Helper-macro casting a variable to another type of the same size.
+ */
 #define sz_bitcast(type, value) (*((type *)&(value)))
 
 #if __has_attribute(__fallthrough__)
@@ -865,54 +881,36 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, 
                                                sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
                                                sz_memory_allocator_t const *alloc);
 
-#if 0
 /**
  *  @brief  Computes the Karp-Rabin rolling hash of a string outputting a binary fingerprint.
  *          Such fingerprints can be compared with Hamming or Jaccard (Tanimoto) distance for similarity.
+ *
+ *  The algorithm doesn't clear the fingerprint buffer on start, so it can be invoked multiple times
+ *  to produce a fingerprint of a longer string, by passing the previous fingerprint as the ::fingerprint.
+ *  It can also be reused to produce multi-resolution fingerprints by changing the ::window_length
+ *  and calling the same function multiple times for the same input ::text.
+ *
+ *  @param text                 String to hash.
+ *  @param length               Number of bytes in the string.
+ *  @param fingerprint          Output fingerprint buffer.
+ *  @param fingerprint_bytes    Number of bytes in the fingerprint buffer.
+ *  @param window_length        Length of the rolling window in bytes.
+ *
+ *  Choosing the right ::window_length is task- and domain-dependant. For example, most English words are
+ *  between 3 and 7 characters long, so a window of 4 bytes would be a good choice. For DNA sequences,
+ *  the ::window_length might be a multiple of 3, as the codons are 3 (aminoacids) bytes long.
+ *  With such minimalistic alphabets of just four characters (AGCT) longer windows might be needed.
+ *  For protein sequences the alphabet is 20 characters long, so the window can be shorter, than for DNAs.
+ *
  */
-SZ_PUBLIC sz_ssize_t sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length,                  //
-                                            sz_ptr_t fingerprint, sz_size_t fingerprint_bytes, //
-                                            sz_size_t window_length) {
-    /// The size of our alphabet.
-    sz_u64_t base = 256;
-    /// Define a large prime number that we are going to use for modulo arithmetic.
-    /// Fun fact, the largest signed 32-bit signed integer (2147483647) is a prime number.
-    /// But we are going to use a larger one, to reduce collisions.
-    /// https://www.mersenneforum.org/showthread.php?t=3471
-    sz_u64_t prime = 18446744073709551557ull;
-    /// The `prime ^ window_length` value, that we are going to use for modulo arithmetic.
-    sz_u64_t prime_power = 1;
-    for (sz_size_t i = 0; i <= w; ++i) prime_power = (prime_power * base) % prime;
-    /// Here we stick to 32-bit hashes as 64-bit modulo arithmetic is expensive.
-    sz_u64_t hash = 0;
-    /// Compute the initial hash value for the first window.
-    sz_cptr_t text_end = text + length;
-    for (sz_cptr_t first_end = text + window_length; text < first_end; ++text) hash = (hash * base + *text) % prime;
+SZ_PUBLIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length,                  //
+                                      sz_ptr_t fingerprint, sz_size_t fingerprint_bytes, //
+                                      sz_size_t window_length);
 
-    /// In most cases the fingerprint length will be a power of two.
-    sz_bool_t fingerprint_length_is_power_of_two = fingerprint_bytes & (fingerprint_bytes - 1);
-    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint;
-    if (!fingerprint_length_is_power_of_two) {
-        /// Compute the hash value for every window, exporting into the fingerprint,
-        /// using the expensive modulo operation.
-        for (; text < text_end; ++text) {
-            hash = (base * (hash - *(text - window_length) * h) + *text) % prime;
-            sz_size_t byte_offset = (hash / 8) % fingerprint_bytes;
-            fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
-        }
-    }
-    else {
-        /// Compute the hash value for every window, exporting into the fingerprint,
-        /// using a cheap bitwise-and operation to determine the byte offset
-        for (; text < text_end; ++text) {
-            hash = (base * (hash - *(text - window_length) * h) + *text) % prime;
-            sz_size_t byte_offset = (hash / 8) & (fingerprint_bytes - 1);
-            fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
-        }
-    }
-}
-
-#endif
+/** @copydoc sz_fingerprint_rolling */
+SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length,                  //
+                                             sz_ptr_t fingerprint, sz_size_t fingerprint_bytes, //
+                                             sz_size_t window_length);
 
 #pragma endregion
 
@@ -1983,33 +1981,18 @@ SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
         (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
 }
 
-SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
-    sz_cptr_t longer, sz_size_t longer_length,   //
-    sz_cptr_t shorter, sz_size_t shorter_length, //
+SZ_INTERNAL sz_size_t _sz_edit_distance_anti_diagonal_serial( //
+    sz_cptr_t longer, sz_size_t longer_length,                //
+    sz_cptr_t shorter, sz_size_t shorter_length,              //
     sz_size_t bound, sz_memory_allocator_t const *alloc) {
+    sz_unused(longer && longer_length && shorter && shorter_length && bound && alloc);
+    return 0;
+}
 
-    // If one of the strings is empty - the edit distance is equal to the length of the other one.
-    if (longer_length == 0) return shorter_length <= bound ? shorter_length : bound;
-    if (shorter_length == 0) return longer_length <= bound ? longer_length : bound;
-
-    // Let's make sure that we use the amount proportional to the
-    // number of elements in the shorter string, not the larger.
-    if (shorter_length > longer_length) {
-        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
-        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
-    }
-
-    // If the difference in length is beyond the `bound`, there is no need to check at all.
-    if (bound && longer_length - shorter_length > bound) return bound;
-
-    // Skip the matching prefixes and suffixes, they won't affect the distance.
-    for (sz_cptr_t a_end = longer + longer_length, b_end = shorter + shorter_length;
-         longer != a_end && shorter != b_end && *longer == *shorter;
-         ++longer, ++shorter, --longer_length, --shorter_length)
-        ;
-    for (; longer_length && shorter_length && longer[longer_length - 1] == shorter[shorter_length - 1];
-         --longer_length, --shorter_length)
-        ;
+SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
+    sz_cptr_t longer, sz_size_t longer_length,                //
+    sz_cptr_t shorter, sz_size_t shorter_length,              //
+    sz_size_t bound, sz_memory_allocator_t const *alloc) {
 
     // If a buffering memory-allocator is provided, this operation is practically free,
     // and cheaper than allocating even 512 bytes (for small distance matrices) on stack.
@@ -2075,6 +2058,37 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     }
 }
 
+SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
+    sz_cptr_t longer, sz_size_t longer_length,   //
+    sz_cptr_t shorter, sz_size_t shorter_length, //
+    sz_size_t bound, sz_memory_allocator_t const *alloc) {
+
+    // If one of the strings is empty - the edit distance is equal to the length of the other one.
+    if (longer_length == 0) return shorter_length <= bound ? shorter_length : bound;
+    if (shorter_length == 0) return longer_length <= bound ? longer_length : bound;
+
+    // Let's make sure that we use the amount proportional to the
+    // number of elements in the shorter string, not the larger.
+    if (shorter_length > longer_length) {
+        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
+        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+    }
+
+    // If the difference in length is beyond the `bound`, there is no need to check at all.
+    if (bound && longer_length - shorter_length > bound) return bound;
+
+    // Skip the matching prefixes and suffixes, they won't affect the distance.
+    for (sz_cptr_t a_end = longer + longer_length, b_end = shorter + shorter_length;
+         longer != a_end && shorter != b_end && *longer == *shorter;
+         ++longer, ++shorter, --longer_length, --shorter_length)
+        ;
+    for (; longer_length && shorter_length && longer[longer_length - 1] == shorter[shorter_length - 1];
+         --longer_length, --shorter_length)
+        ;
+
+    return _sz_edit_distance_wagner_fisher_serial(longer, longer_length, shorter, shorter_length, bound, alloc);
+}
+
 SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     sz_cptr_t longer, sz_size_t longer_length,        //
     sz_cptr_t shorter, sz_size_t shorter_length,      //
@@ -2119,6 +2133,48 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
 
     alloc->free(distances, buffer_length, alloc->handle);
     return previous_distances[shorter_length];
+}
+
+SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length,                  //
+                                             sz_ptr_t fingerprint, sz_size_t fingerprint_bytes, //
+                                             sz_size_t window_length) {
+    /// The size of our alphabet.
+    sz_u64_t base = 256;
+    /// Define a large prime number that we are going to use for modulo arithmetic.
+    /// Fun fact, the largest signed 32-bit signed integer (2147483647) is a prime number.
+    /// But we are going to use a larger one, to reduce collisions.
+    /// https://www.mersenneforum.org/showthread.php?t=3471
+    sz_u64_t prime = 18446744073709551557ull;
+    /// The `prime ^ window_length` value, that we are going to use for modulo arithmetic.
+    sz_u64_t prime_power = 1;
+    for (sz_size_t i = 0; i <= window_length; ++i) prime_power = (prime_power * base) % prime;
+    /// Here we stick to 32-bit hashes as 64-bit modulo arithmetic is expensive.
+    sz_u64_t hash = 0;
+    /// Compute the initial hash value for the first window.
+    sz_cptr_t text_end = text + length;
+    for (sz_cptr_t first_end = text + window_length; text < first_end; ++text) hash = (hash * base + *text) % prime;
+
+    /// In most cases the fingerprint length will be a power of two.
+    sz_bool_t fingerprint_length_is_power_of_two = (sz_bool_t)((fingerprint_bytes & (fingerprint_bytes - 1)) != 0);
+    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint;
+    if (fingerprint_length_is_power_of_two == sz_false_k) {
+        /// Compute the hash value for every window, exporting into the fingerprint,
+        /// using the expensive modulo operation.
+        for (; text < text_end; ++text) {
+            hash = (base * (hash - *(text - window_length) * hash) + *text) % prime;
+            sz_size_t byte_offset = (hash / 8) % fingerprint_bytes;
+            fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
+        }
+    }
+    else {
+        /// Compute the hash value for every window, exporting into the fingerprint,
+        /// using a cheap bitwise-and operation to determine the byte offset
+        for (; text < text_end; ++text) {
+            hash = (base * (hash - *(text - window_length) * hash) + *text) % prime;
+            sz_size_t byte_offset = (hash / 8) & (fingerprint_bytes - 1);
+            fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
+        }
+    }
 }
 
 /**
@@ -3505,6 +3561,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t h, sz_size_t h_length, 
  *  @brief  Pick the right implementation for the string search algorithms.
  */
 #pragma region Compile-Time Dispatching
+#if !SZ_DYNAMIC_DISPATCH
 
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
 
@@ -3643,6 +3700,12 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr
     return sz_alignment_score_serial(a, a_length, b, b_length, gap, subs, alloc);
 }
 
+SZ_PUBLIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_ptr_t fingerprint,
+                                      sz_size_t fingerprint_bytes, sz_size_t window_length) {
+    sz_fingerprint_rolling_serial(text, length, fingerprint, fingerprint_bytes, window_length);
+}
+
+#endif
 #pragma endregion
 
 #ifdef __cplusplus
