@@ -1431,7 +1431,7 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_2byte_equal(sz_u64_vec_t a, sz_u64_vec_t b
 
 /**
  *  @brief  Find the first occurrence of a @b two-character needle in an arbitrary length haystack.
- *          This implementation uses hardware-agnostic SWAR technique, to process 8 offsets at a time.
+ *          This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
 SZ_INTERNAL sz_cptr_t _sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
@@ -1485,7 +1485,7 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_4byte_equal(sz_u64_vec_t a, sz_u64_vec_t b
 
 /**
  *  @brief  Find the first occurrence of a @b four-character needle in an arbitrary length haystack.
- *          This implementation uses hardware-agnostic SWAR technique, to process 8 offsets at a time.
+ *          This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
 SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
@@ -1505,11 +1505,11 @@ SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
     n_vec.u64 *= 0x0000000100000001ull; // broadcast
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time using four 64-bit words.
-    // We load the subsequent word at onceto minimize the data dependency.
+    // We load the subsequent four-byte word as well, taking its first bytes. Think of it as a glorified prefetch :)
     sz_u64_t h_page_current, h_page_next;
-    for (; h + 16 <= h_end; h += 8) {
+    for (; h + sizeof(sz_u64_t) + sizeof(sz_u32_t) <= h_end; h += sizeof(sz_u64_t)) {
         h_page_current = *(sz_u64_t *)h;
-        h_page_next = *(sz_u64_t *)(h + 8);
+        h_page_next = *(sz_u32_t *)(h + 8);
         h0_vec.u64 = (h_page_current);
         h1_vec.u64 = (h_page_current >> 8) | (h_page_next << 56);
         h2_vec.u64 = (h_page_current >> 16) | (h_page_next << 48);
@@ -1530,6 +1530,77 @@ SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
     for (; h + 4 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
+    return NULL;
+}
+
+/**
+ *  @brief  3Byte-level equality comparison between two 64-bit integers.
+ *  @return 64-bit integer, where every top bit in each 3byte signifies a match.
+ */
+SZ_INTERNAL sz_u64_vec_t _sz_u64_each_3byte_equal(sz_u64_vec_t a, sz_u64_vec_t b) {
+    sz_u64_vec_t vec;
+    vec.u64 = ~(a.u64 ^ b.u64);
+    // The match is valid, if every bit within each 4byte is set.
+    // For that take the bottom 31 bits of each 4byte, add one to them,
+    // and if this sets the top bit to one, then all the 31 bits are ones as well.
+    vec.u64 = ((vec.u64 & 0xFFFF7FFFFF7FFFFFull) + 0x0000000001000001ull) & ((vec.u64 & 0x0000800000800000ull));
+    return vec;
+}
+
+/**
+ *  @brief  Find the first occurrence of a @b three-character needle in an arbitrary length haystack.
+ *          This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
+ */
+SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+
+    // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
+    sz_assert(h_length >= 3 && "The haystack is too short.");
+    sz_cptr_t const h_end = h + h_length;
+
+#if !SZ_USE_MISALIGNED_LOADS
+    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+    for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
+        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
+#endif
+
+    // We fetch 12
+    sz_u64_vec_t h0_vec, h1_vec, h2_vec, h3_vec, h4_vec;
+    sz_u64_vec_t matches0_vec, matches1_vec, matches2_vec, matches3_vec, matches4_vec;
+    sz_u64_vec_t n_vec;
+    n_vec.u64 = 0;
+    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1], n_vec.u8s[2] = n[2], n_vec.u8s[3] = n[3];
+    n_vec.u64 *= 0x0000000001000001ull; // broadcast
+
+    // This code simulates hyper-scalar execution, analyzing 8 offsets at a time using three 64-bit words.
+    // We load the subsequent two-byte word as well.
+    sz_u64_t h_page_current, h_page_next;
+    for (; h + sizeof(sz_u64_t) + sizeof(sz_u16_t) <= h_end; h += sizeof(sz_u64_t)) {
+        h_page_current = *(sz_u64_t *)h;
+        h_page_next = *(sz_u16_t *)(h + 8);
+        h0_vec.u64 = (h_page_current);
+        h1_vec.u64 = (h_page_current >> 8) | (h_page_next << 56);
+        h2_vec.u64 = (h_page_current >> 16) | (h_page_next << 48);
+        h3_vec.u64 = (h_page_current >> 24) | (h_page_next << 40);
+        h4_vec.u64 = (h_page_current >> 32) | (h_page_next << 32);
+        matches0_vec = _sz_u64_each_3byte_equal(h0_vec, n_vec);
+        matches1_vec = _sz_u64_each_3byte_equal(h1_vec, n_vec);
+        matches2_vec = _sz_u64_each_3byte_equal(h2_vec, n_vec);
+        matches3_vec = _sz_u64_each_3byte_equal(h3_vec, n_vec);
+        matches4_vec = _sz_u64_each_3byte_equal(h4_vec, n_vec);
+
+        if (matches0_vec.u64 + matches1_vec.u64 + matches2_vec.u64 + matches3_vec.u64 + matches4_vec.u64) {
+            matches0_vec.u64 >>= 16;
+            matches1_vec.u64 >>= 8;
+            matches3_vec.u64 <<= 8;
+            matches4_vec.u64 <<= 16;
+            sz_u64_t match_indicators =
+                matches0_vec.u64 | matches1_vec.u64 | matches2_vec.u64 | matches3_vec.u64 | matches4_vec.u64;
+            return h + sz_u64_ctz(match_indicators) / 8;
+        }
+    }
+
+    for (; h + 3 <= h_end; ++h)
+        if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
     return NULL;
 }
 
@@ -1864,7 +1935,7 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_byte_serial,
         (sz_find_t)_sz_find_2byte_serial,
-        (sz_find_t)_sz_find_bitap_upto_8bytes_serial,
+        (sz_find_t)_sz_find_3byte_serial,
         (sz_find_t)_sz_find_4byte_serial,
         // For needle lengths up to 64, use the Bitap algorithm variation for exact search.
         (sz_find_t)_sz_find_bitap_upto_8bytes_serial,
