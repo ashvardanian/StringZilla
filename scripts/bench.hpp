@@ -18,10 +18,10 @@
 #include <stringzilla/stringzilla.h>
 #include <stringzilla/stringzilla.hpp>
 
-#ifdef NDEBUG // Make debugging faster
+#ifdef SZ_DEBUG // Make debugging faster
 #define default_seconds_m 10
 #else
-#define default_seconds_m 10
+#define default_seconds_m 30
 #endif
 
 namespace sz = ashvardanian::stringzilla;
