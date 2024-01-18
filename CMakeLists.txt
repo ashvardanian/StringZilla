@@ -64,11 +64,6 @@ target_include_directories(
   INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}>
   $<INSTALL_INTERFACE:include>)
 
-# Conditional Compilation for Specialized Implementations
-# check_c_source_compiles(" #include <immintrin.h> int main() { __m256i v =
-# _mm256_set1_epi32(0); return 0; }" STRINGZILLA_HAS_AVX2)
-# if(STRINGZILLA_HAS_AVX2) target_sources(${STRINGZILLA_TARGET_NAME} PRIVATE
-# "src/avx2.c") endif()
 if(STRINGZILLA_INSTALL)
   install(
     TARGETS ${STRINGZILLA_TARGET_NAME}
