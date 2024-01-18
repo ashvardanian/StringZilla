@@ -219,7 +219,7 @@
  *  Debugging and testing.
  */
 #ifndef SZ_DEBUG
-#ifndef NDEBUG
+#ifndef NDEBUG // This means "Not using DEBUG information".
 #define SZ_DEBUG 1
 #else
 #define SZ_DEBUG 0
