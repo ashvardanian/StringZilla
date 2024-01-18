@@ -200,6 +200,7 @@ static void test_api_readonly() {
     assert(str("hello").rfind("l") == 3);
     assert(str("hello").rfind("l", 2) == 2);
     assert(str("hello").rfind("l", 1) == str::npos);
+    assert(str("abbabbaaaaaa").find("aa") == 6);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);

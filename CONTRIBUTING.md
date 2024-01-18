@@ -162,8 +162,8 @@ pip install -e . # To build locally from source
 For testing we use PyTest, which may not be installed on your system.
 
 ```bash
-pip install pytest                      # To install PyTest
-pytest scripts/unit_test.py -s -x       # To run the test suite
+pip install pytest              # To install PyTest
+pytest scripts/test.py -s -x    # To run the test suite
 ```
 
 For fuzzing we love the ability to call the native C implementation from Python bypassing the binding layer.
