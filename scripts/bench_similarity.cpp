@@ -32,14 +32,14 @@ tracked_binary_functions_t distance_functions() {
     alloc.free = &free_from_vector;
     alloc.handle = &temporary_memory;
 
-    auto wrap_sz_distance = [alloc](auto function) -> binary_function_t {
+    auto wrap_sz_distance = [alloc](auto function) mutable -> binary_function_t {
         return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) mutable {
             sz_string_view_t a = to_c(a_str);
             sz_string_view_t b = to_c(b_str);
             return function(a.start, a.length, b.start, b.length, 0, &alloc);
         });
     };
-    auto wrap_sz_scoring = [alloc](auto function) -> binary_function_t {
+    auto wrap_sz_scoring = [alloc](auto function) mutable -> binary_function_t {
         return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) mutable {
             sz_string_view_t a = to_c(a_str);
             sz_string_view_t b = to_c(b_str);
