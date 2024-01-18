@@ -173,9 +173,11 @@
 #if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
 #define SZ_DETECT_64_BIT (1)
 #define SZ_SIZE_MAX (0xFFFFFFFFFFFFFFFFull)
+#define SZ_SSIZE_MAX (0x7FFFFFFFFFFFFFFFull)
 #else
 #define SZ_DETECT_64_BIT (0)
 #define SZ_SIZE_MAX (0xFFFFFFFFu)
+#define SZ_SSIZE_MAX (0x7FFFFFFFu)
 #endif
 
 /*
@@ -301,6 +303,7 @@ typedef struct sz_string_view_t {
 
 /**
  *  @brief  Bit-set structure for 256 ASCII characters. Useful for filtering and search.
+ *  @see    sz_u8_set_init, sz_u8_set_add, sz_u8_set_contains, sz_u8_set_invert
  */
 typedef union sz_u8_set_t {
     sz_u64_t _u64s[4];
@@ -309,19 +312,19 @@ typedef union sz_u8_set_t {
     sz_u8_t _u8s[32];
 } sz_u8_set_t;
 
-SZ_PUBLIC void sz_u8_set_init(sz_u8_set_t *f) { f->_u64s[0] = f->_u64s[1] = f->_u64s[2] = f->_u64s[3] = 0; }
-SZ_PUBLIC void sz_u8_set_add(sz_u8_set_t *f, sz_u8_t c) { f->_u64s[c >> 6] |= (1ull << (c & 63u)); }
-SZ_PUBLIC sz_bool_t sz_u8_set_contains(sz_u8_set_t const *f, sz_u8_t c) {
-    // Checking the bit can be done in different ways:
-    // - (f->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
-    // - (f->_u32s[c >> 5] & (1u << (c & 31u))) != 0
-    // - (f->_u16s[c >> 4] & (1u << (c & 15u))) != 0
-    // - (f->_u8s[c >> 3] & (1u << (c & 7u))) != 0
-    return (sz_bool_t)((f->_u64s[c >> 6] & (1ull << (c & 63u))) != 0);
+SZ_PUBLIC void sz_u8_set_init(sz_u8_set_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
+SZ_PUBLIC void sz_u8_set_add(sz_u8_set_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
+SZ_PUBLIC sz_bool_t sz_u8_set_contains(sz_u8_set_t const *s, sz_u8_t c) {
+    // Checking the bit can be done in disserent ways:
+    // - (s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
+    // - (s->_u32s[c >> 5] & (1u << (c & 31u))) != 0
+    // - (s->_u16s[c >> 4] & (1u << (c & 15u))) != 0
+    // - (s->_u8s[c >> 3] & (1u << (c & 7u))) != 0
+    return (sz_bool_t)((s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0);
 }
-SZ_PUBLIC void sz_u8_set_invert(sz_u8_set_t *f) {
-    f->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, f->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
-        f->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, f->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
+SZ_PUBLIC void sz_u8_set_invert(sz_u8_set_t *s) {
+    s->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
+        s->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
 }
 
 typedef void *(*sz_memory_allocate_t)(sz_size_t, void *);
@@ -330,12 +333,25 @@ typedef sz_u64_t (*sz_random_generator_t)(void *);
 
 /**
  *  @brief  Some complex pattern matching algorithms may require memory allocations.
+ *          This structure is used to pass the memory allocator to those functions.
+ *  @see    sz_memory_allocator_init_fixed
  */
 typedef struct sz_memory_allocator_t {
     sz_memory_allocate_t allocate;
     sz_memory_free_t free;
     void *handle;
 } sz_memory_allocator_t;
+
+/**
+ *  @brief  Initializes a memory allocator to use a static-capacity buffer.
+ *          No dynamic allocations will be performed.
+ *
+ *  @param alloc    Memory allocator to initialize.
+ *  @param buffer   Buffer to use for allocations.
+ *  @param length   Length of the buffer. @b Must be greater than 8 bytes. Different values would be optimal for
+ *                  different algorithms and input lengths, but 4096 bytes (one RAM page) is a good default.
+ */
+SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
 
 /**
  *  @brief  The number of bytes a stack-allocated string can hold, including the NULL termination character.
@@ -626,9 +642,9 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
  *  @param string       String to grow.
  *  @param new_capacity The number of characters to reserve space for, including existing ones.
  *  @param allocator    Memory allocator to use for the allocation.
- *  @return             True if the operation succeeded. False if memory allocation failed.
+ *  @return             NULL if the operation failed, pointer to the new start of the string otherwise.
  */
-SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator);
+SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator);
 
 /**
  *  @brief  Grows the string by adding an uninitialized region of ::added_length at the given ::offset.
@@ -835,20 +851,27 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t text, sz_size_t length,
  *  @param a_length Number of bytes in the first string.
  *  @param b        Second string to compare.
  *  @param b_length Number of bytes in the second string.
- *  @param alloc    Temporary memory allocator, that will allocate at most two rows of the Levenshtein matrix.
+ *
+ *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
+ *                  so the memory usage is linear in relation to ::a_length and ::b_length.
  *  @param bound    Upper bound on the distance, that allows us to exit early.
- *  @return         Unsigned edit distance.
+ *                  If zero is passed, the maximum possible distance will be equal to the length of the longer input.
+ *  @return         Unsigned integer for edit distance, the `bound` if was exceeded or `SZ_SIZE_MAX`
+ *                  if the memory allocation failed.
+ *
+ *  @see    sz_memory_allocator_init_fixed
+ *  @see    https://en.wikipedia.org/wiki/Levenshtein_distance
  */
 SZ_PUBLIC sz_size_t sz_edit_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                     sz_size_t bound, sz_memory_allocator_t const *alloc);
+                                     sz_size_t bound, sz_memory_allocator_t *alloc);
 
 /** @copydoc sz_edit_distance */
 SZ_PUBLIC sz_size_t sz_edit_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                            sz_size_t bound, sz_memory_allocator_t const *alloc);
+                                            sz_size_t bound, sz_memory_allocator_t *alloc);
 
 /** @copydoc sz_edit_distance */
 SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                            sz_size_t bound, sz_memory_allocator_t const *alloc);
+                                            sz_size_t bound, sz_memory_allocator_t *alloc);
 
 /**
  *  @brief  Computes Needleman–Wunsch alignment score for two string. Often used in bioinformatics and cheminformatics.
@@ -865,21 +888,27 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_
  *  @param b_length Number of bytes in the second string.
  *  @param gap      Penalty cost for gaps - insertions and removals.
  *  @param subs     Substitution costs matrix with 256 x 256 values for all pairs of characters.
- *  @param alloc    Temporary memory allocator, that will allocate at most two rows of the Levenshtein matrix.
- *  @return         Signed score ~ edit distance.
+ *
+ *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
+ *                  so the memory usage is linear in relation to ::a_length and ::b_length.
+ *  @return         Signed similarity score. Can be negative, depending on the substitution costs.
+ *                  If the memory allocation fails, the function returns `SZ_SSIZE_MAX`.
+ *
+ *  @see    sz_memory_allocator_init_fixed
+ *  @see    https://en.wikipedia.org/wiki/Needleman%E2%80%93Wunsch_algorithm
  */
 SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                         sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
-                                        sz_memory_allocator_t const *alloc);
+                                        sz_memory_allocator_t *alloc);
 
 /** @copydoc sz_alignment_score */
 SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                                sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
-                                               sz_memory_allocator_t const *alloc);
+                                               sz_memory_allocator_t *alloc);
 /** @copydoc sz_alignment_score */
 SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                                sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
-                                               sz_memory_allocator_t const *alloc);
+                                               sz_memory_allocator_t *alloc);
 
 /**
  *  @brief  Computes the Karp-Rabin rolling hash of a string outputting a binary fingerprint.
@@ -903,14 +932,12 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, 
  *  For protein sequences the alphabet is 20 characters long, so the window can be shorter, than for DNAs.
  *
  */
-SZ_PUBLIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length,                  //
-                                      sz_ptr_t fingerprint, sz_size_t fingerprint_bytes, //
-                                      sz_size_t window_length);
+SZ_PUBLIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                                      sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
 
 /** @copydoc sz_fingerprint_rolling */
-SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length,                  //
-                                             sz_ptr_t fingerprint, sz_size_t fingerprint_bytes, //
-                                             sz_size_t window_length);
+SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                                             sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
 
 #pragma endregion
 
@@ -1196,19 +1223,25 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #endif
 }
 
-SZ_INTERNAL sz_ptr_t _sz_memory_allocate_for_static_buffer(sz_size_t length, sz_string_view_t *string_view) {
-    if (length > string_view->length) return NULL;
-    return (sz_ptr_t)string_view->start;
+SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
+    sz_size_t capacity;
+    sz_copy((sz_ptr_t)&capacity, (sz_cptr_t)handle, sizeof(sz_size_t));
+    sz_size_t consumed_capacity = sizeof(sz_size_t);
+    if (consumed_capacity + length > capacity) return NULL;
+    return (sz_ptr_t)handle + consumed_capacity;
 }
 
-SZ_INTERNAL void _sz_memory_free_for_static_buffer(sz_ptr_t start, sz_size_t length, sz_string_view_t *string_view) {
-    sz_unused(start && length && string_view);
+SZ_INTERNAL void _sz_memory_free_fixed(sz_ptr_t start, sz_size_t length, void *handle) {
+    sz_unused(start && length && handle);
 }
 
-SZ_PUBLIC void sz_memory_allocator_init_for_static_buffer(sz_string_view_t buffer, sz_memory_allocator_t *alloc) {
-    alloc->allocate = (sz_memory_allocate_t)_sz_memory_allocate_for_static_buffer;
-    alloc->free = (sz_memory_free_t)_sz_memory_free_for_static_buffer;
+SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length) {
+    // The logic here is simple - put the buffer length in the first slots of the buffer.
+    // Later use it for bounds checking.
+    alloc->allocate = (sz_memory_allocate_t)_sz_memory_allocate_fixed;
+    alloc->free = (sz_memory_free_t)_sz_memory_free_fixed;
     alloc->handle = &buffer;
+    sz_copy((sz_ptr_t)buffer, (sz_cptr_t)&length, sizeof(sz_size_t));
 }
 
 #pragma endregion
@@ -1984,7 +2017,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
 SZ_INTERNAL sz_size_t _sz_edit_distance_anti_diagonal_serial( //
     sz_cptr_t longer, sz_size_t longer_length,                //
     sz_cptr_t shorter, sz_size_t shorter_length,              //
-    sz_size_t bound, sz_memory_allocator_t const *alloc) {
+    sz_size_t bound, sz_memory_allocator_t *alloc) {
     sz_unused(longer && longer_length && shorter && shorter_length && bound && alloc);
     return 0;
 }
@@ -1992,12 +2025,14 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_anti_diagonal_serial( //
 SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     sz_cptr_t longer, sz_size_t longer_length,                //
     sz_cptr_t shorter, sz_size_t shorter_length,              //
-    sz_size_t bound, sz_memory_allocator_t const *alloc) {
+    sz_size_t bound, sz_memory_allocator_t *alloc) {
 
     // If a buffering memory-allocator is provided, this operation is practically free,
     // and cheaper than allocating even 512 bytes (for small distance matrices) on stack.
     sz_size_t buffer_length = sizeof(sz_size_t) * ((shorter_length + 1) * 2);
     sz_size_t *distances = (sz_size_t *)alloc->allocate(buffer_length, alloc->handle);
+    if (!distances) return SZ_SIZE_MAX;
+
     sz_size_t *previous_distances = distances;
     sz_size_t *current_distances = previous_distances + shorter_length + 1;
 
@@ -2061,7 +2096,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
 SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     sz_cptr_t longer, sz_size_t longer_length,   //
     sz_cptr_t shorter, sz_size_t shorter_length, //
-    sz_size_t bound, sz_memory_allocator_t const *alloc) {
+    sz_size_t bound, sz_memory_allocator_t *alloc) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one.
     if (longer_length == 0) return shorter_length <= bound ? shorter_length : bound;
@@ -2093,7 +2128,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     sz_cptr_t longer, sz_size_t longer_length,        //
     sz_cptr_t shorter, sz_size_t shorter_length,      //
     sz_error_cost_t gap, sz_error_cost_t const *subs, //
-    sz_memory_allocator_t const *alloc) {
+    sz_memory_allocator_t *alloc) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one
     if (longer_length == 0) return shorter_length;
@@ -2135,43 +2170,48 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     return previous_distances[shorter_length];
 }
 
-SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length,                  //
-                                             sz_ptr_t fingerprint, sz_size_t fingerprint_bytes, //
-                                             sz_size_t window_length) {
-    /// The size of our alphabet.
+SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length, sz_size_t window_length,
+                                             sz_ptr_t fingerprint, sz_size_t fingerprint_bytes) {
+
+    if (length < window_length) return;
+    // The size of our alphabet.
     sz_u64_t base = 256;
-    /// Define a large prime number that we are going to use for modulo arithmetic.
-    /// Fun fact, the largest signed 32-bit signed integer (2147483647) is a prime number.
-    /// But we are going to use a larger one, to reduce collisions.
-    /// https://www.mersenneforum.org/showthread.php?t=3471
+    // Define a large prime number that we are going to use for modulo arithmetic.
+    // Fun fact, the largest signed 32-bit signed integer (2147483647) is a prime number.
+    // But we are going to use a larger one, to reduce collisions.
+    // https://www.mersenneforum.org/showthread.php?t=3471
     sz_u64_t prime = 18446744073709551557ull;
-    /// The `prime ^ window_length` value, that we are going to use for modulo arithmetic.
+    // The `prime ^ window_length` value, that we are going to use for modulo arithmetic.
     sz_u64_t prime_power = 1;
     for (sz_size_t i = 0; i <= window_length; ++i) prime_power = (prime_power * base) % prime;
-    /// Here we stick to 32-bit hashes as 64-bit modulo arithmetic is expensive.
+    // Here we stick to 32-bit hashes as 64-bit modulo arithmetic is expensive.
     sz_u64_t hash = 0;
-    /// Compute the initial hash value for the first window.
+    // Compute the initial hash value for the first window.
     sz_cptr_t text_end = text + length;
     for (sz_cptr_t first_end = text + window_length; text < first_end; ++text) hash = (hash * base + *text) % prime;
 
-    /// In most cases the fingerprint length will be a power of two.
+    // In most cases the fingerprint length will be a power of two.
     sz_bool_t fingerprint_length_is_power_of_two = (sz_bool_t)((fingerprint_bytes & (fingerprint_bytes - 1)) != 0);
     sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint;
     if (fingerprint_length_is_power_of_two == sz_false_k) {
-        /// Compute the hash value for every window, exporting into the fingerprint,
-        /// using the expensive modulo operation.
-        for (; text < text_end; ++text) {
-            hash = (base * (hash - *(text - window_length) * hash) + *text) % prime;
             sz_size_t byte_offset = (hash / 8) % fingerprint_bytes;
+        fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
+        // Compute the hash value for every window, exporting into the fingerprint,
+        // using the expensive modulo operation.
+        for (; text < text_end; ++text) {
+            hash = (base * (hash - *(text - window_length) * prime_power) + *text) % prime;
+            byte_offset = (hash / 8) % fingerprint_bytes;
             fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
         }
     }
     else {
-        /// Compute the hash value for every window, exporting into the fingerprint,
-        /// using a cheap bitwise-and operation to determine the byte offset
-        for (; text < text_end; ++text) {
-            hash = (base * (hash - *(text - window_length) * hash) + *text) % prime;
             sz_size_t byte_offset = (hash / 8) & (fingerprint_bytes - 1);
+        fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
+        // Compute the hash value for every window, exporting into the fingerprint,
+        // using a cheap bitwise-and operation to determine the byte offset
+        for (; text < text_end; ++text) {
+            hash = (base * (hash - *(text - window_length) * prime_power) + *text) % prime;
+            byte_offset = (hash / 8) & (fingerprint_bytes - 1);
             fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
         }
     }
@@ -2410,12 +2450,12 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
     return string->external.start;
 }
 
-SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator) {
+SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator) {
 
     sz_assert(string && "String can't be NULL.");
 
     sz_size_t new_space = new_capacity + 1;
-    if (new_space <= sz_string_stack_space) return sz_true_k;
+    if (new_space <= sz_string_stack_space) return string->external.start;
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -2425,7 +2465,7 @@ SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacit
     sz_assert(new_space > string_space && "New space must be larger than current.");
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
-    if (!new_start) return sz_false_k;
+    if (!new_start) return NULL;
 
     sz_copy(new_start, string_start, string_length);
     string->external.start = new_start;
@@ -2435,7 +2475,7 @@ SZ_PUBLIC sz_bool_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacit
 
     // Deallocate the old string.
     if (string_is_external) allocator->free(string_start, string_space, allocator->handle);
-    return sz_true_k;
+    return string->external.start;
 }
 
 SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_size_t added_length,
@@ -2464,10 +2504,10 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
         sz_size_t next_planned_size = sz_max_of_two(SZ_CACHE_LINE_WIDTH, string_space * 2ull);
         sz_size_t min_needed_space = sz_size_bit_ceil(offset + string_length + added_length + 1);
         sz_size_t new_space = sz_max_of_two(min_needed_space, next_planned_size);
-        if (!sz_string_reserve(string, new_space - 1, allocator)) return NULL;
+        string_start = sz_string_reserve(string, new_space - 1, allocator);
+        if (!string_start) return NULL;
 
         // Copy into the new buffer.
-        string_start = string->external.start;
         sz_move(string_start + offset + added_length, string_start + offset, string_length - offset);
         string_start[string_length + added_length] = 0;
         string->external.length = string_length + added_length;
@@ -3336,7 +3376,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t lengt
 SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
     sz_cptr_t const a, sz_size_t const a_length, //
     sz_cptr_t const b, sz_size_t const b_length, //
-    sz_size_t const bound, sz_memory_allocator_t const *alloc) {
+    sz_size_t const bound, sz_memory_allocator_t *alloc) {
 
     sz_u512_vec_t a_vec, b_vec, previous_vec, current_vec, permutation_vec;
     sz_u512_vec_t cost_deletion_vec, cost_insertion_vec, cost_substitution_vec;
@@ -3690,19 +3730,19 @@ SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
 SZ_PUBLIC sz_size_t sz_edit_distance( //
     sz_cptr_t a, sz_size_t a_length,  //
     sz_cptr_t b, sz_size_t b_length,  //
-    sz_size_t bound, sz_memory_allocator_t const *alloc) {
+    sz_size_t bound, sz_memory_allocator_t *alloc) {
     return sz_edit_distance_serial(a, a_length, b, b_length, bound, alloc);
 }
 
 SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
                                         sz_error_cost_t gap, sz_error_cost_t const *subs,
-                                        sz_memory_allocator_t const *alloc) {
+                                        sz_memory_allocator_t *alloc) {
     return sz_alignment_score_serial(a, a_length, b, b_length, gap, subs, alloc);
 }
 
-SZ_PUBLIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_ptr_t fingerprint,
-                                      sz_size_t fingerprint_bytes, sz_size_t window_length) {
-    sz_fingerprint_rolling_serial(text, length, fingerprint, fingerprint_bytes, window_length);
+SZ_PUBLIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_ptr_t fingerprint,
+                                      sz_size_t fingerprint_bytes) {
+    sz_fingerprint_rolling_serial(text, length, window_length, fingerprint, fingerprint_bytes);
 }
 
 #endif

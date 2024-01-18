@@ -7,7 +7,7 @@
  *  alignment scores, and fingerprinting techniques combined with the Hamming distance.
  */
 #include <bench.hpp>
-#include <test.hpp> // `levenshtein_baseline`
+#include <test.hpp> // `levenshtein_baseline`, `unary_substitution_costs`
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -24,10 +24,7 @@ static void free_from_vector(void *buffer, sz_size_t length, void *handle) { sz_
 
 tracked_binary_functions_t distance_functions() {
     // Populate the unary substitutions matrix
-    static std::vector<sz_error_cost_t> unary_substitution_costs;
-    unary_substitution_costs.resize(256 * 256);
-    for (std::size_t i = 0; i != 256; ++i)
-        for (std::size_t j = 0; j != 256; ++j) unary_substitution_costs[i * 256 + j] = (i == j ? 0 : 1);
+    static std::vector<std::int8_t> costs = unary_substitution_costs();
 
     // Two rows of the Levenshtein matrix will occupy this much:
     sz_memory_allocator_t alloc;
@@ -36,17 +33,17 @@ tracked_binary_functions_t distance_functions() {
     alloc.handle = &temporary_memory;
 
     auto wrap_sz_distance = [alloc](auto function) -> binary_function_t {
-        return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) {
+        return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) mutable {
             sz_string_view_t a = to_c(a_str);
             sz_string_view_t b = to_c(b_str);
             return function(a.start, a.length, b.start, b.length, 0, &alloc);
         });
     };
     auto wrap_sz_scoring = [alloc](auto function) -> binary_function_t {
-        return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) {
+        return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) mutable {
             sz_string_view_t a = to_c(a_str);
             sz_string_view_t b = to_c(b_str);
-            return function(a.start, a.length, b.start, b.length, 1, unary_substitution_costs.data(), &alloc);
+            return function(a.start, a.length, b.start, b.length, 1, costs.data(), &alloc);
         });
     };
     tracked_binary_functions_t result = {

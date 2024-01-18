@@ -58,6 +58,7 @@
 #endif
 
 #if !SZ_AVOID_STL
+#include <bitset>
 #include <string>
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
 #include <string_view>
@@ -880,6 +881,35 @@ std::size_t range_length(iterator_type first, iterator_type last) {
 
 #pragma endregion
 
+#pragma region Global Operations with Dynamic Memory
+
+template <typename allocator_type_>
+static void *_call_allocate(sz_size_t n, void *allocator_state) noexcept {
+    return reinterpret_cast<allocator_type_ *>(allocator_state)->allocate(n);
+}
+
+template <typename allocator_type_>
+static void _call_free(void *ptr, sz_size_t n, void *allocator_state) noexcept {
+    return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
+}
+
+template <typename allocator_type_, typename allocator_callback_>
+static bool _with_alloc(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
+    sz_memory_allocator_t alloc;
+    alloc.allocate = &_call_allocate<allocator_type_>;
+    alloc.free = &_call_free<allocator_type_>;
+    alloc.handle = &allocator;
+    return callback(alloc);
+}
+
+template <typename allocator_type_, typename allocator_callback_>
+static bool _with_alloc(allocator_callback_ &&callback) noexcept {
+    allocator_type_ allocator;
+    return _with_alloc(allocator, std::forward<allocator_callback_>(callback));
+}
+
+#pragma endregion
+
 #pragma region Helper Template Classes
 
 /**
@@ -1108,11 +1138,11 @@ class basic_string_slice {
     const_reverse_iterator crbegin() const noexcept { return const_reverse_iterator(start_ + length_ - 1); }
     const_reverse_iterator crend() const noexcept { return const_reverse_iterator(start_ - 1); }
 
-    const_reference operator[](size_type pos) const noexcept { return start_[pos]; }
-    const_reference at(size_type pos) const noexcept { return start_[pos]; }
-    const_reference front() const noexcept { return start_[0]; }
-    const_reference back() const noexcept { return start_[length_ - 1]; }
-    const_pointer data() const noexcept { return start_; }
+    reference operator[](size_type pos) const noexcept { return start_[pos]; }
+    reference at(size_type pos) const noexcept { return start_[pos]; }
+    reference front() const noexcept { return start_[0]; }
+    reference back() const noexcept { return start_[length_ - 1]; }
+    pointer data() const noexcept { return start_; }
 
     difference_type ssize() const noexcept { return static_cast<difference_type>(length_); }
     size_type size() const noexcept { return length_; }
@@ -1139,7 +1169,7 @@ class basic_string_slice {
      *  @brief  Signed alternative to `at()`. Handy if you often write `str[str.size() - 2]`.
      *  @warning The behavior is @b undefined if the position is beyond bounds.
      */
-    value_type sat(difference_type signed_offset) const noexcept {
+    reference sat(difference_type signed_offset) const noexcept {
         size_type pos = (signed_offset < 0) ? size() + signed_offset : signed_offset;
         assert(pos < size() && "string_slice::sat(i) out of bounds");
         return start_[pos];
@@ -1299,13 +1329,13 @@ class basic_string_slice {
 
     /**  @brief  Checks if the string is equal to the other string. */
     bool operator==(string_view other) const noexcept {
-        return length_ == other.length_ && sz_equal(start_, other.start_, other.length_) == sz_true_k;
+        return size() == other.size() && sz_equal(data(), other.data(), other.size()) == sz_true_k;
     }
 
     /**  @brief  Checks if the string is equal to a concatenation of two strings. */
     bool operator==(concatenation<string_view, string_view> const &other) const noexcept {
-        return length_ == other.length() && sz_equal(start_, other.first.data(), other.first.length()) == sz_true_k &&
-               sz_equal(start_ + other.first.length(), other.second.data(), other.second.length()) == sz_true_k;
+        return size() == other.size() && sz_equal(data(), other.first.data(), other.first.size()) == sz_true_k &&
+               sz_equal(data() + other.first.size(), other.second.data(), other.second.size()) == sz_true_k;
     }
 
 #if SZ_DETECT_CPP20
@@ -1788,7 +1818,7 @@ class basic_string {
     static_assert(std::is_const<char_type_>::value == false, "Characters must be mutable");
 
     using char_type = char_type_;
-    using calloc_type = sz_memory_allocator_t;
+    using sz_alloc_type = sz_memory_allocator_t;
 
     sz_string_t string_;
 
@@ -1800,37 +1830,25 @@ class basic_string {
      */
     static_assert(std::is_empty<allocator_type_>::value, "We currently only support stateless allocators");
 
-    static void *call_allocate(sz_size_t n, void *allocator_state) noexcept {
-        return reinterpret_cast<allocator_type_ *>(allocator_state)->allocate(n);
-    }
-
-    static void call_free(void *ptr, sz_size_t n, void *allocator_state) noexcept {
-        return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
-    }
-
     template <typename allocator_callback>
-    bool with_alloc(allocator_callback &&callback) const noexcept {
-        allocator_type_ allocator;
-        sz_memory_allocator_t alloc;
-        alloc.allocate = &call_allocate;
-        alloc.free = &call_free;
-        alloc.handle = &allocator;
-        return callback(alloc);
+    static bool _with_alloc(allocator_callback &&callback) noexcept {
+        return ashvardanian::stringzilla::_with_alloc<allocator_type_>(callback);
     }
 
     bool is_internal() const noexcept { return sz_string_is_on_stack(&string_); }
 
     void init(std::size_t length, char_type value) noexcept(false) {
         sz_ptr_t start;
-        if (!with_alloc([&](calloc_type &alloc) { return (start = sz_string_init_length(&string_, length, &alloc)); }))
+        if (!_with_alloc(
+                [&](sz_alloc_type &alloc) { return (start = sz_string_init_length(&string_, length, &alloc)); }))
             throw std::bad_alloc();
         sz_fill(start, length, *(sz_u8_t *)&value);
     }
 
     void init(string_view other) noexcept(false) {
         sz_ptr_t start;
-        if (!with_alloc(
-                [&](calloc_type &alloc) { return (start = sz_string_init_length(&string_, other.size(), &alloc)); }))
+        if (!_with_alloc(
+                [&](sz_alloc_type &alloc) { return (start = sz_string_init_length(&string_, other.size(), &alloc)); }))
             throw std::bad_alloc();
         sz_copy(start, (sz_cptr_t)other.data(), other.size());
     }
@@ -1888,7 +1906,7 @@ class basic_string {
     }
 
     ~basic_string() noexcept {
-        with_alloc([&](calloc_type &alloc) {
+        _with_alloc([&](sz_alloc_type &alloc) {
             sz_string_free(&string_, &alloc);
             return true;
         });
@@ -1897,7 +1915,7 @@ class basic_string {
     basic_string(basic_string &&other) noexcept { move(other); }
     basic_string &operator=(basic_string &&other) noexcept {
         if (!is_internal()) {
-            with_alloc([&](calloc_type &alloc) {
+            _with_alloc([&](sz_alloc_type &alloc) {
                 sz_string_free(&string_, &alloc);
                 return true;
             });
@@ -1992,7 +2010,7 @@ class basic_string {
 
     template <typename first_type, typename second_type>
     explicit basic_string(concatenation<first_type, second_type> const &expression) noexcept(false) {
-        with_alloc([&](calloc_type &alloc) {
+        _with_alloc([&](sz_alloc_type &alloc) {
             sz_ptr_t ptr = sz_string_init_length(&string_, expression.length(), &alloc);
             if (!ptr) return false;
             expression.copy(ptr);
@@ -2512,7 +2530,7 @@ class basic_string {
     bool try_resize(size_type count, value_type character = '\0') noexcept;
 
     bool try_reserve(size_type capacity) noexcept {
-        return with_alloc([&](calloc_type &alloc) { return sz_string_reserve(&string_, capacity, &alloc); });
+        return _with_alloc([&](sz_alloc_type &alloc) { return sz_string_reserve(&string_, capacity, &alloc); });
     }
 
     bool try_assign(string_view other) noexcept;
@@ -2545,7 +2563,7 @@ class basic_string {
     bool try_insert(difference_type signed_offset, string_view string) noexcept {
         sz_size_t normalized_offset, normalized_length;
         sz_ssize_clamp_interval(size(), signed_offset, 0, &normalized_offset, &normalized_length);
-        if (!with_alloc([&](calloc_type &alloc) {
+        if (!_with_alloc([&](sz_alloc_type &alloc) {
                 return sz_string_expand(&string_, normalized_offset, string.size(), &alloc);
             }))
             return false;
@@ -2606,7 +2624,7 @@ class basic_string {
     basic_string &insert(size_type offset, size_type repeats, char_type character) noexcept(false) {
         if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
         if (size() + repeats > max_size()) throw std::length_error("sz::basic_string::insert");
-        if (!with_alloc([&](calloc_type &alloc) { return sz_string_expand(&string_, offset, repeats, &alloc); }))
+        if (!_with_alloc([&](sz_alloc_type &alloc) { return sz_string_expand(&string_, offset, repeats, &alloc); }))
             throw std::bad_alloc();
 
         sz_fill(data() + offset, repeats, character);
@@ -2622,7 +2640,8 @@ class basic_string {
     basic_string &insert(size_type offset, string_view other) noexcept(false) {
         if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
         if (size() + other.size() > max_size()) throw std::length_error("sz::basic_string::insert");
-        if (!with_alloc([&](calloc_type &alloc) { return sz_string_expand(&string_, offset, other.size(), &alloc); }))
+        if (!_with_alloc(
+                [&](sz_alloc_type &alloc) { return sz_string_expand(&string_, offset, other.size(), &alloc); }))
             throw std::bad_alloc();
 
         sz_copy(data() + offset, other.data(), other.size());
@@ -2689,7 +2708,7 @@ class basic_string {
         auto added_length = range_length(first, last);
         if (size() + added_length > max_size()) throw std::length_error("sz::basic_string::insert");
 
-        if (!with_alloc([&](calloc_type &alloc) { return sz_string_expand(&string_, pos, added_length, &alloc); }))
+        if (!_with_alloc([&](sz_alloc_type &alloc) { return sz_string_expand(&string_, pos, added_length, &alloc); }))
             throw std::bad_alloc();
 
         iterator result = begin() + pos;
@@ -3038,7 +3057,7 @@ class basic_string {
 
     size_type edit_distance(string_view other, size_type bound = npos) const noexcept {
         size_type distance;
-        with_alloc([&](calloc_type &alloc) {
+        _with_alloc([&](sz_alloc_type &alloc) {
             distance = sz_edit_distance(data(), size(), other.data(), other.size(), bound, &alloc);
             return true;
         });
@@ -3170,8 +3189,8 @@ bool basic_string<char_type_, allocator_>::try_resize(size_type count, value_typ
 
     // Allocate more space if needed.
     if (count >= string_space) {
-        if (!with_alloc(
-                [&](calloc_type &alloc) { return sz_string_expand(&string_, SZ_SIZE_MAX, count, &alloc) != NULL; }))
+        if (!_with_alloc(
+                [&](sz_alloc_type &alloc) { return sz_string_expand(&string_, SZ_SIZE_MAX, count, &alloc) != NULL; }))
             return false;
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
     }
@@ -3200,7 +3219,7 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
         sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
     }
     else {
-        if (!with_alloc([&](calloc_type &alloc) {
+        if (!_with_alloc([&](sz_alloc_type &alloc) {
                 string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
                 if (!string_start) return false;
                 other.copy(string_start, other.length());
@@ -3213,7 +3232,7 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
 
 template <typename char_type_, typename allocator_>
 bool basic_string<char_type_, allocator_>::try_push_back(char_type c) noexcept {
-    return with_alloc([&](calloc_type &alloc) {
+    return _with_alloc([&](sz_alloc_type &alloc) {
         auto old_size = size();
         sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, 1, &alloc);
         if (!start) return false;
@@ -3224,7 +3243,7 @@ bool basic_string<char_type_, allocator_>::try_push_back(char_type c) noexcept {
 
 template <typename char_type_, typename allocator_>
 bool basic_string<char_type_, allocator_>::try_append(const_pointer str, size_type length) noexcept {
-    return with_alloc([&](calloc_type &alloc) {
+    return _with_alloc([&](sz_alloc_type &alloc) {
         auto old_size = size();
         sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
         if (!start) return false;
@@ -3341,7 +3360,7 @@ bool basic_string<char_type_, allocator_>::try_assign(concatenation<first_type, 
         other.copy(string_start, other.length());
     }
     else {
-        if (!with_alloc([&](calloc_type &alloc) {
+        if (!_with_alloc([&](sz_alloc_type &alloc) {
                 string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
                 if (!string_start) return false;
                 other.copy(string_start, other.length());
@@ -3371,7 +3390,7 @@ bool basic_string<char_type_, allocator_>::try_preparing_replacement(size_type o
     }
     // 3. The replacement is longer than the replaced range. An allocation may occur.
     else {
-        return with_alloc([&](calloc_type &alloc) {
+        return _with_alloc([&](sz_alloc_type &alloc) {
             return sz_string_expand(&string_, offset + length, replacement_length - length, &alloc);
         });
     }
@@ -3393,18 +3412,20 @@ struct concatenation_result<first_type, following_types...> {
 
 /**
  *  @brief  Concatenates two strings into a template expression.
+ *  @see    `concatenation` class for more details.
  */
 template <typename first_type, typename second_type>
-concatenation<first_type, second_type> concatenate(first_type &&first, second_type &&second) {
+concatenation<first_type, second_type> concatenate(first_type &&first, second_type &&second) noexcept(false) {
     return {first, second};
 }
 
 /**
  *  @brief  Concatenates two or more strings into a template expression.
+ *  @see    `concatenation` class for more details.
  */
 template <typename first_type, typename second_type, typename... following_types>
 typename concatenation_result<first_type, second_type, following_types...>::type concatenate(
-    first_type &&first, second_type &&second, following_types &&...following) {
+    first_type &&first, second_type &&second, following_types &&...following) noexcept(false) {
     // Fold expression like the one below would result in faster compile times,
     // but would incur the penalty of additional `if`-statements in every `append` call.
     // Moreover, those are only supported in C++17 and later.
@@ -3417,6 +3438,101 @@ typename concatenation_result<first_type, second_type, following_types...>::type
         ashvardanian::stringzilla::concatenate(std::forward<second_type>(second),
                                                std::forward<following_types>(following)...));
 }
+
+/**
+ *  @brief  Calculates the Levenshtein edit distance between two strings.
+ *  @see    sz_edit_distance
+ */
+template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
+std::size_t edit_distance(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
+                          allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
+    std::size_t result;
+    if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
+            result = sz_edit_distance(a.data(), a.size(), b.data(), b.size(), SZ_SIZE_MAX, &alloc);
+            return result != SZ_SIZE_MAX;
+        }))
+        throw std::bad_alloc();
+    return result;
+}
+
+/**
+ *  @brief  Calculates the Levenshtein edit distance between two strings.
+ *  @see    sz_edit_distance
+ */
+template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
+std::size_t edit_distance(basic_string<char_type_, allocator_type_> const &a,
+                          basic_string<char_type_, allocator_type_> const &b) noexcept(false) {
+    return ashvardanian::stringzilla::edit_distance(a.view(), b.view(), a.get_allocator());
+}
+
+/**
+ *  @brief  Calculates the Needleman-Wunsch alignment score between two strings.
+ *  @see    sz_alignment_score
+ */
+template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
+std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
+                               std::int8_t gap, std::int8_t const (&subs)[256][256],
+                               allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
+
+    static_assert(sizeof(sz_error_cost_t) == sizeof(std::int8_t), "sz_error_cost_t must be 8-bit.");
+    static_assert(std::is_signed<sz_error_cost_t>() == std::is_signed<std::int8_t>(),
+                  "sz_error_cost_t must be signed.");
+
+    std::ptrdiff_t result;
+    if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
+            result = sz_alignment_score(a.data(), a.size(), b.data(), b.size(), gap, &subs[0][0], &alloc);
+            return result != SZ_SSIZE_MAX;
+        }))
+        throw std::bad_alloc();
+    return result;
+}
+
+/**
+ *  @brief  Calculates the Needleman-Wunsch alignment score between two strings.
+ *  @see    sz_alignment_score
+ */
+template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
+std::ptrdiff_t alignment_score(basic_string<char_type_, allocator_type_> const &a,
+                               basic_string<char_type_, allocator_type_> const &b, //
+                               std::int8_t gap, std::int8_t const (&subs)[256][256]) noexcept(false) {
+    return ashvardanian::stringzilla::alignment_score(a.view(), b.view(), gap, subs, a.get_allocator());
+}
+
+#if !SZ_AVOID_STL
+
+/**
+ *  @brief  Computes the Rabin-Karp-like rolling binary fingerprint of a string.
+ *  @see    sz_fingerprint_rolling
+ */
+template <std::size_t bitset_bits_, typename char_type_>
+void fingerprint_rolling(basic_string_slice<char_type_> const &str, std::size_t window_length,
+                         std::bitset<bitset_bits_> &fingerprint) noexcept {
+    constexpr std::size_t fingerprint_bytes = sizeof(std::bitset<bitset_bits_>);
+    return sz_fingerprint_rolling(str.data(), str.size(), window_length, (sz_ptr_t)&fingerprint, fingerprint_bytes);
+}
+
+/**
+ *  @brief  Computes the Rabin-Karp-like rolling binary fingerprint of a string.
+ *  @see    sz_fingerprint_rolling
+ */
+template <std::size_t bitset_bits_, typename char_type_>
+std::bitset<bitset_bits_> fingerprint_rolling(basic_string_slice<char_type_> const &str,
+                                              std::size_t window_length) noexcept {
+    std::bitset<bitset_bits_> fingerprint;
+    ashvardanian::stringzilla::fingerprint_rolling(str, window_length, fingerprint);
+    return fingerprint;
+}
+
+/**
+ *  @brief  Computes the Rabin-Karp-like rolling binary fingerprint of a string.
+ *  @see    sz_fingerprint_rolling
+ */
+template <std::size_t bitset_bits_, typename char_type_>
+std::bitset<bitset_bits_> fingerprint_rolling(basic_string<char_type_> const &str, std::size_t window_length) noexcept {
+    return ashvardanian::stringzilla::fingerprint_rolling<bitset_bits_>(str.view(), window_length);
+}
+
+#endif
 
 } // namespace stringzilla
 } // namespace ashvardanian
