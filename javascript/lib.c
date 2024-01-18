@@ -7,9 +7,11 @@
  *  @copyright  Copyright (c) 2023
  *  @see        NodeJS docs: https://nodejs.org/api/n-api.html
  */
+#include <stdio.h>  // `printf` for debug builds
+#include <stdlib.h> // `malloc` to export strings into UTF-8
 
-#include <node_api.h>                // `napi_*` functions
-#include <stdlib.h>                  // `malloc`
+#include <node_api.h> // `napi_*` functions
+
 #include <stringzilla/stringzilla.h> // `sz_*` functions
 
 napi_value indexOfAPI(napi_env env, napi_callback_info info) {
@@ -74,7 +76,6 @@ napi_value countAPI(napi_env env, napi_callback_info info) {
 
     size_t count = 0;
     if (needle.length == 0 || haystack.length == 0 || haystack.length < needle.length) { count = 0; }
-    else if (needle.length == 1) { count = sz_count_char(haystack.start, haystack.length, needle.start); }
     else if (overlap) {
         while (haystack.length) {
             sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);

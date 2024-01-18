@@ -188,6 +188,12 @@ Before you ship, please make sure the packaging works.
 cibuildwheel --platform linux
 ```
 
+## Contributing in JavaScript
+
+```bash
+npm ci && npm test
+```
+
 ## Roadmap
 
 The project is in its early stages of development.
