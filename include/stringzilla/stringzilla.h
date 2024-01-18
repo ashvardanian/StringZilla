@@ -2913,7 +2913,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_c
 
     while (h_length >= 32) {
         h_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + h_length - 32));
-        mask = _mm256_cmpeq_epi8_mask(h_vec.ymm, n_vec.ymm);
+        mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_vec.ymm, n_vec.ymm));
         if (mask) return h + h_length - 1 - sz_u32_clz(mask);
         h_length -= 32;
     }
