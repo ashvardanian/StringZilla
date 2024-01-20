@@ -898,16 +898,16 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_
  *  @see    https://en.wikipedia.org/wiki/Needleman%E2%80%93Wunsch_algorithm
  */
 SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                        sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
+                                        sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
                                         sz_memory_allocator_t *alloc);
 
 /** @copydoc sz_alignment_score */
 SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                               sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
+                                               sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
                                                sz_memory_allocator_t *alloc);
 /** @copydoc sz_alignment_score */
 SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                               sz_error_cost_t gap, sz_error_cost_t const *subs,                 //
+                                               sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
                                                sz_memory_allocator_t *alloc);
 
 /**
@@ -1488,7 +1488,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
         matches_even_vec = _sz_u64_each_2byte_equal(h_even_vec, n_vec);
         matches_odd_vec = _sz_u64_each_2byte_equal(h_odd_vec, n_vec);
 
-            matches_even_vec.u64 >>= 8;
+        matches_even_vec.u64 >>= 8;
         if (matches_even_vec.u64 + matches_odd_vec.u64) {
             sz_u64_t match_indicators = matches_even_vec.u64 | matches_odd_vec.u64;
             return h + sz_u64_ctz(match_indicators) / 8;
@@ -2127,7 +2127,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
 SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     sz_cptr_t longer, sz_size_t longer_length,        //
     sz_cptr_t shorter, sz_size_t shorter_length,      //
-    sz_error_cost_t gap, sz_error_cost_t const *subs, //
+    sz_error_cost_t const *subs, sz_error_cost_t gap, //
     sz_memory_allocator_t *alloc) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one
@@ -2194,7 +2194,7 @@ SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length, s
     sz_bool_t fingerprint_length_is_power_of_two = (sz_bool_t)((fingerprint_bytes & (fingerprint_bytes - 1)) != 0);
     sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint;
     if (fingerprint_length_is_power_of_two == sz_false_k) {
-            sz_size_t byte_offset = (hash / 8) % fingerprint_bytes;
+        sz_size_t byte_offset = (hash / 8) % fingerprint_bytes;
         fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
         // Compute the hash value for every window, exporting into the fingerprint,
         // using the expensive modulo operation.
@@ -2205,7 +2205,7 @@ SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length, s
         }
     }
     else {
-            sz_size_t byte_offset = (hash / 8) & (fingerprint_bytes - 1);
+        sz_size_t byte_offset = (hash / 8) & (fingerprint_bytes - 1);
         fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
         // Compute the hash value for every window, exporting into the fingerprint,
         // using a cheap bitwise-and operation to determine the byte offset
@@ -3735,9 +3735,9 @@ SZ_PUBLIC sz_size_t sz_edit_distance( //
 }
 
 SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                        sz_error_cost_t gap, sz_error_cost_t const *subs,
+                                        sz_error_cost_t const *subs, sz_error_cost_t gap,
                                         sz_memory_allocator_t *alloc) {
-    return sz_alignment_score_serial(a, a_length, b, b_length, gap, subs, alloc);
+    return sz_alignment_score_serial(a, a_length, b, b_length, subs, gap, alloc);
 }
 
 SZ_PUBLIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_ptr_t fingerprint,

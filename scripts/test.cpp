@@ -544,8 +544,8 @@ static void test_api_readonly_extensions() {
     std::vector<std::int8_t> costs_vector = unary_substitution_costs();
     matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
 
-    assert(sz::alignment_score(str("hello"), str("hello"), 1, costs) == 0);
-    assert(sz::alignment_score(str("hello"), str("hell"), 1, costs) == 1);
+    assert(sz::alignment_score(str("hello"), str("hello"), costs, 1) == 0);
+    assert(sz::alignment_score(str("hello"), str("hell"), costs, 1) == 1);
 
     // Computing rolling fingerprints.
     assert(sz::fingerprint_rolling<512>(str("hello"), 4).count() == 2);

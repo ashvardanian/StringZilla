@@ -3471,7 +3471,7 @@ std::size_t edit_distance(basic_string<char_type_, allocator_type_> const &a,
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
 std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                               std::int8_t gap, std::int8_t const (&subs)[256][256],
+                               std::int8_t const (&subs)[256][256], std::int8_t gap = 1,
                                allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
 
     static_assert(sizeof(sz_error_cost_t) == sizeof(std::int8_t), "sz_error_cost_t must be 8-bit.");
@@ -3480,7 +3480,7 @@ std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_st
 
     std::ptrdiff_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            result = sz_alignment_score(a.data(), a.size(), b.data(), b.size(), gap, &subs[0][0], &alloc);
+            result = sz_alignment_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc);
             return result != SZ_SSIZE_MAX;
         }))
         throw std::bad_alloc();
@@ -3494,8 +3494,8 @@ std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_st
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
 std::ptrdiff_t alignment_score(basic_string<char_type_, allocator_type_> const &a,
                                basic_string<char_type_, allocator_type_> const &b, //
-                               std::int8_t gap, std::int8_t const (&subs)[256][256]) noexcept(false) {
-    return ashvardanian::stringzilla::alignment_score(a.view(), b.view(), gap, subs, a.get_allocator());
+                               std::int8_t const (&subs)[256][256], std::int8_t gap = 1) noexcept(false) {
+    return ashvardanian::stringzilla::alignment_score(a.view(), b.view(), subs, gap, a.get_allocator());
 }
 
 #if !SZ_AVOID_STL

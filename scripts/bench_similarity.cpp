@@ -43,7 +43,7 @@ tracked_binary_functions_t distance_functions() {
         return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) mutable {
             sz_string_view_t a = to_c(a_str);
             sz_string_view_t b = to_c(b_str);
-            return function(a.start, a.length, b.start, b.length, 1, costs.data(), &alloc);
+            return function(a.start, a.length, b.start, b.length, costs.data(), 1, &alloc);
         });
     };
     tracked_binary_functions_t result = {
