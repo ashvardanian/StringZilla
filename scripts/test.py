@@ -216,9 +216,9 @@ def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability
     ), f"Failed to locate {pattern} at offset {native.find(pattern)} in {native}"
 
 
-@pytest.mark.parametrize("iters", [100])
+@pytest.mark.repeat(100)
 @pytest.mark.parametrize("max_edit_distance", [150])
-def test_edit_distance_insertions(max_edit_distance: int, iters: int):
+def test_edit_distance_insertions(max_edit_distance: int):
     # Create a new string by slicing and concatenating
     def insert_char_at(s, char_to_insert, index):
         return s[:index] + char_to_insert + s[index:]
@@ -229,14 +229,30 @@ def test_edit_distance_insertions(max_edit_distance: int, iters: int):
         source_offset = randint(0, len(ascii_lowercase) - 1)
         target_offset = randint(0, len(b) - 1)
         b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
-        assert sz.edit_distance(a, b, 200) == i + 1
+        assert sz.edit_distance(a, b, bound=200) == i + 1
 
 
-@pytest.mark.parametrize("iters", [100])
-def test_edit_distance_randos(iters: int):
-    a = get_random_string(length=20)
-    b = get_random_string(length=20)
-    assert sz.edit_distance(a, b, 200) == baseline_edit_distance(a, b)
+@pytest.mark.repeat(30)
+@pytest.mark.parametrize("first_length", [20, 100])
+@pytest.mark.parametrize("second_length", [20, 100])
+def test_edit_distance_random(first_length: int, second_length: int):
+    a = get_random_string(length=first_length)
+    b = get_random_string(length=second_length)
+    assert sz.edit_distance(a, b) == baseline_edit_distance(a, b)
+
+
+@pytest.mark.repeat(30)
+@pytest.mark.parametrize("first_length", [20, 100])
+@pytest.mark.parametrize("second_length", [20, 100])
+def test_alignment_score_random(first_length: int, second_length: int):
+    a = get_random_string(length=first_length)
+    b = get_random_string(length=second_length)
+    character_substitutions = np.ones((256, 256), dtype=np.int8)
+    np.fill_diagonal(character_substitutions, 0)
+
+    assert sz.alignment_score(
+        a, b, substitution_matrix=character_substitutions, gap_score=1
+    ) == baseline_edit_distance(a, b)
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
