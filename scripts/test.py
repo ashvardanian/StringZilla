@@ -43,7 +43,10 @@ def test_unit_contains():
 def test_unit_rich_comparisons():
     assert Str("aa") == "aa"
     assert Str("aa") < "b"
-    assert Str("abb")[1:] == "bb"
+    s2 = Str("abb")
+    assert s2[1:] == "bb"
+    assert s2[:-1] == "ab"
+    assert s2[-1:] == "b"
 
 
 def test_unit_buffer_protocol():
@@ -108,6 +111,28 @@ def test_unit_globals():
     assert sz.edit_distance("abababab", "aaaaaaaa", 2) == 2
     assert sz.edit_distance("abababab", "aaaaaaaa", bound=2) == 2
 
+def test_unit_len():
+    w = sz.Str("abcd")
+    assert 4 == len(w)
+
+def test_slice_of_split():
+    def impl(native_str):
+        native_split = native_str.split()
+        text = sz.Str(native_str)
+        split = text.split()
+        for split_idx in range(len(native_split)):
+            native_slice = native_split[split_idx:]
+            idx = split_idx
+            for word in split[split_idx:]:
+                assert str(word) == native_split[idx]
+                idx += 1
+    native_str = 'Weebles wobble before they fall down, don\'t they?'
+    impl(native_str)
+    # ~5GB to overflow 32-bit sizes
+    copies = int(len(native_str) / 5e9)
+    # Eek. Cover 64-bit indices
+    impl(native_str * copies) 
+ 
 
 def get_random_string(
     length: Optional[int] = None,
