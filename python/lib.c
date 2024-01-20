@@ -711,44 +711,37 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         // Depending on the layout, the procedure will be different.
         self_slice->type = self->type;
         switch (self->type) {
-        case STRS_CONSECUTIVE_32: {
-            struct consecutive_slices_32bit_t *from = &self->data.consecutive_32bit;
-            struct consecutive_slices_32bit_t *to = &self_slice->data.consecutive_32bit;
-            to->count = stop - start;
-            to->separator_length = from->separator_length;
-            to->parent = from->parent;
 
-            size_t first_length;
-            str_at_offset_consecutive_32bit(self, start, count, &to->parent, &to->start, &first_length);
-            uint32_t first_offset = to->start - from->start;
-            to->end_offsets = malloc(sizeof(uint32_t) * to->count);
-            if (to->end_offsets == NULL && PyErr_NoMemory()) {
-                Py_XDECREF(self_slice);
-                return NULL;
-            }
-            for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i] - first_offset;
-            Py_INCREF(to->parent);
+/* Usable as consecutive_logic(64bit), e.g. */
+#define consecutive_logic(type)                                                                               \
+    typedef uint64_t index_64bit_t;                                                                           \
+    typedef uint32_t index_32bit_t;                                                                           \
+    typedef index_##type##_t index_t;                                                                         \
+    typedef struct consecutive_slices_##type##_t slice_t;                                                     \
+    slice_t *from = &self->data.consecutive_##type;                                                           \
+    slice_t *to = &self_slice->data.consecutive_##type;                                                       \
+    to->count = stop - start;                                                                                 \
+    to->separator_length = from->separator_length;                                                            \
+    to->parent = from->parent;                                                                                \
+    size_t first_length;                                                                                      \
+    str_at_offset_consecutive_##type(self, start, count, &to->parent, &to->start, &first_length);             \
+    index_t first_offset = to->start - from->start;                                                           \
+    to->end_offsets = malloc(sizeof(index_t) * to->count);                                                    \
+    if (to->end_offsets == NULL && PyErr_NoMemory()) {                                                        \
+        Py_XDECREF(self_slice);                                                                               \
+        return NULL;                                                                                          \
+    }                                                                                                         \
+    for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i + start] - first_offset; \
+    Py_INCREF(to->parent);
+        case STRS_CONSECUTIVE_32: {
+            consecutive_logic(32bit);
             break;
         }
         case STRS_CONSECUTIVE_64: {
-            struct consecutive_slices_64bit_t *from = &self->data.consecutive_64bit;
-            struct consecutive_slices_64bit_t *to = &self_slice->data.consecutive_64bit;
-            to->count = stop - start;
-            to->separator_length = from->separator_length;
-            to->parent = from->parent;
-
-            size_t first_length;
-            str_at_offset_consecutive_64bit(self, start, count, &to->parent, &to->start, &first_length);
-            uint64_t first_offset = to->start - from->start;
-            to->end_offsets = malloc(sizeof(uint64_t) * to->count);
-            if (to->end_offsets == NULL && PyErr_NoMemory()) {
-                Py_XDECREF(self_slice);
-                return NULL;
-            }
-            for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i] - first_offset;
-            Py_INCREF(to->parent);
+            consecutive_logic(64bit);
             break;
         }
+#undef consecutive_logic
         case STRS_REORDERED: {
             struct reordered_slices_t *from = &self->data.reordered;
             struct reordered_slices_t *to = &self_slice->data.reordered;
