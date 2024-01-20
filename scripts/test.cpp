@@ -20,7 +20,7 @@
 // #define SZ_USE_X86_AVX512 0
 // #define SZ_USE_ARM_NEON 0
 // #define SZ_USE_ARM_SVE 0
-#define SZ_DEBUG 1
+#define SZ_DEBUG 1 // Enforce agressive logging for this unit.
 
 #include <string>                      // Baseline
 #include <string_view>                 // Baseline
@@ -200,6 +200,7 @@ static void test_api_readonly() {
     assert(str("hello").rfind("l") == 3);
     assert(str("hello").rfind("l", 2) == 2);
     assert(str("hello").rfind("l", 1) == str::npos);
+    assert(str("abbabbaaaaaa").find("aa") == 6);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);
@@ -500,27 +501,64 @@ static void test_stl_conversion_api() {
 }
 
 /**
- *  @brief  Invokes different C++ member methods of immutable strings to cover extensions beyond the
- *          STL API.
+ *  @brief  Invokes different C++ member methods of immutable strings to cover
+ *          extensions beyond the STL API.
  */
 template <typename string_type>
 static void test_api_readonly_extensions() {
-    assert("hello"_sz.sat(0) == 'h');
-    assert("hello"_sz.sat(-1) == 'o');
-    assert("hello"_sz.sub(1) == "ello");
-    assert("hello"_sz.sub(-1) == "o");
-    assert("hello"_sz.sub(1, 2) == "e");
-    assert("hello"_sz.sub(1, 100) == "ello");
-    assert("hello"_sz.sub(100, 100) == "");
-    assert("hello"_sz.sub(-2, -1) == "l");
-    assert("hello"_sz.sub(-2, -2) == "");
-    assert("hello"_sz.sub(100, -100) == "");
+    using str = string_type;
 
-    assert(("hello"_sz[{1, 2}] == "e"));
-    assert(("hello"_sz[{1, 100}] == "ello"));
-    assert(("hello"_sz[{100, 100}] == ""));
-    assert(("hello"_sz[{100, -100}] == ""));
-    assert(("hello"_sz[{-100, -100}] == ""));
+    // Signed offset lokups and slices.
+    assert(str("hello").sat(0) == 'h');
+    assert(str("hello").sat(-1) == 'o');
+    assert(str("hello").sub(1) == "ello");
+    assert(str("hello").sub(-1) == "o");
+    assert(str("hello").sub(1, 2) == "e");
+    assert(str("hello").sub(1, 100) == "ello");
+    assert(str("hello").sub(100, 100) == "");
+    assert(str("hello").sub(-2, -1) == "l");
+    assert(str("hello").sub(-2, -2) == "");
+    assert(str("hello").sub(100, -100) == "");
+
+    // Passing initializer lists to `operator[]`.
+    // Put extra braces to correctly estimate the number of macro arguments :)
+    assert((str("hello")[{1, 2}] == "e"));
+    assert((str("hello")[{1, 100}] == "ello"));
+    assert((str("hello")[{100, 100}] == ""));
+    assert((str("hello")[{100, -100}] == ""));
+    assert((str("hello")[{-100, -100}] == ""));
+
+    // Computing edit-distances.
+    assert(sz::edit_distance(str("hello"), str("hello")) == 0);
+    assert(sz::edit_distance(str("hello"), str("hell")) == 1);
+    assert(sz::edit_distance(str(""), str("")) == 0);
+    assert(sz::edit_distance(str(""), str("abc")) == 3);
+    assert(sz::edit_distance(str("abc"), str("")) == 3);
+    assert(sz::edit_distance(str("abc"), str("ac")) == 1);                   // one deletion
+    assert(sz::edit_distance(str("abc"), str("a_bc")) == 1);                 // one insertion
+    assert(sz::edit_distance(str("abc"), str("adc")) == 1);                  // one substitution
+    assert(sz::edit_distance(str("ggbuzgjux{}l"), str("gbuzgjux{}l")) == 1); // one insertion (prepended)
+
+    // Computing alignment scores.
+    using matrix_t = std::int8_t[256][256];
+    std::vector<std::int8_t> costs_vector = unary_substitution_costs();
+    matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
+
+    assert(sz::alignment_score(str("hello"), str("hello"), 1, costs) == 0);
+    assert(sz::alignment_score(str("hello"), str("hell"), 1, costs) == 1);
+
+    // Computing rolling fingerprints.
+    assert(sz::fingerprint_rolling<512>(str("hello"), 4).count() == 2);
+    assert(sz::fingerprint_rolling<512>(str("hello"), 3).count() == 3);
+
+    // No matter how many times one repeats a character, the hash should only contain at most one set bit.
+    assert(sz::fingerprint_rolling<512>(str("a"), 3).count() == 0);
+    assert(sz::fingerprint_rolling<512>(str("aa"), 3).count() == 0);
+    assert(sz::fingerprint_rolling<512>(str("aaa"), 3).count() == 1);
+    assert(sz::fingerprint_rolling<512>(str("aaaa"), 3).count() == 1);
+    assert(sz::fingerprint_rolling<512>(str("aaaaa"), 3).count() == 1);
+
+    // Computing fuzzy search results.
 }
 
 void test_api_mutable_extensions() {
@@ -1103,7 +1141,7 @@ int main(int argc, char const **argv) {
     test_arithmetical_utilities();
     test_memory_utilities();
 
-    // Compatibility with STL
+// Compatibility with STL
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
     test_api_readonly<std::string_view>();
 #endif

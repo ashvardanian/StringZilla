@@ -45,6 +45,13 @@ inline std::size_t levenshtein_baseline(std::string_view s1, std::string_view s2
     return dp[len1][len2];
 }
 
+inline std::vector<std::int8_t> unary_substitution_costs() {
+    std::vector<sz_error_cost_t> result(256 * 256);
+    for (std::size_t i = 0; i != 256; ++i)
+        for (std::size_t j = 0; j != 256; ++j) result[i * 256 + j] = (i == j ? 0 : 1);
+    return result;
+}
+
 } // namespace scripts
 } // namespace stringzilla
 } // namespace ashvardanian

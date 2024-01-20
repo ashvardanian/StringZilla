@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.1)
 project(
   stringzilla
   VERSION 0.1.0
-  LANGUAGES C CXX)
+  LANGUAGES C CXX
+  DESCRIPTION "A fast and modern C/C++ library for string manipulation"
+  HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla")
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 17)
@@ -27,13 +29,15 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(STRINGZILLA_IS_MAIN_PROJECT ON)
 endif()
 
-# Options
+# Installation options
 option(STRINGZILLA_INSTALL "Install CMake targets" OFF)
 option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++"
   ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_BENCHMARK "Compile a native benchmark in C++"
   ${STRINGZILLA_IS_MAIN_PROJECT})
-set(STRINGZILLA_TARGET_ARCH "" CACHE STRING "Architecture to tell gcc to optimize for (-march)")
+set(STRINGZILLA_TARGET_ARCH
+  ""
+  CACHE STRING "Architecture to tell the compiler to optimize for (-march)")
 
 # Includes
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
@@ -53,17 +57,13 @@ set(STRINGZILLA_INCLUDE_BUILD_DIR "${PROJECT_SOURCE_DIR}/include/")
 
 # Define our library
 add_library(${STRINGZILLA_TARGET_NAME} INTERFACE)
+add_library(${PROJECT_NAME}::${STRINGZILLA_TARGET_NAME} ALIAS ${STRINGZILLA_TARGET_NAME})
 
 target_include_directories(
   ${STRINGZILLA_TARGET_NAME}
   INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}>
   $<INSTALL_INTERFACE:include>)
 
-# Conditional Compilation for Specialized Implementations
-# check_c_source_compiles(" #include <immintrin.h> int main() { __m256i v =
-# _mm256_set1_epi32(0); return 0; }" STRINGZILLA_HAS_AVX2)
-# if(STRINGZILLA_HAS_AVX2) target_sources(${STRINGZILLA_TARGET_NAME} PRIVATE
-# "src/avx2.c") endif()
 if(STRINGZILLA_INSTALL)
   install(
     TARGETS ${STRINGZILLA_TARGET_NAME}
@@ -92,44 +92,48 @@ function(set_compiler_flags target cpp_standard)
   # Set the C++ standard
   target_compile_features(${target} PUBLIC cxx_std_${cpp_standard})
 
-  # Maximum warnings level & warnings as error
-  # Allow unknown pragmas
-  target_compile_options(${target} PRIVATE
+  # Maximum warnings level & warnings as error Allow unknown pragmas
+  target_compile_options(
+    ${target}
+    PRIVATE
     "$<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>" # For MSVC, /WX is sufficient
     "$<$<CXX_COMPILER_ID:GNU>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function>"
     "$<$<CXX_COMPILER_ID:Clang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
-    "$<$<CXX_COMPILER_ID:AppleClang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>")
+    "$<$<CXX_COMPILER_ID:AppleClang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
+  )
 
   # Set optimization options for different compilers differently
-  target_compile_options(${target} PRIVATE
+  target_compile_options(
+    ${target}
+    PRIVATE
     "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<CONFIG:Release>>:-O3>"
     "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-g>"
-
     "$<$<AND:$<CXX_COMPILER_ID:Clang>,$<CONFIG:Release>>:-O3>"
     "$<$<AND:$<CXX_COMPILER_ID:Clang>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-g>"
-
     "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>"
     "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/Zi>"
   )
 
-  # Check for STRINGZILLA_TARGET_ARCH and set it or use "march=native" if not defined
+  # Check for STRINGZILLA_TARGET_ARCH and set it or use "march=native"
+  # if not defined
   if(STRINGZILLA_TARGET_ARCH STREQUAL "")
     # MSVC does not have a direct equivalent to -march=native
-    target_compile_options(${target} PRIVATE
-      "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=native>"
-    )
+    target_compile_options(
+      ${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=native>")
   else()
-    target_compile_options(${target} PRIVATE
+    target_compile_options(
+      ${target}
+      PRIVATE
       "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=${STRINGZILLA_TARGET_ARCH}>"
-      "$<$<CXX_COMPILER_ID:MSVC>:/arch:${STRINGZILLA_TARGET_ARCH}>"
-    )
+      "$<$<CXX_COMPILER_ID:MSVC>:/arch:${STRINGZILLA_TARGET_ARCH}>")
 
     # Sanitizer options for Debug mode
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-      target_compile_options(${target} PRIVATE
+      target_compile_options(
+        ${target}
+        PRIVATE
         "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=address;-fsanitize=leak>"
-        "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>"
-      )
+        "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
     endif()
   endif()
 endfunction()
