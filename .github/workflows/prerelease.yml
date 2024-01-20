@@ -27,12 +27,32 @@ jobs:
       - uses: actions/checkout@v3
 
         # C/C++
+        # If the compilation fails, we want to log the compilation commands in addition to
+        # the standard output.
       - name: Build C/C++
         run: |
           sudo apt update
           sudo apt install -y cmake build-essential libjemalloc-dev libomp-dev gcc-12 g++-12
-          cmake -B build_artifacts -DCMAKE_BUILD_TYPE=RelWithDebInfo -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_TEST=1
-          cmake --build build_artifacts --config RelWithDebInfo
+          
+          cmake -B build_artifacts \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+            -DSTRINGZILLA_BUILD_TEST=1
+
+          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
+            echo "Compilation failed. Here are the logs:"
+            cat build_artifacts/logs.txt
+            echo "The original compilation commands:"
+            cat build_artifacts/compile_commands.json
+            echo "CPU Features:"
+            lscpu
+            echo "GCC Version:"
+            gcc-12 --version
+            echo "G++ Version:"
+            g++-12 --version
+            exit 1
+          }      
       - name: Test C++
         run: ./build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data

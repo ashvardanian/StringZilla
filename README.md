@@ -589,18 +589,38 @@ std::unordered_map<sz::string, int> words;
 
 __`SZ_DEBUG`__:
 
-> For maximal performance, the library does not perform any bounds checking in Release builds.
-> That behavior is controllable for both C and C++ interfaces via the `SZ_DEBUG` macro.
+> For maximal performance, the C library does not perform any bounds checking in Release builds.
+> In C++, bounds checking happens only in places where the STL `std::string` would do it.
+> If you want to enable more agressive bounds-checking, define `SZ_DEBUG` before including the header.
+> If not explicitly set, it will be inferred from the build type.
 
-__`SZ_USE_X86_AVX512`, `SZ_USE_ARM_NEON`__:
+__`SZ_USE_X86_AVX512`, `SZ_USE_X86_AVX2`, `SZ_USE_ARM_NEON`__:
 
 > One can explicitly disable certain families of SIMD instructions for compatibility purposes.
 > Default values are inferred at compile time.
 
-__`SZ_INCLUDE_STL_CONVERSIONS`__:
+__`SZ_DYNAMIC_DISPATCH`__:
+
+> By default, StringZilla is a header-only library.
+> But if you are running on different generations of devices, it makes sense to pre-compile the library for all supported generations at once, and dispatch at runtime.
+> This flag does just that and is used to produce the `stringzilla.so` shared library, as well as the Python bindings.
+
+__`SZ_USE_MISALIGNED_LOADS`__:
+
+> By default, StringZilla avoids misaligned loads.
+> If supported, it replaces many byte-level operations with word-level ones.
+> Going from `char`-like types to `uint64_t`-like ones can significanly accelerate the serial (SWAR) backend.
+> So consider enabling it if you are building for some embedded device.
+
+__`SZ_AVOID_STL`__:
 
 > When using the C++ interface one can disable conversions from `std::string` to `sz::string` and back.
 > If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
+
+__`STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
+
+> When compiling the tests and benchmarks, you can explicitly set the target hardware architecture.
+> It's synonymous to GCC's `-march` flag and is used to enable/disable the appropriate instruction sets.
 
 ## Algorithms & Design Decisions 📚
 

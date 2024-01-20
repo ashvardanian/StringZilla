@@ -17,10 +17,11 @@ substr_search_cpp
 *.egg-info
 *.whl
 *.pyd
+.venv/*
 node_modules/
 
 # Recommended datasets
 leipzig1M.txt
+enwik9.txt
 xlsum.csv
 enwik9
-.venv/*
