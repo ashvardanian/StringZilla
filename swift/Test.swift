@@ -6,13 +6,19 @@
 //
 
 import Foundation
-import StringZilla
+import StringZillaSwift
 import XCTest
 
 @available(iOS 13, macOS 10.15, tvOS 13.0, watchOS 6.0, *)
 class Test: XCTestCase {
     func testUnit() throws {
-        let str = "Hello, playground, playground, playground"
-        assert(str.find("play") == 7)
+        var str = "Hello, playground, playground, playground"
+        if let index = str.find("play") {
+            let position = str.distance(from: str.startIndex, to: index)
+            assert(position == 7)
+        } else {
+            assert(false, "Failed to find the substring")
+        }
+        print("StringZilla Swift test passed 🎉")
     }
 }
