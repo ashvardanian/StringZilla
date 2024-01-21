@@ -194,6 +194,13 @@ cibuildwheel --platform linux
 npm ci && npm test
 ```
 
+## Contributing in Swift
+
+```bash
+swift build
+swift test
+```
+
 ## Roadmap
 
 The project is in its early stages of development.

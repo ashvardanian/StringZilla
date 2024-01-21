@@ -227,6 +227,9 @@
 #endif
 
 #if SZ_DEBUG
+#undef NULL         // `NULL` will come from following headers.
+#include <stdio.h>  // `fprintf`
+#include <stdlib.h> // `EXIT_FAILURE`
 #define sz_assert(condition)                                                                                \
     do {                                                                                                    \
         if (!(condition)) {                                                                                 \

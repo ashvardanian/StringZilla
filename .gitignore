@@ -1,6 +1,8 @@
 build/
 build_debug/
 .DS_Store
+.build/
+.swiftpm/
 tmp/
 build_debug/
 build_release/
