@@ -1,41 +1,27 @@
 // swift-tools-version:5.3
-
 import PackageDescription
 
 let package = Package(
     name: "StringZilla",
     products: [
-        .library(
-            name: "StringZilla",
-            targets: ["StringZilla", "StringZillaC"]
-        )
+        .library(name: "StringZilla", targets: ["StringZillaC", "StringZillaSwift"])
     ],
-    dependencies: [],
     targets: [
         .target(
             name: "StringZillaC",
-            dependencies: [],
-            path: "swift",
-            sources: ["SwiftPackageManager.c"],
-            publicHeadersPath: "./include/",
-            cSettings: [
-                .headerSearchPath("./include/"),
-                .define("SZ_PUBLIC", to: ""),
-                .define("SZ_DEBUG", to: "0")
-            ]
+            path: "include/stringzilla",
+            publicHeadersPath: "."
         ),
         .target(
-            name: "StringZilla",
+            name: "StringZillaSwift",
             dependencies: ["StringZillaC"],
             path: "swift",
-            exclude: ["Test.swift", "SwiftPackageManager.c"],
-            sources: ["StringProtocol+StringZilla.swift"]
+            exclude: ["Test.swift"]
         ),
         .testTarget(
             name: "StringZillaTests",
-            dependencies: ["StringZilla"],
+            dependencies: ["StringZillaSwift"],
             path: "swift",
-            exclude: ["StringProtocol+StringZilla.swift", "SwiftPackageManager.c"],
             sources: ["Test.swift"]
         )
     ],
