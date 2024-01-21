@@ -46,18 +46,26 @@ SZ_DYNAMIC sz_capability_t sz_capabilities() {
     // Check for AVX512F (Function ID 7, EBX register)
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L155
     unsigned supports_avx512f = (info7.named.ebx & 0x00010000) != 0;
+    // Check for AVX512BW (Function ID 7, EBX register)
+    // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L166
+    unsigned supports_avx512bw = (info7.named.ebx & 0x40000000) != 0;
     // Check for AVX512VL (Function ID 7, EBX register)
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L167C25-L167C35
     unsigned supports_avx512vl = (info7.named.ebx & 0x80000000) != 0;
     // Check for GFNI (Function ID 1, ECX register)
+    // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L171C30-L171C40
+    unsigned supports_avx512vbmi = (info1.named.ecx & 0x00000002) != 0;
+    // Check for GFNI (Function ID 1, ECX register)
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L177C30-L177C40
-    unsigned supports_avx512gfni = (info1.named.ecx & 0x00000100) != 0;
+    unsigned supports_gfni = (info1.named.ecx & 0x00000100) != 0;
 
-    return (sz_capability_t)(                               //
-        (sz_cap_x86_avx2_k * supports_avx2) |               //
-        (sz_cap_x86_avx512_k * supports_avx512f) |          //
-        (sz_cap_x86_avx512vl_k * supports_avx512vl) |       //
-        (sz_cap_x86_avx512gfni_k * (supports_avx512gfni)) | //
+    return (sz_capability_t)(                             //
+        (sz_cap_x86_avx2_k * supports_avx2) |             //
+        (sz_cap_x86_avx512f_k * supports_avx512f) |       //
+        (sz_cap_x86_avx512vl_k * supports_avx512vl) |     //
+        (sz_cap_x86_avx512bw_k * supports_avx512bw) |     //
+        (sz_cap_x86_avx512vbmi_k * supports_avx512vbmi) | //
+        (sz_cap_x86_gfni_k * (supports_gfni)) |           //
         (sz_cap_serial_k));
 
 #endif // SIMSIMD_TARGET_X86
@@ -139,7 +147,7 @@ static void sz_dispatch_table_init() {
 #endif
 
 #if SZ_USE_X86_AVX512
-    if (caps & sz_cap_x86_avx512_k) {
+    if (caps & sz_cap_x86_avx512f_k) {
         impl->equal = sz_equal_avx512;
         impl->order = sz_order_avx512;
         impl->copy = sz_copy_avx512;
@@ -151,7 +159,8 @@ static void sz_dispatch_table_init() {
         impl->find_last = sz_find_last_avx512;
     }
 
-    if ((caps & sz_cap_x86_avx512_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_avx512gfni_k)) {
+    if ((caps & sz_cap_x86_avx512f_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_gfni_k) &&
+        (caps & sz_cap_x86_avx512bw_k) && (caps & sz_cap_x86_avx512vbmi_k)) {
         impl->find_first_from_set = sz_find_from_set_avx512;
         impl->find_last_from_set = sz_find_last_from_set_avx512;
     }

@@ -335,9 +335,11 @@ typedef enum sz_capability_t {
     sz_cap_arm_sve_k = 1 << 11,  ///< ARM SVE capability TODO: Not yet supported or used
 
     sz_cap_x86_avx2_k = 1 << 20,       ///< x86 AVX2 capability
-    sz_cap_x86_avx512_k = 1 << 21,     ///< x86 AVX512 capability
-    sz_cap_x86_avx512vl_k = 1 << 22,   ///< x86 AVX512 VL instruction capability
-    sz_cap_x86_avx512gfni_k = 1 << 23, ///< x86 AVX512 GFNI instruction capability
+    sz_cap_x86_avx512f_k = 1 << 21,    ///< x86 AVX512 F capability
+    sz_cap_x86_avx512bw_k = 1 << 22,   ///< x86 AVX512 BW instruction capability
+    sz_cap_x86_avx512vl_k = 1 << 23,   ///< x86 AVX512 VL instruction capability
+    sz_cap_x86_avx512vbmi_k = 1 << 24, ///< x86 AVX512 VBMI instruction capability
+    sz_cap_x86_gfni_k = 1 << 25,       ///< x86 AVX512 GFNI instruction capability
 
 } sz_capability_t;
 
@@ -2956,7 +2958,7 @@ SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequ
 #if SZ_USE_X86_AVX2
 #pragma GCC push_options
 #pragma GCC target("avx2")
-#pragma clang attribute push (__attribute__((target("avx2"))), apply_to=function)
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 #include <x86intrin.h>
 
 /**
@@ -3097,8 +3099,8 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
 
 #if SZ_USE_X86_AVX512
 #pragma GCC push_options
-#pragma GCC target("avx512f", "avx512vl", "bmi2")
-#pragma clang attribute push (__attribute__((target("avx512f,avx512vl,bmi2"))), apply_to=function)
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
 #include <x86intrin.h>
 
 /**
@@ -3371,6 +3373,14 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
 
     return NULL;
 }
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512vbmi", "bmi", "bmi2", "gfni")
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512vbmi,bmi,bmi2,gfni"))), \
+                             apply_to = function)
 
 SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *filter) {
 
