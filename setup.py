@@ -50,9 +50,7 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
     ]
 
-    if is_64bit_x86():
-        compile_args.append("-march=sapphirerapids")
-    elif is_64bit_arm():
+    if is_64bit_arm():
         compile_args.append("-march=armv8-a+simd")
 
     return compile_args, link_args, macros_args
@@ -90,7 +88,7 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     if is_64bit_x86():
         compile_args.append("-march=skylake")
     # None of Apple products support SVE instructions for now.
-    elif is_64bit_arm():
+    if is_64bit_arm():
         compile_args.append("-march=armv8-a+simd")
 
     return compile_args, link_args, macros_args
