@@ -188,6 +188,16 @@ Before you ship, please make sure the packaging works.
 cibuildwheel --platform linux
 ```
 
+## Contributing in Rust
+
+StringZilla provides Rust bindings available on Crates.io.
+The compilation settings are controlled by the build.rs and are independent from CMake used for C/C++ builds.
+
+```sh
+cargo test -p stringzilla
+cargo publish
+```
+
 ## Contributing in JavaScript
 
 ```bash
