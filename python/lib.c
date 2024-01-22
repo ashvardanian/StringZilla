@@ -874,7 +874,7 @@ static int _Str_find_implementation_( //
     // Perform contains operation
     sz_cptr_t match = finder(haystack.start, haystack.length, needle.start, needle.length);
     if (match == NULL) { *offset_out = -1; }
-    else { *offset_out = (Py_ssize_t)(match - haystack.start); }
+    else { *offset_out = (Py_ssize_t)(match - haystack.start + normalized_offset); }
 
     *haystack_out = haystack;
     *needle_out = needle;
@@ -1294,7 +1294,7 @@ static sz_cptr_t _sz_find_first_of_string_members(sz_cptr_t h, sz_size_t h_lengt
     sz_u8_set_t set;
     sz_u8_set_init(&set);
     for (; n_length; ++n, --n_length) sz_u8_set_add(&set, *n);
-    return sz_find_last_from_set(h, h_length, &set);
+    return sz_find_from_set(h, h_length, &set);
 }
 
 static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -1313,7 +1313,7 @@ static sz_cptr_t _sz_find_first_not_of_string_members(sz_cptr_t h, sz_size_t h_l
     sz_u8_set_init(&set);
     for (; n_length; ++n, --n_length) sz_u8_set_add(&set, *n);
     sz_u8_set_invert(&set);
-    return sz_find_last_from_set(h, h_length, &set);
+    return sz_find_from_set(h, h_length, &set);
 }
 
 static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject *kwargs) {
