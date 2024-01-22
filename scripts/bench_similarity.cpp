@@ -72,8 +72,12 @@ void bench_similarity_on_bio_data() {
         std::size_t length_upper_bound;
         char const *name;
     } bio_cases[] = {
-        {60, 60, "60 aminoacids"},       {100, 100, "100 aminoacids"},       {300, 300, "300 aminoacids"},
-        {1000, 1000, "1000 aminoacids"}, {100, 1000, "100-1000 aminoacids"}, {1000, 10000, "1000-10000 aminoacids"},
+        {60, 60, "60 aminoacids"},              //
+        {100, 100, "100 aminoacids"},           //
+        {300, 300, "300 aminoacids"},           //
+        {1000, 1000, "1000 aminoacids"},        //
+        {100, 1000, "100-1000 aminoacids"},     //
+        {1000, 10000, "1000-10000 aminoacids"}, //
     };
     std::random_device random_device;
     std::mt19937 generator(random_device());
