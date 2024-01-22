@@ -111,9 +111,11 @@ def test_unit_globals():
     assert sz.edit_distance("abababab", "aaaaaaaa", 2) == 2
     assert sz.edit_distance("abababab", "aaaaaaaa", bound=2) == 2
 
+
 def test_unit_len():
     w = sz.Str("abcd")
     assert 4 == len(w)
+
 
 def test_slice_of_split():
     def impl(native_str):
@@ -126,13 +128,14 @@ def test_slice_of_split():
             for word in split[split_idx:]:
                 assert str(word) == native_split[idx]
                 idx += 1
-    native_str = 'Weebles wobble before they fall down, don\'t they?'
+
+    native_str = "Weebles wobble before they fall down, don't they?"
     impl(native_str)
     # ~5GB to overflow 32-bit sizes
     copies = int(len(native_str) / 5e9)
     # Eek. Cover 64-bit indices
-    impl(native_str * copies) 
- 
+    impl(native_str * copies)
+
 
 def get_random_string(
     length: Optional[int] = None,
@@ -197,8 +200,18 @@ def check_identical(
     present_in_big = needle in big
     assert present_in_native == present_in_big
     assert native.find(needle) == big.find(needle)
+    assert native.rfind(needle) == big.rfind(needle)
     assert native.count(needle) == big.count(needle)
 
+    # Check that the `start` and `stop` positions are correctly inferred
+    len_half = len(native) // 2
+    len_quarter = len(native) // 4
+    assert native.find(needle, len_half) == big.find(needle, len_half)
+    assert native.find(needle, len_quarter, 3 * len_quarter) == big.find(
+        needle, len_quarter, 3 * len_quarter
+    )
+
+    # Check splits and other sequence operations
     native_strings = native.split(needle)
     big_strings: Strs = big.split(needle)
     assert len(native_strings) == len(big_strings)

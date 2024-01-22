@@ -1472,7 +1472,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
 #if !SZ_USE_MISALIGNED_LOADS
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
+    for (; ((sz_size_t)h & 7ull) && h + 2 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
 #endif
 
@@ -1526,7 +1526,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
 #if !SZ_USE_MISALIGNED_LOADS
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
+    for (; ((sz_size_t)h & 7ull) && h + 4 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
 #endif
 
@@ -1590,7 +1590,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
 #if !SZ_USE_MISALIGNED_LOADS
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
+    for (; ((sz_size_t)h & 7ull) && h + 3 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
 #endif
 
@@ -1643,6 +1643,22 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h
                                                         sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
+
+    // Here is our baseline:
+    //
+    //      sz_u8_t running_match = 0xFF;
+    //      sz_u8_t character_position_masks[256];
+    //      for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFF; }
+    //      for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1u << i); }
+    //      for (sz_size_t i = 0; i < h_length; ++i) {
+    //          running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
+    //          if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
+    //      }
+    //
+    // On very short patterns, however, every tiny condition may have a huge affect on performance.
+    // 1. Let's combine the first `n_length - 1` passes of the last loop into the previous loop.
+    // 2. Let's replace byte-level intialization of `character_position_masks` with 64-bit ops.
+
     sz_u8_t running_match = 0xFF;
     sz_u8_t character_position_masks[256];
     for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFF; }
