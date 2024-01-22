@@ -714,8 +714,6 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
 /* Usable as consecutive_logic(64bit), e.g. */
 #define consecutive_logic(type)                                                                               \
-    typedef uint64_t index_64bit_t;                                                                           \
-    typedef uint32_t index_32bit_t;                                                                           \
     typedef index_##type##_t index_t;                                                                         \
     typedef struct consecutive_slices_##type##_t slice_t;                                                     \
     slice_t *from = &self->data.consecutive_##type;                                                           \
@@ -734,10 +732,12 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
     for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i + start] - first_offset; \
     Py_INCREF(to->parent);
         case STRS_CONSECUTIVE_32: {
+            typedef uint32_t index_32bit_t;
             consecutive_logic(32bit);
             break;
         }
         case STRS_CONSECUTIVE_64: {
+            typedef uint64_t index_64bit_t;
             consecutive_logic(64bit);
             break;
         }
@@ -1981,7 +1981,7 @@ static PyMethodDef stringzilla_methods[] = {
 static PyModuleDef stringzilla_module = {
     PyModuleDef_HEAD_INIT,
     "stringzilla",
-    "Crunch 100+ GB Strings in Python with ease",
+    "Crunch multi-gigabyte strings with ease",
     -1,
     stringzilla_methods,
     NULL,
@@ -2001,6 +2001,29 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     m = PyModule_Create(&stringzilla_module);
     if (m == NULL) return NULL;
+
+    // Add version metadata
+    {
+        char version_str[50];
+        sprintf(version_str, "%d.%d.%d", STRINGZILLA_VERSION_MAJOR, STRINGZILLA_VERSION_MINOR,
+                STRINGZILLA_VERSION_PATCH);
+        PyModule_AddStringConstant(m, "__version__", version_str);
+    }
+
+    // Define SIMD capabilities
+    {
+        sz_capability_t caps = sz_capabilities();
+        char caps_str[512];
+        char const *serial = (caps & sz_cap_serial_k) ? "serial," : "";
+        char const *neon = (caps & sz_cap_arm_neon_k) ? "neon," : "";
+        char const *sve = (caps & sz_cap_arm_sve_k) ? "sve," : "";
+        char const *avx2 = (caps & sz_cap_x86_avx2_k) ? "avx2," : "";
+        char const *avx512 = (caps & sz_cap_x86_avx512_k) ? "avx512," : "";
+        char const *avx512vl = (caps & sz_cap_x86_avx512vl_k) ? "avx512vl," : "";
+        char const *avx512gfni = (caps & sz_cap_x86_avx512gfni_k) ? "avx512gfni," : "";
+        sprintf(caps_str, "%s%s%s%s%s%s%s", serial, neon, sve, avx2, avx512, avx512vl, avx512gfni);
+        PyModule_AddStringConstant(m, "__capabilities__", caps_str);
+    }
 
     Py_INCREF(&StrType);
     if (PyModule_AddObject(m, "Str", (PyObject *)&StrType) < 0) {

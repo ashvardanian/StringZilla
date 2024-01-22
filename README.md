@@ -10,18 +10,86 @@ Aside from exact search, the library also accelerates fuzzy search, edit distanc
 - Code in C? Replace LibC's `<string.h>` with C 99 `<stringzilla.h>`  - [_more_](#quick-start-c-🛠️)
 - Code in C++? Replace STL's `<string>` with C++ 11 `<stringzilla.hpp>` - [_more_](#quick-start-cpp-🛠️)
 - Code in Python? Upgrade your `str` to faster `Str` - [_more_](#quick-start-python-🐍)
+- Code in Swift? Use the `String+StringZilla` extension - [_more_](#quick-start-swift-🍎)
 - Code in other languages? Let us know!
 
-__Features:__
+StringZilla has a lot of functionality, but first, let's make sure it can handle the basics.
 
-| Feature \ Library              | C++ STL |    LibC |      StringZilla |
-| :----------------------------- | ------: | ------: | ---------------: |
-| Substring Search               |  1 GB/s | 12 GB/s |          12 GB/s |
-| Reverse Order Substring Search |  1 GB/s |       ❌ |          12 GB/s |
-| Fuzzy Search                   |       ❌ |       ❌ |                ? |
-| Levenshtein Edit Distance      |       ❌ |       ❌ |                ✅ |
-| Hashing                        |       ✅ |       ❌ |                ✅ |
-| Interface                      |     C++ |       C | C , C++ , Python |
+<table border="1" style="width: 100%; text-align: center; table-layout: fixed;">
+  <colgroup>
+    <col style="width: 25%;">
+    <col style="width: 25%;">
+    <col style="width: 25%;">
+    <col style="width: 25%;">
+  </colgroup>
+  <tr>
+    <th>LibC</th>
+    <th>C++ Standard</th>
+    <th>Python</th>
+    <th>Stringzilla</th>
+  </tr>
+  <!-- Substrings, normal order -->
+  <tr>
+    <td colspan="4">find the first occurrence of a random word from text, ≅ 5 bytes long</td>
+  </tr>
+  <tr>
+    <td><code>strstr</code> <sup>1</sup><br/>7.4 GB/s on x86<br>2.0 GB/s on Arm</td>
+    <td><code>.find</code><br/>2.9 GB/s on x86<br>1.6 GB/s on Arm</td>
+    <td><code>.find</code><br/>1.1 GB/s on x86<br>0.6 GB/s on Arm</td>
+    <td><code>sz_find</code><br/>10.6 GB/s on x86<br>7.1 GB/s on Arm</td>
+  </tr>
+  <!-- Substrings, reverse order -->
+  <tr>
+    <td colspan="4">find the last occurrence of a random word from text, ≅ 5 bytes long</td>
+  </tr>
+  <tr>
+    <td>❌</td>
+    <td><code>.rfind</code><br/>0.5 GB/s on x86<br>0.4 GB/s on Arm</td>
+    <td><code>.rfind</code><br/>0.9 GB/s on x86<br>0.5 GB/s on Arm</td>
+    <td><code>sz_find_last</code><br/>10.8 GB/s on x86<br>6.7 GB/s on Arm</td>
+  </tr>
+  <!-- Characters, normal order -->
+  <tr>
+    <td colspan="4">find the first occurrence of any of 6 whitespaces <sup>2</sup></td>
+  </tr>
+  <tr>
+    <td><code>strcspn</code> <sup>1</sup><br/>0.74 GB/s on x86<br>0.29 GB/s on Arm</td>
+    <td><code>.find_first_of</code><br/>0.25 GB/s on x86<br>0.23 GB/s on Arm</td>
+    <td><code>re.finditer</code><br/>0.06 GB/s on x86<br>0.02 GB/s on Arm</td>
+    <td><code>sz_find_from_set</code><br/>0.43 GB/s on x86<br>0.23 GB/s on Arm</td>
+  </tr>
+  <!-- Characters, reverse order -->
+  <tr>
+    <td colspan="4">find the last occurrence of any of 6 whitespaces <sup>2</sup></td>
+  </tr>
+  <tr>
+    <td>❌</td>
+    <td><code>.find_last_of</code><br/>0.25 GB/s on x86<br>0.25 GB/s on Arm</td>
+    <td>❌</td>
+    <td><code>sz_find_last_from_set</code><br/>0.43 GB/s on x86<br>0.23 GB/s on Arm</td>
+  </tr>
+  <!-- Edit Distance -->
+  <tr>
+    <td colspan="4">Levenshtein edit distance, ≅ 5 bytes long</td>
+  </tr>
+  <tr>
+    <td>❌</td>
+    <td>❌</td>
+    <td>custom <sup>3</sup></td>
+    <td><code>sz_edit_distance</code><br/>99 ns on x86<br>180 ns on Arm</td>
+  </tr>
+  <!-- Alignment Score -->
+  <tr>
+    <td colspan="4">Needleman-Wunsh alignment scores, ≅ 300 aminoacids long</td>
+  </tr>
+  <tr>
+    <td>❌</td>
+    <td>❌</td>
+    <td>custom <sup>4</sup></td>
+    <td><code>sz_alignment_score</code><br/>73 ms on x86<br>177 ms on Arm</td>
+  </tr>
+
+</table>
 
 > Benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
 > The hardware used is an AVX-512 capable Intel Sapphire Rapids CPU.
@@ -228,7 +296,7 @@ auto b = "some string"_sz; // sz::string_view
 
 Most operations in StringZilla don't assume any memory ownership.
 But in addition to the read-only search-like operations StringZilla provides a minimalistic C and C++ implementations for a memory owning string "class".
-Like other efficient string implementations, it uses the [Small String Optimization][faq-sso] to avoid heap allocations for short strings.
+Like other efficient string implementations, it uses the [Small String Optimization][faq-sso] (SSO) to avoid heap allocations for short strings.
 
 [faq-sso]: https://cpp-optimizations.netlify.app/small_strings/
 
@@ -237,7 +305,7 @@ typedef union sz_string_t {
     struct internal {
         sz_ptr_t start;
         sz_u8_t length;
-        char chars[sz_string_stack_space]; /// Ends with a null-terminator.
+        char chars[SZ_STRING_INTERNAL_SPACE]; /// Ends with a null-terminator.
     } internal;
 
     struct external {
@@ -262,6 +330,10 @@ Our layout might be preferential, if you want to avoid branches.
 | Small String Capacity |                     15 |               __22__ |      __22__ |
 
 > Use the following gist to check on your compiler: https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21
+
+Other langauges, also freuqnetly rely on such optimizations.
+
+- Swift can store 15 bytes in the `String` struct. [docs](https://developer.apple.com/documentation/swift/substring/withutf8(_:)#discussion)
 
 For C++ users, the `sz::string` class hides those implementation details under the hood.
 For C users, less familiar with C++ classes, the `sz_string_t` union is available with following API.
@@ -617,10 +689,11 @@ __`SZ_AVOID_STL`__:
 > When using the C++ interface one can disable conversions from `std::string` to `sz::string` and back.
 > If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
 
-__`STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
+__`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
 
 > When compiling the tests and benchmarks, you can explicitly set the target hardware architecture.
 > It's synonymous to GCC's `-march` flag and is used to enable/disable the appropriate instruction sets.
+> You can also disable the shared library build, if you don't need it.
 
 ## Algorithms & Design Decisions 📚
 

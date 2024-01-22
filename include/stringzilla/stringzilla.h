@@ -100,25 +100,9 @@
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
 
-/**
- *  @brief  Annotation for the public API symbols.
- */
-#if defined(_WIN32) || defined(__CYGWIN__)
-#define SZ_PUBLIC inline static
-#elif __GNUC__ >= 4
-#define SZ_PUBLIC inline static
-#else
-#define SZ_PUBLIC inline static
-#endif
-#define SZ_INTERNAL inline static
-
-/**
- *  @brief  Generally `NULL` is coming from locale.h, stddef.h, stdio.h, stdlib.h, string.h, time.h,
- *          and wchar.h, according to the C standard.
- */
-#ifndef NULL
-#define NULL ((void *)0)
-#endif
+#define STRINGZILLA_VERSION_MAJOR 2
+#define STRINGZILLA_VERSION_MINOR 0
+#define STRINGZILLA_VERSION_PATCH 4
 
 /**
  *  @brief  Generally `CHAR_BIT` is coming from limits.h, according to the C standard.
@@ -264,6 +248,44 @@
     } while (0) /* fallthrough */
 #endif
 
+/**
+ *  @brief  Annotation for the public API symbols.
+ */
+#ifndef SZ_DYNAMIC
+#if SZ_DYNAMIC_DISPATCH
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define SZ_DYNAMIC __declspec(dllexport)
+#define SZ_PUBLIC inline static
+#define SZ_INTERNAL inline static
+#else
+#define SZ_DYNAMIC __attribute__((visibility("default")))
+#define SZ_PUBLIC __attribute__((unused)) inline static
+#define SZ_INTERNAL __attribute__((always_inline)) inline static
+#endif // _WIN32 || __CYGWIN__
+#else
+#define SZ_DYNAMIC inline static
+#define SZ_PUBLIC inline static
+#define SZ_INTERNAL inline static
+#endif // SZ_DYNAMIC_DISPATCH
+#endif // SZ_DYNAMIC
+
+/**
+ *  @brief  Generally `NULL` is coming from locale.h, stddef.h, stdio.h, stdlib.h, string.h, time.h,
+ *          and wchar.h, according to the C standard.
+ */
+#ifndef NULL
+#define NULL ((void *)0)
+#endif
+
+/**
+ *  @brief  The number of bytes a stack-allocated string can hold, including the NULL termination character.
+ *          ! This can't be changed from outside. Don't use the `#error` as it may already be included and set.
+ */
+#ifdef SZ_STRING_INTERNAL_SPACE
+#undef SZ_STRING_INTERNAL_SPACE
+#endif
+#define SZ_STRING_INTERNAL_SPACE (23)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -300,6 +322,30 @@ typedef struct sz_string_view_t {
     sz_cptr_t start;
     sz_size_t length;
 } sz_string_view_t;
+
+/**
+ *  @brief  Enumeration of SIMD capabilities of the target architecture.
+ *          Used to introspect the supported functionality of the dynamic library.
+ */
+typedef enum sz_capability_t {
+    sz_cap_serial_k = 1,       ///< Serial (non-SIMD) capability
+    sz_cap_any_k = 0x7FFFFFFF, ///< Mask representing any capability
+
+    sz_cap_arm_neon_k = 1 << 10, ///< ARM NEON capability
+    sz_cap_arm_sve_k = 1 << 11,  ///< ARM SVE capability TODO: Not yet supported or used
+
+    sz_cap_x86_avx2_k = 1 << 20,       ///< x86 AVX2 capability
+    sz_cap_x86_avx512_k = 1 << 21,     ///< x86 AVX512 capability
+    sz_cap_x86_avx512vl_k = 1 << 22,   ///< x86 AVX512 VL instruction capability
+    sz_cap_x86_avx512gfni_k = 1 << 23, ///< x86 AVX512 GFNI instruction capability
+
+} sz_capability_t;
+
+/**
+ *  @brief  Function to determine the SIMD capabilities of the current machine @b only at @b runtime.
+ *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ */
+SZ_DYNAMIC sz_capability_t sz_capabilities();
 
 /**
  *  @brief  Bit-set structure for 256 ASCII characters. Useful for filtering and search.
@@ -354,11 +400,6 @@ typedef struct sz_memory_allocator_t {
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
 
 /**
- *  @brief  The number of bytes a stack-allocated string can hold, including the NULL termination character.
- */
-#define sz_string_stack_space (23)
-
-/**
  *  @brief  Tiny memory-owning string structure with a Small String Optimization (SSO).
  *          Differs in layout from Folly, Clang, GCC, and probably most other implementations.
  *          It's designed to avoid any branches on read-only operations, and can store up
@@ -376,7 +417,7 @@ typedef union sz_string_t {
     struct internal {
         sz_ptr_t start;
         sz_u8_t length;
-        char chars[sz_string_stack_space];
+        char chars[SZ_STRING_INTERNAL_SPACE];
     } internal;
 
     struct external {
@@ -396,6 +437,7 @@ typedef union sz_string_t {
 typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
 typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
+typedef void (*sz_to_converter_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
 
 /**
  *  @brief  Computes the hash of a string.
@@ -458,9 +500,9 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
  *  @return         64-bit hash value.
  */
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
-SZ_PUBLIC sz_u64_t sz_hash_avx512(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
-SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
 
 /**
  *  @brief  Checks if two string are equal.
@@ -475,10 +517,10 @@ SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length) { return sz_ha
  *  @param length   Number of bytes in both strings.
  *  @return         1 if strings match, 0 otherwise.
  */
-SZ_PUBLIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+
+/** @copydoc sz_equal */
 SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
-SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
-SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /**
  *  @brief  Estimates the relative order of two strings. Equivalent to `memcmp(a, b, length)` in LibC.
@@ -490,7 +532,9 @@ SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
  *  @param b_length Number of bytes in the second string.
  *  @return         Negative if (a < b), positive if (a > b), zero if they are equal.
  */
-SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+
+/** @copydoc sz_order */
 SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 /**
@@ -560,10 +604,10 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t t
  *  @param length   Number of bytes to copy.
  *  @param source   String to copy from.
  */
-SZ_PUBLIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/** @copydoc sz_copy */
 SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
  *  @brief  Similar to `memmove`, copies (moves) contents of one string into another.
@@ -573,10 +617,12 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
  *  @param length   Number of bytes to copy.
  *  @param source   String to copy from.
  */
-SZ_PUBLIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+/** @copydoc sz_move */
 SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+
+typedef void (*sz_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
 
 /**
  *  @brief  Similar to `memset`, fills a string with a given value.
@@ -585,10 +631,12 @@ SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
  *  @param length   Number of bytes to fill.
  *  @param value    Value to fill with.
  */
-SZ_PUBLIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
+/** @copydoc sz_fill */
 SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-SZ_PUBLIC void sz_fill_avx2(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
+typedef void (*sz_fill_t)(sz_ptr_t, sz_size_t, sz_u8_t);
 
 /**
  *  @brief  Initializes a string class instance to an empty value.
@@ -694,6 +742,7 @@ SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *alloca
 
 typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
+typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_u8_set_t const *);
 
 /**
  *  @brief  Locates first matching byte in a string. Equivalent to `memchr(haystack, *needle, h_length)` in LibC.
@@ -706,19 +755,10 @@ typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
  *  @param needle   Needle - single-byte substring to find.
  *  @return         Address of the first match.
  */
-SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-
-/** @copydoc sz_find_byte */
-SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-
-/** @copydoc sz_find_byte */
-SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-
-/** @copydoc sz_find_byte */
-SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
 /**
  *  @brief  Locates last matching byte in a string. Equivalent to `memrchr(haystack, *needle, h_length)` in LibC.
@@ -731,19 +771,10 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz
  *  @param needle   Needle - single-byte substring to find.
  *  @return         Address of the last match.
  */
-SZ_PUBLIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_DYNAMIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
 /** @copydoc sz_find_last_byte */
 SZ_PUBLIC sz_cptr_t sz_find_last_byte_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-
-/** @copydoc sz_find_last_byte */
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-
-/** @copydoc sz_find_last_byte */
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-
-/** @copydoc sz_find_last_byte */
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
 /**
  *  @brief  Locates first matching substring.
@@ -756,19 +787,10 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t haystack, sz_size_t h_lengt
  *  @param n_length Number of bytes in the needle.
  *  @return         Address of the first match.
  */
-SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /** @copydoc sz_find */
 SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-
-/** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-
-/** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-
-/** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /**
  *  @brief  Locates the last matching substring.
@@ -779,19 +801,10 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
  *  @param n_length Number of bytes in the needle.
  *  @return         Address of the last match.
  */
-SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_DYNAMIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /** @copydoc sz_find_last */
 SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-
-/** @copydoc sz_find_last */
-SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-
-/** @copydoc sz_find_last */
-SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-
-/** @copydoc sz_find_last */
-SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /**
  *  @brief  Finds the first character present from the ::set, present in ::text.
@@ -802,16 +815,10 @@ SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t haystack, sz_size_t h_length, sz
  *  @param accepted Set of accepted characters.
  *  @return         Number of bytes forming the prefix.
  */
-SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+SZ_DYNAMIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /** @copydoc sz_find_from_set */
 SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
-
-/** @copydoc sz_find_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
-
-/** @copydoc sz_find_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /**
  *  @brief  Finds the last character present from the ::set, present in ::text.
@@ -828,16 +835,10 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u
  *  @param rejected Set of rejected characters.
  *  @return         Number of bytes forming the prefix.
  */
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+SZ_DYNAMIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 /** @copydoc sz_find_last_from_set */
 SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
-
-/** @copydoc sz_find_last_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
-
-/** @copydoc sz_find_last_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
 
 #pragma endregion
 
@@ -862,16 +863,14 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t text, sz_size_t length,
  *  @see    sz_memory_allocator_init_fixed
  *  @see    https://en.wikipedia.org/wiki/Levenshtein_distance
  */
-SZ_PUBLIC sz_size_t sz_edit_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                     sz_size_t bound, sz_memory_allocator_t *alloc);
+SZ_DYNAMIC sz_size_t sz_edit_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                      sz_size_t bound, sz_memory_allocator_t *alloc);
 
 /** @copydoc sz_edit_distance */
 SZ_PUBLIC sz_size_t sz_edit_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                             sz_size_t bound, sz_memory_allocator_t *alloc);
 
-/** @copydoc sz_edit_distance */
-SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                            sz_size_t bound, sz_memory_allocator_t *alloc);
+typedef sz_size_t (*sz_edit_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_memory_allocator_t *);
 
 /**
  *  @brief  Computes Needleman–Wunsch alignment score for two string. Often used in bioinformatics and cheminformatics.
@@ -897,18 +896,17 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_
  *  @see    sz_memory_allocator_init_fixed
  *  @see    https://en.wikipedia.org/wiki/Needleman%E2%80%93Wunsch_algorithm
  */
-SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                        sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
-                                        sz_memory_allocator_t *alloc);
+SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                         sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
+                                         sz_memory_allocator_t *alloc);
 
 /** @copydoc sz_alignment_score */
 SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                                sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
                                                sz_memory_allocator_t *alloc);
-/** @copydoc sz_alignment_score */
-SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                               sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
-                                               sz_memory_allocator_t *alloc);
+
+typedef sz_ssize_t (*sz_alignment_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_error_cost_t const *,
+                                           sz_error_cost_t, sz_memory_allocator_t *);
 
 /**
  *  @brief  Computes the Karp-Rabin rolling hash of a string outputting a binary fingerprint.
@@ -932,12 +930,83 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, 
  *  For protein sequences the alphabet is 20 characters long, so the window can be shorter, than for DNAs.
  *
  */
-SZ_PUBLIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
-                                      sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
+SZ_DYNAMIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                                       sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
 
 /** @copydoc sz_fingerprint_rolling */
 SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
                                              sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
+
+typedef void (*sz_fingerprint_rolling_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_ptr_t, sz_size_t);
+
+#if SZ_USE_X86_AVX512
+
+/** @copydoc sz_equal_serial */
+SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order_serial */
+SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+/** @copydoc sz_copy_serial */
+SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move_serial */
+SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill_serial */
+SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_find_byte */
+SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_find_last_byte */
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_find */
+SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_find_last */
+SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_find_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+/** @copydoc sz_find_last_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+/** @copydoc sz_edit_distance */
+SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                            sz_size_t bound, sz_memory_allocator_t *alloc);
+/** @copydoc sz_alignment_score */
+SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                               sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
+                                               sz_memory_allocator_t *alloc);
+
+#endif
+
+#if SZ_USE_X86_AVX2
+/** @copydoc sz_equal */
+SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move */
+SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill */
+SZ_PUBLIC void sz_fill_avx2(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_find_byte */
+SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_find_last_byte */
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_find */
+SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_find_last */
+SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+
+#endif
+
+#if SZ_USE_ARM_NEON
+/** @copydoc sz_equal */
+SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_find_byte */
+SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_find_last_byte */
+SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_find */
+SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_find_last */
+SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_find_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+/** @copydoc sz_find_last_from_set */
+SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+#endif
 
 #pragma endregion
 
@@ -1010,6 +1079,7 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #pragma endregion
 
 #pragma region Compiler Extensions and Helper Functions
+#pragma GCC visibility push(hidden)
 
 /*
  *  Intrinsics aliases for MSVC, GCC, and Clang.
@@ -1235,6 +1305,11 @@ SZ_INTERNAL void _sz_memory_free_fixed(sz_ptr_t start, sz_size_t length, void *h
     sz_unused(start && length && handle);
 }
 
+#pragma GCC visibility pop
+#pragma endregion
+
+#pragma region Serial Implementation
+
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length) {
     // The logic here is simple - put the buffer length in the first slots of the buffer.
     // Later use it for bounds checking.
@@ -1243,10 +1318,6 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
     alloc->handle = &buffer;
     sz_copy((sz_ptr_t)buffer, (sz_cptr_t)&length, sizeof(sz_size_t));
 }
-
-#pragma endregion
-
-#pragma region Serial Implementation
 
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length) {
 
@@ -2392,7 +2463,7 @@ SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_s
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
     *length = string->external.length & (0x00000000000000FFull | is_big_mask);
     // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
-    *space = sz_u64_blend(sz_string_stack_space, string->external.space, is_big_mask);
+    *space = sz_u64_blend(SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
     *is_external = (sz_bool_t)!is_small;
 }
 
@@ -2450,7 +2521,7 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
     string->u64s[2] = 0;
     string->u64s[3] = 0;
     // If we are lucky, no memory allocations will be needed.
-    if (space_needed <= sz_string_stack_space) {
+    if (space_needed <= SZ_STRING_INTERNAL_SPACE) {
         string->internal.start = &string->internal.chars[0];
         string->internal.length = length;
     }
@@ -2471,7 +2542,7 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
     sz_assert(string && "String can't be NULL.");
 
     sz_size_t new_space = new_capacity + 1;
-    if (new_space <= sz_string_stack_space) return string->external.start;
+    if (new_space <= SZ_STRING_INTERNAL_SPACE) return string->external.start;
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -2716,8 +2787,8 @@ SZ_INTERNAL void _sz_heapsort(sz_sequence_t *sequence, sz_sequence_comparator_t 
     }
 }
 
-SZ_INTERNAL void _sz_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_size_t first, sz_size_t last,
-                               sz_size_t depth) {
+SZ_PUBLIC void sz_sort_introsort_recursion(sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_size_t first,
+                                           sz_size_t last, sz_size_t depth) {
 
     sz_size_t length = last - first;
     switch (length) {
@@ -2780,18 +2851,18 @@ SZ_INTERNAL void _sz_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t
     }
 
     // Recursively sort the partitions
-    _sz_introsort(sequence, less, first, left, depth);
-    _sz_introsort(sequence, less, right + 1, last, depth);
+    sz_sort_introsort_recursion(sequence, less, first, left, depth);
+    sz_sort_introsort_recursion(sequence, less, right + 1, last, depth);
 }
 
 SZ_PUBLIC void sz_sort_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
     if (sequence->count == 0) return;
     sz_size_t size_is_not_power_of_two = (sequence->count & (sequence->count - 1)) != 0;
     sz_size_t depth_limit = sz_size_log2i_nonzero(sequence->count) + size_is_not_power_of_two;
-    _sz_introsort(sequence, less, 0, sequence->count, depth_limit);
+    sz_sort_introsort_recursion(sequence, less, 0, sequence->count, depth_limit);
 }
 
-SZ_INTERNAL void _sz_sort_recursion( //
+SZ_PUBLIC void sz_sort_recursion( //
     sz_sequence_t *sequence, sz_size_t bit_idx, sz_size_t bit_max, sz_sequence_comparator_t comparator,
     sz_size_t partial_order_length) {
 
@@ -2810,12 +2881,12 @@ SZ_INTERNAL void _sz_sort_recursion( //
     if (bit_idx < bit_max) {
         sz_sequence_t a = *sequence;
         a.count = split;
-        _sz_sort_recursion(&a, bit_idx + 1, bit_max, comparator, partial_order_length);
+        sz_sort_recursion(&a, bit_idx + 1, bit_max, comparator, partial_order_length);
 
         sz_sequence_t b = *sequence;
         b.order += split;
         b.count -= split;
-        _sz_sort_recursion(&b, bit_idx + 1, bit_max, comparator, partial_order_length);
+        sz_sort_recursion(&b, bit_idx + 1, bit_max, comparator, partial_order_length);
     }
     // Reached the end of recursion
     else {
@@ -2854,7 +2925,7 @@ SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_
     }
 
     // Perform optionally-parallel radix sort on them
-    _sz_sort_recursion(sequence, 0, 32, (sz_sequence_comparator_t)_sz_sort_is_less, partial_order_length);
+    sz_sort_recursion(sequence, 0, 32, (sz_sequence_comparator_t)_sz_sort_is_less, partial_order_length);
 }
 
 SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequence->count); }
@@ -2884,13 +2955,13 @@ typedef union sz_u256_vec_t {
 
 SZ_PUBLIC void sz_fill_avx2(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     for (; length >= 32; target += 32, length -= 32) _mm256_storeu_si256((__m256i *)target, _mm256_set1_epi8(value));
-    return sz_fill_serial(target, length, value);
+    sz_fill_serial(target, length, value);
 }
 
 SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     for (; length >= 32; target += 32, source += 32, length -= 32)
         _mm256_storeu_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
-    return sz_copy_serial(target, source, length);
+    sz_copy_serial(target, source, length);
 }
 
 SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
@@ -3617,11 +3688,15 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t h, sz_size_t h_length, 
  *  @brief  Pick the right implementation for the string search algorithms.
  */
 #pragma region Compile-Time Dispatching
+
+SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t ins, sz_size_t length) { return sz_hash_serial(ins, length); }
+SZ_PUBLIC void sz_tolower(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_tolower_serial(ins, length, outs); }
+SZ_PUBLIC void sz_toupper(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_toupper_serial(ins, length, outs); }
+SZ_PUBLIC void sz_toascii(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_toascii_serial(ins, length, outs); }
+
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length) { return sz_hash_serial(text, length); }
-
-SZ_PUBLIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #if SZ_USE_X86_AVX512
     return sz_equal_avx512(a, b, length);
 #else
@@ -3629,7 +3704,7 @@ SZ_PUBLIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #endif
 }
 
-SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
 #if SZ_USE_X86_AVX512
     return sz_order_avx512(a, a_length, b, b_length);
 #else
@@ -3637,7 +3712,7 @@ SZ_PUBLIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, s
 #endif
 }
 
-SZ_PUBLIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_X86_AVX512
     sz_copy_avx512(target, source, length);
 #elif SZ_USE_X86_AVX2
@@ -3647,7 +3722,7 @@ SZ_PUBLIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #endif
 }
 
-SZ_PUBLIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_X86_AVX512
     sz_move_avx512(target, source, length);
 #elif SZ_USE_X86_AVX2
@@ -3657,7 +3732,7 @@ SZ_PUBLIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #endif
 }
 
-SZ_PUBLIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 #if SZ_USE_X86_AVX512
     sz_fill_avx512(target, length, value);
 #elif SZ_USE_X86_AVX2
@@ -3667,7 +3742,7 @@ SZ_PUBLIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 #endif
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
+SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
 #if SZ_USE_X86_AVX512
     return sz_find_byte_avx512(haystack, h_length, needle);
 #elif SZ_USE_X86_AVX2
@@ -3679,7 +3754,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 #endif
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
+SZ_DYNAMIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
 #if SZ_USE_X86_AVX512
     return sz_find_last_byte_avx512(haystack, h_length, needle);
 #elif SZ_USE_X86_AVX2
@@ -3691,7 +3766,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz
 #endif
 }
 
-SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
+SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
 #if SZ_USE_X86_AVX512
     return sz_find_avx512(haystack, h_length, needle, n_length);
 #elif SZ_USE_X86_AVX2
@@ -3703,7 +3778,7 @@ SZ_PUBLIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t ne
 #endif
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
+SZ_DYNAMIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
 #if SZ_USE_X86_AVX512
     return sz_find_last_avx512(haystack, h_length, needle, n_length);
 #elif SZ_USE_X86_AVX2
@@ -3715,7 +3790,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 #endif
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
+SZ_DYNAMIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_find_from_set_avx512(text, length, set);
 #else
@@ -3723,7 +3798,7 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set
 #endif
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
+SZ_DYNAMIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_find_last_from_set_avx512(text, length, set);
 #else
@@ -3731,33 +3806,21 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u
 #endif
 }
 
-SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    sz_tolower_serial(text, length, result);
-}
-
-SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    sz_toupper_serial(text, length, result);
-}
-
-SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    sz_toascii_serial(text, length, result);
-}
-
-SZ_PUBLIC sz_size_t sz_edit_distance( //
-    sz_cptr_t a, sz_size_t a_length,  //
-    sz_cptr_t b, sz_size_t b_length,  //
+SZ_DYNAMIC sz_size_t sz_edit_distance( //
+    sz_cptr_t a, sz_size_t a_length,   //
+    sz_cptr_t b, sz_size_t b_length,   //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
     return sz_edit_distance_serial(a, a_length, b, b_length, bound, alloc);
 }
 
-SZ_PUBLIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                        sz_error_cost_t const *subs, sz_error_cost_t gap,
-                                        sz_memory_allocator_t *alloc) {
+SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                         sz_error_cost_t const *subs, sz_error_cost_t gap,
+                                         sz_memory_allocator_t *alloc) {
     return sz_alignment_score_serial(a, a_length, b, b_length, subs, gap, alloc);
 }
 
-SZ_PUBLIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_ptr_t fingerprint,
-                                      sz_size_t fingerprint_bytes) {
+SZ_DYNAMIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_ptr_t fingerprint,
+                                       sz_size_t fingerprint_bytes) {
     sz_fingerprint_rolling_serial(text, length, window_length, fingerprint, fingerprint_bytes);
 }
 
