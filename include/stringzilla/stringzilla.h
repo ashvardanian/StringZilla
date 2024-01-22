@@ -2939,6 +2939,8 @@ SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequ
 #pragma region AVX2 Implementation
 
 #if SZ_USE_X86_AVX2
+#pragma GCC push_options
+#pragma GCC target("avx2")
 #include <x86intrin.h>
 
 /**
@@ -3061,6 +3063,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
     return sz_find_last_serial(h, h_length, n, n_length);
 }
 
+#pragma GCC pop_options
 #endif
 #pragma endregion
 
@@ -3076,6 +3079,8 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
 #pragma region AVX-512 Implementation
 
 #if SZ_USE_X86_AVX512
+#pragma GCC push_options
+#pragma GCC target("avx512f,avx512vl,bmi2")
 #include <x86intrin.h>
 
 /**
@@ -3530,6 +3535,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
 }
 #endif
 
+#pragma GCC pop_options
 #endif
 
 #pragma endregion
