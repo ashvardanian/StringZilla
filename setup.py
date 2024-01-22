@@ -35,6 +35,10 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         "-Wno-unused-function",  # like: ... declared ‘static’ but never defined
         "-Wno-incompatible-pointer-types",  # like: passing argument 4 of ‘sz_export_prefix_u32’ from incompatible pointer type
         "-Wno-discarded-qualifiers",  # like: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target type
+        "-fPIC",  # to enable dynamic dispatch
+    ]
+    link_args = [
+        "-fPIC",  # to enable dynamic dispatch
     ]
 
     # GCC is our primary compiler, so when packaging the library, even if the current machine
@@ -51,7 +55,6 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     elif is_64bit_arm():
         compile_args.append("-march=armv8-a+simd")
 
-    link_args = []
     return compile_args, link_args, macros_args
 
 
@@ -65,6 +68,10 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         "-Wno-incompatible-function-pointer-types",
         "-Wno-incompatible-pointer-types",  # like: passing argument 4 of ‘sz_export_prefix_u32’ from incompatible pointer type
         "-Wno-discarded-qualifiers",  # like: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target type
+        "-fPIC",  # to enable dynamic dispatch
+    ]
+    link_args = [
+        "-fPIC",  # to enable dynamic dispatch
     ]
 
     # GCC is our primary compiler, so when packaging the library, even if the current machine
@@ -86,7 +93,6 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     elif is_64bit_arm():
         compile_args.append("-march=armv8-a+simd")
 
-    link_args = []
     return compile_args, link_args, macros_args
 
 
@@ -127,7 +133,7 @@ ext_modules = [
         include_dirs=["include", np.get_include()],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
-        define_macros=macros_args,
+        define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
     ),
 ]
 

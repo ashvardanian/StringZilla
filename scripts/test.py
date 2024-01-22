@@ -1,15 +1,17 @@
 from random import choice, randint
 from string import ascii_lowercase
 from typing import Optional
-import numpy as np
 
+import numpy as np
 import pytest
 
-from random import choice, randint
-from string import ascii_lowercase
 import stringzilla as sz
 from stringzilla import Str, Strs
-from typing import Optional
+
+
+def test_library_properties():
+    assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
+    assert "serial" in sz.__capabilities__.split(","), "Serial backend must be present"
 
 
 def test_unit_construct():

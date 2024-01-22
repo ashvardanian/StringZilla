@@ -278,6 +278,7 @@ int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting search benchmarks.\n");
 
     dataset_t dataset = make_dataset(argc, argv);
+    bench_rfinds(dataset.text, {dataset.tokens.begin(), dataset.tokens.end()}, rfind_functions());
 
     // Typical ASCII tokenization and validation benchmarks
     std::printf("Benchmarking for whitespaces:\n");

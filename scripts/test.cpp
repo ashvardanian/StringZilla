@@ -16,10 +16,10 @@
 // Those parameters must never be explicitly set during releases,
 // but they come handy during development, if you want to validate
 // different ISA-specific implementations.
-// #define SZ_USE_X86_AVX2 0
-// #define SZ_USE_X86_AVX512 0
-// #define SZ_USE_ARM_NEON 0
-// #define SZ_USE_ARM_SVE 0
+#define SZ_USE_X86_AVX2 0
+#define SZ_USE_X86_AVX512 0
+#define SZ_USE_ARM_NEON 0
+#define SZ_USE_ARM_SVE 0
 #define SZ_DEBUG 1 // Enforce agressive logging for this unit.
 
 #include <string>                      // Baseline
@@ -200,7 +200,10 @@ static void test_api_readonly() {
     assert(str("hello").rfind("l") == 3);
     assert(str("hello").rfind("l", 2) == 2);
     assert(str("hello").rfind("l", 1) == str::npos);
+
+    // More complex queries.
     assert(str("abbabbaaaaaa").find("aa") == 6);
+    assert(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);
