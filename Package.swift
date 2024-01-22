@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "StringZilla",
     products: [
-        .library(name: "StringZilla", targets: ["StringZillaC", "StringZillaSwift"])
+        .library(name: "StringZilla", targets: ["StringZillaC", "StringZilla"])
     ],
     targets: [
         .target(
@@ -13,14 +13,14 @@ let package = Package(
             publicHeadersPath: "."
         ),
         .target(
-            name: "StringZillaSwift",
+            name: "StringZilla",
             dependencies: ["StringZillaC"],
             path: "swift",
             exclude: ["Test.swift"]
         ),
         .testTarget(
             name: "StringZillaTests",
-            dependencies: ["StringZillaSwift"],
+            dependencies: ["StringZilla"],
             path: "swift",
             sources: ["Test.swift"]
         )
