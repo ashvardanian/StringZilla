@@ -358,8 +358,19 @@ typedef union sz_u8_set_t {
     sz_u8_t _u8s[32];
 } sz_u8_set_t;
 
+/**
+ *  @brief  Initializes a bit-set to an empty collection, meaning - all characters are banned.
+ */
 SZ_PUBLIC void sz_u8_set_init(sz_u8_set_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
+
+/**
+ *  @brief  Adds a character to the set.
+ */
 SZ_PUBLIC void sz_u8_set_add(sz_u8_set_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
+
+/**
+ *  @brief  Checks if the set contains a given character.
+ */
 SZ_PUBLIC sz_bool_t sz_u8_set_contains(sz_u8_set_t const *s, sz_u8_t c) {
     // Checking the bit can be done in disserent ways:
     // - (s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
@@ -368,6 +379,10 @@ SZ_PUBLIC sz_bool_t sz_u8_set_contains(sz_u8_set_t const *s, sz_u8_t c) {
     // - (s->_u8s[c >> 3] & (1u << (c & 7u))) != 0
     return (sz_bool_t)((s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0);
 }
+
+/**
+ *  @brief  Inverts the contents of the set, so allowed character get disallowed, and vice versa.
+ */
 SZ_PUBLIC void sz_u8_set_invert(sz_u8_set_t *s) {
     s->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
         s->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;

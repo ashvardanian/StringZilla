@@ -51,7 +51,7 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     ]
 
     if is_64bit_x86():
-        compile_args.append("-march=native")
+        compile_args.append("-march=sapphirerapids")
     elif is_64bit_arm():
         compile_args.append("-march=armv8-a+simd")
 

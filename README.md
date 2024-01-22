@@ -11,11 +11,12 @@ Aside from exact search, the library also accelerates fuzzy search, edit distanc
 - Code in C++? Replace STL's `<string>` with C++ 11 `<stringzilla.hpp>` - [_more_](#quick-start-cpp-🛠️)
 - Code in Python? Upgrade your `str` to faster `Str` - [_more_](#quick-start-python-🐍)
 - Code in Swift? Use the `String+StringZilla` extension - [_more_](#quick-start-swift-🍎)
+- Code in Rust? Use the `StringZilla` crate - [_more_](#quick-start-rust-🦀)
 - Code in other languages? Let us know!
 
 StringZilla has a lot of functionality, but first, let's make sure it can handle the basics.
 
-<table border="1" style="width: 100%; text-align: center; table-layout: fixed;">
+<table style="width: 100%; text-align: center; table-layout: fixed;">
   <colgroup>
     <col style="width: 25%;">
     <col style="width: 25%;">
@@ -23,72 +24,139 @@ StringZilla has a lot of functionality, but first, let's make sure it can handle
     <col style="width: 25%;">
   </colgroup>
   <tr>
-    <th>LibC</th>
-    <th>C++ Standard</th>
-    <th>Python</th>
-    <th>Stringzilla</th>
+    <th align="center">LibC</th>
+    <th align="center">C++ Standard</th>
+    <th align="center">Python</th>
+    <th align="center">StringZilla</th>
   </tr>
   <!-- Substrings, normal order -->
   <tr>
-    <td colspan="4">find the first occurrence of a random word from text, ≅ 5 bytes long</td>
+    <td colspan="4" align="center">find the first occurrence of a random word from text, ≅ 5 bytes long</td>
   </tr>
   <tr>
-    <td><code>strstr</code> <sup>1</sup><br/>7.4 GB/s on x86<br>2.0 GB/s on Arm</td>
-    <td><code>.find</code><br/>2.9 GB/s on x86<br>1.6 GB/s on Arm</td>
-    <td><code>.find</code><br/>1.1 GB/s on x86<br>0.6 GB/s on Arm</td>
-    <td><code>sz_find</code><br/>10.6 GB/s on x86<br>7.1 GB/s on Arm</td>
+    <td align="center">
+      <code>strstr</code> <sup>1</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>7.4</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2.0</b> GB/s
+    </td>
+    <td align="center">
+      <code>.find</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>2.9</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1.6</b> GB/s
+    </td>
+    <td align="center">
+      <code>.find</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>1.1</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.6</b> GB/s
+    </td>
+    <td align="center">
+      <code>sz_find</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>10.6</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>7.1</b> GB/s
+    </td>
   </tr>
   <!-- Substrings, reverse order -->
   <tr>
-    <td colspan="4">find the last occurrence of a random word from text, ≅ 5 bytes long</td>
+    <td colspan="4" align="center">find the last occurrence of a random word from text, ≅ 5 bytes long</td>
   </tr>
   <tr>
-    <td>❌</td>
-    <td><code>.rfind</code><br/>0.5 GB/s on x86<br>0.4 GB/s on Arm</td>
-    <td><code>.rfind</code><br/>0.9 GB/s on x86<br>0.5 GB/s on Arm</td>
-    <td><code>sz_find_last</code><br/>10.8 GB/s on x86<br>6.7 GB/s on Arm</td>
+    <td align="center">❌</td>
+    <td align="center">
+      <code>.rfind</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.5</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.4</b> GB/s
+    </td>
+    <td align="center">
+      <code>.rfind</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.9</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.5</b> GB/s
+    </td>
+    <td align="center">
+      <code>sz_find_last</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>10.8</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>6.7</b> GB/s
+    </td>
   </tr>
   <!-- Characters, normal order -->
   <tr>
-    <td colspan="4">find the first occurrence of any of 6 whitespaces <sup>2</sup></td>
+    <td colspan="4" align="center">find the first occurrence of any of 6 whitespaces <sup>2</sup></td>
   </tr>
   <tr>
-    <td><code>strcspn</code> <sup>1</sup><br/>0.74 GB/s on x86<br>0.29 GB/s on Arm</td>
-    <td><code>.find_first_of</code><br/>0.25 GB/s on x86<br>0.23 GB/s on Arm</td>
-    <td><code>re.finditer</code><br/>0.06 GB/s on x86<br>0.02 GB/s on Arm</td>
-    <td><code>sz_find_from_set</code><br/>0.43 GB/s on x86<br>0.23 GB/s on Arm</td>
+    <td align="center">
+      <code>strcspn</code> <sup>1</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.74</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.29</b> GB/s
+    </td>
+    <td align="center">
+      <code>.find_first_of</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.25</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
+    </td>
+    <td align="center">
+      <code>re.finditer</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.06</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.02</b> GB/s
+    </td>
+    <td align="center">
+      <code>sz_find_from_set</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
+    </td>
   </tr>
   <!-- Characters, reverse order -->
   <tr>
-    <td colspan="4">find the last occurrence of any of 6 whitespaces <sup>2</sup></td>
+    <td colspan="4" align="center">find the last occurrence of any of 6 whitespaces <sup>2</sup></td>
   </tr>
   <tr>
-    <td>❌</td>
-    <td><code>.find_last_of</code><br/>0.25 GB/s on x86<br>0.25 GB/s on Arm</td>
-    <td>❌</td>
-    <td><code>sz_find_last_from_set</code><br/>0.43 GB/s on x86<br>0.23 GB/s on Arm</td>
+    <td align="center">❌</td>
+    <td align="center">
+      <code>.find_last_of</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.25</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.25</b> GB/s
+    </td>
+    <td align="center">❌</td>
+    <td align="center">
+      <code>sz_find_last_from_set</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
+    </td>
   </tr>
   <!-- Edit Distance -->
   <tr>
-    <td colspan="4">Levenshtein edit distance, ≅ 5 bytes long</td>
+    <td colspan="4" align="center">Levenshtein edit distance, ≅ 5 bytes long</td>
   </tr>
   <tr>
-    <td>❌</td>
-    <td>❌</td>
-    <td>custom <sup>3</sup></td>
-    <td><code>sz_edit_distance</code><br/>99 ns on x86<br>180 ns on Arm</td>
+    <td align="center">❌</td>
+    <td align="center">❌</td>
+    <td align="center">
+      custom <sup>3</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>99</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>180</b> ns
+    </td>
+    <td align="center">
+      <code>sz_edit_distance</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>99</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>180</b> ns
+    </td>
   </tr>
   <!-- Alignment Score -->
   <tr>
-    <td colspan="4">Needleman-Wunsh alignment scores, ≅ 300 aminoacids long</td>
+    <td colspan="4" align="center">Needleman-Wunsh alignment scores, ≅ 300 aminoacids long</td>
   </tr>
   <tr>
-    <td>❌</td>
-    <td>❌</td>
-    <td>custom <sup>4</sup></td>
-    <td><code>sz_alignment_score</code><br/>73 ms on x86<br>177 ms on Arm</td>
+    <td align="center">❌</td>
+    <td align="center">❌</td>
+    <td align="center">
+      custom <sup>4</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>73</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>177</b> ms
+    </td>
+    <td align="center">
+      <code>sz_alignment_score</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>73</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>177</b> ms
+    </td>
   </tr>
-
 </table>
 
 > Benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
