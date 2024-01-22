@@ -68,6 +68,8 @@ SZ_DYNAMIC sz_capability_t sz_capabilities() {
     unsigned supports_neon = 1;
     unsigned supports_sve = 0;
     unsigned supports_sve2 = 0;
+    sz_unused(supports_sve);
+    sz_unused(supports_sve2);
 
     return (sz_capability_t)(                 //
         (sz_cap_arm_neon_k * supports_neon) | //
