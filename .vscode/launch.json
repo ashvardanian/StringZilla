@@ -13,6 +13,17 @@
       "justMyCode": true
     },
     {
+      "name": "Current Python File with Leipzig1M",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "../StringZilla/leipzig1M.txt"
+      ],
+    },
+    {
       "name": "Current PyTest File",
       "type": "python",
       "request": "launch",
