@@ -4,6 +4,7 @@ build_debug/
 tmp/
 build_debug/
 build_release/
+target/
 __pycache__
 .pytest_cache
 .conda
