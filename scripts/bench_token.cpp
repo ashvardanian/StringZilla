@@ -18,9 +18,6 @@ tracked_unary_functions_t hashing_functions() {
 #if SZ_USE_X86_AVX512
         {"sz_hash_avx512", wrap_sz(sz_hash_avx512), true},
 #endif
-#if SZ_USE_ARM_NEON
-        {"sz_hash_neon", wrap_sz(sz_hash_neon), true},
-#endif
         {"std::hash", [](std::string_view s) { return std::hash<std::string_view> {}(s); }},
     };
     return result;

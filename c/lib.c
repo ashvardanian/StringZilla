@@ -96,12 +96,12 @@ typedef struct sz_implementations_t {
     sz_move_t move;
     sz_fill_t fill;
 
-    sz_find_byte_t find_first_byte;
-    sz_find_byte_t find_last_byte;
-    sz_find_t find_first;
-    sz_find_t find_last;
-    sz_find_set_t find_first_from_set;
-    sz_find_set_t find_last_from_set;
+    sz_find_byte_t find_byte;
+    sz_find_byte_t rfind_byte;
+    sz_find_t find;
+    sz_find_t rfind;
+    sz_find_set_t find_from_set;
+    sz_find_set_t rfind_from_set;
 
     // TODO: Upcoming vectorizations
     sz_edit_distance_t edit_distance;
@@ -124,12 +124,14 @@ static void sz_dispatch_table_init() {
     impl->copy = sz_copy_serial;
     impl->move = sz_move_serial;
     impl->fill = sz_fill_serial;
-    impl->find_first_byte = sz_find_byte_serial;
-    impl->find_last_byte = sz_find_last_byte_serial;
-    impl->find_first = sz_find_serial;
-    impl->find_last = sz_find_last_serial;
-    impl->find_first_from_set = sz_find_from_set_serial;
-    impl->find_last_from_set = sz_find_last_from_set_serial;
+
+    impl->find = sz_find_serial;
+    impl->rfind = sz_rfind_serial;
+    impl->find_byte = sz_find_byte_serial;
+    impl->rfind_byte = sz_rfind_byte_serial;
+    impl->find_from_set = sz_find_charset_serial;
+    impl->rfind_from_set = sz_rfind_charset_serial;
+
     impl->edit_distance = sz_edit_distance_serial;
     impl->alignment_score = sz_alignment_score_serial;
     impl->fingerprint_rolling = sz_fingerprint_rolling_serial;
@@ -139,10 +141,10 @@ static void sz_dispatch_table_init() {
         impl->copy = sz_copy_avx2;
         impl->move = sz_move_avx2;
         impl->fill = sz_fill_avx2;
-        impl->find_first_byte = sz_find_byte_avx2;
-        impl->find_last_byte = sz_find_last_byte_avx2;
-        impl->find_first = sz_find_avx2;
-        impl->find_last = sz_find_last_avx2;
+        impl->find_byte = sz_find_byte_avx2;
+        impl->rfind_byte = sz_rfind_byte_avx2;
+        impl->find = sz_find_avx2;
+        impl->rfind = sz_rfind_avx2;
     }
 #endif
 
@@ -153,27 +155,28 @@ static void sz_dispatch_table_init() {
         impl->copy = sz_copy_avx512;
         impl->move = sz_move_avx512;
         impl->fill = sz_fill_avx512;
-        impl->find_first_byte = sz_find_byte_avx512;
-        impl->find_last_byte = sz_find_last_byte_avx512;
-        impl->find_first = sz_find_avx512;
-        impl->find_last = sz_find_last_avx512;
+
+        impl->find = sz_find_avx512;
+        impl->rfind = sz_rfind_avx512;
+        impl->find_byte = sz_find_byte_avx512;
+        impl->rfind_byte = sz_rfind_byte_avx512;
     }
 
     if ((caps & sz_cap_x86_avx512f_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_gfni_k) &&
         (caps & sz_cap_x86_avx512bw_k) && (caps & sz_cap_x86_avx512vbmi_k)) {
-        impl->find_first_from_set = sz_find_from_set_avx512;
-        impl->find_last_from_set = sz_find_last_from_set_avx512;
+        impl->find_from_set = sz_find_charset_avx512;
+        impl->rfind_from_set = sz_rfind_charset_avx512;
     }
 #endif
 
 #if SZ_USE_ARM_NEON
     if (caps & sz_cap_arm_neon_k) {
-        impl->find_first_byte = sz_find_byte_neon;
-        impl->find_last_byte = sz_find_last_byte_neon;
-        impl->find_first = sz_find_neon;
-        impl->find_last = sz_find_last_neon;
-        impl->find_first_from_set = sz_find_from_set_neon;
-        impl->find_last_from_set = sz_find_last_from_set_neon;
+        impl->find = sz_find_neon;
+        impl->rfind = sz_rfind_neon;
+        impl->find_byte = sz_find_byte_neon;
+        impl->rfind_byte = sz_rfind_byte_neon;
+        impl->find_from_set = sz_find_charset_neon;
+        impl->rfind_from_set = sz_rfind_charset_neon;
     }
 #endif
 }
@@ -212,27 +215,27 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
-    return sz_dispatch_table.find_first_byte(haystack, h_length, needle);
+    return sz_dispatch_table.find_byte(haystack, h_length, needle);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
-    return sz_dispatch_table.find_last_byte(haystack, h_length, needle);
+SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
+    return sz_dispatch_table.rfind_byte(haystack, h_length, needle);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-    return sz_dispatch_table.find_first(haystack, h_length, needle, n_length);
+    return sz_dispatch_table.find(haystack, h_length, needle, n_length);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-    return sz_dispatch_table.find_last(haystack, h_length, needle, n_length);
+SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
+    return sz_dispatch_table.rfind(haystack, h_length, needle, n_length);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
-    return sz_dispatch_table.find_first_from_set(text, length, set);
+SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
+    return sz_dispatch_table.find_from_set(text, length, set);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
-    return sz_dispatch_table.find_last_from_set(text, length, set);
+SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
+    return sz_dispatch_table.rfind_from_set(text, length, set);
 }
 
 SZ_DYNAMIC sz_size_t sz_edit_distance( //
@@ -251,4 +254,34 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cpt
 SZ_DYNAMIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_ptr_t fingerprint,
                                        sz_size_t fingerprint_bytes) {
     sz_dispatch_table.fingerprint_rolling(text, length, window_length, fingerprint, fingerprint_bytes);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_charset_t set;
+    sz_charset_init(&set);
+    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
+    return sz_find_charset(h, h_length, &set);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_find_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_charset_t set;
+    sz_charset_init(&set);
+    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
+    sz_charset_invert(&set);
+    return sz_find_charset(h, h_length, &set);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_rfind_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_charset_t set;
+    sz_charset_init(&set);
+    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
+    return sz_rfind_charset(h, h_length, &set);
+}
+
+SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_charset_t set;
+    sz_charset_init(&set);
+    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
+    sz_charset_invert(&set);
+    return sz_rfind_charset(h, h_length, &set);
 }

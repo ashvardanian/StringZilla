@@ -22,6 +22,20 @@ protocol SingleByte {}
 extension UInt8: SingleByte {}
 extension Int8: SingleByte {} // This would match `CChar` as well.
 
+enum StringZillaError: Error {
+    case contiguousStorageUnavailable
+    case memoryAllocationFailed
+    
+    var localizedDescription: String {
+        switch self {
+        case .contiguousStorageUnavailable:
+            return "Contiguous storage for the sequence is unavailable."
+        case .memoryAllocationFailed:
+            return "Memory allocation failed."
+        }
+    }
+}
+
 /// Protocol defining the interface for StringZilla-compatible byte-spans.
 ///  
 /// # Discussion:
@@ -30,60 +44,104 @@ extension Int8: SingleByte {} // This would match `CChar` as well.
 /// https://developer.apple.com/documentation/swift/stringprotocol/withcstring(_:)
 /// https://developer.apple.com/documentation/swift/stringprotocol/withcstring(encodedas:_:)
 /// https://developer.apple.com/documentation/swift/stringprotocol/data(using:allowlossyconversion:)
-protocol StringZillaView {
-    associatedtype Index
+public protocol SZViewable {
+    associatedtype SZIndex
 
     /// Executes a closure with a pointer to the string's UTF8 C representation and its length.
     /// - Parameters:
     ///   - body: A closure that takes a pointer to a C string and its length.
-    func withCStringZilla(_ body: (sz_cptr_t, sz_size_t) -> Void)
+    /// - Throws: Can throw an error.
+    /// - Returns: Returns a value of type R, which is the result of the closure.
+    func szScope<R>(_ body: (sz_cptr_t, sz_size_t) throws -> R) rethrows -> R
 
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
     /// - Parameters:
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
-    ///   - startPointer: The starting pointer for the calculation, previously obtained from `withCStringZilla`.
+    ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
     /// - Returns: The calculated index offset.
-    func getOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index
+    func szOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> SZIndex
 }
 
-extension String: StringZillaView {
-    typealias Index = String.Index
-    func withCStringZilla(_ body: (sz_cptr_t, sz_size_t) -> Void) {
+extension String: SZViewable {
+    public typealias SZIndex = String.Index
+
+    public func szScope<R>(_ body: (sz_cptr_t, sz_size_t) throws -> R) rethrows -> R {
         let cLength = sz_size_t(self.lengthOfBytes(using: .utf8))
-        self.withCString { cString in
-            body(cString, cLength)
+        return try self.withCString { cString in
+            try body(cString, cLength)
         }
     }
     
-    func getOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
+    public func szOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> SZIndex {
         return self.index(self.startIndex, offsetBy: bytePointer - startPointer)
     }
 }
 
-extension UnsafeBufferPointer where Element == SingleByte {
-    typealias Index = Int
-    func withCStringZilla(_ body: (sz_cptr_t, sz_size_t) -> Void) {
-        let cLength = sz_size_t(count)
-        let cString = UnsafeRawPointer(self.baseAddress!).assumingMemoryBound(to: CChar.self)
-        body(cString, cLength)
+extension Substring.UTF8View: SZViewable {
+    public typealias SZIndex = Substring.UTF8View.Index
+
+    /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte elements (UTF-8 code units).
+    /// - Parameters:
+    ///   - body: A closure that takes a pointer to the contiguous storage and its size.
+    /// - Throws: An error if the storage is not contiguous.
+    public func szScope<R>(_ body: (sz_cptr_t, sz_size_t) throws -> R) rethrows -> R {
+        return try withContiguousStorageIfAvailable { bufferPointer -> R in
+            let cLength = sz_size_t(bufferPointer.count)
+            let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
+            return try body(cString, cLength)
+        } ?? {
+            throw StringZillaError.contiguousStorageUnavailable
+        }()
     }
 
-    func getOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
-        return Int(bytePointer - startPointer)
+    /// Calculates the offset index for a given byte pointer relative to a start pointer.
+    /// - Parameters:
+    ///   - bytePointer: A pointer to the byte for which the offset is calculated.
+    ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
+    /// - Returns: The calculated index offset.
+    public func szOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> SZIndex {
+        return self.index(self.startIndex, offsetBy: bytePointer - startPointer)
     }
 }
 
-extension StringZillaView {
+extension String.UTF8View: SZViewable {
+    public typealias SZIndex = String.UTF8View.Index
+
+    /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte elements (UTF-8 code units).
+    /// - Parameters:
+    ///   - body: A closure that takes a pointer to the contiguous storage and its size.
+    /// - Throws: An error if the storage is not contiguous.
+    public func szScope<R>(_ body: (sz_cptr_t, sz_size_t) throws -> R) rethrows -> R {
+        return try withContiguousStorageIfAvailable { bufferPointer -> R in
+            let cLength = sz_size_t(bufferPointer.count)
+            let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
+            return try body(cString, cLength)
+        } ?? {
+            throw StringZillaError.contiguousStorageUnavailable
+        }()
+    }
+
+    /// Calculates the offset index for a given byte pointer relative to a start pointer.
+    /// - Parameters:
+    ///   - bytePointer: A pointer to the byte for which the offset is calculated.
+    ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
+    /// - Returns: The calculated index offset.
+    public func szOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> SZIndex {
+        return self.index(self.startIndex, offsetBy: bytePointer - startPointer)
+    }
+}
+
+public extension SZViewable {
     
     /// Finds the first occurrence of the specified substring within the receiver.
     /// - Parameter needle: The substring to search for.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
-    public func findFirst(_ needle: any StringZillaView) -> Index? {
-        var result: Index?
-        withCStringZilla { hPointer, hLength in
-            needle.withCStringZilla { nPointer, nLength in
+    func findFirst(substring needle: any SZViewable) -> SZIndex? {
+        var result: SZIndex?
+        szScope { hPointer, hLength in
+            needle.szScope { nPointer, nLength in
                 if let matchPointer = sz_find(hPointer, hLength, nPointer, nLength) {
-                    result = self.getOffset(forByte: matchPointer, after: hPointer)
+                    result = self.szOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
@@ -93,12 +151,12 @@ extension StringZillaView {
     /// Finds the last occurrence of the specified substring within the receiver.
     /// - Parameter needle: The substring to search for.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
-    public func findLast(_ needle: any StringZillaView) -> Index? {
-        var result: Index?
-        withCStringZilla { hPointer, hLength in
-            needle.withCStringZilla { nPointer, nLength in
-                if let matchPointer = sz_find_last(hPointer, hLength, nPointer, nLength) {
-                    result = self.getOffset(forByte: matchPointer, after: hPointer)
+    func findLast(substring needle: any SZViewable) -> SZIndex? {
+        var result: SZIndex?
+        szScope { hPointer, hLength in
+            needle.szScope { nPointer, nLength in
+                if let matchPointer = sz_rfind(hPointer, hLength, nPointer, nLength) {
+                    result = self.szOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
@@ -108,12 +166,12 @@ extension StringZillaView {
     /// Finds the first occurrence of the specified character-set members within the receiver.
     /// - Parameter characters: A string-like collection of characters to match.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
-    public func findFirst(of characters: any StringZillaView) -> Index? {
-        var result: Index?
-        withCStringZilla { hPointer, hLength in
-            characters.withCStringZilla { nPointer, nLength in
-                if let matchPointer = sz_find(hPointer, hLength, nPointer, nLength) {
-                    result = self.getOffset(forByte: matchPointer, after: hPointer)
+    func findFirst(characterFrom characters: any SZViewable) -> SZIndex? {
+        var result: SZIndex?
+        szScope { hPointer, hLength in
+            characters.szScope { nPointer, nLength in
+                if let matchPointer = sz_find_char_from(hPointer, hLength, nPointer, nLength) {
+                    result = self.szOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
@@ -123,12 +181,12 @@ extension StringZillaView {
     /// Finds the last occurrence of the specified character-set members within the receiver.
     /// - Parameter characters: A string-like collection of characters to match.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
-    public func findLast(of characters: any StringZillaView) -> Index? {
-        var result: Index?
-        withCStringZilla { hPointer, hLength in
-            characters.withCStringZilla { nPointer, nLength in
-                if let matchPointer = sz_find_last(hPointer, hLength, nPointer, nLength) {
-                    result = self.getOffset(forByte: matchPointer, after: hPointer)
+    func findLast(characterFrom characters: any SZViewable) -> SZIndex? {
+        var result: SZIndex?
+        szScope { hPointer, hLength in
+            characters.szScope { nPointer, nLength in
+                if let matchPointer = sz_rfind_char_from(hPointer, hLength, nPointer, nLength) {
+                    result = self.szOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
@@ -138,12 +196,12 @@ extension StringZillaView {
     /// Finds the first occurrence of a character outside of the the given character-set within the receiver.
     /// - Parameter characters: A string-like collection of characters to exclude.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
-    public func findFirst(notOf characters: any StringZillaView) -> Index? {
-        var result: Index?
-        withCStringZilla { hPointer, hLength in
-            characters.withCStringZilla { nPointer, nLength in
-                if let matchPointer = sz_find(hPointer, hLength, nPointer, nLength) {
-                    result = self.getOffset(forByte: matchPointer, after: hPointer)
+    func findFirst(characterNotFrom characters: any SZViewable) -> SZIndex? {
+        var result: SZIndex?
+        szScope { hPointer, hLength in
+            characters.szScope { nPointer, nLength in
+                if let matchPointer = sz_find_char_not_from(hPointer, hLength, nPointer, nLength) {
+                    result = self.szOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
@@ -153,12 +211,12 @@ extension StringZillaView {
     /// Finds the last occurrence of a character outside of the the given character-set within the receiver.
     /// - Parameter characters: A string-like collection of characters to exclude.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
-    public func findLast(notOf characters: any StringZillaView) -> Index? {
-        var result: Index?
-        withCStringZilla { hPointer, hLength in
-            characters.withCStringZilla { nPointer, nLength in
-                if let matchPointer = sz_find_last(hPointer, hLength, nPointer, nLength) {
-                    result = self.getOffset(forByte: matchPointer, after: hPointer)
+    func findLast(characterNotFrom characters: any SZViewable) -> SZIndex? {
+        var result: SZIndex?
+        szScope { hPointer, hLength in
+            characters.szScope { nPointer, nLength in
+                if let matchPointer = sz_rfind_char_not_from(hPointer, hLength, nPointer, nLength) {
+                    result = self.szOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
@@ -169,15 +227,26 @@ extension StringZillaView {
     /// - Parameter other: A string-like collection of characters to exclude.
     /// - Returns: The edit distance, as an unsigned integer.
     /// - Throws: If a memory allocation error has happened.
-    public func editDistance(_ other: any StringZillaView) -> UInt {
-        var result: Int?
-        withCStringZilla { hPointer, hLength in
-            other.withCStringZilla { nPointer, nLength in
-                if let matchPointer = sz_edit_distance(hPointer, hLength, nPointer, nLength) {
-                    result = self.getOffset(forByte: matchPointer, after: hPointer)
+    func editDistance(from other: any SZViewable, bound: UInt64 = 0) throws -> UInt64? {
+        var result: UInt64?
+
+        // Use a do-catch block to handle potential errors
+        do {
+            try szScope { hPointer, hLength in
+                try other.szScope { nPointer, nLength in
+                    result = sz_edit_distance(hPointer, hLength, nPointer, nLength, sz_size_t(bound), nil)
+                    if result == SZ_SIZE_MAX {
+                        result = nil
+                        throw StringZillaError.memoryAllocationFailed
+                    }
                 }
             }
+        } catch {
+            // Handle or rethrow the error
+            throw error
         }
+
         return result
     }
+
 }

@@ -914,7 +914,7 @@ static PyObject *Str_rfind(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_last, &signed_offset, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, &signed_offset, &text, &separator)) return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
 
@@ -922,7 +922,7 @@ static PyObject *Str_rindex(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_last, &signed_offset, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, &signed_offset, &text, &separator)) return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
         return NULL;
@@ -981,7 +981,7 @@ static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs)
 }
 
 static PyObject *Str_rpartition(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_partition_implementation(self, args, kwargs, &sz_find_last);
+    return _Str_partition_implementation(self, args, kwargs, &sz_rfind);
 }
 
 static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -1290,73 +1290,38 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
     else { Py_RETURN_FALSE; }
 }
 
-static sz_cptr_t _sz_find_first_of_string_members(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_u8_set_t set;
-    sz_u8_set_init(&set);
-    for (; n_length; ++n, --n_length) sz_u8_set_add(&set, *n);
-    return sz_find_from_set(h, h_length, &set);
-}
-
 static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &_sz_find_first_of_string_members, &signed_offset, &text,
-                                   &separator))
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_from, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
-}
-
-static sz_cptr_t _sz_find_first_not_of_string_members(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                      sz_size_t n_length) {
-    sz_u8_set_t set;
-    sz_u8_set_init(&set);
-    for (; n_length; ++n, --n_length) sz_u8_set_add(&set, *n);
-    sz_u8_set_invert(&set);
-    return sz_find_from_set(h, h_length, &set);
 }
 
 static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &_sz_find_first_not_of_string_members, &signed_offset, &text,
-                                   &separator))
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_not_from, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
-}
-
-static sz_cptr_t _sz_find_last_of_string_members(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_u8_set_t set;
-    sz_u8_set_init(&set);
-    for (; n_length; ++n, --n_length) sz_u8_set_add(&set, *n);
-    return sz_find_last_from_set(h, h_length, &set);
 }
 
 static PyObject *Str_find_last_of(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &_sz_find_last_of_string_members, &signed_offset, &text,
-                                   &separator))
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_from, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
-}
-
-static sz_cptr_t _sz_find_last_not_of_string_members(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_u8_set_t set;
-    sz_u8_set_init(&set);
-    for (; n_length; ++n, --n_length) sz_u8_set_add(&set, *n);
-    sz_u8_set_invert(&set);
-    return sz_find_last_from_set(h, h_length, &set);
 }
 
 static PyObject *Str_find_last_not_of(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &_sz_find_last_not_of_string_members, &signed_offset, &text,
-                                   &separator))
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_not_from, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }

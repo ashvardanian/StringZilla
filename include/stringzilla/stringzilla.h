@@ -12,9 +12,9 @@
  *  @section    Uncommon operations covered by StringZilla
  *
  *  Every in-order search/matching operations has a reverse order counterpart, a rare feature in string libraries.
- *  That way `sz_find` and `sz_find_last` are similar to `strstr` and `strrstr` in LibC, but `sz_find_byte` and
- *  `sz_find_last_byte` are equivalent to `memchr` and `memrchr`. The same goes for `sz_find_from_set` and
- *  `sz_find_last_from_set`, which are equivalent to `strspn` and `strcspn` in LibC.
+ *  That way `sz_find` and `sz_rfind` are similar to `strstr` and `strrstr` in LibC, but `sz_find_byte` and
+ *  `sz_rfind_byte` are equivalent to `memchr` and `memrchr`. The same goes for `sz_find_charset` and
+ *  `sz_rfind_charset`, which are equivalent to `strspn` and `strcspn` in LibC.
  *
  *  Edit distance computations can be parameterized with the substitution matrix and gap (insertion & deletion)
  *  penalties. This allows for more flexible usecases, like scoring fuzzy string matches, and bioinformatics.
@@ -65,13 +65,13 @@
  *
  *  Covered:
  *      - void    *memchr(const void *, int, size_t); -> sz_find_byte
- *      - void    *memrchr(const void *, int, size_t); -> sz_find_last_byte
+ *      - void    *memrchr(const void *, int, size_t); -> sz_rfind_byte
  *      - int      memcmp(const void *, const void *, size_t); -> sz_order, sz_equal
  *      - char    *strchr(const char *, int); -> sz_find_byte
  *      - int      strcmp(const char *, const char *); -> sz_order, sz_equal
- *      - size_t   strcspn(const char *, const char *); -> sz_find_last_from_set
+ *      - size_t   strcspn(const char *, const char *); -> sz_rfind_charset
  *      - size_t   strlen(const char *);-> sz_find_byte
- *      - size_t   strspn(const char *, const char *); -> sz_find_from_set
+ *      - size_t   strspn(const char *, const char *); -> sz_find_charset
  *      - char    *strstr(const char *, const char *); -> sz_find
  *
  *  Not implemented:
@@ -277,7 +277,11 @@
  *          and wchar.h, according to the C standard.
  */
 #ifndef NULL
+#ifdef __GNUG__
+#define NULL __null
+#else
 #define NULL ((void *)0)
+#endif
 #endif
 
 /**
@@ -290,6 +294,9 @@
 #define SZ_STRING_INTERNAL_SPACE (23)
 
 #ifdef __cplusplus
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 extern "C" {
 #endif
 
@@ -353,30 +360,27 @@ typedef enum sz_capability_t {
 SZ_DYNAMIC sz_capability_t sz_capabilities();
 
 /**
- *  @brief  Bit-set structure for 256 ASCII characters. Useful for filtering and search.
- *  @see    sz_u8_set_init, sz_u8_set_add, sz_u8_set_contains, sz_u8_set_invert
+ *  @brief  Bit-set structure for 256 possible byte values. Useful for filtering and search.
+ *  @see    sz_charset_init, sz_charset_add, sz_charset_contains, sz_charset_invert
  */
-typedef union sz_u8_set_t {
+typedef union sz_charset_t {
     sz_u64_t _u64s[4];
     sz_u32_t _u32s[8];
     sz_u16_t _u16s[16];
     sz_u8_t _u8s[32];
-} sz_u8_set_t;
+} sz_charset_t;
 
-/**
- *  @brief  Initializes a bit-set to an empty collection, meaning - all characters are banned.
- */
-SZ_PUBLIC void sz_u8_set_init(sz_u8_set_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
+/** @brief  Initializes a bit-set to an empty collection, meaning - all characters are banned. */
+SZ_PUBLIC void sz_charset_init(sz_charset_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
 
-/**
- *  @brief  Adds a character to the set.
- */
-SZ_PUBLIC void sz_u8_set_add(sz_u8_set_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
+/** @brief  Adds a character to the set and accepts @b unsigned integers. */
+SZ_PUBLIC void sz_charset_add_u8(sz_charset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
 
-/**
- *  @brief  Checks if the set contains a given character.
- */
-SZ_PUBLIC sz_bool_t sz_u8_set_contains(sz_u8_set_t const *s, sz_u8_t c) {
+/** @brief  Adds a character to the set. Consider @b sz_charset_add_u8. */
+SZ_PUBLIC void sz_charset_add(sz_charset_t *s, char c) { sz_charset_add_u8(s, sz_bitcast(sz_u8_t, c)); }
+
+/** @brief  Checks if the set contains a given character and accepts @b unsigned integers. */
+SZ_PUBLIC sz_bool_t sz_charset_contains_u8(sz_charset_t const *s, sz_u8_t c) {
     // Checking the bit can be done in disserent ways:
     // - (s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
     // - (s->_u32s[c >> 5] & (1u << (c & 31u))) != 0
@@ -385,10 +389,13 @@ SZ_PUBLIC sz_bool_t sz_u8_set_contains(sz_u8_set_t const *s, sz_u8_t c) {
     return (sz_bool_t)((s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0);
 }
 
-/**
- *  @brief  Inverts the contents of the set, so allowed character get disallowed, and vice versa.
- */
-SZ_PUBLIC void sz_u8_set_invert(sz_u8_set_t *s) {
+/** @brief  Checks if the set contains a given character. Consider @b sz_charset_contains_u8. */
+SZ_PUBLIC sz_bool_t sz_charset_contains(sz_charset_t const *s, char c) {
+    return sz_charset_contains_u8(s, sz_bitcast(sz_u8_t, c));
+}
+
+/** @brief  Inverts the contents of the set, so allowed character get disallowed, and vice versa. */
+SZ_PUBLIC void sz_charset_invert(sz_charset_t *s) {
     s->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
         s->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
 }
@@ -407,6 +414,12 @@ typedef struct sz_memory_allocator_t {
     sz_memory_free_t free;
     void *handle;
 } sz_memory_allocator_t;
+
+/**
+ *  @brief  Initializes a memory allocator to use the system default `malloc` and `free`.
+ *  @param alloc    Memory allocator to initialize.
+ */
+SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
 
 /**
  *  @brief  Initializes a memory allocator to use a static-capacity buffer.
@@ -762,7 +775,7 @@ SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *alloca
 
 typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
-typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_u8_set_t const *);
+typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_charset_t const *);
 
 /**
  *  @brief  Locates first matching byte in a string. Equivalent to `memchr(haystack, *needle, h_length)` in LibC.
@@ -791,10 +804,10 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t h_length, 
  *  @param needle   Needle - single-byte substring to find.
  *  @return         Address of the last match.
  */
-SZ_DYNAMIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
-/** @copydoc sz_find_last_byte */
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
 /**
  *  @brief  Locates first matching substring.
@@ -821,29 +834,29 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cp
  *  @param n_length Number of bytes in the needle.
  *  @return         Address of the last match.
  */
-SZ_DYNAMIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
-/** @copydoc sz_find_last */
-SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_rfind */
+SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /**
  *  @brief  Finds the first character present from the ::set, present in ::text.
  *          Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
- *          May have identical implementation and performance to ::sz_find_last_from_set.
+ *          May have identical implementation and performance to ::sz_rfind_charset.
  *
  *  @param text     String to be trimmed.
  *  @param accepted Set of accepted characters.
  *  @return         Number of bytes forming the prefix.
  */
-SZ_DYNAMIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 
-/** @copydoc sz_find_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+/** @copydoc sz_find_charset */
+SZ_PUBLIC sz_cptr_t sz_find_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 
 /**
  *  @brief  Finds the last character present from the ::set, present in ::text.
  *          Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
- *          May have identical implementation and performance to ::sz_find_from_set.
+ *          May have identical implementation and performance to ::sz_find_charset.
  *
  *  Useful for parsing, when we want to skip a set of characters. Examples:
  *  * 6 whitespaces: " \t\n\r\v\f".
@@ -855,10 +868,10 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz
  *  @param rejected Set of rejected characters.
  *  @return         Number of bytes forming the prefix.
  */
-SZ_DYNAMIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 
-/** @copydoc sz_find_last_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+/** @copydoc sz_rfind_charset */
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 
 #pragma endregion
 
@@ -875,12 +888,13 @@ SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t lengt
  *
  *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
  *                  so the memory usage is linear in relation to ::a_length and ::b_length.
+ *                  If NULL is passed, will initialize to the systems default `malloc`.
  *  @param bound    Upper bound on the distance, that allows us to exit early.
  *                  If zero is passed, the maximum possible distance will be equal to the length of the longer input.
  *  @return         Unsigned integer for edit distance, the `bound` if was exceeded or `SZ_SIZE_MAX`
  *                  if the memory allocation failed.
  *
- *  @see    sz_memory_allocator_init_fixed
+ *  @see    sz_memory_allocator_init_fixed, sz_memory_allocator_init_default
  *  @see    https://en.wikipedia.org/wiki/Levenshtein_distance
  */
 SZ_DYNAMIC sz_size_t sz_edit_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
@@ -910,10 +924,11 @@ typedef sz_size_t (*sz_edit_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size
  *
  *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
  *                  so the memory usage is linear in relation to ::a_length and ::b_length.
+ *                  If NULL is passed, will initialize to the systems default `malloc`.
  *  @return         Signed similarity score. Can be negative, depending on the substitution costs.
  *                  If the memory allocation fails, the function returns `SZ_SSIZE_MAX`.
  *
- *  @see    sz_memory_allocator_init_fixed
+ *  @see    sz_memory_allocator_init_fixed, sz_memory_allocator_init_default
  *  @see    https://en.wikipedia.org/wiki/Needleman%E2%80%93Wunsch_algorithm
  */
 SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
@@ -959,6 +974,10 @@ SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length, s
 
 typedef void (*sz_fingerprint_rolling_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_ptr_t, sz_size_t);
 
+#pragma endregion
+
+#pragma region Hardware-Specific API
+
 #if SZ_USE_X86_AVX512
 
 /** @copydoc sz_equal_serial */
@@ -973,16 +992,16 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-/** @copydoc sz_find_last_byte */
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 /** @copydoc sz_find */
 SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-/** @copydoc sz_find_last */
-SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-/** @copydoc sz_find_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
-/** @copydoc sz_find_last_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+/** @copydoc sz_rfind */
+SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_find_charset */
+SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
+/** @copydoc sz_rfind_charset */
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 /** @copydoc sz_edit_distance */
 SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                             sz_size_t bound, sz_memory_allocator_t *alloc);
@@ -1002,12 +1021,12 @@ SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
 SZ_PUBLIC void sz_fill_avx2(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-/** @copydoc sz_find_last_byte */
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 /** @copydoc sz_find */
 SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-/** @copydoc sz_find_last */
-SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_rfind */
+SZ_PUBLIC sz_cptr_t sz_rfind_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 #endif
 
@@ -1016,17 +1035,49 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t haystack, sz_size_t h_length, sz
 SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
-/** @copydoc sz_find_last_byte */
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 /** @copydoc sz_find */
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-/** @copydoc sz_find_last */
-SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-/** @copydoc sz_find_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
-/** @copydoc sz_find_last_from_set */
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set);
+/** @copydoc sz_rfind */
+SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_find_charset */
+SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
+/** @copydoc sz_rfind_charset */
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 #endif
+
+#pragma endregion
+
+#pragma region Convenience API
+
+/**
+ *  @brief  Finds the first character in the haystack, that is present in the needle.
+ *          Convenience function, reused across different language bindings.
+ *  @see    sz_find_charset
+ */
+SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
+
+/**
+ *  @brief  Finds the first character in the haystack, that is @b not present in the needle.
+ *          Convenience function, reused across different language bindings.
+ *  @see    sz_find_charset
+ */
+SZ_DYNAMIC sz_cptr_t sz_find_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
+
+/**
+ *  @brief  Finds the last character in the haystack, that is present in the needle.
+ *          Convenience function, reused across different language bindings.
+ *  @see    sz_find_charset
+ */
+SZ_DYNAMIC sz_cptr_t sz_rfind_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
+
+/**
+ *  @brief  Finds the last character in the haystack, that is @b not present in the needle.
+ *          Convenience function, reused across different language bindings.
+ *  @see    sz_find_charset
+ */
+SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
 
 #pragma endregion
 
@@ -1330,6 +1381,12 @@ SZ_INTERNAL void _sz_memory_free_fixed(sz_ptr_t start, sz_size_t length, void *h
 
 #pragma region Serial Implementation
 
+SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc) {
+    alloc->allocate = (sz_memory_allocate_t)malloc;
+    alloc->free = (sz_memory_free_t)free;
+    alloc->handle = NULL;
+}
+
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length) {
     // The logic here is simple - put the buffer length in the first slots of the buffer.
     // Later use it for bounds checking.
@@ -1423,18 +1480,18 @@ SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
     return (sz_bool_t)(a_end == a);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
+SZ_PUBLIC sz_cptr_t sz_find_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
     for (sz_cptr_t const end = text + length; text != end; ++text)
-        if (sz_u8_set_contains(set, *text)) return text;
+        if (sz_charset_contains(set, *text)) return text;
     return NULL;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_serial(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
     sz_cptr_t const end = text;
     for (text += length; text != end;)
-        if (sz_u8_set_contains(set, *(text -= 1))) return text;
+        if (sz_charset_contains(set, *(text -= 1))) return text;
     return NULL;
 #pragma GCC diagnostic pop
 }
@@ -1508,7 +1565,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *          Identical to `memrchr(haystack, needle[0], haystack_length)`.
  */
-sz_cptr_t sz_find_last_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
     if (!h_length) return NULL;
     sz_cptr_t const h_start = h;
@@ -1766,8 +1823,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h
  *  @brief  Bitap algorithm for exact matching of patterns up to @b 8-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                             sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                         sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u8_t running_match = 0xFF;
@@ -1806,8 +1863,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t 
  *  @brief  Bitap algorithm for exact matching of patterns up to @b 16-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                              sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                          sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u16_t running_match = 0xFFFF;
@@ -1846,8 +1903,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t 
  *  @brief  Bitap algorithm for exact matching of patterns up to @b 32-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                              sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                          sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u32_t running_match = 0xFFFFFFFF;
@@ -1886,8 +1943,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t 
  *  @brief  Bitap algorithm for exact matching of patterns up to @b 64-bytes long in @b reverse order.
  *          https://en.wikipedia.org/wiki/Bitap_algorithm
  */
-SZ_INTERNAL sz_cptr_t _sz_find_last_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                              sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                          sz_size_t n_length) {
     sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
@@ -1978,8 +2035,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_siz
     return NULL;
 }
 
-SZ_INTERNAL sz_cptr_t _sz_find_last_horspool_upto_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                                  sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_upto_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                              sz_size_t n_length) {
     sz_u8_t bad_shift_table[256] = {(sz_u8_t)n_length};
     sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
     for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n_unsigned[i]] = (sz_u8_t)(i + 1);
@@ -2033,8 +2090,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_c
  *  @brief  Exact reverse-order substring search helper function, that finds the last occurrence of a suffix of the
  *          needle using a given search function, and then verifies the remaining part of the needle.
  */
-SZ_INTERNAL sz_cptr_t _sz_find_last_with_suffix(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length,
-                                                sz_find_t find_suffix, sz_size_t suffix_length) {
+SZ_INTERNAL sz_cptr_t _sz_rfind_with_suffix(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length,
+                                            sz_find_t find_suffix, sz_size_t suffix_length) {
 
     sz_size_t prefix_length = n_length - suffix_length;
     while (1) {
@@ -2059,9 +2116,9 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_over_256bytes_serial(sz_cptr_t h, sz_siz
     return _sz_find_with_prefix(h, h_length, n, n_length, _sz_find_horspool_upto_256bytes_serial, 256);
 }
 
-SZ_INTERNAL sz_cptr_t _sz_find_last_horspool_over_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                                  sz_size_t n_length) {
-    return _sz_find_last_with_suffix(h, h_length, n, n_length, _sz_find_last_horspool_upto_256bytes_serial, 256);
+SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_over_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
+                                                              sz_size_t n_length) {
+    return _sz_rfind_with_suffix(h, h_length, n, n_length, _sz_rfind_horspool_upto_256bytes_serial, 256);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -2094,22 +2151,22 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return NULL;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
-        (sz_find_t)sz_find_last_byte_serial,
+        (sz_find_t)sz_rfind_byte_serial,
         // For needle lengths up to 64, use the Bitap algorithm variation for reverse-order exact search.
-        (sz_find_t)_sz_find_last_bitap_upto_8bytes_serial,
-        (sz_find_t)_sz_find_last_bitap_upto_16bytes_serial,
-        (sz_find_t)_sz_find_last_bitap_upto_32bytes_serial,
-        (sz_find_t)_sz_find_last_bitap_upto_64bytes_serial,
+        (sz_find_t)_sz_rfind_bitap_upto_8bytes_serial,
+        (sz_find_t)_sz_rfind_bitap_upto_16bytes_serial,
+        (sz_find_t)_sz_rfind_bitap_upto_32bytes_serial,
+        (sz_find_t)_sz_rfind_bitap_upto_64bytes_serial,
         // For longer needles - use skip tables.
-        (sz_find_t)_sz_find_last_horspool_upto_256bytes_serial,
-        (sz_find_t)_sz_find_last_horspool_over_256bytes_serial,
+        (sz_find_t)_sz_rfind_horspool_upto_256bytes_serial,
+        (sz_find_t)_sz_rfind_horspool_over_256bytes_serial,
     };
 
     return backends[
@@ -2133,6 +2190,13 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     sz_cptr_t longer, sz_size_t longer_length,                //
     sz_cptr_t shorter, sz_size_t shorter_length,              //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
+
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
 
     // If a buffering memory-allocator is provided, this operation is practically free,
     // and cheaper than allocating even 512 bytes (for small distance matrices) on stack.
@@ -2228,6 +2292,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
          --longer_length, --shorter_length)
         ;
 
+    if (longer_length == 0) return 0; // If no mismatches were found - the distance is zero.
     return _sz_edit_distance_wagner_fisher_serial(longer, longer_length, shorter, shorter_length, bound, alloc);
 }
 
@@ -2246,6 +2311,13 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     if (shorter_length > longer_length) {
         sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
         sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+    }
+
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
     }
 
     sz_size_t buffer_length = sizeof(sz_ssize_t) * (shorter_length + 1) * 2;
@@ -3016,7 +3088,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
     return sz_find_byte_serial(h, h_length, n);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     int mask;
     sz_u256_vec_t h_vec, n_vec;
     n_vec.ymm = _mm256_set1_epi8(n[0]);
@@ -3028,7 +3100,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_c
         h_length -= 32;
     }
 
-    return sz_find_last_byte_serial(h, h_length, n);
+    return sz_rfind_byte_serial(h, h_length, n);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -3057,8 +3129,8 @@ SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
     return sz_find_serial(h, h_length, n, n_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    if (n_length == 1) return sz_find_last_byte_avx2(h, h_length, n);
+SZ_PUBLIC sz_cptr_t sz_rfind_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    if (n_length == 1) return sz_rfind_byte_avx2(h, h_length, n);
 
     int matches;
     sz_u256_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
@@ -3081,7 +3153,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
         }
     }
 
-    return sz_find_last_serial(h, h_length, n, n_length);
+    return sz_rfind_serial(h, h_length, n, n_length);
 }
 
 #pragma clang attribute pop
@@ -3303,7 +3375,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     return NULL;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     __mmask64 mask;
     sz_u512_vec_t h_vec, n_vec;
     n_vec.zmm = _mm512_set1_epi8(n[0]);
@@ -3326,11 +3398,11 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz
     return NULL;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return NULL;
-    if (n_length == 1) return sz_find_last_byte_avx512(h, h_length, n);
+    if (n_length == 1) return sz_rfind_byte_avx512(h, h_length, n);
 
     __mmask64 mask;
     __mmask64 matches;
@@ -3385,7 +3457,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512vbmi,bmi,bmi2,gfni"))), \
                              apply_to = function)
 
-SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *filter) {
+SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
 
     sz_size_t load_length;
     __mmask32 load_mask, matches_mask;
@@ -3440,7 +3512,7 @@ SZ_PUBLIC sz_cptr_t sz_find_from_set_avx512(sz_cptr_t text, sz_size_t length, sz
     return NULL;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_avx512(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *filter) {
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
 
     sz_size_t load_length;
     __mmask32 load_mask, matches_mask;
@@ -3578,6 +3650,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
 #pragma region ARM NEON
 
 #if SZ_USE_ARM_NEON
+#include <arm_acle.h>
 #include <arm_neon.h>
 
 /**
@@ -3614,7 +3687,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
     return sz_find_byte_serial(h, h_length, n);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     sz_u8_t offsets[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 
     sz_u128_vec_t h_vec, n_vec, offsets_vec, matches_vec;
@@ -3634,7 +3707,7 @@ SZ_PUBLIC sz_cptr_t sz_find_last_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_c
         h_length -= 16;
     }
 
-    return sz_find_last_byte_serial(h, h_length, n);
+    return sz_rfind_byte_serial(h, h_length, n);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -3672,8 +3745,8 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
     return sz_find_serial(h, h_length, n, n_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    if (n_length == 1) return sz_find_last_byte_neon(h, h_length, n);
+SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    if (n_length == 1) return sz_rfind_byte_neon(h, h_length, n);
 
     // Will contain 4 bits per character.
     sz_u64_t matches;
@@ -3707,15 +3780,15 @@ SZ_PUBLIC sz_cptr_t sz_find_last_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
         }
     }
 
-    return sz_find_last_serial(h, h_length, n, n_length);
+    return sz_rfind_serial(h, h_length, n, n_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_from_set_neon(sz_cptr_t h, sz_size_t h_length, sz_u8_set_t const *set) {
-    return sz_find_from_set_serial(h, h_length, set);
+SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
+    return sz_find_charset_serial(h, h_length, set);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_last_from_set_neon(sz_cptr_t h, sz_size_t h_length, sz_u8_set_t const *set) {
-    return sz_find_last_from_set_serial(h, h_length, set);
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
+    return sz_rfind_charset_serial(h, h_length, set);
 }
 
 #endif // Arm Neon
@@ -3792,15 +3865,15 @@ SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_last_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
+SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
 #if SZ_USE_X86_AVX512
-    return sz_find_last_byte_avx512(haystack, h_length, needle);
+    return sz_rfind_byte_avx512(haystack, h_length, needle);
 #elif SZ_USE_X86_AVX2
-    return sz_find_last_byte_avx2(haystack, h_length, needle);
+    return sz_rfind_byte_avx2(haystack, h_length, needle);
 #elif SZ_USE_ARM_NEON
-    return sz_find_last_byte_neon(haystack, h_length, needle);
+    return sz_rfind_byte_neon(haystack, h_length, needle);
 #else
-    return sz_find_last_byte_serial(haystack, h_length, needle);
+    return sz_rfind_byte_serial(haystack, h_length, needle);
 #endif
 }
 
@@ -3816,31 +3889,31 @@ SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t n
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_last(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
+SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
 #if SZ_USE_X86_AVX512
-    return sz_find_last_avx512(haystack, h_length, needle, n_length);
+    return sz_rfind_avx512(haystack, h_length, needle, n_length);
 #elif SZ_USE_X86_AVX2
-    return sz_find_last_avx2(haystack, h_length, needle, n_length);
+    return sz_rfind_avx2(haystack, h_length, needle, n_length);
 #elif SZ_USE_ARM_NEON
-    return sz_find_last_neon(haystack, h_length, needle, n_length);
+    return sz_rfind_neon(haystack, h_length, needle, n_length);
 #else
-    return sz_find_last_serial(haystack, h_length, needle, n_length);
+    return sz_rfind_serial(haystack, h_length, needle, n_length);
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
+SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
 #if SZ_USE_X86_AVX512
-    return sz_find_from_set_avx512(text, length, set);
+    return sz_find_charset_avx512(text, length, set);
 #else
-    return sz_find_from_set_serial(text, length, set);
+    return sz_find_charset_serial(text, length, set);
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_last_from_set(sz_cptr_t text, sz_size_t length, sz_u8_set_t const *set) {
+SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
 #if SZ_USE_X86_AVX512
-    return sz_find_last_from_set_avx512(text, length, set);
+    return sz_rfind_charset_avx512(text, length, set);
 #else
-    return sz_find_last_from_set_serial(text, length, set);
+    return sz_rfind_charset_serial(text, length, set);
 #endif
 }
 
@@ -3862,10 +3935,45 @@ SZ_DYNAMIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size
     sz_fingerprint_rolling_serial(text, length, window_length, fingerprint, fingerprint_bytes);
 }
 
+
+SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_charset_t set;
+    sz_charset_init(&set);
+    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
+    return sz_find_charset(h, h_length, &set);
+}
+
+
+SZ_DYNAMIC sz_cptr_t sz_find_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_charset_t set;
+    sz_charset_init(&set);
+    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
+    sz_charset_invert(&set);
+    return sz_find_charset(h, h_length, &set);
+}
+
+
+SZ_DYNAMIC sz_cptr_t sz_rfind_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_charset_t set;
+    sz_charset_init(&set);
+    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
+    return sz_rfind_charset(h, h_length, &set);
+}
+
+
+SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_charset_t set;
+    sz_charset_init(&set);
+    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
+    sz_charset_invert(&set);
+    return sz_rfind_charset(h, h_length, &set);
+}
+
 #endif
 #pragma endregion
 
 #ifdef __cplusplus
+#pragma GCC diagnostic pop
 }
 #endif
 
