@@ -9,9 +9,14 @@ let package = Package(
     targets: [
         .target(
             name: "StringZillaC",
-            path: "include/stringzilla",
-            sources: ["empty.c"],
-            publicHeadersPath: "."
+            path: "include/stringzilla", // Adjust the path to include your C source files
+            sources: ["../../c/lib.c"], // Include the source file here
+            publicHeadersPath: ".",
+            cSettings: [
+                .define("SZ_DYNAMIC_DISPATCH", to: "1"), // Define a macro
+                .headerSearchPath("include/stringzilla"), // Specify header search paths
+                .unsafeFlags(["-Wall"]) // Use with caution: specify custom compiler flags
+            ]
         ),
         .target(
             name: "StringZilla",
