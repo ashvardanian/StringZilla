@@ -43,7 +43,7 @@ tracked_binary_functions_t distance_functions() {
         return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) mutable {
             sz_string_view_t a = to_c(a_str);
             sz_string_view_t b = to_c(b_str);
-            return function(a.start, a.length, b.start, b.length, 1, costs.data(), &alloc);
+            return function(a.start, a.length, b.start, b.length, costs.data(), 1, &alloc);
         });
     };
     tracked_binary_functions_t result = {
@@ -72,8 +72,12 @@ void bench_similarity_on_bio_data() {
         std::size_t length_upper_bound;
         char const *name;
     } bio_cases[] = {
-        {60, 60, "60 aminoacids"},       {100, 100, "100 aminoacids"},       {300, 300, "300 aminoacids"},
-        {1000, 1000, "1000 aminoacids"}, {100, 1000, "100-1000 aminoacids"}, {1000, 10000, "1000-10000 aminoacids"},
+        {60, 60, "60 aminoacids"},              //
+        {100, 100, "100 aminoacids"},           //
+        {300, 300, "300 aminoacids"},           //
+        {1000, 1000, "1000 aminoacids"},        //
+        {100, 1000, "100-1000 aminoacids"},     //
+        {1000, 10000, "1000-10000 aminoacids"}, //
     };
     std::random_device random_device;
     std::mt19937 generator(random_device());

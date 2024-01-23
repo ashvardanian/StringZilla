@@ -16,10 +16,10 @@
 // Those parameters must never be explicitly set during releases,
 // but they come handy during development, if you want to validate
 // different ISA-specific implementations.
-// #define SZ_USE_X86_AVX2 0
-// #define SZ_USE_X86_AVX512 0
-// #define SZ_USE_ARM_NEON 0
-// #define SZ_USE_ARM_SVE 0
+#define SZ_USE_X86_AVX2 0
+#define SZ_USE_X86_AVX512 0
+#define SZ_USE_ARM_NEON 0
+#define SZ_USE_ARM_SVE 0
 #define SZ_DEBUG 1 // Enforce agressive logging for this unit.
 
 #include <string>                      // Baseline
@@ -200,7 +200,10 @@ static void test_api_readonly() {
     assert(str("hello").rfind("l") == 3);
     assert(str("hello").rfind("l", 2) == 2);
     assert(str("hello").rfind("l", 1) == str::npos);
+
+    // More complex queries.
     assert(str("abbabbaaaaaa").find("aa") == 6);
+    assert(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);
@@ -544,8 +547,8 @@ static void test_api_readonly_extensions() {
     std::vector<std::int8_t> costs_vector = unary_substitution_costs();
     matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
 
-    assert(sz::alignment_score(str("hello"), str("hello"), 1, costs) == 0);
-    assert(sz::alignment_score(str("hello"), str("hell"), 1, costs) == 1);
+    assert(sz::alignment_score(str("hello"), str("hello"), costs, 1) == 0);
+    assert(sz::alignment_score(str("hello"), str("hell"), costs, 1) == 1);
 
     // Computing rolling fingerprints.
     assert(sz::fingerprint_rolling<512>(str("hello"), 4).count() == 2);

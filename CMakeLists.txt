@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.1)
 project(
   stringzilla
-  VERSION 0.1.0
+  VERSION 2.0.4
   LANGUAGES C CXX
-  DESCRIPTION "A fast and modern C/C++ library for string manipulation"
+  DESCRIPTION "Crunch multi-gigabyte strings with ease"
   HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla")
 
 set(CMAKE_C_STANDARD 99)
@@ -35,6 +35,7 @@ option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++"
   ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_BENCHMARK "Compile a native benchmark in C++"
   ${STRINGZILLA_IS_MAIN_PROJECT})
+option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${STRINGZILLA_IS_MAIN_PROJECT})
 set(STRINGZILLA_TARGET_ARCH
   ""
   CACHE STRING "Architecture to tell the compiler to optimize for (-march)")
@@ -90,7 +91,9 @@ function(set_compiler_flags target cpp_standard)
     ${CMAKE_BINARY_DIR})
 
   # Set the C++ standard
-  target_compile_features(${target} PUBLIC cxx_std_${cpp_standard})
+  if(NOT ${cpp_standard} STREQUAL "")
+    target_compile_features(${target} PUBLIC cxx_std_${cpp_standard})
+  endif()
 
   # Maximum warnings level & warnings as error Allow unknown pragmas
   target_compile_options(
@@ -157,4 +160,13 @@ if(${STRINGZILLA_BUILD_TEST})
   define_launcher(stringzilla_test_cpp14 scripts/test.cpp 14)
   define_launcher(stringzilla_test_cpp17 scripts/test.cpp 17)
   define_launcher(stringzilla_test_cpp20 scripts/test.cpp 20)
+endif()
+
+if(${STRINGZILLA_BUILD_SHARED})
+  add_library(stringzilla_shared SHARED c/lib.c)
+  set_compiler_flags(stringzilla_shared "")
+  set_target_properties(stringzilla_shared PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION 1
+    PUBLIC_HEADER include/stringzilla/stringzilla.h)
 endif()
