@@ -4,7 +4,10 @@ import PackageDescription
 let package = Package(
     name: "StringZilla",
     products: [
-        .library(name: "StringZilla", targets: ["StringZillaC", "StringZilla"])
+        .library(
+            name: "StringZilla",
+            targets: ["StringZillaC", "StringZilla"]
+        )
     ],
     targets: [
         .target(
