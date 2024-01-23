@@ -72,7 +72,7 @@ StringZilla has a lot of functionality, but first, let's make sure it can handle
       <span style="color:#ABABAB;">arm:</span> <b>0.5</b> GB/s
     </td>
     <td align="center">
-      <code>sz_find_last</code><br/>
+      <code>sz_rfind</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>10.8</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>6.7</b> GB/s
     </td>
@@ -98,7 +98,7 @@ StringZilla has a lot of functionality, but first, let's make sure it can handle
       <span style="color:#ABABAB;">arm:</span> <b>0.02</b> GB/s
     </td>
     <td align="center">
-      <code>sz_find_from_set</code><br/>
+      <code>sz_find_charset</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
     </td>
@@ -116,7 +116,7 @@ StringZilla has a lot of functionality, but first, let's make sure it can handle
     </td>
     <td align="center">❌</td>
     <td align="center">
-      <code>sz_find_last_from_set</code><br/>
+      <code>sz_rfind_charset</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
     </td>
@@ -195,6 +195,19 @@ On the engineering side, the library:
 
 - Implement the Small String Optimization for strings shorter than 23 bytes.
 - Avoids PyBind11, SWIG, `ParseTuple` and other CPython sugar to minimize call latency. [_details_](https://ashvardanian.com/posts/pybind11-cpython-tutorial/) 
+
+
+## Supported Functionality
+
+| Functionality        | C 99 | C++ 11 | Python | Swift | Rust |
+| :------------------- | :--- | :----- | :----- | :---- | :--- |
+| Substring Search     | ✅    | ✅      | ✅      | ✅     | ✅    |
+| Character Set Search | ✅    | ✅      | ✅      | ✅     | ✅    |
+| Edit Distance        | ✅    | ✅      | ✅      | ✅     | ❌    |
+| Small String Class   | ✅    | ✅      | ❌      | ❌     | ❌    |
+| Sequence Operation   | ✅    | ❌      | ✅      | ❌     | ❌    |
+| Lazy Ranges          | ❌    | ✅      | ❌      | ❌     | ❌    |
+| Fingerprints         | ✅    | ✅      | ❌      | ❌     | ❌    |
 
 ## Quick Start: Python 🐍
 

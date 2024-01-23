@@ -79,15 +79,15 @@ tracked_binary_functions_t rfind_functions() {
              auto match = h.rfind(n);
              return (match == std::string_view::npos ? 0 : match);
          }},
-        {"sz_find_last_serial", wrap_sz(sz_find_last_serial), true},
+        {"sz_rfind_serial", wrap_sz(sz_rfind_serial), true},
 #if SZ_USE_X86_AVX512
-        {"sz_find_last_avx512", wrap_sz(sz_find_last_avx512), true},
+        {"sz_rfind_avx512", wrap_sz(sz_rfind_avx512), true},
 #endif
 #if SZ_USE_X86_AVX2
-        {"sz_find_last_avx2", wrap_sz(sz_find_last_avx2), true},
+        {"sz_rfind_avx2", wrap_sz(sz_rfind_avx2), true},
 #endif
 #if SZ_USE_ARM_NEON
-        {"sz_find_last_neon", wrap_sz(sz_find_last_neon), true},
+        {"sz_rfind_neon", wrap_sz(sz_rfind_neon), true},
 #endif
         {"std::search",
          [](std::string_view h, std::string_view n) {
@@ -127,12 +127,12 @@ tracked_binary_functions_t find_character_set_functions() {
              auto match = h.find_first_of(n);
              return (match == std::string_view::npos ? h.size() : match);
          }},
-        {"sz_find_from_set_serial", wrap_sz(sz_find_from_set_serial), true},
+        {"sz_find_charset_serial", wrap_sz(sz_find_charset_serial), true},
 #if SZ_USE_X86_AVX512
-        {"sz_find_from_set_avx512", wrap_sz(sz_find_from_set_avx512), true},
+        {"sz_find_charset_avx512", wrap_sz(sz_find_charset_avx512), true},
 #endif
 #if SZ_USE_ARM_NEON
-        {"sz_find_from_set_neon", wrap_sz(sz_find_from_set_neon), true},
+        {"sz_find_charset_neon", wrap_sz(sz_find_charset_neon), true},
 #endif
         {"strcspn", [](std::string_view h, std::string_view n) { return strcspn(h.data(), n.data()); }},
     };
@@ -155,12 +155,12 @@ tracked_binary_functions_t rfind_character_set_functions() {
              auto match = h.find_last_of(n);
              return (match == std::string_view::npos ? 0 : match);
          }},
-        {"sz_find_last_from_set_serial", wrap_sz(sz_find_last_from_set_serial), true},
+        {"sz_rfind_charset_serial", wrap_sz(sz_rfind_charset_serial), true},
 #if SZ_USE_X86_AVX512
-        {"sz_find_last_from_set_avx512", wrap_sz(sz_find_last_from_set_avx512), true},
+        {"sz_rfind_charset_avx512", wrap_sz(sz_rfind_charset_avx512), true},
 #endif
 #if SZ_USE_ARM_NEON
-        {"sz_find_last_from_set_neon", wrap_sz(sz_find_last_from_set_neon), true},
+        {"sz_rfind_charset_neon", wrap_sz(sz_rfind_charset_neon), true},
 #endif
     };
     return result;
