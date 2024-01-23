@@ -1,4 +1,4 @@
-// swift-tools-version:5.3
+// swift-tools-version:5.9
 import PackageDescription
 
 let package = Package(
@@ -10,6 +10,7 @@ let package = Package(
         .target(
             name: "StringZillaC",
             path: "include/stringzilla",
+            sources: ["empty.c"],
             publicHeadersPath: "."
         ),
         .target(
@@ -25,6 +26,5 @@ let package = Package(
             sources: ["Test.swift"]
         )
     ],
-    cLanguageStandard: CLanguageStandard.c99,
-    cxxLanguageStandard: CXXLanguageStandard.cxx14
+    cLanguageStandard: CLanguageStandard.c99
 )

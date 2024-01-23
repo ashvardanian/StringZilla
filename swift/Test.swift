@@ -15,7 +15,7 @@ class StringZillaTests: XCTestCase {
     override func setUp() {
         super.setUp()
         testString = "Hello, world! Welcome to StringZilla. 👋"
-        XCTAssertEqual(testString.length, 39)
+        XCTAssertEqual(testString.count, 39)
         XCTAssertEqual(testString.utf8.count, 42)
     }
     
