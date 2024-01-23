@@ -3665,11 +3665,15 @@ typedef union sz_u128_vec_t {
     sz_u8_t u8s[16];
 } sz_u128_vec_t;
 
+SZ_INTERNAL sz_u64_t vreinterpretq_u8_u4(uint8x16_t vec) {
+    // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
+    // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
+}
+
 SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-    sz_u8_t offsets[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-    sz_u128_vec_t h_vec, n_vec, offsets_vec, matches_vec;
+    sz_u128_vec_t h_vec, n_vec, matches_vec;
     n_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)n);
-    offsets_vec.u8x16 = vld1q_u8(offsets);
 
     while (h_length >= 16) {
         h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h);
@@ -3677,10 +3681,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
         // In Arm NEON we don't have a `movemask` to combine it with `ctz` and get the offset of the match.
         // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise selecting)
         // the vector with a relative offsets array.
-        if (vmaxvq_u8(matches_vec.u8x16)) {
-            matches_vec.u8x16 = vbslq_u8(matches_vec.u8x16, offsets_vec.u8x16, vdupq_n_u8(0xFF));
-            return h + vminvq_u8(matches_vec.u8x16);
-        }
+        if (vmaxvq_u8(matches_vec.u8x16)) return h + sz_u64_ctz(vreinterpretq_u8_u4(matches_vec.u8x16)) / 4;
+
         h += 16, h_length -= 16;
     }
 
@@ -3688,22 +3690,14 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
-    sz_u8_t offsets[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
-
-    sz_u128_vec_t h_vec, n_vec, offsets_vec, matches_vec;
+    sz_u128_vec_t h_vec, n_vec, matches_vec;
     n_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)n);
-    offsets_vec.u8x16 = vld1q_u8(offsets);
 
     while (h_length >= 16) {
         h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h + h_length - 16);
         matches_vec.u8x16 = vceqq_u8(h_vec.u8x16, n_vec.u8x16);
-        // In Arm NEON we don't have a `movemask` to combine it with `clz` and get the offset of the match.
-        // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise selecting)
-        // the vector with a relative offsets array.
-        if (vmaxvq_u8(matches_vec.u8x16)) {
-            matches_vec.u8x16 = vbslq_u8(matches_vec.u8x16, offsets_vec.u8x16, vdupq_n_u8(0));
-            return h + h_length - 16 + vmaxvq_u8(matches_vec.u8x16);
-        }
+        if (vmaxvq_u8(matches_vec.u8x16))
+            return h + h_length - 1 - sz_u64_clz(vreinterpretq_u8_u4(matches_vec.u8x16)) / 4;
         h_length -= 16;
     }
 
@@ -3730,10 +3724,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
         if (vmaxvq_u8(matches_vec.u8x16)) {
-            // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
-            // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
-            matches = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(matches_vec.u8x16), 4)), 0) &
-                      0x8888888888888888ull;
+            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_ctz(matches) / 4;
                 if (sz_equal(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
@@ -3765,10 +3756,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
         if (vmaxvq_u8(matches_vec.u8x16)) {
-            // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
-            // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
-            matches = vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(matches_vec.u8x16), 4)), 0) &
-                      0x8888888888888888ull;
+            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_clz(matches) / 4;
                 if (sz_equal(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
@@ -3784,10 +3772,52 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
+
+    sz_u128_vec_t h_vec, matches_vec;
+    uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
+    uint8x16_t set_bottom_vec_u8x16 = vld1q_u8(&set->_u8s[16]);
+
+    for (; h_length >= 16; h += 16, h_length -= 16) {
+        h_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h));
+        // Once we've read the characters in the haystack, we want to
+        // compare them against our bitset. The serial version of that code
+        // would look like: `(set_->_u8s[c >> 3] & (1u << (c & 7u))) != 0`.
+        uint8x16_t byte_index_vec = vshrq_n_u8(h_vec.u8x16, 3);
+        uint8x16_t byte_mask_vec = vshlq_u8(vdupq_n_u8(1), vreinterpretq_s8_u8(vandq_u8(h_vec.u8x16, vdupq_n_u8(7))));
+        uint8x16_t matches_top_vec = vqtbl1q_u8(set_top_vec_u8x16, byte_index_vec);
+        // The table lookup instruction in NEON replies to out-of-bound requests with zeros.
+        // The values in `byte_index_vec` all fall in [0; 32). So for values under 16, substracting 16 will underflow
+        // and map into interval [240, 256). Meaning that those will be populated with zeros and we can safely
+        // merge `matches_top_vec` and `matches_bottom_vec` with a bitwise OR.
+        uint8x16_t matches_bottom_vec = vqtbl1q_u8(set_bottom_vec_u8x16, vsubq_u8(byte_index_vec, vdupq_n_u8(16)));
+        matches_vec.u8x16 = vorrq_u8(matches_top_vec, matches_bottom_vec);
+        // Istead of pure `vandq_u8`, we can immediately broadcast a match presence across each 8-bit word.
+        matches_vec.u8x16 = vtstq_u8(matches_vec.u8x16, byte_mask_vec);
+        if (vmaxvq_u8(matches_vec.u8x16)) return h + sz_u64_ctz(vreinterpretq_u8_u4(matches_vec.u8x16)) / 4;
+    }
+
     return sz_find_charset_serial(h, h_length, set);
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
+
+    sz_u128_vec_t h_vec, matches_vec;
+    uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
+    uint8x16_t set_bottom_vec_u8x16 = vld1q_u8(&set->_u8s[16]);
+
+    // Check `sz_find_charset_neon` for explanations.
+    for (; h_length >= 16; h_length -= 16) {
+        h_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h) + h_length - 16);
+        uint8x16_t byte_index_vec = vshrq_n_u8(h_vec.u8x16, 3);
+        uint8x16_t byte_mask_vec = vshlq_u8(vdupq_n_u8(1), vreinterpretq_s8_u8(vandq_u8(h_vec.u8x16, vdupq_n_u8(7))));
+        uint8x16_t matches_top_vec = vqtbl1q_u8(set_top_vec_u8x16, byte_index_vec);
+        uint8x16_t matches_bottom_vec = vqtbl1q_u8(set_bottom_vec_u8x16, vsubq_u8(byte_index_vec, vdupq_n_u8(16)));
+        matches_vec.u8x16 = vorrq_u8(matches_top_vec, matches_bottom_vec);
+        matches_vec.u8x16 = vtstq_u8(matches_vec.u8x16, byte_mask_vec);
+        if (vmaxvq_u8(matches_vec.u8x16))
+            return h + h_length - 1 - sz_u64_clz(vreinterpretq_u8_u4(matches_vec.u8x16)) / 4;
+    }
+
     return sz_rfind_charset_serial(h, h_length, set);
 }
 
@@ -3904,6 +3934,8 @@ SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t 
 SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_find_charset_avx512(text, length, set);
+#elif SZ_USE_ARM_NEON
+    return sz_find_charset_neon(text, length, set);
 #else
     return sz_find_charset_serial(text, length, set);
 #endif
@@ -3912,6 +3944,8 @@ SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charse
 SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_rfind_charset_avx512(text, length, set);
+#elif SZ_USE_ARM_NEON
+    return sz_rfind_charset_neon(text, length, set);
 #else
     return sz_rfind_charset_serial(text, length, set);
 #endif
@@ -3935,14 +3969,12 @@ SZ_DYNAMIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size
     sz_fingerprint_rolling_serial(text, length, window_length, fingerprint, fingerprint_bytes);
 }
 
-
 SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
     sz_charset_t set;
     sz_charset_init(&set);
     for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
     return sz_find_charset(h, h_length, &set);
 }
-
 
 SZ_DYNAMIC sz_cptr_t sz_find_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
     sz_charset_t set;
@@ -3952,14 +3984,12 @@ SZ_DYNAMIC sz_cptr_t sz_find_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_c
     return sz_find_charset(h, h_length, &set);
 }
 
-
 SZ_DYNAMIC sz_cptr_t sz_rfind_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
     sz_charset_t set;
     sz_charset_init(&set);
     for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
     return sz_rfind_charset(h, h_length, &set);
 }
-
 
 SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
     sz_charset_t set;

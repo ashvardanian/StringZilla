@@ -44,7 +44,7 @@ tracked_binary_functions_t find_functions() {
              sz_cptr_t match = (sz_cptr_t)memmem(h.data(), h.size(), n.data(), n.size());
              return (match ? match - h.data() : h.size());
          }},
-        {"std::search",
+        {"std::search<>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.data(), h.data() + h.size(), n.data(), n.data() + n.size());
              return (match - h.data());
@@ -89,19 +89,19 @@ tracked_binary_functions_t rfind_functions() {
 #if SZ_USE_ARM_NEON
         {"sz_rfind_neon", wrap_sz(sz_rfind_neon), true},
 #endif
-        {"std::search",
+        {"std::search<R>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.rbegin(), h.rend(), n.rbegin(), n.rend());
              auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
              return h.size() - offset_from_end;
          }},
-        {"std::search<BM>",
+        {"std::search<R, BM>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.rbegin(), h.rend(), std::boyer_moore_searcher(n.rbegin(), n.rend()));
              auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
              return h.size() - offset_from_end;
          }},
-        {"std::search<BMH>",
+        {"std::search<R, BMH>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.rbegin(), h.rend(), std::boyer_moore_horspool_searcher(n.rbegin(), n.rend()));
              auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
@@ -111,7 +111,7 @@ tracked_binary_functions_t rfind_functions() {
     return result;
 }
 
-tracked_binary_functions_t find_character_set_functions() {
+tracked_binary_functions_t find_charset_functions() {
     // ! Despite receiving string-views, following functions are assuming the strings are null-terminated.
     auto wrap_sz = [](auto function) -> binary_function_t {
         return binary_function_t([function](std::string_view h, std::string_view n) {
@@ -139,7 +139,7 @@ tracked_binary_functions_t find_character_set_functions() {
     return result;
 }
 
-tracked_binary_functions_t rfind_character_set_functions() {
+tracked_binary_functions_t rfind_charset_functions() {
     // ! Despite receiving string-views, following functions are assuming the strings are null-terminated.
     auto wrap_sz = [](auto function) -> binary_function_t {
         return binary_function_t([function](std::string_view h, std::string_view n) {
@@ -278,20 +278,28 @@ int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting search benchmarks.\n");
 
     dataset_t dataset = make_dataset(argc, argv);
-    bench_rfinds(dataset.text, {dataset.tokens.begin(), dataset.tokens.end()}, rfind_functions());
+
+    // Splitting by new lines
+    std::printf("Benchmarking for a newline symbol:\n");
+    bench_finds(dataset.text, {"\n"}, find_functions());
+    bench_rfinds(dataset.text, {"\n"}, rfind_functions());
+
+    std::printf("Benchmarking for an [\\n\\r] RegEx:\n");
+    bench_finds(dataset.text, {sz::newlines}, find_charset_functions());
+    bench_rfinds(dataset.text, {sz::newlines}, rfind_charset_functions());
 
     // Typical ASCII tokenization and validation benchmarks
     std::printf("Benchmarking for whitespaces:\n");
-    bench_finds(dataset.text, {sz::whitespaces}, find_character_set_functions());
-    bench_rfinds(dataset.text, {sz::whitespaces}, rfind_character_set_functions());
+    bench_finds(dataset.text, {sz::whitespaces}, find_charset_functions());
+    bench_rfinds(dataset.text, {sz::whitespaces}, rfind_charset_functions());
 
     std::printf("Benchmarking for punctuation marks:\n");
-    bench_finds(dataset.text, {sz::punctuation}, find_character_set_functions());
-    bench_rfinds(dataset.text, {sz::punctuation}, rfind_character_set_functions());
+    bench_finds(dataset.text, {sz::punctuation}, find_charset_functions());
+    bench_rfinds(dataset.text, {sz::punctuation}, rfind_charset_functions());
 
     std::printf("Benchmarking for non-printable characters:\n");
-    bench_finds(dataset.text, {sz::ascii_controls}, find_character_set_functions());
-    bench_rfinds(dataset.text, {sz::ascii_controls}, rfind_character_set_functions());
+    bench_finds(dataset.text, {sz::ascii_controls}, find_charset_functions());
+    bench_rfinds(dataset.text, {sz::ascii_controls}, rfind_charset_functions());
 
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");
