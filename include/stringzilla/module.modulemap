@@ -1,0 +1,9 @@
+module StringZillaC {
+    header "stringzilla.h"
+    export *
+}
+
+module StringZillaCpp {
+    header "stringzilla.hpp"
+    export *
+}

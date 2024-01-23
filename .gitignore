@@ -1,8 +1,12 @@
 build/
+build_debug/
 .DS_Store
+.build/
+.swiftpm/
 tmp/
 build_debug/
 build_release/
+target/
 __pycache__
 .pytest_cache
 .conda
@@ -16,9 +20,11 @@ substr_search_cpp
 *.egg-info
 *.whl
 *.pyd
+.venv/*
 node_modules/
 
 # Recommended datasets
 leipzig1M.txt
 enwik9.txt
 xlsum.csv
+enwik9

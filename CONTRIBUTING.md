@@ -194,6 +194,24 @@ cibuildwheel --platform linux
 npm ci && npm test
 ```
 
+## Contributing in Swift
+
+```bash
+swift build && swift test
+```
+
+Running Swift on Linux requires a couple of extra steps, as the Swift compiler is not available in the default repositories.
+Please get the most recent Swift tarball from the [official website](https://www.swift.org/install/).
+At the time of writing, for 64-bit Arm CPU running Ubuntu 22.04, the following commands would work:
+
+```bash
+wget https://download.swift.org/swift-5.9.2-release/ubuntu2204-aarch64/swift-5.9.2-RELEASE/swift-5.9.2-RELEASE-ubuntu22.04-aarch64.tar.gz
+tar xzf swift-5.9.2-RELEASE-ubuntu22.04-aarch64.tar.gz
+sudo mv swift-5.9.2-RELEASE-ubuntu22.04-aarch64 /usr/share/swift
+echo "export PATH=/usr/share/swift/usr/bin:$PATH" >> ~/.bashrc
+source ~/.bashrc
+```
+
 ## Roadmap
 
 The project is in its early stages of development.

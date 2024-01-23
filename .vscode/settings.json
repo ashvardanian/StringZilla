@@ -18,6 +18,7 @@
   "cmake.sourceDirectory": "${workspaceRoot}",
   "cSpell.words": [
     "allowoverlap",
+    "aminoacids",
     "Apostolico",
     "Appleby",
     "ashvardanian",
@@ -31,6 +32,7 @@
     "cheminformatics",
     "cibuildwheel",
     "copydoc",
+    "cptr",
     "endregion",
     "endswith",
     "Fisher",

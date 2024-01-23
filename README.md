@@ -10,18 +10,154 @@ Aside from exact search, the library also accelerates fuzzy search, edit distanc
 - Code in C? Replace LibC's `<string.h>` with C 99 `<stringzilla.h>`  - [_more_](#quick-start-c-🛠️)
 - Code in C++? Replace STL's `<string>` with C++ 11 `<stringzilla.hpp>` - [_more_](#quick-start-cpp-🛠️)
 - Code in Python? Upgrade your `str` to faster `Str` - [_more_](#quick-start-python-🐍)
+- Code in Swift? Use the `String+StringZilla` extension - [_more_](#quick-start-swift-🍎)
+- Code in Rust? Use the `StringZilla` crate - [_more_](#quick-start-rust-🦀)
 - Code in other languages? Let us know!
 
-__Features:__
+StringZilla has a lot of functionality, but first, let's make sure it can handle the basics.
 
-| Feature \ Library              | C++ STL |    LibC |      StringZilla |
-| :----------------------------- | ------: | ------: | ---------------: |
-| Substring Search               |  1 GB/s | 12 GB/s |          12 GB/s |
-| Reverse Order Substring Search |  1 GB/s |       ❌ |          12 GB/s |
-| Fuzzy Search                   |       ❌ |       ❌ |                ? |
-| Levenshtein Edit Distance      |       ❌ |       ❌ |                ✅ |
-| Hashing                        |       ✅ |       ❌ |                ✅ |
-| Interface                      |     C++ |       C | C , C++ , Python |
+<table style="width: 100%; text-align: center; table-layout: fixed;">
+  <colgroup>
+    <col style="width: 25%;">
+    <col style="width: 25%;">
+    <col style="width: 25%;">
+    <col style="width: 25%;">
+  </colgroup>
+  <tr>
+    <th align="center">LibC</th>
+    <th align="center">C++ Standard</th>
+    <th align="center">Python</th>
+    <th align="center">StringZilla</th>
+  </tr>
+  <!-- Substrings, normal order -->
+  <tr>
+    <td colspan="4" align="center">find the first occurrence of a random word from text, ≅ 5 bytes long</td>
+  </tr>
+  <tr>
+    <td align="center">
+      <code>strstr</code> <sup>1</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>7.4</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2.0</b> GB/s
+    </td>
+    <td align="center">
+      <code>.find</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>2.9</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>1.6</b> GB/s
+    </td>
+    <td align="center">
+      <code>.find</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>1.1</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.6</b> GB/s
+    </td>
+    <td align="center">
+      <code>sz_find</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>10.6</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>7.1</b> GB/s
+    </td>
+  </tr>
+  <!-- Substrings, reverse order -->
+  <tr>
+    <td colspan="4" align="center">find the last occurrence of a random word from text, ≅ 5 bytes long</td>
+  </tr>
+  <tr>
+    <td align="center">❌</td>
+    <td align="center">
+      <code>.rfind</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.5</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.4</b> GB/s
+    </td>
+    <td align="center">
+      <code>.rfind</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.9</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.5</b> GB/s
+    </td>
+    <td align="center">
+      <code>sz_rfind</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>10.8</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>6.7</b> GB/s
+    </td>
+  </tr>
+  <!-- Characters, normal order -->
+  <tr>
+    <td colspan="4" align="center">find the first occurrence of any of 6 whitespaces <sup>2</sup></td>
+  </tr>
+  <tr>
+    <td align="center">
+      <code>strcspn</code> <sup>1</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.74</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.29</b> GB/s
+    </td>
+    <td align="center">
+      <code>.find_first_of</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.25</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
+    </td>
+    <td align="center">
+      <code>re.finditer</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.06</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.02</b> GB/s
+    </td>
+    <td align="center">
+      <code>sz_find_charset</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
+    </td>
+  </tr>
+  <!-- Characters, reverse order -->
+  <tr>
+    <td colspan="4" align="center">find the last occurrence of any of 6 whitespaces <sup>2</sup></td>
+  </tr>
+  <tr>
+    <td align="center">❌</td>
+    <td align="center">
+      <code>.find_last_of</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.25</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.25</b> GB/s
+    </td>
+    <td align="center">❌</td>
+    <td align="center">
+      <code>sz_rfind_charset</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
+    </td>
+  </tr>
+  <!-- Edit Distance -->
+  <tr>
+    <td colspan="4" align="center">Levenshtein edit distance, ≅ 5 bytes long</td>
+  </tr>
+  <tr>
+    <td align="center">❌</td>
+    <td align="center">❌</td>
+    <td align="center">
+      custom <sup>3</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>99</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>180</b> ns
+    </td>
+    <td align="center">
+      <code>sz_edit_distance</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>99</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>180</b> ns
+    </td>
+  </tr>
+  <!-- Alignment Score -->
+  <tr>
+    <td colspan="4" align="center">Needleman-Wunsh alignment scores, ≅ 300 aminoacids long</td>
+  </tr>
+  <tr>
+    <td align="center">❌</td>
+    <td align="center">❌</td>
+    <td align="center">
+      custom <sup>4</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>73</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>177</b> ms
+    </td>
+    <td align="center">
+      <code>sz_alignment_score</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>73</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>177</b> ms
+    </td>
+  </tr>
+</table>
 
 > Benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
 > The hardware used is an AVX-512 capable Intel Sapphire Rapids CPU.
@@ -59,6 +195,19 @@ On the engineering side, the library:
 
 - Implement the Small String Optimization for strings shorter than 23 bytes.
 - Avoids PyBind11, SWIG, `ParseTuple` and other CPython sugar to minimize call latency. [_details_](https://ashvardanian.com/posts/pybind11-cpython-tutorial/) 
+
+
+## Supported Functionality
+
+| Functionality        | C 99 | C++ 11 | Python | Swift | Rust |
+| :------------------- | :--- | :----- | :----- | :---- | :--- |
+| Substring Search     | ✅    | ✅      | ✅      | ✅     | ✅    |
+| Character Set Search | ✅    | ✅      | ✅      | ✅     | ✅    |
+| Edit Distance        | ✅    | ✅      | ✅      | ✅     | ❌    |
+| Small String Class   | ✅    | ✅      | ❌      | ❌     | ❌    |
+| Sequence Operation   | ✅    | ❌      | ✅      | ❌     | ❌    |
+| Lazy Ranges          | ❌    | ✅      | ❌      | ❌     | ❌    |
+| Fingerprints         | ✅    | ✅      | ❌      | ❌     | ❌    |
 
 ## Quick Start: Python 🐍
 
@@ -228,7 +377,7 @@ auto b = "some string"_sz; // sz::string_view
 
 Most operations in StringZilla don't assume any memory ownership.
 But in addition to the read-only search-like operations StringZilla provides a minimalistic C and C++ implementations for a memory owning string "class".
-Like other efficient string implementations, it uses the [Small String Optimization][faq-sso] to avoid heap allocations for short strings.
+Like other efficient string implementations, it uses the [Small String Optimization][faq-sso] (SSO) to avoid heap allocations for short strings.
 
 [faq-sso]: https://cpp-optimizations.netlify.app/small_strings/
 
@@ -237,7 +386,7 @@ typedef union sz_string_t {
     struct internal {
         sz_ptr_t start;
         sz_u8_t length;
-        char chars[sz_string_stack_space]; /// Ends with a null-terminator.
+        char chars[SZ_STRING_INTERNAL_SPACE]; /// Ends with a null-terminator.
     } internal;
 
     struct external {
@@ -262,6 +411,10 @@ Our layout might be preferential, if you want to avoid branches.
 | Small String Capacity |                     15 |               __22__ |      __22__ |
 
 > Use the following gist to check on your compiler: https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21
+
+Other langauges, also freuqnetly rely on such optimizations.
+
+- Swift can store 15 bytes in the `String` struct. [docs](https://developer.apple.com/documentation/swift/substring/withutf8(_:)#discussion)
 
 For C++ users, the `sz::string` class hides those implementation details under the hood.
 For C users, less familiar with C++ classes, the `sz_string_t` union is available with following API.
@@ -617,10 +770,11 @@ __`SZ_AVOID_STL`__:
 > When using the C++ interface one can disable conversions from `std::string` to `sz::string` and back.
 > If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
 
-__`STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
+__`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
 
 > When compiling the tests and benchmarks, you can explicitly set the target hardware architecture.
 > It's synonymous to GCC's `-march` flag and is used to enable/disable the appropriate instruction sets.
+> You can also disable the shared library build, if you don't need it.
 
 ## Algorithms & Design Decisions 📚
 

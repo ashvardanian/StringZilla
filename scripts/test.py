@@ -1,15 +1,17 @@
 from random import choice, randint
 from string import ascii_lowercase
 from typing import Optional
-import numpy as np
 
+import numpy as np
 import pytest
 
-from random import choice, randint
-from string import ascii_lowercase
 import stringzilla as sz
 from stringzilla import Str, Strs
-from typing import Optional
+
+
+def test_library_properties():
+    assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
+    assert "serial" in sz.__capabilities__.split(","), "Serial backend must be present"
 
 
 def test_unit_construct():
@@ -43,7 +45,10 @@ def test_unit_contains():
 def test_unit_rich_comparisons():
     assert Str("aa") == "aa"
     assert Str("aa") < "b"
-    assert Str("abb")[1:] == "bb"
+    s2 = Str("abb")
+    assert s2[1:] == "bb"
+    assert s2[:-1] == "ab"
+    assert s2[-1:] == "b"
 
 
 def test_unit_buffer_protocol():
@@ -109,6 +114,31 @@ def test_unit_globals():
     assert sz.edit_distance("abababab", "aaaaaaaa", bound=2) == 2
 
 
+def test_unit_len():
+    w = sz.Str("abcd")
+    assert 4 == len(w)
+
+
+def test_slice_of_split():
+    def impl(native_str):
+        native_split = native_str.split()
+        text = sz.Str(native_str)
+        split = text.split()
+        for split_idx in range(len(native_split)):
+            native_slice = native_split[split_idx:]
+            idx = split_idx
+            for word in split[split_idx:]:
+                assert str(word) == native_split[idx]
+                idx += 1
+
+    native_str = "Weebles wobble before they fall down, don't they?"
+    impl(native_str)
+    # ~5GB to overflow 32-bit sizes
+    copies = int(len(native_str) / 5e9)
+    # Eek. Cover 64-bit indices
+    impl(native_str * copies)
+
+
 def get_random_string(
     length: Optional[int] = None,
     variability: Optional[int] = None,
@@ -172,8 +202,18 @@ def check_identical(
     present_in_big = needle in big
     assert present_in_native == present_in_big
     assert native.find(needle) == big.find(needle)
+    assert native.rfind(needle) == big.rfind(needle)
     assert native.count(needle) == big.count(needle)
 
+    # Check that the `start` and `stop` positions are correctly inferred
+    len_half = len(native) // 2
+    len_quarter = len(native) // 4
+    assert native.find(needle, len_half) == big.find(needle, len_half)
+    assert native.find(needle, len_quarter, 3 * len_quarter) == big.find(
+        needle, len_quarter, 3 * len_quarter
+    )
+
+    # Check splits and other sequence operations
     native_strings = native.split(needle)
     big_strings: Strs = big.split(needle)
     assert len(native_strings) == len(big_strings)
@@ -216,9 +256,9 @@ def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability
     ), f"Failed to locate {pattern} at offset {native.find(pattern)} in {native}"
 
 
-@pytest.mark.parametrize("iters", [100])
+@pytest.mark.repeat(100)
 @pytest.mark.parametrize("max_edit_distance", [150])
-def test_edit_distance_insertions(max_edit_distance: int, iters: int):
+def test_edit_distance_insertions(max_edit_distance: int):
     # Create a new string by slicing and concatenating
     def insert_char_at(s, char_to_insert, index):
         return s[:index] + char_to_insert + s[index:]
@@ -229,14 +269,30 @@ def test_edit_distance_insertions(max_edit_distance: int, iters: int):
         source_offset = randint(0, len(ascii_lowercase) - 1)
         target_offset = randint(0, len(b) - 1)
         b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
-        assert sz.edit_distance(a, b, 200) == i + 1
+        assert sz.edit_distance(a, b, bound=200) == i + 1
 
 
-@pytest.mark.parametrize("iters", [100])
-def test_edit_distance_randos(iters: int):
-    a = get_random_string(length=20)
-    b = get_random_string(length=20)
-    assert sz.edit_distance(a, b, 200) == baseline_edit_distance(a, b)
+@pytest.mark.repeat(30)
+@pytest.mark.parametrize("first_length", [20, 100])
+@pytest.mark.parametrize("second_length", [20, 100])
+def test_edit_distance_random(first_length: int, second_length: int):
+    a = get_random_string(length=first_length)
+    b = get_random_string(length=second_length)
+    assert sz.edit_distance(a, b) == baseline_edit_distance(a, b)
+
+
+@pytest.mark.repeat(30)
+@pytest.mark.parametrize("first_length", [20, 100])
+@pytest.mark.parametrize("second_length", [20, 100])
+def test_alignment_score_random(first_length: int, second_length: int):
+    a = get_random_string(length=first_length)
+    b = get_random_string(length=second_length)
+    character_substitutions = np.ones((256, 256), dtype=np.int8)
+    np.fill_diagonal(character_substitutions, 0)
+
+    assert sz.alignment_score(
+        a, b, substitution_matrix=character_substitutions, gap_score=1
+    ) == baseline_edit_distance(a, b)
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])

@@ -76,7 +76,7 @@ namespace ashvardanian {
 namespace stringzilla {
 
 template <typename>
-class basic_char_set;
+class basic_charset;
 template <typename>
 class basic_string_slice;
 template <typename, typename>
@@ -182,22 +182,22 @@ inline static constexpr char base64[64] = { //
  *  @brief  A set of characters represented as a bitset with 256 slots.
  */
 template <typename char_type_ = char>
-class basic_char_set {
-    sz_u8_set_t bitset_;
+class basic_charset {
+    sz_charset_t bitset_;
 
   public:
     using char_type = char_type_;
 
-    basic_char_set() noexcept {
-        // ! Instead of relying on the `sz_u8_set_init`, we have to reimplement it to support `constexpr`.
+    basic_charset() noexcept {
+        // ! Instead of relying on the `sz_charset_init`, we have to reimplement it to support `constexpr`.
         bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
     }
-    explicit basic_char_set(std::initializer_list<char_type> chars) noexcept : basic_char_set() {
-        // ! Instead of relying on the `sz_u8_set_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
+    explicit basic_charset(std::initializer_list<char_type> chars) noexcept : basic_charset() {
+        // ! Instead of relying on the `sz_charset_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
         for (auto c : chars) bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
     }
     template <std::size_t count_characters>
-    explicit basic_char_set(char_type const (&chars)[count_characters]) noexcept : basic_char_set() {
+    explicit basic_charset(char_type const (&chars)[count_characters]) noexcept : basic_charset() {
         static_assert(count_characters > 0, "Character array cannot be empty");
         for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
             char_type c = chars[i];
@@ -205,34 +205,34 @@ class basic_char_set {
         }
     }
 
-    basic_char_set(basic_char_set const &other) noexcept : bitset_(other.bitset_) {}
-    basic_char_set &operator=(basic_char_set const &other) noexcept {
+    basic_charset(basic_charset const &other) noexcept : bitset_(other.bitset_) {}
+    basic_charset &operator=(basic_charset const &other) noexcept {
         bitset_ = other.bitset_;
         return *this;
     }
 
-    basic_char_set operator|(basic_char_set other) const noexcept {
-        basic_char_set result = *this;
+    basic_charset operator|(basic_charset other) const noexcept {
+        basic_charset result = *this;
         result.bitset_._u64s[0] |= other.bitset_._u64s[0], result.bitset_._u64s[1] |= other.bitset_._u64s[1],
             result.bitset_._u64s[2] |= other.bitset_._u64s[2], result.bitset_._u64s[3] |= other.bitset_._u64s[3];
         return *this;
     }
 
-    inline basic_char_set &add(char_type c) noexcept {
-        sz_u8_set_add(&bitset_, sz_bitcast(sz_u8_t, c));
+    inline basic_charset &add(char_type c) noexcept {
+        sz_charset_add(&bitset_, sz_bitcast(sz_u8_t, c));
         return *this;
     }
-    inline sz_u8_set_t &raw() noexcept { return bitset_; }
-    inline sz_u8_set_t const &raw() const noexcept { return bitset_; }
-    inline bool contains(char_type c) const noexcept { return sz_u8_set_contains(&bitset_, sz_bitcast(sz_u8_t, c)); }
-    inline basic_char_set inverted() const noexcept {
-        basic_char_set result = *this;
-        sz_u8_set_invert(&result.bitset_);
+    inline sz_charset_t &raw() noexcept { return bitset_; }
+    inline sz_charset_t const &raw() const noexcept { return bitset_; }
+    inline bool contains(char_type c) const noexcept { return sz_charset_contains(&bitset_, sz_bitcast(sz_u8_t, c)); }
+    inline basic_charset inverted() const noexcept {
+        basic_charset result = *this;
+        sz_charset_invert(&result.bitset_);
         return result;
     }
 };
 
-using char_set = basic_char_set<char>;
+using char_set = basic_charset<char>;
 
 inline static char_set const ascii_letters_set {ascii_letters};
 inline static char_set const ascii_lowercase_set {ascii_lowercase};
@@ -1453,7 +1453,7 @@ class basic_string_slice {
      *  @return The offset of the first character of the match, or `npos` if not found.
      */
     size_type rfind(string_view other) const noexcept {
-        auto ptr = sz_find_last(start_, length_, other.start_, other.length_);
+        auto ptr = sz_rfind(start_, length_, other.start_, other.length_);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1470,7 +1470,7 @@ class basic_string_slice {
      *  @return The offset of the match, or `npos` if not found.
      */
     size_type rfind(value_type character) const noexcept {
-        auto ptr = sz_find_last_byte(start_, length_, &character);
+        auto ptr = sz_rfind_byte(start_, length_, &character);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1533,7 +1533,7 @@ class basic_string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_of(char_set set, size_type skip = 0) const noexcept {
-        auto ptr = sz_find_from_set(start_ + skip, length_ - skip, &set.raw());
+        auto ptr = sz_find_charset(start_ + skip, length_ - skip, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1550,7 +1550,7 @@ class basic_string_slice {
      *  @brief  Find the last occurrence of a character from a set.
      */
     size_type find_last_of(char_set set) const noexcept {
-        auto ptr = sz_find_last_from_set(start_, length_, &set.raw());
+        auto ptr = sz_rfind_charset(start_, length_, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1565,7 +1565,7 @@ class basic_string_slice {
      */
     size_type find_last_of(char_set set, size_type until) const noexcept {
         auto len = sz_min_of_two(until + 1, length_);
-        auto ptr = sz_find_last_from_set(start_, len, &set.raw());
+        auto ptr = sz_rfind_charset(start_, len, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1658,7 +1658,7 @@ class basic_string_slice {
      */
     string_slice lstrip(char_set set) const noexcept {
         set = set.inverted();
-        auto new_start = sz_find_from_set(start_, length_, &set.raw());
+        auto new_start = sz_find_charset(start_, length_, &set.raw());
         return new_start ? string_slice {new_start, length_ - static_cast<size_type>(new_start - start_)}
                          : string_slice();
     }
@@ -1669,7 +1669,7 @@ class basic_string_slice {
      */
     string_slice rstrip(char_set set) const noexcept {
         set = set.inverted();
-        auto new_end = sz_find_last_from_set(start_, length_, &set.raw());
+        auto new_end = sz_rfind_charset(start_, length_, &set.raw());
         return new_end ? string_slice {start_, static_cast<size_type>(new_end - start_ + 1)} : string_slice();
     }
 
@@ -1679,13 +1679,12 @@ class basic_string_slice {
      */
     string_slice strip(char_set set) const noexcept {
         set = set.inverted();
-        auto new_start = sz_find_from_set(start_, length_, &set.raw());
-        return new_start
-                   ? string_slice {new_start,
-                                   static_cast<size_type>(
-                                       sz_find_last_from_set(new_start, length_ - (new_start - start_), &set.raw()) -
-                                       new_start + 1)}
-                   : string_slice();
+        auto new_start = sz_find_charset(start_, length_, &set.raw());
+        return new_start ? string_slice {new_start,
+                                         static_cast<size_type>(
+                                             sz_rfind_charset(new_start, length_ - (new_start - start_), &set.raw()) -
+                                             new_start + 1)}
+                         : string_slice();
     }
 
 #pragma endregion
@@ -3471,7 +3470,7 @@ std::size_t edit_distance(basic_string<char_type_, allocator_type_> const &a,
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
 std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                               std::int8_t gap, std::int8_t const (&subs)[256][256],
+                               std::int8_t const (&subs)[256][256], std::int8_t gap = 1,
                                allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
 
     static_assert(sizeof(sz_error_cost_t) == sizeof(std::int8_t), "sz_error_cost_t must be 8-bit.");
@@ -3480,7 +3479,7 @@ std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_st
 
     std::ptrdiff_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            result = sz_alignment_score(a.data(), a.size(), b.data(), b.size(), gap, &subs[0][0], &alloc);
+            result = sz_alignment_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc);
             return result != SZ_SSIZE_MAX;
         }))
         throw std::bad_alloc();
@@ -3494,8 +3493,8 @@ std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_st
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
 std::ptrdiff_t alignment_score(basic_string<char_type_, allocator_type_> const &a,
                                basic_string<char_type_, allocator_type_> const &b, //
-                               std::int8_t gap, std::int8_t const (&subs)[256][256]) noexcept(false) {
-    return ashvardanian::stringzilla::alignment_score(a.view(), b.view(), gap, subs, a.get_allocator());
+                               std::int8_t const (&subs)[256][256], std::int8_t gap = 1) noexcept(false) {
+    return ashvardanian::stringzilla::alignment_score(a.view(), b.view(), subs, gap, a.get_allocator());
 }
 
 #if !SZ_AVOID_STL

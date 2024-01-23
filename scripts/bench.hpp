@@ -18,7 +18,7 @@
 #include <stringzilla/stringzilla.h>
 #include <stringzilla/stringzilla.hpp>
 
-#ifdef SZ_DEBUG // Make debugging faster
+#if SZ_DEBUG // Make debugging faster
 #define default_seconds_m 10
 #else
 #define default_seconds_m 30
