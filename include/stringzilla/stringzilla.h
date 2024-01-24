@@ -3772,7 +3772,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
-
+    sz_u64_t matches;
     sz_u128_vec_t h_vec, matches_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
     uint8x16_t set_bottom_vec_u8x16 = vld1q_u8(&set->_u8s[16]);
@@ -3793,14 +3793,15 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_cha
         matches_vec.u8x16 = vorrq_u8(matches_top_vec, matches_bottom_vec);
         // Istead of pure `vandq_u8`, we can immediately broadcast a match presence across each 8-bit word.
         matches_vec.u8x16 = vtstq_u8(matches_vec.u8x16, byte_mask_vec);
-        if (vmaxvq_u8(matches_vec.u8x16)) return h + sz_u64_ctz(vreinterpretq_u8_u4(matches_vec.u8x16)) / 4;
+        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        if (matches) return h + sz_u64_ctz(matches) / 4;
     }
 
     return sz_find_charset_serial(h, h_length, set);
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
-
+    sz_u64_t matches;
     sz_u128_vec_t h_vec, matches_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
     uint8x16_t set_bottom_vec_u8x16 = vld1q_u8(&set->_u8s[16]);
@@ -3814,8 +3815,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_ch
         uint8x16_t matches_bottom_vec = vqtbl1q_u8(set_bottom_vec_u8x16, vsubq_u8(byte_index_vec, vdupq_n_u8(16)));
         matches_vec.u8x16 = vorrq_u8(matches_top_vec, matches_bottom_vec);
         matches_vec.u8x16 = vtstq_u8(matches_vec.u8x16, byte_mask_vec);
-        if (vmaxvq_u8(matches_vec.u8x16))
-            return h + h_length - 1 - sz_u64_clz(vreinterpretq_u8_u4(matches_vec.u8x16)) / 4;
+        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        if (matches) return h + h_length - 1 - sz_u64_clz(matches) / 4;
     }
 
     return sz_rfind_charset_serial(h, h_length, set);
