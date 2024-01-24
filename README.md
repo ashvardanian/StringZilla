@@ -129,9 +129,9 @@ StringZilla has a lot of functionality, but first, let's make sure it can handle
     <td align="center">❌</td>
     <td align="center">❌</td>
     <td align="center">
-      custom <sup>3</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>99</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>180</b> ns
+      via <code>jellyfish</code> <sup>3</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>?</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2,220</b> ns
     </td>
     <td align="center">
       <code>sz_edit_distance</code><br/>
@@ -147,9 +147,9 @@ StringZilla has a lot of functionality, but first, let's make sure it can handle
     <td align="center">❌</td>
     <td align="center">❌</td>
     <td align="center">
-      custom <sup>4</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>73</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>177</b> ms
+      via <code>biopython</code> <sup>4</sup><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>?</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>254</b> ms
     </td>
     <td align="center">
       <code>sz_alignment_score</code><br/>
