@@ -565,6 +565,28 @@ static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->s
 
 static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->start, self->length); }
 
+static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs) {
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member || nargs > !is_member + 1 || kwargs) {
+        PyErr_SetString(PyExc_TypeError, "hash() expects exactly one positional argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    sz_string_view_t text;
+
+    // Validate and convert `text`
+    if (!export_string_like(text_obj, &text.start, &text.length)) {
+        PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
+        return NULL;
+    }
+
+    sz_u64_t result = sz_hash(text.start, text.length);
+    return PyLong_FromSize_t((size_t)result);
+}
+
 static Py_ssize_t Str_len(Str *self) { return self->length; }
 
 static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
@@ -1940,6 +1962,9 @@ static PyMethodDef stringzilla_methods[] = {
      "Finds the first occurrence of a character not present in another string."},
     {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS,
      "Finds the last occurrence of a character not present in another string."},
+
+    // Global unary extensions
+    {"hash", Str_like_hash, SZ_METHOD_FLAGS, "Hash a string or a byte-array."},
 
     {NULL, NULL, 0, NULL}};
 
