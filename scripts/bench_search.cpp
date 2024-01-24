@@ -293,6 +293,10 @@ int main(int argc, char const **argv) {
     bench_finds(dataset.text, {sz::whitespaces}, find_charset_functions());
     bench_rfinds(dataset.text, {sz::whitespaces}, rfind_charset_functions());
 
+    std::printf("Benchmarking for HTML tag start/end:\n");
+    bench_finds(dataset.text, {"<>"}, find_charset_functions());
+    bench_rfinds(dataset.text, {"<>"}, rfind_charset_functions());
+
     std::printf("Benchmarking for punctuation marks:\n");
     bench_finds(dataset.text, {sz::punctuation}, find_charset_functions());
     bench_rfinds(dataset.text, {sz::punctuation}, rfind_charset_functions());
