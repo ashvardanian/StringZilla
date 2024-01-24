@@ -3672,6 +3672,7 @@ SZ_INTERNAL sz_u64_t vreinterpretq_u8_u4(uint8x16_t vec) {
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+    sz_u64_t matches;
     sz_u128_vec_t h_vec, n_vec, matches_vec;
     n_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)n);
 
@@ -3681,7 +3682,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
         // In Arm NEON we don't have a `movemask` to combine it with `ctz` and get the offset of the match.
         // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise selecting)
         // the vector with a relative offsets array.
-        if (vmaxvq_u8(matches_vec.u8x16)) return h + sz_u64_ctz(vreinterpretq_u8_u4(matches_vec.u8x16)) / 4;
+        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        if (matches) return h + sz_u64_ctz(matches) / 4;
 
         h += 16, h_length -= 16;
     }
@@ -3690,14 +3692,15 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+    sz_u64_t matches;
     sz_u128_vec_t h_vec, n_vec, matches_vec;
     n_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)n);
 
     while (h_length >= 16) {
         h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h + h_length - 16);
         matches_vec.u8x16 = vceqq_u8(h_vec.u8x16, n_vec.u8x16);
-        if (vmaxvq_u8(matches_vec.u8x16))
-            return h + h_length - 1 - sz_u64_clz(vreinterpretq_u8_u4(matches_vec.u8x16)) / 4;
+        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        if (matches) return h + h_length - 1 - sz_u64_clz(matches) / 4;
         h_length -= 16;
     }
 
