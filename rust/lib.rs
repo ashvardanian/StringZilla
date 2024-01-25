@@ -49,93 +49,96 @@ extern "C" {
 
 /// Generic function to find the first occurrence of a substring or a subarray
 pub fn find<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needle: N) -> Option<usize> {
-    unsafe {
-        let haystack_ref = haystack.as_ref();
-        let needle_ref = needle.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
-        let haystack_length = haystack_ref.len();
-        let needle_pointer = needle_ref.as_ptr() as *const c_void;
-        let needle_length = needle_ref.len();
-        let result = sz_find(
+    let haystack_ref = haystack.as_ref();
+    let needle_ref = needle.as_ref();
+    let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+    let haystack_length = haystack_ref.len();
+    let needle_pointer = needle_ref.as_ptr() as *const c_void;
+    let needle_length = needle_ref.len();
+    let result = unsafe {
+        sz_find(
             haystack_pointer,
             haystack_length,
             needle_pointer,
             needle_length,
-        );
-        if result.is_null() {
-            None
-        } else {
-            Some(result.offset_from(haystack_pointer) as usize)
-        }
+        )
+    };
+
+    if result.is_null() {
+        None
+    } else {
+        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
     }
 }
 
 /// Generic function to find the last occurrence of a substring or a subarray
 pub fn rfind<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needle: N) -> Option<usize> {
-    unsafe {
-        let haystack_ref = haystack.as_ref();
-        let needle_ref = needle.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
-        let haystack_length = haystack_ref.len();
-        let needle_pointer = needle_ref.as_ptr() as *const c_void;
-        let needle_length = needle_ref.len();
-        let result = sz_rfind(
+    let haystack_ref = haystack.as_ref();
+    let needle_ref = needle.as_ref();
+    let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+    let haystack_length = haystack_ref.len();
+    let needle_pointer = needle_ref.as_ptr() as *const c_void;
+    let needle_length = needle_ref.len();
+    let result = unsafe {
+        sz_rfind(
             haystack_pointer,
             haystack_length,
             needle_pointer,
             needle_length,
-        );
-        if result.is_null() {
-            None
-        } else {
-            Some(result.offset_from(haystack_pointer) as usize)
-        }
+        )
+    };
+
+    if result.is_null() {
+        None
+    } else {
+        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
     }
 }
 
 /// Generic function to find the first occurrence of a character/element from the second argument
 pub fn find_char_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needles: N) -> Option<usize> {
-    unsafe {
-        let haystack_ref = haystack.as_ref();
-        let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
-        let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as *const c_void;
-        let needles_length = needles_ref.len();
-        let result = sz_find_char_from(
+    let haystack_ref = haystack.as_ref();
+    let needles_ref = needles.as_ref();
+    let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+    let haystack_length = haystack_ref.len();
+    let needles_pointer = needles_ref.as_ptr() as *const c_void;
+    let needles_length = needles_ref.len();
+    let result = unsafe {
+        sz_find_char_from(
             haystack_pointer,
             haystack_length,
             needles_pointer,
             needles_length,
-        );
-        if result.is_null() {
-            None
-        } else {
-            Some(result.offset_from(haystack_pointer) as usize)
-        }
+        )
+    };
+    if result.is_null() {
+        None
+    } else {
+        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
     }
 }
 
 /// Generic function to find the last occurrence of a character/element from the second argument
 pub fn rfind_char_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needles: N) -> Option<usize> {
-    unsafe {
-        let haystack_ref = haystack.as_ref();
-        let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
-        let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as *const c_void;
-        let needles_length = needles_ref.len();
-        let result = sz_rfind_char_from(
+    let haystack_ref = haystack.as_ref();
+    let needles_ref = needles.as_ref();
+    let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+    let haystack_length = haystack_ref.len();
+    let needles_pointer = needles_ref.as_ptr() as *const c_void;
+    let needles_length = needles_ref.len();
+    let result = unsafe {
+        sz_rfind_char_from(
             haystack_pointer,
             haystack_length,
             needles_pointer,
             needles_length,
-        );
-        if result.is_null() {
-            None
-        } else {
-            Some(result.offset_from(haystack_pointer) as usize)
-        }
+        )
+    };
+
+    if result.is_null() {
+        None
+    } else {
+        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
     }
 }
 
@@ -144,24 +147,24 @@ pub fn find_char_not_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(
     haystack: H,
     needles: N,
 ) -> Option<usize> {
-    unsafe {
-        let haystack_ref = haystack.as_ref();
-        let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
-        let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as *const c_void;
-        let needles_length = needles_ref.len();
-        let result = sz_find_char_not_from(
+    let haystack_ref = haystack.as_ref();
+    let needles_ref = needles.as_ref();
+    let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+    let haystack_length = haystack_ref.len();
+    let needles_pointer = needles_ref.as_ptr() as *const c_void;
+    let needles_length = needles_ref.len();
+    let result = unsafe {
+        sz_find_char_not_from(
             haystack_pointer,
             haystack_length,
             needles_pointer,
             needles_length,
-        );
-        if result.is_null() {
-            None
-        } else {
-            Some(result.offset_from(haystack_pointer) as usize)
-        }
+        )
+    };
+    if result.is_null() {
+        None
+    } else {
+        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
     }
 }
 
@@ -170,24 +173,24 @@ pub fn rfind_char_not_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(
     haystack: H,
     needles: N,
 ) -> Option<usize> {
-    unsafe {
-        let haystack_ref = haystack.as_ref();
-        let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
-        let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as *const c_void;
-        let needles_length = needles_ref.len();
-        let result = sz_rfind_char_not_from(
+    let haystack_ref = haystack.as_ref();
+    let needles_ref = needles.as_ref();
+    let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+    let haystack_length = haystack_ref.len();
+    let needles_pointer = needles_ref.as_ptr() as *const c_void;
+    let needles_length = needles_ref.len();
+    let result = unsafe {
+        sz_rfind_char_not_from(
             haystack_pointer,
             haystack_length,
             needles_pointer,
             needles_length,
-        );
-        if result.is_null() {
-            None
-        } else {
-            Some(result.offset_from(haystack_pointer) as usize)
-        }
+        )
+    };
+    if result.is_null() {
+        None
+    } else {
+        Some(unsafe { result.offset_from(haystack_pointer) } as usize)
     }
 }
 
