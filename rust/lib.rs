@@ -1,4 +1,6 @@
-use std::os::raw::c_void;
+#![cfg_attr(not(test), no_std)]
+
+use core::ffi::c_void;
 
 // Import the functions from the StringZilla C library.
 extern "C" {
