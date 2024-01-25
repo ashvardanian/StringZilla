@@ -45,7 +45,7 @@ extern "C" {
     ) -> *mut c_void;
 }
 
-// Generic function to find the first occurrence of a substring or a subarray
+/// Generic function to find the first occurrence of a substring or a subarray
 pub fn find<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needle: N) -> Option<usize> {
     unsafe {
         let haystack_ref = haystack.as_ref();
@@ -68,7 +68,7 @@ pub fn find<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needle: N) -> Option<us
     }
 }
 
-// Generic function to find the last occurrence of a substring or a subarray
+/// Generic function to find the last occurrence of a substring or a subarray
 pub fn rfind<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needle: N) -> Option<usize> {
     unsafe {
         let haystack_ref = haystack.as_ref();
@@ -91,7 +91,7 @@ pub fn rfind<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needle: N) -> Option<u
     }
 }
 
-// Generic function to find the first occurrence of a character/element from the second argument
+/// Generic function to find the first occurrence of a character/element from the second argument
 pub fn find_char_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needles: N) -> Option<usize> {
     unsafe {
         let haystack_ref = haystack.as_ref();
@@ -114,7 +114,7 @@ pub fn find_char_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needles: N) -
     }
 }
 
-// Generic function to find the last occurrence of a character/element from the second argument
+/// Generic function to find the last occurrence of a character/element from the second argument
 pub fn rfind_char_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needles: N) -> Option<usize> {
     unsafe {
         let haystack_ref = haystack.as_ref();
@@ -137,7 +137,7 @@ pub fn rfind_char_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(haystack: H, needles: N) 
     }
 }
 
-// Generic function to find the first occurrence of a character/element from the second argument
+/// Generic function to find the first occurrence of a character/element from the second argument
 pub fn find_char_not_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(
     haystack: H,
     needles: N,
@@ -163,7 +163,7 @@ pub fn find_char_not_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(
     }
 }
 
-// Generic function to find the last occurrence of a character/element from the second argument
+/// Generic function to find the last occurrence of a character/element from the second argument
 pub fn rfind_char_not_from<H: AsRef<[u8]>, N: AsRef<[u8]>>(
     haystack: H,
     needles: N,
