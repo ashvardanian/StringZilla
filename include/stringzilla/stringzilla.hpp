@@ -3501,34 +3501,34 @@ std::ptrdiff_t alignment_score(basic_string<char_type_, allocator_type_> const &
 
 /**
  *  @brief  Computes the Rabin-Karp-like rolling binary fingerprint of a string.
- *  @see    sz_fingerprint_rolling
+ *  @see    sz_hashes
  */
 template <std::size_t bitset_bits_, typename char_type_>
-void fingerprint_rolling(basic_string_slice<char_type_> const &str, std::size_t window_length,
-                         std::bitset<bitset_bits_> &fingerprint) noexcept {
+void hashes_fingerprint(basic_string_slice<char_type_> const &str, std::size_t window_length,
+                        std::bitset<bitset_bits_> &fingerprint) noexcept {
     constexpr std::size_t fingerprint_bytes = sizeof(std::bitset<bitset_bits_>);
-    return sz_fingerprint_rolling(str.data(), str.size(), window_length, (sz_ptr_t)&fingerprint, fingerprint_bytes);
+    return sz_hashes_fingerprint(str.data(), str.size(), window_length, (sz_ptr_t)&fingerprint, fingerprint_bytes);
 }
 
 /**
  *  @brief  Computes the Rabin-Karp-like rolling binary fingerprint of a string.
- *  @see    sz_fingerprint_rolling
+ *  @see    sz_hashes
  */
 template <std::size_t bitset_bits_, typename char_type_>
-std::bitset<bitset_bits_> fingerprint_rolling(basic_string_slice<char_type_> const &str,
-                                              std::size_t window_length) noexcept {
+std::bitset<bitset_bits_> hashes_fingerprint(basic_string_slice<char_type_> const &str,
+                                             std::size_t window_length) noexcept {
     std::bitset<bitset_bits_> fingerprint;
-    ashvardanian::stringzilla::fingerprint_rolling(str, window_length, fingerprint);
+    ashvardanian::stringzilla::hashes_fingerprint(str, window_length, fingerprint);
     return fingerprint;
 }
 
 /**
  *  @brief  Computes the Rabin-Karp-like rolling binary fingerprint of a string.
- *  @see    sz_fingerprint_rolling
+ *  @see    sz_hashes
  */
 template <std::size_t bitset_bits_, typename char_type_>
-std::bitset<bitset_bits_> fingerprint_rolling(basic_string<char_type_> const &str, std::size_t window_length) noexcept {
-    return ashvardanian::stringzilla::fingerprint_rolling<bitset_bits_>(str.view(), window_length);
+std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str, std::size_t window_length) noexcept {
+    return ashvardanian::stringzilla::hashes_fingerprint<bitset_bits_>(str.view(), window_length);
 }
 
 #endif

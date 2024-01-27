@@ -105,13 +105,6 @@
 #define STRINGZILLA_VERSION_PATCH 4
 
 /**
- *  @brief  Generally `CHAR_BIT` is coming from limits.h, according to the C standard.
- */
-#ifndef CHAR_BIT
-#define CHAR_BIT (8)
-#endif
-
-/**
  *  @brief  A misaligned load can be - trying to fetch eight consecutive bytes from an address
  *          that is not divisible by eight.
  *
@@ -273,6 +266,13 @@
 #endif // SZ_DYNAMIC
 
 /**
+ *  @brief  Generally `CHAR_BIT` is coming from limits.h, according to the C standard.
+ */
+#ifndef CHAR_BIT
+#define CHAR_BIT (8)
+#endif
+
+/**
  *  @brief  Generally `NULL` is coming from locale.h, stddef.h, stdio.h, stdlib.h, string.h, time.h,
  *          and wchar.h, according to the C standard.
  */
@@ -324,6 +324,20 @@ typedef signed char sz_error_cost_t; /// Character mismatch cost for fuzzy match
 
 typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        /// Only one relevant bit
 typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; /// Only three possible states: <=>
+
+// Define a large prime number that we are going to use for modulo arithmetic.
+// Fun fact, the largest signed 32-bit signed integer (2,147,483,647) is a prime number.
+// But we are going to use a larger one, to reduce collisions.
+// https://www.mersenneforum.org/showthread.php?t=3471
+#define SZ_U32_MAX_PRIME (2147483647u)
+/**
+ *  @brief  Largest prime number that fits into 64 bits.
+ *
+ *  2^64 = 18,446,744,073,709,551,616
+ *  this = 18,446,744,073,709,551,557
+ *  diff = 59
+ */
+#define SZ_U64_MAX_PRIME (18446744073709551557ull)
 
 /**
  *  @brief  Tiny string-view structure. It's POD type, unlike the `std::string_view`.
@@ -943,20 +957,18 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(sz_cptr_t a, sz_size_t a_length, 
 typedef sz_ssize_t (*sz_alignment_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_error_cost_t const *,
                                            sz_error_cost_t, sz_memory_allocator_t *);
 
+typedef void (*sz_hash_callback_t)(sz_cptr_t, sz_size_t, sz_u64_t, void *user);
+
 /**
- *  @brief  Computes the Karp-Rabin rolling hash of a string outputting a binary fingerprint.
- *          Such fingerprints can be compared with Hamming or Jaccard (Tanimoto) distance for similarity.
+ *  @brief  Computes the Karp-Rabin rolling hashes of a string supplying them to the provided `callback`.
+ *          Can be used for similarity scores, search, ranking, etc.
  *
- *  The algorithm doesn't clear the fingerprint buffer on start, so it can be invoked multiple times
- *  to produce a fingerprint of a longer string, by passing the previous fingerprint as the ::fingerprint.
- *  It can also be reused to produce multi-resolution fingerprints by changing the ::window_length
- *  and calling the same function multiple times for the same input ::text.
+ *  Rabin-Karp-like rolling hashes can have very high-level of collisions and depend
+ *  on the choice of bases and the prime number. That's why, often two hashes from the same
+ *  family are used with different bases.
  *
- *  @param text                 String to hash.
- *  @param length               Number of bytes in the string.
- *  @param fingerprint          Output fingerprint buffer.
- *  @param fingerprint_bytes    Number of bytes in the fingerprint buffer.
- *  @param window_length        Length of the rolling window in bytes.
+ *       1. Kernighan and Ritchie's function uses 31, a prime close to the size of English alphabet.
+ *       2. To be friendlier to byte-arrays and UTF8, we use 257 for the second function.
  *
  *  Choosing the right ::window_length is task- and domain-dependant. For example, most English words are
  *  between 3 and 7 characters long, so a window of 4 bytes would be a good choice. For DNA sequences,
@@ -964,15 +976,64 @@ typedef sz_ssize_t (*sz_alignment_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_s
  *  With such minimalistic alphabets of just four characters (AGCT) longer windows might be needed.
  *  For protein sequences the alphabet is 20 characters long, so the window can be shorter, than for DNAs.
  *
+ *  @param text             String to hash.
+ *  @param length           Number of bytes in the string.
+ *  @param window_length    Length of the rolling window in bytes.
+ *  @param callback         Function receiving the start & length of a substring, the hash, and the `callback_handle`.
+ *  @param callback_handle  Optional user-provided pointer to be passed to the `callback`.
+ *  @see                    sz_hashes_fingerprint, sz_hashes_intersection
  */
-SZ_DYNAMIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
-                                       sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
+SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                          sz_hash_callback_t callback, void *callback_handle);
 
-/** @copydoc sz_fingerprint_rolling */
-SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
-                                             sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
+/** @copydoc sz_hashes */
+SZ_PUBLIC void sz_hashes_serial(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                                sz_hash_callback_t callback, void *callback_handle);
 
-typedef void (*sz_fingerprint_rolling_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_ptr_t, sz_size_t);
+typedef void (*sz_hashes_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_hash_callback_t, void *);
+
+/**
+ *  @brief  Computes the Karp-Rabin rolling hashes of a string outputting a binary fingerprint.
+ *          Such fingerprints can be compared with Hamming or Jaccard (Tanimoto) distance for similarity.
+ *
+ *  The algorithm doesn't clear the fingerprint buffer on start, so it can be invoked multiple times
+ *  to produce a fingerprint of a longer string, by passing the previous fingerprint as the ::fingerprint.
+ *  It can also be reused to produce multi-resolution fingerprints by changing the ::window_length
+ *  and calling the same function multiple times for the same input ::text.
+ *
+ *  Processes large strings in parts to maximize the cache utilization, using a small on-stack buffer,
+ *  avoiding cache-coherency penalties of remote on-heap buffers.
+ *
+ *  @param text                 String to hash.
+ *  @param length               Number of bytes in the string.
+ *  @param fingerprint          Output fingerprint buffer.
+ *  @param fingerprint_bytes    Number of bytes in the fingerprint buffer.
+ *  @param window_length        Length of the rolling window in bytes.
+ *  @see                        sz_hashes, sz_hashes_intersection
+ */
+SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                                     sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
+
+typedef void (*sz_hashes_fingerprint_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_ptr_t, sz_size_t);
+
+/**
+ *  @brief  Given a hash-fingerprint of a textual document, computes the number of intersecting hashes
+ *          of the incoming document. Can be used for document scoring and search.
+ *
+ *  Processes large strings in parts to maximize the cache utilization, using a small on-stack buffer,
+ *  avoiding cache-coherency penalties of remote on-heap buffers.
+ *
+ *  @param text                 Input document.
+ *  @param length               Number of bytes in the input document.
+ *  @param fingerprint          Reference document fingerprint.
+ *  @param fingerprint_bytes    Number of bytes in the reference documents fingerprint.
+ *  @param window_length        Length of the rolling window in bytes.
+ *  @see                        sz_hashes, sz_hashes_fingerprint
+ */
+SZ_PUBLIC sz_size_t sz_hashes_intersection(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                                           sz_cptr_t fingerprint, sz_size_t fingerprint_bytes);
+
+typedef sz_size_t (*sz_hashes_intersection_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 #pragma endregion
 
@@ -1009,7 +1070,9 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_
 SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                                sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
                                                sz_memory_allocator_t *alloc);
-
+/** @copydoc sz_hashes */
+SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                                sz_hash_callback_t callback, void *callback_handle);
 #endif
 
 #if SZ_USE_X86_AVX2
@@ -1027,7 +1090,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, s
 SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 /** @copydoc sz_rfind */
 SZ_PUBLIC sz_cptr_t sz_rfind_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
-
+/** @copydoc sz_hashes */
+SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                              sz_hash_callback_t callback, void *callback_handle);
 #endif
 
 #if SZ_USE_ARM_NEON
@@ -1267,6 +1332,25 @@ SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
 }
 
 /**
+ *  @brief  Transposes an 8x8 bit matrix packed in a `sz_u64_t`.
+ *
+ *  There is a well known SWAR sequence for that known to chess programmers,
+ *  willing to flip a bit-matrix of pieces along the main A1-H8 diagonal.
+ *  https://www.chessprogramming.org/Flipping_Mirroring_and_Rotating
+ *  https://lukas-prokop.at/articles/2021-07-23-transpose
+ */
+SZ_INTERNAL sz_u64_t sz_u64_transpose(sz_u64_t x) {
+    sz_u64_t t;
+    t = x ^ (x << 36);
+    x ^= 0xf0f0f0f00f0f0f0full & (t ^ (x >> 36));
+    t = 0xcccc0000cccc0000ull & (x ^ (x << 18));
+    x ^= t ^ (t >> 18);
+    t = 0xaa00aa00aa00aa00ull & (x ^ (x << 9));
+    x ^= t ^ (t >> 9);
+    return x;
+}
+
+/**
  *  @brief  Helper, that swaps two 64-bit integers representing the order of elements in the sequence.
  */
 SZ_INTERNAL void sz_u64_swap(sz_u64_t *a, sz_u64_t *b) {
@@ -1364,6 +1448,7 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #endif
 }
 
+/** @brief  Helper function, using the supplied fixed-capacity buffer to allocate memory. */
 SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
     sz_size_t capacity;
     sz_copy((sz_ptr_t)&capacity, (sz_cptr_t)handle, sizeof(sz_size_t));
@@ -1372,8 +1457,36 @@ SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
     return (sz_ptr_t)handle + consumed_capacity;
 }
 
+/** @brief  Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
 SZ_INTERNAL void _sz_memory_free_fixed(sz_ptr_t start, sz_size_t length, void *handle) {
     sz_unused(start && length && handle);
+}
+
+/** @brief  An internal callback used to set a bit in a power-of-two length binary fingerprint of a string. */
+SZ_INTERNAL void _sz_hashes_fingerprint_pow2_callback(sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *handle) {
+    sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
+    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
+    sz_size_t fingerprint_bytes = fingerprint_buffer->length;
+    fingerprint_u8s[(hash / 8) & (fingerprint_bytes - 1)] |= (1 << (hash & 7));
+    sz_unused(start && length);
+}
+
+/** @brief  An internal callback used to set a bit in a @b non power-of-two length binary fingerprint of a string. */
+SZ_INTERNAL void _sz_hashes_fingerprint_non_pow2_callback(sz_cptr_t start, sz_size_t length, sz_u64_t hash,
+                                                          void *handle) {
+    sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
+    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
+    sz_size_t fingerprint_bytes = fingerprint_buffer->length;
+    fingerprint_u8s[(hash / 8) % fingerprint_bytes] |= (1 << (hash & 7));
+    sz_unused(start && length);
+}
+
+/** @brief  An internal callback, used to mix all the running hashes into one pointer-size value. */
+SZ_INTERNAL void _sz_hashes_fingerprint_scalar_callback(sz_cptr_t start, sz_size_t length, sz_u64_t hash,
+                                                        void *scalar_handle) {
+    sz_unused(start && length && hash && scalar_handle);
+    sz_size_t *scalar_ptr = (sz_size_t *)scalar_handle;
+    *scalar_ptr ^= hash;
 }
 
 #pragma GCC visibility pop
@@ -1394,80 +1507,6 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
     alloc->free = (sz_memory_free_t)_sz_memory_free_fixed;
     alloc->handle = &buffer;
     sz_copy((sz_ptr_t)buffer, (sz_cptr_t)&length, sizeof(sz_size_t));
-}
-
-SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length) {
-
-    sz_u64_t const c1 = 0x87c37b91114253d5ull;
-    sz_u64_t const c2 = 0x4cf5ad432745937full;
-    sz_u64_vec_t k1, k2;
-    sz_u64_t h1, h2;
-
-    k1.u64 = k2.u64 = 0;
-    h1 = h2 = length;
-
-    for (; length >= 16; length -= 16, start += 16) {
-        k1 = sz_u64_load(start);
-        k2 = sz_u64_load(start + 8);
-
-        k1.u64 *= c1;
-        k1.u64 = sz_u64_rotl(k1.u64, 31);
-        k1.u64 *= c2;
-        h1 ^= k1.u64;
-
-        h1 = sz_u64_rotl(h1, 27);
-        h1 += h2;
-        h1 = h1 * 5 + 0x52dce729;
-
-        k2.u64 *= c2;
-        k2.u64 = sz_u64_rotl(k2.u64, 33);
-        k2.u64 *= c1;
-        h2 ^= k2.u64;
-
-        h2 = sz_u64_rotl(h2, 31);
-        h2 += h1;
-        h2 = h2 * 5 + 0x38495ab5;
-    }
-
-    // Similar to xxHash, WaterHash:
-    // 0 - 3 bytes: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L4515
-    // 4 - 8 bytes: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L4537
-    // 9 - 16 bytes: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L4553
-    // 17 - 128 bytes: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L4640
-    // Long sequences: https://github.com/Cyan4973/xxHash/blob/f91df681b034d78c7ce87de66f0f78a1e40e7bfb/xxhash.h#L5906
-    switch (length & 15) {
-    case 15: k2.u8s[6] = start[14]; SZ_FALLTHROUGH;
-    case 14: k2.u8s[5] = start[13]; SZ_FALLTHROUGH;
-    case 13: k2.u8s[4] = start[12]; SZ_FALLTHROUGH;
-    case 12: k2.u8s[3] = start[11]; SZ_FALLTHROUGH;
-    case 11: k2.u8s[2] = start[10]; SZ_FALLTHROUGH;
-    case 10: k2.u8s[1] = start[9]; SZ_FALLTHROUGH;
-    case 9:
-        k2.u8s[0] = start[8];
-        k2.u64 *= c2;
-        k2.u64 = sz_u64_rotl(k2.u64, 33);
-        k2.u64 *= c1;
-        h2 ^= k2.u64;
-        SZ_FALLTHROUGH;
-
-    case 8: k1.u8s[7] = start[7]; SZ_FALLTHROUGH;
-    case 7: k1.u8s[6] = start[6]; SZ_FALLTHROUGH;
-    case 6: k1.u8s[5] = start[5]; SZ_FALLTHROUGH;
-    case 5: k1.u8s[4] = start[4]; SZ_FALLTHROUGH;
-    case 4: k1.u8s[3] = start[3]; SZ_FALLTHROUGH;
-    case 3: k1.u8s[2] = start[2]; SZ_FALLTHROUGH;
-    case 2: k1.u8s[1] = start[1]; SZ_FALLTHROUGH;
-    case 1:
-        k1.u8s[0] = start[0];
-        k1.u64 *= c1;
-        k1.u64 = sz_u64_rotl(k1.u64, 31);
-        k1.u64 *= c2;
-        h1 ^= k1.u64;
-    };
-
-    // We almost entirely avoid the final mixing step
-    // https://github.com/aappleby/smhasher/blob/61a0530f28277f2e850bfc39600ce61d02b518de/src/MurmurHash3.cpp#L317
-    return h1 + h2;
 }
 
 /**
@@ -2349,52 +2388,175 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     return previous_distances[shorter_length];
 }
 
-SZ_PUBLIC void sz_fingerprint_rolling_serial(sz_cptr_t text, sz_size_t length, sz_size_t window_length,
-                                             sz_ptr_t fingerprint, sz_size_t fingerprint_bytes) {
+/*
+ *  One hardware-accelerated way of mixing hashes can be CRC, but it's only implemented for 32-bit values.
+ *  Using a Boost-like mixer works very poorly in such case:
+ *
+ *       hash_first ^ (hash_second + 0x517cc1b727220a95 + (hash_first << 6) + (hash_first >> 2));
+ *
+ *  Let's stick to the Fibonacci hash trick using the golden ratio.
+ *  https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/
+ */
+#define _sz_hash_mix(first, second) ((first * 11400714819323198485ull) ^ (second * 11400714819323198485ull))
+#define _sz_shift_low(x) (x)
+#define _sz_shift_high(x) ((x + 77ull) & 0xFFull)
+#define _sz_prime_mod(x) (x % SZ_U64_MAX_PRIME)
 
-    if (length < window_length) return;
-    // The size of our alphabet.
-    sz_u64_t base = 256;
-    // Define a large prime number that we are going to use for modulo arithmetic.
-    // Fun fact, the largest signed 32-bit signed integer (2147483647) is a prime number.
-    // But we are going to use a larger one, to reduce collisions.
-    // https://www.mersenneforum.org/showthread.php?t=3471
-    sz_u64_t prime = 18446744073709551557ull;
-    // The `prime ^ window_length` value, that we are going to use for modulo arithmetic.
-    sz_u64_t prime_power = 1;
-    for (sz_size_t i = 0; i <= window_length; ++i) prime_power = (prime_power * base) % prime;
-    // Here we stick to 32-bit hashes as 64-bit modulo arithmetic is expensive.
-    sz_u64_t hash = 0;
+SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length) {
+
+    sz_u64_t hash_low = 0;
+    sz_u64_t hash_high = 0;
+    sz_u8_t const *text = (sz_u8_t const *)start;
+    sz_u8_t const *text_end = text + length;
+
+    switch (length) {
+    case 0: return 0;
+
+    // Texts under 7 bytes long are definitely below the largest prime.
+    case 1:
+        hash_low = _sz_shift_low(text[0]);
+        hash_high = _sz_shift_high(text[0]);
+        break;
+    case 2:
+        hash_low = _sz_shift_low(text[0]) * 31ull + _sz_shift_low(text[1]);
+        hash_high = _sz_shift_high(text[0]) * 257ull + _sz_shift_high(text[1]);
+        break;
+    case 3:
+        hash_low = _sz_shift_low(text[0]) * 31ull * 31ull + //
+                   _sz_shift_low(text[1]) * 31ull +         //
+                   _sz_shift_low(text[2]);
+        hash_high = _sz_shift_high(text[0]) * 257ull * 257ull + //
+                    _sz_shift_high(text[1]) * 257ull +          //
+                    _sz_shift_high(text[2]);
+        break;
+    case 4:
+        hash_low = _sz_shift_low(text[0]) * 31ull * 31ull * 31ull + //
+                   _sz_shift_low(text[1]) * 31ull * 31ull +         //
+                   _sz_shift_low(text[2]) * 31ull +                 //
+                   _sz_shift_low(text[3]);
+        hash_high = _sz_shift_high(text[0]) * 257ull * 257ull * 257ull + //
+                    _sz_shift_high(text[1]) * 257ull * 257ull +          //
+                    _sz_shift_high(text[2]) * 257ull +                   //
+                    _sz_shift_high(text[3]);
+        break;
+    case 5:
+        hash_low = _sz_shift_low(text[0]) * 31ull * 31ull * 31ull * 31ull + //
+                   _sz_shift_low(text[1]) * 31ull * 31ull * 31ull +         //
+                   _sz_shift_low(text[2]) * 31ull * 31ull +                 //
+                   _sz_shift_low(text[3]) * 31ull +                         //
+                   _sz_shift_low(text[4]);
+        hash_high = _sz_shift_high(text[0]) * 257ull * 257ull * 257ull * 257ull + //
+                    _sz_shift_high(text[1]) * 257ull * 257ull * 257ull +          //
+                    _sz_shift_high(text[2]) * 257ull * 257ull +                   //
+                    _sz_shift_high(text[3]) * 257ull +                            //
+                    _sz_shift_high(text[4]);
+        break;
+    case 6:
+        hash_low = _sz_shift_low(text[0]) * 31ull * 31ull * 31ull * 31ull * 31ull + //
+                   _sz_shift_low(text[1]) * 31ull * 31ull * 31ull * 31ull +         //
+                   _sz_shift_low(text[2]) * 31ull * 31ull * 31ull +                 //
+                   _sz_shift_low(text[3]) * 31ull * 31ull +                         //
+                   _sz_shift_low(text[4]) * 31ull +                                 //
+                   _sz_shift_low(text[5]);
+        hash_high = _sz_shift_high(text[0]) * 257ull * 257ull * 257ull * 257ull * 257ull + //
+                    _sz_shift_high(text[1]) * 257ull * 257ull * 257ull * 257ull +          //
+                    _sz_shift_high(text[2]) * 257ull * 257ull * 257ull +                   //
+                    _sz_shift_high(text[3]) * 257ull * 257ull +                            //
+                    _sz_shift_high(text[4]) * 257ull +                                     //
+                    _sz_shift_high(text[5]);
+        break;
+    case 7:
+        hash_low = _sz_shift_low(text[0]) * 31ull * 31ull * 31ull * 31ull * 31ull * 31ull + //
+                   _sz_shift_low(text[1]) * 31ull * 31ull * 31ull * 31ull * 31ull +         //
+                   _sz_shift_low(text[2]) * 31ull * 31ull * 31ull * 31ull +                 //
+                   _sz_shift_low(text[3]) * 31ull * 31ull * 31ull +                         //
+                   _sz_shift_low(text[4]) * 31ull * 31ull +                                 //
+                   _sz_shift_low(text[5]) * 31ull +                                         //
+                   _sz_shift_low(text[6]);
+        hash_high = _sz_shift_high(text[0]) * 257ull * 257ull * 257ull * 257ull * 257ull * 257ull + //
+                    _sz_shift_high(text[1]) * 257ull * 257ull * 257ull * 257ull * 257ull +          //
+                    _sz_shift_high(text[2]) * 257ull * 257ull * 257ull * 257ull +                   //
+                    _sz_shift_high(text[3]) * 257ull * 257ull * 257ull +                            //
+                    _sz_shift_high(text[4]) * 257ull * 257ull +                                     //
+                    _sz_shift_high(text[5]) * 257ull +                                              //
+                    _sz_shift_high(text[6]);
+        break;
+    default:
+        // Unroll the first seven cycles:
+        hash_low = hash_low * 31ull + _sz_shift_low(text[0]);
+        hash_high = hash_high * 257ull + _sz_shift_high(text[0]);
+        hash_low = hash_low * 31ull + _sz_shift_low(text[1]);
+        hash_high = hash_high * 257ull + _sz_shift_high(text[1]);
+        hash_low = hash_low * 31ull + _sz_shift_low(text[2]);
+        hash_high = hash_high * 257ull + _sz_shift_high(text[2]);
+        hash_low = hash_low * 31ull + _sz_shift_low(text[3]);
+        hash_high = hash_high * 257ull + _sz_shift_high(text[3]);
+        hash_low = hash_low * 31ull + _sz_shift_low(text[4]);
+        hash_high = hash_high * 257ull + _sz_shift_high(text[4]);
+        hash_low = hash_low * 31ull + _sz_shift_low(text[5]);
+        hash_high = hash_high * 257ull + _sz_shift_high(text[5]);
+        hash_low = hash_low * 31ull + _sz_shift_low(text[6]);
+        hash_high = hash_high * 257ull + _sz_shift_high(text[6]);
+        text += 7;
+
+        // Iterate throw the rest with the modulus:
+        for (; text != text_end; ++text) {
+            hash_low = hash_low * 31ull + _sz_shift_low(text[0]);
+            hash_high = hash_high * 257ull + _sz_shift_high(text[0]);
+            // Wrap the hashes around:
+            hash_low = _sz_prime_mod(hash_low);
+            hash_high = _sz_prime_mod(hash_high);
+        }
+        break;
+    }
+
+    return _sz_hash_mix(hash_low, hash_high);
+}
+
+SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t window_length, //
+                                sz_hash_callback_t callback, void *callback_handle) {
+
+    if (length < window_length || !window_length) return;
+    sz_u8_t const *text = (sz_u8_t const *)start;
+    sz_u8_t const *text_end = text + length;
+
+    // Prepare the `prime ^ window_length` values, that we are going to use for modulo arithmetic.
+    sz_u64_t prime_power_low = 1, prime_power_high = 1;
+    for (sz_size_t i = 0; i + 1 < window_length; ++i)
+        prime_power_low = (prime_power_low * 31ull) % SZ_U64_MAX_PRIME,
+        prime_power_high = (prime_power_high * 257ull) % SZ_U64_MAX_PRIME;
+
     // Compute the initial hash value for the first window.
-    sz_cptr_t text_end = text + length;
-    for (sz_cptr_t first_end = text + window_length; text < first_end; ++text) hash = (hash * base + *text) % prime;
+    sz_u64_t hash_low = 0, hash_high = 0, hash_mix;
+    for (sz_u8_t const *first_end = text + window_length; text < first_end; ++text)
+        hash_low = (hash_low * 31ull + _sz_shift_low(*text)) % SZ_U64_MAX_PRIME,
+        hash_high = (hash_high * 257ull + _sz_shift_high(*text)) % SZ_U64_MAX_PRIME;
 
     // In most cases the fingerprint length will be a power of two.
-    sz_bool_t fingerprint_length_is_power_of_two = (sz_bool_t)((fingerprint_bytes & (fingerprint_bytes - 1)) != 0);
-    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint;
-    if (fingerprint_length_is_power_of_two == sz_false_k) {
-        sz_size_t byte_offset = (hash / 8) % fingerprint_bytes;
-        fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
-        // Compute the hash value for every window, exporting into the fingerprint,
-        // using the expensive modulo operation.
-        for (; text < text_end; ++text) {
-            hash = (base * (hash - *(text - window_length) * prime_power) + *text) % prime;
-            byte_offset = (hash / 8) % fingerprint_bytes;
-            fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
-        }
-    }
-    else {
-        sz_size_t byte_offset = (hash / 8) & (fingerprint_bytes - 1);
-        fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
-        // Compute the hash value for every window, exporting into the fingerprint,
-        // using a cheap bitwise-and operation to determine the byte offset
-        for (; text < text_end; ++text) {
-            hash = (base * (hash - *(text - window_length) * prime_power) + *text) % prime;
-            byte_offset = (hash / 8) & (fingerprint_bytes - 1);
-            fingerprint_u8s[byte_offset] |= (1 << (hash & 7));
-        }
+    hash_mix = _sz_hash_mix(hash_low, hash_high);
+    callback((sz_cptr_t)text, window_length, hash_mix, callback_handle);
+
+    // Compute the hash value for every window, exporting into the fingerprint,
+    // using the expensive modulo operation.
+    for (; text < text_end; ++text) {
+        // Discard one character:
+        hash_low -= _sz_shift_low(*(text - window_length)) * prime_power_low;
+        hash_high -= _sz_shift_high(*(text - window_length)) * prime_power_high;
+        // And add a new one:
+        hash_low = 31ull * hash_low + _sz_shift_low(*text);
+        hash_high = 257ull * hash_high + _sz_shift_high(*text);
+        // Wrap the hashes around:
+        hash_low = _sz_prime_mod(hash_low);
+        hash_high = _sz_prime_mod(hash_high);
+        hash_mix = _sz_hash_mix(hash_low, hash_high);
+        callback((sz_cptr_t)text, window_length, hash_mix, callback_handle);
     }
 }
+
+#undef _sz_shift_low
+#undef _sz_shift_high
+#undef _sz_hash_mix
+#undef _sz_prime_mod
 
 /**
  *  @brief  Uses a small lookup-table to convert a lowercase character to uppercase.
@@ -3156,6 +3318,138 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
     return sz_rfind_serial(h, h_length, n, n_length);
 }
 
+/**
+ *  @brief  There is no AVX2 instruction for fast multiplication of 64-bit integers.
+ *          This implementation is coming from Agner Fog's Vector Class Library.
+ */
+SZ_INTERNAL __m256i _mm256_mul_epu64(__m256i a, __m256i b) {
+    __m256i bswap = _mm256_shuffle_epi32(b, 0xB1);
+    __m256i prodlh = _mm256_mullo_epi32(a, bswap);
+    __m256i zero = _mm256_setzero_si256();
+    __m256i prodlh2 = _mm256_hadd_epi32(prodlh, zero);
+    __m256i prodlh3 = _mm256_shuffle_epi32(prodlh2, 0x73);
+    __m256i prodll = _mm256_mul_epu32(a, b);
+    __m256i prod = _mm256_add_epi64(prodll, prodlh3);
+    return prod;
+}
+
+SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t window_length, //
+                              sz_hash_callback_t callback, void *callback_handle) {
+
+    if (length < window_length || !window_length) return;
+    if (length < 4 * window_length) {
+        sz_hashes_serial(start, length, window_length, callback, callback_handle);
+        return;
+    }
+
+    // Using AVX2, we can perform 4 long integer multiplications and additions within one register.
+    // So let's slice the entire string into 4 overlapping windows, to slide over them in parallel.
+    sz_size_t const max_hashes = length - window_length + 1;
+    sz_size_t const min_hashes_per_thread = max_hashes / 4; // At most one sequence can overlap between 2 threads.
+    sz_u8_t const *text_first = (sz_u8_t const *)start;
+    sz_u8_t const *text_second = text_first + min_hashes_per_thread;
+    sz_u8_t const *text_third = text_first + min_hashes_per_thread * 2;
+    sz_u8_t const *text_fourth = text_first + min_hashes_per_thread * 3;
+    sz_u8_t const *text_end = text_first + length;
+
+    // Prepare the `prime ^ window_length` values, that we are going to use for modulo arithmetic.
+    sz_u64_t prime_power_low = 1, prime_power_high = 1;
+    for (sz_size_t i = 0; i + 1 < window_length; ++i)
+        prime_power_low = (prime_power_low * 31ull) % SZ_U64_MAX_PRIME,
+        prime_power_high = (prime_power_high * 257ull) % SZ_U64_MAX_PRIME;
+
+    // Broadcast the constants into the registers.
+    sz_u256_vec_t prime_vec, golden_ratio_vec;
+    sz_u256_vec_t base_low_vec, base_high_vec, prime_power_low_vec, prime_power_high_vec, shift_high_vec;
+    base_low_vec.ymm = _mm256_set1_epi64x(31ull);
+    base_high_vec.ymm = _mm256_set1_epi64x(257ull);
+    shift_high_vec.ymm = _mm256_set1_epi64x(77ull);
+    prime_vec.ymm = _mm256_set1_epi64x(SZ_U64_MAX_PRIME);
+    golden_ratio_vec.ymm = _mm256_set1_epi64x(11400714819323198485ull);
+    prime_power_low_vec.ymm = _mm256_set1_epi64x(prime_power_low);
+    prime_power_high_vec.ymm = _mm256_set1_epi64x(prime_power_high);
+
+    // Compute the initial hash values for every one of the four windows.
+    sz_u256_vec_t hash_low_vec, hash_high_vec, hash_mix_vec, chars_low_vec, chars_high_vec;
+    hash_low_vec.ymm = _mm256_setzero_si256();
+    hash_high_vec.ymm = _mm256_setzero_si256();
+    for (sz_u8_t const *prefix_end = text_first + window_length; text_first < prefix_end;
+         ++text_first, ++text_second, ++text_third, ++text_fourth) {
+
+        // 1. Multiply the hashes by the base.
+        hash_low_vec.ymm = _mm256_mul_epu64(hash_low_vec.ymm, base_low_vec.ymm);
+        hash_high_vec.ymm = _mm256_mul_epu64(hash_high_vec.ymm, base_high_vec.ymm);
+
+        // 2. Load the four characters from `text_first`, `text_first + max_hashes_per_thread`,
+        //   `text_first + max_hashes_per_thread * 2`, `text_first + max_hashes_per_thread * 3`.
+        chars_low_vec.ymm = _mm256_set_epi64x(text_fourth[0], text_third[0], text_second[0], text_first[0]);
+        chars_high_vec.ymm = _mm256_add_epi8(chars_low_vec.ymm, shift_high_vec.ymm);
+
+        // 3. Add the incoming charactters.
+        hash_low_vec.ymm = _mm256_add_epi64(hash_low_vec.ymm, chars_low_vec.ymm);
+        hash_high_vec.ymm = _mm256_add_epi64(hash_high_vec.ymm, chars_high_vec.ymm);
+
+        // 4. Compute the modulo. Assuming there are only 59 values between our prime
+        //    and the 2^64 value, we can simply compute the modulo by conditionally subtracting the prime.
+        hash_low_vec.ymm = _mm256_blendv_epi8(hash_low_vec.ymm, _mm256_sub_epi64(hash_low_vec.ymm, prime_vec.ymm),
+                                              _mm256_cmpgt_epi64(hash_low_vec.ymm, prime_vec.ymm));
+        hash_high_vec.ymm = _mm256_blendv_epi8(hash_high_vec.ymm, _mm256_sub_epi64(hash_high_vec.ymm, prime_vec.ymm),
+                                               _mm256_cmpgt_epi64(hash_high_vec.ymm, prime_vec.ymm));
+    }
+
+    // 5. Compute the hash mix, that will be used to index into the fingerprint.
+    //    This includes a serial step at the end.
+    hash_low_vec.ymm = _mm256_mul_epu64(hash_low_vec.ymm, golden_ratio_vec.ymm);
+    hash_high_vec.ymm = _mm256_mul_epu64(hash_high_vec.ymm, golden_ratio_vec.ymm);
+    hash_mix_vec.ymm = _mm256_xor_si256(hash_low_vec.ymm, hash_high_vec.ymm);
+    callback((sz_cptr_t)text_first, window_length, hash_mix_vec.u64s[0], callback_handle);
+    callback((sz_cptr_t)text_second, window_length, hash_mix_vec.u64s[1], callback_handle);
+    callback((sz_cptr_t)text_third, window_length, hash_mix_vec.u64s[2], callback_handle);
+    callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
+
+    // Now repeat that operation for the remaining characters, discarding older characters.
+    for (; text_fourth != text_end; ++text_first, ++text_second, ++text_third, ++text_fourth) {
+        // 0. Load again the four characters we are dropping, shift them, and subtract.
+        chars_low_vec.ymm = _mm256_set_epi64x(text_fourth[-window_length], text_third[-window_length],
+                                              text_second[-window_length], text_first[-window_length]);
+        chars_high_vec.ymm = _mm256_add_epi8(chars_low_vec.ymm, shift_high_vec.ymm);
+        hash_low_vec.ymm =
+            _mm256_sub_epi64(hash_low_vec.ymm, _mm256_mul_epu64(chars_low_vec.ymm, prime_power_low_vec.ymm));
+        hash_high_vec.ymm =
+            _mm256_sub_epi64(hash_high_vec.ymm, _mm256_mul_epu64(chars_high_vec.ymm, prime_power_high_vec.ymm));
+
+        // 1. Multiply the hashes by the base.
+        hash_low_vec.ymm = _mm256_mul_epu64(hash_low_vec.ymm, base_low_vec.ymm);
+        hash_high_vec.ymm = _mm256_mul_epu64(hash_high_vec.ymm, base_high_vec.ymm);
+
+        // 2. Load the four characters from `text_first`, `text_first + max_hashes_per_thread`,
+        //   `text_first + max_hashes_per_thread * 2`, `text_first + max_hashes_per_thread * 3`.
+        chars_low_vec.ymm = _mm256_set_epi64x(text_fourth[0], text_third[0], text_second[0], text_first[0]);
+        chars_high_vec.ymm = _mm256_add_epi8(chars_low_vec.ymm, shift_high_vec.ymm);
+
+        // 3. Add the incoming charactters.
+        hash_low_vec.ymm = _mm256_add_epi64(hash_low_vec.ymm, chars_low_vec.ymm);
+        hash_high_vec.ymm = _mm256_add_epi64(hash_high_vec.ymm, chars_high_vec.ymm);
+
+        // 4. Compute the modulo. Assuming there are only 59 values between our prime
+        //    and the 2^64 value, we can simply compute the modulo by conditionally subtracting the prime.
+        hash_low_vec.ymm = _mm256_blendv_epi8(hash_low_vec.ymm, _mm256_sub_epi64(hash_low_vec.ymm, prime_vec.ymm),
+                                              _mm256_cmpgt_epi64(hash_low_vec.ymm, prime_vec.ymm));
+        hash_high_vec.ymm = _mm256_blendv_epi8(hash_high_vec.ymm, _mm256_sub_epi64(hash_high_vec.ymm, prime_vec.ymm),
+                                               _mm256_cmpgt_epi64(hash_high_vec.ymm, prime_vec.ymm));
+
+        // 5. Compute the hash mix, that will be used to index into the fingerprint.
+        //    This includes a serial step at the end.
+        hash_low_vec.ymm = _mm256_mul_epu64(hash_low_vec.ymm, golden_ratio_vec.ymm);
+        hash_high_vec.ymm = _mm256_mul_epu64(hash_high_vec.ymm, golden_ratio_vec.ymm);
+        hash_mix_vec.ymm = _mm256_xor_si256(hash_low_vec.ymm, hash_high_vec.ymm);
+        callback((sz_cptr_t)text_first, window_length, hash_mix_vec.u64s[0], callback_handle);
+        callback((sz_cptr_t)text_second, window_length, hash_mix_vec.u64s[1], callback_handle);
+        callback((sz_cptr_t)text_third, window_length, hash_mix_vec.u64s[2], callback_handle);
+        callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
+    }
+}
+
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif
@@ -3346,9 +3640,10 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         h_first_vec.zmm = _mm512_loadu_epi8(h);
         h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
         h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
-        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
+        matches = _kand_mask64(_kand_mask64( // Intersect the masks
+                                   _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
+                                   _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
+                               _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_ctz(matches);
             if (n_length <= 3 || sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2))
@@ -3362,9 +3657,10 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
         h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
-        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
+        matches = _kand_mask64(_kand_mask64( // Intersect the masks
+                                   _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
+                                   _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
+                               _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_ctz(matches);
             if (n_length <= 3 || sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2))
@@ -3416,9 +3712,10 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
         h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
         h_mid_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1 + n_length / 2);
         h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
-        matches = _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm);
+        matches = _kand_mask64(_kand_mask64( // Intersect the masks
+                                   _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
+                                   _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
+                               _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_clz(matches);
             if (n_length <= 3 || sz_equal_avx512(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
@@ -3434,9 +3731,10 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
         h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
         h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
         h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
-        matches = _mm512_mask_cmpeq_epi8_mask(mask, h_first_vec.zmm, n_first_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_mid_vec.zmm, n_mid_vec.zmm) &
-                  _mm512_mask_cmpeq_epi8_mask(mask, h_last_vec.zmm, n_last_vec.zmm);
+        matches = _kand_mask64(_kand_mask64( // Intersect the masks
+                                   _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
+                                   _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
+                               _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_clz(matches);
             if (n_length <= 3 || sz_equal_avx512(h + 64 - potential_offset, n + 1, n_length - 2))
@@ -3447,6 +3745,127 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
     }
 
     return NULL;
+}
+
+SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t window_length, //
+                                sz_hash_callback_t callback, void *callback_handle) {
+
+    if (length < window_length || !window_length) return;
+    if (length < 4 * window_length) {
+        sz_hashes_serial(start, length, window_length, callback, callback_handle);
+        return;
+    }
+
+    // Using AVX2, we can perform 4 long integer multiplications and additions within one register.
+    // So let's slice the entire string into 4 overlapping windows, to slide over them in parallel.
+    sz_size_t const max_hashes = length - window_length + 1;
+    sz_size_t const min_hashes_per_thread = max_hashes / 4; // At most one sequence can overlap between 2 threads.
+    sz_u8_t const *text_first = (sz_u8_t const *)start;
+    sz_u8_t const *text_second = text_first + min_hashes_per_thread;
+    sz_u8_t const *text_third = text_first + min_hashes_per_thread * 2;
+    sz_u8_t const *text_fourth = text_first + min_hashes_per_thread * 3;
+    sz_u8_t const *text_end = text_first + length;
+
+    // Broadcast the global constants into the registers.
+    // Both high and low hashes will work with the same prime and golden ratio.
+    sz_u512_vec_t prime_vec, golden_ratio_vec;
+    prime_vec.zmm = _mm512_set1_epi64(SZ_U64_MAX_PRIME);
+    golden_ratio_vec.zmm = _mm512_set1_epi64(11400714819323198485ull);
+
+    // Prepare the `prime ^ window_length` values, that we are going to use for modulo arithmetic.
+    sz_u64_t prime_power_low = 1, prime_power_high = 1;
+    for (sz_size_t i = 0; i + 1 < window_length; ++i)
+        prime_power_low = (prime_power_low * 31ull) % SZ_U64_MAX_PRIME,
+        prime_power_high = (prime_power_high * 257ull) % SZ_U64_MAX_PRIME;
+
+    // We will be evaluating 4 offsets at a time with 2 different hash functions.
+    // We can fit all those 8 state variables in each of the following ZMM registers.
+    sz_u512_vec_t base_vec, prime_power_vec, shift_vec;
+    base_vec.zmm = _mm512_set_epi64(31ull, 31ull, 31ull, 31ull, 257ull, 257ull, 257ull, 257ull);
+    shift_vec.zmm = _mm512_set_epi64(0ull, 0ull, 0ull, 0ull, 77ull, 77ull, 77ull, 77ull);
+    prime_power_vec.zmm = _mm512_set_epi64(prime_power_low, prime_power_low, prime_power_low, prime_power_low,
+                                           prime_power_high, prime_power_high, prime_power_high, prime_power_high);
+
+    // Compute the initial hash values for every one of the four windows.
+    sz_u512_vec_t hash_vec, chars_vec;
+    hash_vec.zmm = _mm512_setzero_si512();
+    for (sz_u8_t const *prefix_end = text_first + window_length; text_first < prefix_end;
+         ++text_first, ++text_second, ++text_third, ++text_fourth) {
+
+        // 1. Multiply the hashes by the base.
+        hash_vec.zmm = _mm512_mullo_epi64(hash_vec.zmm, base_vec.zmm);
+
+        // 2. Load the four characters from `text_first`, `text_first + max_hashes_per_thread`,
+        //   `text_first + max_hashes_per_thread * 2`, `text_first + max_hashes_per_thread * 3`...
+        chars_vec.zmm = _mm512_set_epi64(text_fourth[0], text_third[0], text_second[0], text_first[0], //
+                                         text_fourth[0], text_third[0], text_second[0], text_first[0]);
+        chars_vec.zmm = _mm512_add_epi8(chars_vec.zmm, shift_vec.zmm);
+
+        // 3. Add the incoming charactters.
+        hash_vec.zmm = _mm512_add_epi64(hash_vec.zmm, chars_vec.zmm);
+
+        // 4. Compute the modulo. Assuming there are only 59 values between our prime
+        //    and the 2^64 value, we can simply compute the modulo by conditionally subtracting the prime.
+        hash_vec.zmm = _mm512_mask_blend_epi8(_mm512_cmpgt_epi64_mask(hash_vec.zmm, prime_vec.zmm), hash_vec.zmm,
+                                              _mm512_sub_epi64(hash_vec.zmm, prime_vec.zmm));
+    }
+
+    // 5. Compute the hash mix, that will be used to index into the fingerprint.
+    //    This includes a serial step at the end.
+    sz_u512_vec_t hash_mix_vec;
+    hash_mix_vec.zmm = _mm512_mullo_epi64(hash_vec.zmm, golden_ratio_vec.zmm);
+    hash_mix_vec.ymms[0] = _mm256_xor_si256(_mm512_extracti64x4_epi64(hash_mix_vec.zmm, 1), //
+                                            _mm512_extracti64x4_epi64(hash_mix_vec.zmm, 0));
+
+    callback((sz_cptr_t)text_first, window_length, hash_mix_vec.u64s[0], callback_handle);
+    callback((sz_cptr_t)text_second, window_length, hash_mix_vec.u64s[1], callback_handle);
+    callback((sz_cptr_t)text_third, window_length, hash_mix_vec.u64s[2], callback_handle);
+    callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
+
+    // Now repeat that operation for the remaining characters, discarding older characters.
+    for (; text_fourth != text_end; ++text_first, ++text_second, ++text_third, ++text_fourth) {
+        // 0. Load again the four characters we are dropping, shift them, and subtract.
+        chars_vec.zmm = _mm512_set_epi64(text_fourth[-window_length], text_third[-window_length],
+                                         text_second[-window_length], text_first[-window_length], //
+                                         text_fourth[-window_length], text_third[-window_length],
+                                         text_second[-window_length], text_first[-window_length]);
+        chars_vec.zmm = _mm512_add_epi8(chars_vec.zmm, shift_vec.zmm);
+        hash_vec.zmm = _mm512_sub_epi64(hash_vec.zmm, _mm512_mullo_epi64(chars_vec.zmm, prime_power_vec.zmm));
+
+        // 1. Multiply the hashes by the base.
+        hash_vec.zmm = _mm512_mullo_epi64(hash_vec.zmm, base_vec.zmm);
+
+        // 2. Load the four characters from `text_first`, `text_first + max_hashes_per_thread`,
+        //   `text_first + max_hashes_per_thread * 2`, `text_first + max_hashes_per_thread * 3`.
+        chars_vec.zmm = _mm512_set_epi64(text_fourth[0], text_third[0], text_second[0], text_first[0], //
+                                         text_fourth[0], text_third[0], text_second[0], text_first[0]);
+        chars_vec.zmm = _mm512_add_epi8(chars_vec.zmm, shift_vec.zmm);
+
+        // ... and prefetch the next four characters into Level 2 or higher.
+        _mm_prefetch(text_fourth + 1, _MM_HINT_T1);
+        _mm_prefetch(text_third + 1, _MM_HINT_T1);
+        _mm_prefetch(text_second + 1, _MM_HINT_T1);
+        _mm_prefetch(text_first + 1, _MM_HINT_T1);
+
+        // 3. Add the incoming charactters.
+        hash_vec.zmm = _mm512_add_epi64(hash_vec.zmm, chars_vec.zmm);
+
+        // 4. Compute the modulo. Assuming there are only 59 values between our prime
+        //    and the 2^64 value, we can simply compute the modulo by conditionally subtracting the prime.
+        hash_vec.zmm = _mm512_mask_blend_epi8(_mm512_cmpgt_epi64_mask(hash_vec.zmm, prime_vec.zmm), hash_vec.zmm,
+                                              _mm512_sub_epi64(hash_vec.zmm, prime_vec.zmm));
+
+        // 5. Compute the hash mix, that will be used to index into the fingerprint.
+        //    This includes a serial step at the end.
+        hash_mix_vec.zmm = _mm512_mullo_epi64(hash_vec.zmm, golden_ratio_vec.zmm);
+        hash_mix_vec.ymms[0] = _mm256_xor_si256(_mm512_extracti64x4_epi64(hash_mix_vec.zmm, 1), //
+                                                _mm512_castsi512_si256(hash_mix_vec.zmm));
+
+        callback((sz_cptr_t)text_first, window_length, hash_mix_vec.u64s[0], callback_handle);
+        callback((sz_cptr_t)text_second, window_length, hash_mix_vec.u64s[1], callback_handle);
+        callback((sz_cptr_t)text_third, window_length, hash_mix_vec.u64s[2], callback_handle);
+        callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
+    }
 }
 
 #pragma clang attribute pop
@@ -3839,6 +4258,21 @@ SZ_PUBLIC void sz_tolower(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_t
 SZ_PUBLIC void sz_toupper(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_toupper_serial(ins, length, outs); }
 SZ_PUBLIC void sz_toascii(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_toascii_serial(ins, length, outs); }
 
+SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_ptr_t fingerprint,
+                                     sz_size_t fingerprint_bytes) {
+
+    sz_bool_t fingerprint_length_is_power_of_two = (sz_bool_t)((fingerprint_bytes & (fingerprint_bytes - 1)) == 0);
+    sz_string_view_t fingerprint_buffer = {fingerprint, fingerprint_bytes};
+
+    // https://blog.stuffedcow.net/2015/08/pagewalk-coherence/
+
+    // In most cases the fingerprint length will be a power of two.
+    if (fingerprint_length_is_power_of_two == sz_false_k)
+        sz_hashes(start, length, window_length, _sz_hashes_fingerprint_non_pow2_callback, &fingerprint_buffer);
+    else
+        sz_hashes(start, length, window_length, _sz_hashes_fingerprint_pow2_callback, &fingerprint_buffer);
+}
+
 #if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
@@ -3968,9 +4402,15 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cpt
     return sz_alignment_score_serial(a, a_length, b, b_length, subs, gap, alloc);
 }
 
-SZ_DYNAMIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_ptr_t fingerprint,
-                                       sz_size_t fingerprint_bytes) {
-    sz_fingerprint_rolling_serial(text, length, window_length, fingerprint, fingerprint_bytes);
+SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                          sz_hash_callback_t callback, void *callback_handle) {
+#if SZ_USE_X86_AVX512
+    sz_hashes_avx512(text, length, window_length, callback, callback_handle);
+#elif SZ_USE_X86_AVX2
+    sz_hashes_avx2(text, length, window_length, callback, callback_handle);
+#else
+    sz_hashes_serial(text, length, window_length, callback, callback_handle);
+#endif
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {

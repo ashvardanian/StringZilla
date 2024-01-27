@@ -106,7 +106,7 @@ typedef struct sz_implementations_t {
     // TODO: Upcoming vectorizations
     sz_edit_distance_t edit_distance;
     sz_alignment_score_t alignment_score;
-    sz_fingerprint_rolling_t fingerprint_rolling;
+    sz_hashes_t hashes;
 
 } sz_implementations_t;
 static sz_implementations_t sz_dispatch_table;
@@ -134,7 +134,7 @@ static void sz_dispatch_table_init() {
 
     impl->edit_distance = sz_edit_distance_serial;
     impl->alignment_score = sz_alignment_score_serial;
-    impl->fingerprint_rolling = sz_fingerprint_rolling_serial;
+    impl->hashes = sz_hashes_serial;
 
 #if SZ_USE_X86_AVX2
     if (caps & sz_cap_x86_avx2_k) {
@@ -251,9 +251,9 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cpt
     return sz_dispatch_table.alignment_score(a, a_length, b, b_length, subs, gap, alloc);
 }
 
-SZ_DYNAMIC void sz_fingerprint_rolling(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_ptr_t fingerprint,
-                                       sz_size_t fingerprint_bytes) {
-    sz_dispatch_table.fingerprint_rolling(text, length, window_length, fingerprint, fingerprint_bytes);
+SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+                          sz_hash_callback_t callback, void *callback_handle) {
+    sz_dispatch_table.hashes(text, length, window_length, callback, callback_handle);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {

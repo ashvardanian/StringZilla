@@ -15,11 +15,44 @@ tracked_unary_functions_t hashing_functions() {
     };
     tracked_unary_functions_t result = {
         {"sz_hash_serial", wrap_sz(sz_hash_serial)},
-#if SZ_USE_X86_AVX512
-        {"sz_hash_avx512", wrap_sz(sz_hash_avx512), true},
-#endif
         {"std::hash", [](std::string_view s) { return std::hash<std::string_view> {}(s); }},
     };
+    return result;
+}
+
+template <std::size_t window_width = 8>
+tracked_unary_functions_t sliding_hashing_functions() {
+    auto wrap_sz = [](auto function) -> unary_function_t {
+        return unary_function_t([function](std::string_view s) {
+            sz_size_t mixed_hash = 0;
+            function(s.data(), s.size(), window_width, _sz_hashes_fingerprint_scalar_callback, &mixed_hash);
+            return mixed_hash;
+        });
+    };
+    tracked_unary_functions_t result = {
+#if SZ_USE_X86_AVX512
+        {"sz_hashes_avx512", wrap_sz(sz_hashes_avx512)},
+#endif
+#if SZ_USE_X86_AVX2
+        {"sz_hashes_avx2", wrap_sz(sz_hashes_avx2)},
+#endif
+        {"sz_hashes_serial", wrap_sz(sz_hashes_serial)},
+    };
+    return result;
+}
+
+template <std::size_t window_width = 8, std::size_t fingerprint_bytes = 4096>
+tracked_unary_functions_t fingerprinting_functions() {
+    using fingerprint_slot_t = std::uint8_t;
+    static std::vector<fingerprint_slot_t> fingerprint(fingerprint_bytes);
+    auto wrap_sz = [](auto function) -> unary_function_t {
+        return unary_function_t([function](std::string_view s) {
+            sz_size_t mixed_hash = 0;
+            return mixed_hash;
+        });
+    };
+    tracked_unary_functions_t result = {};
+    sz_unused(wrap_sz);
     return result;
 }
 
@@ -93,6 +126,13 @@ template <typename strings_type>
 void bench(strings_type &&strings) {
     if (strings.size() == 0) return;
 
+    // Benchmark logical operations
+    bench_unary_functions(strings, hashing_functions());
+    bench_unary_functions(strings, sliding_hashing_functions());
+    bench_unary_functions(strings, fingerprinting_functions());
+    bench_binary_functions(strings, equality_functions());
+    bench_binary_functions(strings, ordering_functions());
+
     // Benchmark the cost of converting `std::string` and `sz::string` to `std::string_view`.
     // ! The results on a mixture of short and long strings should be similar.
     // ! If the dataset is made of exclusively short or long strings, STL will look much better
@@ -104,15 +144,24 @@ void bench(strings_type &&strings) {
     bench_unary_functions(strings, random_generation_functions(5));
     bench_unary_functions(strings, random_generation_functions(20));
     bench_unary_functions(strings, random_generation_functions(100));
-
-    // Benchmark logical operations
-    bench_unary_functions(strings, hashing_functions());
-    bench_binary_functions(strings, equality_functions());
-    bench_binary_functions(strings, ordering_functions());
 }
 
 void bench_on_input_data(int argc, char const **argv) {
     dataset_t dataset = make_dataset(argc, argv);
+
+    // When performaing fingerprinting, it's extremely important to:
+    //      1. Have small output fingerprints that fit the cache.
+    //      2. Have that memory in close affinity to the core, idealy on stack, to avoid cache coherency problems.
+    // This introduces an additional challenge for effiecient fingerprinting, as the CPU caches vary a lot.
+    // On the Intel Sappire Rapids 6455B Gold CPU they are 96 KiB x2 for L1d, 4 MiB x2 for L2.
+    // Spilling into the L3 is a bad idea.
+    std::printf("Benchmarking on the entire dataset:\n");
+    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions<128>());
+    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, hashing_functions());
+    // bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions<128, 4 * 1024>());
+    // bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions<128, 64 * 1024>());
+    // bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions<128, 1024 *
+    // 1024>());
 
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");
