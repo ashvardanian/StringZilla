@@ -86,9 +86,16 @@ using tracked_binary_functions_t = std::vector<tracked_function_gt<binary_functi
  *  @brief  Stops compilers from optimizing out the expression.
  *          Shamelessly stolen from Google Benchmark.
  */
-template <typename value_at>
-inline void do_not_optimize(value_at &&value) {
-    asm volatile("" : "+r"(value) : : "memory");
+template <typename argument_type>
+inline void do_not_optimize(argument_type &&value) {
+#if defined(_MSC_VER) // MSVC
+    using plain_type = typename std::remove_reference<argument_type>::type;
+    // Use the `volatile` keyword and a memory barrier to prevent optimization
+    volatile plain_type *p = &value;
+    _ReadWriteBarrier();
+#else // Other compilers (GCC, Clang, etc.)
+    asm volatile("" : "+r,m"(value) : : "memory");
+#endif
 }
 
 /**

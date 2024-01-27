@@ -213,7 +213,9 @@
     "unordered_set": "cpp",
     "utility": "cpp",
     "variant": "cpp",
-    "vector": "cpp"
+    "vector": "cpp",
+    "stddef.h": "c",
+    "immintrin.h": "c"
   },
   "python.pythonPath": "~/miniconda3/bin/python"
 }

@@ -85,98 +85,157 @@ class basic_string;
 using string_span = basic_string_slice<char>;
 using string_view = basic_string_slice<char const>;
 
+template <std::size_t count_characters>
+using carray = char[count_characters];
+
 #pragma region Character Sets
 
 /**
  *  @brief  The concatenation of the `ascii_lowercase` and `ascii_uppercase`. This value is not locale-dependent.
  *          https://docs.python.org/3/library/string.html#string.ascii_letters
  */
-inline static constexpr char ascii_letters[52] = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
-                                                  'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
-                                                  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-                                                  'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
+inline carray<52> const &ascii_letters() noexcept {
+    static carray<52> const all = {
+        //
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
+        's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+        'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    };
+    return all;
+}
 
 /**
  *  @brief  The lowercase letters "abcdefghijklmnopqrstuvwxyz". This value is not locale-dependent.
  *          https://docs.python.org/3/library/string.html#string.ascii_lowercase
  */
-inline static constexpr char ascii_lowercase[26] = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
-                                                    'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'};
+inline carray<26> const &ascii_lowercase() noexcept {
+    static carray<26> const all = {
+        //
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+        'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    };
+    return all;
+}
 
 /**
  *  @brief  The uppercase letters "ABCDEFGHIJKLMNOPQRSTUVWXYZ". This value is not locale-dependent.
  *          https://docs.python.org/3/library/string.html#string.ascii_uppercase
  */
-inline static constexpr char ascii_uppercase[26] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-                                                    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'};
+inline carray<26> const &ascii_uppercase() noexcept {
+    static carray<26> const all = {
+        //
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+        'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    };
+    return all;
+}
 
 /**
  *  @brief  ASCII characters which are considered printable.
  *          A combination of `digits`, `ascii_letters`, `punctuation`, and `whitespace`.
  *          https://docs.python.org/3/library/string.html#string.printable
  */
-inline static constexpr char ascii_printables[100] = {
-    '0', '1', '2', '3', '4', '5',  '6', '7', '8',  '9', 'a', 'b', 'c', 'd', 'e', 'f',  'g',  'h',  'i',  'j',
-    'k', 'l', 'm', 'n', 'o', 'p',  'q', 'r', 's',  't', 'u', 'v', 'w', 'x', 'y', 'z',  'A',  'B',  'C',  'D',
-    'E', 'F', 'G', 'H', 'I', 'J',  'K', 'L', 'M',  'N', 'O', 'P', 'Q', 'R', 'S', 'T',  'U',  'V',  'W',  'X',
-    'Y', 'Z', '!', '"', '#', '$',  '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.',  '/',  ':',  ';',  '<',
-    '=', '>', '?', '@', '[', '\\', ']', '^', '_',  '`', '{', '|', '}', '~', ' ', '\t', '\n', '\r', '\f', '\v'};
+inline carray<100> const &ascii_printables() noexcept {
+    static carray<100> const all = {
+        //
+        '0', '1', '2', '3', '4', '5',  '6', '7', '8',  '9', 'a', 'b', 'c', 'd', 'e', 'f',  'g',  'h',  'i',  'j',
+        'k', 'l', 'm', 'n', 'o', 'p',  'q', 'r', 's',  't', 'u', 'v', 'w', 'x', 'y', 'z',  'A',  'B',  'C',  'D',
+        'E', 'F', 'G', 'H', 'I', 'J',  'K', 'L', 'M',  'N', 'O', 'P', 'Q', 'R', 'S', 'T',  'U',  'V',  'W',  'X',
+        'Y', 'Z', '!', '"', '#', '$',  '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.',  '/',  ':',  ';',  '<',
+        '=', '>', '?', '@', '[', '\\', ']', '^', '_',  '`', '{', '|', '}', '~', ' ', '\t', '\n', '\r', '\f', '\v',
+    };
+    return all;
+}
 
 /**
  *  @brief  Non-printable ASCII control characters.
  *          Includes all codes from 0 to 31 and 127.
  */
-inline static constexpr char ascii_controls[33] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16,
-                                                   17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 127};
+inline carray<33> const &ascii_controls() noexcept {
+    static carray<33> const all = {
+        //
+        0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,  16,
+        17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 127,
+    };
+    return all;
+}
 
 /**
  *  @brief  The digits "0123456789".
  *          https://docs.python.org/3/library/string.html#string.digits
  */
-inline static constexpr char digits[10] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+inline carray<10> const &digits() noexcept {
+    static carray<10> const all = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+    return all;
+}
 
 /**
  *  @brief  The letters "0123456789abcdefABCDEF".
  *          https://docs.python.org/3/library/string.html#string.hexdigits
  */
-inline static constexpr char hexdigits[22] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', //
-                                              'a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F'};
+inline carray<22> const &hexdigits() noexcept {
+    static carray<22> const all = {
+        //
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', //
+        'a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F',
+    };
+    return all;
+}
 
 /**
  *  @brief  The letters "01234567".
  *          https://docs.python.org/3/library/string.html#string.octdigits
  */
-inline static constexpr char octdigits[8] = {'0', '1', '2', '3', '4', '5', '6', '7'};
+inline carray<8> const &octdigits() noexcept {
+    static carray<8> const all = {'0', '1', '2', '3', '4', '5', '6', '7'};
+    return all;
+}
 
 /**
  *  @brief  ASCII characters considered punctuation characters in the C locale:
  *          !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~.
  *          https://docs.python.org/3/library/string.html#string.punctuation
  */
-inline static constexpr char punctuation[32] = { //
-    '!', '"', '#', '$', '%', '&', '\'', '(',  ')', '*', '+', ',', '-', '.', '/', ':',
-    ';', '<', '=', '>', '?', '@', '[',  '\\', ']', '^', '_', '`', '{', '|', '}', '~'};
+inline carray<32> const &punctuation() noexcept {
+    static carray<32> const all = {
+        //
+        '!', '"', '#', '$', '%', '&', '\'', '(',  ')', '*', '+', ',', '-', '.', '/', ':',
+        ';', '<', '=', '>', '?', '@', '[',  '\\', ']', '^', '_', '`', '{', '|', '}', '~',
+    };
+    return all;
+}
 
 /**
  *  @brief  ASCII characters that are considered whitespace.
  *          This includes space, tab, linefeed, return, formfeed, and vertical tab.
  *          https://docs.python.org/3/library/string.html#string.whitespace
  */
-inline static constexpr char whitespaces[6] = {' ', '\t', '\n', '\r', '\f', '\v'};
+inline carray<6> const &whitespaces() noexcept {
+    static carray<6> const all = {' ', '\t', '\n', '\r', '\f', '\v'};
+    return all;
+}
 
 /**
  *  @brief  ASCII characters that are considered line delimiters.
  *          https://docs.python.org/3/library/stdtypes.html#str.splitlines
  */
-inline static constexpr char newlines[8] = {'\n', '\r', '\f', '\v', '\x1C', '\x1D', '\x1E', '\x85'};
+inline carray<8> const &newlines() noexcept {
+    static carray<8> const all = {'\n', '\r', '\f', '\v', '\x1C', '\x1D', '\x1E', '\x85'};
+    return all;
+}
 
 /**
  *  @brief  ASCII characters forming the BASE64 encoding alphabet.
  */
-inline static constexpr char base64[64] = { //
-    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
-    'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R',
-    'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'};
+inline carray<64> const &base64() noexcept {
+    static carray<64> const all = {
+        //
+        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
+        'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R',
+        'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/',
+    };
+    return all;
+}
 
 /**
  *  @brief  A set of characters represented as a bitset with 256 slots.
@@ -198,6 +257,15 @@ class basic_charset {
     }
     template <std::size_t count_characters>
     explicit basic_charset(char_type const (&chars)[count_characters]) noexcept : basic_charset() {
+        static_assert(count_characters > 0, "Character array cannot be empty");
+        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+            char_type c = chars[i];
+            bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
+        }
+    }
+
+    template <std::size_t count_characters>
+    explicit basic_charset(std::array<char_type, count_characters> const &chars) noexcept : basic_charset() {
         static_assert(count_characters > 0, "Character array cannot be empty");
         for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
             char_type c = chars[i];
@@ -234,31 +302,32 @@ class basic_charset {
 
 using char_set = basic_charset<char>;
 
-inline static char_set const ascii_letters_set {ascii_letters};
-inline static char_set const ascii_lowercase_set {ascii_lowercase};
-inline static char_set const ascii_uppercase_set {ascii_uppercase};
-inline static char_set const ascii_printables_set {ascii_printables};
-inline static char_set const ascii_controls_set {ascii_controls};
-inline static char_set const digits_set {digits};
-inline static char_set const hexdigits_set {hexdigits};
-inline static char_set const octdigits_set {octdigits};
-inline static char_set const punctuation_set {punctuation};
-inline static char_set const whitespaces_set {whitespaces};
-inline static char_set const newlines_set {newlines};
-inline static char_set const base64_set {base64};
+inline char_set ascii_letters_set() { return char_set {ascii_letters()}; }
+inline char_set ascii_lowercase_set() { return char_set {ascii_lowercase()}; }
+inline char_set ascii_uppercase_set() { return char_set {ascii_uppercase()}; }
+inline char_set ascii_printables_set() { return char_set {ascii_printables()}; }
+inline char_set ascii_controls_set() { return char_set {ascii_controls()}; }
+inline char_set digits_set() { return char_set {digits()}; }
+inline char_set hexdigits_set() { return char_set {hexdigits()}; }
+inline char_set octdigits_set() { return char_set {octdigits()}; }
+inline char_set punctuation_set() { return char_set {punctuation()}; }
+inline char_set whitespaces_set() { return char_set {whitespaces()}; }
+inline char_set newlines_set() { return char_set {newlines()}; }
+inline char_set base64_set() { return char_set {base64()}; }
 
 #pragma endregion
 
 #pragma region Ranges of Search Matches
 
 struct end_sentinel_type {};
-inline static constexpr end_sentinel_type end_sentinel;
-
 struct include_overlaps_type {};
-inline static constexpr include_overlaps_type include_overlaps;
-
 struct exclude_overlaps_type {};
+
+#if SZ_DETECT_CPP_17
+inline static constexpr end_sentinel_type end_sentinel;
+inline static constexpr include_overlaps_type include_overlaps;
 inline static constexpr exclude_overlaps_type exclude_overlaps;
+#endif
 
 /**
  *  @brief  Zero-cost wrapper around the `.find` member function of string-like classes.
@@ -404,11 +473,11 @@ class range_matches {
         bool operator==(end_sentinel_type) const noexcept { return remaining_.empty(); }
     };
 
-    iterator begin() const noexcept { return iterator(haystack_, matcher_); }
-    iterator end() const noexcept { return iterator({haystack_.end(), 0}, matcher_); }
+    iterator begin() const noexcept { return {haystack_, matcher_}; }
+    iterator end() const noexcept { return {string_type {haystack_.data() + haystack_.size(), 0ull}, matcher_}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
-    bool empty() const noexcept { return begin() == end_sentinel; }
+    bool empty() const noexcept { return begin() == end_sentinel_type {}; }
     bool include_overlaps() const noexcept { return matcher_.skip_length() < matcher_.needle_length(); }
 
     /**
@@ -496,11 +565,11 @@ class range_rmatches {
         bool operator==(end_sentinel_type) const noexcept { return remaining_.empty(); }
     };
 
-    iterator begin() const noexcept { return iterator(haystack_, matcher_); }
-    iterator end() const noexcept { return iterator({haystack_.begin(), 0}, matcher_); }
+    iterator begin() const noexcept { return {haystack_, matcher_}; }
+    iterator end() const noexcept { return {string_type {haystack_.data(), 0ull}, matcher_}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
-    bool empty() const noexcept { return begin() == end_sentinel; }
+    bool empty() const noexcept { return begin() == end_sentinel_type {}; }
     bool include_overlaps() const noexcept { return matcher_.skip_length() < matcher_.needle_length(); }
 
     /**
@@ -599,8 +668,8 @@ class range_splits {
         bool is_last() const noexcept { return remaining_.size() == length_within_remaining_; }
     };
 
-    iterator begin() const noexcept { return iterator(haystack_, matcher_); }
-    iterator end() const noexcept { return iterator({haystack_.end(), 0}, matcher_, end_sentinel); }
+    iterator begin() const noexcept { return {haystack_, matcher_}; }
+    iterator end() const noexcept { return {string_type {haystack_.end(), 0}, matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -708,8 +777,8 @@ class range_rsplits {
         bool is_last() const noexcept { return remaining_.size() == length_within_remaining_; }
     };
 
-    iterator begin() const noexcept { return iterator(haystack_, matcher_); }
-    iterator end() const noexcept { return iterator({haystack_.begin(), 0}, matcher_, end_sentinel); }
+    iterator begin() const noexcept { return {haystack_, matcher_}; }
+    iterator end() const noexcept { return {{haystack_.data(), 0ull}, matcher_, end_sentinel_type {}}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
     difference_type ssize() const noexcept { return std::distance(begin(), end()); }
     constexpr bool empty() const noexcept { return false; }
@@ -1060,7 +1129,7 @@ class basic_string_slice {
     /** @brief  Special value for missing matches.
      *          We take the largest 63-bit unsigned integer.
      */
-    inline static constexpr size_type npos = 0x7FFFFFFFFFFFFFFFull;
+    static constexpr size_type npos = 0x7FFFFFFFFFFFFFFFull;
 
 #pragma region Constructors and STL Utilities
 
@@ -1085,7 +1154,7 @@ class basic_string_slice {
 
     template <typename sfinae_ = char_type, typename std::enable_if<!std::is_const<sfinae_>::value, int>::type = 0>
     sz_constexpr_if_cpp20 basic_string_slice(std::string &other) noexcept
-        : basic_string_slice(other.data(), other.size()) {}
+        : basic_string_slice(&other[0], other.size()) {} // The `.data()` has mutable variant only since C++17
 
     template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
     sz_constexpr_if_cpp20 string_slice &operator=(std::string const &other) noexcept {
@@ -1516,15 +1585,16 @@ class basic_string_slice {
 
 #pragma region Matching Character Sets
 
+    // `isascii` is a macro in MSVC headers
     bool contains_only(char_set set) const noexcept { return find_first_not_of(set) == npos; }
-    bool isalpha() const noexcept { return !empty() && contains_only(ascii_letters_set); }
-    bool isalnum() const noexcept { return !empty() && contains_only(ascii_letters_set | digits_set); }
-    bool isascii() const noexcept { return empty() || contains_only(ascii_controls_set | ascii_printables_set); }
-    bool isdigit() const noexcept { return !empty() && contains_only(digits_set); }
-    bool islower() const noexcept { return !empty() && contains_only(ascii_lowercase_set); }
-    bool isspace() const noexcept { return !empty() && contains_only(whitespaces_set); }
-    bool isupper() const noexcept { return !empty() && contains_only(ascii_uppercase_set); }
-    bool isprintable() const noexcept { return empty() || contains_only(ascii_printables_set); }
+    bool is_alpha() const noexcept { return !empty() && contains_only(ascii_letters_set()); }
+    bool is_alnum() const noexcept { return !empty() && contains_only(ascii_letters_set() | digits_set()); }
+    bool is_ascii() const noexcept { return empty() || contains_only(ascii_controls_set() | ascii_printables_set()); }
+    bool is_digit() const noexcept { return !empty() && contains_only(digits_set()); }
+    bool is_lower() const noexcept { return !empty() && contains_only(ascii_lowercase_set()); }
+    bool is_space() const noexcept { return !empty() && contains_only(whitespaces_set()); }
+    bool is_upper() const noexcept { return !empty() && contains_only(ascii_uppercase_set()); }
+    bool is_printable() const noexcept { return empty() || contains_only(ascii_printables_set()); }
 
 #pragma region Character Set Arguments
     /**
@@ -1892,7 +1962,7 @@ class basic_string {
     /** @brief  Special value for missing matches.
      *          We take the largest 63-bit unsigned integer.
      */
-    inline static constexpr size_type npos = 0x7FFFFFFFFFFFFFFFull;
+    static constexpr size_type npos = 0x7FFFFFFFFFFFFFFFull;
 
 #pragma region Constructors and STL Utilities
 
@@ -2368,14 +2438,14 @@ class basic_string {
 #pragma region Matching Character Sets
 
     bool contains_only(char_set set) const noexcept { return find_first_not_of(set) == npos; }
-    bool isalpha() const noexcept { return !empty() && contains_only(ascii_letters_set); }
-    bool isalnum() const noexcept { return !empty() && contains_only(ascii_letters_set | digits_set); }
-    bool isascii() const noexcept { return empty() || contains_only(ascii_controls_set | ascii_printables_set); }
-    bool isdigit() const noexcept { return !empty() && contains_only(digits_set); }
-    bool islower() const noexcept { return !empty() && contains_only(ascii_lowercase_set); }
-    bool isspace() const noexcept { return !empty() && contains_only(whitespaces_set); }
-    bool isupper() const noexcept { return !empty() && contains_only(ascii_uppercase_set); }
-    bool isprintable() const noexcept { return empty() || contains_only(ascii_printables_set); }
+    bool is_alpha() const noexcept { return !empty() && contains_only(ascii_letters_set()); }
+    bool is_alnum() const noexcept { return !empty() && contains_only(ascii_letters_set() | digits_set()); }
+    bool is_ascii() const noexcept { return empty() || contains_only(ascii_controls_set() | ascii_printables_set()); }
+    bool is_digit() const noexcept { return !empty() && contains_only(digits_set()); }
+    bool is_lower() const noexcept { return !empty() && contains_only(ascii_lowercase_set()); }
+    bool is_space() const noexcept { return !empty() && contains_only(whitespaces_set()); }
+    bool is_upper() const noexcept { return !empty() && contains_only(ascii_uppercase_set()); }
+    bool is_printable() const noexcept { return empty() || contains_only(ascii_printables_set()); }
 
 #pragma region Character Set Arguments
 
@@ -3271,7 +3341,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
         // Instead of iterating with `begin()` and `end()`, we could use the cheaper sentinel-based approach.
         //      for (string_view match : matches) { ... }
         matches_type matches = matches_type(this_view, {pattern});
-        for (auto matches_iterator = matches.begin(); matches_iterator != end_sentinel; ++matches_iterator) {
+        for (auto matches_iterator = matches.begin(); matches_iterator != end_sentinel_type {}; ++matches_iterator) {
             replacement.copy(const_cast<pointer>((*matches_iterator).data()));
         }
         return true;
@@ -3296,7 +3366,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
             sz_move((sz_ptr_t)compacted_end, match_view.begin(), match_view.length());
             compacted_end += match_view.length();
             ++matches_iterator;
-        } while (matches_iterator != end_sentinel);
+        } while (matches_iterator != end_sentinel_type {});
 
         // Can't fail, so let's just return true :)
         try_resize(compacted_end - begin());

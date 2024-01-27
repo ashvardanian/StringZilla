@@ -607,7 +607,7 @@ void test_api_mutable_extensions() {
  *  @brief  Tests copy constructor and copy-assignment constructor of `sz::string`.
  */
 static void test_constructors() {
-    std::string alphabet {sz::ascii_printables, sizeof(sz::ascii_printables)};
+    std::string alphabet {sz::ascii_printables(), sizeof(sz::ascii_printables())};
     std::vector<sz::string> strings;
     for (std::size_t alphabet_slice = 0; alphabet_slice != alphabet.size(); ++alphabet_slice)
         strings.push_back(alphabet.substr(0, alphabet_slice));
@@ -629,34 +629,40 @@ static void test_constructors() {
 }
 
 struct accounting_allocator : public std::allocator<char> {
-    inline static bool verbose = false;
-    inline static std::size_t current_bytes_alloced = 0;
+    inline static bool &verbose_ref() {
+        static bool global_value = false;
+        return global_value;
+    }
+    inline static std::size_t &counter_ref() {
+        static std::size_t global_value = 0ul;
+        return global_value;
+    }
 
     template <typename... args_types>
     static void print_if_verbose(char const *fmt, args_types... args) {
-        if (!verbose) return;
+        if (!verbose_ref()) return;
         std::printf(fmt, args...);
     }
 
     char *allocate(std::size_t n) {
-        current_bytes_alloced += n;
-        print_if_verbose("alloc %zd -> %zd\n", n, current_bytes_alloced);
+        counter_ref() += n;
+        print_if_verbose("alloc %zd -> %zd\n", n, counter_ref());
         return std::allocator<char>::allocate(n);
     }
 
     void deallocate(char *val, std::size_t n) {
-        assert(n <= current_bytes_alloced);
-        current_bytes_alloced -= n;
-        print_if_verbose("dealloc: %zd -> %zd\n", n, current_bytes_alloced);
+        assert(n <= counter_ref());
+        counter_ref() -= n;
+        print_if_verbose("dealloc: %zd -> %zd\n", n, counter_ref());
         std::allocator<char>::deallocate(val, n);
     }
 
     template <typename callback_type>
     static std::size_t account_block(callback_type callback) {
-        auto before = accounting_allocator::current_bytes_alloced;
+        auto before = accounting_allocator::counter_ref();
         print_if_verbose("starting block: %zd\n", before);
         callback();
-        auto after = accounting_allocator::current_bytes_alloced;
+        auto after = accounting_allocator::counter_ref();
         print_if_verbose("ending block: %zd\n", after);
         return after - before;
     }
@@ -671,7 +677,7 @@ void assert_balanced_memory(callback_type callback) {
 static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
     std::size_t iterations = 4;
 
-    assert(accounting_allocator::current_bytes_alloced == 0);
+    assert(accounting_allocator::counter_ref() == 0);
     using string = sz::basic_string<char, accounting_allocator>;
     string base;
 
@@ -734,7 +740,7 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
 
     // Now let's clear the base and check that we're back to zero
     base = string();
-    assert(accounting_allocator::current_bytes_alloced == 0);
+    assert(accounting_allocator::counter_ref() == 0);
 }
 
 /**
@@ -799,9 +805,9 @@ static void test_search() {
     assert(sz::string_view("axbYaxbY").find_first_of("Y") == 3);
     assert(sz::string_view("YbXaYbXa").find_last_of("XY") == 6);
     assert(sz::string_view("YbxaYbxa").find_last_of("Y") == 4);
-    assert(sz::string_view(sz::base64).find_first_of("_") == sz::string_view::npos);
-    assert(sz::string_view(sz::base64).find_first_of("+") == 62);
-    assert(sz::string_view(sz::ascii_printables).find_first_of("~") != sz::string_view::npos);
+    assert(sz::string_view(sz::base64()).find_first_of("_") == sz::string_view::npos);
+    assert(sz::string_view(sz::base64()).find_first_of("+") == 62);
+    assert(sz::string_view(sz::ascii_printables()).find_first_of("~") != sz::string_view::npos);
 
     assert("aabaa"_sz.remove_prefix("a") == "abaa");
     assert("aabaa"_sz.remove_suffix("a") == "aaba");
@@ -821,26 +827,26 @@ static void test_search() {
     assert("hello"_sz.find_all("l").size() == 2);
     assert("hello"_sz.rfind_all("l").size() == 2);
 
-    assert(""_sz.find_all(".", sz::include_overlaps).size() == 0);
-    assert(""_sz.find_all(".", sz::exclude_overlaps).size() == 0);
-    assert("."_sz.find_all(".", sz::include_overlaps).size() == 1);
-    assert("."_sz.find_all(".", sz::exclude_overlaps).size() == 1);
-    assert(".."_sz.find_all(".", sz::include_overlaps).size() == 2);
-    assert(".."_sz.find_all(".", sz::exclude_overlaps).size() == 2);
-    assert(""_sz.rfind_all(".", sz::include_overlaps).size() == 0);
-    assert(""_sz.rfind_all(".", sz::exclude_overlaps).size() == 0);
-    assert("."_sz.rfind_all(".", sz::include_overlaps).size() == 1);
-    assert("."_sz.rfind_all(".", sz::exclude_overlaps).size() == 1);
-    assert(".."_sz.rfind_all(".", sz::include_overlaps).size() == 2);
-    assert(".."_sz.rfind_all(".", sz::exclude_overlaps).size() == 2);
+    assert(""_sz.find_all(".", sz::include_overlaps_type {}).size() == 0);
+    assert(""_sz.find_all(".", sz::exclude_overlaps_type {}).size() == 0);
+    assert("."_sz.find_all(".", sz::include_overlaps_type {}).size() == 1);
+    assert("."_sz.find_all(".", sz::exclude_overlaps_type {}).size() == 1);
+    assert(".."_sz.find_all(".", sz::include_overlaps_type {}).size() == 2);
+    assert(".."_sz.find_all(".", sz::exclude_overlaps_type {}).size() == 2);
+    assert(""_sz.rfind_all(".", sz::include_overlaps_type {}).size() == 0);
+    assert(""_sz.rfind_all(".", sz::exclude_overlaps_type {}).size() == 0);
+    assert("."_sz.rfind_all(".", sz::include_overlaps_type {}).size() == 1);
+    assert("."_sz.rfind_all(".", sz::exclude_overlaps_type {}).size() == 1);
+    assert(".."_sz.rfind_all(".", sz::include_overlaps_type {}).size() == 2);
+    assert(".."_sz.rfind_all(".", sz::exclude_overlaps_type {}).size() == 2);
 
     assert("a.b.c.d"_sz.find_all(".").size() == 3);
     assert("a.,b.,c.,d"_sz.find_all(".,").size() == 3);
     assert("a.,b.,c.,d"_sz.rfind_all(".,").size() == 3);
     assert("a.b,c.d"_sz.find_all(sz::char_set(".,")).size() == 3);
     assert("a...b...c"_sz.rfind_all("..").size() == 4);
-    assert("a...b...c"_sz.rfind_all("..", sz::include_overlaps).size() == 4);
-    assert("a...b...c"_sz.rfind_all("..", sz::exclude_overlaps).size() == 2);
+    assert("a...b...c"_sz.rfind_all("..", sz::include_overlaps_type {}).size() == 4);
+    assert("a...b...c"_sz.rfind_all("..", sz::exclude_overlaps_type {}).size() == 2);
 
     auto finds = "a.b.c"_sz.find_all(sz::char_set("abcd")).template to<std::vector<std::string>>();
     assert(finds.size() == 3);
@@ -1038,11 +1044,11 @@ static void test_search_with_misaligned_repetitions() {
     test_search_with_misaligned_repetitions("ab", "ab");
     test_search_with_misaligned_repetitions("abc", "abc");
     test_search_with_misaligned_repetitions("abcd", "abcd");
-    test_search_with_misaligned_repetitions({sz::base64, sizeof(sz::base64)}, {sz::base64, sizeof(sz::base64)});
-    test_search_with_misaligned_repetitions({sz::ascii_lowercase, sizeof(sz::ascii_lowercase)},
-                                            {sz::ascii_lowercase, sizeof(sz::ascii_lowercase)});
-    test_search_with_misaligned_repetitions({sz::ascii_printables, sizeof(sz::ascii_printables)},
-                                            {sz::ascii_printables, sizeof(sz::ascii_printables)});
+    test_search_with_misaligned_repetitions({sz::base64(), sizeof(sz::base64())}, {sz::base64(), sizeof(sz::base64())});
+    test_search_with_misaligned_repetitions({sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())},
+                                            {sz::ascii_lowercase(), sizeof(sz::ascii_lowercase())});
+    test_search_with_misaligned_repetitions({sz::ascii_printables(), sizeof(sz::ascii_printables())},
+                                            {sz::ascii_printables(), sizeof(sz::ascii_printables())});
 
     // When we are dealing with NULL characters inside the string
     test_search_with_misaligned_repetitions("\0", "\0");
@@ -1129,7 +1135,8 @@ static void test_levenshtein_distances() {
             std::size_t second_length = length_distribution(generator);
             std::generate_n(std::back_inserter(first), first_length, [&]() { return alphabet[generator() % 2]; });
             std::generate_n(std::back_inserter(second), second_length, [&]() { return alphabet[generator() % 2]; });
-            test_distance(first, second, levenshtein_baseline(first, second));
+            test_distance(first, second,
+                          levenshtein_baseline(first.c_str(), first.length(), second.c_str(), second.length()));
             first.clear();
             second.clear();
         }

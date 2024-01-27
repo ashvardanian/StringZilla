@@ -2,10 +2,9 @@
  *  @brief  Helper structures and functions for C++ tests.
  */
 #pragma once
-#include <random>      // `std::random_device`
-#include <string>      // `std::string`
-#include <string_view> // `std::string_view`
-#include <vector>      // `std::vector`
+#include <random> // `std::random_device`
+#include <string> // `std::string`
+#include <vector> // `std::vector`
 
 namespace ashvardanian {
 namespace stringzilla {
@@ -14,16 +13,13 @@ namespace scripts {
 inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
     std::string result(length, '\0');
     static std::random_device seed_source; // Too expensive to construct every time
-    std::mt19937 generator(seed_source());
+    static std::mt19937 generator(seed_source());
     std::uniform_int_distribution<std::size_t> distribution(1, cardinality);
     std::generate(result.begin(), result.end(), [&]() { return alphabet[distribution(generator)]; });
     return result;
 }
 
-inline std::size_t levenshtein_baseline(std::string_view s1, std::string_view s2) {
-    std::size_t len1 = s1.size();
-    std::size_t len2 = s2.size();
-
+inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2) {
     std::vector<std::vector<std::size_t>> dp(len1 + 1, std::vector<std::size_t>(len2 + 1));
 
     // Initialize the borders of the matrix.
@@ -46,7 +42,7 @@ inline std::size_t levenshtein_baseline(std::string_view s1, std::string_view s2
 }
 
 inline std::vector<std::int8_t> unary_substitution_costs() {
-    std::vector<sz_error_cost_t> result(256 * 256);
+    std::vector<std::int8_t> result(256 * 256);
     for (std::size_t i = 0; i != 256; ++i)
         for (std::size_t j = 0; j != 256; ++j) result[i * 256 + j] = (i == j ? 0 : 1);
     return result;

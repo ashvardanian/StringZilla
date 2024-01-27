@@ -2,33 +2,39 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build for Linux: Debug",
-            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -DCMAKE_CXX_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_BUILD_TYPE=Debug -B ./build_debug && make stringzilla_test_cpp20 -C ./build_debug",
-            "args": [],
+            "label": "Build with GCC: Debug",
+            "command": "./.github/workflows/build_tools.sh Debug GCC",
             "type": "shell",
             "problemMatcher": [
                 "$gcc"
             ]
         },
         {
-            "label": "Build for Linux: Release",
-            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -DCMAKE_CXX_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_BUILD_TYPE=RelWithDebInfo -B ./build_release && make stringzilla_test_cpp20 -C ./build_release",
-            "args": [],
+            "label": "Build with GCC: Release",
+            "command": "./.github/workflows/build_tools.sh Release GCC",
             "type": "shell",
             "problemMatcher": [
                 "$gcc"
             ]
         },
         {
-            "label": "Build for MacOS: Debug",
-            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=Debug -B ./build_debug && make -C ./build_debug",
-            "args": [],
-            "type": "shell",
+            "label": "Build with LLVM: Debug",
+            "command": "./.github/workflows/build_tools.sh Debug LLVM",
+            "type": "shell"
         },
         {
-            "label": "Build for MacOS: Release",
-            "command": "cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo -B ./build_release && make -C ./build_release",
-            "args": [],
+            "label": "Build with LLVM: Release",
+            "command": "./.github/workflows/build_tools.sh Release LLVM",
+            "type": "shell"
+        },
+        {
+            "label": "Build with MSVC: Debug",
+            "command": "./.github/workflows/build_tools.sh Debug MSVC",
+            "type": "shell"
+        },
+        {
+            "label": "Build with MSVC: Release",
+            "command": "./.github/workflows/build_tools.sh Release MSVC",
             "type": "shell"
         }
     ]

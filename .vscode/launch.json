@@ -50,12 +50,18 @@
       ],
       "stopAtEntry": false,
       "linux": {
-        "preLaunchTask": "Build for Linux: Debug",
+        "preLaunchTask": "Build with GCC: Debug",
         "MIMode": "gdb"
       },
       "osx": {
-        "preLaunchTask": "Build for MacOS: Debug",
+        "preLaunchTask": "Build with LLVM: Debug",
         "MIMode": "lldb"
+      },
+      "windows": {
+        "program": "${workspaceFolder}\\build_debug\\stringzilla_test_cpp20.exe",
+        "preLaunchTask": "Build with MSVC: Debug",
+        "MIMode": "gdb",
+        "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
       }
     },
     {
@@ -75,12 +81,18 @@
       ],
       "stopAtEntry": false,
       "linux": {
-        "preLaunchTask": "Build for Linux: Debug",
+        "preLaunchTask": "Build with GCC: Debug",
         "MIMode": "gdb"
       },
       "osx": {
-        "preLaunchTask": "Build for MacOS: Debug",
+        "preLaunchTask": "Build with LLVM: Debug",
         "MIMode": "lldb"
+      },
+      "windows": {
+        "program": "${workspaceFolder}\\build_debug\\stringzilla_${fileBasenameNoExtension}.exe",
+        "preLaunchTask": "Build with MSVC: Debug",
+        "MIMode": "gdb",
+        "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
       }
     }
   ]

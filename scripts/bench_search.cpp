@@ -6,6 +6,8 @@
  *  It accepts a file with a list of words, and benchmarks the search operations on them.
  *  Outside of present tokens also tries missing tokens.
  */
+#include <string.h> // `memmem`
+
 #include <bench.hpp>
 
 using namespace ashvardanian::stringzilla::scripts;
@@ -39,11 +41,13 @@ tracked_binary_functions_t find_functions() {
              sz_cptr_t match = strstr(h.data(), n.data());
              return (match ? match - h.data() : h.size());
          }},
-        {"memmem",
+#ifdef _GNU_SOURCE
+        {"memmem", // Not supported on MSVC
          [](std::string_view h, std::string_view n) {
              sz_cptr_t match = (sz_cptr_t)memmem(h.data(), h.size(), n.data(), n.size());
              return (match ? match - h.data() : h.size());
          }},
+#endif
         {"std::search<>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.data(), h.data() + h.size(), n.data(), n.data() + n.size());
@@ -285,25 +289,25 @@ int main(int argc, char const **argv) {
     bench_rfinds(dataset.text, {"\n"}, rfind_functions());
 
     std::printf("Benchmarking for an [\\n\\r] RegEx:\n");
-    bench_finds(dataset.text, {sz::newlines}, find_charset_functions());
-    bench_rfinds(dataset.text, {sz::newlines}, rfind_charset_functions());
+    bench_finds(dataset.text, {sz::newlines()}, find_charset_functions());
+    bench_rfinds(dataset.text, {sz::newlines()}, rfind_charset_functions());
 
     // Typical ASCII tokenization and validation benchmarks
     std::printf("Benchmarking for whitespaces:\n");
-    bench_finds(dataset.text, {sz::whitespaces}, find_charset_functions());
-    bench_rfinds(dataset.text, {sz::whitespaces}, rfind_charset_functions());
+    bench_finds(dataset.text, {sz::whitespaces()}, find_charset_functions());
+    bench_rfinds(dataset.text, {sz::whitespaces()}, rfind_charset_functions());
 
     std::printf("Benchmarking for HTML tag start/end:\n");
     bench_finds(dataset.text, {"<>"}, find_charset_functions());
     bench_rfinds(dataset.text, {"<>"}, rfind_charset_functions());
 
     std::printf("Benchmarking for punctuation marks:\n");
-    bench_finds(dataset.text, {sz::punctuation}, find_charset_functions());
-    bench_rfinds(dataset.text, {sz::punctuation}, rfind_charset_functions());
+    bench_finds(dataset.text, {sz::punctuation()}, find_charset_functions());
+    bench_rfinds(dataset.text, {sz::punctuation()}, rfind_charset_functions());
 
     std::printf("Benchmarking for non-printable characters:\n");
-    bench_finds(dataset.text, {sz::ascii_controls}, find_charset_functions());
-    bench_rfinds(dataset.text, {sz::ascii_controls}, rfind_charset_functions());
+    bench_finds(dataset.text, {sz::ascii_controls()}, find_charset_functions());
+    bench_rfinds(dataset.text, {sz::ascii_controls()}, rfind_charset_functions());
 
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");

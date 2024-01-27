@@ -765,6 +765,16 @@ __`SZ_USE_MISALIGNED_LOADS`__:
 > Going from `char`-like types to `uint64_t`-like ones can significanly accelerate the serial (SWAR) backend.
 > So consider enabling it if you are building for some embedded device.
 
+__`SZ_CACHE_LINE_WIDTH`, `SZ_SWAR_THRESHOLD`__:
+
+> The width of the cache line and the "SWAR threshold" are performance-optimization settings.
+> They will mostly affect the serial performance.
+
+__`SZ_AVOID_LIBC`__:
+
+> When using the C header-only library one can disable the use of LibC.
+> This may affect the type resolution system on obscure hardware platforms. 
+
 __`SZ_AVOID_STL`__:
 
 > When using the C++ interface one can disable conversions from `std::string` to `sz::string` and back.

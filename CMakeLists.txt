@@ -86,20 +86,41 @@ endif()
 function(set_compiler_flags target cpp_standard)
   target_include_directories(${target} PRIVATE scripts)
   target_link_libraries(${target} PRIVATE ${STRINGZILLA_TARGET_NAME})
-  target_compile_definitions(${target} PUBLIC DEV_USER_NAME=${DEV_USER_NAME})
-  set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-    ${CMAKE_BINARY_DIR})
+
+  # Set output directory for single-configuration generators (like Make)
+  set_target_properties(${target} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>
+  )
+
+  # Set output directory for multi-configuration generators (like Visual Studio)
+  foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES)
+    string(TOUPPER ${config} config_upper)
+    set_target_properties(${target} PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY_${config_upper} ${CMAKE_BINARY_DIR}/$<0:>
+    )
+  endforeach()
 
   # Set the C++ standard
   if(NOT ${cpp_standard} STREQUAL "")
-    target_compile_features(${target} PUBLIC cxx_std_${cpp_standard})
+    # Use the /Zc:__cplusplus flag to correctly define the __cplusplus macro in MSVC
+    set(CXX_STANDARD_MSVC "/std:c++${cpp_standard};/Zc:__cplusplus")
+    set(CXX_STANDARD_GNU "-std=c++${cpp_standard}")
+    target_compile_options(${target} PRIVATE
+      "$<$<CXX_COMPILER_ID:MSVC>:${CXX_STANDARD_MSVC}>"
+      "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:${CXX_STANDARD_GNU}>"
+    )
+  endif()
+
+  # Set the C++ standard for GNU compilers (GCC, Clang, AppleClang)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(${target} PRIVATE "-std=c++${cpp_standard}")
   endif()
 
   # Maximum warnings level & warnings as error Allow unknown pragmas
   target_compile_options(
     ${target}
     PRIVATE
-    "$<$<CXX_COMPILER_ID:MSVC>:/W4;/WX>" # For MSVC, /WX is sufficient
+    "$<$<CXX_COMPILER_ID:MSVC>:/STOP>" # For MSVC, /WX would have been sufficient
     "$<$<CXX_COMPILER_ID:GNU>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function>"
     "$<$<CXX_COMPILER_ID:Clang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
     "$<$<CXX_COMPILER_ID:AppleClang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
@@ -122,7 +143,9 @@ function(set_compiler_flags target cpp_standard)
   if(STRINGZILLA_TARGET_ARCH STREQUAL "")
     # MSVC does not have a direct equivalent to -march=native
     target_compile_options(
-      ${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=native>")
+      ${target} PRIVATE
+      "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=native>"
+      "$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2>")
   else()
     target_compile_options(
       ${target}
@@ -156,7 +179,7 @@ if(${STRINGZILLA_BUILD_BENCHMARK})
 endif()
 
 if(${STRINGZILLA_BUILD_TEST})
-  define_launcher(stringzilla_test_cpp11 scripts/test.cpp 11)
+  define_launcher(stringzilla_test_cpp11 scripts/test.cpp 11) # MSVC only supports C++11 and newer
   define_launcher(stringzilla_test_cpp14 scripts/test.cpp 14)
   define_launcher(stringzilla_test_cpp17 scripts/test.cpp 17)
   define_launcher(stringzilla_test_cpp20 scripts/test.cpp 20)

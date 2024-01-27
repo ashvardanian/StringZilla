@@ -32,22 +32,24 @@ tracked_binary_functions_t distance_functions() {
     alloc.free = &free_from_vector;
     alloc.handle = &temporary_memory;
 
+    auto wrap_baseline = binary_function_t([](std::string_view a, std::string_view b) -> std::size_t {
+        return levenshtein_baseline(a.data(), a.length(), b.data(), b.length());
+    });
     auto wrap_sz_distance = [alloc](auto function) mutable -> binary_function_t {
-        return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) mutable {
-            sz_string_view_t a = to_c(a_str);
-            sz_string_view_t b = to_c(b_str);
-            return function(a.start, a.length, b.start, b.length, 0, &alloc);
+        return binary_function_t([function, alloc](std::string_view a, std::string_view b) mutable -> std::size_t {
+            return function(a.data(), a.length(), b.data(), b.length(), (sz_error_cost_t)0, &alloc);
         });
     };
     auto wrap_sz_scoring = [alloc](auto function) mutable -> binary_function_t {
-        return binary_function_t([function, alloc](std::string_view a_str, std::string_view b_str) mutable {
-            sz_string_view_t a = to_c(a_str);
-            sz_string_view_t b = to_c(b_str);
-            return function(a.start, a.length, b.start, b.length, costs.data(), 1, &alloc);
+        return binary_function_t([function, alloc](std::string_view a, std::string_view b) mutable -> std::size_t {
+            sz_memory_allocator_t *alloc_ptr = &alloc;
+            return (std::size_t)function(a.data(), a.length(), b.data(), b.length(),
+                                         reinterpret_cast<sz_error_cost_t const *>(costs.data()), (sz_error_cost_t)1,
+                                         alloc_ptr);
         });
     };
     tracked_binary_functions_t result = {
-        {"naive", &levenshtein_baseline},
+        {"naive", wrap_baseline},
         {"sz_edit_distance", wrap_sz_distance(sz_edit_distance_serial), true},
         {"sz_alignment_score", wrap_sz_scoring(sz_alignment_score_serial), true},
     };

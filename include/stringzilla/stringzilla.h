@@ -204,7 +204,6 @@
 #endif
 
 #if SZ_DEBUG
-#undef NULL         // `NULL` will come from following headers.
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `EXIT_FAILURE`
 #define sz_assert(condition)                                                                                \
@@ -236,14 +235,6 @@
  */
 #define sz_bitcast(type, value) (*((type *)&(value)))
 
-#if __has_attribute(__fallthrough__)
-#define SZ_FALLTHROUGH __attribute__((__fallthrough__))
-#else
-#define SZ_FALLTHROUGH \
-    do {               \
-    } while (0) /* fallthrough */
-#endif
-
 /**
  *  @brief  Annotation for the public API symbols.
  */
@@ -273,18 +264,6 @@
 #endif
 
 /**
- *  @brief  Generally `NULL` is coming from locale.h, stddef.h, stdio.h, stdlib.h, string.h, time.h,
- *          and wchar.h, according to the C standard.
- */
-#ifndef NULL
-#ifdef __GNUG__
-#define NULL __null
-#else
-#define NULL ((void *)0)
-#endif
-#endif
-
-/**
  *  @brief  The number of bytes a stack-allocated string can hold, including the NULL termination character.
  *          ! This can't be changed from outside. Don't use the `#error` as it may already be included and set.
  */
@@ -298,6 +277,22 @@
 #pragma GCC diagnostic ignored "-Wconversion"
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 extern "C" {
+#endif
+
+#if SZ_AVOID_LIBC
+extern void *malloc(size_t);
+extern void free(void *, size_t);
+
+/**
+ *  @brief  Generally `NULL` is coming from locale.h, stddef.h, stdio.h, stdlib.h, string.h, time.h,
+ *          and wchar.h, according to the C standard.
+ */
+#ifndef NULL
+#ifdef __GNUG__
+#define NULL __null
+#else
+#define NULL ((void *)0)
+#endif
 #endif
 
 #if SZ_DETECT_64_BIT
@@ -321,6 +316,31 @@ typedef char *sz_ptr_t;        /// A type alias for `char *`
 typedef char const *sz_cptr_t; /// A type alias for `char const *`
 
 typedef signed char sz_error_cost_t; /// Character mismatch cost for fuzzy matching functions
+
+#else
+#include <stddef.h> // `NULL`
+#include <stdint.h> // `uint8_t`
+#include <stdio.h>  // `fprintf`
+#include <stdlib.h> // `EXIT_FAILURE`, `malloc`
+
+typedef size_t sz_size_t;
+typedef ptrdiff_t sz_ssize_t;
+
+sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
+sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
+
+typedef uint8_t sz_u8_t;   /// Always 8 bits
+typedef uint16_t sz_u16_t; /// Always 16 bits
+typedef int16_t sz_i32_t;  /// Always 32 bits
+typedef uint32_t sz_u32_t; /// Always 32 bits
+typedef uint64_t sz_u64_t; /// Always 64 bits
+
+typedef char *sz_ptr_t;        /// A type alias for `char *`
+typedef char const *sz_cptr_t; /// A type alias for `char const *`
+
+typedef int8_t sz_error_cost_t; /// Character mismatch cost for fuzzy matching functions
+
+#endif
 
 typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        /// Only one relevant bit
 typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; /// Only three possible states: <=>
@@ -1221,14 +1241,15 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
  *  Intrinsics aliases for MSVC, GCC, and Clang.
  */
 #if defined(_MSC_VER)
-SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __popcnt64(x); }
-SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
-SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
+#include <intrin.h>
+SZ_INTERNAL sz_size_t sz_u64_popcount(sz_u64_t x) { return __popcnt64(x); }
+SZ_INTERNAL sz_size_t sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
+SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
 SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
-SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __popcnt32(x); }
+SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __popcnt(x); }
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return _tzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return _lzcnt_u32(x); }
-SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_uint32(val); }
+SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
 #else
 SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
 SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
@@ -2685,7 +2706,7 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
     else {
         sz_assert(generator && "Expects a valid random generator");
         for (sz_cptr_t end = result + result_length; result != end; ++result)
-            *result = alphabet[sz_u8_divide(generator(generator_user_data) & 0xFF, alphabet_size)];
+            *result = alphabet[sz_u8_divide(generator(generator_user_data) & 0xFF, (sz_u8_t)alphabet_size)];
     }
 }
 
@@ -2777,7 +2798,7 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
     // If we are lucky, no memory allocations will be needed.
     if (space_needed <= SZ_STRING_INTERNAL_SPACE) {
         string->internal.start = &string->internal.chars[0];
-        string->internal.length = length;
+        string->internal.length = (sz_u8_t)length;
     }
     else {
         // If we are not lucky, we need to allocate memory.
@@ -3196,7 +3217,7 @@ SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequ
 #pragma GCC push_options
 #pragma GCC target("avx2")
 #pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
-#include <x86intrin.h>
+#include <immintrin.h>
 
 /**
  *  @brief  Helper structure to simplify work with 256-bit registers.
@@ -3470,7 +3491,7 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t windo
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
-#include <x86intrin.h>
+#include <immintrin.h>
 
 /**
  *  @brief  Helper structure to simplify work with 512-bit registers.

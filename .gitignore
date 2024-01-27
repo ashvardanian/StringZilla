@@ -1,11 +1,12 @@
+# Primary build folders
 build/
 build_debug/
+build_release/
+
+# Temporary files
 .DS_Store
-.build/
 .swiftpm/
 tmp/
-build_debug/
-build_release/
 target/
 __pycache__
 .pytest_cache
@@ -14,8 +15,6 @@ Makefile
 CMakeCache.txt
 cmake_install.cmake
 CMakeFiles
-CMakeLists.txt~
-substr_search_cpp
 *.so
 *.egg-info
 *.whl
@@ -27,4 +26,3 @@ node_modules/
 leipzig1M.txt
 enwik9.txt
 xlsum.csv
-enwik9

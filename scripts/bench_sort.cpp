@@ -6,6 +6,8 @@
  *  This file is the sibling of `bench_similarity.cpp`, `bench_search.cpp` and `bench_token.cpp`.
  *  It accepts a file with a list of words, and benchmarks the sorting operations on them.
  */
+#include <memory> // `std::memcpy`
+
 #include <bench.hpp>
 
 using namespace ashvardanian::stringzilla::scripts;
@@ -48,7 +50,7 @@ static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
     // What if we take up-to 4 first characters and the index
     for (size_t i = 0; i != strings.size(); ++i)
         std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
-                    std::min(strings[order[i]].size(), 4ul));
+                    std::min<std::size_t>(strings[order[i]].size(), 4ul));
 
     std::sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
         char *i_bytes = (char *)&i;
@@ -88,7 +90,7 @@ static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
     // What if we take up-to 4 first characters and the index
     for (size_t i = 0; i != strings.size(); ++i)
         std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
-                    std::min(strings[order[i]].size(), 4ul));
+                    std::min<std::size_t>(strings[order[i]].size(), 4ull));
 
     std::stable_sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
         char *i_bytes = (char *)&i;
