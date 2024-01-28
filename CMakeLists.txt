@@ -111,11 +111,6 @@ function(set_compiler_flags target cpp_standard)
     )
   endif()
 
-  # Set the C++ standard for GNU compilers (GCC, Clang, AppleClang)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    target_compile_options(${target} PRIVATE "-std=c++${cpp_standard}")
-  endif()
-
   # Maximum warnings level & warnings as error Allow unknown pragmas
   target_compile_options(
     ${target}

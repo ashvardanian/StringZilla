@@ -41,6 +41,4 @@ case "$BUILD_TYPE" in
 esac
 
 # Execute commands
-cmake $COMMON_FLAGS $COMPILER_FLAGS $BUILD_FLAGS --build $BUILD_DIR && cmake --build $BUILD_DIR --config $BUILD_TYPE
-
-cmake --build build_release && cmake --build build_release --config Release
+cmake $COMMON_FLAGS $COMPILER_FLAGS $BUILD_FLAGS -B $BUILD_DIR && cmake --build $BUILD_DIR --config $BUILD_TYPE

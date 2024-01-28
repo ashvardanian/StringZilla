@@ -1146,8 +1146,12 @@ static void test_levenshtein_distances() {
 int main(int argc, char const **argv) {
 
     // Let's greet the user nicely
-    std::printf("Hi, dear tester! You look nice today!\n");
     sz_unused(argc && argv);
+    std::printf("Hi, dear tester! You look nice today!\n");
+    std::printf("- Uses AVX2: %s \n", SZ_USE_X86_AVX2 ? "yes" : "no");
+    std::printf("- Uses AVX512: %s \n", SZ_USE_X86_AVX512 ? "yes" : "no");
+    std::printf("- Uses NEON: %s \n", SZ_USE_ARM_NEON ? "yes" : "no");
+    std::printf("- Uses SVE: %s \n", SZ_USE_ARM_SVE ? "yes" : "no");
 
     // Basic utilities
     test_arithmetical_utilities();
