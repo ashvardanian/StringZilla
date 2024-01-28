@@ -6,6 +6,12 @@
  *  This implementation is aiming to be compatible with C++11, while implementing the C++23 functionality.
  *  By default, it includes C++ STL headers, but that can be avoided to minimize compilation overhead.
  *  https://artificial-mind.net/projects/compile-health/
+ *
+ *  @see    StringZilla: https://github.com/ashvardanian/StringZilla/blob/main/README.md
+ *  @see    C++ Standard String: https://en.cppreference.com/w/cpp/header/string
+ *
+ *  @file   stringzilla.hpp
+ *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_HPP_
 #define STRINGZILLA_HPP_
@@ -1138,9 +1144,8 @@ class basic_string_slice {
         : start_(c_string), length_(null_terminated_length(c_string)) {}
     constexpr basic_string_slice(pointer c_string, size_type length) noexcept : start_(c_string), length_(length) {}
 
-    constexpr basic_string_slice(basic_string_slice const &other) noexcept = default;
-    constexpr basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
-
+    sz_constexpr_if_cpp20 basic_string_slice(basic_string_slice const &other) noexcept = default;
+    sz_constexpr_if_cpp20 basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
     basic_string_slice(std::nullptr_t) = delete;
 
     /**  @brief Exchanges the view with that of the `other`. */
@@ -1966,7 +1971,7 @@ class basic_string {
 
 #pragma region Constructors and STL Utilities
 
-    constexpr basic_string() noexcept {
+    sz_constexpr_if_cpp20 basic_string() noexcept {
         // ! Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
         string_.internal.start = &string_.internal.chars[0];
         string_.u64s[1] = 0;
