@@ -3,99 +3,23 @@
  *          It may be slower than LibC, but has a broader & cleaner interface, and a very short implementation
  *          targeting modern x86 CPUs with AVX-512 and Arm NEON and older CPUs with SWAR and auto-vectorization.
  *
- *  @section    Operations potentially not worth optimizing in StringZilla
+ *  Consider overriding the following macros to customize the library:
  *
- *  Some operations, like equality comparisons and relative order checking, almost always fail on some of the very
- *  first bytes in either string. This makes vectorization almost useless, unless huge strings are considered.
- *  Examples would be - computing the checksum of a long string, or checking 2 large binary strings for exact equality.
+ *  - `SZ_DEBUG=0` - whether to enable debug assertions and logging.
+ *  - `SZ_DYNAMIC_DISPATCH=0` - whether to use runtime dispatching of the most advanced SIMD backend.
+ *  - `SZ_USE_MISALIGNED_LOADS=0` - whether to use misaligned loads on platforms that support them.
+ *  - `SZ_CACHE_LINE_WIDTH=64` - cache line width in bytes, used for some algorithms.
+ *  - `SZ_SWAR_THRESHOLD=24` - threshold for switching to SWAR backend over serial byte-level for-loops.
+ *  - `SZ_USE_X86_AVX512=?` - whether to use AVX-512 instructions on x86_64.
+ *  - `SZ_USE_X86_AVX2=?` - whether to use AVX2 instructions on x86_64.
+ *  - `SZ_USE_ARM_NEON=?` - whether to use NEON instructions on ARM.
+ *  - `SZ_USE_ARM_SVE=?` - whether to use SVE instructions on ARM.
  *
- *  @section    Uncommon operations covered by StringZilla
+ *  @see    StringZilla: https://github.com/ashvardanian/StringZilla/blob/main/README.md
+ *  @see    LibC String: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
  *
- *  Every in-order search/matching operations has a reverse order counterpart, a rare feature in string libraries.
- *  That way `sz_find` and `sz_rfind` are similar to `strstr` and `strrstr` in LibC, but `sz_find_byte` and
- *  `sz_rfind_byte` are equivalent to `memchr` and `memrchr`. The same goes for `sz_find_charset` and
- *  `sz_rfind_charset`, which are equivalent to `strspn` and `strcspn` in LibC.
- *
- *  Edit distance computations can be parameterized with the substitution matrix and gap (insertion & deletion)
- *  penalties. This allows for more flexible usecases, like scoring fuzzy string matches, and bioinformatics.
-
- *  @section    Exact substring search algorithms
- *
- *  Uses different algorithms for different needle lengths and backends:
- *
- *  > Naive exact matching for 1-, 2-, 3-, and 4-character-long needles using SIMD.
- *  > Bitap "Shift Or" Baeza-Yates-Gonnet (BYG) algorithm for mid-length needles on a serial backend.
- *  > Boyer-Moore-Horspool (BMH) algorithm with Raita heuristic variation for longer needles.
- *  > Apostolico-Giancarlo algorithm for longer needles (TODO), if needle preprocessing time isn't an issue.
- *
- *  Substring search algorithms are generally divided into: comparison-based, automaton-based, and bit-parallel.
- *  Different families are effective for different alphabet sizes and needle lengths. The more operations are
- *  needed per-character - the more effective SIMD would be. The longer the needle - the more effective the
- *  skip-tables are.
- *
- *  On very short needles, especially 1-4 characters long, brute force with SIMD is the fastest solution.
- *  On mid-length needles, bit-parallel algorithms are very effective, as the character masks fit into 32-bit
- *  or 64-bit words. Either way, if the needle is under 64-bytes long, on haystack traversal we will still fetch
- *  every CPU cache line. So the only way to improve performance is to reduce the number of comparisons.
- *
- *  Going beyond that, to long needles, Boyer-Moore (BM) and its variants are often the best choice. It has two tables:
- *  the good-suffix shift and the bad-character shift. Common choice is to use the simplified BMH algorithm,
- *  which only uses the bad-character shift table, reducing the pre-processing time. In the C++ Standards Library,
- *  the `std::string::find` function uses the BMH algorithm with Raita's heuristic. We do the same for longer needles.
- *
- *  All those, still, have O(hn) worst case complexity, and struggle with repetitive needle patterns.
- *  To guarantee O(h) worst case time complexity, the Apostolico-Giancarlo (AG) algorithm adds an additional skip-table.
- *  Preprocessing phase is O(n+sigma) in time and space. On traversal, performs from (h/n) to (3h/2) comparisons.
- *  We should consider implementing it if we can:
- *      - accelerate the preprocessing phase of the needle.
- *      - simplify the control-flow of the main loop.
- *      - replace the array of shift values with a circular buffer.
- *
- *  Reading materials:
- *      - Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
- *      - SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
- *
- *  @section    Compatibility with LibC and STL
- *
- *  The C++ Standard Templates Library provides an `std::string` and `std::string_view` classes with similar
- *  functionality. LibC, in turn, provides the "string.h" header with a set of functions for working with C strings.
- *  Both of those have a fairly constrained interface, as well as poor utilization of SIMD and SWAR techniques.
- *  StringZilla improves on both of those, by providing a more flexible interface, and better performance.
- *  If you are well familiar use the following index to find the equivalent functionality:
- *
- *  Covered:
- *      - void    *memchr(const void *, int, size_t); -> sz_find_byte
- *      - void    *memrchr(const void *, int, size_t); -> sz_rfind_byte
- *      - int      memcmp(const void *, const void *, size_t); -> sz_order, sz_equal
- *      - char    *strchr(const char *, int); -> sz_find_byte
- *      - int      strcmp(const char *, const char *); -> sz_order, sz_equal
- *      - size_t   strcspn(const char *, const char *); -> sz_rfind_charset
- *      - size_t   strlen(const char *);-> sz_find_byte
- *      - size_t   strspn(const char *, const char *); -> sz_find_charset
- *      - char    *strstr(const char *, const char *); -> sz_find
- *
- *  Not implemented:
- *      - void    *memccpy(void *restrict, const void *restrict, int, size_t);
- *      - void    *memcpy(void *restrict, const void *restrict, size_t);
- *      - void    *memmove(void *, const void *, size_t);
- *      - void    *memset(void *, int, size_t);
- *      - char    *strcat(char *restrict, const char *restrict);
- *      - int      strcoll(const char *, const char *);
- *      - char    *strcpy(char *restrict, const char *restrict);
- *      - char    *strdup(const char *);
- *      - char    *strerror(int);
- *      - int     *strerror_r(int, char *, size_t);
- *      - char    *strncat(char *restrict, const char *restrict, size_t);
- *      - int      strncmp(const char *, const char *, size_t);
- *      - char    *strncpy(char *restrict, const char *restrict, size_t);
- *      - char    *strpbrk(const char *, const char *);
- *      - char    *strrchr(const char *, int);
- *      - char    *strtok(char *restrict, const char *restrict);
- *      - char    *strtok_r(char *, const char *, char **);
- *      - size_t   strxfrm(char *restrict, const char *restrict, size_t);
- *
- *  LibC documentation: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
- *  STL documentation: https://en.cppreference.com/w/cpp/header/string_view
+ *  @file   stringzilla.h
+ *  @author Ash Vardanian
  */
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
@@ -159,6 +83,7 @@
 
 /*
  *  Hardware feature detection.
+ *  All of those can be controlled by the user.
  */
 #ifndef SZ_USE_X86_AVX512
 #ifdef __AVX512BW__
@@ -203,20 +128,6 @@
 #endif
 #endif
 
-#if SZ_DEBUG
-#include <stdio.h>  // `fprintf`
-#include <stdlib.h> // `EXIT_FAILURE`
-#define sz_assert(condition)                                                                                \
-    do {                                                                                                    \
-        if (!(condition)) {                                                                                 \
-            fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", #condition, __FILE__, __LINE__); \
-            exit(EXIT_FAILURE);                                                                             \
-        }                                                                                                   \
-    } while (0)
-#else
-#define sz_assert(condition) ((void)0)
-#endif
-
 /**
  *  @brief  Compile-time assert macro similar to `static_assert` in C++.
  */
@@ -225,18 +136,11 @@
         int static_assert_##name : (condition) ? 1 : -1; \
     } sz_static_assert_##name##_t
 
-/**
- *  @brief  Helper-macro to mark potentially unused variables.
- */
-#define sz_unused(x) ((void)(x))
-
-/**
- *  @brief  Helper-macro casting a variable to another type of the same size.
- */
-#define sz_bitcast(type, value) (*((type *)&(value)))
-
-/**
- *  @brief  Annotation for the public API symbols.
+/*  Annotation for the public API symbols:
+ *
+ *  - `SZ_PUBLIC` is used for functions that are part of the public API.
+ *  - `SZ_INTERNAL` is used for internal helper functions with unstable APIs.
+ *  - `SZ_DYNAMIC` is used for functions that are part of the public API, but are dispatched at runtime.
  */
 #ifndef SZ_DYNAMIC
 #if SZ_DYNAMIC_DISPATCH
@@ -279,7 +183,32 @@
 extern "C" {
 #endif
 
-#if SZ_AVOID_LIBC
+#if !SZ_AVOID_LIBC
+
+#include <stddef.h> // `NULL`
+#include <stdint.h> // `uint8_t`
+#include <stdio.h>  // `fprintf`
+#include <stdlib.h> // `EXIT_FAILURE`, `malloc`
+
+typedef size_t sz_size_t;
+typedef ptrdiff_t sz_ssize_t;
+
+sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
+sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
+
+typedef uint8_t sz_u8_t;   /// Always 8 bits
+typedef uint16_t sz_u16_t; /// Always 16 bits
+typedef int16_t sz_i32_t;  /// Always 32 bits
+typedef uint32_t sz_u32_t; /// Always 32 bits
+typedef uint64_t sz_u64_t; /// Always 64 bits
+
+typedef char *sz_ptr_t;        /// A type alias for `char *`
+typedef char const *sz_cptr_t; /// A type alias for `char const *`
+
+typedef int8_t sz_error_cost_t; /// Character mismatch cost for fuzzy matching functions
+
+#else
+
 extern void *malloc(size_t);
 extern void free(void *, size_t);
 
@@ -315,32 +244,11 @@ typedef unsigned long long sz_u64_t; /// Always 64 bits
 typedef char *sz_ptr_t;        /// A type alias for `char *`
 typedef char const *sz_cptr_t; /// A type alias for `char const *`
 
-typedef signed char sz_error_cost_t; /// Character mismatch cost for fuzzy matching functions
-
-#else
-#include <stddef.h> // `NULL`
-#include <stdint.h> // `uint8_t`
-#include <stdio.h>  // `fprintf`
-#include <stdlib.h> // `EXIT_FAILURE`, `malloc`
-
-typedef size_t sz_size_t;
-typedef ptrdiff_t sz_ssize_t;
-
-sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
-sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
-
-typedef uint8_t sz_u8_t;   /// Always 8 bits
-typedef uint16_t sz_u16_t; /// Always 16 bits
-typedef int16_t sz_i32_t;  /// Always 32 bits
-typedef uint32_t sz_u32_t; /// Always 32 bits
-typedef uint64_t sz_u64_t; /// Always 64 bits
-
-typedef char *sz_ptr_t;        /// A type alias for `char *`
-typedef char const *sz_cptr_t; /// A type alias for `char const *`
-
-typedef int8_t sz_error_cost_t; /// Character mismatch cost for fuzzy matching functions
+typedef signed char sz_error_cost_t; /// Character mismatch cost for fuzzy matching function
 
 #endif
+
+#pragma region Public API
 
 typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        /// Only one relevant bit
 typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; /// Only three possible states: <=>
@@ -411,7 +319,7 @@ SZ_PUBLIC void sz_charset_init(sz_charset_t *s) { s->_u64s[0] = s->_u64s[1] = s-
 SZ_PUBLIC void sz_charset_add_u8(sz_charset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
 
 /** @brief  Adds a character to the set. Consider @b sz_charset_add_u8. */
-SZ_PUBLIC void sz_charset_add(sz_charset_t *s, char c) { sz_charset_add_u8(s, sz_bitcast(sz_u8_t, c)); }
+SZ_PUBLIC void sz_charset_add(sz_charset_t *s, char c) { sz_charset_add_u8(s, *(sz_u8_t *)(&c)); } //< bitcast
 
 /** @brief  Checks if the set contains a given character and accepts @b unsigned integers. */
 SZ_PUBLIC sz_bool_t sz_charset_contains_u8(sz_charset_t const *s, sz_u8_t c) {
@@ -425,7 +333,7 @@ SZ_PUBLIC sz_bool_t sz_charset_contains_u8(sz_charset_t const *s, sz_u8_t c) {
 
 /** @brief  Checks if the set contains a given character. Consider @b sz_charset_contains_u8. */
 SZ_PUBLIC sz_bool_t sz_charset_contains(sz_charset_t const *s, char c) {
-    return sz_charset_contains_u8(s, sz_bitcast(sz_u8_t, c));
+    return sz_charset_contains_u8(s, *(sz_u8_t *)(&c)); //< bitcast
 }
 
 /** @brief  Inverts the contents of the set, so allowed character get disallowed, and vice versa. */
@@ -498,8 +406,6 @@ typedef union sz_string_t {
     sz_u64_t u64s[4];
 
 } sz_string_t;
-
-#pragma region API
 
 typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
@@ -1237,6 +1143,30 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #pragma region Compiler Extensions and Helper Functions
 #pragma GCC visibility push(hidden)
 
+/**
+ *  @brief  Helper-macro to mark potentially unused variables.
+ */
+#define sz_unused(x) ((void)(x))
+
+/**
+ *  @brief  Helper-macro casting a variable to another type of the same size.
+ */
+#define sz_bitcast(type, value) (*((type *)&(value)))
+
+#if SZ_DEBUG
+#include <stdio.h>  // `fprintf`
+#include <stdlib.h> // `EXIT_FAILURE`
+#define sz_assert(condition)                                                                                \
+    do {                                                                                                    \
+        if (!(condition)) {                                                                                 \
+            fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", #condition, __FILE__, __LINE__); \
+            exit(EXIT_FAILURE);                                                                             \
+        }                                                                                                   \
+    } while (0)
+#else
+#define sz_assert(condition) ((void)0)
+#endif
+
 /*
  *  Intrinsics aliases for MSVC, GCC, and Clang.
  */
@@ -1844,278 +1774,93 @@ SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 }
 
 /**
- *  @brief  Bitap algo for exact matching of patterns up to @b 8-bytes long.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                        sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-
-    // Here is our baseline:
-    //
-    //      sz_u8_t running_match = 0xFF;
-    //      sz_u8_t character_position_masks[256];
-    //      for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFF; }
-    //      for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1u << i); }
-    //      for (sz_size_t i = 0; i < h_length; ++i) {
-    //          running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
-    //          if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
-    //      }
-    //
-    // On very short patterns, however, every tiny condition may have a huge affect on performance.
-    // 1. Let's combine the first `n_length - 1` passes of the last loop into the previous loop.
-    // 2. Let's replace byte-level intialization of `character_position_masks` with 64-bit ops.
-
-    sz_u8_t running_match = 0xFF;
-    sz_u8_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1u << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
-        if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Bitap algorithm for exact matching of patterns up to @b 8-bytes long in @b reverse order.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_8bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                         sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    sz_u8_t running_match = 0xFF;
-    sz_u8_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1u << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
-        if ((running_match & (1u << (n_length - 1))) == 0) { return h + h_length - i - 1; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Bitap algo for exact matching of patterns up to @b 16-bytes long.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                         sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    sz_u16_t running_match = 0xFFFF;
-    sz_u16_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1u << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
-        if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Bitap algorithm for exact matching of patterns up to @b 16-bytes long in @b reverse order.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_16bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                          sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    sz_u16_t running_match = 0xFFFF;
-    sz_u16_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1u << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
-        if ((running_match & (1u << (n_length - 1))) == 0) { return h + h_length - i - 1; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Bitap algo for exact matching of patterns up to @b 32-bytes long.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                         sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    sz_u32_t running_match = 0xFFFFFFFF;
-    sz_u32_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1u << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
-        if ((running_match & (1u << (n_length - 1))) == 0) { return h + i - n_length + 1; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Bitap algorithm for exact matching of patterns up to @b 32-bytes long in @b reverse order.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_32bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                          sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    sz_u32_t running_match = 0xFFFFFFFF;
-    sz_u32_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFF; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1u << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
-        if ((running_match & (1u << (n_length - 1))) == 0) { return h + h_length - i - 1; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Bitap algo for exact matching of patterns up to @b 64-bytes long.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_find_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                         sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
-    sz_u64_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1ull << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
-        if ((running_match & (1ull << (n_length - 1))) == 0) { return h + i - n_length + 1; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Bitap algorithm for exact matching of patterns up to @b 64-bytes long in @b reverse order.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_rfind_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                          sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
-    sz_u64_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1ull << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
-        if ((running_match & (1ull << (n_length - 1))) == 0) { return h + h_length - i - 1; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Bitap algo for approximate matching of patterns up to @b 64-bytes long.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_find_bounded_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                                 sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
-    sz_u64_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[i]] &= ~(1ull << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[i]];
-        if ((running_match & (1ull << (n_length - 1))) == 0) { return h + i - n_length + 1; }
-    }
-
-    return NULL;
-}
-
-/**
- *  @brief  Bitap algorithm for approximate matching of patterns up to @b 64-bytes long in @b reverse order.
- *          https://en.wikipedia.org/wiki/Bitap_algorithm
- */
-SZ_INTERNAL sz_cptr_t _sz_find_bounded_last_bitap_upto_64bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                                      sz_size_t n_length) {
-    sz_u8_t const *h_unsigned = (sz_u8_t const *)h;
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    sz_u64_t running_match = 0xFFFFFFFFFFFFFFFFull;
-    sz_u64_t character_position_masks[256];
-    for (sz_size_t i = 0; i != 256; ++i) { character_position_masks[i] = 0xFFFFFFFFFFFFFFFFull; }
-    for (sz_size_t i = 0; i < n_length; ++i) { character_position_masks[n_unsigned[n_length - i - 1]] &= ~(1ull << i); }
-    for (sz_size_t i = 0; i < h_length; ++i) {
-        running_match = (running_match << 1) | character_position_masks[h_unsigned[h_length - i - 1]];
-        if ((running_match & (1ull << (n_length - 1))) == 0) { return h + h_length - i - 1; }
-    }
-
-    return NULL;
-}
-
-/**
  *  @brief  Boyer-Moore-Horspool algorithm for exact matching of patterns up to @b 256-bytes long.
  *          Uses the Raita heuristic to match the first two, the last, and the middle character of the pattern.
  */
 SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                              sz_size_t n_length) {
-
+    sz_assert(n_length <= 256 && "The pattern is too long.");
     // Several popular string matching algorithms are using a bad-character shift table.
     // Boyer Moore: https://www-igm.univ-mlv.fr/~lecroq/string/node14.html
     // Quick Search: https://www-igm.univ-mlv.fr/~lecroq/string/node19.html
     // Smith: https://www-igm.univ-mlv.fr/~lecroq/string/node21.html
-    sz_u8_t bad_shift_table[256] = {(sz_u8_t)n_length};
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n_unsigned[i]] = (sz_u8_t)(n_length - i - 1);
+    union {
+        sz_u8_t jumps[256];
+        sz_u64_vec_t vecs[64];
+    } bad_shift_table;
+
+    // Let's initialize the table using SWAR to the total length of the string.
+    {
+        sz_u64_vec_t n_length_vec;
+        n_length_vec.u64 = n_length;
+        n_length_vec.u64 *= 0x0101010101010101ull; // broadcast
+        for (sz_size_t i = 0; i != 64; ++i) bad_shift_table.vecs[i].u64 = n_length_vec.u64;
+        sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
+        for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table.jumps[n_unsigned[i]] = (sz_u8_t)(n_length - i - 1);
+    }
 
     // Another common heuristic is to match a few characters from different parts of a string.
     // Raita suggests to use the first two, the last, and the middle character of the pattern.
-    sz_size_t n_midpoint = n_length / 2 + 1;
+    sz_size_t n_midpoint = n_length / 2;
     sz_u32_vec_t h_vec, n_vec;
     n_vec.u8s[0] = n[0];
     n_vec.u8s[1] = n[1];
     n_vec.u8s[2] = n[n_midpoint];
     n_vec.u8s[3] = n[n_length - 1];
 
-    // Scan through the whole haystack, skipping the last `n_length` bytes.
+    // Scan through the whole haystack, skipping the last `n_length - 1` bytes.
     for (sz_size_t i = 0; i <= h_length - n_length;) {
         h_vec.u8s[0] = h[i + 0];
         h_vec.u8s[1] = h[i + 1];
         h_vec.u8s[2] = h[i + n_midpoint];
         h_vec.u8s[3] = h[i + n_length - 1];
-        if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i + 2, n + 2, n_length - 3)) return h + i;
-        i += bad_shift_table[h_vec.u8s[3]];
+        if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i, n, n_length)) return h + i;
+        i += bad_shift_table.jumps[h_vec.u8s[3]];
     }
     return NULL;
 }
 
+/**
+ *  @brief  Boyer-Moore-Horspool algorithm for @b reverse-order exact matching of patterns up to @b 256-bytes long.
+ *          Uses the Raita heuristic to match the first two, the last, and the middle character of the pattern.
+ */
 SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_upto_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                               sz_size_t n_length) {
-    sz_u8_t bad_shift_table[256] = {(sz_u8_t)n_length};
-    sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-    for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table[n_unsigned[i]] = (sz_u8_t)(i + 1);
+    sz_assert(n_length <= 256 && "The pattern is too long.");
+    union {
+        sz_u8_t jumps[256];
+        sz_u64_vec_t vecs[64];
+    } bad_shift_table;
 
+    // Let's initialize the table using SWAR to the total length of the string.
+    {
+        sz_u64_vec_t n_length_vec;
+        n_length_vec.u64 = n_length;
+        n_length_vec.u64 *= 0x0101010101010101ull; // broadcast
+        for (sz_size_t i = 0; i != 64; ++i) bad_shift_table.vecs[i].u64 = n_length_vec.u64;
+        sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
+        for (sz_size_t i = 0; i + 1 < n_length; ++i)
+            bad_shift_table.jumps[n_unsigned[n_length - i - 1]] = (sz_u8_t)(n_length - i - 1);
+    }
+
+    // Another common heuristic is to match a few characters from different parts of a string.
+    // Raita suggests to use the first two, the last, and the middle character of the pattern.
     sz_size_t n_midpoint = n_length / 2;
     sz_u32_vec_t h_vec, n_vec;
-    n_vec.u8s[0] = n[n_length - 1];
-    n_vec.u8s[1] = n[n_length - 2];
+    n_vec.u8s[0] = n[0];
+    n_vec.u8s[1] = n[1];
     n_vec.u8s[2] = n[n_midpoint];
-    n_vec.u8s[3] = n[0];
+    n_vec.u8s[3] = n[n_length - 1];
 
+    // Scan through the whole haystack, skipping the first `n_length - 1` bytes.
     for (sz_size_t j = 0; j <= h_length - n_length;) {
         sz_size_t i = h_length - n_length - j;
-        h_vec.u8s[0] = h[i + n_length - 1];
-        h_vec.u8s[1] = h[i + n_length - 2];
+        h_vec.u8s[0] = h[i + 0];
+        h_vec.u8s[1] = h[i + 1];
         h_vec.u8s[2] = h[i + n_midpoint];
-        h_vec.u8s[3] = h[i];
-        if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i + 1, n + 1, n_length - 3)) return h + i;
-        j += bad_shift_table[h_vec.u8s[0]];
+        h_vec.u8s[3] = h[i + n_length - 1];
+        if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i, n, n_length)) return h + i;
+        j += bad_shift_table.jumps[h_vec.u8s[0]];
     }
     return NULL;
 }
@@ -2171,6 +1916,10 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_with_suffix(sz_cptr_t h, sz_size_t h_length, sz_
     return NULL;
 }
 
+SZ_INTERNAL sz_cptr_t _sz_find_over_4bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    return _sz_find_with_prefix(h, h_length, n, n_length, (sz_find_t)_sz_find_4byte_serial, 4);
+}
+
 SZ_INTERNAL sz_cptr_t _sz_find_horspool_over_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                                              sz_size_t n_length) {
     return _sz_find_with_prefix(h, h_length, n, n_length, _sz_find_horspool_upto_256bytes_serial, 256);
@@ -2192,11 +1941,8 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         (sz_find_t)_sz_find_2byte_serial,
         (sz_find_t)_sz_find_3byte_serial,
         (sz_find_t)_sz_find_4byte_serial,
-        // For needle lengths up to 64, use the Bitap algorithm variation for exact search.
-        (sz_find_t)_sz_find_bitap_upto_8bytes_serial,
-        (sz_find_t)_sz_find_bitap_upto_16bytes_serial,
-        (sz_find_t)_sz_find_bitap_upto_32bytes_serial,
-        (sz_find_t)_sz_find_bitap_upto_64bytes_serial,
+        // To avoid constructing the skip-table, let's use the prefixed approach.
+        (sz_find_t)_sz_find_over_4bytes_serial,
         // For longer needles - use skip tables.
         (sz_find_t)_sz_find_horspool_upto_256bytes_serial,
         (sz_find_t)_sz_find_horspool_over_256bytes_serial,
@@ -2205,10 +1951,10 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     return backends[
         // For very short strings brute-force SWAR makes sense.
         (n_length > 1) + (n_length > 2) + (n_length > 3) +
-        // For needle lengths up to 64, use the Bitap algorithm variation for exact search.
-        (n_length > 4) + (n_length > 8) + (n_length > 16) + (n_length > 32) +
+        // To avoid constructing the skip-table, let's use the prefixed approach.
+        (n_length > 4) +
         // For longer needles - use skip tables.
-        (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
+        (n_length > 8) + (n_length > 256)](h, h_length, n, n_length);
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -2218,12 +1964,13 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
+        // TODO: implement reverse-order SWAR for 2/3/4 byte variants.
         (sz_find_t)sz_rfind_byte_serial,
-        // For needle lengths up to 64, use the Bitap algorithm variation for reverse-order exact search.
-        (sz_find_t)_sz_rfind_bitap_upto_8bytes_serial,
-        (sz_find_t)_sz_rfind_bitap_upto_16bytes_serial,
-        (sz_find_t)_sz_rfind_bitap_upto_32bytes_serial,
-        (sz_find_t)_sz_rfind_bitap_upto_64bytes_serial,
+        // (sz_find_t)_sz_rfind_2byte_serial,
+        // (sz_find_t)_sz_rfind_3byte_serial,
+        // (sz_find_t)_sz_rfind_4byte_serial,
+        // To avoid constructing the skip-table, let's use the prefixed approach.
+        // (sz_find_t)_sz_rfind_over_4bytes_serial,
         // For longer needles - use skip tables.
         (sz_find_t)_sz_rfind_horspool_upto_256bytes_serial,
         (sz_find_t)_sz_rfind_horspool_over_256bytes_serial,
@@ -2232,10 +1979,10 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
     return backends[
         // For very short strings brute-force SWAR makes sense.
         0 +
-        // For needle lengths up to 64, use the Bitap algorithm variation for reverse-order exact search.
-        (n_length > 1) + (n_length > 8) + (n_length > 16) + (n_length > 32) +
+        // To avoid constructing the skip-table, let's use the prefixed approach.
+        (n_length > 1) +
         // For longer needles - use skip tables.
-        (n_length > 64) + (n_length > 256)](h, h_length, n, n_length);
+        (n_length > 256)](h, h_length, n, n_length);
 }
 
 SZ_INTERNAL sz_size_t _sz_edit_distance_anti_diagonal_serial( //
@@ -4470,6 +4217,6 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_
 #ifdef __cplusplus
 #pragma GCC diagnostic pop
 }
-#endif
+#endif // __cplusplus
 
 #endif // STRINGZILLA_H_
