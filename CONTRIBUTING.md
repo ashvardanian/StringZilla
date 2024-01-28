@@ -90,7 +90,9 @@ Using modern syntax, this is how you build and run the test suite:
 ```bash
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
 cmake --build ./build_debug --config Debug          # Which will produce the following targets:
-./build_debug/stringzilla_test_cpp20                # Unit test for the entire library
+./build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
+./build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBrdige - last arch. before AVX2
+./build_debug/stringzilla_test_cpp20_arm_serial     # Arm variant compiled withou Neon
 ```
 
 For benchmarks, you can use the following commands:
@@ -129,8 +131,8 @@ On x86_64, you can use the following commands to compile for Sandy Bridge, Haswe
 
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DSTRINGZILLA_TARGET_ARCH="sandybridge" -B build_release/sandybridge && \
-    cmake --build build_release/sandybridge --config Release
+    -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_release/ivybridge && \
+    cmake --build build_release/ivybridge --config Release
 cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     -DSTRINGZILLA_TARGET_ARCH="haswell" -B build_release/haswell && \
     cmake --build build_release/haswell --config Release
@@ -222,11 +224,12 @@ Future development plans include:
 - [x] [Bindings for JavaScript](https://github.com/ashvardanian/StringZilla/issues/25).
 - [x] [Reverse-order operations](https://github.com/ashvardanian/StringZilla/issues/12).
 - [ ] [Faster string sorting algorithm](https://github.com/ashvardanian/StringZilla/issues/45).
-- [ ] [Splitting with multiple separators at once](https://github.com/ashvardanian/StringZilla/issues/29).
+- [x] [Splitting with multiple separators at once](https://github.com/ashvardanian/StringZilla/issues/29).
 - [ ] Universal hashing solution.
 - [ ] Add `.pyi` interface for Python.
-- [ ] Arm NEON backend.
-- [ ] Bindings for Rust.
+- [x] Arm NEON backend.
+- [x] Bindings for Rust.
+- [x] Bindings for Swift.
 - [ ] Arm SVE backend.
 - [ ] Stateful automata-based search.
 

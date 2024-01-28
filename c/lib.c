@@ -116,8 +116,9 @@ static sz_implementations_t sz_dispatch_table;
  *          Run it just once to avoiding unnucessary `if`-s.
  */
 static void sz_dispatch_table_init() {
-    sz_capability_t caps = sz_capabilities();
     sz_implementations_t *impl = &sz_dispatch_table;
+    sz_capability_t caps = sz_capabilities();
+    sz_unused(caps); //< Unused when compiling on pre-SIMD machines.
 
     impl->equal = sz_equal_serial;
     impl->order = sz_order_serial;

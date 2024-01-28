@@ -83,7 +83,7 @@ if(${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER 3.13)
 endif()
 
 # Function to set compiler-specific flags
-function(set_compiler_flags target cpp_standard)
+function(set_compiler_flags target cpp_standard target_arch)
   target_include_directories(${target} PRIVATE scripts)
   target_link_libraries(${target} PRIVATE ${STRINGZILLA_TARGET_NAME})
 
@@ -111,7 +111,7 @@ function(set_compiler_flags target cpp_standard)
     )
   endif()
 
-  # Maximum warnings level & warnings as error Allow unknown pragmas
+  # Maximum warnings level & warnings as error
   target_compile_options(
     ${target}
     PRIVATE
@@ -133,9 +133,9 @@ function(set_compiler_flags target cpp_standard)
     "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/Zi>"
   )
 
-  # Check for STRINGZILLA_TARGET_ARCH and set it or use "march=native"
+  # Check for ${target_arch} and set it or use "march=native"
   # if not defined
-  if(STRINGZILLA_TARGET_ARCH STREQUAL "")
+  if("${target_arch}" STREQUAL "")
     # MSVC does not have a direct equivalent to -march=native
     target_compile_options(
       ${target} PRIVATE
@@ -145,14 +145,15 @@ function(set_compiler_flags target cpp_standard)
     target_compile_options(
       ${target}
       PRIVATE
-      "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=${STRINGZILLA_TARGET_ARCH}>"
-      "$<$<CXX_COMPILER_ID:MSVC>:/arch:${STRINGZILLA_TARGET_ARCH}>")
+      "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=${target_arch}>"
+      "$<$<CXX_COMPILER_ID:MSVC>:/arch:${target_arch}>")
+  endif()
 
-    # Sanitizer options for Debug mode
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-      target_compile_options(
-        ${target}
-        PRIVATE
+  # Sanitizer options for Debug mode
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(
+      ${target}
+      PRIVATE
       "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=leak>"
       "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
 
@@ -160,35 +161,49 @@ function(set_compiler_flags target cpp_standard)
       ${target}
       PRIVATE
       "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=leak>"
-        "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
-    endif()
+      "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
   endif()
 endfunction()
 
-function(define_launcher exec_name source cpp_standard)
+function(define_launcher exec_name source cpp_standard target_arch)
   add_executable(${exec_name} ${source})
-  set_compiler_flags(${exec_name} ${cpp_standard})
+  set_compiler_flags(${exec_name} ${cpp_standard} "${target_arch}")
   add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction()
 
 if(${STRINGZILLA_BUILD_BENCHMARK})
-  define_launcher(stringzilla_bench_search scripts/bench_search.cpp 17)
-  define_launcher(stringzilla_bench_similarity scripts/bench_similarity.cpp 17)
-  define_launcher(stringzilla_bench_sort scripts/bench_sort.cpp 17)
-  define_launcher(stringzilla_bench_token scripts/bench_token.cpp 17)
-  define_launcher(stringzilla_bench_container scripts/bench_container.cpp 17)
+  define_launcher(stringzilla_bench_search scripts/bench_search.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+  define_launcher(stringzilla_bench_similarity scripts/bench_similarity.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+  define_launcher(stringzilla_bench_sort scripts/bench_sort.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+  define_launcher(stringzilla_bench_token scripts/bench_token.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+  define_launcher(stringzilla_bench_container scripts/bench_container.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
 endif()
 
 if(${STRINGZILLA_BUILD_TEST})
-  define_launcher(stringzilla_test_cpp11 scripts/test.cpp 11) # MSVC only supports C++11 and newer
-  define_launcher(stringzilla_test_cpp14 scripts/test.cpp 14)
-  define_launcher(stringzilla_test_cpp17 scripts/test.cpp 17)
-  define_launcher(stringzilla_test_cpp20 scripts/test.cpp 20)
+  # Make sure that the compilation passes for different C++ standards
+  # ! Keep in mind, MSVC only supports C++11 and newer.
+  define_launcher(stringzilla_test_cpp11 scripts/test.cpp 11 "${STRINGZILLA_TARGET_ARCH}")
+  define_launcher(stringzilla_test_cpp14 scripts/test.cpp 14 "${STRINGZILLA_TARGET_ARCH}")
+  define_launcher(stringzilla_test_cpp17 scripts/test.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+  define_launcher(stringzilla_test_cpp20 scripts/test.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+
+  # Check system architecture to avoid complex cross-compilation workflows, but
+  # compile multiple backends: disabling all SIMD, enabling only AVX2, only AVX-512, only Arm Neon.
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+    # x86 specific backends
+    define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "ivybridge")
+    define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
+    define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|ARM|aarch64|AARCH64")
+    # ARM specific backends
+    define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a")
+    define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8-a+simd")
+  endif()
 endif()
 
 if(${STRINGZILLA_BUILD_SHARED})
   add_library(stringzilla_shared SHARED c/lib.c)
-  set_compiler_flags(stringzilla_shared "")
+  set_compiler_flags(stringzilla_shared "" "${STRINGZILLA_TARGET_ARCH}")
   set_target_properties(stringzilla_shared PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 1
