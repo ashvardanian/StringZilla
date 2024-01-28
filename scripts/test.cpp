@@ -916,6 +916,8 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
     std::size_t haystack_buffer_length = max_repeats * haystack_pattern.size() + 2 * SZ_CACHE_LINE_WIDTH;
     std::vector<char> haystack_buffer(haystack_buffer_length, 'x');
     char *haystack = haystack_buffer.data();
+
+    // Skip the misaligned part.
     while (reinterpret_cast<std::uintptr_t>(haystack) % SZ_CACHE_LINE_WIDTH != misalignment) ++haystack;
 
     /// Helper container to store the offsets of the matches. Useful during debugging :)
@@ -931,12 +933,11 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
         ASAN_POISON_MEMORY_REGION(haystack + haystack_length, poisoned_suffix_length);
 
         // Append the new repetition to our buffer.
-        std::memcpy(haystack + misalignment + repeats * haystack_pattern.size(), haystack_pattern.data(),
-                    haystack_pattern.size());
+        std::memcpy(haystack + repeats * haystack_pattern.size(), haystack_pattern.data(), haystack_pattern.size());
 
         // Convert to string views
-        auto haystack_stl = std::string_view(haystack + misalignment, haystack_length);
-        auto haystack_sz = sz::string_view(haystack + misalignment, haystack_length);
+        auto haystack_stl = std::string_view(haystack, haystack_length);
+        auto haystack_sz = sz::string_view(haystack, haystack_length);
         auto needle_sz = sz::string_view(needle_stl.data(), needle_stl.size());
 
         // Wrap into ranges
