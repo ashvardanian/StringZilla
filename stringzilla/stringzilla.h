@@ -35,6 +35,8 @@
 #define NULL ((void *)0)
 #endif
 
+#define IS_LITTLE_ENDIAN (*(uint16_t *)"\0\xff" > 0x100)
+
 /**
  * @brief   Compile-time assert macro.
  */
@@ -160,7 +162,13 @@ inline static sz_string_start_t sz_find_1char_swar(sz_string_start_t const hayst
         match_indicators &= match_indicators >> 4;
         match_indicators &= 0x0101010101010101;
 
-        if (match_indicators != 0) return text + ctz64(match_indicators) / 8;
+        if (match_indicators != 0) {
+            if (IS_LITTLE_ENDIAN) {
+                return text + ctz64(match_indicators) / 8;
+            } else {
+                return text + clz64(match_indicators) / 8;
+            }
+        }
     }
 
     for (; text < end; ++text)
@@ -176,12 +184,11 @@ inline static sz_string_start_t sz_find_1char_swar(sz_string_start_t const hayst
 inline static sz_string_start_t sz_rfind_1char_swar(sz_string_start_t const haystack,
                                                     sz_size_t const haystack_length,
                                                     sz_string_start_t const needle) {
-
     sz_string_start_t const end = haystack + haystack_length;
-    sz_string_start_t text = end - 1;
+    sz_string_start_t text = end;
 
     // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)text & 7ull) && text >= haystack; --text)
+    for (; ((sz_size_t)text & 7ull) && --text >= haystack;)
         if (*text == *needle) return text;
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
@@ -189,15 +196,25 @@ inline static sz_string_start_t sz_rfind_1char_swar(sz_string_start_t const hays
     nnnnnnnn |= nnnnnnnn << 8;  // broadcast `needle` into `nnnnnnnn`
     nnnnnnnn |= nnnnnnnn << 16; // broadcast `needle` into `nnnnnnnn`
     nnnnnnnn |= nnnnnnnn << 32; // broadcast `needle` into `nnnnnnnn`
-    for (; text - 8 >= haystack; text -= 8) {
+
+    while ((text - 8) >= haystack) {
+        text -= 8;
+
         sz_u64_t text_slice = *(sz_u64_t const *)text;
         sz_u64_t match_indicators = ~(text_slice ^ nnnnnnnn);
+
         match_indicators &= match_indicators >> 1;
         match_indicators &= match_indicators >> 2;
         match_indicators &= match_indicators >> 4;
         match_indicators &= 0x0101010101010101;
 
-        if (match_indicators != 0) return text - 8 + clz64(match_indicators) / 8;
+        if (match_indicators != 0) {
+            if (IS_LITTLE_ENDIAN) {
+                return text + 8 - ((clz64(match_indicators) / 8) + 1);
+            } else {
+                return text + 8 - ((ctz64(match_indicators) / 8) + 1);
+            }
+        }
     }
 
     for (; text >= haystack; --text)
@@ -221,31 +238,58 @@ inline static sz_string_start_t sz_find_2char_swar(sz_string_start_t const hayst
         if (text[0] == needle[0] && text[1] == needle[1]) return text;
 
     // This code simulates hyper-scalar execution, analyzing 7 offsets at a time.
-    sz_u64_t nnnn = ((sz_u64_t)(needle[0]) << 0) | ((sz_u64_t)(needle[1]) << 8); // broadcast `needle` into `nnnn`
-    nnnn |= nnnn << 16;                                                          // broadcast `needle` into `nnnn`
-    nnnn |= nnnn << 32;                                                          // broadcast `needle` into `nnnn`
+    sz_u64_t nnnn; // broadcast `needle` into `nnnn`
+    if (IS_LITTLE_ENDIAN) {
+        nnnn = ((sz_u64_t)(needle[0]) << 0) | ((sz_u64_t)(needle[1]) << 8);
+    } else {
+        nnnn = ((sz_u64_t)(needle[0]) << 8) | ((sz_u64_t)(needle[1]) << 0);
+    }
+
+    // broadcast `needle` into `nnnn`
+    nnnn |= nnnn << 16;
+    nnnn |= nnnn << 32;
     for (; text + 8 <= end; text += 7) {
         sz_u64_t text_slice = *(sz_u64_t const *)text;
         sz_u64_t even_indicators = ~(text_slice ^ nnnn);
-        sz_u64_t odd_indicators = ~((text_slice << 8) ^ nnnn);
+        sz_u64_t odd_indicators;
+        if (IS_LITTLE_ENDIAN) {
+            odd_indicators = ~((text_slice << 8) ^ nnnn);
+        } else {
+            odd_indicators = ~((text_slice >> 8) ^ nnnn);
+        }
 
         // For every even match - 2 char (16 bits) must be identical.
         even_indicators &= even_indicators >> 1;
         even_indicators &= even_indicators >> 2;
         even_indicators &= even_indicators >> 4;
-        even_indicators &= even_indicators >> 8;
-        even_indicators &= 0x0001000100010001;
+        if (IS_LITTLE_ENDIAN) {
+            even_indicators &= even_indicators >> 8;
+            even_indicators &= 0x0001000100010001;
+        } else {
+            even_indicators &= even_indicators << 8;
+            even_indicators &= 0x0100010001000100;
+        }
 
         // For every odd match - 2 char (16 bits) must be identical.
         odd_indicators &= odd_indicators >> 1;
         odd_indicators &= odd_indicators >> 2;
         odd_indicators &= odd_indicators >> 4;
-        odd_indicators &= odd_indicators >> 8;
-        odd_indicators &= 0x0001000100010000;
+        if (IS_LITTLE_ENDIAN) {
+            odd_indicators &= odd_indicators >> 8;
+            odd_indicators &= 0x0001000100010000;
+        } else {
+            odd_indicators &= odd_indicators << 8;
+            odd_indicators &= 0x0000010001000100;
+        }
 
         if (even_indicators + odd_indicators) {
-            sz_u64_t match_indicators = even_indicators | (odd_indicators >> 8);
-            return text + ctz64(match_indicators) / 8;
+            if (IS_LITTLE_ENDIAN) {
+                sz_u64_t match_indicators = even_indicators | (odd_indicators >> 8);
+                return text + ctz64(match_indicators) / 8;
+            } else {
+                sz_u64_t match_indicators = even_indicators | (odd_indicators << 8);
+                return text + (clz64(match_indicators) / 8);
+            }
         }
     }
 
@@ -253,6 +297,7 @@ inline static sz_string_start_t sz_find_2char_swar(sz_string_start_t const hayst
         if (text[0] == needle[0] && text[1] == needle[1]) return text;
     return NULL;
 }
+
 
 /**
  *  @brief  Find the first occurrence of a three-character needle in an arbitrary length haystack.
@@ -271,44 +316,89 @@ inline static sz_string_start_t sz_find_3char_swar(sz_string_start_t const hayst
 
     // This code simulates hyper-scalar execution, analyzing 6 offsets at a time.
     // We have two unused bytes at the end.
-    sz_u64_t nn =                      // broadcast `needle` into `nn`
-        (sz_u64_t)(needle[0] << 0) |   // broadcast `needle` into `nn`
-        ((sz_u64_t)(needle[1]) << 8) | // broadcast `needle` into `nn`
-        ((sz_u64_t)(needle[2]) << 16); // broadcast `needle` into `nn`
-    nn |= nn << 24;                    // broadcast `needle` into `nn`
-    nn <<= 16;                         // broadcast `needle` into `nn`
+    sz_u64_t nn; // broadcast `needle` into `nn`
+
+    if (IS_LITTLE_ENDIAN) {
+        nn =
+            (sz_u64_t)(needle[0] << 0) |
+            ((sz_u64_t)(needle[1]) << 8) |
+            ((sz_u64_t)(needle[2]) << 16);
+    } else {
+        nn =
+            (sz_u64_t)(needle[0] << 16) |
+            ((sz_u64_t)(needle[1]) << 8) |
+            ((sz_u64_t)(needle[2]) << 0);
+    }
+
+    // broadcast `needle` into `nn`
+    if (IS_LITTLE_ENDIAN) {
+        nn |= nn << 24;
+        nn <<= 16;
+    } else {
+        nn |= nn << 24;
+    }
 
     for (; text + 8 <= end; text += 6) {
         sz_u64_t text_slice = *(sz_u64_t const *)text;
         sz_u64_t first_indicators = ~(text_slice ^ nn);
-        sz_u64_t second_indicators = ~((text_slice << 8) ^ nn);
-        sz_u64_t third_indicators = ~((text_slice << 16) ^ nn);
+        sz_u64_t second_indicators;
+        sz_u64_t third_indicators;
+        if (IS_LITTLE_ENDIAN) {
+            second_indicators = ~((text_slice << 8) ^ nn);
+            third_indicators = ~((text_slice << 16) ^ nn);
+        } else {
+            second_indicators = ~((text_slice >> 8) ^ nn);
+            third_indicators = ~((text_slice >> 16) ^ nn);
+        }
         // For every first match - 3 chars (24 bits) must be identical.
         // For that merge every byte state and then combine those three-way.
         first_indicators &= first_indicators >> 1;
         first_indicators &= first_indicators >> 2;
         first_indicators &= first_indicators >> 4;
-        first_indicators =
-            (first_indicators >> 16) & (first_indicators >> 8) & (first_indicators >> 0) & 0x0000010000010000;
+
+        if (IS_LITTLE_ENDIAN) {
+            first_indicators =
+                (first_indicators >> 16) & (first_indicators >> 8) & (first_indicators >> 0) & 0x0000010000010000;
+        } else {
+            first_indicators =
+                (first_indicators << 16) & (first_indicators << 8) & (first_indicators << 0) & 0x0000010000010000;
+        }
 
         // For every second match - 3 chars (24 bits) must be identical.
         // For that merge every byte state and then combine those three-way.
         second_indicators &= second_indicators >> 1;
         second_indicators &= second_indicators >> 2;
         second_indicators &= second_indicators >> 4;
-        second_indicators =
-            (second_indicators >> 16) & (second_indicators >> 8) & (second_indicators >> 0) & 0x0000010000010000;
+
+        if (IS_LITTLE_ENDIAN) {
+            second_indicators =
+                (second_indicators >> 16) & (second_indicators >> 8) & (second_indicators >> 0) & 0x0000010000010000;
+        } else {
+            second_indicators =
+                (second_indicators << 16) & (second_indicators << 8) & (second_indicators << 0) & 0x0000010000010000;
+        }
 
         // For every third match - 3 chars (24 bits) must be identical.
         // For that merge every byte state and then combine those three-way.
         third_indicators &= third_indicators >> 1;
         third_indicators &= third_indicators >> 2;
         third_indicators &= third_indicators >> 4;
-        third_indicators =
-            (third_indicators >> 16) & (third_indicators >> 8) & (third_indicators >> 0) & 0x0000010000010000;
 
-        sz_u64_t match_indicators = first_indicators | (second_indicators >> 8) | (third_indicators >> 16);
-        if (match_indicators != 0) return text + ctz64(match_indicators) / 8;
+        if (IS_LITTLE_ENDIAN) {
+            third_indicators =
+                (third_indicators >> 16) & (third_indicators >> 8) & (third_indicators >> 0) & 0x0000010000010000;
+        } else {
+            third_indicators =
+                (third_indicators << 16) & (third_indicators << 8) & (third_indicators << 0) & 0x0000010000010000;
+        }
+
+        if (IS_LITTLE_ENDIAN) {
+            sz_u64_t match_indicators = first_indicators | (second_indicators >> 8) | (third_indicators >> 16);
+            if (match_indicators != 0) return text + ctz64(match_indicators) / 8;
+        } else {
+            sz_u64_t match_indicators = (first_indicators) | (second_indicators << 8) | (third_indicators << 16);
+            if (match_indicators != 0) return text + (clz64(match_indicators) / 8);
+        }
     }
 
     for (; text + 3 <= end; ++text)
@@ -332,8 +422,21 @@ inline static sz_string_start_t sz_find_4char_swar(sz_string_start_t const hayst
         if (text[0] == needle[0] && text[1] == needle[1] && text[2] == needle[2] && text[3] == needle[3]) return text;
 
     // This code simulates hyper-scalar execution, analyzing 4 offsets at a time.
-    sz_u64_t nn = (sz_u64_t)(needle[0] << 0) | ((sz_u64_t)(needle[1]) << 8) | ((sz_u64_t)(needle[2]) << 16) |
-                  ((sz_u64_t)(needle[3]) << 24);
+    sz_u64_t nn;
+    if (IS_LITTLE_ENDIAN) {
+        nn =
+            (sz_u64_t)(needle[0] << 0) |
+            ((sz_u64_t)(needle[1]) << 8) |
+            ((sz_u64_t)(needle[2]) << 16) |
+            ((sz_u64_t)(needle[3]) << 24);
+    } else {
+        nn =
+            (sz_u64_t)(needle[0] << 24) |
+            ((sz_u64_t)(needle[1]) << 16) |
+            ((sz_u64_t)(needle[2]) << 8) |
+            ((sz_u64_t)(needle[3]) << 0);
+    }
+
     nn |= nn << 32;
 
     //
@@ -345,8 +448,17 @@ inline static sz_string_start_t sz_find_4char_swar(sz_string_start_t const hayst
     // We can perform 5 comparisons per load, but it's easier to perform 4, minimizing the size of the lookup table.
     for (; text + 8 <= end; text += 4) {
         sz_u64_t text_slice = *(sz_u64_t const *)text;
-        sz_u64_t text01 = (text_slice & 0x00000000FFFFFFFF) | ((text_slice & 0x000000FFFFFFFF00) << 24);
-        sz_u64_t text23 = ((text_slice & 0x0000FFFFFFFF0000) >> 16) | ((text_slice & 0x00FFFFFFFF000000) << 8);
+        sz_u64_t text01;
+        sz_u64_t text23;
+
+        if (IS_LITTLE_ENDIAN) {
+            text01 = (text_slice & 0x00000000FFFFFFFF) | ((text_slice & 0x000000FFFFFFFF00) << 24);
+            text23 = ((text_slice & 0x0000FFFFFFFF0000) >> 16) | ((text_slice & 0x00FFFFFFFF000000) << 8);
+        } else {
+            text01 = (text_slice & 0xFFFFFFFF00000000) | ((text_slice & 0x00FFFFFFFF000000) >> 24);
+            text23 = ((text_slice & 0x0000FFFFFFFF0000) << 16) | ((text_slice & 0x000000FFFFFFFF00) >> 8);
+        }
+
         sz_u64_t text01_indicators = ~(text01 ^ nn);
         sz_u64_t text23_indicators = ~(text23 ^ nn);
 
@@ -354,25 +466,44 @@ inline static sz_string_start_t sz_find_4char_swar(sz_string_start_t const hayst
         text01_indicators &= text01_indicators >> 1;
         text01_indicators &= text01_indicators >> 2;
         text01_indicators &= text01_indicators >> 4;
-        text01_indicators &= text01_indicators >> 8;
-        text01_indicators &= text01_indicators >> 16;
-        text01_indicators &= 0x0000000100000001;
+        if (IS_LITTLE_ENDIAN) {
+            text01_indicators &= text01_indicators >> 8;
+            text01_indicators &= text01_indicators >> 16;
+            text01_indicators &= 0x0000000100000001;
+        } else {
+            text01_indicators &= text01_indicators << 8;
+            text01_indicators &= text01_indicators << 16;
+            text01_indicators &= 0x0100000001000000;
+        }
 
         // For every first match - 4 chars (32 bits) must be identical.
         text23_indicators &= text23_indicators >> 1;
         text23_indicators &= text23_indicators >> 2;
         text23_indicators &= text23_indicators >> 4;
-        text23_indicators &= text23_indicators >> 8;
-        text23_indicators &= text23_indicators >> 16;
-        text23_indicators &= 0x0000000100000001;
+        if (IS_LITTLE_ENDIAN) {
+            text23_indicators &= text23_indicators >> 8;
+            text23_indicators &= text23_indicators >> 16;
+            text23_indicators &= 0x0000000100000001;
+        } else {
+            text23_indicators &= text23_indicators << 8;
+            text23_indicators &= text23_indicators << 16;
+            text23_indicators &= 0x0100000001000000;
+        }
 
         if (text01_indicators + text23_indicators) {
             // Assuming we have performed 4 comparisons, we can only have 2^4=16 outcomes.
             // Which is small enough for a lookup table.
-            unsigned char match_indicators = (unsigned char)(          //
-                (text01_indicators >> 31) | (text01_indicators << 0) | //
-                (text23_indicators >> 29) | (text23_indicators << 2));
-            return text + offset_in_slice[match_indicators];
+            if (IS_LITTLE_ENDIAN) {
+                unsigned char match_indicators = (unsigned char)(
+                    (text01_indicators >> 31) | (text01_indicators << 0) |
+                    (text23_indicators >> 29) | (text23_indicators << 2));
+                return text + offset_in_slice[match_indicators];
+            } else {
+                unsigned char match_indicators = (unsigned char)(
+                    (text01_indicators >> 23) | (text01_indicators >> 56) |
+                    (text23_indicators >> 54) | (text23_indicators >> 21));
+                return text + offset_in_slice[match_indicators];
+            }
         }
     }
 
@@ -424,7 +555,11 @@ inline static sz_string_start_t sz_find_substring_swar( //
                 if (sz_equal(text + 4, n_suffix_ptr, n_suffix_len)) // Match suffix.
                     return text;
 
-            h_anomaly.u32 >>= 8;
+            if (IS_LITTLE_ENDIAN) {
+                h_anomaly.u32 >>= 8;
+            } else {
+                h_anomaly.u32 <<= 8;
+            }
             ++text;
         }
         return NULL;

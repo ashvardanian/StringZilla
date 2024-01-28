@@ -90,13 +90,19 @@ if(STRINGZILLA_INSTALL)
 endif()
 
 if(${STRINGZILLA_BUILD_TEST} OR ${STRINGZILLA_BUILD_BENCHMARK})
+  find_package(GTest REQUIRED)
+  include(GoogleTest)
+
   add_executable(stringzilla_test scripts/test.cpp)
+  add_executable(stringzilla_unittest scripts/ut_stringzilla.cpp)
+  target_link_libraries(stringzilla_unittest GTest::GTest GTest::Main)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
   set(CMAKE_CXX_FLAGS
       "${CMAKE_CXX_FLAGS} -O3 -flto -march=native -finline-functions -funroll-loops"
   )
 
   target_include_directories(stringzilla_test PRIVATE stringzilla)
+  target_include_directories(stringzilla_unittest PRIVATE stringzilla)
   set_target_properties(stringzilla_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY
                                                     ${CMAKE_BINARY_DIR})
 
@@ -104,6 +110,7 @@ if(${STRINGZILLA_BUILD_TEST} OR ${STRINGZILLA_BUILD_BENCHMARK})
                                             3.13)
     include(CTest)
     enable_testing()
+    add_test(NAME stringzilla_unittest COMMAND stringzilla_unittest)
     add_test(NAME stringzilla_test COMMAND stringzilla_test)
   endif()
 endif()

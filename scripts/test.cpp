@@ -91,7 +91,11 @@ int hybrid_sort_c_compare_uint32_t(const void *a, const void *b) {
     return (int_a < int_b) ? -1 : (int_a > int_b);
 }
 
+#ifdef __APPLE__
 int hybrid_sort_c_compare_strings(void *arg, const void *a, const void *b) {
+#else
+int hybrid_sort_c_compare_strings(const void *arg, const void *a, void *b) {
+#endif
     sz_sequence_t *sequence = (sz_sequence_t *)arg;
     sz_size_t idx_a = *(sz_size_t *)a;
     sz_size_t idx_b = *(sz_size_t *)b;
@@ -123,8 +127,11 @@ sz_size_t hybrid_sort_c(sz_sequence_t *sequence) {
     }
 
     // Sort the full strings.
+#ifdef __APPLE__
     qsort_r(sequence->order, sequence->count, sizeof(sz_size_t), sequence, hybrid_sort_c_compare_strings);
-
+#else
+    qsort_r(sequence->order, sequence->count, sizeof(sz_size_t), hybrid_sort_c_compare_strings, sequence);
+#endif
     return sequence->count;
 }
 
