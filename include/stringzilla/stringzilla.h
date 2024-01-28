@@ -2033,6 +2033,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
             }
             sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
         }
+        // Cache scalar before `free` call.
         sz_size_t result = previous_distances[shorter_length];
         alloc->free(distances, buffer_length, alloc->handle);
         return result;
@@ -2065,6 +2066,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
             // Swap previous_distances and current_distances pointers
             sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
         }
+        // Cache scalar before `free` call.
         sz_size_t result = previous_distances[shorter_length] < bound ? previous_distances[shorter_length] : bound;
         alloc->free(distances, buffer_length, alloc->handle);
         return result;
@@ -2152,8 +2154,10 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
         sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
     }
 
+    // Cache scalar before `free` call.
+    sz_ssize_t result = previous_distances[shorter_length];
     alloc->free(distances, buffer_length, alloc->handle);
-    return previous_distances[shorter_length];
+    return result;
 }
 
 /*

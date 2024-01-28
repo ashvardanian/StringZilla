@@ -153,7 +153,13 @@ function(set_compiler_flags target cpp_standard)
       target_compile_options(
         ${target}
         PRIVATE
-        "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=address;-fsanitize=leak>"
+      "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=leak>"
+      "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
+
+    target_link_options(
+      ${target}
+      PRIVATE
+      "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=leak>"
         "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
     endif()
   endif()
