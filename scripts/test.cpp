@@ -196,10 +196,17 @@ static void test_api_readonly() {
     assert(str("hello").find("ell") == 1);
     assert(str("hello").find("ell", 1) == 1);
     assert(str("hello").find("ell", 2) == str::npos);
+    assert(str("hello").find("el", 1) == 1);
     assert(str("hello").find("ell", 1, 2) == 1);
     assert(str("hello").rfind("l") == 3);
     assert(str("hello").rfind("l", 2) == 2);
     assert(str("hello").rfind("l", 1) == str::npos);
+
+    // The second argument is the last possible value of the returned offset.
+    assert(str("hello").rfind("el", 1) == 1);
+    assert(str("hello").rfind("ell", 1) == 1);
+    assert(str("hello").rfind("ello", 1) == 1);
+    assert(str("hello").rfind("ell", 1, 2) == 1);
 
     // More complex queries.
     assert(str("abbabbaaaaaa").find("aa") == 6);

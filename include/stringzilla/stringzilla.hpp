@@ -1531,7 +1531,7 @@ class basic_string_slice {
      *  @return The offset of the first character of the match, or `npos` if not found.
      */
     size_type rfind(string_view other, size_type until) const noexcept {
-        return until < length_ ? substr(0, until + 1).rfind(other) : rfind(other);
+        return until + other.size() < length_ ? substr(0, until + other.size()).rfind(other) : rfind(other);
     }
 
     /**
