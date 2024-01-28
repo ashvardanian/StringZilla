@@ -335,6 +335,62 @@ sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, 
 sz_sort(&array, &your_config);
 ```
 
+Unlike LibC:
+
+- all strings are expected to have a length, and are not necesserily null-terminated.
+- every operations has a reverse order counterpart.
+
+That way `sz_find` and `sz_rfind` are similar to `strstr` and `strrstr` in LibC.
+Similarly, `sz_find_byte` and `sz_rfind_byte` replace `memchr` and `memrchr`.
+The `sz_find_charset` maps to `strspn` and `strcspn`, while `sz_rfind_charset` has no sibling in LibC.
+
+<table>
+    <tr>
+        <th>LibC Functionality</th>
+        <th>StringZilla Equivalents</th>
+    </tr>
+    <tr>
+        <td><code>memchr(haystack, needle, haystack_length)</code>, <code>strchr</code></td>
+        <td><code>sz_find_byte(haystack, haystack_length, needle)</code></td>
+    </tr>
+    <tr>
+        <td><code>memrchr(haystack, needle, haystack_length)</code></td>
+        <td><code>sz_rfind_byte(haystack, haystack_length, needle)</code></td>
+    </tr>
+    <tr>
+        <td><code>memcmp</code>, <code>strcmp</code></td>
+        <td><code>sz_order</code>, <code>sz_equal</code></td>
+    </tr>
+    <tr>
+        <td><code>strlen(haystack)</code></td>
+        <td><code>sz_find_byte(haystack, haystack_length, needle)</code></td>
+    </tr>
+    <tr>
+        <td><code>strcspn(haystack, needles)</code></td>
+        <td><code>sz_rfind_charset(haystack, haystack_length, needles_bitset)</code></td>
+    </tr>
+    <tr>
+        <td><code>strspn(haystack, needles)</code></td>
+        <td><code>sz_find_charset(haystack, haystack_length, needles_bitset)</code></td>
+    </tr>
+    <tr>
+        <td><code>memmem(haystack, haystack_length, needle, needle_length)</code>, <code>strstr</code></td>
+        <td><code>sz_find(haystack, haystack_length, needle, needle_length)</code></td>
+    </tr>
+    <tr>
+        <td><code>memcpy(destination, source, destination_length)</code></td>
+        <td><code>sz_copy(destination, source, destination_length)</code></td>
+    </tr>
+    <tr>
+        <td><code>memmove(destination, source, destination_length)</code></td>
+        <td><code>sz_move(destination, source, destination_length)</code></td>
+    </tr>
+    <tr>
+        <td><code>memset(destination, value, destination_length)</code></td>
+        <td><code>sz_fill(destination, destination_length, value)</code></td>
+    </tr>
+</table>
+
 ### Basic Usage with C++ 11 and Newer
 
 There is a stable C++ 11 interface available in the `ashvardanian::stringzilla` namespace.
@@ -765,11 +821,6 @@ __`SZ_USE_MISALIGNED_LOADS`__:
 > Going from `char`-like types to `uint64_t`-like ones can significanly accelerate the serial (SWAR) backend.
 > So consider enabling it if you are building for some embedded device.
 
-__`SZ_CACHE_LINE_WIDTH`, `SZ_SWAR_THRESHOLD`__:
-
-> The width of the cache line and the "SWAR threshold" are performance-optimization settings.
-> They will mostly affect the serial performance.
-
 __`SZ_AVOID_LIBC`__:
 
 > When using the C header-only library one can disable the use of LibC.
@@ -788,9 +839,98 @@ __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH
 
 ## Algorithms & Design Decisions 📚
 
+StringZilla aims to optimize some of the slowest string operations.
+Some popular operations, however, like equality comparisons and relative order checking, almost always complete on some of the very first bytes in either string.
+In such operations vectorization is almost useless, unless huge and very similar strings are considered.
+StringZilla implements those operations as well, but won't result in substantial speedups.
+
 ### Hashing
 
-### Substring Search
+Hashing is a very deeply studies subject with countless implementations.
+Choosing the right hashing algorithm for your application can be crucial from both performance and security standpoint.
+In StringZilla a 64-bit rolling hash function is reused for both string hashes and substring hashes, Rabin-style fingerprints, and is accelerated with SIMD for longer strings.
+
+#### Why not CRC32?
+
+Cyclic Redundancy Check 32 is one of the most commonly used hash functions in Computer Science.
+It has in-hardware support on both x86 and Arm, for both 8-bit, 16-bit, 32-bit, and 64-bit words.
+The `0x1EDC6F41` polynomial is used in iSCSI, Btrfs, ext4, and the `0x04C11DB7` in SATA, Ethernet, Zlib, PNG.
+In case of Arm more than one polynomial is supported.
+It is, however, somewhat limiting for Big Data usecases, which often have to deal with more than 4 Billion strings, making collisions unavoidable.
+Moreover, the existing SIMD approaches are tricky, combining general purpose computations with specialized instructions, to utilize more silicon in every cycle.
+
+Some of the best articles on CRC32:
+
+- [Comprehensive derivation of approaches](https://github.com/komrad36/CRC)
+- [Faster computation for 4 KB buffers on x86](https://www.corsix.org/content/fast-crc32c-4k)
+- [Comparing different lookup tables](https://create.stephan-brumme.com/crc32)
+
+Some of the best open-source implementations:
+
+- [By Peter Cawley](https://github.com/corsix/fast-crc32)
+- [By Stephan Brumme](https://github.com/stbrumme/crc32)
+
+#### Other Modern Alternatives
+
+[MurmurHash](https://github.com/aappleby/smhasher/blob/master/README.md) from 2008 by Austin Appleby is one of the best known non-cryptographic hashes.
+It has a very short implementation and is capable of producing 32-bit and 128-bit hashes.
+The [CityHash](https://opensource.googleblog.com/2011/04/introducing-cityhash) from 2011 by Google and the [xxHash](https://github.com/Cyan4973/xxHash) improve on that, better leveraging the super-scalar nature of modern CPUs and producing 64-bit and 128-bit hashes.
+
+Neither of those functions are cryptographic, unlike MD5, SHA, and BLAKE algorithms.
+Most of cryptographic hashes are based on the Merkle-Damgård construction, and aren't resistant to the length-extension attacks.
+Current state of the Art, might be the [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) algorithm.
+It's resistant to a broad range of attacks, can process 2 bytes per CPU cycle, and comes with a very optimized official implementation for C and Rust.
+It has the same 128-bit security level as the BLAKE2, and achieves its performance gains by reducing the number of mixing rounds, and processing data in 1 KiB chunks, which is great for longer strings, but may result in poor performance on short ones.
+
+> [!TIP]
+> All mentioned libraries have undergone extensive testing and are considered production-ready.
+> They can definitely accelerate your application, but so may the downstream mixer.
+> For instance, when a hash-table is constructed, the hashes are further shrinked to address table buckets.
+> If the mixer looses entropy, the performance gains from the hash function may be lost.
+> An example would be power-of-two modulo, which is a common mixer, but is known to be weak.
+> One alternative would be the [fastrange](https://github.com/lemire/fastrange) by Daniel Lemire.
+> Another one is the [Fibonacci hash trick](https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/) using the Golden Ratio, also used in StringZilla.
+
+### Exact Substring Search
+
+StringZilla uses different exactsubstring search algorithms for different needle lengths and backends:
+
+- When no SIMD is available - SWAR (SIMD Within A Register) algorithms are used on 64-bit words.
+- Boyer-Moore-Horspool (BMH) algorithm with Raita heuristic variation for longer needles.
+- SIMD algorithms are randomized to look at different parts of the needle.
+- Apostolico-Giancarlo algorithm is _considered_ for longer needles, if preprocessing time isn't an issue.
+
+Substring search algorithms are generally divided into: comparison-based, automaton-based, and bit-parallel.
+Different families are effective for different alphabet sizes and needle lengths.
+The more operations are needed per-character - the more effective SIMD would be.
+The longer the needle - the more effective the skip-tables are.
+
+On very short needles, especially 1-4 characters long, brute force with SIMD is the fastest solution.
+On mid-length needles, bit-parallel algorithms are effective, as the character masks fit into 32-bit or 64-bit words.
+Either way, if the needle is under 64-bytes long, on haystack traversal we will still fetch every CPU cache line.
+So the only way to improve performance is to reduce the number of comparisons.
+
+Going beyond that, to long needles, Boyer-Moore (BM) and its variants are often the best choice.
+It has two tables: the good-suffix shift and the bad-character shift.
+Common choice is to use the simplified BMH algorithm, which only uses the bad-character shift table, reducing the pre-processing time.
+In the C++ Standards Library, the `std::string::find` function uses the BMH algorithm with Raita's heuristic.
+We do something similar longer needles.
+
+All those, still, have $O(hn)$ worst case complexity, and struggle with repetitive needle patterns.
+To guarantee $O(h)$ worst case time complexity, the Apostolico-Giancarlo (AG) algorithm adds an additional skip-table.
+Preprocessing phase is $O(n+sigma)$ in time and space.
+On traversal, performs from $(h/n)$ to $(3h/2)$ comparisons.
+We should consider implementing it if we can:
+
+- accelerate the preprocessing phase of the needle.
+- simplify the control-flow of the main loop.
+- replace the array of shift values with a circular buffer.
+
+Reading materials:
+
+- Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
+- SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
+
 
 ### Levenshtein Edit Distance
 

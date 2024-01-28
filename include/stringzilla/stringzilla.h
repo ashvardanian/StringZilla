@@ -8,7 +8,6 @@
  *  - `SZ_DEBUG=0` - whether to enable debug assertions and logging.
  *  - `SZ_DYNAMIC_DISPATCH=0` - whether to use runtime dispatching of the most advanced SIMD backend.
  *  - `SZ_USE_MISALIGNED_LOADS=0` - whether to use misaligned loads on platforms that support them.
- *  - `SZ_CACHE_LINE_WIDTH=64` - cache line width in bytes, used for some algorithms.
  *  - `SZ_SWAR_THRESHOLD=24` - threshold for switching to SWAR backend over serial byte-level for-loops.
  *  - `SZ_USE_X86_AVX512=?` - whether to use AVX-512 instructions on x86_64.
  *  - `SZ_USE_X86_AVX2=?` - whether to use AVX2 instructions on x86_64.
@@ -50,71 +49,18 @@
 #endif
 
 /**
- *  @brief  Cache-line width, that will affect the execution of some algorithms,
- *          like equality checks and relative order computing.
- */
-#ifndef SZ_CACHE_LINE_WIDTH
-#define SZ_CACHE_LINE_WIDTH (64) // bytes
-#endif
-
-/**
- *  @brief  Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops.
- *          On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
- *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
- */
-#ifndef SZ_SWAR_THRESHOLD
-#define SZ_SWAR_THRESHOLD (24) // bytes
-#endif
-
-/**
  *  @brief  Analogous to `size_t` and `std::size_t`, unsigned integer, identical to pointer size.
  *          64-bit on most platforms where pointers are 64-bit.
  *          32-bit on platforms where pointers are 32-bit.
  */
 #if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
 #define SZ_DETECT_64_BIT (1)
-#define SZ_SIZE_MAX (0xFFFFFFFFFFFFFFFFull)
-#define SZ_SSIZE_MAX (0x7FFFFFFFFFFFFFFFull)
+#define SZ_SIZE_MAX (0xFFFFFFFFFFFFFFFFull)  // Largest unsigned integer that fits into 64 bits.
+#define SZ_SSIZE_MAX (0x7FFFFFFFFFFFFFFFull) // Largest signed integer that fits into 64 bits.
 #else
 #define SZ_DETECT_64_BIT (0)
-#define SZ_SIZE_MAX (0xFFFFFFFFu)
-#define SZ_SSIZE_MAX (0x7FFFFFFFu)
-#endif
-
-/*
- *  Hardware feature detection.
- *  All of those can be controlled by the user.
- */
-#ifndef SZ_USE_X86_AVX512
-#ifdef __AVX512BW__
-#define SZ_USE_X86_AVX512 1
-#else
-#define SZ_USE_X86_AVX512 0
-#endif
-#endif
-
-#ifndef SZ_USE_X86_AVX2
-#ifdef __AVX2__
-#define SZ_USE_X86_AVX2 1
-#else
-#define SZ_USE_X86_AVX2 0
-#endif
-#endif
-
-#ifndef SZ_USE_ARM_NEON
-#ifdef __ARM_NEON
-#define SZ_USE_ARM_NEON 1
-#else
-#define SZ_USE_ARM_NEON 0
-#endif
-#endif
-
-#ifndef SZ_USE_ARM_SVE
-#ifdef __ARM_FEATURE_SVE
-#define SZ_USE_ARM_SVE 1
-#else
-#define SZ_USE_ARM_SVE 0
-#endif
+#define SZ_SIZE_MAX (0xFFFFFFFFu)  // Largest unsigned integer that fits into 32 bits.
+#define SZ_SSIZE_MAX (0x7FFFFFFFu) // Largest signed integer that fits into 32 bits.
 #endif
 
 /*
@@ -122,19 +68,11 @@
  */
 #ifndef SZ_DEBUG
 #ifndef NDEBUG // This means "Not using DEBUG information".
-#define SZ_DEBUG 1
+#define SZ_DEBUG (1)
 #else
-#define SZ_DEBUG 0
+#define SZ_DEBUG (0)
 #endif
 #endif
-
-/**
- *  @brief  Compile-time assert macro similar to `static_assert` in C++.
- */
-#define sz_static_assert(condition, name)                \
-    typedef struct {                                     \
-        int static_assert_##name : (condition) ? 1 : -1; \
-    } sz_static_assert_##name##_t
 
 /*  Annotation for the public API symbols:
  *
@@ -160,112 +98,64 @@
 #endif // SZ_DYNAMIC_DISPATCH
 #endif // SZ_DYNAMIC
 
-/**
- *  @brief  Generally `CHAR_BIT` is coming from limits.h, according to the C standard.
- */
-#ifndef CHAR_BIT
-#define CHAR_BIT (8)
-#endif
-
-/**
- *  @brief  The number of bytes a stack-allocated string can hold, including the NULL termination character.
- *          ! This can't be changed from outside. Don't use the `#error` as it may already be included and set.
- */
-#ifdef SZ_STRING_INTERNAL_SPACE
-#undef SZ_STRING_INTERNAL_SPACE
-#endif
-#define SZ_STRING_INTERNAL_SPACE (23)
-
 #ifdef __cplusplus
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wconversion"
-#pragma GCC diagnostic ignored "-Wold-style-cast"
 extern "C" {
 #endif
 
-#if !SZ_AVOID_LIBC
-
-#include <stddef.h> // `NULL`
-#include <stdint.h> // `uint8_t`
-#include <stdio.h>  // `fprintf`
-#include <stdlib.h> // `EXIT_FAILURE`, `malloc`
-
-typedef size_t sz_size_t;
-typedef ptrdiff_t sz_ssize_t;
-
-sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
-sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
-
-typedef uint8_t sz_u8_t;   /// Always 8 bits
-typedef uint16_t sz_u16_t; /// Always 16 bits
-typedef int16_t sz_i32_t;  /// Always 32 bits
-typedef uint32_t sz_u32_t; /// Always 32 bits
-typedef uint64_t sz_u64_t; /// Always 64 bits
-
-typedef char *sz_ptr_t;        /// A type alias for `char *`
-typedef char const *sz_cptr_t; /// A type alias for `char const *`
-
-typedef int8_t sz_error_cost_t; /// Character mismatch cost for fuzzy matching functions
-
-#else
-
-extern void *malloc(size_t);
-extern void free(void *, size_t);
-
-/**
- *  @brief  Generally `NULL` is coming from locale.h, stddef.h, stdio.h, stdlib.h, string.h, time.h,
- *          and wchar.h, according to the C standard.
+/*
+ *  Let's infer the integer types or pull them from LibC,
+ *  if that is allowed by the user.
  */
-#ifndef NULL
-#ifdef __GNUG__
-#define NULL __null
-#else
-#define NULL ((void *)0)
-#endif
-#endif
+#if !SZ_AVOID_LIBC
+#include <stddef.h>           // `size_t`
+#include <stdint.h>           // `uint8_t`
+typedef int8_t sz_i8_t;       // Always 8 bits
+typedef uint8_t sz_u8_t;      // Always 8 bits
+typedef uint16_t sz_u16_t;    // Always 16 bits
+typedef int16_t sz_i32_t;     // Always 32 bits
+typedef uint32_t sz_u32_t;    // Always 32 bits
+typedef uint64_t sz_u64_t;    // Always 64 bits
+typedef size_t sz_size_t;     // Pointer-sized unsigned integer, 32 or 64 bits
+typedef ptrdiff_t sz_ssize_t; // Signed version of `sz_size_t`, 32 or 64 bits
+
+#else // if SZ_AVOID_LIBC:
+
+typedef signed char sz_i8_t;         // Always 8 bits
+typedef unsigned char sz_u8_t;       // Always 8 bits
+typedef unsigned short sz_u16_t;     // Always 16 bits
+typedef int sz_i32_t;                // Always 32 bits
+typedef unsigned int sz_u32_t;       // Always 32 bits
+typedef unsigned long long sz_u64_t; // Always 64 bits
 
 #if SZ_DETECT_64_BIT
-typedef unsigned long long sz_size_t;
-typedef long long sz_ssize_t;
+typedef unsigned long long sz_size_t; // 64-bit.
+typedef long long sz_ssize_t;         // 64-bit.
 #else
-typedef unsigned sz_size_t;
-typedef unsigned sz_ssize_t;
-#endif
+typedef unsigned sz_size_t;  // 32-bit.
+typedef unsigned sz_ssize_t; // 32-bit.
+#endif // SZ_DETECT_64_BIT
+
+#endif // SZ_AVOID_LIBC
+
+/**
+ *  @brief  Compile-time assert macro similar to `static_assert` in C++.
+ */
+#define sz_static_assert(condition, name)                \
+    typedef struct {                                     \
+        int static_assert_##name : (condition) ? 1 : -1; \
+    } sz_static_assert_##name##_t
 
 sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
 sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
-
-typedef unsigned char sz_u8_t;       /// Always 8 bits
-typedef unsigned short sz_u16_t;     /// Always 16 bits
-typedef int sz_i32_t;                /// Always 32 bits
-typedef unsigned int sz_u32_t;       /// Always 32 bits
-typedef unsigned long long sz_u64_t; /// Always 64 bits
-
-typedef char *sz_ptr_t;        /// A type alias for `char *`
-typedef char const *sz_cptr_t; /// A type alias for `char const *`
-
-typedef signed char sz_error_cost_t; /// Character mismatch cost for fuzzy matching function
-
-#endif
 
 #pragma region Public API
 
-typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        /// Only one relevant bit
-typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; /// Only three possible states: <=>
+typedef char *sz_ptr_t;          // A type alias for `char *`
+typedef char const *sz_cptr_t;   // A type alias for `char const *`
+typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching functions
 
-// Define a large prime number that we are going to use for modulo arithmetic.
-// Fun fact, the largest signed 32-bit signed integer (2,147,483,647) is a prime number.
-// But we are going to use a larger one, to reduce collisions.
-// https://www.mersenneforum.org/showthread.php?t=3471
-#define SZ_U32_MAX_PRIME (2147483647u)
-/**
- *  @brief  Largest prime number that fits into 64 bits.
- *
- *  2^64 = 18,446,744,073,709,551,616
- *  this = 18,446,744,073,709,551,557
- *  diff = 59
- */
-#define SZ_U64_MAX_PRIME (18446744073709551557ull)
+typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        // Only one relevant bit
+typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; // Only three possible states: <=>
 
 /**
  *  @brief  Tiny string-view structure. It's POD type, unlike the `std::string_view`.
@@ -280,18 +170,18 @@ typedef struct sz_string_view_t {
  *          Used to introspect the supported functionality of the dynamic library.
  */
 typedef enum sz_capability_t {
-    sz_cap_serial_k = 1,       ///< Serial (non-SIMD) capability
-    sz_cap_any_k = 0x7FFFFFFF, ///< Mask representing any capability
+    sz_cap_serial_k = 1,       /// Serial (non-SIMD) capability
+    sz_cap_any_k = 0x7FFFFFFF, /// Mask representing any capability
 
-    sz_cap_arm_neon_k = 1 << 10, ///< ARM NEON capability
-    sz_cap_arm_sve_k = 1 << 11,  ///< ARM SVE capability TODO: Not yet supported or used
+    sz_cap_arm_neon_k = 1 << 10, /// ARM NEON capability
+    sz_cap_arm_sve_k = 1 << 11,  /// ARM SVE capability TODO: Not yet supported or used
 
-    sz_cap_x86_avx2_k = 1 << 20,       ///< x86 AVX2 capability
-    sz_cap_x86_avx512f_k = 1 << 21,    ///< x86 AVX512 F capability
-    sz_cap_x86_avx512bw_k = 1 << 22,   ///< x86 AVX512 BW instruction capability
-    sz_cap_x86_avx512vl_k = 1 << 23,   ///< x86 AVX512 VL instruction capability
-    sz_cap_x86_avx512vbmi_k = 1 << 24, ///< x86 AVX512 VBMI instruction capability
-    sz_cap_x86_gfni_k = 1 << 25,       ///< x86 AVX512 GFNI instruction capability
+    sz_cap_x86_avx2_k = 1 << 20,       /// x86 AVX2 capability
+    sz_cap_x86_avx512f_k = 1 << 21,    /// x86 AVX512 F capability
+    sz_cap_x86_avx512bw_k = 1 << 22,   /// x86 AVX512 BW instruction capability
+    sz_cap_x86_avx512vl_k = 1 << 23,   /// x86 AVX512 VL instruction capability
+    sz_cap_x86_avx512vbmi_k = 1 << 24, /// x86 AVX512 VBMI instruction capability
+    sz_cap_x86_gfni_k = 1 << 25,       /// x86 AVX512 GFNI instruction capability
 
 } sz_capability_t;
 
@@ -319,7 +209,7 @@ SZ_PUBLIC void sz_charset_init(sz_charset_t *s) { s->_u64s[0] = s->_u64s[1] = s-
 SZ_PUBLIC void sz_charset_add_u8(sz_charset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
 
 /** @brief  Adds a character to the set. Consider @b sz_charset_add_u8. */
-SZ_PUBLIC void sz_charset_add(sz_charset_t *s, char c) { sz_charset_add_u8(s, *(sz_u8_t *)(&c)); } //< bitcast
+SZ_PUBLIC void sz_charset_add(sz_charset_t *s, char c) { sz_charset_add_u8(s, *(sz_u8_t *)(&c)); } // bitcast
 
 /** @brief  Checks if the set contains a given character and accepts @b unsigned integers. */
 SZ_PUBLIC sz_bool_t sz_charset_contains_u8(sz_charset_t const *s, sz_u8_t c) {
@@ -333,7 +223,7 @@ SZ_PUBLIC sz_bool_t sz_charset_contains_u8(sz_charset_t const *s, sz_u8_t c) {
 
 /** @brief  Checks if the set contains a given character. Consider @b sz_charset_contains_u8. */
 SZ_PUBLIC sz_bool_t sz_charset_contains(sz_charset_t const *s, char c) {
-    return sz_charset_contains_u8(s, *(sz_u8_t *)(&c)); //< bitcast
+    return sz_charset_contains_u8(s, *(sz_u8_t *)(&c)); // bitcast
 }
 
 /** @brief  Inverts the contents of the set, so allowed character get disallowed, and vice versa. */
@@ -375,10 +265,19 @@ SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
 
 /**
+ *  @brief  The number of bytes a stack-allocated string can hold, including the SZ_NULL termination character.
+ *          ! This can't be changed from outside. Don't use the `#error` as it may already be included and set.
+ */
+#ifdef SZ_STRING_INTERNAL_SPACE
+#undef SZ_STRING_INTERNAL_SPACE
+#endif
+#define SZ_STRING_INTERNAL_SPACE (23)
+
+/**
  *  @brief  Tiny memory-owning string structure with a Small String Optimization (SSO).
  *          Differs in layout from Folly, Clang, GCC, and probably most other implementations.
  *          It's designed to avoid any branches on read-only operations, and can store up
- *          to 22 characters on stack, followed by the NULL-termination character.
+ *          to 22 characters on stack, followed by the SZ_NULL-termination character.
  *
  *  @section Changing Length
  *
@@ -413,64 +312,15 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 typedef void (*sz_to_converter_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
 
 /**
- *  @brief  Computes the hash of a string.
- *
- *  Preferences for the ideal hash:
- *  - 64 bits long.
- *  - Fast on short strings.
- *  - Short implementation.
- *  - Supports rolling computation.
- *  - For two strings with known hashes, the hash of their concatenation can be computed in sublinear time.
- *  - Invariance to zero characters? Maybe only at start/end?
- *
- *  @section    Why not use vanilla CRC32?
- *
- *  Cyclic Redundancy Check 32 is one of the most commonly used hash functions in Computer Science.
- *  It has in-hardware support on both x86 and Arm, for both 8-bit, 16-bit, 32-bit, and 64-bit words.
- *  The `0x1EDC6F41` polynomial is used in iSCSI, Btrfs, ext4, and the `0x04C11DB7` in SATA, Ethernet, Zlib, PNG.
- *  In case of Arm more than one polynomial is supported. It is, however, somewhat limiting for Big Data
- *  usecases, which often have to deal with more than 4 Billion strings, making collisions unavoidable.
- *  Moreover, the existing SIMD approaches are tricky, combining general purpose computations with
- *  specialized instructions, to utilize more silicon in every cycle.
- *
- *  Some of the best articles on CRC32:
- *  - Comprehensive derivation of approaches: https://github.com/komrad36/CRC
- *  - Faster computation for 4 KB buffers on x86: https://www.corsix.org/content/fast-crc32c-4k
- *  - Comparing different lookup tables: https://create.stephan-brumme.com/crc32
- *
- *  Some of the best open-source implementations:
- *  - Peter Cawley: https://github.com/corsix/fast-crc32
- *  - Stephan Brumme: https://github.com/stbrumme/crc32
- *
- *  @section    Modern Algorithms
- *
- *  MurmurHash from 2008 by Austin Appleby is one of the best known non-cryptographic hashes.
- *  It has a very short implementation and is capable of producing 32-bit and 128-bit hashes.
- *  https://github.com/aappleby/smhasher/tree/61a0530f28277f2e850bfc39600ce61d02b518de
- *
- *  The CityHash from 2011 by Google and the xxHash improve on that, better leveraging
- *  the super-scalar nature of modern CPUs and producing 64-bit and 128-bit hashes.
- *  https://opensource.googleblog.com/2011/04/introducing-cityhash
- *  https://github.com/Cyan4973/xxHash
- *
- *  Neither of those functions are cryptographic, unlike MD5, SHA, and BLAKE algorithms.
- *  Most of those are based on the Merkle-Damgård construction, and aren't resistant to
- *  the length-extension attacks. Current state of the Art, might be the BLAKE3 algorithm.
- *  It's resistant to a broad range of attacks, can process 2 bytes per CPU cycle, and comes
- *  with a very optimized official implementation for C and Rust. It has the same 128-bit
- *  security level as the BLAKE2, and achieves its performance gains by reducing the number
- *  of mixing rounds, and processing data in 1 KiB chunks, which is great for longer strings,
- *  but may result in poor performance on short ones.
- *  https://en.wikipedia.org/wiki/BLAKE_(hash_function)#BLAKE3
- *  https://github.com/BLAKE3-team/BLAKE3
- *
- *  As shown, choosing the right hashing algorithm for your application can be crucial from
- *  both performance and security standpoint. Assuming, this functionality will be mostly used on
- *  multi-word short UTF8 strings, StringZilla implements a very simple scheme derived from MurMur3.
+ *  @brief  Computes the 64-bit unsigned hash of a string. Fairly fast for short strings,
+ *          simple implementation, and supports rolling computation, reused in other APIs.
+ *          Similar to `std::hash` in C++.
  *
  *  @param text     String to hash.
  *  @param length   Number of bytes in the text.
  *  @return         64-bit hash value.
+ *
+ *  @see    sz_hashes, sz_hashes_fingerprint, sz_hashes_intersection
  */
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length);
 
@@ -628,8 +478,8 @@ SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
  *
  *  @param string       String to unpack.
  *  @param start        Pointer to the start of the string.
- *  @param length       Number of bytes in the string, before the NULL character.
- *  @param space        Number of bytes allocated for the string (heap or stack), including the NULL character.
+ *  @param length       Number of bytes in the string, before the SZ_NULL character.
+ *  @param space        Number of bytes allocated for the string (heap or stack), including the SZ_NULL character.
  *  @param is_external  Whether the string is allocated on the heap externally, or fits withing ::string instance.
  */
 SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space,
@@ -641,7 +491,7 @@ SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_s
  *
  * @param string       String to unpack.
  * @param start        Pointer to the start of the string.
- * @param length       Number of bytes in the string, before the NULL character.
+ * @param length       Number of bytes in the string, before the SZ_NULL character.
  */
 SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
 
@@ -650,9 +500,9 @@ SZ_PUBLIC void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_si
  *          Use the returned character pointer to populate the string.
  *
  *  @param string       String to initialize.
- *  @param length       Number of bytes in the string, before the NULL character.
+ *  @param length       Number of bytes in the string, before the SZ_NULL character.
  *  @param allocator    Memory allocator to use for the allocation.
- *  @return             NULL if the operation failed, pointer to the start of the string otherwise.
+ *  @return             SZ_NULL if the operation failed, pointer to the start of the string otherwise.
  */
 SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator);
 
@@ -663,7 +513,7 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
  *  @param string       String to grow.
  *  @param new_capacity The number of characters to reserve space for, including existing ones.
  *  @param allocator    Memory allocator to use for the allocation.
- *  @return             NULL if the operation failed, pointer to the new start of the string otherwise.
+ *  @return             SZ_NULL if the operation failed, pointer to the new start of the string otherwise.
  */
 SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator);
 
@@ -677,7 +527,7 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
  *                      If provided offset is larger than the length, it will be capped.
  *  @param added_length The number of new characters to reserve space for.
  *  @param allocator    Memory allocator to use for the allocation.
- *  @return             NULL if the operation failed, pointer to the new start of the string otherwise.
+ *  @return             SZ_NULL if the operation failed, pointer to the new start of the string otherwise.
  */
 SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_size_t added_length,
                                     sz_memory_allocator_t *allocator);
@@ -711,7 +561,7 @@ SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *alloca
 
 #pragma endregion
 
-#pragma region Fast Substring Search
+#pragma region Fast Substring Search API
 
 typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
@@ -815,7 +665,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
 
 #pragma endregion
 
-#pragma region String Similarity Measures
+#pragma region String Similarity Measures API
 
 /**
  *  @brief  Computes the Levenshtein edit-distance between two strings using the Wagner-Fisher algorithm.
@@ -828,7 +678,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
  *
  *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
  *                  so the memory usage is linear in relation to ::a_length and ::b_length.
- *                  If NULL is passed, will initialize to the systems default `malloc`.
+ *                  If SZ_NULL is passed, will initialize to the systems default `malloc`.
  *  @param bound    Upper bound on the distance, that allows us to exit early.
  *                  If zero is passed, the maximum possible distance will be equal to the length of the longer input.
  *  @return         Unsigned integer for edit distance, the `bound` if was exceeded or `SZ_SIZE_MAX`
@@ -864,7 +714,7 @@ typedef sz_size_t (*sz_edit_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size
  *
  *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
  *                  so the memory usage is linear in relation to ::a_length and ::b_length.
- *                  If NULL is passed, will initialize to the systems default `malloc`.
+ *                  If SZ_NULL is passed, will initialize to the systems default `malloc`.
  *  @return         Signed similarity score. Can be negative, depending on the substitution costs.
  *                  If the memory allocation fails, the function returns `SZ_SSIZE_MAX`.
  *
@@ -963,6 +813,156 @@ typedef sz_size_t (*sz_hashes_intersection_t)(sz_cptr_t, sz_size_t, sz_size_t, s
 
 #pragma endregion
 
+#pragma region Convenience API
+
+/**
+ *  @brief  Finds the first character in the haystack, that is present in the needle.
+ *          Convenience function, reused across different language bindings.
+ *  @see    sz_find_charset
+ */
+SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
+
+/**
+ *  @brief  Finds the first character in the haystack, that is @b not present in the needle.
+ *          Convenience function, reused across different language bindings.
+ *  @see    sz_find_charset
+ */
+SZ_DYNAMIC sz_cptr_t sz_find_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
+
+/**
+ *  @brief  Finds the last character in the haystack, that is present in the needle.
+ *          Convenience function, reused across different language bindings.
+ *  @see    sz_find_charset
+ */
+SZ_DYNAMIC sz_cptr_t sz_rfind_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
+
+/**
+ *  @brief  Finds the last character in the haystack, that is @b not present in the needle.
+ *          Convenience function, reused across different language bindings.
+ *  @see    sz_find_charset
+ */
+SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
+
+#pragma endregion
+
+#pragma region String Sequences API
+
+struct sz_sequence_t;
+
+typedef sz_cptr_t (*sz_sequence_member_start_t)(struct sz_sequence_t const *, sz_size_t);
+typedef sz_size_t (*sz_sequence_member_length_t)(struct sz_sequence_t const *, sz_size_t);
+typedef sz_bool_t (*sz_sequence_predicate_t)(struct sz_sequence_t const *, sz_size_t);
+typedef sz_bool_t (*sz_sequence_comparator_t)(struct sz_sequence_t const *, sz_size_t, sz_size_t);
+typedef sz_bool_t (*sz_string_is_less_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
+
+typedef struct sz_sequence_t {
+    sz_u64_t *order;
+    sz_size_t count;
+    sz_sequence_member_start_t get_start;
+    sz_sequence_member_length_t get_length;
+    void const *handle;
+} sz_sequence_t;
+
+/**
+ *  @brief  Initiates the sequence structure from a tape layout, used by Apache Arrow.
+ *          Expects ::offsets to contains `count + 1` entries, the last pointing at the end
+ *          of the last string, indicating the total length of the ::tape.
+ */
+SZ_PUBLIC void sz_sequence_from_u32tape(sz_cptr_t *start, sz_u32_t const *offsets, sz_size_t count,
+                                        sz_sequence_t *sequence);
+
+/**
+ *  @brief  Initiates the sequence structure from a tape layout, used by Apache Arrow.
+ *          Expects ::offsets to contains `count + 1` entries, the last pointing at the end
+ *          of the last string, indicating the total length of the ::tape.
+ */
+SZ_PUBLIC void sz_sequence_from_u64tape(sz_cptr_t *start, sz_u64_t const *offsets, sz_size_t count,
+                                        sz_sequence_t *sequence);
+
+/**
+ *  @brief  Similar to `std::partition`, given a predicate splits the sequence into two parts.
+ *          The algorithm is unstable, meaning that elements may change relative order, as long
+ *          as they are in the right partition. This is the simpler algorithm for partitioning.
+ */
+SZ_PUBLIC sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate);
+
+/**
+ *  @brief  Inplace `std::set_union` for two consecutive chunks forming the same continuous `sequence`.
+ *
+ *  @param partition The number of elements in the first sub-sequence in `sequence`.
+ *  @param less Comparison function, to determine the lexicographic ordering.
+ */
+SZ_PUBLIC void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequence_comparator_t less);
+
+/**
+ *  @brief  Sorting algorithm, combining Radix Sort for the first 32 bits of every word
+ *          and a follow-up by a more conventional sorting procedure on equally prefixed parts.
+ */
+SZ_PUBLIC void sz_sort(sz_sequence_t *sequence);
+
+/**
+ *  @brief  Partial sorting algorithm, combining Radix Sort for the first 32 bits of every word
+ *          and a follow-up by a more conventional sorting procedure on equally prefixed parts.
+ */
+SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t n);
+
+/**
+ *  @brief  Intro-Sort algorithm that supports custom comparators.
+ */
+SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t less);
+
+#pragma endregion
+
+/*
+ *  Hardware feature detection.
+ *  All of those can be controlled by the user.
+ */
+#ifndef SZ_USE_X86_AVX512
+#ifdef __AVX512BW__
+#define SZ_USE_X86_AVX512 1
+#else
+#define SZ_USE_X86_AVX512 0
+#endif
+#endif
+
+#ifndef SZ_USE_X86_AVX2
+#ifdef __AVX2__
+#define SZ_USE_X86_AVX2 1
+#else
+#define SZ_USE_X86_AVX2 0
+#endif
+#endif
+
+#ifndef SZ_USE_ARM_NEON
+#ifdef __ARM_NEON
+#define SZ_USE_ARM_NEON 1
+#else
+#define SZ_USE_ARM_NEON 0
+#endif
+#endif
+
+#ifndef SZ_USE_ARM_SVE
+#ifdef __ARM_FEATURE_SVE
+#define SZ_USE_ARM_SVE 1
+#else
+#define SZ_USE_ARM_SVE 0
+#endif
+#endif
+
+/*
+ *  Include hardware-specific headers.
+ */
+#if SZ_USE_X86_AVX512 || SZ_USE_X86_AVX2
+#include <immintrin.h>
+#endif // SZ_USE_X86...
+#if SZ_USE_ARM_NEON
+#include <arm_acle.h>
+#include <arm_neon.h>
+#endif // SZ_USE_ARM_NEON
+#if SZ_USE_ARM_SVE
+#include <arm_sve.h>
+#endif // SZ_USE_ARM_SVE
+
 #pragma region Hardware-Specific API
 
 #if SZ_USE_X86_AVX512
@@ -1040,107 +1040,24 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
 
 #pragma endregion
 
-#pragma region Convenience API
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
 
-/**
- *  @brief  Finds the first character in the haystack, that is present in the needle.
- *          Convenience function, reused across different language bindings.
- *  @see    sz_find_charset
- */
-SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
-
-/**
- *  @brief  Finds the first character in the haystack, that is @b not present in the needle.
- *          Convenience function, reused across different language bindings.
- *  @see    sz_find_charset
- */
-SZ_DYNAMIC sz_cptr_t sz_find_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
-
-/**
- *  @brief  Finds the last character in the haystack, that is present in the needle.
- *          Convenience function, reused across different language bindings.
- *  @see    sz_find_charset
- */
-SZ_DYNAMIC sz_cptr_t sz_rfind_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
-
-/**
- *  @brief  Finds the last character in the haystack, that is @b not present in the needle.
- *          Convenience function, reused across different language bindings.
- *  @see    sz_find_charset
- */
-SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length);
-
-#pragma endregion
-
-#pragma region String Sequences
-
-struct sz_sequence_t;
-
-typedef sz_cptr_t (*sz_sequence_member_start_t)(struct sz_sequence_t const *, sz_size_t);
-typedef sz_size_t (*sz_sequence_member_length_t)(struct sz_sequence_t const *, sz_size_t);
-typedef sz_bool_t (*sz_sequence_predicate_t)(struct sz_sequence_t const *, sz_size_t);
-typedef sz_bool_t (*sz_sequence_comparator_t)(struct sz_sequence_t const *, sz_size_t, sz_size_t);
-typedef sz_bool_t (*sz_string_is_less_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
-
-typedef struct sz_sequence_t {
-    sz_u64_t *order;
-    sz_size_t count;
-    sz_sequence_member_start_t get_start;
-    sz_sequence_member_length_t get_length;
-    void const *handle;
-} sz_sequence_t;
-
-/**
- *  @brief  Initiates the sequence structure from a tape layout, used by Apache Arrow.
- *          Expects ::offsets to contains `count + 1` entries, the last pointing at the end
- *          of the last string, indicating the total length of the ::tape.
- */
-SZ_PUBLIC void sz_sequence_from_u32tape(sz_cptr_t *start, sz_u32_t const *offsets, sz_size_t count,
-                                        sz_sequence_t *sequence);
-
-/**
- *  @brief  Initiates the sequence structure from a tape layout, used by Apache Arrow.
- *          Expects ::offsets to contains `count + 1` entries, the last pointing at the end
- *          of the last string, indicating the total length of the ::tape.
- */
-SZ_PUBLIC void sz_sequence_from_u64tape(sz_cptr_t *start, sz_u64_t const *offsets, sz_size_t count,
-                                        sz_sequence_t *sequence);
-
-/**
- *  @brief  Similar to `std::partition`, given a predicate splits the sequence into two parts.
- *          The algorithm is unstable, meaning that elements may change relative order, as long
- *          as they are in the right partition. This is the simpler algorithm for partitioning.
- */
-SZ_PUBLIC sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate);
-
-/**
- *  @brief  Inplace `std::set_union` for two consecutive chunks forming the same continuous `sequence`.
+/*
+ **********************************************************************************************************************
+ **********************************************************************************************************************
+ **********************************************************************************************************************
  *
- *  @param partition The number of elements in the first sub-sequence in `sequence`.
- *  @param less Comparison function, to determine the lexicographic ordering.
+ *  This is where we the actual implementation begins.
+ *  The rest of the file is hidden from the public API.
+ *
+ **********************************************************************************************************************
+ **********************************************************************************************************************
+ **********************************************************************************************************************
  */
-SZ_PUBLIC void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequence_comparator_t less);
-
-/**
- *  @brief  Sorting algorithm, combining Radix Sort for the first 32 bits of every word
- *          and a follow-up by a more conventional sorting procedure on equally prefixed parts.
- */
-SZ_PUBLIC void sz_sort(sz_sequence_t *sequence);
-
-/**
- *  @brief  Partial sorting algorithm, combining Radix Sort for the first 32 bits of every word
- *          and a follow-up by a more conventional sorting procedure on equally prefixed parts.
- */
-SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t n);
-
-/**
- *  @brief  Intro-Sort algorithm that supports custom comparators.
- */
-SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t less);
-
-#pragma endregion
 
 #pragma region Compiler Extensions and Helper Functions
+
 #pragma GCC visibility push(hidden)
 
 /**
@@ -1153,6 +1070,27 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
  */
 #define sz_bitcast(type, value) (*((type *)&(value)))
 
+/**
+ *  @brief  Defines `SZ_NULL`, analogous to `NULL`.
+ *          The default often comes from locale.h, stddef.h,
+ *          stdio.h, stdlib.h, string.h, time.h, or wchar.h.
+ */
+#ifdef __GNUG__
+#define SZ_NULL __null
+#else
+#define SZ_NULL ((void *)0)
+#endif
+
+/**
+ *  @brief  Cache-line width, that will affect the execution of some algorithms,
+ *          like equality checks and relative order computing.
+ */
+#define SZ_CACHE_LINE_WIDTH (64) // bytes
+
+/**
+ *  @brief  Similar to `assert`, the `sz_assert` is used in the SZ_DEBUG mode
+ *          to check the invariants of the library. It's a no-op in the SZ_RELEASE mode.
+ */
 #if SZ_DEBUG
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `EXIT_FAILURE`
@@ -1404,7 +1342,7 @@ SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
     sz_size_t capacity;
     sz_copy((sz_ptr_t)&capacity, (sz_cptr_t)handle, sizeof(sz_size_t));
     sz_size_t consumed_capacity = sizeof(sz_size_t);
-    if (consumed_capacity + length > capacity) return NULL;
+    if (consumed_capacity + length > capacity) return SZ_NULL;
     return (sz_ptr_t)handle + consumed_capacity;
 }
 
@@ -1440,15 +1378,58 @@ SZ_INTERNAL void _sz_hashes_fingerprint_scalar_callback(sz_cptr_t start, sz_size
     *scalar_ptr ^= hash;
 }
 
+/**
+ *  @brief  Chooses the offsets of the most interesting characters in a search needle.
+ *
+ *  Search throughput can significantly deteriorate if we are matching the wrong characters.
+ *  Say the needle is "aXaYa", and we are comparing the first, second, and last character.
+ *  If we use SIMD and compare many offsets at a time, comparing against "a" in every register is a waste.
+ *
+ *  Similarly, dealing with UTF8 inputs, we know that the lower bits of each character code carry more information.
+ *  Cyrillic alphabet, for example, falls into [0x0410, 0x042F] code range for uppercase [А, Я], and
+ *  into [0x0430, 0x044F] for lowercase [а, я]. Scanning through a text written in Russian, half of the
+ *  bytes will carry absolutely no value and will be equal to 0x04.
+ */
+SZ_INTERNAL void _sz_pick_targets(sz_cptr_t start, sz_size_t length, //
+                                  sz_size_t *first, sz_size_t *second, sz_size_t *third) {
+    *first = 0;
+    *second = length / 2;
+    *third = length - 1;
+
+    //
+    int has_duplicates =                   //
+        start[*first] == start[*second] || //
+        start[*first] == start[*third] ||  //
+        start[*second] == start[*third];
+
+    // Loop through letters to find non-colliding variants.
+    if (length > 3 && has_duplicates) {
+        // Pivot the middle point left, until we find a character different from the first one.
+        for (; start[*second] == start[*first] && *second; --(*second)) {}
+        // Pivot the middle point right, until we find a character different from the first one.
+        for (; start[*second] == start[*first] && *second + 1 < *third; ++(*second)) {}
+        // Pivot the third (last) point left, until we find a different character.
+        for (; (start[*third] == start[*second] || start[*third] == start[*first]) && *third > (*second + 1);
+             --(*third)) {}
+    }
+}
+
 #pragma GCC visibility pop
 #pragma endregion
 
 #pragma region Serial Implementation
 
+#if !SZ_AVOID_LIBC
+#include <stdlib.h> // `malloc`
+#else
+extern void *malloc(size_t);
+extern void free(void *, size_t);
+#endif
+
 SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc) {
     alloc->allocate = (sz_memory_allocate_t)malloc;
     alloc->free = (sz_memory_free_t)free;
-    alloc->handle = NULL;
+    alloc->handle = SZ_NULL;
 }
 
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length) {
@@ -1473,7 +1454,7 @@ SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
 SZ_PUBLIC sz_cptr_t sz_find_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
     for (sz_cptr_t const end = text + length; text != end; ++text)
         if (sz_charset_contains(set, *text)) return text;
-    return NULL;
+    return SZ_NULL;
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
@@ -1482,7 +1463,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
     sz_cptr_t const end = text;
     for (text += length; text != end;)
         if (sz_charset_contains(set, *(text -= 1))) return text;
-    return NULL;
+    return SZ_NULL;
 #pragma GCC diagnostic pop
 }
 
@@ -1524,7 +1505,7 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_byte_equal(sz_u64_vec_t a, sz_u64_vec_t b)
  */
 SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    if (!h_length) return NULL;
+    if (!h_length) return SZ_NULL;
     sz_cptr_t const h_end = h + h_length;
 
 #if !SZ_USE_MISALIGNED_LOADS
@@ -1547,7 +1528,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     // Handle the misaligned tail.
     for (; h < h_end; ++h)
         if (*h == *n) return h;
-    return NULL;
+    return SZ_NULL;
 }
 
 /**
@@ -1557,7 +1538,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
  */
 sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    if (!h_length) return NULL;
+    if (!h_length) return SZ_NULL;
     sz_cptr_t const h_start = h;
 
     // Reposition the `h` pointer to the end, as we will be walking backwards.
@@ -1581,7 +1562,7 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
     for (; h >= h_start; --h)
         if (*h == *n) return h;
-    return NULL;
+    return SZ_NULL;
 }
 
 /**
@@ -1635,7 +1616,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
     for (; h + 2 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
-    return NULL;
+    return SZ_NULL;
 }
 
 /**
@@ -1699,7 +1680,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
     for (; h + 4 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
-    return NULL;
+    return SZ_NULL;
 }
 
 /**
@@ -1770,7 +1751,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
     for (; h + 3 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
-    return NULL;
+    return SZ_NULL;
 }
 
 /**
@@ -1817,7 +1798,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_siz
         if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i, n, n_length)) return h + i;
         i += bad_shift_table.jumps[h_vec.u8s[3]];
     }
-    return NULL;
+    return SZ_NULL;
 }
 
 /**
@@ -1862,7 +1843,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_upto_256bytes_serial(sz_cptr_t h, sz_si
         if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i, n, n_length)) return h + i;
         j += bad_shift_table.jumps[h_vec.u8s[0]];
     }
-    return NULL;
+    return SZ_NULL;
 }
 
 /**
@@ -1875,11 +1856,11 @@ SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_c
     sz_size_t suffix_length = n_length - prefix_length;
     while (1) {
         sz_cptr_t found = find_prefix(h, h_length, n, prefix_length);
-        if (!found) return NULL;
+        if (!found) return SZ_NULL;
 
         // Verify the remaining part of the needle
         sz_size_t remaining = h_length - (found - h);
-        if (remaining < suffix_length) return NULL;
+        if (remaining < suffix_length) return SZ_NULL;
         if (sz_equal_serial(found + prefix_length, n + prefix_length, suffix_length)) return found;
 
         // Adjust the position.
@@ -1888,7 +1869,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_c
     }
 
     // Unreachable, but helps silence compiler warnings:
-    return NULL;
+    return SZ_NULL;
 }
 
 /**
@@ -1901,11 +1882,11 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_with_suffix(sz_cptr_t h, sz_size_t h_length, sz_
     sz_size_t prefix_length = n_length - suffix_length;
     while (1) {
         sz_cptr_t found = find_suffix(h, h_length, n + prefix_length, suffix_length);
-        if (!found) return NULL;
+        if (!found) return SZ_NULL;
 
         // Verify the remaining part of the needle
         sz_size_t remaining = found - h;
-        if (remaining < prefix_length) return NULL;
+        if (remaining < prefix_length) return SZ_NULL;
         if (sz_equal_serial(found - prefix_length, n, prefix_length)) return found - prefix_length;
 
         // Adjust the position.
@@ -1913,7 +1894,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_with_suffix(sz_cptr_t h, sz_size_t h_length, sz_
     }
 
     // Unreachable, but helps silence compiler warnings:
-    return NULL;
+    return SZ_NULL;
 }
 
 SZ_INTERNAL sz_cptr_t _sz_find_over_4bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -1933,7 +1914,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_over_256bytes_serial(sz_cptr_t h, sz_si
 SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
@@ -1960,15 +1941,15 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
 SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
-        // TODO: implement reverse-order SWAR for 2/3/4 byte variants.
         (sz_find_t)sz_rfind_byte_serial,
-        // (sz_find_t)_sz_rfind_2byte_serial,
-        // (sz_find_t)_sz_rfind_3byte_serial,
-        // (sz_find_t)_sz_rfind_4byte_serial,
+        //  TODO: implement reverse-order SWAR for 2/3/4 byte variants.
+        //  TODO: (sz_find_t)_sz_rfind_2byte_serial,
+        //  TODO: (sz_find_t)_sz_rfind_3byte_serial,
+        //  TODO: (sz_find_t)_sz_rfind_4byte_serial,
         // To avoid constructing the skip-table, let's use the prefixed approach.
         // (sz_find_t)_sz_rfind_over_4bytes_serial,
         // For longer needles - use skip tables.
@@ -2159,6 +2140,22 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     alloc->free(distances, buffer_length, alloc->handle);
     return result;
 }
+
+/**
+ *  @brief  Largest prime number that fits into 31 bits.
+ *  @see    https://mersenneforum.org/showthread.php?t=3471
+ */
+#define SZ_U32_MAX_PRIME (2147483647u)
+
+/**
+ *  @brief  Largest prime number that fits into 64 bits.
+ *  @see    https://mersenneforum.org/showthread.php?t=3471
+ *
+ *  2^64 = 18,446,744,073,709,551,616
+ *  this = 18,446,744,073,709,551,557
+ *  diff = 59
+ */
+#define SZ_U64_MAX_PRIME (18446744073709551557ull)
 
 /*
  *  One hardware-accelerated way of mixing hashes can be CRC, but it's only implemented for 32-bit values.
@@ -2468,6 +2465,15 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
  */
 #pragma region Serial Implementation for the String Class
 
+/**
+ *  @brief  Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops.
+ *          On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
+ *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
+ */
+#ifndef SZ_SWAR_THRESHOLD
+#define SZ_SWAR_THRESHOLD (24) // bytes
+#endif
+
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
     // It doesn't matter if it's on stack or heap, the pointer location is the same.
     return (sz_bool_t)((sz_cptr_t)string->internal.start == (sz_cptr_t)&string->internal.chars[0]);
@@ -2527,7 +2533,7 @@ SZ_PUBLIC sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const 
 }
 
 SZ_PUBLIC void sz_string_init(sz_string_t *string) {
-    sz_assert(string && "String can't be NULL.");
+    sz_assert(string && "String can't be SZ_NULL.");
 
     // Only 8 + 1 + 1 need to be initialized.
     string->internal.start = &string->internal.chars[0];
@@ -2541,7 +2547,7 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
 
 SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
-    sz_assert(string && allocator && "String and allocator can't be NULL.");
+    sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
     // Initialize the string to zeros for safety.
     string->u64s[1] = 0;
     string->u64s[2] = 0;
@@ -2554,7 +2560,7 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
     else {
         // If we are not lucky, we need to allocate memory.
         string->external.start = (sz_ptr_t)allocator->allocate(space_needed, allocator->handle);
-        if (!string->external.start) return NULL;
+        if (!string->external.start) return SZ_NULL;
         string->external.length = length;
         string->external.space = space_needed;
     }
@@ -2565,7 +2571,7 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
 
 SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator) {
 
-    sz_assert(string && "String can't be NULL.");
+    sz_assert(string && "String can't be SZ_NULL.");
 
     sz_size_t new_space = new_capacity + 1;
     if (new_space <= SZ_STRING_INTERNAL_SPACE) return string->external.start;
@@ -2578,7 +2584,7 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
     sz_assert(new_space > string_space && "New space must be larger than current.");
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
-    if (!new_start) return NULL;
+    if (!new_start) return SZ_NULL;
 
     sz_copy(new_start, string_start, string_length);
     string->external.start = new_start;
@@ -2594,7 +2600,7 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
 SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_size_t added_length,
                                     sz_memory_allocator_t *allocator) {
 
-    sz_assert(string && allocator && "String and allocator can't be NULL.");
+    sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -2618,7 +2624,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
         sz_size_t min_needed_space = sz_size_bit_ceil(offset + string_length + added_length + 1);
         sz_size_t new_space = sz_max_of_two(min_needed_space, next_planned_size);
         string_start = sz_string_reserve(string, new_space - 1, allocator);
-        if (!string_start) return NULL;
+        if (!string_start) return SZ_NULL;
 
         // Copy into the new buffer.
         sz_move(string_start + offset + added_length, string_start + offset, string_length - offset);
@@ -2631,7 +2637,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
 
 SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
 
-    sz_assert(string && "String can't be NULL.");
+    sz_assert(string && "String can't be SZ_NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -3040,22 +3046,25 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_
 SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
     if (n_length == 1) return sz_find_byte_avx2(h, h_length, n);
 
+    sz_size_t offset_first, offset_second, offset_third;
+    _sz_pick_targets(h, h_length, &offset_first, &offset_second, &offset_third);
+
     int matches;
     sz_u256_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
-    n_first_vec.ymm = _mm256_set1_epi8(n[0]);
-    n_mid_vec.ymm = _mm256_set1_epi8(n[n_length / 2]);
-    n_last_vec.ymm = _mm256_set1_epi8(n[n_length - 1]);
+    n_first_vec.ymm = _mm256_set1_epi8(n[offset_first]);
+    n_mid_vec.ymm = _mm256_set1_epi8(n[offset_second]);
+    n_last_vec.ymm = _mm256_set1_epi8(n[offset_third]);
 
     for (; h_length >= n_length + 32; h += 32, h_length -= 32) {
-        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h));
-        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + n_length / 2));
-        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + n_length - 1));
+        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_first));
+        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_second));
+        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_third));
         matches = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_first_vec.ymm, n_first_vec.ymm)) &
                   _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_mid_vec.ymm, n_mid_vec.ymm)) &
                   _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches) {
             int potential_offset = sz_u32_ctz(matches);
-            if (sz_equal(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+            if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
             matches &= matches - 1;
         }
     }
@@ -3391,13 +3400,13 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
         if (mask) return h + sz_u64_ctz(mask);
     }
 
-    return NULL;
+    return SZ_NULL;
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_find_byte_avx512(h, h_length, n);
 
     __mmask64 matches;
@@ -3440,7 +3449,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
             matches &= matches - 1;
         }
     }
-    return NULL;
+    return SZ_NULL;
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
@@ -3463,13 +3472,13 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cpt
         if (mask) return h + 64 - sz_u64_clz(mask) - 1;
     }
 
-    return NULL;
+    return SZ_NULL;
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_rfind_byte_avx512(h, h_length, n);
 
     __mmask64 mask;
@@ -3516,7 +3525,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
         }
     }
 
-    return NULL;
+    return SZ_NULL;
 }
 
 SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t window_length, //
@@ -3700,7 +3709,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_
         else { text += load_length, length -= load_length; }
     }
 
-    return NULL;
+    return SZ_NULL;
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
@@ -3755,79 +3764,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz
         else { length -= load_length; }
     }
 
-    return NULL;
+    return SZ_NULL;
 }
-
-#if 0
-SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
-    sz_cptr_t const a, sz_size_t const a_length, //
-    sz_cptr_t const b, sz_size_t const b_length, //
-    sz_size_t const bound, sz_memory_allocator_t *alloc) {
-
-    sz_u512_vec_t a_vec, b_vec, previous_vec, current_vec, permutation_vec;
-    sz_u512_vec_t cost_deletion_vec, cost_insertion_vec, cost_substitution_vec;
-    sz_size_t min_distance;
-
-    b_vec.zmm = _mm512_maskz_loadu_epi8(_sz_u64_mask_until(b_length), b);
-    previous_vec.zmm = _mm512_set_epi8(63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, //
-                                       47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, //
-                                       31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
-                                       15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
-
-    // Shifting bytes across the whole ZMM register is quite complicated, so let's use a permutation for that.
-    permutation_vec.zmm = _mm512_set_epi8(62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, //
-                                          46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, //
-                                          30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, //
-                                          14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 63);
-
-    for (sz_size_t idx_a = 0; idx_a != a_length; ++idx_a) {
-        min_distance = bound - 1;
-
-        a_vec.zmm = _mm512_set1_epi8(a[idx_a]);
-        // We first start by computing the cost of deletions and substitutions
-        // for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
-        //     sz_u8_t cost_deletion = previous_vec.u8s[idx_b + 1] + 1;
-        //     sz_u8_t cost_substitution = previous_vec.u8s[idx_b] + (a[idx_a] != b[idx_b]);
-        //     current_vec.u8s[idx_b + 1] = sz_min_of_two(cost_deletion, cost_substitution);
-        // }
-        cost_deletion_vec.zmm = _mm512_add_epi8(previous_vec.zmm, _mm512_set1_epi8(1));
-        cost_substitution_vec.zmm =
-            _mm512_mask_set1_epi8(_mm512_setzero_si512(), _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm), 0x01);
-        cost_substitution_vec.zmm = _mm512_add_epi8(previous_vec.zmm, cost_substitution_vec.zmm);
-        cost_substitution_vec.zmm = _mm512_permutexvar_epi8(permutation_vec.zmm, cost_substitution_vec.zmm);
-        current_vec.zmm = _mm512_min_epu8(cost_deletion_vec.zmm, cost_substitution_vec.zmm);
-        current_vec.u8s[0] = idx_a + 1;
-
-        // Now we need to compute the inclusive prefix sums using the minimum operator
-        // In one line:
-        //      current_vec.u8s[idx_b + 1] = sz_min_of_two(current_vec.u8s[idx_b + 1], current_vec.u8s[idx_b] + 1)
-        //
-        // Unrolling this:
-        //      current_vec.u8s[0 + 1] = sz_min_of_two(current_vec.u8s[0 + 1], current_vec.u8s[0] + 1)
-        //      current_vec.u8s[1 + 1] = sz_min_of_two(current_vec.u8s[1 + 1], current_vec.u8s[1] + 1)
-        //      current_vec.u8s[2 + 1] = sz_min_of_two(current_vec.u8s[2 + 1], current_vec.u8s[2] + 1)
-        //      current_vec.u8s[3 + 1] = sz_min_of_two(current_vec.u8s[3 + 1], current_vec.u8s[3] + 1)
-        //
-        // Alternatively, using a tree-like reduction in log2 steps:
-        //      - 6 cycles of reductions shifting by 1, 2, 4, 8, 16, 32, 64 bytes;
-        //      - with each cycle containing at least one shift, min, add, blend.
-        //
-        // Which adds meaningless complexity without any performance gains.
-        for (sz_size_t idx_b = 0; idx_b != b_length; ++idx_b) {
-            sz_u8_t cost_insertion = current_vec.u8s[idx_b] + 1;
-            current_vec.u8s[idx_b + 1] = sz_min_of_two(current_vec.u8s[idx_b + 1], cost_insertion);
-        }
-
-        // Swap previous_distances and current_distances pointers
-        sz_u512_vec_t temp_vec;
-        temp_vec.zmm = previous_vec.zmm;
-        previous_vec.zmm = current_vec.zmm;
-        current_vec.zmm = temp_vec.zmm;
-    }
-
-    return previous_vec.u8s[b_length] < bound ? previous_vec.u8s[b_length] : bound;
-}
-#endif
 
 #pragma clang attribute pop
 #pragma GCC pop_options
@@ -3841,8 +3779,6 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
 #pragma region ARM NEON
 
 #if SZ_USE_ARM_NEON
-#include <arm_acle.h>
-#include <arm_neon.h>
 
 /**
  *  @brief  Helper structure to simplify work with 64-bit words.
