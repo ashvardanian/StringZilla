@@ -3501,8 +3501,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
             int potential_offset = sz_u64_clz(matches);
             if (n_length <= 3 || sz_equal_avx512(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
                 return h + h_length - n_length - potential_offset;
-            sz_assert((matches & (1 << (63 - potential_offset))) != 0 && "The bit must be set before we squash it");
-            matches &= ~(1 << (63 - potential_offset));
+            sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
+                      "The bit must be set before we squash it");
+            matches &= ~((sz_u64_t)1 << (63 - potential_offset));
         }
     }
 
@@ -3520,8 +3521,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
             int potential_offset = sz_u64_clz(matches);
             if (n_length <= 3 || sz_equal_avx512(h + 64 - potential_offset, n + 1, n_length - 2))
                 return h + 64 - potential_offset - 1;
-            sz_assert((matches & (1 << (63 - potential_offset))) != 0 && "The bit must be set before we squash it");
-            matches &= ~(1 << (63 - potential_offset));
+            sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
+                      "The bit must be set before we squash it");
+            matches &= ~((sz_u64_t)1 << (63 - potential_offset));
         }
     }
 
