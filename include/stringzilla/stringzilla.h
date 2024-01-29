@@ -3530,6 +3530,14 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
     return SZ_NULL;
 }
 
+#pragma clang attribute pop
+#pragma GCC pop_options
+
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "bmi", "bmi2")
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,bmi,bmi2"))), \
+                             apply_to = function)
+
 SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t window_length, //
                                 sz_hash_callback_t callback, void *callback_handle) {
 
