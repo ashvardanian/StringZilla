@@ -133,8 +133,11 @@ function(set_compiler_flags target cpp_standard target_arch)
     "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/Zi>"
   )
 
-  # Check for ${target_arch} and set it or use "march=native"
-  # if not defined
+  # Enable Position Independent Code
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
+  target_link_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
+
+  # Check for ${target_arch} and set it or use "march=native" if not defined
   if("${target_arch}" STREQUAL "")
     # MSVC does not have a direct equivalent to -march=native
     target_compile_options(
@@ -207,5 +210,6 @@ if(${STRINGZILLA_BUILD_SHARED})
   set_target_properties(stringzilla_shared PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 1
+    POSITION_INDEPENDENT_CODE ON
     PUBLIC_HEADER include/stringzilla/stringzilla.h)
 endif()
