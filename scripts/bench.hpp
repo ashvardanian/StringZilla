@@ -5,9 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
-#include <fstream>
 #include <functional> // `std::equal_to`
-#include <iostream>
 #include <limits>
 #include <numeric>
 #include <random>
@@ -17,6 +15,8 @@
 
 #include <stringzilla/stringzilla.h>
 #include <stringzilla/stringzilla.hpp>
+
+#include "test.hpp" // `read_file`
 
 #if SZ_DEBUG // Make debugging faster
 #define default_seconds_m 10
@@ -68,14 +68,14 @@ struct tracked_function_gt {
         //  - call latency in ns with up to 1 significant digit, 10 characters
         //  - number of failed tests, 10 characters
         //  - first example of a failed test, up to 20 characters
-        if constexpr (std::is_same<function_type, binary_function_t>())
-            format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s %s\n";
-        else
-            format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s\n";
+        bool is_binary = std::is_same<function_type, binary_function_t>();
+        if (is_binary) { format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s %s\n"; }
+        else { format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s\n"; }
+
         std::printf(format, name.c_str(), results.bytes_passed / results.seconds / 1.e9,
                     results.seconds * 1e9 / results.iterations, failed_count, results.iterations,
                     failed_strings.size() ? failed_strings[0].c_str() : "",
-                    failed_strings.size() ? failed_strings[1].c_str() : "");
+                    failed_strings.size() >= 2 && is_binary ? failed_strings[1].c_str() : "");
     }
 };
 
@@ -109,25 +109,24 @@ inline std::size_t bit_floor(std::size_t n) {
     return static_cast<std::size_t>(1) << most_siginificant_bit_position;
 }
 
-inline std::string read_file(std::string path) {
-    std::ifstream stream(path);
-    if (!stream.is_open()) { throw std::runtime_error("Failed to open file: " + path); }
-    return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-}
-
-/**
- *  @brief  Splits a string into words,using newlines, tabs, and whitespaces as delimiters.
- */
-inline std::vector<std::string_view> tokenize(std::string_view str) {
+template <typename is_separator_callback_type>
+inline std::vector<std::string_view> tokenize(std::string_view str, is_separator_callback_type &&is_separator) {
     std::vector<std::string_view> words;
     std::size_t start = 0;
     for (std::size_t end = 0; end <= str.length(); ++end) {
-        if (end == str.length() || std::isspace(str[end])) {
+        if (end == str.length() || is_separator(str[end])) {
             if (start < end) words.push_back({&str[start], end - start});
             start = end + 1;
         }
     }
     return words;
+}
+
+/**
+ *  @brief  Splits a string into words, using newlines, tabs, and whitespaces as delimiters.
+ */
+inline std::vector<std::string_view> tokenize(std::string_view str) {
+    return tokenize(str, [](char c) { return std::isspace(c); });
 }
 
 template <typename result_string_type = std::string_view, typename from_string_type = result_string_type,
@@ -143,6 +142,7 @@ inline std::vector<result_string_type> filter_by_length(std::vector<from_string_
 struct dataset_t {
     std::string text;
     std::vector<std::string_view> tokens;
+    std::vector<std::string_view> lines;
 };
 
 /**
@@ -154,18 +154,29 @@ inline dataset_t make_dataset_from_path(std::string path) {
     data.text.resize(bit_floor(data.text.size()));
     data.tokens = tokenize(data.text);
     data.tokens.resize(bit_floor(data.tokens.size()));
+    data.lines = tokenize(data.text, [](char c) { return c == '\n'; });
+    data.lines.resize(bit_floor(data.lines.size()));
 
 #ifdef NDEBUG // Shuffle only in release mode
     std::random_device random_device;
     std::mt19937 random_generator(random_device());
     std::shuffle(data.tokens.begin(), data.tokens.end(), random_generator);
+    std::shuffle(data.lines.begin(), data.lines.end(), random_generator);
 #endif
 
     // Report some basic stats about the dataset
-    std::size_t mean_bytes = 0;
-    for (auto const &str : data.tokens) mean_bytes += str.size();
-    mean_bytes /= data.tokens.size();
-    std::printf("Parsed the file with %zu words of %zu mean length!\n", data.tokens.size(), mean_bytes);
+    double mean_token_bytes = 0, mean_line_bytes = 0;
+    for (auto const &str : data.tokens) mean_token_bytes += str.size();
+    for (auto const &str : data.lines) mean_line_bytes += str.size();
+    mean_token_bytes /= data.tokens.size();
+    mean_line_bytes /= data.lines.size();
+
+    std::setlocale(LC_NUMERIC, "");
+    std::printf(                                     //
+        "Parsed the dataset with:\n"                 //
+        "- %zu words of mean length ~ %.2f bytes\n"  //
+        "- %zu lines of mean length ~ %.2f bytes\n", //
+        data.tokens.size(), mean_token_bytes, data.lines.size(), mean_line_bytes);
 
     return data;
 }

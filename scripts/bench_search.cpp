@@ -8,6 +8,7 @@
  */
 #include <string.h> // `memmem`
 
+#define SZ_USE_MISALIGNED_LOADS (1)
 #include <bench.hpp>
 
 using namespace ashvardanian::stringzilla::scripts;
@@ -309,13 +310,15 @@ int main(int argc, char const **argv) {
     bench_finds(dataset.text, {sz::ascii_controls()}, find_charset_functions());
     bench_rfinds(dataset.text, {sz::ascii_controls()}, rfind_charset_functions());
 
-    // Baseline benchmarks for real words, coming in all lengths
-    std::printf("Benchmarking on real words:\n");
+    // Baseline benchmarks for present tokens, coming in all lengths
+    std::printf("Benchmarking on present lines:\n");
+    bench_search(dataset.text, {dataset.lines.begin(), dataset.lines.end()});
+    std::printf("Benchmarking on present tokens:\n");
     bench_search(dataset.text, {dataset.tokens.begin(), dataset.tokens.end()});
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
-        std::printf("Benchmarking on real words of length %zu:\n", token_length);
+        std::printf("Benchmarking on present tokens of length %zu:\n", token_length);
         bench_search(dataset.text, filter_by_length<std::string>(dataset.tokens, token_length));
     }
 
