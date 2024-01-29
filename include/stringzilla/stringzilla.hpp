@@ -71,10 +71,11 @@
 #endif
 #endif
 
-#include <cassert> // `assert`
-#include <cstddef> // `std::size_t`
-#include <iosfwd>  // `std::basic_ostream`
-#include <utility> // `std::swap`
+#include <cassert>   // `assert`
+#include <cstddef>   // `std::size_t`
+#include <iosfwd>    // `std::basic_ostream`
+#include <stdexcept> // `std::out_of_range`
+#include <utility>   // `std::swap`
 
 #include <stringzilla/stringzilla.h>
 
