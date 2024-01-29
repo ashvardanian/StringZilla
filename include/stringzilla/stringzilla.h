@@ -28,6 +28,18 @@
 #define STRINGZILLA_VERSION_PATCH 4
 
 /**
+ *  @brief  When set to 1, the library will include the following LibC headers: <stddef.h> and <stdint.h>.
+ *          In debug builds (SZ_DEBUG=1), the library will also include <stdio.h> and <stdlib.h>.
+ *
+ *  You may want to disable this compiling for use in the kernel, or in embedded systems.
+ *  You may also avoid them, if you are very sensitive to compilation time and avoid pre-compiled headers.
+ *  https://artificial-mind.net/projects/compile-health/
+ */
+#ifndef SZ_AVOID_LIBC
+#define SZ_AVOID_LIBC (0) // true or false
+#endif
+
+/**
  *  @brief  A misaligned load can be - trying to fetch eight consecutive bytes from an address
  *          that is not divisible by eight.
  *
@@ -1090,10 +1102,10 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
 /**
  *  @brief  Similar to `assert`, the `sz_assert` is used in the SZ_DEBUG mode
  *          to check the invariants of the library. It's a no-op in the SZ_RELEASE mode.
+ *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
 #if SZ_DEBUG
-#include <stdio.h>  // `fprintf`
-#include <stdlib.h> // `EXIT_FAILURE`
+#include <stdio.h>
 #define sz_assert(condition)                                                                                \
     do {                                                                                                    \
         if (!(condition)) {                                                                                 \
@@ -1390,7 +1402,7 @@ SZ_INTERNAL void _sz_hashes_fingerprint_scalar_callback(sz_cptr_t start, sz_size
  *  into [0x0430, 0x044F] for lowercase [а, я]. Scanning through a text written in Russian, half of the
  *  bytes will carry absolutely no value and will be equal to 0x04.
  */
-SZ_INTERNAL void _sz_pick_targets(sz_cptr_t start, sz_size_t length, //
+SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, //
                                   sz_size_t *first, sz_size_t *second, sz_size_t *third) {
     *first = 0;
     *second = length / 2;
@@ -1420,7 +1432,8 @@ SZ_INTERNAL void _sz_pick_targets(sz_cptr_t start, sz_size_t length, //
 #pragma region Serial Implementation
 
 #if !SZ_AVOID_LIBC
-#include <stdlib.h> // `malloc`
+#include <stdio.h>  // `fprintf`
+#include <stdlib.h> // `malloc`, `EXIT_FAILURE`
 #else
 extern void *malloc(size_t);
 extern void free(void *, size_t);
@@ -1758,8 +1771,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
  *  @brief  Boyer-Moore-Horspool algorithm for exact matching of patterns up to @b 256-bytes long.
  *          Uses the Raita heuristic to match the first two, the last, and the middle character of the pattern.
  */
-SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                             sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h_chars, sz_size_t h_length, //
+                                                             sz_cptr_t n_chars, sz_size_t n_length) {
     sz_assert(n_length <= 256 && "The pattern is too long.");
     // Several popular string matching algorithms are using a bad-character shift table.
     // Boyer Moore: https://www-igm.univ-mlv.fr/~lecroq/string/node14.html
@@ -1771,32 +1784,38 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_siz
     } bad_shift_table;
 
     // Let's initialize the table using SWAR to the total length of the string.
+    sz_u8_t const *h = (sz_u8_t const *)h_chars;
+    sz_u8_t const *n = (sz_u8_t const *)n_chars;
     {
         sz_u64_vec_t n_length_vec;
         n_length_vec.u64 = n_length;
         n_length_vec.u64 *= 0x0101010101010101ull; // broadcast
         for (sz_size_t i = 0; i != 64; ++i) bad_shift_table.vecs[i].u64 = n_length_vec.u64;
-        sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
-        for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table.jumps[n_unsigned[i]] = (sz_u8_t)(n_length - i - 1);
+        for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table.jumps[n[i]] = (sz_u8_t)(n_length - i - 1);
     }
 
     // Another common heuristic is to match a few characters from different parts of a string.
     // Raita suggests to use the first two, the last, and the middle character of the pattern.
-    sz_size_t n_midpoint = n_length / 2;
     sz_u32_vec_t h_vec, n_vec;
-    n_vec.u8s[0] = n[0];
-    n_vec.u8s[1] = n[1];
-    n_vec.u8s[2] = n[n_midpoint];
-    n_vec.u8s[3] = n[n_length - 1];
+
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n_chars, n_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast those characters into an unsigned integer.
+    n_vec.u8s[0] = n[offset_first];
+    n_vec.u8s[1] = n[offset_first + 1];
+    n_vec.u8s[2] = n[offset_mid];
+    n_vec.u8s[3] = n[offset_last];
 
     // Scan through the whole haystack, skipping the last `n_length - 1` bytes.
     for (sz_size_t i = 0; i <= h_length - n_length;) {
-        h_vec.u8s[0] = h[i + 0];
-        h_vec.u8s[1] = h[i + 1];
-        h_vec.u8s[2] = h[i + n_midpoint];
-        h_vec.u8s[3] = h[i + n_length - 1];
-        if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i, n, n_length)) return h + i;
-        i += bad_shift_table.jumps[h_vec.u8s[3]];
+        h_vec.u8s[0] = h[i + offset_first];
+        h_vec.u8s[1] = h[i + offset_first + 1];
+        h_vec.u8s[2] = h[i + offset_mid];
+        h_vec.u8s[3] = h[i + offset_last];
+        if (h_vec.u32 == n_vec.u32 && sz_equal((sz_cptr_t)h + i, n_chars, n_length)) return (sz_cptr_t)h + i;
+        i += bad_shift_table.jumps[h[i + n_length - 1]];
     }
     return SZ_NULL;
 }
@@ -1805,8 +1824,8 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h, sz_siz
  *  @brief  Boyer-Moore-Horspool algorithm for @b reverse-order exact matching of patterns up to @b 256-bytes long.
  *          Uses the Raita heuristic to match the first two, the last, and the middle character of the pattern.
  */
-SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_upto_256bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
-                                                              sz_size_t n_length) {
+SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_upto_256bytes_serial(sz_cptr_t h_chars, sz_size_t h_length, //
+                                                              sz_cptr_t n_chars, sz_size_t n_length) {
     sz_assert(n_length <= 256 && "The pattern is too long.");
     union {
         sz_u8_t jumps[256];
@@ -1814,34 +1833,40 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_upto_256bytes_serial(sz_cptr_t h, sz_si
     } bad_shift_table;
 
     // Let's initialize the table using SWAR to the total length of the string.
+    sz_u8_t const *h = (sz_u8_t const *)h_chars;
+    sz_u8_t const *n = (sz_u8_t const *)n_chars;
     {
         sz_u64_vec_t n_length_vec;
         n_length_vec.u64 = n_length;
         n_length_vec.u64 *= 0x0101010101010101ull; // broadcast
         for (sz_size_t i = 0; i != 64; ++i) bad_shift_table.vecs[i].u64 = n_length_vec.u64;
-        sz_u8_t const *n_unsigned = (sz_u8_t const *)n;
         for (sz_size_t i = 0; i + 1 < n_length; ++i)
-            bad_shift_table.jumps[n_unsigned[n_length - i - 1]] = (sz_u8_t)(n_length - i - 1);
+            bad_shift_table.jumps[n[n_length - i - 1]] = (sz_u8_t)(n_length - i - 1);
     }
 
     // Another common heuristic is to match a few characters from different parts of a string.
     // Raita suggests to use the first two, the last, and the middle character of the pattern.
-    sz_size_t n_midpoint = n_length / 2;
     sz_u32_vec_t h_vec, n_vec;
-    n_vec.u8s[0] = n[0];
-    n_vec.u8s[1] = n[1];
-    n_vec.u8s[2] = n[n_midpoint];
-    n_vec.u8s[3] = n[n_length - 1];
+
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n_chars, n_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast those characters into an unsigned integer.
+    n_vec.u8s[0] = n[offset_first];
+    n_vec.u8s[1] = n[offset_first + 1];
+    n_vec.u8s[2] = n[offset_mid];
+    n_vec.u8s[3] = n[offset_last];
 
     // Scan through the whole haystack, skipping the first `n_length - 1` bytes.
     for (sz_size_t j = 0; j <= h_length - n_length;) {
         sz_size_t i = h_length - n_length - j;
-        h_vec.u8s[0] = h[i + 0];
-        h_vec.u8s[1] = h[i + 1];
-        h_vec.u8s[2] = h[i + n_midpoint];
-        h_vec.u8s[3] = h[i + n_length - 1];
-        if (h_vec.u32 == n_vec.u32 && sz_equal_serial(h + i, n, n_length)) return h + i;
-        j += bad_shift_table.jumps[h_vec.u8s[0]];
+        h_vec.u8s[0] = h[i + offset_first];
+        h_vec.u8s[1] = h[i + offset_first + 1];
+        h_vec.u8s[2] = h[i + offset_mid];
+        h_vec.u8s[3] = h[i + offset_last];
+        if (h_vec.u32 == n_vec.u32 && sz_equal((sz_cptr_t)h + i, n_chars, n_length)) return (sz_cptr_t)h + i;
+        j += bad_shift_table.jumps[h[i]];
     }
     return SZ_NULL;
 }
@@ -1861,7 +1886,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_c
         // Verify the remaining part of the needle
         sz_size_t remaining = h_length - (found - h);
         if (remaining < suffix_length) return SZ_NULL;
-        if (sz_equal_serial(found + prefix_length, n + prefix_length, suffix_length)) return found;
+        if (sz_equal(found + prefix_length, n + prefix_length, suffix_length)) return found;
 
         // Adjust the position.
         h = found + 1;
@@ -1887,7 +1912,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_with_suffix(sz_cptr_t h, sz_size_t h_length, sz_
         // Verify the remaining part of the needle
         sz_size_t remaining = found - h;
         if (remaining < prefix_length) return SZ_NULL;
-        if (sz_equal_serial(found - prefix_length, n, prefix_length)) return found - prefix_length;
+        if (sz_equal(found - prefix_length, n, prefix_length)) return found - prefix_length;
 
         // Adjust the position.
         h_length = remaining - 1;
@@ -3044,21 +3069,27 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_find_byte_avx2(h, h_length, n);
 
-    sz_size_t offset_first, offset_second, offset_third;
-    _sz_pick_targets(h, h_length, &offset_first, &offset_second, &offset_third);
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
 
+    // Broadcast those characters into YMM registers.
     int matches;
     sz_u256_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
     n_first_vec.ymm = _mm256_set1_epi8(n[offset_first]);
-    n_mid_vec.ymm = _mm256_set1_epi8(n[offset_second]);
-    n_last_vec.ymm = _mm256_set1_epi8(n[offset_third]);
+    n_mid_vec.ymm = _mm256_set1_epi8(n[offset_mid]);
+    n_last_vec.ymm = _mm256_set1_epi8(n[offset_last]);
 
+    // Scan through the string.
     for (; h_length >= n_length + 32; h += 32, h_length -= 32) {
         h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_first));
-        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_second));
-        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_third));
+        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_mid));
+        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + offset_last));
         matches = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_first_vec.ymm, n_first_vec.ymm)) &
                   _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_mid_vec.ymm, n_mid_vec.ymm)) &
                   _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
@@ -3073,24 +3104,35 @@ SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_rfind_byte_avx2(h, h_length, n);
 
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast those characters into YMM registers.
     int matches;
     sz_u256_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
-    n_first_vec.ymm = _mm256_set1_epi8(n[0]);
-    n_mid_vec.ymm = _mm256_set1_epi8(n[n_length / 2]);
-    n_last_vec.ymm = _mm256_set1_epi8(n[n_length - 1]);
+    n_first_vec.ymm = _mm256_set1_epi8(n[offset_first]);
+    n_mid_vec.ymm = _mm256_set1_epi8(n[offset_mid]);
+    n_last_vec.ymm = _mm256_set1_epi8(n[offset_last]);
 
+    // Scan through the string.
+    sz_cptr_t h_reversed;
     for (; h_length >= n_length + 32; h_length -= 32) {
-        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + h_length - n_length - 32 + 1));
-        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + h_length - n_length - 32 + 1 + n_length / 2));
-        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h + h_length - 32));
+        h_reversed = h + h_length - n_length - 32 + 1;
+        h_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h_reversed + offset_first));
+        h_mid_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h_reversed + offset_mid));
+        h_last_vec.ymm = _mm256_lddqu_si256((__m256i const *)(h_reversed + offset_last));
         matches = _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_first_vec.ymm, n_first_vec.ymm)) &
                   _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_mid_vec.ymm, n_mid_vec.ymm)) &
                   _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches) {
             int potential_offset = sz_u32_clz(matches);
-            if (sz_equal(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
+            if (sz_equal(h + h_length - n_length - potential_offset, n, n_length))
                 return h + h_length - n_length - potential_offset;
             matches &= ~(1 << (31 - potential_offset));
         }
@@ -3409,43 +3451,50 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_find_byte_avx512(h, h_length, n);
 
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast those characters into ZMM registers.
     __mmask64 matches;
     __mmask64 mask;
     sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
-    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
-    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
-    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
+    n_first_vec.zmm = _mm512_set1_epi8(n[offset_first]);
+    n_mid_vec.zmm = _mm512_set1_epi8(n[offset_mid]);
+    n_last_vec.zmm = _mm512_set1_epi8(n[offset_last]);
 
-    // The main "body" of the function processes 64 possible offsets at once.
+    // Scan through the string.
     for (; h_length >= n_length + 64; h += 64, h_length -= 64) {
-        h_first_vec.zmm = _mm512_loadu_epi8(h);
-        h_mid_vec.zmm = _mm512_loadu_epi8(h + n_length / 2);
-        h_last_vec.zmm = _mm512_loadu_epi8(h + n_length - 1);
+        h_first_vec.zmm = _mm512_loadu_epi8(h + offset_first);
+        h_mid_vec.zmm = _mm512_loadu_epi8(h + offset_mid);
+        h_last_vec.zmm = _mm512_loadu_epi8(h + offset_last);
         matches = _kand_mask64(_kand_mask64( // Intersect the masks
                                    _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
                                    _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
                                _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_ctz(matches);
-            if (n_length <= 3 || sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2))
-                return h + potential_offset;
+            if (n_length <= 3 || sz_equal_avx512(h + potential_offset, n, n_length)) return h + potential_offset;
             matches &= matches - 1;
         }
+
+        // TODO: If the last character contains a bad byte, we can reposition the start of the next iteration.
+        // This will be very helpful for very long needles.
     }
+
     // The "tail" of the function uses masked loads to process the remaining bytes.
     {
         mask = _sz_u64_mask_until(h_length - n_length + 1);
-        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + offset_first);
+        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + offset_mid);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + offset_last);
         matches = _kand_mask64(_kand_mask64( // Intersect the masks
                                    _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
                                    _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
                                _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_ctz(matches);
-            if (n_length <= 3 || sz_equal_avx512(h + potential_offset + 1, n + 1, n_length - 2))
-                return h + potential_offset;
+            if (n_length <= 3 || sz_equal_avx512(h + potential_offset, n, n_length)) return h + potential_offset;
             matches &= matches - 1;
         }
     }
@@ -3481,25 +3530,32 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
     if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_rfind_byte_avx512(h, h_length, n);
 
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast those characters into ZMM registers.
     __mmask64 mask;
     __mmask64 matches;
     sz_u512_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec;
-    n_first_vec.zmm = _mm512_set1_epi8(n[0]);
-    n_mid_vec.zmm = _mm512_set1_epi8(n[n_length / 2]);
-    n_last_vec.zmm = _mm512_set1_epi8(n[n_length - 1]);
+    n_first_vec.zmm = _mm512_set1_epi8(n[offset_first]);
+    n_mid_vec.zmm = _mm512_set1_epi8(n[offset_mid]);
+    n_last_vec.zmm = _mm512_set1_epi8(n[offset_last]);
 
-    // The main "body" of the function processes 64 possible offsets at once.
+    // Scan through the string.
+    sz_cptr_t h_reversed;
     for (; h_length >= n_length + 64; h_length -= 64) {
-        h_first_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1);
-        h_mid_vec.zmm = _mm512_loadu_epi8(h + h_length - n_length - 64 + 1 + n_length / 2);
-        h_last_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
+        h_reversed = h + h_length - n_length - 64 + 1;
+        h_first_vec.zmm = _mm512_loadu_epi8(h_reversed + offset_first);
+        h_mid_vec.zmm = _mm512_loadu_epi8(h_reversed + offset_mid);
+        h_last_vec.zmm = _mm512_loadu_epi8(h_reversed + offset_last);
         matches = _kand_mask64(_kand_mask64( // Intersect the masks
                                    _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
                                    _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
                                _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_clz(matches);
-            if (n_length <= 3 || sz_equal_avx512(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
+            if (n_length <= 3 || sz_equal_avx512(h + h_length - n_length - potential_offset, n, n_length))
                 return h + h_length - n_length - potential_offset;
             sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
                       "The bit must be set before we squash it");
@@ -3510,16 +3566,16 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
     // The "tail" of the function uses masked loads to process the remaining bytes.
     {
         mask = _sz_u64_mask_until(h_length - n_length + 1);
-        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h);
-        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length / 2);
-        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + n_length - 1);
+        h_first_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + offset_first);
+        h_mid_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + offset_mid);
+        h_last_vec.zmm = _mm512_maskz_loadu_epi8(mask, h + offset_last);
         matches = _kand_mask64(_kand_mask64( // Intersect the masks
                                    _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
                                    _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
                                _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_clz(matches);
-            if (n_length <= 3 || sz_equal_avx512(h + 64 - potential_offset, n + 1, n_length - 2))
+            if (n_length <= 3 || sz_equal_avx512(h + 64 - potential_offset - 1, n, n_length))
                 return h + 64 - potential_offset - 1;
             sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
                       "The bit must be set before we squash it");
