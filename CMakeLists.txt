@@ -3,7 +3,7 @@ project(
   stringzilla
   VERSION 2.0.4
   LANGUAGES C CXX
-  DESCRIPTION "Crunch multi-gigabyte strings with ease"
+  DESCRIPTION "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances"
   HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla")
 
 set(CMAKE_C_STANDARD 99)

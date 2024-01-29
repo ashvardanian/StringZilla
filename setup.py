@@ -148,7 +148,7 @@ setup(
     name=__lib_name__,
     version=__version__,
     author="Ash Vardanian",
-    description="Crunch multi-gigabyte strings with ease",
+    description="SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="Apache-2.0",
