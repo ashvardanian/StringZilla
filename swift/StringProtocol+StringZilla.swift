@@ -17,6 +17,13 @@
 import Foundation
 import StringZillaC
 
+// We need to link the standard libraries.
+#if os(Linux)
+import Glibc
+#else
+import Darwin.C
+#endif
+
 /// Protocol defining a single-byte data type.
 protocol SingleByte {}
 extension UInt8: SingleByte {}

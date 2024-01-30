@@ -80,9 +80,9 @@
  */
 #ifndef SZ_DEBUG
 #ifndef NDEBUG // This means "Not using DEBUG information".
-#define SZ_DEBUG (1)
-#else
 #define SZ_DEBUG (0)
+#else
+#define SZ_DEBUG (1)
 #endif
 #endif
 
@@ -1436,8 +1436,8 @@ SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, 
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
 #else
-extern void *malloc(size_t);
-extern void free(void *, size_t);
+SZ_DYNAMIC void *malloc(size_t);
+SZ_DYNAMIC void free(void *, size_t);
 #endif
 
 SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc) {

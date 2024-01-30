@@ -16,6 +16,14 @@
 #define SZ_DYNAMIC_DISPATCH 1
 #include <stringzilla/stringzilla.h>
 
+#if SZ_AVOID_LIBC
+SZ_DYNAMIC void free(void *start, size_t length) { sz_unused(start && length); }
+SZ_DYNAMIC void *malloc(size_t length) {
+    sz_unused(length);
+    return SZ_NULL;
+}
+#endif
+
 SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
 
 #if SZ_USE_X86_AVX512 || SZ_USE_X86_AVX2

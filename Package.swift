@@ -14,6 +14,8 @@ let package = Package(
             publicHeadersPath: ".",
             cSettings: [
                 .define("SZ_DYNAMIC_DISPATCH", to: "1"), // Define a macro
+                .define("SZ_AVOID_LIBC", to: "0"), // We need `malloc` from LibC
+                .define("SZ_DEBUG", to: "0"), // We don't need any extra assertions in the C layer
                 .headerSearchPath("include/stringzilla"), // Specify header search paths
                 .unsafeFlags(["-Wall"]) // Use with caution: specify custom compiler flags
             ]

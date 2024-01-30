@@ -238,6 +238,12 @@ echo "export PATH=/usr/share/swift/usr/bin:$PATH" >> ~/.bashrc
 source ~/.bashrc
 ```
 
+Alternatively, on Linux, the official Swift Docker image can be used for builds and tests:
+
+```bash
+sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:5.9 /bin/bash -cl "swift build -c release --static-swift-stdlib && swift test -c release --enable-test-discovery"
+```
+
 ## Roadmap
 
 The project is in its early stages of development.
