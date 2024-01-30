@@ -175,6 +175,14 @@ function(set_compiler_flags target cpp_standard target_arch)
       PRIVATE
       "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=leak>"
       "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
+
+    # Define SZ_DEBUG macro based on build configuration
+    target_compile_definitions(
+      ${target}
+      PRIVATE
+      "$<$<CONFIG:Debug>:SZ_DEBUG=1>"
+      "$<$<NOT:$<CONFIG:Debug>>:SZ_DEBUG=0>"
+    )
   endif()
 endfunction()
 
