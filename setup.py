@@ -72,24 +72,15 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         "-fPIC",  # to enable dynamic dispatch
     ]
 
-    # GCC is our primary compiler, so when packaging the library, even if the current machine
-    # doesn't support AVX-512 or SVE, still precompile those.
+    # Apple Clang doesn't support the `-march=native` argument,
+    # so we must pre-set the CPU generation. Technically the last Intel-based Apple
+    # product was the 2021 MacBook Pro, which had the "Coffee Lake" architecture.
     macros_args = [
         ("SZ_USE_X86_AVX512", "0"),
         ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_ARM_SVE", "0"),
         ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
     ]
-
-    # Apple Clang doesn't support the `-march=native` argument,
-    # so we must pre-set the CPU generation. Technically the last Intel-based Apple
-    # product was the 2021 MacBook Pro, which had the "Coffee Lake" architecture.
-    # It's feature-set matches the "skylake" generation code for LLVM and GCC.
-    if is_64bit_x86():
-        compile_args.append("-march=skylake")
-    # None of Apple products support SVE instructions for now.
-    if is_64bit_arm():
-        compile_args.append("-march=armv8-a+simd")
 
     return compile_args, link_args, macros_args
 

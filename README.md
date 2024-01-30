@@ -800,7 +800,7 @@ __`SZ_DEBUG`__:
 
 > For maximal performance, the C library does not perform any bounds checking in Release builds.
 > In C++, bounds checking happens only in places where the STL `std::string` would do it.
-> If you want to enable more agressive bounds-checking, define `SZ_DEBUG` before including the header.
+> If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
 __`SZ_USE_X86_AVX512`, `SZ_USE_X86_AVX2`, `SZ_USE_ARM_NEON`__:
@@ -818,7 +818,7 @@ __`SZ_USE_MISALIGNED_LOADS`__:
 
 > By default, StringZilla avoids misaligned loads.
 > If supported, it replaces many byte-level operations with word-level ones.
-> Going from `char`-like types to `uint64_t`-like ones can significanly accelerate the serial (SWAR) backend.
+> Going from `char`-like types to `uint64_t`-like ones can significantly accelerate the serial (SWAR) backend.
 > So consider enabling it if you are building for some embedded device.
 
 __`SZ_AVOID_LIBC`__:
@@ -885,7 +885,7 @@ It has the same 128-bit security level as the BLAKE2, and achieves its performan
 > [!TIP]
 > All mentioned libraries have undergone extensive testing and are considered production-ready.
 > They can definitely accelerate your application, but so may the downstream mixer.
-> For instance, when a hash-table is constructed, the hashes are further shrinked to address table buckets.
+> For instance, when a hash-table is constructed, the hashes are further shrunk to address table buckets.
 > If the mixer looses entropy, the performance gains from the hash function may be lost.
 > An example would be power-of-two modulo, which is a common mixer, but is known to be weak.
 > One alternative would be the [fastrange](https://github.com/lemire/fastrange) by Daniel Lemire.
@@ -893,7 +893,7 @@ It has the same 128-bit security level as the BLAKE2, and achieves its performan
 
 ### Exact Substring Search
 
-StringZilla uses different exactsubstring search algorithms for different needle lengths and backends:
+StringZilla uses different exact substring search algorithms for different needle lengths and backends:
 
 - When no SIMD is available - SWAR (SIMD Within A Register) algorithms are used on 64-bit words.
 - Boyer-Moore-Horspool (BMH) algorithm with Raita heuristic variation for longer needles.

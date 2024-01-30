@@ -62,13 +62,13 @@ tracked_binary_functions_t find_functions() {
                  std::search(h.data(), h.data() + h.size(), std::boyer_moore_searcher(n.data(), n.data() + n.size()));
              return (match - h.data());
          }},
-#endif
         {"std::search<BMH>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.data(), h.data() + h.size(),
                                       std::boyer_moore_horspool_searcher(n.data(), n.data() + n.size()));
              return (match - h.data());
          }},
+#endif
     };
     return result;
 }
@@ -110,13 +110,13 @@ tracked_binary_functions_t rfind_functions() {
              auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
              return h.size() - offset_from_end;
          }},
-#endif
         {"std::search<R, BMH>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.rbegin(), h.rend(), std::boyer_moore_horspool_searcher(n.rbegin(), n.rend()));
              auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
              return h.size() - offset_from_end;
          }},
+#endif
     };
     return result;
 }

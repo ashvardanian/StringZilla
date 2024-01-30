@@ -225,7 +225,7 @@ SZ_PUBLIC void sz_charset_add(sz_charset_t *s, char c) { sz_charset_add_u8(s, *(
 
 /** @brief  Checks if the set contains a given character and accepts @b unsigned integers. */
 SZ_PUBLIC sz_bool_t sz_charset_contains_u8(sz_charset_t const *s, sz_u8_t c) {
-    // Checking the bit can be done in disserent ways:
+    // Checking the bit can be done in different ways:
     // - (s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
     // - (s->_u32s[c >> 5] & (1u << (c & 31u))) != 0
     // - (s->_u16s[c >> 4] & (1u << (c & 15u))) != 0
@@ -1105,7 +1105,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
  *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
 #if SZ_DEBUG
-#include <stdio.h>
+#include <stdio.h>  // `fprintf`
+#include <stdlib.h> // `EXIT_FAILURE`
 #define sz_assert(condition)                                                                                \
     do {                                                                                                    \
         if (!(condition)) {                                                                                 \
@@ -1403,7 +1404,7 @@ SZ_INTERNAL void _sz_hashes_fingerprint_scalar_callback(sz_cptr_t start, sz_size
  *  bytes will carry absolutely no value and will be equal to 0x04.
  */
 SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, //
-                                  sz_size_t *first, sz_size_t *second, sz_size_t *third) {
+                                             sz_size_t *first, sz_size_t *second, sz_size_t *third) {
     *first = 0;
     *second = length / 2;
     *third = length - 1;
@@ -3208,7 +3209,7 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t windo
         chars_low_vec.ymm = _mm256_set_epi64x(text_fourth[0], text_third[0], text_second[0], text_first[0]);
         chars_high_vec.ymm = _mm256_add_epi8(chars_low_vec.ymm, shift_high_vec.ymm);
 
-        // 3. Add the incoming charactters.
+        // 3. Add the incoming characters.
         hash_low_vec.ymm = _mm256_add_epi64(hash_low_vec.ymm, chars_low_vec.ymm);
         hash_high_vec.ymm = _mm256_add_epi64(hash_high_vec.ymm, chars_high_vec.ymm);
 
@@ -3250,7 +3251,7 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t windo
         chars_low_vec.ymm = _mm256_set_epi64x(text_fourth[0], text_third[0], text_second[0], text_first[0]);
         chars_high_vec.ymm = _mm256_add_epi8(chars_low_vec.ymm, shift_high_vec.ymm);
 
-        // 3. Add the incoming charactters.
+        // 3. Add the incoming characters.
         hash_low_vec.ymm = _mm256_add_epi64(hash_low_vec.ymm, chars_low_vec.ymm);
         hash_high_vec.ymm = _mm256_add_epi64(hash_high_vec.ymm, chars_high_vec.ymm);
 
@@ -3648,7 +3649,7 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t win
                                          text_fourth[0], text_third[0], text_second[0], text_first[0]);
         chars_vec.zmm = _mm512_add_epi8(chars_vec.zmm, shift_vec.zmm);
 
-        // 3. Add the incoming charactters.
+        // 3. Add the incoming characters.
         hash_vec.zmm = _mm512_add_epi64(hash_vec.zmm, chars_vec.zmm);
 
         // 4. Compute the modulo. Assuming there are only 59 values between our prime
@@ -3694,7 +3695,7 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t win
         _mm_prefetch(text_second + 1, _MM_HINT_T1);
         _mm_prefetch(text_first + 1, _MM_HINT_T1);
 
-        // 3. Add the incoming charactters.
+        // 3. Add the incoming characters.
         hash_vec.zmm = _mm512_add_epi64(hash_vec.zmm, chars_vec.zmm);
 
         // 4. Compute the modulo. Assuming there are only 59 values between our prime
@@ -3947,11 +3948,11 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
                 vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
-            while (matches) {
-                int potential_offset = sz_u64_ctz(matches) / 4;
+        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        while (matches) {
+            int potential_offset = sz_u64_ctz(matches) / 4;
             if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
-                matches &= matches - 1;
+            matches &= matches - 1;
         }
     }
 
@@ -3986,14 +3987,14 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
                 vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
-            while (matches) {
-                int potential_offset = sz_u64_clz(matches) / 4;
+        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        while (matches) {
+            int potential_offset = sz_u64_clz(matches) / 4;
             if (sz_equal(h + h_length - n_length - potential_offset, n, n_length))
-                    return h + h_length - n_length - potential_offset;
-                sz_assert((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
-                          "The bit must be set before we squash it");
-                matches &= ~(1ull << (63 - potential_offset * 4));
+                return h + h_length - n_length - potential_offset;
+            sz_assert((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
+                      "The bit must be set before we squash it");
+            matches &= ~(1ull << (63 - potential_offset * 4));
         }
     }
 

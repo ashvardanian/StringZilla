@@ -13,6 +13,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_COMPILE_WARNING_AS_ERROR)
 set(DEV_USER_NAME $ENV{USER})
 
+message(STATUS "C Compiler ID: ${CMAKE_C_COMPILER_ID}")
+message(STATUS "C Compiler Version: ${CMAKE_C_COMPILER_VERSION}")
+message(STATUS "C Compiler: ${CMAKE_C_COMPILER}")
+message(STATUS "C++ Compiler ID: ${CMAKE_CXX_COMPILER_ID}")
+message(STATUS "C++ Compiler Version: ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER}")
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
 # Set a default build type to "Release" if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
@@ -144,13 +152,13 @@ function(set_compiler_flags target cpp_standard target_arch)
     # MSVC does not have a direct equivalent to -march=native
     target_compile_options(
       ${target} PRIVATE
-      "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=native>"
+      "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<NOT:$<CXX_COMPILER_ID:AppleClang>>>:-march=native>"
       "$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2>")
   else()
     target_compile_options(
       ${target}
       PRIVATE
-      "$<$<CXX_COMPILER_ID:GNU,Clang>:-march=${target_arch}>"
+      "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<NOT:$<CXX_COMPILER_ID:AppleClang>>>:-march=${target_arch}>"
       "$<$<CXX_COMPILER_ID:MSVC>:/arch:${target_arch}>")
   endif()
 
