@@ -201,7 +201,7 @@ typedef enum sz_capability_t {
  *  @brief  Function to determine the SIMD capabilities of the current machine @b only at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_DYNAMIC sz_capability_t sz_capabilities();
+SZ_DYNAMIC sz_capability_t sz_capabilities(void);
 
 /**
  *  @brief  Bit-set structure for 256 possible byte values. Useful for filtering and search.
@@ -2356,7 +2356,7 @@ SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t win
  *  @brief  Uses a small lookup-table to convert a lowercase character to uppercase.
  */
 SZ_INTERNAL sz_u8_t sz_u8_tolower(sz_u8_t c) {
-    static sz_u8_t lowered[256] = {
+    static sz_u8_t const lowered[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
         32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  //
@@ -2381,7 +2381,7 @@ SZ_INTERNAL sz_u8_t sz_u8_tolower(sz_u8_t c) {
  *  @brief  Uses a small lookup-table to convert an uppercase character to lowercase.
  */
 SZ_INTERNAL sz_u8_t sz_u8_toupper(sz_u8_t c) {
-    static sz_u8_t upped[256] = {
+    static sz_u8_t const upped[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
         32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  //
@@ -2410,7 +2410,7 @@ SZ_INTERNAL sz_u8_t sz_u8_toupper(sz_u8_t c) {
  *  @param  number  Integral value to divide.
  */
 SZ_INTERNAL sz_u8_t sz_u8_divide(sz_u8_t number, sz_u8_t divisor) {
-    static sz_u16_t multipliers[256] = {
+    static sz_u16_t const multipliers[256] = {
         0,     0,     0,     21846, 0,     39322, 21846, 9363,  0,     50973, 39322, 29790, 21846, 15124, 9363,  4370,
         0,     57826, 50973, 44841, 39322, 34329, 29790, 25645, 21846, 18351, 15124, 12137, 9363,  6780,  4370,  2115,
         0,     61565, 57826, 54302, 50973, 47824, 44841, 42011, 39322, 36765, 34329, 32006, 29790, 27671, 25645, 23705,
@@ -2429,7 +2429,7 @@ SZ_INTERNAL sz_u8_t sz_u8_divide(sz_u8_t number, sz_u8_t divisor) {
         4370,  4080,  3792,  3507,  3224,  2943,  2665,  2388,  2115,  1843,  1573,  1306,  1041,  778,   517,   258,
     };
     // This table can be avoided using a single addition and counting trailing zeros.
-    static sz_u8_t shifts[256] = {
+    static sz_u8_t const shifts[256] = {
         0, 0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, //
         4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, //
         5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, //

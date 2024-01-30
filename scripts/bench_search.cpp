@@ -6,7 +6,8 @@
  *  It accepts a file with a list of words, and benchmarks the search operations on them.
  *  Outside of present tokens also tries missing tokens.
  */
-#include <string.h> // `memmem`
+#include <cstring>    // `memmem`
+#include <functional> // `std::boyer_moore_searcher`
 
 #define SZ_USE_MISALIGNED_LOADS (1)
 #include <bench.hpp>
@@ -54,12 +55,14 @@ tracked_binary_functions_t find_functions() {
              auto match = std::search(h.data(), h.data() + h.size(), n.data(), n.data() + n.size());
              return (match - h.data());
          }},
+#if __cpp_lib_boyer_moore_searcher
         {"std::search<BM>",
          [](std::string_view h, std::string_view n) {
              auto match =
                  std::search(h.data(), h.data() + h.size(), std::boyer_moore_searcher(n.data(), n.data() + n.size()));
              return (match - h.data());
          }},
+#endif
         {"std::search<BMH>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.data(), h.data() + h.size(),
@@ -100,12 +103,14 @@ tracked_binary_functions_t rfind_functions() {
              auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
              return h.size() - offset_from_end;
          }},
+#if __cpp_lib_boyer_moore_searcher
         {"std::search<R, BM>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.rbegin(), h.rend(), std::boyer_moore_searcher(n.rbegin(), n.rend()));
              auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
              return h.size() - offset_from_end;
          }},
+#endif
         {"std::search<R, BMH>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.rbegin(), h.rend(), std::boyer_moore_horspool_searcher(n.rbegin(), n.rend()));

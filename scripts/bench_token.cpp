@@ -48,6 +48,7 @@ tracked_unary_functions_t fingerprinting_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
         return unary_function_t([function](std::string_view s) {
             sz_size_t mixed_hash = 0;
+            sz_unused(s);
             return mixed_hash;
         });
     };

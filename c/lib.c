@@ -16,7 +16,7 @@
 #define SZ_DYNAMIC_DISPATCH 1
 #include <stringzilla/stringzilla.h>
 
-SZ_DYNAMIC sz_capability_t sz_capabilities() {
+SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
 
 #if SZ_USE_X86_AVX512 || SZ_USE_X86_AVX2
 
@@ -115,7 +115,7 @@ static sz_implementations_t sz_dispatch_table;
  *  @brief  Initializes a global static "virtual table" of supported backends
  *          Run it just once to avoiding unnucessary `if`-s.
  */
-static void sz_dispatch_table_init() {
+static void sz_dispatch_table_init(void) {
     sz_implementations_t *impl = &sz_dispatch_table;
     sz_capability_t caps = sz_capabilities();
     sz_unused(caps); //< Unused when compiling on pre-SIMD machines.

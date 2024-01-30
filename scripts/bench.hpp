@@ -3,15 +3,16 @@
  */
 #pragma once
 #include <algorithm>
-#include <chrono>
-#include <cstring>
+#include <chrono>     // `std::chrono::high_resolution_clock`
+#include <clocale>    // `std::setlocale`
+#include <cstring>    // `std::memcpy`
 #include <functional> // `std::equal_to`
-#include <limits>
-#include <numeric>
-#include <random>
-#include <string>
-#include <string_view> // Require C++17
+#include <limits>     // `std::numeric_limits`
+#include <random>     // `std::random_device`, `std::mt19937`
+#include <string>     // `std::hash`
 #include <vector>
+
+#include <string_view> // Requires C++17
 
 #include <stringzilla/stringzilla.h>
 #include <stringzilla/stringzilla.hpp>
