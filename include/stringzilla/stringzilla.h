@@ -3921,31 +3921,37 @@ SZ_PUBLIC sz_u64_t _sz_find_charset_neon_register(sz_u128_vec_t h_vec, uint8x16_
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_find_byte_neon(h, h_length, n);
 
-    // Will contain 4 bits per character.
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast those characters into SIMD registers.
     sz_u64_t matches;
     sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
-    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
-    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length / 2]);
-    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length - 1]);
+    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_first]);
+    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_mid]);
+    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_last]);
 
+    // Scan through the string.
     for (; h_length >= n_length + 16; h += 16, h_length -= 16) {
-        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h));
-        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + n_length / 2));
-        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + n_length - 1));
+        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_first));
+        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_mid));
+        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_last));
         matches_vec.u8x16 = vandq_u8(                           //
             vandq_u8(                                           //
                 vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-        if (vmaxvq_u8(matches_vec.u8x16)) {
             matches = vreinterpretq_u8_u4(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_ctz(matches) / 4;
-                if (sz_equal(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+            if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
                 matches &= matches - 1;
-            }
         }
     }
 
@@ -3953,34 +3959,41 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_rfind_byte_neon(h, h_length, n);
+
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
 
     // Will contain 4 bits per character.
     sz_u64_t matches;
     sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
-    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
-    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length / 2]);
-    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length - 1]);
+    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_first]);
+    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_mid]);
+    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_last]);
 
+    sz_cptr_t h_reversed;
     for (; h_length >= n_length + 16; h_length -= 16) {
-        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - n_length - 16 + 1));
-        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - n_length - 16 + 1 + n_length / 2));
-        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - 16));
+        h_reversed = h + h_length - n_length - 16 + 1;
+        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h_reversed + offset_first));
+        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h_reversed + offset_mid));
+        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h_reversed + offset_last));
         matches_vec.u8x16 = vandq_u8(                           //
             vandq_u8(                                           //
                 vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-        if (vmaxvq_u8(matches_vec.u8x16)) {
             matches = vreinterpretq_u8_u4(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_clz(matches) / 4;
-                if (sz_equal(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
+            if (sz_equal(h + h_length - n_length - potential_offset, n, n_length))
                     return h + h_length - n_length - potential_offset;
                 sz_assert((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
                           "The bit must be set before we squash it");
                 matches &= ~(1ull << (63 - potential_offset * 4));
-            }
         }
     }
 
