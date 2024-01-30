@@ -1437,7 +1437,7 @@ SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, 
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
 #else
 extern void *malloc(size_t);
-extern void free(void *, size_t);
+extern void free(void *);
 #endif
 
 SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc) {
@@ -1992,66 +1992,12 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
         (n_length > 256)](h, h_length, n, n_length);
 }
 
-/**
- *  @brief  Computes the Levenshtein distance, assuming the shorter string is up to 64 bytes long.
- *
- *  https://www.researchgate.net/publication/2536540_Explaining_and_Extending_the_Bit-parallel_Approximate_String_Matching_Algorithm_of_Myers
- *  https://www.mi.fu-berlin.de/wiki/pub/ABI/RnaSeqP4/myers-bitvector-verification.pdf
- *  https://github.com/rapidfuzz/rapidfuzz-cpp/blob/ef8999342dfd7b8d4603cda73c1da0df847782f9/rapidfuzz/distance/Levenshtein_impl.hpp#L235
- *  https://github.com/rapidfuzz/rapidfuzz-cpp/blob/ef8999342dfd7b8d4603cda73c1da0df847782f9/rapidfuzz/distance/Levenshtein_impl.hpp#L839
- *  https://github.com/rapidfuzz/rapidfuzz-cpp/blob/ef8999342dfd7b8d4603cda73c1da0df847782f9/rapidfuzz/details/PatternMatchVector.hpp#L135
- */
-SZ_INTERNAL sz_size_t _sz_edit_distance_upto64_serial( //
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_serial( //
     sz_cptr_t shorter, sz_size_t shorter_length,       //
     sz_cptr_t longer, sz_size_t longer_length,         //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
     sz_unused(longer && longer_length && shorter && shorter_length && bound && alloc);
-
-    typedef sz_u64_t offset_mask_t;
-
-    sz_u8_t const *shorter_unsigned = (sz_u8_t const *)shorter;
-    sz_u8_t const *longer_unsigned = (sz_u8_t const *)longer;
-    sz_size_t res = shorter_length;
-    offset_mask_t PM[256];
-
-    // Fill up the position masks.
-    for (sz_size_t i = 0; i != 256; ++i) PM[i] = 0;
-    for (sz_size_t i = 0; i != shorter_length; ++i) PM[shorter_unsigned[i]] |= UINT64_C(1) << i;
-
-    offset_mask_t VP = 0;
-    offset_mask_t VN = 0;
-
-    /* VP is set to 1^m. Shifting by bitwidth would be undefined behavior */
-    VP = ~VP;
-
-    /* mask used when computing D[m,j] in the paper 10^(m-1) */
-    offset_mask_t mask = UINT64_C(1) << (shorter_length - 1);
-
-    /* Searching */
-    sz_u8_t const *longer_end = longer_unsigned + longer_length;
-    for (; longer_unsigned != longer_end; ++longer_unsigned) {
-        /* Step 1: Computing D0 */
-        offset_mask_t PM_j = PM[*longer_unsigned];
-        offset_mask_t X = PM_j;
-        offset_mask_t D0 = (((X & VP) + VP) ^ VP) | X | VN;
-
-        /* Step 2: Computing HP and HN */
-        offset_mask_t HP = VN | ~(D0 | VP);
-        offset_mask_t HN = D0 & VP;
-
-        /* Step 3: Computing the value D[m,j] */
-        res += (HP & mask) != 0;
-        res -= (HN & mask) != 0;
-
-        /* Step 4: Computing Vp and VN */
-        HP = (HP << 1) | 1;
-        HN = (HN << 1);
-
-        VP = HN | ~(D0 | HP);
-        VN = HP & D0;
-    }
-
-    return res;
+    return 0;
 }
 
 SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
@@ -2163,9 +2109,6 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
         ;
 
     if (longer_length == 0) return 0; // If no mismatches were found - the distance is zero.
-
-    // if (shorter_length <= 64)
-    //     return _sz_edit_distance_upto64_serial(shorter, shorter_length, longer, longer_length, bound, alloc);
     return _sz_edit_distance_wagner_fisher_serial(longer, longer_length, shorter, shorter_length, bound, alloc);
 }
 
