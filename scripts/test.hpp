@@ -2,13 +2,28 @@
  *  @brief  Helper structures and functions for C++ tests.
  */
 #pragma once
-#include <random> // `std::random_device`
-#include <string> // `std::string`
-#include <vector> // `std::vector`
+#include <fstream>  // `std::ifstream`
+#include <iostream> // `std::cout`, `std::endl`
+#include <random>   // `std::random_device`
+#include <string>   // `std::string`
+#include <vector>   // `std::vector`
 
 namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
+
+inline std::string read_file(std::string path) {
+    std::ifstream stream(path);
+    if (!stream.is_open()) { throw std::runtime_error("Failed to open file: " + path); }
+    return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+}
+
+inline void write_file(std::string path, std::string content) {
+    std::ofstream stream(path);
+    if (!stream.is_open()) { throw std::runtime_error("Failed to open file: " + path); }
+    stream << content;
+    stream.close();
+}
 
 inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
     std::string result(length, '\0');

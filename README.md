@@ -1,5 +1,9 @@
 # StringZilla 🦖
 
+[![StringZilla Python installs](https://static.pepy.tech/personalized-badge/stringzilla?period=total&units=abbreviation&left_color=black&right_color=blue&left_text=StringZilla%20Python%20installs)](https://github.com/ashvardanian/stringzilla)
+[![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust")](https://crates.io/crates/stringzilla)
+![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
+
 StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations for modern CPUs.
 It is significantly faster than the default string libraries in Python and C++, and offers a more powerful API.
 Aside from exact search, the library also accelerates fuzzy search, edit distance computation, and sorting.
@@ -7,14 +11,20 @@ Aside from exact search, the library also accelerates fuzzy search, edit distanc
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
 [faq-swar]: https://en.wikipedia.org/wiki/SWAR
 
-- Code in C? Replace LibC's `<string.h>` with C 99 `<stringzilla.h>`  - [_more_](#quick-start-c-🛠️)
-- Code in C++? Replace STL's `<string>` with C++ 11 `<stringzilla.hpp>` - [_more_](#quick-start-cpp-🛠️)
-- Code in Python? Upgrade your `str` to faster `Str` - [_more_](#quick-start-python-🐍)
-- Code in Swift? Use the `String+StringZilla` extension - [_more_](#quick-start-swift-🍎)
-- Code in Rust? Use the `StringZilla` crate - [_more_](#quick-start-rust-🦀)
+- __[C](#quick-start-c-🛠️):__ Upgrade LibC's `<string.h>` to `<stringzilla.h>`  in C 99
+- __[C++](#quick-start-cpp-🛠️):__ Upgrade STL's `<string>` to `<stringzilla.hpp>` in C++ 11
+- __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
+- __[Swift](#quick-start-swift-🍎):__ Use the `String+StringZilla` extension
+- __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` crate
 - Code in other languages? Let us know!
 
-StringZilla has a lot of functionality, but first, let's make sure it can handle the basics.
+![](StringZilla-rounded.png)
+
+## Throughput Benchmarks
+
+StringZilla has a lot of functionality, most of which is covered by benchmarks across C, C++, Python and other languages.
+You can find those in the `./scripts` directory, with usage notes listed in the `CONTRIBUTING.md` file.
+The following table summarizes the most important benchmarks performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
 
 <table style="width: 100%; text-align: center; table-layout: fixed;">
   <colgroup>
@@ -171,12 +181,6 @@ __Who is this for?__
 - For hardware designers, needing a SWAR baseline for strings-processing functionality.
 - For students studying SIMD/SWAR applications to non-data-parallel operations.
 
-__Limitations:__
-
-- Assumes little-endian architecture (most CPUs, including x86, Arm, RISC-V).
-- Assumes ASCII or UTF-8 encoding (most content and systems).
-- Assumes 64-bit address space (most modern CPUs).
-
 __Technical insights:__
 
 - Uses SWAR and SIMD to accelerate exact search for very short needles under 4 bytes.
@@ -195,6 +199,11 @@ On the engineering side, the library:
 
 - Implement the Small String Optimization for strings shorter than 23 bytes.
 - Avoids PyBind11, SWIG, `ParseTuple` and other CPython sugar to minimize call latency. [_details_](https://ashvardanian.com/posts/pybind11-cpython-tutorial/) 
+
+> [!NOTE]
+> Current StringZilla design assumes little-endian architecture, ASCII or UTF-8 encoding, and 64-bit address space.
+> This covers most modern CPUs, including x86, Arm, RISC-V.
+> Feel free to open an issue if you need support for other architectures.
 
 
 ## Supported Functionality
@@ -800,7 +809,7 @@ __`SZ_DEBUG`__:
 
 > For maximal performance, the C library does not perform any bounds checking in Release builds.
 > In C++, bounds checking happens only in places where the STL `std::string` would do it.
-> If you want to enable more agressive bounds-checking, define `SZ_DEBUG` before including the header.
+> If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
 __`SZ_USE_X86_AVX512`, `SZ_USE_X86_AVX2`, `SZ_USE_ARM_NEON`__:
@@ -818,7 +827,7 @@ __`SZ_USE_MISALIGNED_LOADS`__:
 
 > By default, StringZilla avoids misaligned loads.
 > If supported, it replaces many byte-level operations with word-level ones.
-> Going from `char`-like types to `uint64_t`-like ones can significanly accelerate the serial (SWAR) backend.
+> Going from `char`-like types to `uint64_t`-like ones can significantly accelerate the serial (SWAR) backend.
 > So consider enabling it if you are building for some embedded device.
 
 __`SZ_AVOID_LIBC`__:
@@ -844,56 +853,9 @@ Some popular operations, however, like equality comparisons and relative order c
 In such operations vectorization is almost useless, unless huge and very similar strings are considered.
 StringZilla implements those operations as well, but won't result in substantial speedups.
 
-### Hashing
-
-Hashing is a very deeply studies subject with countless implementations.
-Choosing the right hashing algorithm for your application can be crucial from both performance and security standpoint.
-In StringZilla a 64-bit rolling hash function is reused for both string hashes and substring hashes, Rabin-style fingerprints, and is accelerated with SIMD for longer strings.
-
-#### Why not CRC32?
-
-Cyclic Redundancy Check 32 is one of the most commonly used hash functions in Computer Science.
-It has in-hardware support on both x86 and Arm, for both 8-bit, 16-bit, 32-bit, and 64-bit words.
-The `0x1EDC6F41` polynomial is used in iSCSI, Btrfs, ext4, and the `0x04C11DB7` in SATA, Ethernet, Zlib, PNG.
-In case of Arm more than one polynomial is supported.
-It is, however, somewhat limiting for Big Data usecases, which often have to deal with more than 4 Billion strings, making collisions unavoidable.
-Moreover, the existing SIMD approaches are tricky, combining general purpose computations with specialized instructions, to utilize more silicon in every cycle.
-
-Some of the best articles on CRC32:
-
-- [Comprehensive derivation of approaches](https://github.com/komrad36/CRC)
-- [Faster computation for 4 KB buffers on x86](https://www.corsix.org/content/fast-crc32c-4k)
-- [Comparing different lookup tables](https://create.stephan-brumme.com/crc32)
-
-Some of the best open-source implementations:
-
-- [By Peter Cawley](https://github.com/corsix/fast-crc32)
-- [By Stephan Brumme](https://github.com/stbrumme/crc32)
-
-#### Other Modern Alternatives
-
-[MurmurHash](https://github.com/aappleby/smhasher/blob/master/README.md) from 2008 by Austin Appleby is one of the best known non-cryptographic hashes.
-It has a very short implementation and is capable of producing 32-bit and 128-bit hashes.
-The [CityHash](https://opensource.googleblog.com/2011/04/introducing-cityhash) from 2011 by Google and the [xxHash](https://github.com/Cyan4973/xxHash) improve on that, better leveraging the super-scalar nature of modern CPUs and producing 64-bit and 128-bit hashes.
-
-Neither of those functions are cryptographic, unlike MD5, SHA, and BLAKE algorithms.
-Most of cryptographic hashes are based on the Merkle-Damgård construction, and aren't resistant to the length-extension attacks.
-Current state of the Art, might be the [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) algorithm.
-It's resistant to a broad range of attacks, can process 2 bytes per CPU cycle, and comes with a very optimized official implementation for C and Rust.
-It has the same 128-bit security level as the BLAKE2, and achieves its performance gains by reducing the number of mixing rounds, and processing data in 1 KiB chunks, which is great for longer strings, but may result in poor performance on short ones.
-
-> [!TIP]
-> All mentioned libraries have undergone extensive testing and are considered production-ready.
-> They can definitely accelerate your application, but so may the downstream mixer.
-> For instance, when a hash-table is constructed, the hashes are further shrinked to address table buckets.
-> If the mixer looses entropy, the performance gains from the hash function may be lost.
-> An example would be power-of-two modulo, which is a common mixer, but is known to be weak.
-> One alternative would be the [fastrange](https://github.com/lemire/fastrange) by Daniel Lemire.
-> Another one is the [Fibonacci hash trick](https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/) using the Golden Ratio, also used in StringZilla.
-
 ### Exact Substring Search
 
-StringZilla uses different exactsubstring search algorithms for different needle lengths and backends:
+StringZilla uses different exact substring search algorithms for different needle lengths and backends:
 
 - When no SIMD is available - SWAR (SIMD Within A Register) algorithms are used on 64-bit words.
 - Boyer-Moore-Horspool (BMH) algorithm with Raita heuristic variation for longer needles.
@@ -931,6 +893,69 @@ Reading materials:
 - Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
 - SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
 
+
+### Hashing
+
+Hashing is a very deeply studies subject with countless implementations.
+Choosing the right hashing algorithm for your application can be crucial from both performance and security standpoint.
+In StringZilla a 64-bit rolling hash function is reused for both string hashes and substring hashes, Rabin-style fingerprints.
+Rolling hashes take the same amount of time to compute hashes with different window sizes, and are fast to update.
+Those are not however perfect hashes, and collisions are frequent.
+To reduce those.
+
+
+They are not, however, optimal for cryptographic purposes, and require integer multiplication, which is not always fast.
+Using SIMD, we can process N interleaving slices of the input in parallel.
+On Intel Sapphire Rapids, the following numbers can be expected for N-way parallel variants.
+
+- 4-way AVX2 throughput with 64-bit integer multiplication (no native support): 0.28 GB/s.
+- 4-way AVX2 throughput with 32-bit integer multiplication: 0.54 GB/s.
+- 4-way AVX-512DQ throughput with 64-bit integer multiplication: 0.46 GB/s.
+- 4-way AVX-512 throughput with 32-bit integer multiplication: 0.58 GB/s.
+- 8-way AVX-512 throughput with 32-bit integer multiplication: 0.11 GB/s.
+
+
+
+#### Why not CRC32?
+
+Cyclic Redundancy Check 32 is one of the most commonly used hash functions in Computer Science.
+It has in-hardware support on both x86 and Arm, for both 8-bit, 16-bit, 32-bit, and 64-bit words.
+The `0x1EDC6F41` polynomial is used in iSCSI, Btrfs, ext4, and the `0x04C11DB7` in SATA, Ethernet, Zlib, PNG.
+In case of Arm more than one polynomial is supported.
+It is, however, somewhat limiting for Big Data usecases, which often have to deal with more than 4 Billion strings, making collisions unavoidable.
+Moreover, the existing SIMD approaches are tricky, combining general purpose computations with specialized instructions, to utilize more silicon in every cycle.
+
+Some of the best articles on CRC32:
+
+- [Comprehensive derivation of approaches](https://github.com/komrad36/CRC)
+- [Faster computation for 4 KB buffers on x86](https://www.corsix.org/content/fast-crc32c-4k)
+- [Comparing different lookup tables](https://create.stephan-brumme.com/crc32)
+
+Some of the best open-source implementations:
+
+- [By Peter Cawley](https://github.com/corsix/fast-crc32)
+- [By Stephan Brumme](https://github.com/stbrumme/crc32)
+
+#### Other Modern Alternatives
+
+[MurmurHash](https://github.com/aappleby/smhasher/blob/master/README.md) from 2008 by Austin Appleby is one of the best known non-cryptographic hashes.
+It has a very short implementation and is capable of producing 32-bit and 128-bit hashes.
+The [CityHash](https://opensource.googleblog.com/2011/04/introducing-cityhash) from 2011 by Google and the [xxHash](https://github.com/Cyan4973/xxHash) improve on that, better leveraging the super-scalar nature of modern CPUs and producing 64-bit and 128-bit hashes.
+
+Neither of those functions are cryptographic, unlike MD5, SHA, and BLAKE algorithms.
+Most of cryptographic hashes are based on the Merkle-Damgård construction, and aren't resistant to the length-extension attacks.
+Current state of the Art, might be the [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) algorithm.
+It's resistant to a broad range of attacks, can process 2 bytes per CPU cycle, and comes with a very optimized official implementation for C and Rust.
+It has the same 128-bit security level as the BLAKE2, and achieves its performance gains by reducing the number of mixing rounds, and processing data in 1 KiB chunks, which is great for longer strings, but may result in poor performance on short ones.
+
+> [!TIP]
+> All mentioned libraries have undergone extensive testing and are considered production-ready.
+> They can definitely accelerate your application, but so may the downstream mixer.
+> For instance, when a hash-table is constructed, the hashes are further shrunk to address table buckets.
+> If the mixer looses entropy, the performance gains from the hash function may be lost.
+> An example would be power-of-two modulo, which is a common mixer, but is known to be weak.
+> One alternative would be the [fastrange](https://github.com/lemire/fastrange) by Daniel Lemire.
+> Another one is the [Fibonacci hash trick](https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/) using the Golden Ratio, also used in StringZilla.
 
 ### Levenshtein Edit Distance
 

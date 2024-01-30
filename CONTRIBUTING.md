@@ -107,6 +107,13 @@ cmake --build ./build_release --config Release      # Which will produce the fol
 ./build_release/stringzilla_bench_container <path>  # for STL containers with string keys
 ```
 
+To simplify tracing and profiling, build with symbols using the `RelWithDebInfo` configuration.
+
+```bash
+cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_SHARED=1 -B build_release
+cmake --build ./build_release --config Release
+```
+
 You may want to download some datasets for benchmarks, like these:
 
 ```sh
@@ -145,12 +152,29 @@ Alternatively, you may want to compare the performance of the code compiled with
 On x86_64, you may want to compare GCC, Clang, and ICX.
 
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_SHARED=1 \
     -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_C_COMPILER=gcc-12 \
     -B build_release/gcc && cmake --build build_release/gcc --config Release
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_SHARED=1 \
     -DCMAKE_CXX_COMPILER=clang++-14 -DCMAKE_C_COMPILER=clang-14 \
     -B build_release/clang && cmake --build build_release/clang --config Release
+```
+
+To use CppCheck for static analysis make sure to export the compilation commands.
+Overall, CppCheck and Clang-Tidy are extremely noisy and not suitable for CI, but may be useful for local development.
+
+```bash
+sudo apt install cppcheck clang-tidy-11
+
+cmake -B build_artifacts \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+  -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+  -DSTRINGZILLA_BUILD_TEST=1
+
+cppcheck --project=build_artifacts/compile_commands.json --enable=all
+
+clang-tidy-11 -p build_artifacts
 ```
 
 ## Contributing in Python

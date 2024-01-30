@@ -23,7 +23,14 @@
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
 #else
+#include <limits.h> // `SSIZE_MAX`
 #include <unistd.h> // `ssize_t`
+#endif
+
+// It seems like some Python versions forget to include a header, so we should:
+// https://github.com/ashvardanian/StringZilla/actions/runs/7706636733/job/21002535521
+#ifndef SSIZE_MAX
+#define SSIZE_MAX (SIZE_MAX / 2)
 #endif
 
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
@@ -1971,7 +1978,7 @@ static PyMethodDef stringzilla_methods[] = {
 static PyModuleDef stringzilla_module = {
     PyModuleDef_HEAD_INIT,
     "stringzilla",
-    "Crunch multi-gigabyte strings with ease",
+    "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
     -1,
     stringzilla_methods,
     NULL,

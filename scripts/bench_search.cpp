@@ -6,8 +6,10 @@
  *  It accepts a file with a list of words, and benchmarks the search operations on them.
  *  Outside of present tokens also tries missing tokens.
  */
-#include <string.h> // `memmem`
+#include <cstring>    // `memmem`
+#include <functional> // `std::boyer_moore_searcher`
 
+#define SZ_USE_MISALIGNED_LOADS (1)
 #include <bench.hpp>
 
 using namespace ashvardanian::stringzilla::scripts;
@@ -53,6 +55,7 @@ tracked_binary_functions_t find_functions() {
              auto match = std::search(h.data(), h.data() + h.size(), n.data(), n.data() + n.size());
              return (match - h.data());
          }},
+#if __cpp_lib_boyer_moore_searcher
         {"std::search<BM>",
          [](std::string_view h, std::string_view n) {
              auto match =
@@ -65,6 +68,7 @@ tracked_binary_functions_t find_functions() {
                                       std::boyer_moore_horspool_searcher(n.data(), n.data() + n.size()));
              return (match - h.data());
          }},
+#endif
     };
     return result;
 }
@@ -99,6 +103,7 @@ tracked_binary_functions_t rfind_functions() {
              auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
              return h.size() - offset_from_end;
          }},
+#if __cpp_lib_boyer_moore_searcher
         {"std::search<R, BM>",
          [](std::string_view h, std::string_view n) {
              auto match = std::search(h.rbegin(), h.rend(), std::boyer_moore_searcher(n.rbegin(), n.rend()));
@@ -111,6 +116,7 @@ tracked_binary_functions_t rfind_functions() {
              auto offset_from_end = (sz_ssize_t)(match - h.rbegin());
              return h.size() - offset_from_end;
          }},
+#endif
     };
     return result;
 }
@@ -309,13 +315,15 @@ int main(int argc, char const **argv) {
     bench_finds(dataset.text, {sz::ascii_controls()}, find_charset_functions());
     bench_rfinds(dataset.text, {sz::ascii_controls()}, rfind_charset_functions());
 
-    // Baseline benchmarks for real words, coming in all lengths
-    std::printf("Benchmarking on real words:\n");
+    // Baseline benchmarks for present tokens, coming in all lengths
+    std::printf("Benchmarking on present lines:\n");
+    bench_search(dataset.text, {dataset.lines.begin(), dataset.lines.end()});
+    std::printf("Benchmarking on present tokens:\n");
     bench_search(dataset.text, {dataset.tokens.begin(), dataset.tokens.end()});
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
-        std::printf("Benchmarking on real words of length %zu:\n", token_length);
+        std::printf("Benchmarking on present tokens of length %zu:\n", token_length);
         bench_search(dataset.text, filter_by_length<std::string>(dataset.tokens, token_length));
     }
 

@@ -3,6 +3,7 @@ import sys
 import platform
 from setuptools import setup, Extension
 from typing import List, Tuple
+import sysconfig
 import glob
 
 import numpy as np
@@ -72,24 +73,17 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         "-fPIC",  # to enable dynamic dispatch
     ]
 
-    # GCC is our primary compiler, so when packaging the library, even if the current machine
-    # doesn't support AVX-512 or SVE, still precompile those.
-    macros_args = [
-        ("SZ_USE_X86_AVX512", "0"),
-        ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ARM_SVE", "0"),
-        ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
-    ]
-
     # Apple Clang doesn't support the `-march=native` argument,
     # so we must pre-set the CPU generation. Technically the last Intel-based Apple
     # product was the 2021 MacBook Pro, which had the "Coffee Lake" architecture.
-    # It's feature-set matches the "skylake" generation code for LLVM and GCC.
-    if is_64bit_x86():
-        compile_args.append("-march=skylake")
-    # None of Apple products support SVE instructions for now.
-    if is_64bit_arm():
-        compile_args.append("-march=armv8-a+simd")
+    # During Universal builds, however, even AVX header cause compilation errors.
+    can_use_avx2 = is_64bit_x86() and sysconfig.get_platform().startswith("universal")
+    macros_args = [
+        ("SZ_USE_X86_AVX512", "0"),
+        ("SZ_USE_X86_AVX2", "1" if can_use_avx2 else "0"),
+        ("SZ_USE_ARM_SVE", "0"),
+        ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
+    ]
 
     return compile_args, link_args, macros_args
 
@@ -148,7 +142,7 @@ setup(
     name=__lib_name__,
     version=__version__,
     author="Ash Vardanian",
-    description="Crunch multi-gigabyte strings with ease",
+    description="SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="Apache-2.0",

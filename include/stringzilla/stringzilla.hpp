@@ -71,10 +71,11 @@
 #endif
 #endif
 
-#include <cassert> // `assert`
-#include <cstddef> // `std::size_t`
-#include <iosfwd>  // `std::basic_ostream`
-#include <utility> // `std::swap`
+#include <cassert>   // `assert`
+#include <cstddef>   // `std::size_t`
+#include <iosfwd>    // `std::basic_ostream`
+#include <stdexcept> // `std::out_of_range`
+#include <utility>   // `std::swap`
 
 #include <stringzilla/stringzilla.h>
 
@@ -643,7 +644,7 @@ class range_splits {
         }
 
         iterator(string_type haystack, matcher_type matcher, end_sentinel_type) noexcept
-            : matcher_(matcher), remaining_(haystack), reached_tail_(true) {}
+            : matcher_(matcher), remaining_(haystack), length_within_remaining_(0), reached_tail_(true) {}
 
         pointer operator->() const noexcept = delete;
         value_type operator*() const noexcept { return remaining_.substr(0, length_within_remaining_); }
@@ -748,7 +749,7 @@ class range_rsplits {
         }
 
         iterator(string_type haystack, matcher_type matcher, end_sentinel_type) noexcept
-            : matcher_(matcher), remaining_(haystack), reached_tail_(true) {}
+            : matcher_(matcher), remaining_(haystack), length_within_remaining_(0), reached_tail_(true) {}
 
         pointer operator->() const noexcept = delete;
         value_type operator*() const noexcept {
@@ -1535,7 +1536,7 @@ class basic_string_slice {
      *  @brief  Find the last occurrence of a substring, within first `until` characters.
      *  @return The offset of the first character of the match, or `npos` if not found.
      */
-    size_type rfind(string_view other, size_type until) const noexcept {
+    size_type rfind(string_view other, size_type until) const noexcept(false) {
         return until + other.size() < length_ ? substr(0, until + other.size()).rfind(other) : rfind(other);
     }
 
@@ -1807,10 +1808,10 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief  Split around occurrences of given characters. */
-    split_chars_type split(char_set set = whitespaces_set) const noexcept { return {*this, {set}}; }
+    split_chars_type split(char_set set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(char_set set = whitespaces_set) const noexcept { return {*this, {set}}; }
+    rsplit_chars_type rsplit(char_set set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set); }
@@ -1828,12 +1829,13 @@ class basic_string_slice {
     }
 
   private:
-    constexpr string_view &assign(string_view const &other) noexcept {
+    sz_constexpr_if_cpp20 string_view &assign(string_view const &other) noexcept {
         start_ = other.start_;
         length_ = other.length_;
         return *this;
     }
-    inline static constexpr size_type null_terminated_length(const_pointer s) noexcept {
+
+    sz_constexpr_if_cpp20 static size_type null_terminated_length(const_pointer s) noexcept {
         const_pointer p = s;
         while (*p) ++p;
         return p - s;
@@ -1842,15 +1844,17 @@ class basic_string_slice {
     template <typename pattern_>
     partition_type partition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = find(pattern);
-        if (pos == npos) return {substr(), string_view(), string_view()};
-        return {substr(0, pos), substr(pos, pattern_length), substr(pos + pattern_length)};
+        if (pos == npos) return {*this, string_view(), string_view()};
+        return {string_view(start_, pos), string_view(start_ + pos, pattern_length),
+                string_view(start_ + pos + pattern_length, length_ - pos - pattern_length)};
     }
 
     template <typename pattern_>
     partition_type rpartition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = rfind(pattern);
-        if (pos == npos) return {substr(), string_view(), string_view()};
-        return {substr(0, pos), substr(pos, pattern_length), substr(pos + pattern_length)};
+        if (pos == npos) return {*this, string_view(), string_view()};
+        return {string_view(start_, pos), string_view(start_ + pos, pattern_length),
+                string_view(start_ + pos + pattern_length, length_ - pos - pattern_length)};
     }
 };
 

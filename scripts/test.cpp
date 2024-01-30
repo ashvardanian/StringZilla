@@ -812,9 +812,10 @@ static void test_search() {
     assert(sz::string_view("axbYaxbY").find_first_of("Y") == 3);
     assert(sz::string_view("YbXaYbXa").find_last_of("XY") == 6);
     assert(sz::string_view("YbxaYbxa").find_last_of("Y") == 4);
-    assert(sz::string_view(sz::base64()).find_first_of("_") == sz::string_view::npos);
-    assert(sz::string_view(sz::base64()).find_first_of("+") == 62);
-    assert(sz::string_view(sz::ascii_printables()).find_first_of("~") != sz::string_view::npos);
+    assert(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("_") == sz::string_view::npos);
+    assert(sz::string_view(sz::base64(), sizeof(sz::base64())).find_first_of("+") == 62);
+    assert(sz::string_view(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
+           sz::string_view::npos);
 
     assert("aabaa"_sz.remove_prefix("a") == "abaa");
     assert("aabaa"_sz.remove_suffix("a") == "aaba");
@@ -1171,8 +1172,8 @@ int main(int argc, char const **argv) {
 #endif
     test_api_readonly<std::string>();
     test_api_readonly<sz::string_view>();
-
     test_api_readonly<sz::string>();
+
     test_api_mutable<std::string>(); // Make sure the test itself is reasonable
     test_api_mutable<sz::string>();  // The fact that this compiles is already a miracle :)
 

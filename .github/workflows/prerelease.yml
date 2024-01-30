@@ -9,6 +9,8 @@ on:
 env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
+  PYTHON_VERSION: 3.11
+  SWIFT_VERSION: 5.9
   PYTHONUTF8: 1
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -24,7 +26,7 @@ jobs:
       CXX: g++-12
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
         # C/C++
         # If the compilation fails, we want to log the compilation commands in addition to
@@ -33,7 +35,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y cmake build-essential libjemalloc-dev libomp-dev gcc-12 g++-12
-          
+
           cmake -B build_artifacts \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
@@ -52,7 +54,7 @@ jobs:
             echo "G++ Version:"
             g++-12 --version
             exit 1
-          }      
+          }
       - name: Test C++
         run: ./build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data
@@ -70,7 +72,7 @@ jobs:
 
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python
@@ -82,9 +84,179 @@ jobs:
         run: pytest scripts/test.py -s -x
 
         # JavaScript
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      # - name: Set up Node.js
+      #   uses: actions/setup-node
+      #   with:
+      #     node-version: 18
+      # - name: Build and test JavaScript
+      #   run: npm ci && npm test
+
+        # Rust
+      - name: Test Rust
+        uses: actions-rs/toolchain@v1
         with:
-          node-version: 18
-      - name: Build and test JavaScript
-        run: npm ci && npm test
+          toolchain: stable
+          override: true
+
+        # Swift
+      - name: Set up Swift ${{ env.SWIFT_VERSION }}
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+      - name: Build Swift
+        run: swift build
+      - name: Test Swift
+        run: swift test
+
+  test_ubuntu_clang:
+    name: Ubuntu (Clang 16)
+    runs-on: ubuntu-22.04
+    env:
+      CC: clang-16
+      CXX: clang++-16
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main-dev
+      - run: git submodule update --init --recursive
+
+        # C/C++
+        # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
+      - name: Build C/C++
+        run: |
+          sudo apt update
+          sudo apt install -y cmake build-essential libjemalloc-dev
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
+
+          cmake -B build_artifacts \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+            -DSTRINGZILLA_BUILD_TEST=1
+
+          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || {
+            echo "Compilation failed. Here are the logs:"
+            cat build_artifacts/logs.txt
+            echo "The original compilation commands:"
+            cat build_artifacts/compile_commands.json
+            echo "CPU Features:"
+            lscpu
+            echo "Clang Version:"
+            clang-16 --version
+            echo "Clang++ Version:"
+            clang++-16 --version
+            exit 1
+          }
+      - name: Test C++
+        run: ./build_artifacts/stringzilla_test_cpp20
+      - name: Test on Real World Data
+        run: |
+          ./build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
+          ./build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+          ./build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
+          ./build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
+          ./build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+        env:
+          DATASET_PATH: ./README.md
+        # Don't overload GitHub with our benchmarks.
+        # The results in such an unstable environment will be meaningless anyway.
+        if: 0
+
+        # Python
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-repeat numpy
+          python -m pip install .
+      - name: Test Python
+        run: pytest scripts/test.py -s -x
+
+        # Rust
+      - name: Test Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+        # Swift
+      - name: Set up Swift ${{ env.SWIFT_VERSION }}
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+      - name: Build Swift
+        run: swift build
+      - name: Test Swift
+        run: swift test
+
+  test_macos:
+    name: MacOS
+    runs-on: macos-12
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main-dev
+      - run: git submodule update --init --recursive
+
+        # C/C++
+      - name: Build C/C++
+        run: |
+          brew update
+          brew install cmake
+          cmake -B build_artifacts \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+            -DSTRINGZILLA_BUILD_TEST=1
+          cmake --build build_artifacts --config RelWithDebInfo
+      - name: Test C++
+        run: ./build_artifacts/stringzilla_test_cpp17
+      - name: Test on Real World Data
+        run: |
+          ./build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
+          ./build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+          ./build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
+          ./build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
+          ./build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+        env:
+          DATASET_PATH: ./README.md
+        # Don't overload GitHub with our benchmarks.
+        # The results in such an unstable environment will be meaningless anyway.
+        if: 0
+
+        # Python
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-repeat numpy
+          python -m pip install .
+      - name: Test Python
+        run: pytest scripts/test.py -s -x
+
+        # Swift
+      - name: Set up Swift ${{ env.SWIFT_VERSION }}
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+      - name: Build Swift
+        run: swift build
+      - name: Test Swift
+        run: swift test
+
+        # Rust
+      - name: Test Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true

@@ -16,11 +16,11 @@
 #define SZ_DYNAMIC_DISPATCH 1
 #include <stringzilla/stringzilla.h>
 
-SZ_DYNAMIC sz_capability_t sz_capabilities() {
+SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
 
 #if SZ_USE_X86_AVX512 || SZ_USE_X86_AVX2
 
-    /// The states of 4 registers populated for a specific "cpuid" assmebly call
+    /// The states of 4 registers populated for a specific "cpuid" assembly call
     union four_registers_t {
         int array[4];
         struct separate_t {
@@ -103,7 +103,7 @@ typedef struct sz_implementations_t {
     sz_find_set_t find_from_set;
     sz_find_set_t rfind_from_set;
 
-    // TODO: Upcoming vectorizations
+    // TODO: Upcoming vectorization
     sz_edit_distance_t edit_distance;
     sz_alignment_score_t alignment_score;
     sz_hashes_t hashes;
@@ -113,9 +113,9 @@ static sz_implementations_t sz_dispatch_table;
 
 /**
  *  @brief  Initializes a global static "virtual table" of supported backends
- *          Run it just once to avoiding unnucessary `if`-s.
+ *          Run it just once to avoiding unnecessary `if`-s.
  */
-static void sz_dispatch_table_init() {
+static void sz_dispatch_table_init(void) {
     sz_implementations_t *impl = &sz_dispatch_table;
     sz_capability_t caps = sz_capabilities();
     sz_unused(caps); //< Unused when compiling on pre-SIMD machines.
@@ -192,7 +192,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
     }
 }
 #else
-__attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang() { sz_dispatch_table_init(); }
+__attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
