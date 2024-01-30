@@ -1,5 +1,9 @@
 # StringZilla 🦖
 
+[![StringZilla Python installs](https://static.pepy.tech/personalized-badge/stringzilla?period=total&units=abbreviation&left_color=black&right_color=blue&left_text=StringZilla%20Python%20installs)](https://github.com/ashvardanian/stringzilla)
+[![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust")](https://crates.io/crates/stringzilla)
+![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
+
 StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations for modern CPUs.
 It is significantly faster than the default string libraries in Python and C++, and offers a more powerful API.
 Aside from exact search, the library also accelerates fuzzy search, edit distance computation, and sorting.
@@ -7,14 +11,20 @@ Aside from exact search, the library also accelerates fuzzy search, edit distanc
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
 [faq-swar]: https://en.wikipedia.org/wiki/SWAR
 
-- Code in C? Replace LibC's `<string.h>` with C 99 `<stringzilla.h>`  - [_more_](#quick-start-c-🛠️)
-- Code in C++? Replace STL's `<string>` with C++ 11 `<stringzilla.hpp>` - [_more_](#quick-start-cpp-🛠️)
-- Code in Python? Upgrade your `str` to faster `Str` - [_more_](#quick-start-python-🐍)
-- Code in Swift? Use the `String+StringZilla` extension - [_more_](#quick-start-swift-🍎)
-- Code in Rust? Use the `StringZilla` crate - [_more_](#quick-start-rust-🦀)
+- __[C](#quick-start-c-🛠️):__ Upgrade LibC's `<string.h>` to `<stringzilla.h>`  in C 99
+- __[C++](#quick-start-cpp-🛠️):__ Upgrade STL's `<string>` to `<stringzilla.hpp>` in C++ 11
+- __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
+- __[Swift](#quick-start-swift-🍎):__ Use the `String+StringZilla` extension
+- __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` crate
 - Code in other languages? Let us know!
 
-StringZilla has a lot of functionality, but first, let's make sure it can handle the basics.
+![](StringZilla-rounded.png)
+
+## Throughput Benchmarks
+
+StringZilla has a lot of functionality, most of which is covered by benchmarks across C, C++, Python and other languages.
+You can find those in the `./scripts` directory, with usage notes listed in the `CONTRIBUTING.md` file.
+The following table summarizes the most important benchmarks performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
 
 <table style="width: 100%; text-align: center; table-layout: fixed;">
   <colgroup>
@@ -171,12 +181,6 @@ __Who is this for?__
 - For hardware designers, needing a SWAR baseline for strings-processing functionality.
 - For students studying SIMD/SWAR applications to non-data-parallel operations.
 
-__Limitations:__
-
-- Assumes little-endian architecture (most CPUs, including x86, Arm, RISC-V).
-- Assumes ASCII or UTF-8 encoding (most content and systems).
-- Assumes 64-bit address space (most modern CPUs).
-
 __Technical insights:__
 
 - Uses SWAR and SIMD to accelerate exact search for very short needles under 4 bytes.
@@ -195,6 +199,11 @@ On the engineering side, the library:
 
 - Implement the Small String Optimization for strings shorter than 23 bytes.
 - Avoids PyBind11, SWIG, `ParseTuple` and other CPython sugar to minimize call latency. [_details_](https://ashvardanian.com/posts/pybind11-cpython-tutorial/) 
+
+> [!NOTE]
+> Current StringZilla design assumes little-endian architecture, ASCII or UTF-8 encoding, and 64-bit address space.
+> This covers most modern CPUs, including x86, Arm, RISC-V.
+> Feel free to open an issue if you need support for other architectures.
 
 
 ## Supported Functionality
@@ -844,11 +853,68 @@ Some popular operations, however, like equality comparisons and relative order c
 In such operations vectorization is almost useless, unless huge and very similar strings are considered.
 StringZilla implements those operations as well, but won't result in substantial speedups.
 
+### Exact Substring Search
+
+StringZilla uses different exact substring search algorithms for different needle lengths and backends:
+
+- When no SIMD is available - SWAR (SIMD Within A Register) algorithms are used on 64-bit words.
+- Boyer-Moore-Horspool (BMH) algorithm with Raita heuristic variation for longer needles.
+- SIMD algorithms are randomized to look at different parts of the needle.
+- Apostolico-Giancarlo algorithm is _considered_ for longer needles, if preprocessing time isn't an issue.
+
+Substring search algorithms are generally divided into: comparison-based, automaton-based, and bit-parallel.
+Different families are effective for different alphabet sizes and needle lengths.
+The more operations are needed per-character - the more effective SIMD would be.
+The longer the needle - the more effective the skip-tables are.
+
+On very short needles, especially 1-4 characters long, brute force with SIMD is the fastest solution.
+On mid-length needles, bit-parallel algorithms are effective, as the character masks fit into 32-bit or 64-bit words.
+Either way, if the needle is under 64-bytes long, on haystack traversal we will still fetch every CPU cache line.
+So the only way to improve performance is to reduce the number of comparisons.
+
+Going beyond that, to long needles, Boyer-Moore (BM) and its variants are often the best choice.
+It has two tables: the good-suffix shift and the bad-character shift.
+Common choice is to use the simplified BMH algorithm, which only uses the bad-character shift table, reducing the pre-processing time.
+In the C++ Standards Library, the `std::string::find` function uses the BMH algorithm with Raita's heuristic.
+We do something similar longer needles.
+
+All those, still, have $O(hn)$ worst case complexity, and struggle with repetitive needle patterns.
+To guarantee $O(h)$ worst case time complexity, the Apostolico-Giancarlo (AG) algorithm adds an additional skip-table.
+Preprocessing phase is $O(n+sigma)$ in time and space.
+On traversal, performs from $(h/n)$ to $(3h/2)$ comparisons.
+We should consider implementing it if we can:
+
+- accelerate the preprocessing phase of the needle.
+- simplify the control-flow of the main loop.
+- replace the array of shift values with a circular buffer.
+
+Reading materials:
+
+- Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
+- SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
+
+
 ### Hashing
 
 Hashing is a very deeply studies subject with countless implementations.
 Choosing the right hashing algorithm for your application can be crucial from both performance and security standpoint.
-In StringZilla a 64-bit rolling hash function is reused for both string hashes and substring hashes, Rabin-style fingerprints, and is accelerated with SIMD for longer strings.
+In StringZilla a 64-bit rolling hash function is reused for both string hashes and substring hashes, Rabin-style fingerprints.
+Rolling hashes take the same amount of time to compute hashes with different window sizes, and are fast to update.
+Those are not however perfect hashes, and collisions are frequent.
+To reduce those.
+
+
+They are not, however, optimal for cryptographic purposes, and require integer multiplication, which is not always fast.
+Using SIMD, we can process N interleaving slices of the input in parallel.
+On Intel Sapphire Rapids, the following numbers can be expected for N-way parallel variants.
+
+- 4-way AVX2 throughput with 64-bit integer multiplication (no native support): 0.28 GB/s.
+- 4-way AVX2 throughput with 32-bit integer multiplication: 0.54 GB/s.
+- 4-way AVX-512DQ throughput with 64-bit integer multiplication: 0.46 GB/s.
+- 4-way AVX-512 throughput with 32-bit integer multiplication: 0.58 GB/s.
+- 8-way AVX-512 throughput with 32-bit integer multiplication: 0.11 GB/s.
+
+
 
 #### Why not CRC32?
 
@@ -890,47 +956,6 @@ It has the same 128-bit security level as the BLAKE2, and achieves its performan
 > An example would be power-of-two modulo, which is a common mixer, but is known to be weak.
 > One alternative would be the [fastrange](https://github.com/lemire/fastrange) by Daniel Lemire.
 > Another one is the [Fibonacci hash trick](https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/) using the Golden Ratio, also used in StringZilla.
-
-### Exact Substring Search
-
-StringZilla uses different exact substring search algorithms for different needle lengths and backends:
-
-- When no SIMD is available - SWAR (SIMD Within A Register) algorithms are used on 64-bit words.
-- Boyer-Moore-Horspool (BMH) algorithm with Raita heuristic variation for longer needles.
-- SIMD algorithms are randomized to look at different parts of the needle.
-- Apostolico-Giancarlo algorithm is _considered_ for longer needles, if preprocessing time isn't an issue.
-
-Substring search algorithms are generally divided into: comparison-based, automaton-based, and bit-parallel.
-Different families are effective for different alphabet sizes and needle lengths.
-The more operations are needed per-character - the more effective SIMD would be.
-The longer the needle - the more effective the skip-tables are.
-
-On very short needles, especially 1-4 characters long, brute force with SIMD is the fastest solution.
-On mid-length needles, bit-parallel algorithms are effective, as the character masks fit into 32-bit or 64-bit words.
-Either way, if the needle is under 64-bytes long, on haystack traversal we will still fetch every CPU cache line.
-So the only way to improve performance is to reduce the number of comparisons.
-
-Going beyond that, to long needles, Boyer-Moore (BM) and its variants are often the best choice.
-It has two tables: the good-suffix shift and the bad-character shift.
-Common choice is to use the simplified BMH algorithm, which only uses the bad-character shift table, reducing the pre-processing time.
-In the C++ Standards Library, the `std::string::find` function uses the BMH algorithm with Raita's heuristic.
-We do something similar longer needles.
-
-All those, still, have $O(hn)$ worst case complexity, and struggle with repetitive needle patterns.
-To guarantee $O(h)$ worst case time complexity, the Apostolico-Giancarlo (AG) algorithm adds an additional skip-table.
-Preprocessing phase is $O(n+sigma)$ in time and space.
-On traversal, performs from $(h/n)$ to $(3h/2)$ comparisons.
-We should consider implementing it if we can:
-
-- accelerate the preprocessing phase of the needle.
-- simplify the control-flow of the main loop.
-- replace the array of shift values with a circular buffer.
-
-Reading materials:
-
-- Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
-- SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
-
 
 ### Levenshtein Edit Distance
 

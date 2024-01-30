@@ -3,6 +3,7 @@ import sys
 import platform
 from setuptools import setup, Extension
 from typing import List, Tuple
+import sysconfig
 import glob
 
 import numpy as np
@@ -75,9 +76,11 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     # Apple Clang doesn't support the `-march=native` argument,
     # so we must pre-set the CPU generation. Technically the last Intel-based Apple
     # product was the 2021 MacBook Pro, which had the "Coffee Lake" architecture.
+    # During Universal builds, however, even AVX header cause compilation errors.
+    can_use_avx2 = is_64bit_x86() and sysconfig.get_platform().startswith("universal")
     macros_args = [
         ("SZ_USE_X86_AVX512", "0"),
-        ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_X86_AVX2", "1" if can_use_avx2 else "0"),
         ("SZ_USE_ARM_SVE", "0"),
         ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
     ]

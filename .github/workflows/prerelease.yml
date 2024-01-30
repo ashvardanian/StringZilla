@@ -9,6 +9,8 @@ on:
 env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
+  PYTHON_VERSION: 3.11
+  SWIFT_VERSION: 5.9
   PYTHONUTF8: 1
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -89,12 +91,22 @@ jobs:
       # - name: Build and test JavaScript
       #   run: npm ci && npm test
 
-      # Rust
+        # Rust
       - name: Test Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
+
+        # Swift
+      - name: Set up Swift ${{ env.SWIFT_VERSION }}
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+      - name: Build Swift
+        run: swift build
+      - name: Test Swift
+        run: swift test
 
   test_ubuntu_clang:
     name: Ubuntu (Clang 16)
@@ -166,12 +178,22 @@ jobs:
       - name: Test Python
         run: pytest scripts/test.py -s -x
 
-      # Rust
+        # Rust
       - name: Test Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
+
+        # Swift
+      - name: Set up Swift ${{ env.SWIFT_VERSION }}
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+      - name: Build Swift
+        run: swift build
+      - name: Test Swift
+        run: swift test
 
   test_macos:
     name: MacOS
@@ -222,13 +244,17 @@ jobs:
       - name: Test Python
         run: pytest python/scripts/ -s -x
 
-        # ObjC/Swift
-      - name: Build ObjC/Swift
+        # Swift
+      - name: Set up Swift ${{ env.SWIFT_VERSION }}
+        uses: swift-actions/setup-swift@v1
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+      - name: Build Swift
         run: swift build
-      - name: Test ObjC/Swift
+      - name: Test Swift
         run: swift test
 
-      # Rust
+        # Rust
       - name: Test Rust
         uses: actions-rs/toolchain@v1
         with:
