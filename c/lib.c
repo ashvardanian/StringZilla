@@ -17,7 +17,7 @@
 #include <stringzilla/stringzilla.h>
 
 #if SZ_AVOID_LIBC
-void free(void *start, size_t length) { sz_unused(start && length); }
+void free(void *start) { sz_unused(start); }
 void *malloc(size_t length) {
     sz_unused(length);
     return SZ_NULL;

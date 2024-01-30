@@ -230,4 +230,14 @@ if(${STRINGZILLA_BUILD_SHARED})
     SOVERSION 1
     POSITION_INDEPENDENT_CODE ON
     PUBLIC_HEADER include/stringzilla/stringzilla.h)
+
+  # Try compiling a version without linking the LibC
+  add_library(stringzillite SHARED c/lib.c)
+  set_compiler_flags(stringzillite "" "${STRINGZILLA_TARGET_ARCH}")
+  target_compile_definitions(stringzillite PRIVATE "SZ_AVOID_LIBC=1")
+  set_target_properties(stringzillite PROPERTIES
+    VERSION ${PROJECT_VERSION}
+    SOVERSION 1
+    POSITION_INDEPENDENT_CODE ON
+    PUBLIC_HEADER include/stringzilla/stringzilla.h)
 endif()
