@@ -234,7 +234,7 @@ public extension SZViewable {
         do {
             try szScope { hPointer, hLength in
                 try other.szScope { nPointer, nLength in
-                    result = sz_edit_distance(hPointer, hLength, nPointer, nLength, sz_size_t(bound), nil)
+                    result = UInt64(sz_edit_distance(hPointer, hLength, nPointer, nLength, sz_size_t(bound), nil))
                     if result == SZ_SIZE_MAX {
                         result = nil
                         throw StringZillaError.memoryAllocationFailed

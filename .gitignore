@@ -11,6 +11,7 @@ package-lock.json
 # Temporary files
 .DS_Store
 .swiftpm/
+.build/
 tmp/
 target/
 __pycache__
