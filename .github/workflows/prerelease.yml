@@ -239,10 +239,10 @@ jobs:
       - name: Build Python
         run: |
           python -m pip install --upgrade pip
-          pip install pytest numpy
+          pip install pytest pytest-repeat numpy
           python -m pip install .
       - name: Test Python
-        run: pytest python/scripts/ -s -x
+        run: pytest scripts/test.py -s -x
 
         # Swift
       - name: Set up Swift ${{ env.SWIFT_VERSION }}
