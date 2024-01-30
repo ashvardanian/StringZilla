@@ -18,6 +18,13 @@ inline std::string read_file(std::string path) {
     return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
 }
 
+inline void write_file(std::string path, std::string content) {
+    std::ofstream stream(path);
+    if (!stream.is_open()) { throw std::runtime_error("Failed to open file: " + path); }
+    stream << content;
+    stream.close();
+}
+
 inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
     std::string result(length, '\0');
     static std::random_device seed_source; // Too expensive to construct every time

@@ -3900,32 +3900,58 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_
     return sz_rfind_byte_serial(h, h_length, n);
 }
 
+SZ_PUBLIC sz_u64_t _sz_find_charset_neon_register(sz_u128_vec_t h_vec, uint8x16_t set_top_vec_u8x16,
+                                                  uint8x16_t set_bottom_vec_u8x16) {
+
+    // Once we've read the characters in the haystack, we want to
+    // compare them against our bitset. The serial version of that code
+    // would look like: `(set_->_u8s[c >> 3] & (1u << (c & 7u))) != 0`.
+    uint8x16_t byte_index_vec = vshrq_n_u8(h_vec.u8x16, 3);
+    uint8x16_t byte_mask_vec = vshlq_u8(vdupq_n_u8(1), vreinterpretq_s8_u8(vandq_u8(h_vec.u8x16, vdupq_n_u8(7))));
+    uint8x16_t matches_top_vec = vqtbl1q_u8(set_top_vec_u8x16, byte_index_vec);
+    // The table lookup instruction in NEON replies to out-of-bound requests with zeros.
+    // The values in `byte_index_vec` all fall in [0; 32). So for values under 16, substracting 16 will underflow
+    // and map into interval [240, 256). Meaning that those will be populated with zeros and we can safely
+    // merge `matches_top_vec` and `matches_bottom_vec` with a bitwise OR.
+    uint8x16_t matches_bottom_vec = vqtbl1q_u8(set_bottom_vec_u8x16, vsubq_u8(byte_index_vec, vdupq_n_u8(16)));
+    uint8x16_t matches_vec = vorrq_u8(matches_top_vec, matches_bottom_vec);
+    // Istead of pure `vandq_u8`, we can immediately broadcast a match presence across each 8-bit word.
+    matches_vec = vtstq_u8(matches_vec, byte_mask_vec);
+    return vreinterpretq_u8_u4(matches_vec);
+}
+
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_find_byte_neon(h, h_length, n);
 
-    // Will contain 4 bits per character.
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
+
+    // Broadcast those characters into SIMD registers.
     sz_u64_t matches;
     sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
-    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
-    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length / 2]);
-    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length - 1]);
+    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_first]);
+    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_mid]);
+    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_last]);
 
+    // Scan through the string.
     for (; h_length >= n_length + 16; h += 16, h_length -= 16) {
-        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h));
-        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + n_length / 2));
-        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + n_length - 1));
+        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_first));
+        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_mid));
+        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_last));
         matches_vec.u8x16 = vandq_u8(                           //
             vandq_u8(                                           //
                 vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-        if (vmaxvq_u8(matches_vec.u8x16)) {
             matches = vreinterpretq_u8_u4(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_ctz(matches) / 4;
-                if (sz_equal(h + potential_offset + 1, n + 1, n_length - 2)) return h + potential_offset;
+            if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
                 matches &= matches - 1;
-            }
         }
     }
 
@@ -3933,34 +3959,41 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return SZ_NULL;
     if (n_length == 1) return sz_rfind_byte_neon(h, h_length, n);
+
+    // Pick the parts of the needle that are worth comparing.
+    sz_size_t offset_first, offset_mid, offset_last;
+    _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
 
     // Will contain 4 bits per character.
     sz_u64_t matches;
     sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
-    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
-    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length / 2]);
-    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[n_length - 1]);
+    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_first]);
+    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_mid]);
+    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_last]);
 
+    sz_cptr_t h_reversed;
     for (; h_length >= n_length + 16; h_length -= 16) {
-        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - n_length - 16 + 1));
-        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - n_length - 16 + 1 + n_length / 2));
-        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + h_length - 16));
+        h_reversed = h + h_length - n_length - 16 + 1;
+        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h_reversed + offset_first));
+        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h_reversed + offset_mid));
+        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h_reversed + offset_last));
         matches_vec.u8x16 = vandq_u8(                           //
             vandq_u8(                                           //
                 vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-        if (vmaxvq_u8(matches_vec.u8x16)) {
             matches = vreinterpretq_u8_u4(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_clz(matches) / 4;
-                if (sz_equal(h + h_length - n_length - potential_offset + 1, n + 1, n_length - 2))
+            if (sz_equal(h + h_length - n_length - potential_offset, n, n_length))
                     return h + h_length - n_length - potential_offset;
                 sz_assert((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
                           "The bit must be set before we squash it");
                 matches &= ~(1ull << (63 - potential_offset * 4));
-            }
         }
     }
 
@@ -3969,27 +4002,13 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
 
 SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
     sz_u64_t matches;
-    sz_u128_vec_t h_vec, matches_vec;
+    sz_u128_vec_t h_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
     uint8x16_t set_bottom_vec_u8x16 = vld1q_u8(&set->_u8s[16]);
 
     for (; h_length >= 16; h += 16, h_length -= 16) {
         h_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h));
-        // Once we've read the characters in the haystack, we want to
-        // compare them against our bitset. The serial version of that code
-        // would look like: `(set_->_u8s[c >> 3] & (1u << (c & 7u))) != 0`.
-        uint8x16_t byte_index_vec = vshrq_n_u8(h_vec.u8x16, 3);
-        uint8x16_t byte_mask_vec = vshlq_u8(vdupq_n_u8(1), vreinterpretq_s8_u8(vandq_u8(h_vec.u8x16, vdupq_n_u8(7))));
-        uint8x16_t matches_top_vec = vqtbl1q_u8(set_top_vec_u8x16, byte_index_vec);
-        // The table lookup instruction in NEON replies to out-of-bound requests with zeros.
-        // The values in `byte_index_vec` all fall in [0; 32). So for values under 16, substracting 16 will underflow
-        // and map into interval [240, 256). Meaning that those will be populated with zeros and we can safely
-        // merge `matches_top_vec` and `matches_bottom_vec` with a bitwise OR.
-        uint8x16_t matches_bottom_vec = vqtbl1q_u8(set_bottom_vec_u8x16, vsubq_u8(byte_index_vec, vdupq_n_u8(16)));
-        matches_vec.u8x16 = vorrq_u8(matches_top_vec, matches_bottom_vec);
-        // Istead of pure `vandq_u8`, we can immediately broadcast a match presence across each 8-bit word.
-        matches_vec.u8x16 = vtstq_u8(matches_vec.u8x16, byte_mask_vec);
-        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        matches = _sz_find_charset_neon_register(h_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
         if (matches) return h + sz_u64_ctz(matches) / 4;
     }
 
@@ -3998,20 +4017,14 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_cha
 
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
     sz_u64_t matches;
-    sz_u128_vec_t h_vec, matches_vec;
+    sz_u128_vec_t h_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
     uint8x16_t set_bottom_vec_u8x16 = vld1q_u8(&set->_u8s[16]);
 
     // Check `sz_find_charset_neon` for explanations.
     for (; h_length >= 16; h_length -= 16) {
         h_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h) + h_length - 16);
-        uint8x16_t byte_index_vec = vshrq_n_u8(h_vec.u8x16, 3);
-        uint8x16_t byte_mask_vec = vshlq_u8(vdupq_n_u8(1), vreinterpretq_s8_u8(vandq_u8(h_vec.u8x16, vdupq_n_u8(7))));
-        uint8x16_t matches_top_vec = vqtbl1q_u8(set_top_vec_u8x16, byte_index_vec);
-        uint8x16_t matches_bottom_vec = vqtbl1q_u8(set_bottom_vec_u8x16, vsubq_u8(byte_index_vec, vdupq_n_u8(16)));
-        matches_vec.u8x16 = vorrq_u8(matches_top_vec, matches_bottom_vec);
-        matches_vec.u8x16 = vtstq_u8(matches_vec.u8x16, byte_mask_vec);
-        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        matches = _sz_find_charset_neon_register(h_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
         if (matches) return h + h_length - 1 - sz_u64_clz(matches) / 4;
     }
 

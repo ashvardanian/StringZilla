@@ -1829,12 +1829,13 @@ class basic_string_slice {
     }
 
   private:
-    constexpr string_view &assign(string_view const &other) noexcept {
+    sz_constexpr_if_cpp20 string_view &assign(string_view const &other) noexcept {
         start_ = other.start_;
         length_ = other.length_;
         return *this;
     }
-    inline static constexpr size_type null_terminated_length(const_pointer s) noexcept {
+
+    sz_constexpr_if_cpp20 static size_type null_terminated_length(const_pointer s) noexcept {
         const_pointer p = s;
         while (*p) ++p;
         return p - s;

@@ -61,16 +61,38 @@ struct tracked_function_gt {
     tracked_function_gt &operator=(tracked_function_gt const &) = default;
 
     void print() const {
-        char const *format;
+        bool is_binary = std::is_same<function_type, binary_function_t>();
+
+        // If failures have occured, output them to file tos implify the debugging process.
+        bool contains_failures = !failed_strings.empty();
+        if (contains_failures) {
+            // The file name is made of the string hash and the function name.
+            for (std::size_t fail_index = 0; fail_index != failed_strings.size();) {
+                std::string const &first_argument = failed_strings[fail_index];
+                std::string file_name =
+                    "failed_" + name + "_" + std::to_string(std::hash<std::string> {}(first_argument));
+                if (is_binary) {
+                    std::string const &second_argument = failed_strings[fail_index + 1];
+                    write_file(file_name + ".first.txt", first_argument);
+                    write_file(file_name + ".second.txt", second_argument);
+                    fail_index += 2;
+                }
+                else {
+                    write_file(file_name + ".txt", first_argument);
+                    fail_index += 1;
+                }
+            }
+        }
+
         // Now let's print in the format:
         //  - name, up to 20 characters
         //  - throughput in GB/s with up to 3 significant digits, 10 characters
         //  - call latency in ns with up to 1 significant digit, 10 characters
         //  - number of failed tests, 10 characters
         //  - first example of a failed test, up to 20 characters
-        bool is_binary = std::is_same<function_type, binary_function_t>();
-        if (is_binary) { format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s %s\n"; }
-        else { format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %s\n"; }
+        char const *format;
+        if (is_binary) { format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %-20s %-20s\n"; }
+        else { format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %-20s\n"; }
 
         std::printf(format, name.c_str(), results.bytes_passed / results.seconds / 1.e9,
                     results.seconds * 1e9 / results.iterations, failed_count, results.iterations,
