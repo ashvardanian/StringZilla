@@ -107,12 +107,7 @@ cmake --build ./build_release --config Release      # Which will produce the fol
 ./build_release/stringzilla_bench_container <path>  # for STL containers with string keys
 ```
 
-To simplify tracing and profiling, build with symbols using the `RelWithDebInfo` configuration.
 
-```bash
-cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_SHARED=1 -B build_release
-cmake --build ./build_release --config Release
-```
 
 You may want to download some datasets for benchmarks, like these:
 
@@ -175,6 +170,26 @@ cmake -B build_artifacts \
 cppcheck --project=build_artifacts/compile_commands.json --enable=all
 
 clang-tidy-11 -p build_artifacts
+```
+
+To simplify tracing and profiling, build with symbols using the `RelWithDebInfo` configuration.
+Here is an example for profiling one target - `stringzilla_bench_token`.
+
+```bash
+cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+    -DSTRINGZILLA_BUILD_TEST=1 \
+    -DSTRINGZILLA_BUILD_SHARED=1 \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -B build_profile
+cmake --build ./build_profile --config Release --target stringzilla_bench_token
+
+# Check that the debugging symbols are there with your favorite tool
+readelf --sections ./build_profile/stringzilla_bench_token | grep debug
+objdump -h ./build_profile/stringzilla_bench_token | grep debug
+
+# Profile
+sudo perf record -g ./build_profile/stringzilla_bench_token ./leipzig1M.txt
+sudo perf report
 ```
 
 ## Contributing in Python
