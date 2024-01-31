@@ -767,18 +767,19 @@ typedef void (*sz_hash_callback_t)(sz_cptr_t, sz_size_t, sz_u64_t, void *user);
  *  @param text             String to hash.
  *  @param length           Number of bytes in the string.
  *  @param window_length    Length of the rolling window in bytes.
+ *  @param window_step      Step of reported hashes. @b Must be power of two. Should be smaller than `window_length`.
  *  @param callback         Function receiving the start & length of a substring, the hash, and the `callback_handle`.
  *  @param callback_handle  Optional user-provided pointer to be passed to the `callback`.
  *  @see                    sz_hashes_fingerprint, sz_hashes_intersection
  */
-SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
                           sz_hash_callback_t callback, void *callback_handle);
 
 /** @copydoc sz_hashes */
-SZ_PUBLIC void sz_hashes_serial(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+SZ_PUBLIC void sz_hashes_serial(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
                                 sz_hash_callback_t callback, void *callback_handle);
 
-typedef void (*sz_hashes_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_hash_callback_t, void *);
+typedef void (*sz_hashes_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_size_t, sz_hash_callback_t, void *);
 
 /**
  *  @brief  Computes the Karp-Rabin rolling hashes of a string outputting a binary fingerprint.
@@ -1009,7 +1010,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_avx512(sz_cptr_t a, sz_size_t a_length, 
                                                sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
                                                sz_memory_allocator_t *alloc);
 /** @copydoc sz_hashes */
-SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t step, //
                                 sz_hash_callback_t callback, void *callback_handle);
 #endif
 
@@ -1029,7 +1030,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr
 /** @copydoc sz_rfind */
 SZ_PUBLIC sz_cptr_t sz_rfind_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 /** @copydoc sz_hashes */
-SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t step, //
                               sz_hash_callback_t callback, void *callback_handle);
 #endif
 
@@ -2308,7 +2309,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length) {
     return _sz_hash_mix(hash_low, hash_high);
 }
 
-SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t window_length, //
+SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step, //
                                 sz_hash_callback_t callback, void *callback_handle) {
 
     if (length < window_length || !window_length) return;
@@ -2333,7 +2334,9 @@ SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t win
 
     // Compute the hash value for every window, exporting into the fingerprint,
     // using the expensive modulo operation.
-    for (; text < text_end; ++text) {
+    sz_size_t cycles = 1;
+    sz_size_t const step_mask = step - 1;
+    for (; text < text_end; ++text, ++cycles) {
         // Discard one character:
         hash_low -= _sz_shift_low(*(text - window_length)) * prime_power_low;
         hash_high -= _sz_shift_high(*(text - window_length)) * prime_power_high;
@@ -2343,8 +2346,11 @@ SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t win
         // Wrap the hashes around:
         hash_low = _sz_prime_mod(hash_low);
         hash_high = _sz_prime_mod(hash_high);
-        hash_mix = _sz_hash_mix(hash_low, hash_high);
-        callback((sz_cptr_t)text, window_length, hash_mix, callback_handle);
+        // Mix only if we've skipped enough hashes.
+        if ((cycles & step_mask) == 0) {
+            hash_mix = _sz_hash_mix(hash_low, hash_high);
+            callback((sz_cptr_t)text, window_length, hash_mix, callback_handle);
+        }
     }
 }
 
@@ -3157,12 +3163,12 @@ SZ_INTERNAL __m256i _mm256_mul_epu64(__m256i a, __m256i b) {
     return prod;
 }
 
-SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t window_length, //
+SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step, //
                               sz_hash_callback_t callback, void *callback_handle) {
 
     if (length < window_length || !window_length) return;
     if (length < 4 * window_length) {
-        sz_hashes_serial(start, length, window_length, callback, callback_handle);
+        sz_hashes_serial(start, length, window_length, step, callback, callback_handle);
         return;
     }
 
@@ -3232,7 +3238,9 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t windo
     callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
 
     // Now repeat that operation for the remaining characters, discarding older characters.
-    for (; text_fourth != text_end; ++text_first, ++text_second, ++text_third, ++text_fourth) {
+    sz_size_t cycle = 1;
+    sz_size_t const step_mask = step - 1;
+    for (; text_fourth != text_end; ++text_first, ++text_second, ++text_third, ++text_fourth, ++cycle) {
         // 0. Load again the four characters we are dropping, shift them, and subtract.
         chars_low_vec.ymm = _mm256_set_epi64x(text_fourth[-window_length], text_third[-window_length],
                                               text_second[-window_length], text_first[-window_length]);
@@ -3267,10 +3275,12 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t windo
         hash_low_vec.ymm = _mm256_mul_epu64(hash_low_vec.ymm, golden_ratio_vec.ymm);
         hash_high_vec.ymm = _mm256_mul_epu64(hash_high_vec.ymm, golden_ratio_vec.ymm);
         hash_mix_vec.ymm = _mm256_xor_si256(hash_low_vec.ymm, hash_high_vec.ymm);
-        callback((sz_cptr_t)text_first, window_length, hash_mix_vec.u64s[0], callback_handle);
-        callback((sz_cptr_t)text_second, window_length, hash_mix_vec.u64s[1], callback_handle);
-        callback((sz_cptr_t)text_third, window_length, hash_mix_vec.u64s[2], callback_handle);
-        callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
+        if ((cycle & step_mask) == 0) {
+            callback((sz_cptr_t)text_first, window_length, hash_mix_vec.u64s[0], callback_handle);
+            callback((sz_cptr_t)text_second, window_length, hash_mix_vec.u64s[1], callback_handle);
+            callback((sz_cptr_t)text_third, window_length, hash_mix_vec.u64s[2], callback_handle);
+            callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
+        }
     }
 }
 
@@ -3595,12 +3605,12 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,bmi,bmi2"))), \
                              apply_to = function)
 
-SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t window_length, //
+SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step, //
                                 sz_hash_callback_t callback, void *callback_handle) {
 
     if (length < window_length || !window_length) return;
     if (length < 4 * window_length) {
-        sz_hashes_serial(start, length, window_length, callback, callback_handle);
+        sz_hashes_serial(start, length, window_length, step, callback, callback_handle);
         return;
     }
 
@@ -3671,7 +3681,9 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t win
     callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
 
     // Now repeat that operation for the remaining characters, discarding older characters.
-    for (; text_fourth != text_end; ++text_first, ++text_second, ++text_third, ++text_fourth) {
+    sz_size_t cycle = 1;
+    sz_size_t step_mask = step - 1;
+    for (; text_fourth != text_end; ++text_first, ++text_second, ++text_third, ++text_fourth, ++cycle) {
         // 0. Load again the four characters we are dropping, shift them, and subtract.
         chars_vec.zmm = _mm512_set_epi64(text_fourth[-window_length], text_third[-window_length],
                                          text_second[-window_length], text_first[-window_length], //
@@ -3709,10 +3721,12 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t win
         hash_mix_vec.ymms[0] = _mm256_xor_si256(_mm512_extracti64x4_epi64(hash_mix_vec.zmm, 1), //
                                                 _mm512_castsi512_si256(hash_mix_vec.zmm));
 
-        callback((sz_cptr_t)text_first, window_length, hash_mix_vec.u64s[0], callback_handle);
-        callback((sz_cptr_t)text_second, window_length, hash_mix_vec.u64s[1], callback_handle);
-        callback((sz_cptr_t)text_third, window_length, hash_mix_vec.u64s[2], callback_handle);
-        callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
+        if ((cycle & step_mask) == 0) {
+            callback((sz_cptr_t)text_first, window_length, hash_mix_vec.u64s[0], callback_handle);
+            callback((sz_cptr_t)text_second, window_length, hash_mix_vec.u64s[1], callback_handle);
+            callback((sz_cptr_t)text_third, window_length, hash_mix_vec.u64s[2], callback_handle);
+            callback((sz_cptr_t)text_fourth, window_length, hash_mix_vec.u64s[3], callback_handle);
+        }
     }
 }
 
@@ -3852,7 +3866,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz
  */
 typedef union sz_u128_vec_t {
     uint8x16_t u8x16;
+    uint16x8_t u16x8;
     uint32x4_t u32x4;
+    uint64x2_t u64x2;
     sz_u64_t u64s[2];
     sz_u32_t u32s[4];
     sz_u16_t u16s[8];
@@ -4056,9 +4072,9 @@ SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_
 
     // In most cases the fingerprint length will be a power of two.
     if (fingerprint_length_is_power_of_two == sz_false_k)
-        sz_hashes(start, length, window_length, _sz_hashes_fingerprint_non_pow2_callback, &fingerprint_buffer);
+        sz_hashes(start, length, window_length, 1, _sz_hashes_fingerprint_non_pow2_callback, &fingerprint_buffer);
     else
-        sz_hashes(start, length, window_length, _sz_hashes_fingerprint_pow2_callback, &fingerprint_buffer);
+        sz_hashes(start, length, window_length, 1, _sz_hashes_fingerprint_pow2_callback, &fingerprint_buffer);
 }
 
 #if !SZ_DYNAMIC_DISPATCH
@@ -4190,14 +4206,14 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cpt
     return sz_alignment_score_serial(a, a_length, b, b_length, subs, gap, alloc);
 }
 
-SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
                           sz_hash_callback_t callback, void *callback_handle) {
 #if SZ_USE_X86_AVX512
-    sz_hashes_avx512(text, length, window_length, callback, callback_handle);
+    sz_hashes_avx512(text, length, window_length, window_step, callback, callback_handle);
 #elif SZ_USE_X86_AVX2
-    sz_hashes_avx2(text, length, window_length, callback, callback_handle);
+    sz_hashes_avx2(text, length, window_length, window_step, callback, callback_handle);
 #else
-    sz_hashes_serial(text, length, window_length, callback, callback_handle);
+    sz_hashes_serial(text, length, window_length, window_step, callback, callback_handle);
 #endif
 }
 
