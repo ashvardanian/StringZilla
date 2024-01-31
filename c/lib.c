@@ -9,6 +9,11 @@
 #include <windows.h> // `DllMain`
 #endif
 
+// If we don't have the LibC, the `malloc` definition in `stringzilla.h` will be illformed.
+#if SZ_AVOID_LIBC
+typedef __SIZE_TYPE__ size_t;
+#endif
+
 // Overwrite `SZ_DYNAMIC_DISPATCH` before including StringZilla.
 #ifdef SZ_DYNAMIC_DISPATCH
 #undef SZ_DYNAMIC_DISPATCH
