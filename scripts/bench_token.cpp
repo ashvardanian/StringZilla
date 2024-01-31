@@ -20,10 +20,9 @@ tracked_unary_functions_t hashing_functions() {
     return result;
 }
 
-template <std::size_t window_width = 8>
-tracked_unary_functions_t sliding_hashing_functions() {
-    auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](std::string_view s) {
+tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width) {
+    auto wrap_sz = [=](auto function) -> unary_function_t {
+        return unary_function_t([function, window_width](std::string_view s) {
             sz_size_t mixed_hash = 0;
             function(s.data(), s.size(), window_width, _sz_hashes_fingerprint_scalar_callback, &mixed_hash);
             return mixed_hash;
@@ -31,12 +30,15 @@ tracked_unary_functions_t sliding_hashing_functions() {
     };
     tracked_unary_functions_t result = {
 #if SZ_USE_X86_AVX512
-        {"sz_hashes_avx512", wrap_sz(sz_hashes_avx512)},
+        {"sz_hashes_avx512:" + std::to_string(window_width), wrap_sz(sz_hashes_avx512)},
 #endif
 #if SZ_USE_X86_AVX2
-        {"sz_hashes_avx2", wrap_sz(sz_hashes_avx2)},
+        {"sz_hashes_avx2:" + std::to_string(window_width), wrap_sz(sz_hashes_avx2)},
 #endif
-        {"sz_hashes_serial", wrap_sz(sz_hashes_serial)},
+#if SZ_USE_ARM_NEON
+        {"sz_hashes_neon:" + std::to_string(window_width), wrap_sz(sz_hashes_neon)},
+#endif
+        {"sz_hashes_serial:" + std::to_string(window_width), wrap_sz(sz_hashes_serial)},
     };
     return result;
 }
@@ -129,7 +131,7 @@ void bench(strings_type &&strings) {
 
     // Benchmark logical operations
     bench_unary_functions(strings, hashing_functions());
-    bench_unary_functions(strings, sliding_hashing_functions());
+    bench_unary_functions(strings, sliding_hashing_functions(8));
     bench_unary_functions(strings, fingerprinting_functions());
     bench_binary_functions(strings, equality_functions());
     bench_binary_functions(strings, ordering_functions());
@@ -157,7 +159,10 @@ void bench_on_input_data(int argc, char const **argv) {
     // On the Intel Sappire Rapids 6455B Gold CPU they are 96 KiB x2 for L1d, 4 MiB x2 for L2.
     // Spilling into the L3 is a bad idea.
     std::printf("Benchmarking on the entire dataset:\n");
-    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions<128>());
+    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(7));
+    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(17));
+    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(33));
+    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(127));
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, hashing_functions());
     // bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions<128, 4 * 1024>());
     // bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions<128, 64 * 1024>());
