@@ -1993,12 +1993,82 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
         (n_length > 256)](h, h_length, n, n_length);
 }
 
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_serial( //
-    sz_cptr_t shorter, sz_size_t shorter_length,       //
-    sz_cptr_t longer, sz_size_t longer_length,         //
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                 //
+    sz_cptr_t longer, sz_size_t longer_length,                   //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
-    sz_unused(longer && longer_length && shorter && shorter_length && bound && alloc);
-    return 0;
+
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
+    // TODO: Generalize!
+    sz_assert(!bound && "For bounded search the method should only evaluate one band of the matrix.");
+    sz_assert(shorter_length == longer_length && "The method hasn't been generalized to different length inputs yet.");
+    sz_unused(longer_length && bound);
+
+    // We are going to store 3 diagonals of the matrix.
+    // The length of the longest (main) diagonal would be `n = (shorter_length + 1)`.
+    sz_size_t n = shorter_length + 1;
+    sz_size_t buffer_length = sizeof(sz_size_t) * n * 3;
+    sz_size_t *distances = (sz_size_t *)alloc->allocate(buffer_length, alloc->handle);
+    if (!distances) return SZ_SIZE_MAX;
+
+    sz_size_t *previous_distances = distances;
+    sz_size_t *current_distances = previous_distances + n;
+    sz_size_t *next_distances = previous_distances + n * 2;
+
+    // Initialize the first two diagonals:
+    previous_distances[0] = 0;
+    current_distances[0] = current_distances[1] = 1;
+
+    // Progress through the upper triangle of the Levenshtein matrix.
+    sz_size_t next_skew_diagonal_index = 2;
+    for (; next_skew_diagonal_index != n; ++next_skew_diagonal_index) {
+        sz_size_t const next_skew_diagonal_length = next_skew_diagonal_index + 1;
+        for (sz_size_t i = 0; i + 2 < next_skew_diagonal_length; ++i) {
+            sz_size_t cost_of_substitution = shorter[next_skew_diagonal_index - i - 2] != longer[i];
+            sz_size_t cost_if_substitution = previous_distances[i] + cost_of_substitution;
+            sz_size_t cost_if_deletion_or_insertion = sz_min_of_two(current_distances[i], current_distances[i + 1]) + 1;
+            next_distances[i + 1] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
+        }
+        // Don't forget to populate the first row and the fiest column of the Levenshtein matrix.
+        next_distances[0] = next_distances[next_skew_diagonal_length - 1] = next_skew_diagonal_index;
+        // Perform a circular rotarion of those buffers, to reuse the memory.
+        sz_size_t *temporary = previous_distances;
+        previous_distances = current_distances;
+        current_distances = next_distances;
+        next_distances = temporary;
+    }
+
+    // By now we've scanned through the upper triangle of the matrix, where each subsequent iteration results in a
+    // larger diagonal. From now onwards, we will be shrinking. Instead of adding value equal to the skewed diagonal
+    // index on either side, we will be cropping those values out.
+    sz_size_t total_diagonals = n + n - 1;
+    for (; next_skew_diagonal_index != total_diagonals; ++next_skew_diagonal_index) {
+        sz_size_t const next_skew_diagonal_length = total_diagonals - next_skew_diagonal_index;
+        for (sz_size_t i = 0; i != next_skew_diagonal_length; ++i) {
+            sz_size_t cost_of_substitution =
+                shorter[shorter_length - 1 - i] != longer[next_skew_diagonal_index - n + i];
+            sz_size_t cost_if_substitution = previous_distances[i] + cost_of_substitution;
+            sz_size_t cost_if_deletion_or_insertion = sz_min_of_two(current_distances[i], current_distances[i + 1]) + 1;
+            next_distances[i] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
+        }
+        // Perform a circular rotarion of those buffers, to reuse the memory, this time, with a shift,
+        // dropping the first element in the current array.
+        sz_size_t *temporary = previous_distances;
+        previous_distances = current_distances + 1;
+        current_distances = next_distances;
+        next_distances = temporary;
+    }
+
+    // Cache scalar before `free` call.
+    sz_size_t result = current_distances[0];
+    alloc->free(distances, buffer_length, alloc->handle);
+    return result;
 }
 
 SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
@@ -2086,19 +2156,12 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     sz_cptr_t shorter, sz_size_t shorter_length, //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
 
-    // If one of the strings is empty - the edit distance is equal to the length of the other one.
-    if (longer_length == 0) return shorter_length <= bound ? shorter_length : bound;
-    if (shorter_length == 0) return longer_length <= bound ? longer_length : bound;
-
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
         sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
         sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
     }
-
-    // If the difference in length is beyond the `bound`, there is no need to check at all.
-    if (bound && longer_length - shorter_length > bound) return bound;
 
     // Skip the matching prefixes and suffixes, they won't affect the distance.
     for (sz_cptr_t a_end = longer + longer_length, b_end = shorter + shorter_length;
@@ -2109,7 +2172,18 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
          --longer_length, --shorter_length)
         ;
 
-    if (longer_length == 0) return 0; // If no mismatches were found - the distance is zero.
+    // Bounded computations may exit early.
+    if (bound) {
+        // If one of the strings is empty - the edit distance is equal to the length of the other one.
+        if (longer_length == 0) return shorter_length <= bound ? shorter_length : bound;
+        if (shorter_length == 0) return longer_length <= bound ? longer_length : bound;
+        // If the difference in length is beyond the `bound`, there is no need to check at all.
+        if (longer_length - shorter_length > bound) return bound;
+    }
+
+    if (shorter_length == 0) return longer_length; // If no mismatches were found - the distance is zero.
+    if (shorter_length == longer_length && !bound)
+        return _sz_edit_distance_skewed_diagonals_serial(longer, longer_length, shorter, shorter_length, bound, alloc);
     return _sz_edit_distance_wagner_fisher_serial(longer, longer_length, shorter, shorter_length, bound, alloc);
 }
 

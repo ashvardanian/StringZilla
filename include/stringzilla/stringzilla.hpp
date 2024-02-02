@@ -3133,7 +3133,7 @@ class basic_string {
 
     concatenation<string_view, string_view> operator|(string_view other) const noexcept { return {view(), other}; }
 
-    size_type edit_distance(string_view other, size_type bound = npos) const noexcept {
+    size_type edit_distance(string_view other, size_type bound = 0) const noexcept {
         size_type distance;
         _with_alloc([&](sz_alloc_type &alloc) {
             distance = sz_edit_distance(data(), size(), other.data(), other.size(), bound, &alloc);
