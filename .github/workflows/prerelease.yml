@@ -98,16 +98,6 @@ jobs:
           toolchain: stable
           override: true
 
-        # Swift
-      - name: Set up Swift ${{ env.SWIFT_VERSION }}
-        uses: swift-actions/setup-swift@v1
-        with:
-          swift-version: ${{ env.SWIFT_VERSION }}
-      - name: Build Swift
-        run: swift build -c release --static-swift-stdlib
-      - name: Test Swift
-        run: swift test -c release --enable-test-discovery
-
   test_ubuntu_clang:
     name: Ubuntu (Clang 16)
     runs-on: ubuntu-22.04
@@ -186,14 +176,26 @@ jobs:
           override: true
 
         # Swift
-      - name: Set up Swift ${{ env.SWIFT_VERSION }}
-        uses: swift-actions/setup-swift@v1
-        with:
-          swift-version: ${{ env.SWIFT_VERSION }}
-      - name: Build Swift
-        run: swift build -c release --static-swift-stdlib
+        # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
+      # - name: Set up Swift ${{ env.SWIFT_VERSION }}
+      #   uses: swift-actions/setup-swift@v1
+      #   with:
+      #     swift-version: ${{ env.SWIFT_VERSION }}
+      # - name: Build Swift
+      #   run: swift build -c release --static-swift-stdlib
+      # - name: Test Swift
+      #   run: swift test -c release --enable-test-discovery
+
+  # Temporary workaround to run Swift tests on Linux
+  # Based on: https://github.com/swift-actions/setup-swift/issues/591#issuecomment-1685710678
+  test_ubuntu_swift:
+    name: Ubuntu (Swift)
+    runs-on: ubuntu-22.04
+    container: swift:5.9
+    steps:
+      - uses: actions/checkout@v4
       - name: Test Swift
-        run: swift test -c release --enable-test-discovery
+        run: swift test
 
   test_macos:
     name: MacOS

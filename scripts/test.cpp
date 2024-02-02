@@ -1089,7 +1089,7 @@ static void test_search_with_misaligned_repetitions() {
 
 /**
  *  @brief  Tests the correctness of the string class Levenshtein distance computation,
- *          as well as TODO: the similarity scoring functions for bioinformatics-like workloads.
+ *          as well as the similarity scoring functions for bioinformatics-like workloads.
  */
 static void test_levenshtein_distances() {
     struct {
@@ -1097,13 +1097,15 @@ static void test_levenshtein_distances() {
         char const *right;
         std::size_t distance;
     } explicit_cases[] = {
+        {"listen", "silent", 4},
         {"", "", 0},
         {"", "abc", 3},
         {"abc", "", 3},
         {"abc", "ac", 1},                   // one deletion
         {"abc", "a_bc", 1},                 // one insertion
         {"abc", "adc", 1},                  // one substitution
-        {"ggbuzgjux{}l", "gbuzgjux{}l", 1}, // one insertion (prepended
+        {"abc", "abc", 0},                  // same string
+        {"ggbuzgjux{}l", "gbuzgjux{}l", 1}, // one insertion (prepended)
     };
 
     auto print_failure = [&](sz::string const &l, sz::string const &r, std::size_t expected, std::size_t received) {
@@ -1137,15 +1139,23 @@ static void test_levenshtein_distances() {
     std::mt19937 generator(random_device());
     sz::string first, second;
     for (auto fuzzy_case : fuzzy_cases) {
-        char alphabet[2] = {'a', 'b'};
+        char alphabet[4] = {'a', 'c', 'g', 't'};
         std::uniform_int_distribution<std::size_t> length_distribution(0, fuzzy_case.length_upper_bound);
         for (std::size_t i = 0; i != fuzzy_case.iterations; ++i) {
             std::size_t first_length = length_distribution(generator);
             std::size_t second_length = length_distribution(generator);
-            std::generate_n(std::back_inserter(first), first_length, [&]() { return alphabet[generator() % 2]; });
-            std::generate_n(std::back_inserter(second), second_length, [&]() { return alphabet[generator() % 2]; });
+            std::generate_n(std::back_inserter(first), first_length, [&]() { return alphabet[generator() % 4]; });
+            std::generate_n(std::back_inserter(second), second_length, [&]() { return alphabet[generator() % 4]; });
             test_distance(first, second,
                           levenshtein_baseline(first.c_str(), first.length(), second.c_str(), second.length()));
+
+            // Try computing the distance on equal-length chunks of those strings.
+            first.resize(std::min(first_length, second_length));
+            second.resize(std::min(first_length, second_length));
+            test_distance(first, second,
+                          levenshtein_baseline(first.c_str(), first.length(), second.c_str(), second.length()));
+
+            // Discard before the next iteration.
             first.clear();
             second.clear();
         }

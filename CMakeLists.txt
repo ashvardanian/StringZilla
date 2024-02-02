@@ -135,11 +135,12 @@ function(set_compiler_flags target cpp_standard target_arch)
   target_compile_options(
     ${target}
     PRIVATE
-    "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<CONFIG:Release>>:-O3>"
+    "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O3>"
     "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-g>"
-    "$<$<AND:$<CXX_COMPILER_ID:Clang>,$<CONFIG:Release>>:-O3>"
+    "$<$<AND:$<CXX_COMPILER_ID:Clang>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O3>"
     "$<$<AND:$<CXX_COMPILER_ID:Clang>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-g>"
     "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:Release>>:/O2>"
+    "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:/O2>"
     "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/Zi>"
   )
 

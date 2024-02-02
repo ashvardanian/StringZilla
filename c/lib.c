@@ -265,9 +265,9 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cpt
     return sz_dispatch_table.alignment_score(a, a_length, b, b_length, subs, gap, alloc);
 }
 
-SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t step, //
                           sz_hash_callback_t callback, void *callback_handle) {
-    sz_dispatch_table.hashes(text, length, window_length, callback, callback_handle);
+    sz_dispatch_table.hashes(text, length, window_length, step, callback, callback_handle);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {

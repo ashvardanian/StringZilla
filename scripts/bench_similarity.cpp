@@ -37,7 +37,7 @@ tracked_binary_functions_t distance_functions() {
     });
     auto wrap_sz_distance = [alloc](auto function) mutable -> binary_function_t {
         return binary_function_t([function, alloc](std::string_view a, std::string_view b) mutable -> std::size_t {
-            return function(a.data(), a.length(), b.data(), b.length(), (sz_error_cost_t)0, &alloc);
+            return function(a.data(), a.length(), b.data(), b.length(), (sz_size_t)0, &alloc);
         });
     };
     auto wrap_sz_scoring = [alloc](auto function) mutable -> binary_function_t {
@@ -67,7 +67,7 @@ void bench_similarity_on_bio_data() {
 
     // A typical protein is 100-1000 amino acids long.
     // The alphabet is generally 20 amino acids, but that won't affect the throughput.
-    char alphabet[2] = {'a', 'b'};
+    char alphabet[4] = {'a', 'c', 'g', 't'};
     constexpr std::size_t bio_samples = 128;
     struct {
         std::size_t length_lower_bound;
@@ -89,7 +89,7 @@ void bench_similarity_on_bio_data() {
         for (std::size_t i = 0; i != bio_samples; ++i) {
             std::size_t length = length_distribution(generator);
             std::string protein(length, 'a');
-            std::generate(protein.begin(), protein.end(), [&]() { return alphabet[generator() % 2]; });
+            std::generate(protein.begin(), protein.end(), [&]() { return alphabet[generator() % sizeof(alphabet)]; });
             proteins.push_back(protein);
         }
 
