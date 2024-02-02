@@ -900,7 +900,7 @@ range_splits<string, matcher_find<string, exclude_overlaps_type>> split(string c
  *  @tparam string  A string-like type, ideally a view, like StringZilla or STL `string_view`.
  */
 template <typename string>
-range_rmatches<string, matcher_rfind<string, exclude_overlaps_type>> rsplit(string const &h, string const &n) noexcept {
+range_rsplits<string, matcher_rfind<string, exclude_overlaps_type>> rsplit(string const &h, string const &n) noexcept {
     return {h, n};
 }
 
