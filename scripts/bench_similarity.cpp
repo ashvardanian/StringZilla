@@ -52,6 +52,10 @@ tracked_binary_functions_t distance_functions() {
         {"naive", wrap_baseline},
         {"sz_edit_distance", wrap_sz_distance(sz_edit_distance_serial), true},
         {"sz_alignment_score", wrap_sz_scoring(sz_alignment_score_serial), true},
+#if SZ_USE_X86_AVX512
+        {"sz_edit_distance_avx512", wrap_sz_distance(sz_edit_distance_avx512), true},
+        {"sz_alignment_score_avx512", wrap_sz_scoring(sz_alignment_score_avx512), true},
+#endif
     };
     return result;
 }

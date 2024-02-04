@@ -174,12 +174,15 @@ static void sz_dispatch_table_init(void) {
         impl->rfind = sz_rfind_avx512;
         impl->find_byte = sz_find_byte_avx512;
         impl->rfind_byte = sz_rfind_byte_avx512;
+
+        impl->edit_distance = sz_edit_distance_avx512;
     }
 
     if ((caps & sz_cap_x86_avx512f_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_gfni_k) &&
         (caps & sz_cap_x86_avx512bw_k) && (caps & sz_cap_x86_avx512vbmi_k)) {
         impl->find_from_set = sz_find_charset_avx512;
         impl->rfind_from_set = sz_rfind_charset_avx512;
+        impl->alignment_score = sz_alignment_score_avx512;
     }
 #endif
 
