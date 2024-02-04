@@ -2195,8 +2195,8 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     sz_memory_allocator_t *alloc) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one
-    if (longer_length == 0) return shorter_length;
-    if (shorter_length == 0) return longer_length;
+    if (longer_length == 0) return (sz_ssize_t)shorter_length * gap;
+    if (shorter_length == 0) return (sz_ssize_t)longer_length * gap;
 
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
@@ -4113,8 +4113,8 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
     sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one
-    if (longer_length == 0) return (sz_ssize_t)shorter_length;
-    if (shorter_length == 0) return (sz_ssize_t)longer_length;
+    if (longer_length == 0) return (sz_ssize_t)shorter_length * gap;
+    if (shorter_length == 0) return (sz_ssize_t)longer_length * gap;
 
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.

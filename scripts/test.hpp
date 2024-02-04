@@ -59,7 +59,7 @@ inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char c
 inline std::vector<std::int8_t> unary_substitution_costs() {
     std::vector<std::int8_t> result(256 * 256);
     for (std::size_t i = 0; i != 256; ++i)
-        for (std::size_t j = 0; j != 256; ++j) result[i * 256 + j] = (i == j ? 0 : 1);
+        for (std::size_t j = 0; j != 256; ++j) result[i * 256 + j] = (i == j ? 0 : -1);
     return result;
 }
 

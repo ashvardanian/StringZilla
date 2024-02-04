@@ -548,14 +548,17 @@ static void test_api_readonly_extensions() {
     assert(sz::edit_distance(str("abc"), str("a_bc")) == 1);                 // one insertion
     assert(sz::edit_distance(str("abc"), str("adc")) == 1);                  // one substitution
     assert(sz::edit_distance(str("ggbuzgjux{}l"), str("gbuzgjux{}l")) == 1); // one insertion (prepended)
+    assert(sz::edit_distance(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg")) == 14);
 
     // Computing alignment scores.
     using matrix_t = std::int8_t[256][256];
     std::vector<std::int8_t> costs_vector = unary_substitution_costs();
     matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
 
-    assert(sz::alignment_score(str("hello"), str("hello"), costs, 1) == 0);
-    assert(sz::alignment_score(str("hello"), str("hell"), costs, 1) == 1);
+    assert(sz::alignment_score(str("listen"), str("silent"), costs, -1) == -4);
+    assert(sz::alignment_score(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg"), costs, -1) == -14);
+    assert(sz::alignment_score(str("hello"), str("hello"), costs, -1) == 0);
+    assert(sz::alignment_score(str("hello"), str("hell"), costs, -1) == -1);
 
     assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
 
@@ -1108,25 +1111,40 @@ static void test_levenshtein_distances() {
         {"ggbuzgjux{}l", "gbuzgjux{}l", 1}, // one insertion (prepended)
     };
 
-    auto print_failure = [&](sz::string const &l, sz::string const &r, std::size_t expected, std::size_t received) {
+    using matrix_t = std::int8_t[256][256];
+    std::vector<std::int8_t> costs_vector = unary_substitution_costs();
+    matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
+
+    auto print_failure = [&](char const *name, sz::string const &l, sz::string const &r, std::size_t expected,
+                             std::size_t received) {
         char const *ellipsis = l.length() > 22 || r.length() > 22 ? "..." : "";
-        std::printf("Levenshtein distance error: distance(\"%.22s%s\", \"%.22s%s\"); got %zd, expected %zd\n", //
-                    l.c_str(), ellipsis, r.c_str(), ellipsis, received, expected);
+        std::printf("%s error: distance(\"%.22s%s\", \"%.22s%s\"); got %zd, expected %zd\n", //
+                    name, l.c_str(), ellipsis, r.c_str(), ellipsis, received, expected);
     };
 
     auto test_distance = [&](sz::string const &l, sz::string const &r, std::size_t expected) {
-        auto received = l.edit_distance(r);
-        if (received != expected) print_failure(l, r, expected, received);
+        auto received = sz::edit_distance(l, r);
+        auto received_score = sz::alignment_score(l, r, costs, -1);
+        if (received != expected) print_failure("Levenshtein", l, r, expected, received);
+        if ((std::size_t)(-received_score) != expected) print_failure("Scoring", l, r, expected, received_score);
         // The distance relation commutes
-        received = r.edit_distance(l);
-        if (received != expected) print_failure(r, l, expected, received);
+        received = sz::edit_distance(r, l);
+        received_score = sz::alignment_score(r, l, costs, -1);
+        if (received != expected) print_failure("Levenshtein", r, l, expected, received);
+        if ((std::size_t)(-received_score) != expected) print_failure("Scoring", r, l, expected, received_score);
     };
 
     for (auto explicit_case : explicit_cases)
         test_distance(sz::string(explicit_case.left), sz::string(explicit_case.right), explicit_case.distance);
 
+    // Gradually increasing the length of the strings.
+    for (std::size_t length = 0; length != 1000; ++length) {
+        sz::string left, right;
+        for (std::size_t i = 0; i != length; ++i) left.push_back('a'), right.push_back('b');
+        test_distance(left, right, length);
+    }
+
     // Randomized tests
-    // TODO: Add bounded distance tests
     struct {
         std::size_t length_upper_bound;
         std::size_t iterations;
