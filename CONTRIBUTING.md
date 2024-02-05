@@ -107,8 +107,6 @@ cmake --build ./build_release --config Release      # Which will produce the fol
 ./build_release/stringzilla_bench_container <path>  # for STL containers with string keys
 ```
 
-
-
 You may want to download some datasets for benchmarks, like these:
 
 ```sh
@@ -259,30 +257,11 @@ Alternatively, on Linux, the official Swift Docker image can be used for builds 
 sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:5.9 /bin/bash -cl "swift build -c release --static-swift-stdlib && swift test -c release --enable-test-discovery"
 ```
 
-## Roadmap
-
-The project is in its early stages of development.
-So outside of basic bug-fixes, several features are still missing, and can be implemented by you.
-Future development plans include:
-
-- [x] [Replace PyBind11 with CPython](https://github.com/ashvardanian/StringZilla/issues/35), [blog](https://ashvardanian.com/posts/pybind11-cpython-tutorial/.
-- [x] [Bindings for JavaScript](https://github.com/ashvardanian/StringZilla/issues/25).
-- [x] [Reverse-order operations](https://github.com/ashvardanian/StringZilla/issues/12).
-- [ ] [Faster string sorting algorithm](https://github.com/ashvardanian/StringZilla/issues/45).
-- [x] [Splitting with multiple separators at once](https://github.com/ashvardanian/StringZilla/issues/29).
-- [ ] Universal hashing solution.
-- [ ] Add `.pyi` interface for Python.
-- [x] Arm NEON backend.
-- [x] Bindings for Rust.
-- [x] Bindings for Swift.
-- [ ] Arm SVE backend.
-- [ ] Stateful automata-based search.
-
 ## General Performance Observations
 
 ### Unaligned Loads
 
-One common surface of attach for performance optimizations is minimizing unaligned loads.
+One common surface of attack for performance optimizations is minimizing unaligned loads.
 Such solutions are beautiful from the algorithmic perspective, but often lead to worse performance.
 It's often cheaper to issue two interleaving wide-register loads, than try minimizing those loads at the cost of juggling registers.
 

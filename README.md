@@ -4,27 +4,37 @@
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust")](https://crates.io/crates/stringzilla)
 ![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
 
-StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations for modern CPUs.
+StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations on modern CPUs.
 It is significantly faster than the default string libraries in Python and C++, and offers a more powerful API.
 Aside from exact search, the library also accelerates fuzzy search, edit distance computation, and sorting.
 
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
 [faq-swar]: https://en.wikipedia.org/wiki/SWAR
 
-- __[C](#quick-start-c-🛠️):__ Upgrade LibC's `<string.h>` to `<stringzilla.h>`  in C 99
-- __[C++](#quick-start-cpp-🛠️):__ Upgrade STL's `<string>` to `<stringzilla.hpp>` in C++ 11
+- __[C](#quick-start-cc-🛠️) :__ Upgrade LibC's `<string.h>` to `<stringzilla.h>`  in C 99
+- __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla.hpp>` in C++ 11
 - __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
 - __[Swift](#quick-start-swift-🍎):__ Use the `String+StringZilla` extension
 - __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` crate
 - Code in other languages? Let us know!
+- Researcher curious about the algorithms? Jump to [Algorithms & Design Decisions 📚](#algorithms--design-decisions-📚)
+- Want to contribute? Jump to [Contributing 🤝](CONTRIBUTING.md)
 
-![](StringZilla-rounded.png)
+__Who is this for?__
+
+- For data-engineers often memory-mapping and parsing large datasets, like the [CommonCrawl](https://commoncrawl.org/).
+- For Python, C, or C++ software engineers looking for faster strings for their apps.
+- For Bioinformaticians and Search Engineers measuring edit distances and fuzzy-matching.
+- For hardware designers, needing a SWAR baseline for strings-processing functionality.
+- For students studying SIMD/SWAR applications to non-data-parallel operations.
 
 ## Throughput Benchmarks
 
+![StringZilla Cover](assets/cover-strinzilla.jpeg)
+
 StringZilla has a lot of functionality, most of which is covered by benchmarks across C, C++, Python and other languages.
 You can find those in the `./scripts` directory, with usage notes listed in the `CONTRIBUTING.md` file.
-The following table summarizes the most important benchmarks performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
+Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are faster than either standard library.
 
 <table style="width: 100%; text-align: center; table-layout: fixed;">
   <colgroup>
@@ -140,7 +150,7 @@ The following table summarizes the most important benchmarks performed on Arm-ba
     <td align="center">❌</td>
     <td align="center">
       via <code>jellyfish</code> <sup>3</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>?</b> &centerdot;
+      <span style="color:#ABABAB;">x86:</span> <b>1,550</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>2,220</b> ns
     </td>
     <td align="center">
@@ -151,15 +161,15 @@ The following table summarizes the most important benchmarks performed on Arm-ba
   </tr>
   <!-- Alignment Score -->
   <tr>
-    <td colspan="4" align="center">Needleman-Wunsh alignment scores, ≅ 300 aminoacids long</td>
+    <td colspan="4" align="center">Needleman-Wunsch alignment scores, ≅ 10 K aminoacids long</td>
   </tr>
   <tr>
     <td align="center">❌</td>
     <td align="center">❌</td>
     <td align="center">
       via <code>biopython</code> <sup>4</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>?</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>254</b> ms
+      <span style="color:#ABABAB;">x86:</span> <b>257</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>367</b> ms
     </td>
     <td align="center">
       <code>sz_alignment_score</code><br/>
@@ -169,54 +179,32 @@ The following table summarizes the most important benchmarks performed on Arm-ba
   </tr>
 </table>
 
-> Benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
-> The hardware used is an AVX-512 capable Intel Sapphire Rapids CPU.
+> Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
 > The code was compiled with GCC 12, using `glibc` v2.35.
+> The benchmarks performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
+> Most modern Arm-based 64-bit CPUs will have similar relative speedups.
+> Variance withing x86 CPUs will be larger.
+> <sup>1</sup> Unlike other libraries, LibC requires strings to be NULL-terminated.
+> <sup>2</sup> Six whitespaces in the ASCII set are: ` \t\n\v\f\r`. Python's and other standard libraries have specialized functions for those.
+> <sup>3</sup> Most Python libraries for strings are also implemented in C.
+> <sup>4</sup> Unlike the rest of BioPython, the alignment score computation is [implemented in C](https://github.com/biopython/biopython/blob/master/Bio/Align/_pairwisealigner.c).
 
-__Who is this for?__
+## Supported Functionality
 
-- For data-engineers often memory-mapping and parsing large datasets, like the [CommonCrawl](https://commoncrawl.org/).
-- For Python, C, or C++ software engineers looking for faster strings for their apps.
-- For Bioinformaticians and Search Engineers measuring edit distances and fuzzy-matching.
-- For hardware designers, needing a SWAR baseline for strings-processing functionality.
-- For students studying SIMD/SWAR applications to non-data-parallel operations.
-
-__Technical insights:__
-
-- Uses SWAR and SIMD to accelerate exact search for very short needles under 4 bytes.
-- Uses the Shift-Or Bitap algorithm for mid-length needles under 64 bytes.
-- Uses the Boyer-Moore-Horspool algorithm with Raita heuristic for longer needles.
-- Uses the Manber-Wu improvement of the Shift-Or algorithm for bounded fuzzy search.
-- Uses the two-row Wagner-Fisher algorithm for Levenshtein edit distance computation.
-- Uses the Needleman-Wunsch improvement for parameterized edit distance computation.
-- Uses the Karp-Rabin rolling hashes to produce binary fingerprints.
-- Uses Radix Sort to accelerate sorting of strings.
-
-The choice of the optimal algorithm is predicated on the length of the needle and the alphabet cardinality.
-If the amount of compute per byte is low and the needles are beyond longer than the cache-line (64 bytes), skip-table-based approaches are preferred.
-In other cases, brute force approaches can be more efficient.
-On the engineering side, the library:
-
-- Implement the Small String Optimization for strings shorter than 23 bytes.
-- Avoids PyBind11, SWIG, `ParseTuple` and other CPython sugar to minimize call latency. [_details_](https://ashvardanian.com/posts/pybind11-cpython-tutorial/) 
+| Functionality                  | C 99 | C++ 11 | Python | Swift | Rust |
+| :----------------------------- | :--- | :----- | :----- | :---- | :--- |
+| Substring Search               | ✅    | ✅      | ✅      | ✅     | ✅    |
+| Character Set Search           | ✅    | ✅      | ✅      | ✅     | ✅    |
+| Edit Distance                  | ✅    | ✅      | ✅      | ✅     | ❌    |
+| Small String Class             | ✅    | ✅      | ❌      | ❌     | ❌    |
+| Sequence Operations            | ✅    | ✅      | ✅      | ❌     | ❌    |
+| Lazy Ranges, Compressed Arrays | ❌    | ✅      | ✅      | ❌     | ❌    |
+| Fingerprints                   | ✅    | ✅      | ❌      | ❌     | ❌    |
 
 > [!NOTE]
 > Current StringZilla design assumes little-endian architecture, ASCII or UTF-8 encoding, and 64-bit address space.
 > This covers most modern CPUs, including x86, Arm, RISC-V.
 > Feel free to open an issue if you need support for other architectures.
-
-
-## Supported Functionality
-
-| Functionality        | C 99 | C++ 11 | Python | Swift | Rust |
-| :------------------- | :--- | :----- | :----- | :---- | :--- |
-| Substring Search     | ✅    | ✅      | ✅      | ✅     | ✅    |
-| Character Set Search | ✅    | ✅      | ✅      | ✅     | ✅    |
-| Edit Distance        | ✅    | ✅      | ✅      | ✅     | ❌    |
-| Small String Class   | ✅    | ✅      | ❌      | ❌     | ❌    |
-| Sequence Operation   | ✅    | ❌      | ✅      | ❌     | ❌    |
-| Lazy Ranges          | ❌    | ✅      | ❌      | ❌     | ❌    |
-| Fingerprints         | ✅    | ✅      | ❌      | ❌     | ❌    |
 
 ## Quick Start: Python 🐍
 
@@ -225,7 +213,8 @@ On the engineering side, the library:
 
 ### Basic Usage
 
-StringZilla offers two mostly interchangeable core classes:
+If you've ever used the Python `str` or `bytes` class, you'll know what to expect.
+StringZilla's `Str` class is a hybrid of those two, providing `str`-like interface to byte-arrays.
 
 ```python
 from stringzilla import Str, File
@@ -234,8 +223,7 @@ text_from_str = Str('some-string')
 text_from_file = Str(File('some-file.txt'))
 ```
 
-The `Str` is designed to replace long Python `str` strings and wrap our C-level API.
-On the other hand, the `File` memory-maps a file from persistent memory without loading its copy into RAM.
+The `File` class memory-maps a file from persistent memory without loading its copy into RAM.
 The contents of that file would remain immutable, and the mapping can be shared by multiple Python processes simultaneously.
 A standard dataset pre-processing use case would be to map a sizeable textual dataset like Common Crawl into memory, spawn child processes, and split the job between them.
 
@@ -261,9 +249,9 @@ A standard dataset pre-processing use case would be to map a sizeable textual da
 Once split into a `Strs` object, you can sort, shuffle, and reorganize the slices.
 
 ```python
-lines: Strs = text.split(separator='\n')
-lines.sort()
-lines.shuffle(seed=42)
+lines: Strs = text.split(separator='\n') # 4 bytes per line overhead for under 4 GB of text
+lines.sort() # explodes to 16 bytes per line overhead for any length text
+lines.shuffle(seed=42) # reproducing dataset shuffling with a seed
 ```
 
 Assuming superior search speed splitting should also work 3x faster than with native Python strings.
@@ -272,13 +260,6 @@ Need copies?
 ```python
 sorted_copy: Strs = lines.sorted()
 shuffled_copy: Strs = lines.shuffled(seed=42)
-```
-
-Basic `list`-like operations are also supported:
-
-```python
-lines.append('Pythonic string')
-lines.extend(shuffled_copy)
 ```
 
 Those collections of `Strs` are designed to keep the memory consumption low.
@@ -290,7 +271,8 @@ To address all 20 Billion annotated english documents in it, one will need only 
 
 ### Low-Level Python API
 
-The StringZilla CPython bindings implement vector-call conventions for faster calls.
+Aside from calling the methods on the `Str` and `Strs` classes, you can also call the global functions directly on `str` and `bytes` instances.
+Assuming StringZilla CPython bindings are implemented [without any intermediate tools like SWIG or PyBind](https://ashvardanian.com/posts/pybind11-cpython-tutorial/), the call latency should be similar to native classes.
 
 ```py
 import stringzilla as sz
@@ -298,12 +280,69 @@ import stringzilla as sz
 contains: bool = sz.contains("haystack", "needle", start=0, end=9223372036854775807)
 offset: int = sz.find("haystack", "needle", start=0, end=9223372036854775807)
 count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, allowoverlap=False)
+```
+
+### Edit Distances
+
+```py
 edit_distance: int = sz.edit_distance("needle", "nidl")
 ```
 
+Several Python libraries provide edit distance computation.
+Most of them are implemented in C, but are rarely as fast as StringZilla.
+Computing pairwise distances between words in an English text you may expect following results:
+
+- [EditDistance](https://github.com/roy-ht/editdistance): 28.7s
+- [JellyFish](https://github.com/jamesturk/jellyfish/): 26.8s
+- [Levenshtein](https://github.com/maxbachmann/Levenshtein): 8.6s
+- StringZilla: __4.2s__
+
+Moreover, you can pass custom substitution matrices to compute the Needleman-Wunsch alignment scores.
+That task is very common in bioinformatics and computational biology.
+It's natively supported in BioPython, and its BLOSUM matrices can be converted to StringZilla's format.
+
+<details>
+  <summary>Example converting from BioPython to StringZilla</summary>
+
+```py
+import numpy as np
+from Bio import Align
+from Bio.Align import substitution_matrices
+
+aligner = Align.PairwiseAligner()
+aligner.substitution_matrix = substitution_matrices.load("BLOSUM62")
+aligner.open_gap_score = 1
+aligner.extend_gap_score = 1
+
+# Convert the matrix to NumPy
+subs_packed = np.array(aligner.substitution_matrix).astype(np.int8)
+subs_reconstructed = np.zeros((256, 256), dtype=np.int8)
+
+# Initialize all banned characters to a the largest possible penalty
+subs_reconstructed.fill(127)
+for packed_row, packed_row_aminoacid in enumerate(aligner.substitution_matrix.alphabet):
+    for packed_column, packed_column_aminoacid in enumerate(aligner.substitution_matrix.alphabet):
+        reconstructed_row = ord(packed_row_aminoacid)
+        reconstructed_column = ord(packed_column_aminoacid)
+        subs_reconstructed[reconstructed_row, reconstructed_column] = subs_packed[packed_row, packed_column]
+
+# Let's pick two examples for of tri-peptides (made of 3 aminoacids)
+glutathione = "ECG" # Need to rebuild human tissue?
+thyrotropin_releasing_hormone = "QHP" # Or to regulate your metabolism?
+
+assert sz.alignment_score(
+    glutathione,
+    thyrotropin_releasing_hormone, 
+    substitution_matrix=subs_reconstructed, 
+    gap_score=1) == aligner.score(glutathione, thyrotropin_releasing_hormone) # Equal to 6
+```
+
+</details>
+
 ## Quick Start: C/C++ 🛠️
 
-The library is header-only, so you can just copy the `stringzilla.h` header into your project.
+The C library is header-only, so you can just copy the `stringzilla.h` header into your project.
+Same applies to C++, where you would copy the `stringzilla.hpp` header.
 Alternatively, add it as a submodule, and include it in your build system.
 
 ```sh
@@ -316,6 +355,9 @@ Or using a pure CMake approach:
 FetchContent_Declare(stringzilla GIT_REPOSITORY https://github.com/ashvardanian/stringzilla.git)
 FetchContent_MakeAvailable(stringzilla)
 ```
+
+Last, but not the least, you can also install it as a library, and link against it.
+This approach is worse for inlining, but brings dynamic runtime dispatch for the most advanced CPU features.
 
 ### Basic Usage with C 99 and Newer
 
@@ -346,7 +388,7 @@ sz_sort(&array, &your_config);
 
 Unlike LibC:
 
-- all strings are expected to have a length, and are not necesserily null-terminated.
+- all strings are expected to have a length, and are not necessarily null-terminated.
 - every operations has a reverse order counterpart.
 
 That way `sz_find` and `sz_rfind` are similar to `strstr` and `strrstr` in LibC.
@@ -475,11 +517,11 @@ Our layout might be preferential, if you want to avoid branches.
 | `sizeof(std::string)` |                     32 |                   24 |          32 |
 | Small String Capacity |                     15 |               __22__ |      __22__ |
 
-> Use the following gist to check on your compiler: https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21
+> [!TIP]
+> You can check your compiler with a [simple Gist](https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21).
 
-Other langauges, also freuqnetly rely on such optimizations.
-
-- Swift can store 15 bytes in the `String` struct. [docs](https://developer.apple.com/documentation/swift/substring/withutf8(_:)#discussion)
+Other languages, also frequently rely on such optimizations.
+Swift can store 15 bytes in the `String` struct. [docs](https://developer.apple.com/documentation/swift/substring/withutf8(_:)#discussion)
 
 For C++ users, the `sz::string` class hides those implementation details under the hood.
 For C users, less familiar with C++ classes, the `sz_string_t` union is available with following API.
@@ -500,7 +542,7 @@ sz_string_append(&string, "_Hello_", 7, &allocator); // == sz_true_k
 sz_string_append(&string, "world", 5, &allocator); // == sz_true_k
 sz_string_erase(&string, 0, 1);
 
-// Upacking & introspection.
+// Unpacking & introspection.
 sz_ptr_t string_start;
 sz_size_t string_length;
 sz_size_t string_space;
@@ -580,12 +622,11 @@ str("a:b").sub(-2, 1) == ""; // similar to Python's `"a:b"[-2:1]`
 Assuming StringZilla is a header-only library you can use the full API in some translation units and gradually transition to safer restricted API in others.
 Bonus - all the bound checking is branchless, so it has a constant cost and won't hurt your branch predictor.
 
-
 ### Beyond the Standard Templates Library - Learning from Python
 
 Python is arguably the most popular programming language for data science.
 In part, that's due to the simplicity of its standard interfaces.
-StringZilla brings some of thet functionality to C++.
+StringZilla brings some of that functionality to C++.
 
 - Content checks: `isalnum`, `isalpha`, `isascii`, `isdigit`, `islower`, `isspace`, `isupper`.
 - Trimming character sets: `lstrip`, `rstrip`, `strip`.
@@ -654,7 +695,6 @@ text.push_back('x', unchecked); // no bounds checking, Rust style
 text.try_push_back('x'); // returns `false` if the string is full and the allocation failed
 
 sz::concatenate(text, "@", domain, ".", tld); // No allocations
-text + "@" + domain + "." + tld; // No allocations, if `SZ_LAZY_CONCAT` is defined
 ```
 
 ### Splits and Ranges
@@ -759,23 +799,13 @@ dna.randomize("ACGT"); // `noexcept` pre-allocated version
 dna.randomize(&std::rand, "ACGT"); // custom distribution
 ```
 
-Recent benchmarks suggest the following numbers for strings of different lengths.
-
-| Length | `std::generate` → `std::string` | `sz::generate` → `sz::string` |
-| -----: | ------------------------------: | ----------------------------: |
-|      5 |                        0.5 GB/s |                      1.5 GB/s |
-|     20 |                        0.3 GB/s |                      1.5 GB/s |
-|    100 |                        0.2 GB/s |                      1.5 GB/s |
-
 ### Levenshtein Edit Distance and Alignment Scores
 
-### Fuzzy Search with Bounded Levenshtein Distance
-
 ```cpp
-// For Levenshtein distance, the following are available:
-text.edit_distance(other[, upper_bound]) == 7; // May perform a memory allocation
-text.find_similar(other[, upper_bound]);
-text.rfind_similar(other[, upper_bound]);
+sz::edit_distance(first, second[, upper_bound[, allocator]]) -> std::size_t;
+
+std::int8_t costs[256][256]; // Substitution costs matrix
+sz::alignment_score(first, second, costs[, gap_score[, allocator]) -> std::ptrdiff_t;
 ```
 
 ### Standard C++ Containers with String Keys
@@ -860,7 +890,12 @@ StringZilla uses different exact substring search algorithms for different needl
 - When no SIMD is available - SWAR (SIMD Within A Register) algorithms are used on 64-bit words.
 - Boyer-Moore-Horspool (BMH) algorithm with Raita heuristic variation for longer needles.
 - SIMD algorithms are randomized to look at different parts of the needle.
-- Apostolico-Giancarlo algorithm is _considered_ for longer needles, if preprocessing time isn't an issue.
+
+Other algorithms previously considered and deprecated:
+
+- Apostolico-Giancarlo algorithm for longer needles. _Control-flow is too complex for efficient vectorization._
+- Shift-Or-based Bitap algorithm for short needles. _Slower than SWAR._
+- Horspool-style bad-character check in SIMD backends. _Effective only for very long needles, and very uneven character distributions between the needle and the haystack. Faster "character-in-set" check needed to generalize._
 
 Substring search algorithms are generally divided into: comparison-based, automaton-based, and bit-parallel.
 Different families are effective for different alphabet sizes and needle lengths.
@@ -876,36 +911,85 @@ Going beyond that, to long needles, Boyer-Moore (BM) and its variants are often 
 It has two tables: the good-suffix shift and the bad-character shift.
 Common choice is to use the simplified BMH algorithm, which only uses the bad-character shift table, reducing the pre-processing time.
 In the C++ Standards Library, the `std::string::find` function uses the BMH algorithm with Raita's heuristic.
-We do something similar longer needles.
+We do something similar for longer needles, finding unique characters in needles as part of the pre-processing phase.
 
-All those, still, have $O(hn)$ worst case complexity, and struggle with repetitive needle patterns.
+https://github.com/ashvardanian/StringZilla/blob/46e957cd4f9ecd4945318dd3c48783dd11323f37/include/stringzilla/stringzilla.h#L1398-L1431
+
+All those, still, have $O(hn)$ worst case complexity.
 To guarantee $O(h)$ worst case time complexity, the Apostolico-Giancarlo (AG) algorithm adds an additional skip-table.
 Preprocessing phase is $O(n+sigma)$ in time and space.
 On traversal, performs from $(h/n)$ to $(3h/2)$ comparisons.
-We should consider implementing it if we can:
+It however, isn't practical on modern CPUs.
+A simpler idea, the Galil-rule might be a more relevant optimizations, if many matches must be found.
 
-- accelerate the preprocessing phase of the needle.
-- simplify the control-flow of the main loop.
-- replace the array of shift values with a circular buffer.
+> Reading materials.
+> [Exact String Matching Algorithms in Java](https://www-igm.univ-mlv.fr/~lecroq/string).
+> [SIMD-friendly algorithms for substring searching](http://0x80.pl/articles/simd-strfind.html).
 
-Reading materials:
+### Levenshtein Edit Distance
 
-- Exact String Matching Algorithms in Java: https://www-igm.univ-mlv.fr/~lecroq/string
-- SIMD-friendly algorithms for substring searching: http://0x80.pl/articles/simd-strfind.html
+Levenshtein distance is the best known edit-distance for strings, that checks, how many insertions, deletions, and substitutions are needed to transform one string to another.
+It's extensively used in approximate string-matching, spell-checking, and bioinformatics.
 
+The computational cost of the Levenshtein distance is $O(n*m)$, where $n$ and $m$ are the lengths of the string arguments.
+To compute that, the naive approach requires $O(n*m)$ space to store the "Levenshtein matrix", the bottom-right corner of which will contain the Levenshtein distance.
+The algorithm producing the matrix has been simultaneously studied/discovered by the Soviet mathematician Vladimir Levenshtein in 1965, Vintsyuk in 1968, and American computer scientists - Robert Wagner, David Sankoff, Michael J. Fischer in the following years.
+Several optimizations are known:
+
+1. __Space optimization__: The matrix can be computed in O(min(n,m)) space, by only storing the last two rows of the matrix.
+2. __Divide and Conquer__: Hirschberg's algorithm can be applied to decompose the computation into subtasks.
+3. __Automata__: Levenshtein automata can be very effective, when one of the strings doesn't change, and the other one is a subject to many comparisons.
+4. __Shift-Or__: The least known approach, derived from the Baeza-Yates-Gonnet algorithm, extended to bounded edit-distance search by Manber and Wu in 1990s, and further extended by Gene Myers in 1999 and Heikki Hyyro between 2002 and 2004.
+
+The last approach is quite powerful and performant, and is used by the great [RapidFuzz][rapidfuzz] library.
+StringZilla introduces a different approach, extensively used in Unum's internal combinatorial optimization libraries.
+The approach doesn't change the number of trivial operations, but performs them in a different order, removing the data dependency, that occurs when computing the insertion costs.
+This results in much better vectorization for intra-core parallelism and potentially multi-core evaluation of a single request.
+
+> Reading materials.
+> [Faster Levenshtein Distances with a SIMD-friendly Traversal Order](https://ashvardanian.com/posts/levenshtein-diagonal).
+
+[rapidfuzz]: https://github.com/rapidfuzz/RapidFuzz
+
+### Needleman-Wunsch Alignment Score for Bioinformatics
+
+The field of bioinformatics studies various representations of biological structures.
+The "primary" representations are generally strings over sparse alphabets:
+
+- DNA sequences, where the alphabet is {A, C, G, T}, ranging from ~100 characters for short reads to three billions for the human genome.
+- RNA sequences, where the alphabet is {A, C, G, U}, ranging from ~50 characters for tRNA to thousands for mRNA.
+- Proteins, where the alphabet is {A, C, D, E, F, G, H, I, K, L, M, N, P, Q, R, S, T, V, W, Y}, ranging from 2 characters for dipeptides to 35,000 for Titin, the longest protein.
+
+The shorter the representation, the more often researchers may want to use custom substitution matrices.
+Meaning that the cost of a substitution between two characters may not be the same for all pairs.
+
+StringZilla adapts the fairly efficient two-row Wagner-Fisher algorithm as a baseline serial implementation of the Needleman-Wunsch score.
+It supports arbitrary alphabets up to 256 characters, and can be used with either [BLOSUM][faq-blosum], [PAM][faq-pam], or other substitution matrices.
+It also uses SIMD for hardware acceleration of the substitution lookups.
+This however, does not __yet__ break the data-dependency for insertion costs, where 80% of the time is wasted.
+With that solved, the SIMD implementation will become 5x faster than the serial one.
+
+[faq-blosum]: https://en.wikipedia.org/wiki/BLOSUM
+[faq-pam]: https://en.wikipedia.org/wiki/Point_accepted_mutation
+
+### Radix Sorting
+
+For prefix-based sorting, StringZilla uses the Radix sort algorithm.
+It matches the first four bytes from each string, exporting them into a separate buffer for higher locality.
+The buffer is then sorted using the counting sort algorithm, and the strings are reordered accordingly.
+The process is used as a pre-processing step before applying another sorting algorithm on partially ordered chunks.
 
 ### Hashing
 
-Hashing is a very deeply studies subject with countless implementations.
+> [!WARNING]
+> Hash functions are not cryptographically safe and are currently under active development.
+> They may change in future __minor__ releases.
+
 Choosing the right hashing algorithm for your application can be crucial from both performance and security standpoint.
 In StringZilla a 64-bit rolling hash function is reused for both string hashes and substring hashes, Rabin-style fingerprints.
 Rolling hashes take the same amount of time to compute hashes with different window sizes, and are fast to update.
 Those are not however perfect hashes, and collisions are frequent.
-To reduce those.
-
-
-They are not, however, optimal for cryptographic purposes, and require integer multiplication, which is not always fast.
-Using SIMD, we can process N interleaving slices of the input in parallel.
+StringZilla attempts to use SIMD, but the performance is not __yet__ satisfactory.
 On Intel Sapphire Rapids, the following numbers can be expected for N-way parallel variants.
 
 - 4-way AVX2 throughput with 64-bit integer multiplication (no native support): 0.28 GB/s.
@@ -913,8 +997,6 @@ On Intel Sapphire Rapids, the following numbers can be expected for N-way parall
 - 4-way AVX-512DQ throughput with 64-bit integer multiplication: 0.46 GB/s.
 - 4-way AVX-512 throughput with 32-bit integer multiplication: 0.58 GB/s.
 - 8-way AVX-512 throughput with 32-bit integer multiplication: 0.11 GB/s.
-
-
 
 #### Why not CRC32?
 
@@ -925,16 +1007,13 @@ In case of Arm more than one polynomial is supported.
 It is, however, somewhat limiting for Big Data usecases, which often have to deal with more than 4 Billion strings, making collisions unavoidable.
 Moreover, the existing SIMD approaches are tricky, combining general purpose computations with specialized instructions, to utilize more silicon in every cycle.
 
-Some of the best articles on CRC32:
-
-- [Comprehensive derivation of approaches](https://github.com/komrad36/CRC)
-- [Faster computation for 4 KB buffers on x86](https://www.corsix.org/content/fast-crc32c-4k)
-- [Comparing different lookup tables](https://create.stephan-brumme.com/crc32)
-
-Some of the best open-source implementations:
-
-- [By Peter Cawley](https://github.com/corsix/fast-crc32)
-- [By Stephan Brumme](https://github.com/stbrumme/crc32)
+> Reading materials on CRC32.
+> [Comprehensive derivation of approaches](https://github.com/komrad36/CRC)
+> [Faster computation for 4 KB buffers on x86](https://www.corsix.org/content/fast-crc32c-4k)
+> [Comparing different lookup tables](https://create.stephan-brumme.com/crc32)
+> Great open-source implementations.
+> [By Peter Cawley](https://github.com/corsix/fast-crc32)
+> [By Stephan Brumme](https://github.com/stbrumme/crc32)
 
 #### Other Modern Alternatives
 
@@ -948,50 +1027,22 @@ Current state of the Art, might be the [BLAKE3](https://github.com/BLAKE3-team/B
 It's resistant to a broad range of attacks, can process 2 bytes per CPU cycle, and comes with a very optimized official implementation for C and Rust.
 It has the same 128-bit security level as the BLAKE2, and achieves its performance gains by reducing the number of mixing rounds, and processing data in 1 KiB chunks, which is great for longer strings, but may result in poor performance on short ones.
 
-> [!TIP]
-> All mentioned libraries have undergone extensive testing and are considered production-ready.
-> They can definitely accelerate your application, but so may the downstream mixer.
-> For instance, when a hash-table is constructed, the hashes are further shrunk to address table buckets.
-> If the mixer looses entropy, the performance gains from the hash function may be lost.
-> An example would be power-of-two modulo, which is a common mixer, but is known to be weak.
-> One alternative would be the [fastrange](https://github.com/lemire/fastrange) by Daniel Lemire.
-> Another one is the [Fibonacci hash trick](https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/) using the Golden Ratio, also used in StringZilla.
-
-### Levenshtein Edit Distance
-
-StringZilla can compute the Levenshtein edit distance between two strings.
-For that the two-row Wagner-Fisher algorithm is used, which is a space-efficient variant of the Needleman-Wunsch algorithm.
-The algorithm is implemented in C and C++ and is available in the `stringzilla.h` and `stringzilla.hpp` headers respectively.
-It's also available in Python via the `Str.edit_distance` method and as a global function in the `stringzilla` module.
-
-```py
-import stringzilla as sz
-
-words = open('leipzig1M').read().split(' ')
-
-for word in words:
-    sz.edit_distance(word, "rebel")
-    sz.edit_distance(word, "statement")
-    sz.edit_distance(word, "sent")
-```
-
-Even without SIMD optimizations, one can expect the following evaluation time for the main `for`-loop on short word-like tokens on a modern CPU core.
-
-- [EditDistance](https://github.com/roy-ht/editdistance): 28.7s
-- [JellyFish](https://github.com/jamesturk/jellyfish/): 26.8s
-- [Levenshtein](https://github.com/maxbachmann/Levenshtein): 8.6s
-- StringZilla: __4.2s__
-
-### Needleman-Wunsch Alignment Score for Bioinformatics
-
-Similar to the conventional Levenshtein edit distance, StringZilla can compute the Needleman-Wunsch alignment score.
-It's practically the same, but parameterized with a scoring matrix for different substitutions and tunable penalties for insertions and deletions.
+All mentioned libraries have undergone extensive testing and are considered production-ready.
+They can definitely accelerate your application, but so may the downstream mixer.
+For instance, when a hash-table is constructed, the hashes are further shrunk to address table buckets.
+If the mixer looses entropy, the performance gains from the hash function may be lost.
+An example would be power-of-two modulo, which is a common mixer, but is known to be weak.
+One alternative would be the [fastrange](https://github.com/lemire/fastrange) by Daniel Lemire.
+Another one is the [Fibonacci hash trick](https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/) using the Golden Ratio, also used in StringZilla.
 
 ### Unicode, UTF-8, and Wide Characters
 
-UTF-8 is the most common encoding for Unicode characters.
-Yet, some programming languages use wide characters (`wchar`) - two byte long codes.
-These include Java, JavaScript, Python 2, C#, and Objective-C, to name a few.
+StringZilla does not __yet__ implement any Unicode-specific algorithms.
+The content is addressed at byte-level, and the string is assumed to be encoded in UTF-8 or extended ASCII.
+Refer to [simdutf](https://github.com/simdutf/simdutf) for fast conversions and [icu](https://github.com/unicode-org/icu) for character metadata.
+
+This may introduce frictions, when binding to some programming languages.
+Namely, Java, JavaScript, Python 2, C#, and Objective-C use wide characters (`wchar`) - two byte long codes.
 This leads [to all kinds of offset-counting issues][wide-char-offsets] when facing four-byte long Unicode characters.
 
 [wide-char-offsets]: https://josephg.com/blog/string-length-lies/

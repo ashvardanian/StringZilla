@@ -24,25 +24,6 @@
 #define SZ_AVOID_STL (0) // true or false
 #endif
 
-/**
- *  @brief  When set to 1, the strings `+` will return an expression template rather than a temporary string.
- *          This will improve performance, but may break some STL-specific code, so it's disabled by default.
- *          TODO:
- */
-#ifndef SZ_LAZY_CONCAT
-#define SZ_LAZY_CONCAT (0) // true or false
-#endif
-
-/**
- *  @brief  When set to 1, the library will change `substr` and several other member methods of `string`
- *          to return a view of its slice, rather than a copy, if the lifetime of the object is guaranteed.
- *          This will improve performance, but may break some STL-specific code, so it's disabled by default.
- *          TODO:
- */
-#ifndef SZ_PREFER_VIEWS
-#define SZ_PREFER_VIEWS (0) // true or false
-#endif
-
 /*  We need to detect the version of the C++ language we are compiled with.
  *  This will affect recent features like `operator<=>` and tests against STL.
  */
