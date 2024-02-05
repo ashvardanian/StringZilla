@@ -66,15 +66,26 @@ tracked_unary_functions_t fingerprinting_functions(std::size_t window_width = 8,
 }
 
 tracked_unary_functions_t random_generation_functions(std::size_t token_length) {
+    static std::vector<char> buffer;
+    if (buffer.size() < token_length) buffer.resize(token_length);
 
+    auto suffix = ", " + std::to_string(token_length) + " chars";
     tracked_unary_functions_t result = {
-        {"random std::string" + std::to_string(token_length),
-         unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
-             return random_string(token_length, alphabet.data(), alphabet.size()).size();
+        {"std::rand % uint8" + suffix, unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
+             using max_alphabet_size_t = std::uint8_t;
+             auto max_alphabet_size = static_cast<max_alphabet_size_t>(alphabet.size());
+             for (std::size_t i = 0; i < token_length; ++i) { buffer[i] = alphabet[std::rand() % max_alphabet_size]; }
+             return token_length;
          })},
-        {"random sz::string" + std::to_string(token_length),
+        {"std::uniform_int_ditribtution<uint8>" + suffix,
          unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
-             return sz::string::random(global_random_generator(), token_length, alphabet).size();
+             randomize_string(buffer.data(), token_length, alphabet.data(), alphabet.size());
+             return token_length;
+         })},
+        {"sz::randomize" + suffix, unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
+             sz::string_span span(buffer.data(), token_length);
+             sz::randomize(span, global_random_generator(), alphabet);
+             return token_length;
          })},
     };
     return result;
@@ -148,20 +159,15 @@ void bench(strings_type &&strings) {
     // ! in this micro-benchmark, as the correct branch of the SSO will be predicted every time.
     bench_dereferencing<std::string>("std::string -> std::string_view", {strings.begin(), strings.end()});
     bench_dereferencing<sz::string>("sz::string -> std::string_view", {strings.begin(), strings.end()});
-
-    // Benchmark generating strings of different length using those tokens as alphabets
-    bench_unary_functions(strings, random_generation_functions(5));
-    bench_unary_functions(strings, random_generation_functions(20));
-    bench_unary_functions(strings, random_generation_functions(100));
 }
 
 void bench_on_input_data(int argc, char const **argv) {
     dataset_t dataset = make_dataset(argc, argv);
 
-    // Benchmark generating strings of different length using those tokens as alphabets
-    bench_unary_functions(dataset.tokens, random_generation_functions(5));
-    bench_unary_functions(dataset.tokens, random_generation_functions(20));
+    std::printf("Benchmarking on the entire dataset:\n");
     bench_unary_functions(dataset.tokens, random_generation_functions(100));
+    bench_unary_functions(dataset.tokens, random_generation_functions(20));
+    bench_unary_functions(dataset.tokens, random_generation_functions(5));
 
     // When performing fingerprinting, it's extremely important to:
     //      1. Have small output fingerprints that fit the cache.
@@ -169,7 +175,6 @@ void bench_on_input_data(int argc, char const **argv) {
     // This introduces an additional challenge for efficient fingerprinting, as the CPU caches vary a lot.
     // On the Intel Sapphire Rapids 6455B Gold CPU they are 96 KiB x2 for L1d, 4 MiB x2 for L2.
     // Spilling into the L3 is a bad idea.
-    std::printf("Benchmarking on the entire dataset:\n");
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(7, 1));
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(17, 4));
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(33, 8));

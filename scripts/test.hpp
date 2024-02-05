@@ -31,13 +31,22 @@ inline std::mt19937 &global_random_generator() {
     return generator;
 }
 
+inline void randomize_string(char *string, std::size_t length, char const *alphabet, std::size_t cardinality) {
+    using max_alphabet_size_t = std::uint8_t;
+    std::uniform_int_distribution<max_alphabet_size_t> distribution(1, static_cast<max_alphabet_size_t>(cardinality));
+    std::generate(string, string + length, [&]() -> char { return alphabet[distribution(global_random_generator())]; });
+}
+
 inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
     std::string result(length, '\0');
-    std::uniform_int_distribution<std::size_t> distribution(1, cardinality);
-    std::generate(result.begin(), result.end(), [&]() { return alphabet[distribution(global_random_generator())]; });
+    randomize_string(&result[0], length, alphabet, cardinality);
     return result;
 }
 
+/**
+ *  @brief  Inefficient baseline Levenshtein distance computation, as implemented in most codebases.
+ *          Allocates a new matrix on every call, with rows potentially scattered around memory.
+ */
 inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2) {
     std::vector<std::vector<std::size_t>> dp(len1 + 1, std::vector<std::size_t>(len2 + 1));
 
@@ -60,6 +69,10 @@ inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char c
     return dp[len1][len2];
 }
 
+/**
+ *  @brief  Produces a substitution cost matrix for the Needlemann-Wunsch alignment score,
+ *          that would yield the same result as the negative Levenshtein distance.
+ */
 inline std::vector<std::int8_t> unary_substitution_costs() {
     std::vector<std::int8_t> result(256 * 256);
     for (std::size_t i = 0; i != 256; ++i)

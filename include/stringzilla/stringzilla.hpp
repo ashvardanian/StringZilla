@@ -950,6 +950,12 @@ static void _call_free(void *ptr, sz_size_t n, void *allocator_state) noexcept {
     return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
 }
 
+template <typename generator_type_>
+static sz_u64_t _call_random_generator(void *state) noexcept {
+    generator_type_ &generator = *reinterpret_cast<generator_type_ *>(state);
+    return generator();
+}
+
 template <typename allocator_type_, typename allocator_callback_>
 static bool _with_alloc(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
     sz_memory_allocator_t alloc;
@@ -3137,7 +3143,7 @@ class basic_string {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        sz_random_generator_t generator_callback = &random_generator<generator_type>;
+        sz_random_generator_t generator_callback = &_call_random_generator<generator_type>;
         sz_generate(alphabet.data(), alphabet.size(), start, length, generator_callback, &generator);
         return *this;
     }
@@ -3228,12 +3234,6 @@ class basic_string {
     }
 
   private:
-    template <typename generator_type>
-    static sz_u64_t random_generator(void *state) noexcept {
-        generator_type &generator = *reinterpret_cast<generator_type *>(state);
-        return generator();
-    }
-
     template <typename pattern_type>
     bool try_replace_all_(pattern_type pattern, string_view replacement) noexcept;
 
@@ -3569,6 +3569,33 @@ std::ptrdiff_t alignment_score(basic_string<char_type_, allocator_type_> const &
                                basic_string<char_type_, allocator_type_> const &b, //
                                std::int8_t const (&subs)[256][256], std::int8_t gap = -1) noexcept(false) {
     return ashvardanian::stringzilla::alignment_score(a.view(), b.view(), subs, gap, a.get_allocator());
+}
+
+/**
+ *  @brief  Overwrites the string slice with random characters from the given alphabet using the random generator.
+ *
+ *  @param  string     The string to overwrite.
+ *  @param  generator  A random generator function object that returns a random number in the range [0, 2^64).
+ *  @param  alphabet   A string of characters to choose from.
+ */
+template <typename char_type_, typename generator_type_>
+void randomize(basic_string_slice<char_type_> string, generator_type_ &generator,
+               string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+    static_assert(!std::is_const<char_type_>::value, "The string must be mutable.");
+    sz_random_generator_t generator_callback = &_call_random_generator<generator_type_>;
+    sz_generate(alphabet.data(), alphabet.size(), string.data(), string.size(), generator_callback, &generator);
+}
+
+/**
+ *  @brief  Overwrites the string slice with random characters from the given alphabet
+ *          using `std::rand` as the random generator.
+ *
+ *  @param  string     The string to overwrite.
+ *  @param  alphabet   A string of characters to choose from.
+ */
+template <typename char_type_>
+void randomize(basic_string_slice<char_type_> string, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+    randomize(string, &std::rand, alphabet);
 }
 
 #if !SZ_AVOID_STL
