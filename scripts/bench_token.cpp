@@ -39,9 +39,9 @@ tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width, st
         {"sz_hashes_avx2:" + suffix, wrap_sz(sz_hashes_avx2)},
 #endif
 #if SZ_USE_ARM_NEON
-        {"sz_hashes_neon:" + suffix, wrap_sz(sz_hashes_neon_naive)},
-        {"sz_hashes_neon:" + suffix, wrap_sz(sz_hashes_neon_readhead)},
-        {"sz_hashes_neon:" + suffix, wrap_sz(sz_hashes_neon_reusing_loads)},
+        {"sz_hashes_neon_naive:" + suffix, wrap_sz(sz_hashes_neon_naive)},
+        {"sz_hashes_neon_readhead:" + suffix, wrap_sz(sz_hashes_neon_readhead)},
+        {"sz_hashes_neon_reusing_loads:" + suffix, wrap_sz(sz_hashes_neon_reusing_loads)},
 #endif
         {"sz_hashes_serial:" + suffix, wrap_sz(sz_hashes_serial)},
     };
