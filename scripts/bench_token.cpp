@@ -74,7 +74,7 @@ tracked_unary_functions_t random_generation_functions(std::size_t token_length) 
          })},
         {"random sz::string" + std::to_string(token_length),
          unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
-             return sz::string::random(token_length, alphabet).size();
+             return sz::string::random(global_random_generator(), token_length, alphabet).size();
          })},
     };
     return result;
@@ -145,7 +145,7 @@ void bench(strings_type &&strings) {
     // Benchmark the cost of converting `std::string` and `sz::string` to `std::string_view`.
     // ! The results on a mixture of short and long strings should be similar.
     // ! If the dataset is made of exclusively short or long strings, STL will look much better
-    // ! in this microbenchmark, as the correct branch of the SSO will be predicted every time.
+    // ! in this micro-benchmark, as the correct branch of the SSO will be predicted every time.
     bench_dereferencing<std::string>("std::string -> std::string_view", {strings.begin(), strings.end()});
     bench_dereferencing<sz::string>("sz::string -> std::string_view", {strings.begin(), strings.end()});
 
@@ -158,11 +158,16 @@ void bench(strings_type &&strings) {
 void bench_on_input_data(int argc, char const **argv) {
     dataset_t dataset = make_dataset(argc, argv);
 
-    // When performaing fingerprinting, it's extremely important to:
+    // Benchmark generating strings of different length using those tokens as alphabets
+    bench_unary_functions(dataset.tokens, random_generation_functions(5));
+    bench_unary_functions(dataset.tokens, random_generation_functions(20));
+    bench_unary_functions(dataset.tokens, random_generation_functions(100));
+
+    // When performing fingerprinting, it's extremely important to:
     //      1. Have small output fingerprints that fit the cache.
-    //      2. Have that memory in close affinity to the core, idealy on stack, to avoid cache coherency problems.
-    // This introduces an additional challenge for effiecient fingerprinting, as the CPU caches vary a lot.
-    // On the Intel Sappire Rapids 6455B Gold CPU they are 96 KiB x2 for L1d, 4 MiB x2 for L2.
+    //      2. Have that memory in close affinity to the core, ideally on stack, to avoid cache coherency problems.
+    // This introduces an additional challenge for efficient fingerprinting, as the CPU caches vary a lot.
+    // On the Intel Sapphire Rapids 6455B Gold CPU they are 96 KiB x2 for L1d, 4 MiB x2 for L2.
     // Spilling into the L3 is a bad idea.
     std::printf("Benchmarking on the entire dataset:\n");
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(7, 1));

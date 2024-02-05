@@ -25,12 +25,16 @@ inline void write_file(std::string path, std::string content) {
     stream.close();
 }
 
-inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
-    std::string result(length, '\0');
+inline std::mt19937 &global_random_generator() {
     static std::random_device seed_source; // Too expensive to construct every time
     static std::mt19937 generator(seed_source());
+    return generator;
+}
+
+inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
+    std::string result(length, '\0');
     std::uniform_int_distribution<std::size_t> distribution(1, cardinality);
-    std::generate(result.begin(), result.end(), [&]() { return alphabet[distribution(generator)]; });
+    std::generate(result.begin(), result.end(), [&]() { return alphabet[distribution(global_random_generator())]; });
     return result;
 }
 

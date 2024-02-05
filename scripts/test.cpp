@@ -20,7 +20,7 @@
 // #define SZ_USE_X86_AVX512 0
 // #define SZ_USE_ARM_NEON 0
 // #define SZ_USE_ARM_SVE 0
-#define SZ_DEBUG 1 // Enforce agressive logging for this unit.
+#define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
 #include <string>                      // Baseline
 #include <string_view>                 // Baseline
@@ -1153,8 +1153,7 @@ static void test_levenshtein_distances() {
         {100, 100},
         {1000, 10},
     };
-    std::random_device random_device;
-    std::mt19937 generator(random_device());
+    std::mt19937 &generator = global_random_generator();
     sz::string first, second;
     for (auto fuzzy_case : fuzzy_cases) {
         char alphabet[4] = {'a', 'c', 'g', 't'};

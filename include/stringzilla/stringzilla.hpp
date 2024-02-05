@@ -3133,7 +3133,7 @@ class basic_string {
      *  @param  alphabet   A string of characters to choose from.
      */
     template <typename generator_type>
-    basic_string &randomize(generator_type &&generator, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+    basic_string &randomize(generator_type &generator, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
@@ -3161,6 +3161,20 @@ class basic_string {
      */
     static basic_string random(size_type length, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept(false) {
         return basic_string(length, '\0').randomize(alphabet);
+    }
+
+    /**
+     *  @brief  Generate a new random string of given length using the provided random number generator.
+     *          May throw exceptions if the memory allocation fails.
+     *
+     *  @param  generator  A random generator function object that returns a random number in the range [0, 2^64).
+     *  @param  length     The length of the generated string.
+     *  @param  alphabet   A string of characters to choose from.
+     */
+    template <typename generator_type>
+    static basic_string random(generator_type &generator, size_type length,
+                               string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept(false) {
+        return basic_string(length, '\0').randomize(generator, alphabet);
     }
 
     /**
