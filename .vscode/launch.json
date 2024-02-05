@@ -5,39 +5,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Current Python File",
-      "type": "python",
-      "request": "launch",
-      "program": "${file}",
-      "console": "integratedTerminal",
-      "justMyCode": true
-    },
-    {
-      "name": "Current Python File with Leipzig1M",
-      "type": "python",
-      "request": "launch",
-      "program": "${file}",
-      "console": "integratedTerminal",
-      "justMyCode": true,
-      "args": [
-        "../StringZilla/leipzig1M.txt"
-      ],
-    },
-    {
-      "name": "Current PyTest File",
-      "type": "python",
-      "request": "launch",
-      "module": "pytest",
-      "args": [
-        "${file}",
-        "-s",
-        "-x"
-      ],
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
-    {
-      "name": "Debug Unit Tests",
+      "name": "Debug C++ Unit Tests",
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build_debug/stringzilla_test_cpp20",
@@ -94,6 +62,38 @@
         "MIMode": "gdb",
         "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
       }
+    },
+    {
+      "name": "Current Python File",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Current Python File with Leipzig1M arg",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "./leipzig1M.txt"
+      ],
+    },
+    {
+      "name": "Current PyTest File",
+      "type": "python",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "${file}",
+        "-s",
+        "-x"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
   ]
 }

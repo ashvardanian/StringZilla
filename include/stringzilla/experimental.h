@@ -314,6 +314,56 @@ SZ_PUBLIC sz_size_t sz_edit_distance_avx512(     //
     return previous_vec.u8s[b_length] < bound ? previous_vec.u8s[b_length] : bound;
 }
 
+sz_u512_vec_t sz_inclusive_min(sz_i32_t previous, sz_error_cost_t gap, sz_u512_vec_t base_vec) {
+
+    sz_u512_vec_t gap_vec, gap_double_vec, gap_quad_vec, gap_octa_vec;
+    gap_vec.zmm = _mm512_set1_epi32(gap);
+    gap_double_vec.zmm = _mm512_set1_epi32(2 * gap);
+    gap_quad_vec.zmm = _mm512_set1_epi32(4 * gap);
+    gap_octa_vec.zmm = _mm512_set1_epi32(8 * gap);
+
+    // __mmask16 mask_skip_one = 0xFFFF - 1;
+    // __mmask16 mask_skip_two = 0xFFFF - 3;
+    // __mmask16 mask_skip_four = 0xFFF0;
+    // __mmask16 mask_skip_eight = 0xFF00;
+    __mmask16 mask_skip_one = 0x7FFF;
+    __mmask16 mask_skip_two = 0x3FFF;
+    __mmask16 mask_skip_four = 0x0FFF;
+    __mmask16 mask_skip_eight = 0x00FF;
+    sz_u512_vec_t shift_by_one_vec, shift_by_two_vec, shift_by_four_vec, shift_by_eight_vec;
+    shift_by_one_vec.zmm = _mm512_set_epi32(14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0);
+    shift_by_two_vec.zmm = _mm512_set_epi32(13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0);
+    shift_by_four_vec.zmm = _mm512_set_epi32(11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0);
+    shift_by_eight_vec.zmm = _mm512_set_epi32(7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+    sz_u512_vec_t shifted_vec;
+    sz_u512_vec_t new_vec = base_vec;
+    shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_one_vec.zmm, new_vec.zmm);
+    shifted_vec.i32s[0] = previous;
+    shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_vec.zmm);
+    new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_one, new_vec.zmm, shifted_vec.zmm);
+    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+
+    shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_two_vec.zmm, new_vec.zmm);
+    shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_double_vec.zmm);
+    new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_two, new_vec.zmm, shifted_vec.zmm);
+    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+
+    shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_four_vec.zmm, new_vec.zmm);
+    shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_quad_vec.zmm);
+    new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_four, new_vec.zmm, shifted_vec.zmm);
+    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+
+    shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_eight_vec.zmm, new_vec.zmm);
+    shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_octa_vec.zmm);
+    new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_eight, new_vec.zmm, shifted_vec.zmm);
+
+    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+    for (sz_size_t i = 1; i < 16; i++) sz_assert(new_vec.i32s[i] == max(new_vec.i32s[i - 1] + gap, new_vec.i32s[i]));
+
+    return new_vec;
+}
+
 #endif // SZ_USE_AVX512
 
 #if SZ_USE_ARM_NEON

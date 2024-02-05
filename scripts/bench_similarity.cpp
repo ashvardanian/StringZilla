@@ -43,9 +43,10 @@ tracked_binary_functions_t distance_functions() {
     auto wrap_sz_scoring = [alloc](auto function) mutable -> binary_function_t {
         return binary_function_t([function, alloc](std::string_view a, std::string_view b) mutable -> std::size_t {
             sz_memory_allocator_t *alloc_ptr = &alloc;
-            return (std::size_t)function(a.data(), a.length(), b.data(), b.length(),
-                                         reinterpret_cast<sz_error_cost_t const *>(costs.data()), (sz_error_cost_t)1,
-                                         alloc_ptr);
+            sz_ssize_t signed_result =
+                function(a.data(), a.length(), b.data(), b.length(),
+                         reinterpret_cast<sz_error_cost_t const *>(costs.data()), (sz_error_cost_t)-1, alloc_ptr);
+            return (std::size_t)(-signed_result);
         });
     };
     tracked_binary_functions_t result = {

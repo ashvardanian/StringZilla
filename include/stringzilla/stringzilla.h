@@ -1181,10 +1181,11 @@ SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { retur
 #define sz_min_of_three(x, y, z) sz_min_of_two(x, sz_min_of_two(y, z))
 #define sz_max_of_three(x, y, z) sz_max_of_two(x, sz_max_of_two(y, z))
 
-/**
- *  @brief  Branchless minimum function for two integers.
- */
+/** @brief  Branchless minimum function for two signed 32-bit integers. */
 SZ_INTERNAL sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
+
+/** @brief  Branchless minimum function for two signed 32-bit integers. */
+SZ_INTERNAL sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x - y) & (x - y) >> 31); }
 
 /**
  *  @brief  Clamps signed offsets in a string to a valid range. Used for Pythonic-style slicing.
@@ -4151,17 +4152,18 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
     sz_u512_vec_t shuffled_first_subs_vec, shuffled_second_subs_vec, shuffled_third_subs_vec, shuffled_fourth_subs_vec;
 
     // Prepare constants and masks.
-    sz_u512_vec_t is_third_or_fourth_vec, is_second_or_fourth_vec;
+    sz_u512_vec_t is_third_or_fourth_vec, is_second_or_fourth_vec, gap_vec;
     {
         char is_third_or_fourth_check, is_second_or_fourth_check;
         *(sz_u8_t *)&is_third_or_fourth_check = 0x80, *(sz_u8_t *)&is_second_or_fourth_check = 0x40;
         is_third_or_fourth_vec.zmm = _mm512_set1_epi8(is_third_or_fourth_check);
         is_second_or_fourth_vec.zmm = _mm512_set1_epi8(is_second_or_fourth_check);
+        gap_vec.zmm = _mm512_set1_epi32(gap);
     }
 
     sz_u8_t const *shorter_unsigned = (sz_u8_t const *)shorter;
     for (sz_size_t idx_shorter = 0; idx_shorter != shorter_length; ++idx_shorter) {
-        current_distances[0] = (sz_ssize_t)(idx_shorter + 1) * gap;
+        sz_i32_t last_in_row = current_distances[0] = (sz_ssize_t)(idx_shorter + 1) * gap;
 
         // Load one row of the substitution matrix into four ZMM registers.
         sz_error_cost_t const *row_subs = subs + shorter_unsigned[idx_shorter] * 256u;
@@ -4225,52 +4227,78 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
                 cost_substitution_vec.zmm = _mm512_add_epi32(
                     cost_substitution_vec.zmm, _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64(current_0_31_vec, 0)));
                 cost_deletion_vec.zmm = _mm512_maskz_loadu_epi32(mask, previous_distances + 1 + idx_longer);
-                cost_deletion_vec.zmm = _mm512_add_epi32(cost_deletion_vec.zmm, _mm512_set1_epi32(gap));
+                cost_deletion_vec.zmm = _mm512_add_epi32(cost_deletion_vec.zmm, gap_vec.zmm);
                 current_vec.zmm = _mm512_max_epi32(cost_substitution_vec.zmm, cost_deletion_vec.zmm);
+
+                // Inclusive prefix minimum computation to combine with insertion costs.
+                // Simply disabling this operation results in 5x performance improvement, meaning
+                // that this operation is responsible for 80% of the total runtime.
+                //    for (sz_size_t idx_longer = 0; idx_longer < longer_length; ++idx_longer) {
+                //        current_distances[idx_longer + 1] =
+                //            sz_max_of_two(current_distances[idx_longer] + gap, current_distances[idx_longer + 1]);
+                //    }
+                //
+                // To perform the same operation in vectorized form, we need to perform a tree-like reduction,
+                // that will involve multiple steps. It's quite expensive and should be first tested in the
+                // "experimental" section.
+                //
+                // Another approach might be loop unrolling:
+                //      current_vec.i32s[0] = last_in_row = sz_i32_max_of_two(current_vec.i32s[0], last_in_row + gap);
+                //      current_vec.i32s[1] = last_in_row = sz_i32_max_of_two(current_vec.i32s[1], last_in_row + gap);
+                //      current_vec.i32s[2] = last_in_row = sz_i32_max_of_two(current_vec.i32s[2], last_in_row + gap);
+                //      ... yet this approach is also quite expensive.
+                for (int i = 0; i != 16; ++i)
+                    current_vec.i32s[i] = last_in_row = sz_max_of_two(current_vec.i32s[i], last_in_row + gap);
                 _mm512_mask_storeu_epi32(current_distances + idx_longer + 1, mask, current_vec.zmm);
             }
 
             // Export the values from 16 to 31.
             if (register_length > 16) {
-                mask >>= 16;
+                mask = _kshiftri_mask64(mask, 16);
                 cost_substitution_vec.zmm = _mm512_maskz_loadu_epi32(mask, previous_distances + idx_longer + 16);
                 cost_substitution_vec.zmm = _mm512_add_epi32(
                     cost_substitution_vec.zmm, _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64(current_0_31_vec, 1)));
                 cost_deletion_vec.zmm = _mm512_maskz_loadu_epi32(mask, previous_distances + 1 + idx_longer + 16);
-                cost_deletion_vec.zmm = _mm512_add_epi32(cost_deletion_vec.zmm, _mm512_set1_epi32(gap));
+                cost_deletion_vec.zmm = _mm512_add_epi32(cost_deletion_vec.zmm, gap_vec.zmm);
                 current_vec.zmm = _mm512_max_epi32(cost_substitution_vec.zmm, cost_deletion_vec.zmm);
+
+                // Aggregate running insertion costs within the register.
+                for (int i = 0; i != 16; ++i)
+                    current_vec.i32s[i] = last_in_row = sz_max_of_two(current_vec.i32s[i], last_in_row + gap);
                 _mm512_mask_storeu_epi32(current_distances + idx_longer + 1 + 16, mask, current_vec.zmm);
             }
 
             // Export the values from 32 to 47.
             if (register_length > 32) {
-                mask >>= 16;
+                mask = _kshiftri_mask64(mask, 16);
                 cost_substitution_vec.zmm = _mm512_maskz_loadu_epi32(mask, previous_distances + idx_longer + 32);
                 cost_substitution_vec.zmm = _mm512_add_epi32(
                     cost_substitution_vec.zmm, _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64(current_32_63_vec, 0)));
                 cost_deletion_vec.zmm = _mm512_maskz_loadu_epi32(mask, previous_distances + 1 + idx_longer + 32);
-                cost_deletion_vec.zmm = _mm512_add_epi32(cost_deletion_vec.zmm, _mm512_set1_epi32(gap));
+                cost_deletion_vec.zmm = _mm512_add_epi32(cost_deletion_vec.zmm, gap_vec.zmm);
                 current_vec.zmm = _mm512_max_epi32(cost_substitution_vec.zmm, cost_deletion_vec.zmm);
+
+                // Aggregate running insertion costs within the register.
+                for (int i = 0; i != 16; ++i)
+                    current_vec.i32s[i] = last_in_row = sz_max_of_two(current_vec.i32s[i], last_in_row + gap);
                 _mm512_mask_storeu_epi32(current_distances + idx_longer + 1 + 32, mask, current_vec.zmm);
             }
 
             // Export the values from 32 to 47.
             if (register_length > 48) {
-                mask >>= 16;
+                mask = _kshiftri_mask64(mask, 16);
                 cost_substitution_vec.zmm = _mm512_maskz_loadu_epi32(mask, previous_distances + idx_longer + 48);
                 cost_substitution_vec.zmm = _mm512_add_epi32(
                     cost_substitution_vec.zmm, _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64(current_32_63_vec, 1)));
                 cost_deletion_vec.zmm = _mm512_maskz_loadu_epi32(mask, previous_distances + 1 + idx_longer + 48);
-                cost_deletion_vec.zmm = _mm512_add_epi32(cost_deletion_vec.zmm, _mm512_set1_epi32(gap));
+                cost_deletion_vec.zmm = _mm512_add_epi32(cost_deletion_vec.zmm, gap_vec.zmm);
                 current_vec.zmm = _mm512_max_epi32(cost_substitution_vec.zmm, cost_deletion_vec.zmm);
+
+                // Aggregate running insertion costs within the register.
+                for (int i = 0; i != 16; ++i)
+                    current_vec.i32s[i] = last_in_row = sz_max_of_two(current_vec.i32s[i], last_in_row + gap);
                 _mm512_mask_storeu_epi32(current_distances + idx_longer + 1 + 48, mask, current_vec.zmm);
             }
-        }
-
-        // Inclusive prefix minimum computation to combine with addition costs.
-        for (sz_size_t idx_longer = 0; idx_longer < longer_length; ++idx_longer) {
-            current_distances[idx_longer + 1] =
-                sz_max_of_two(current_distances[idx_longer] + gap, current_distances[idx_longer + 1]);
         }
 
         // Swap previous_distances and current_distances pointers
