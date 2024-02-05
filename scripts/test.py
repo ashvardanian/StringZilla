@@ -287,12 +287,16 @@ def test_edit_distance_random(first_length: int, second_length: int):
 def test_alignment_score_random(first_length: int, second_length: int):
     a = get_random_string(length=first_length)
     b = get_random_string(length=second_length)
-    character_substitutions = np.ones((256, 256), dtype=np.int8)
+    character_substitutions = np.zeros((256, 256), dtype=np.int8)
+    character_substitutions.fill(-1)
     np.fill_diagonal(character_substitutions, 0)
 
     assert sz.alignment_score(
-        a, b, substitution_matrix=character_substitutions, gap_score=1
-    ) == baseline_edit_distance(a, b)
+        a,
+        b,
+        substitution_matrix=character_substitutions,
+        gap_score=-1,
+    ) == -baseline_edit_distance(a, b)
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
