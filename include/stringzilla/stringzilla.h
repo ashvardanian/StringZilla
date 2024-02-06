@@ -3010,16 +3010,53 @@ SZ_PUBLIC void sz_sort_recursion( //
 
     if (!sequence->count) return;
 
-    // Partition a range of integers according to a specific bit value
-    sz_size_t split = 0;
-    {
-        sz_u64_t mask = (1ull << 63) >> bit_idx;
-        while (split != sequence->count && !(sequence->order[split] & mask)) ++split;
-        for (sz_size_t i = split + 1; i < sequence->count; ++i)
-            if (!(sequence->order[i] & mask)) sz_u64_swap(sequence->order + i, sequence->order + split), ++split;
+    // Array of size one doesn't need sorting - only needs the prefix to be discarded.
+    if (sequence->count == 1) {
+        sz_u32_t *order_half_words = (sz_u32_t *)sequence->order;
+        order_half_words[1] = 0;
+        return;
     }
 
-    // Go down recursively
+    // Partition a range of integers according to a specific bit value
+    sz_size_t split = 0;
+    sz_u64_t mask = (1ull << 63) >> bit_idx;
+
+    // The clean approach would be to perform a single pass over the sequence.
+    //
+    //    while (split != sequence->count && !(sequence->order[split] & mask)) ++split;
+    //    for (sz_size_t i = split + 1; i < sequence->count; ++i)
+    //        if (!(sequence->order[i] & mask)) sz_u64_swap(sequence->order + i, sequence->order + split), ++split;
+    //
+    // This, however, doesn't take into account the high relative cost of writes and swaps.
+    // To cercumvent that, we can first count the total number entries to be mapped into either part.
+    // And then walk through both parts, swapping the entries that are in the wrong part.
+    // This would often lead to ~15% performance gain.
+    sz_size_t count_with_bit_set = 0;
+    for (sz_size_t i = 0; i != sequence->count; ++i) count_with_bit_set += (sequence->order[i] & mask) != 0;
+    split = sequence->count - count_with_bit_set;
+
+    // It's possible that the sequence is already partitioned.
+    if (split != 0 && split != sequence->count) {
+        // Use two pointers to efficiently reposition elements.
+        // On pointer walks left-to-right from the start, and the other walks right-to-left from the end.
+        sz_size_t left = 0;
+        sz_size_t right = sequence->count - 1;
+        while (true) {
+            // Find the next element with the bit set on the left side.
+            while (left < split && !(sequence->order[left] & mask)) ++left;
+            // Find the next element without the bit set on the right side.
+            while (right >= split && (sequence->order[right] & mask)) --right;
+            // Swap the mispositioned elements.
+            if (left < split && right >= split) {
+                sz_u64_swap(sequence->order + left, sequence->order + right);
+                ++left;
+                --right;
+            }
+            else { break; }
+        }
+    }
+
+    // Go down recursively.
     if (bit_idx < bit_max) {
         sz_sequence_t a = *sequence;
         a.count = split;
@@ -3030,9 +3067,9 @@ SZ_PUBLIC void sz_sort_recursion( //
         b.count -= split;
         sz_sort_recursion(&b, bit_idx + 1, bit_max, comparator, partial_order_length);
     }
-    // Reached the end of recursion
+    // Reached the end of recursion.
     else {
-        // Discard the prefixes
+        // Discard the prefixes.
         sz_u32_t *order_half_words = (sz_u32_t *)sequence->order;
         for (sz_size_t i = 0; i != sequence->count; ++i) { order_half_words[i * 2 + 1] = 0; }
 
