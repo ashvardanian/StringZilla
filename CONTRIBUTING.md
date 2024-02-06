@@ -91,8 +91,8 @@ Using modern syntax, this is how you build and run the test suite:
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
 cmake --build ./build_debug --config Debug          # Which will produce the following targets:
 ./build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
-./build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBrdige - last arch. before AVX2
-./build_debug/stringzilla_test_cpp20_arm_serial     # Arm variant compiled withou Neon
+./build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
+./build_debug/stringzilla_test_cpp20_arm_serial     # Arm variant compiled without Neon
 ```
 
 For benchmarks, you can use the following commands:

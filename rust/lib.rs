@@ -213,9 +213,9 @@ mod tests {
 
     #[test]
     fn basics() {
-        let my_string = String::from("Hello, world!");
-        let my_str = my_string.as_str();
-        let my_cow_str = Cow::from(&my_string);
+        let my_string: String = String::from("Hello, world!");
+        let my_str: &str = my_string.as_str();
+        let my_cow_str: Cow<'_, str> = Cow::from(&my_string);
 
         // Use the generic function with a String
         assert_eq!(my_string.sz_find("world"), Some(7));
