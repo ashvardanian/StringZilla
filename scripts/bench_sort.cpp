@@ -8,6 +8,10 @@
  */
 #include <memory> // `std::memcpy`
 
+#if __linux__ && defined(_GNU_SOURCE)
+#include <stdlib.h> // `qsort_r`
+#endif
+
 #include <bench.hpp>
 
 using namespace ashvardanian::stringzilla::scripts;
@@ -31,6 +35,20 @@ static sz_size_t get_length(sz_sequence_t const *array_c, sz_size_t i) {
 static sz_bool_t has_under_four_chars(sz_sequence_t const *array_c, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c->handle);
     return (sz_bool_t)(array[i].size() < 4);
+}
+
+static int _get_qsort_order(const void *a, const void *b, void *arg) {
+    sz_sequence_t *sequence = (sz_sequence_t *)arg;
+    sz_size_t idx_a = *(sz_size_t *)a;
+    sz_size_t idx_b = *(sz_size_t *)b;
+
+    const char *str_a = sequence->get_start(sequence, idx_a);
+    const char *str_b = sequence->get_start(sequence, idx_b);
+    sz_size_t len_a = sequence->get_length(sequence, idx_a);
+    sz_size_t len_b = sequence->get_length(sequence, idx_b);
+
+    int res = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
+    return res ? res : (int)(len_a - len_b);
 }
 
 #pragma endregion
@@ -63,26 +81,6 @@ static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
     std::sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) { return strings[i] < strings[j]; });
 
     return strings.size();
-}
-
-int hybrid_sort_c_compare_uint32_t(const void *a, const void *b) {
-    uint32_t int_a = *((uint32_t *)(((char *)a) + sizeof(sz_size_t) - 4));
-    uint32_t int_b = *((uint32_t *)(((char *)b) + sizeof(sz_size_t) - 4));
-    return (int_a < int_b) ? -1 : (int_a > int_b);
-}
-
-int hybrid_sort_c_compare_strings(void *arg, const void *a, const void *b) {
-    sz_sequence_t *sequence = (sz_sequence_t *)arg;
-    sz_size_t idx_a = *(sz_size_t *)a;
-    sz_size_t idx_b = *(sz_size_t *)b;
-
-    const char *str_a = sequence->get_start(sequence, idx_a);
-    const char *str_b = sequence->get_start(sequence, idx_b);
-    sz_size_t len_a = sequence->get_length(sequence, idx_a);
-    sz_size_t len_b = sequence->get_length(sequence, idx_b);
-
-    int res = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
-    return res ? res : (int)(len_a - len_b);
 }
 
 static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
@@ -192,6 +190,21 @@ int main(int argc, char const **argv) {
             sz_sort(&array);
         });
         expect_sorted(strings, permute_new);
+
+#if __linux__ && defined(_GNU_SOURCE)
+        bench_permute("qsort_r", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+            sz_sequence_t array;
+            array.order = permute.data();
+            array.count = strings.size();
+            array.handle = &strings;
+            array.get_start = get_start;
+            array.get_length = get_length;
+            qsort_r(array.order, array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
+        });
+        expect_sorted(strings, permute_new);
+#else
+        sz_unused(_get_qsort_order);
+#endif
 
         bench_permute("hybrid_sort_cpp", strings, permute_new,
                       [](strings_t const &strings, permute_t &permute) { hybrid_sort_cpp(strings, permute.data()); });

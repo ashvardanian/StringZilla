@@ -1179,6 +1179,33 @@ static void test_levenshtein_distances() {
     }
 }
 
+/**
+ *  @brief  Tests sorting functionality.
+ */
+static void test_sequence_algorithms() {
+    using strs_t = std::vector<std::string>;
+    using order_t = std::vector<std::size_t>;
+
+    assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::sorted_order(x) == order_t({0, 1, 2, 3}));
+    assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::sorted_order(x) == order_t({3, 0, 1, 2}));
+    assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::sorted_order(x) == order_t({1, 0, 3, 2}));
+
+    // Generate random strings of different lengths.
+    for (std::size_t dataset_size : {10, 100, 1000, 10000}) {
+        // Build the dataset.
+        strs_t dataset;
+        for (std::size_t i = 0; i != dataset_size; ++i)
+            dataset.push_back(sz::scripts::random_string(i % 32, "abcdefghijklmnopqrstuvwxyz", 26));
+
+        // Run several iterations of fuzzy tests.
+        for (std::size_t experiment_idx = 0; experiment_idx != 10; ++experiment_idx) {
+            std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
+            auto order = sz::sorted_order(dataset);
+            for (std::size_t i = 1; i != dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
+        }
+    }
+}
+
 int main(int argc, char const **argv) {
 
     // Let's greet the user nicely
@@ -1225,6 +1252,9 @@ int main(int argc, char const **argv) {
 
     // Similarity measures and fuzzy search
     test_levenshtein_distances();
+
+    // Sequences of strings
+    test_sequence_algorithms();
 
     std::printf("All tests passed... Unbelievable!\n");
     return 0;

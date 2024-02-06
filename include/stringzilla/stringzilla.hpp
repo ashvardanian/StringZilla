@@ -3598,6 +3598,65 @@ void randomize(basic_string_slice<char_type_> string, string_view alphabet = "ab
     randomize(string, &std::rand, alphabet);
 }
 
+/**
+ *  @brief  Internal data-structure used to forward the arguments to the `sz_sort` function.
+ *  @see    sorted_order
+ */
+template <typename objects_type_, typename string_extractor_>
+struct _sequence_args {
+    objects_type_ const *begin;
+    std::size_t count;
+    std::size_t *order;
+    string_extractor_ extractor;
+};
+
+template <typename objects_type_, typename string_extractor_>
+sz_cptr_t _call_sequence_member_start(struct sz_sequence_t const *sequence, sz_size_t i) {
+    using handle_type = _sequence_args<objects_type_, string_extractor_>;
+    handle_type const *args = reinterpret_cast<handle_type const *>(sequence->handle);
+    string_view member = args->extractor(args->begin[i]);
+    return member.data();
+}
+
+template <typename objects_type_, typename string_extractor_>
+sz_size_t _call_sequence_member_length(struct sz_sequence_t const *sequence, sz_size_t i) {
+    using handle_type = _sequence_args<objects_type_, string_extractor_>;
+    handle_type const *args = reinterpret_cast<handle_type const *>(sequence->handle);
+    string_view member = args->extractor(args->begin[i]);
+    return static_cast<sz_size_t>(member.size());
+}
+
+/**
+ *  @brief  Computes the permutation of an array, that would lead to sorted order.
+ *          The elements of the array must be convertible to a `string_view` with the given extractor.
+ *          Unlike the `sz_sort` C interface, overwrites the output array.
+ *
+ *  @param[in] begin       The pointer to the first element of the array.
+ *  @param[in] end         The pointer to the element after the last element of the array.
+ *  @param[out] order      The pointer to the output array of indices, that will be populated with the permutation.
+ *  @param[in] extractor   The function object that extracts the string from the object.
+ *
+ *  @see    sz_sort
+ */
+template <typename objects_type_, typename string_extractor_>
+void sorted_order(objects_type_ const *begin, objects_type_ const *end, std::size_t *order,
+                  string_extractor_ &&extractor) noexcept {
+
+    // Pack the arguments into a single structure to reference it from the callback.
+    _sequence_args<objects_type_, string_extractor_> args = {begin, static_cast<std::size_t>(end - begin), order,
+                                                             std::forward<string_extractor_>(extractor)};
+    // Populate the array with `iota`-style order.
+    for (std::size_t i = 0; i != args.count; ++i) order[i] = i;
+
+    sz_sequence_t array;
+    array.order = reinterpret_cast<sz_u64_t *>(order);
+    array.count = args.count;
+    array.handle = &args;
+    array.get_start = _call_sequence_member_start<objects_type_, string_extractor_>;
+    array.get_length = _call_sequence_member_length<objects_type_, string_extractor_>;
+    sz_sort(&array);
+}
+
 #if !SZ_AVOID_STL
 
 /**
@@ -3630,6 +3689,44 @@ std::bitset<bitset_bits_> hashes_fingerprint(basic_string_slice<char_type_> cons
 template <std::size_t bitset_bits_, typename char_type_>
 std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str, std::size_t window_length) noexcept {
     return ashvardanian::stringzilla::hashes_fingerprint<bitset_bits_>(str.view(), window_length);
+}
+
+/**
+ *  @brief  Computes the permutation of an array, that would lead to sorted order.
+ *  @return The array of indices, that will be populated with the permutation.
+ *  @throw  `std::bad_alloc` if the allocation fails.
+ */
+template <typename objects_type_, typename string_extractor_>
+std::vector<std::size_t> sorted_order(objects_type_ const *begin, objects_type_ const *end,
+                                      string_extractor_ &&extractor) noexcept(false) {
+    std::vector<std::size_t> order(end - begin);
+    sorted_order(begin, end, order.data(), std::forward<string_extractor_>(extractor));
+    return order;
+}
+
+/**
+ *  @brief  Computes the permutation of an array, that would lead to sorted order.
+ *  @return The array of indices, that will be populated with the permutation.
+ *  @throw  `std::bad_alloc` if the allocation fails.
+ */
+template <typename string_like_type_>
+std::vector<std::size_t> sorted_order(string_like_type_ const *begin, string_like_type_ const *end) noexcept(false) {
+    static_assert(std::is_convertible<string_like_type_, string_view>::value,
+                  "The type must be convertible to string_view.");
+    return sorted_order(begin, end, [](string_like_type_ const &s) -> string_view { return s; });
+}
+
+/**
+ *  @brief  Computes the permutation of an array, that would lead to sorted order.
+ *  @return The array of indices, that will be populated with the permutation.
+ *  @throw  `std::bad_alloc` if the allocation fails.
+ */
+template <typename string_like_type_>
+std::vector<std::size_t> sorted_order(std::vector<string_like_type_> const &array) noexcept(false) {
+    static_assert(std::is_convertible<string_like_type_, string_view>::value,
+                  "The type must be convertible to string_view.");
+    return sorted_order(array.data(), array.data() + array.size(),
+                        [](string_like_type_ const &s) -> string_view { return s; });
 }
 
 #endif
