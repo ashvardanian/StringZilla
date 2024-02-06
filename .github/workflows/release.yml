@@ -19,14 +19,16 @@ jobs:
 
   versioning:
     name: Semantic Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3
-      with:
-        persist-credentials: false
-    - uses: actions/setup-node@v3
-    - run: npm install --save-dev @semantic-release/exec @semantic-release/git conventional-changelog-eslint semantic-release && npx semantic-release
-
+      - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --ignore-scripts --save-dev --prefix ./package-ci @semantic-release/exec @semantic-release/git conventional-changelog-eslint semantic-release && npx --prefix ./package-ci semantic-release
 
   rebase:
     name: Rebase Dev. Branch
