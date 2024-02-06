@@ -18,16 +18,16 @@ permissions:
 jobs:
 
   # How hard can it be?!
-  # Let's just upgrade versions manually with `.github/workflows/update_version.sh`.
+  # Let's just upgrade verions manually with `.github/workflows/update_version.sh`.
   # versioning:
   #   name: Semantic Release
   #   runs-on: ubuntu-22.04
   #   steps:
-  #     - uses: actions/checkout
+  #     - uses: actions/checkout@v4
   #       with:
   #         persist-credentials: false
   #     - name: Set up Node.js
-  #       uses: actions/setup-node
+  #       uses: actions/setup-node@v4
   #       with:
   #         node-version: 20
   #     - run: npm install --ignore-scripts --save-dev --prefix ./package-ci @semantic-release/exec @semantic-release/git conventional-changelog-eslint semantic-release && npx --prefix ./package-ci semantic-release
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the latest code
-        uses: actions/checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -48,7 +48,7 @@ jobs:
           git rebase origin/main
           
       - name: Push changes
-        uses: CasperWA/push-protected
+        uses: CasperWA/push-protected@v2
         with:
           token: ${{ secrets.SEMANTIC_REBASE_TOKEN }}
           branch: main-dev
@@ -63,20 +63,18 @@ jobs:
         os: [ubuntu-20.04, macOS-11, windows-2022]
 
     steps:
-      - uses: actions/checkout
+      - uses: actions/checkout@v4
         with:
           ref: 'main'      
-      - uses: actions/setup-python
+      - uses: actions/setup-python@v5
       
       - name: Setup Docker
         if: matrix.os != 'windows-2022'
-        uses: crazy-max/ghaction-setup-docker
-        with:
-          version: 23.0.1
+        uses: crazy-max/ghaction-setup-docker@v3
 
       - name: Setup QEMU
         if: matrix.os != 'windows-2022'
-        uses: docker/setup-qemu-action
+        uses: docker/setup-qemu-action@v3
 
       - name: Install CIBuildWheel
         run: python -m pip install --no-cache-dir cibuildwheel
@@ -84,7 +82,7 @@ jobs:
       - name: Build wheels
         run: python -m cibuildwheel
 
-      - uses: actions/upload-artifact
+      - uses: actions/upload-artifact@v4
         with:
           path: ./wheelhouse/*.whl
   
@@ -101,7 +99,7 @@ jobs:
 
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact
+        uses: actions/download-artifact@v4
         with:
           path: ./dist/
 
@@ -116,15 +114,15 @@ jobs:
     name: Publish Rust
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout
+      - uses: actions/checkout@v4
         with:
           ref: "main"
       - run: git submodule update --init --recursive
-      - uses: actions-rs/toolchain
+      - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
-      - uses: katyo/publish-crates
+      - uses: katyo/publish-crates@v2
         with:
           registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
@@ -134,16 +132,16 @@ jobs:
   #   needs: versioning
   #   runs-on: ubuntu-latest
   #   steps:
-  #     - uses: actions/checkout
+  #     - uses: actions/checkout@v4
   #       with:
   #         ref: 'main'  
   #     - run: git submodule update --init --recursive
-  #     - uses: actions/setup-node
+  #     - uses: actions/setup-node@v3
   #       with:
   #         node-version: 18
   #     - run: npm install
   #     - run: npm ci
   #     - run: npm test
-  #     - uses: JS-DevTools/npm-publish
+  #     - uses: JS-DevTools/npm-publish@v2
   #       with:
   #         token: ${{ secrets.NPM_TOKEN }}
