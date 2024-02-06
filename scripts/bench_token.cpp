@@ -40,7 +40,7 @@ tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width, st
 #endif
 #if SZ_USE_ARM_NEON
         {"sz_hashes_neon_naive:" + suffix, wrap_sz(sz_hashes_neon_naive)},
-        {"sz_hashes_neon_readhead:" + suffix, wrap_sz(sz_hashes_neon_readhead)},
+        {"sz_hashes_neon_readahead:" + suffix, wrap_sz(sz_hashes_neon_readahead)},
         {"sz_hashes_neon_reusing_loads:" + suffix, wrap_sz(sz_hashes_neon_reusing_loads)},
 #endif
         {"sz_hashes_serial:" + suffix, wrap_sz(sz_hashes_serial)},
@@ -77,7 +77,7 @@ tracked_unary_functions_t random_generation_functions(std::size_t token_length) 
              for (std::size_t i = 0; i < token_length; ++i) { buffer[i] = alphabet[std::rand() % max_alphabet_size]; }
              return token_length;
          })},
-        {"std::uniform_int_ditribtution<uint8>" + suffix,
+        {"std::uniform_int_distribution<uint8>" + suffix,
          unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
              randomize_string(buffer.data(), token_length, alphabet.data(), alphabet.size());
              return token_length;

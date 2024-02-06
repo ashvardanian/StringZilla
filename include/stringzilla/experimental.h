@@ -587,7 +587,7 @@ SZ_PUBLIC void sz_hashes_neon_reusing_loads(sz_cptr_t start, sz_size_t length, s
     }
 }
 
-SZ_PUBLIC void sz_hashes_neon_readhead(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step,
+SZ_PUBLIC void sz_hashes_neon_readahead(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step,
                                        sz_hash_callback_t callback, void *callback_handle) {
 
     if (length < window_length || !window_length) return;
