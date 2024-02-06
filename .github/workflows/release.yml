@@ -16,9 +16,8 @@ permissions:
   id-token: write
 
 jobs:
-
   # How hard can it be?!
-  # Let's just upgrade verions manually with `.github/workflows/update_version.sh`.
+  # Let's just upgrade versions manually with `.github/workflows/update_version.sh`.
   # versioning:
   #   name: Semantic Release
   #   runs-on: ubuntu-22.04
@@ -46,7 +45,7 @@ jobs:
           git fetch origin main
           git checkout main-dev
           git rebase origin/main
-          
+
       - name: Push changes
         uses: CasperWA/push-protected@v2
         with:
@@ -65,9 +64,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 'main'      
+          ref: "main"
       - uses: actions/setup-python@v5
-      
+
       - name: Setup Docker
         if: matrix.os != 'windows-2022'
         uses: crazy-max/ghaction-setup-docker@v3
@@ -85,8 +84,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           path: ./wheelhouse/*.whl
-  
-  
+          overwrite: true
+
   publish_python:
     name: Publish Python
     needs: build_wheels
@@ -134,7 +133,7 @@ jobs:
   #   steps:
   #     - uses: actions/checkout@v4
   #       with:
-  #         ref: 'main'  
+  #         ref: 'main'
   #     - run: git submodule update --init --recursive
   #     - uses: actions/setup-node@v3
   #       with:
