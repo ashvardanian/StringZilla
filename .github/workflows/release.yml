@@ -110,21 +110,39 @@ jobs:
           verbose: true
           print-hash: true
 
-  publish_javascript:
-    name: Publish JavaScript
+  publish_rust:
+    name: Publish Rust
     needs: versioning
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
         with:
-          ref: 'main'  
+          ref: "main"
       - run: git submodule update --init --recursive
-      - uses: actions/setup-node@v3
+      - uses: actions-rs/toolchain@v1
         with:
-          node-version: 18
-      - run: npm install
-      - run: npm ci
-      - run: npm test
-      - uses: JS-DevTools/npm-publish@v2
+          toolchain: stable
+          override: true
+      - uses: katyo/publish-crates@v2
         with:
-          token: ${{ secrets.NPM_TOKEN }}
+          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Let's not publish the JavaScript package for now
+  # publish_javascript:
+  #   name: Publish JavaScript
+  #   needs: versioning
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #       with:
+  #         ref: 'main'  
+  #     - run: git submodule update --init --recursive
+  #     - uses: actions/setup-node@v3
+  #       with:
+  #         node-version: 18
+  #     - run: npm install
+  #     - run: npm ci
+  #     - run: npm test
+  #     - uses: JS-DevTools/npm-publish@v2
+  #       with:
+  #         token: ${{ secrets.NPM_TOKEN }}
