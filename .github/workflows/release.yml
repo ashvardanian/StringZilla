@@ -17,20 +17,23 @@ permissions:
 
 jobs:
 
-  versioning:
-    name: Semantic Release
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        persist-credentials: false
-    - uses: actions/setup-node@v3
-    - run: npm install --save-dev @semantic-release/exec @semantic-release/git conventional-changelog-eslint semantic-release && npx semantic-release
-
+  # How hard can it be?!
+  # Let's just upgrade verions manually with `.github/workflows/update_version.sh`.
+  # versioning:
+  #   name: Semantic Release
+  #   runs-on: ubuntu-22.04
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #       with:
+  #         persist-credentials: false
+  #     - name: Set up Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #     - run: npm install --ignore-scripts --save-dev --prefix ./package-ci @semantic-release/exec @semantic-release/git conventional-changelog-eslint semantic-release && npx --prefix ./package-ci semantic-release
 
   rebase:
     name: Rebase Dev. Branch
-    needs: versioning
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the latest code
@@ -55,7 +58,6 @@ jobs:
   build_wheels:
     name: Build Python
     runs-on: ${{ matrix.os }}
-    needs: versioning
     strategy:
       matrix:
         os: [ubuntu-20.04, macOS-11, windows-2022]
@@ -110,21 +112,38 @@ jobs:
           verbose: true
           print-hash: true
 
-  publish_javascript:
-    name: Publish JavaScript
-    needs: versioning
-    runs-on: ubuntu-latest
+  publish_rust:
+    name: Publish Rust
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
         with:
-          ref: 'main'  
+          ref: "main"
       - run: git submodule update --init --recursive
-      - uses: actions/setup-node@v3
+      - uses: actions-rs/toolchain@v1
         with:
-          node-version: 18
-      - run: npm install
-      - run: npm ci
-      - run: npm test
-      - uses: JS-DevTools/npm-publish@v2
+          toolchain: stable
+          override: true
+      - uses: katyo/publish-crates@v2
         with:
-          token: ${{ secrets.NPM_TOKEN }}
+          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # Let's not publish the JavaScript package for now
+  # publish_javascript:
+  #   name: Publish JavaScript
+  #   needs: versioning
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #       with:
+  #         ref: 'main'  
+  #     - run: git submodule update --init --recursive
+  #     - uses: actions/setup-node@v3
+  #       with:
+  #         node-version: 18
+  #     - run: npm install
+  #     - run: npm ci
+  #     - run: npm test
+  #     - uses: JS-DevTools/npm-publish@v2
+  #       with:
+  #         token: ${{ secrets.NPM_TOKEN }}
