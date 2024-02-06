@@ -1,0 +1,16 @@
+[package]
+name = "stringzilla"
+version = "2.0.4"
+authors = ["Ash Vardanian <1983160+ashvardanian@users.noreply.github.com>"]
+description = "Faster SIMD-accelerated string search, sorting, fingerprints, and edit distances"
+edition = "2021"
+license = "Apache-2.0"
+publish = true
+repository = "https://github.com/ashvardanian/stringzilla"
+
+[lib]
+name = "stringzilla"
+path = "rust/lib.rs"
+
+[build-dependencies]
+cc = "1.0"

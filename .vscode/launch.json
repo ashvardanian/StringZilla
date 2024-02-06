@@ -1,30 +1,99 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug C++ Unit Tests",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_debug/stringzilla_test_cpp20",
+      "cwd": "${workspaceFolder}",
+      "environment": [
         {
-            "name": "Test",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/build_debug/stringzilla_test",
-            "cwd": "${workspaceFolder}",
-            "environment": [
-                {
-                    "name": "ASAN_OPTIONS",
-                    "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
-                }
-            ],
-            "stopAtEntry": false,
-            "linux": {
-                "preLaunchTask": "Linux Build C++ Test Debug",
-                "MIMode": "gdb"
-            },
-            "osx": {
-                "preLaunchTask": "MacOS Build C++ Test Debug",
-                "MIMode": "lldb"
-            }
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
         }
-    ]
+      ],
+      "stopAtEntry": false,
+      "linux": {
+        "preLaunchTask": "Build with GCC: Debug",
+        "MIMode": "gdb"
+      },
+      "osx": {
+        "preLaunchTask": "Build with LLVM: Debug",
+        "MIMode": "lldb"
+      },
+      "windows": {
+        "program": "${workspaceFolder}\\build_debug\\stringzilla_test_cpp20.exe",
+        "preLaunchTask": "Build with MSVC: Debug",
+        "MIMode": "gdb",
+        "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
+      }
+    },
+    {
+      "name": "Current C++ Benchmark",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_debug/stringzilla_${fileBasenameNoExtension}",
+      "args": [
+        "leipzig1M.txt"
+      ],
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
+        }
+      ],
+      "stopAtEntry": false,
+      "linux": {
+        "preLaunchTask": "Build with GCC: Debug",
+        "MIMode": "gdb"
+      },
+      "osx": {
+        "preLaunchTask": "Build with LLVM: Debug",
+        "MIMode": "lldb"
+      },
+      "windows": {
+        "program": "${workspaceFolder}\\build_debug\\stringzilla_${fileBasenameNoExtension}.exe",
+        "preLaunchTask": "Build with MSVC: Debug",
+        "MIMode": "gdb",
+        "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
+      }
+    },
+    {
+      "name": "Current Python File",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Current Python File with Leipzig1M arg",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "args": [
+        "./leipzig1M.txt"
+      ],
+    },
+    {
+      "name": "Current PyTest File",
+      "type": "python",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "${file}",
+        "-s",
+        "-x"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
 }

@@ -77,6 +77,8 @@
                     "conanfile.py",
                     "package.json",
                     "Cargo.toml",
+                    "CMakeLists.txt",
+                    "include/stringzilla/stringzilla.h"
                 ],
                 "message": "Build: Released ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
             }

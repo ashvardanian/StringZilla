@@ -1,8 +1,19 @@
+# Primary build folders
 build/
-.DS_Store
-tmp/
 build_debug/
 build_release/
+
+# Yes, everyone loves keeping this file in the history.
+# But with a very minimalistic binding and just a couple of dependencies 
+# it brings 7000 lines of text polluting the entire repo.
+package-lock.json
+
+# Temporary files
+.DS_Store
+.swiftpm/
+.build/
+tmp/
+target/
 __pycache__
 .pytest_cache
 .conda
@@ -10,12 +21,14 @@ Makefile
 CMakeCache.txt
 cmake_install.cmake
 CMakeFiles
-CMakeLists.txt~
-substr_search_cpp
 *.so
 *.egg-info
 *.whl
 *.pyd
+.venv/*
 node_modules/
 
+# Recommended datasets
 leipzig1M.txt
+enwik9.txt
+xlsum.csv

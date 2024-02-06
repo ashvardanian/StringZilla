@@ -23,7 +23,14 @@
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
 #else
+#include <limits.h> // `SSIZE_MAX`
 #include <unistd.h> // `ssize_t`
+#endif
+
+// It seems like some Python versions forget to include a header, so we should:
+// https://github.com/ashvardanian/StringZilla/actions/runs/7706636733/job/21002535521
+#ifndef SSIZE_MAX
+#define SSIZE_MAX (SIZE_MAX / 2)
 #endif
 
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
@@ -32,7 +39,7 @@ typedef SSIZE_T ssize_t;
 
 #include <string.h> // `memset`, `memcpy`
 
-#include <stringzilla.h>
+#include <stringzilla/stringzilla.h>
 
 #pragma region Forward Declarations
 
@@ -54,7 +61,7 @@ typedef struct {
 #else
         int file_descriptor;
 #endif
-    sz_string_start_t start;
+    sz_cptr_t start;
     sz_size_t length;
 } File;
 
@@ -73,7 +80,7 @@ typedef struct {
 typedef struct {
     PyObject_HEAD //
         PyObject *parent;
-    sz_string_start_t start;
+    sz_cptr_t start;
     sz_size_t length;
 } Str;
 
@@ -144,11 +151,26 @@ typedef struct {
 
 #pragma region Helpers
 
-inline static sz_string_start_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
+static sz_ptr_t temporary_memory_allocate(sz_size_t size, sz_string_view_t *existing) {
+    if (existing->length < size) {
+        sz_cptr_t new_start = realloc(existing->start, size);
+        if (!new_start) {
+            PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
+            return NULL;
+        }
+        existing->start = new_start;
+        existing->length = size;
+    }
+    return existing->start;
+}
+
+static void temporary_memory_free(sz_ptr_t start, sz_size_t size, sz_string_view_t *existing) {}
+
+static sz_cptr_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].start;
 }
 
-inline static sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
+static sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].length;
 }
 
@@ -187,28 +209,7 @@ void apply_order(sz_string_view_t *array, sz_u64_t *order, size_t length) {
     }
 }
 
-void slice(size_t length, ssize_t start, ssize_t end, size_t *normalized_offset, size_t *normalized_length) {
-
-    // clang-format off
-    // Normalize negative indices
-    if (start < 0) start += length;
-    if (end < 0) end += length;
-
-    // Clamp indices to a valid range
-    if (start < 0) start = 0;
-    if (end < 0) end = 0;
-    if (start > (ssize_t)length) start = length;
-    if (end > (ssize_t)length) end = length;
-
-    // Ensure start <= end
-    if (start > end) start = end;
-    // clang-format on
-
-    *normalized_offset = start;
-    *normalized_length = end - start;
-}
-
-sz_bool_t export_string_like(PyObject *object, sz_string_start_t **start, sz_size_t *length) {
+sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python str
         Py_ssize_t signed_length;
@@ -243,8 +244,8 @@ sz_bool_t export_string_like(PyObject *object, sz_string_start_t **start, sz_siz
 
 typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject **, char const **, size_t *);
 
-void str_at_offset_consecutive_32bit(
-    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+void str_at_offset_consecutive_32bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start,
+                                     size_t *length) {
     uint32_t start_offset = (i == 0) ? 0 : strs->data.consecutive_32bit.end_offsets[i - 1];
     uint32_t end_offset = strs->data.consecutive_32bit.end_offsets[i];
     *start = strs->data.consecutive_32bit.start + start_offset;
@@ -252,8 +253,8 @@ void str_at_offset_consecutive_32bit(
     *parent = strs->data.consecutive_32bit.parent;
 }
 
-void str_at_offset_consecutive_64bit(
-    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+void str_at_offset_consecutive_64bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start,
+                                     size_t *length) {
     uint64_t start_offset = (i == 0) ? 0 : strs->data.consecutive_64bit.end_offsets[i - 1];
     uint64_t end_offset = strs->data.consecutive_64bit.end_offsets[i];
     *start = strs->data.consecutive_64bit.start + start_offset;
@@ -261,8 +262,8 @@ void str_at_offset_consecutive_64bit(
     *parent = strs->data.consecutive_64bit.parent;
 }
 
-void str_at_offset_reordered(
-    Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start, size_t *length) {
+void str_at_offset_reordered(Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start,
+                             size_t *length) {
     *start = strs->data.reordered.parts[i].start;
     *length = strs->data.reordered.parts[i].length;
     *parent = strs->data.reordered.parent;
@@ -540,7 +541,7 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
 
     // Apply slicing
     size_t normalized_offset, normalized_length;
-    slice(self->length, from, to, &normalized_offset, &normalized_length);
+    sz_ssize_clamp_interval(self->length, from, to, &normalized_offset, &normalized_length);
     self->start = ((char *)self->start) + normalized_offset;
     self->length = normalized_length;
     return 0;
@@ -569,7 +570,29 @@ static void Str_dealloc(Str *self) {
 
 static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->start, self->length); }
 
-static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash_crc32(self->start, self->length); }
+static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->start, self->length); }
+
+static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs) {
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member || nargs > !is_member + 1 || kwargs) {
+        PyErr_SetString(PyExc_TypeError, "hash() expects exactly one positional argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    sz_string_view_t text;
+
+    // Validate and convert `text`
+    if (!export_string_like(text_obj, &text.start, &text.length)) {
+        PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
+        return NULL;
+    }
+
+    sz_u64_t result = sz_hash(text.start, text.length);
+    return PyLong_FromSize_t((size_t)result);
+}
 
 static Py_ssize_t Str_len(Str *self) { return self->length; }
 
@@ -655,7 +678,7 @@ static int Str_in(Str *self, PyObject *arg) {
         return -1;
     }
 
-    return sz_find_substring(self->start, self->length, needle_struct.start, needle_struct.length) != NULL;
+    return sz_find(self->start, self->length, needle_struct.start, needle_struct.length) != NULL;
 }
 
 static Py_ssize_t Strs_len(Strs *self) {
@@ -717,44 +740,37 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         // Depending on the layout, the procedure will be different.
         self_slice->type = self->type;
         switch (self->type) {
-        case STRS_CONSECUTIVE_32: {
-            struct consecutive_slices_32bit_t *from = &self->data.consecutive_32bit;
-            struct consecutive_slices_32bit_t *to = &self_slice->data.consecutive_32bit;
-            to->count = stop - start;
-            to->separator_length = from->separator_length;
-            to->parent = from->parent;
 
-            size_t first_length;
-            str_at_offset_consecutive_32bit(self, start, count, &to->parent, &to->start, &first_length);
-            uint32_t first_offset = to->start - from->start;
-            to->end_offsets = malloc(sizeof(uint32_t) * to->count);
-            if (to->end_offsets == NULL && PyErr_NoMemory()) {
-                Py_XDECREF(self_slice);
-                return NULL;
-            }
-            for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i] - first_offset;
-            Py_INCREF(to->parent);
+/* Usable as consecutive_logic(64bit), e.g. */
+#define consecutive_logic(type)                                                                               \
+    typedef index_##type##_t index_t;                                                                         \
+    typedef struct consecutive_slices_##type##_t slice_t;                                                     \
+    slice_t *from = &self->data.consecutive_##type;                                                           \
+    slice_t *to = &self_slice->data.consecutive_##type;                                                       \
+    to->count = stop - start;                                                                                 \
+    to->separator_length = from->separator_length;                                                            \
+    to->parent = from->parent;                                                                                \
+    size_t first_length;                                                                                      \
+    str_at_offset_consecutive_##type(self, start, count, &to->parent, &to->start, &first_length);             \
+    index_t first_offset = to->start - from->start;                                                           \
+    to->end_offsets = malloc(sizeof(index_t) * to->count);                                                    \
+    if (to->end_offsets == NULL && PyErr_NoMemory()) {                                                        \
+        Py_XDECREF(self_slice);                                                                               \
+        return NULL;                                                                                          \
+    }                                                                                                         \
+    for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i + start] - first_offset; \
+    Py_INCREF(to->parent);
+        case STRS_CONSECUTIVE_32: {
+            typedef uint32_t index_32bit_t;
+            consecutive_logic(32bit);
             break;
         }
         case STRS_CONSECUTIVE_64: {
-            struct consecutive_slices_64bit_t *from = &self->data.consecutive_64bit;
-            struct consecutive_slices_64bit_t *to = &self_slice->data.consecutive_64bit;
-            to->count = stop - start;
-            to->separator_length = from->separator_length;
-            to->parent = from->parent;
-
-            size_t first_length;
-            str_at_offset_consecutive_64bit(self, start, count, &to->parent, &to->start, &first_length);
-            uint64_t first_offset = to->start - from->start;
-            to->end_offsets = malloc(sizeof(uint64_t) * to->count);
-            if (to->end_offsets == NULL && PyErr_NoMemory()) {
-                Py_XDECREF(self_slice);
-                return NULL;
-            }
-            for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i] - first_offset;
-            Py_INCREF(to->parent);
+            typedef uint64_t index_64bit_t;
+            consecutive_logic(64bit);
             break;
         }
+#undef consecutive_logic
         case STRS_REORDERED: {
             struct reordered_slices_t *from = &self->data.reordered;
             struct reordered_slices_t *to = &self_slice->data.reordered;
@@ -790,7 +806,7 @@ static int Strs_contains(Str *self, PyObject *arg) { return 0; }
 
 static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 
-    sz_string_start_t a_start = NULL, b_start = NULL;
+    sz_cptr_t a_start = NULL, b_start = NULL;
     sz_size_t a_length = 0, b_length = 0;
     if (!export_string_like(self, &a_start, &a_length) || !export_string_like(other, &b_start, &b_length))
         Py_RETURN_NOTIMPLEMENTED;
@@ -814,15 +830,12 @@ static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 }
 
 /**
+ *  @brief  Implementation function for all search-like operations, parameterized by a function callback.
  *  @return 1 on success, 0 on failure.
  */
-static int Str_find_( //
-    PyObject *self,
-    PyObject *args,
-    PyObject *kwargs,
-    Py_ssize_t *offset_out,
-    sz_string_view_t *haystack_out,
-    sz_string_view_t *needle_out) {
+static int _Str_find_implementation_( //
+    PyObject *self, PyObject *args, PyObject *kwargs, sz_find_t finder, Py_ssize_t *offset_out,
+    sz_string_view_t *haystack_out, sz_string_view_t *needle_out) {
 
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -883,25 +896,34 @@ static int Str_find_( //
 
     // Limit the `haystack` range
     size_t normalized_offset, normalized_length;
-    slice(haystack.length, start, end, &normalized_offset, &normalized_length);
+    sz_ssize_clamp_interval(haystack.length, start, end, &normalized_offset, &normalized_length);
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
     // Perform contains operation
-    sz_string_start_t match = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+    sz_cptr_t match = finder(haystack.start, haystack.length, needle.start, needle.length);
     if (match == NULL) { *offset_out = -1; }
-    else { *offset_out = (Py_ssize_t)(match - haystack.start); }
+    else { *offset_out = (Py_ssize_t)(match - haystack.start + normalized_offset); }
 
     *haystack_out = haystack;
     *needle_out = needle;
     return 1;
 }
 
+static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset;
+    sz_string_view_t text;
+    sz_string_view_t separator;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, &signed_offset, &text, &separator)) return NULL;
+    if (signed_offset == -1) { Py_RETURN_FALSE; }
+    else { Py_RETURN_TRUE; }
+}
+
 static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_(self, args, kwargs, &signed_offset, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, &signed_offset, &text, &separator)) return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
 
@@ -909,7 +931,7 @@ static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_(self, args, kwargs, &signed_offset, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, &signed_offset, &text, &separator)) return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
         return NULL;
@@ -917,23 +939,34 @@ static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_rfind(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_(self, args, kwargs, &signed_offset, &text, &separator)) return NULL;
-    if (signed_offset == -1) { Py_RETURN_FALSE; }
-    else { Py_RETURN_TRUE; }
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, &signed_offset, &text, &separator)) return NULL;
+    return PyLong_FromSsize_t(signed_offset);
 }
 
-static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_rindex(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset;
+    sz_string_view_t text;
+    sz_string_view_t separator;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, &signed_offset, &text, &separator)) return NULL;
+    if (signed_offset == -1) {
+        PyErr_SetString(PyExc_ValueError, "substring not found");
+        return NULL;
+    }
+    return PyLong_FromSsize_t(signed_offset);
+}
+
+static PyObject *_Str_partition_implementation(PyObject *self, PyObject *args, PyObject *kwargs, sz_find_t finder) {
     Py_ssize_t separator_index;
     sz_string_view_t text;
     sz_string_view_t separator;
     PyObject *result_tuple;
 
-    // Use Str_find_ to get the index of the separator
-    if (!Str_find_(self, args, kwargs, &separator_index, &text, &separator)) return NULL;
+    // Use _Str_find_implementation_ to get the index of the separator
+    if (!_Str_find_implementation_(self, args, kwargs, finder, &separator_index, &text, &separator)) return NULL;
 
     // If separator is not found, return a tuple (self, "", "")
     if (separator_index == -1) {
@@ -970,6 +1003,14 @@ static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs)
     PyTuple_SET_ITEM(result_tuple, 2, after);
 
     return result_tuple;
+}
+
+static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return _Str_partition_implementation(self, args, kwargs, &sz_find);
+}
+
+static PyObject *Str_rpartition(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return _Str_partition_implementation(self, args, kwargs, &sz_rfind);
 }
 
 static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -1010,16 +1051,15 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     if ((start == -1 || end == -1 || allowoverlap == -1) && PyErr_Occurred()) return NULL;
 
     size_t normalized_offset, normalized_length;
-    slice(haystack.length, start, end, &normalized_offset, &normalized_length);
+    sz_ssize_clamp_interval(haystack.length, start, end, &normalized_offset, &normalized_length);
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
     size_t count = 0;
     if (needle.length == 0 || haystack.length == 0 || haystack.length < needle.length) { count = 0; }
-    else if (needle.length == 1) { count = sz_count_char(haystack.start, haystack.length, needle.start); }
     else if (allowoverlap) {
         while (haystack.length) {
-            sz_string_start_t ptr = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+            sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
             sz_size_t offset = found ? ptr - haystack.start : haystack.length;
             count += found;
@@ -1029,7 +1069,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     }
     else {
         while (haystack.length) {
-            sz_string_start_t ptr = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+            sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
             sz_size_t offset = found ? ptr - haystack.start : haystack.length;
             count += found;
@@ -1041,7 +1081,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSize_t(count);
 }
 
-static PyObject *Str_levenstein(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 2) {
@@ -1066,9 +1106,9 @@ static PyObject *Str_levenstein(PyObject *self, PyObject *args, PyObject *kwargs
             }
     }
 
-    int bound = 255; // Default value for bound
-    if (bound_obj && ((bound = PyLong_AsLong(bound_obj)) > 255 || bound < 0)) {
-        PyErr_Format(PyExc_ValueError, "Bound must be an integer between 0 and 255");
+    Py_ssize_t bound = 0; // Default value for bound
+    if (bound_obj && ((bound = PyLong_AsSsize_t(bound_obj)) < 0)) {
+        PyErr_Format(PyExc_ValueError, "Bound must be a non-negative integer");
         return NULL;
     }
 
@@ -1079,22 +1119,118 @@ static PyObject *Str_levenstein(PyObject *self, PyObject *args, PyObject *kwargs
         return NULL;
     }
 
-    // Allocate memory for the Levenstein matrix
-    size_t memory_needed = sz_levenstein_memory_needed(str1.length, str2.length);
-    if (temporary_memory.length < memory_needed) {
-        temporary_memory.start = realloc(temporary_memory.start, memory_needed);
-        temporary_memory.length = memory_needed;
-    }
-    if (!temporary_memory.start) {
-        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
+    // Allocate memory for the Levenshtein matrix
+    sz_memory_allocator_t reusing_allocator;
+    reusing_allocator.allocate = &temporary_memory_allocate;
+    reusing_allocator.free = &temporary_memory_free;
+    reusing_allocator.handle = &temporary_memory;
+
+    sz_size_t distance =
+        sz_edit_distance(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &reusing_allocator);
+
+    // Check for memory allocation issues
+    if (distance == SZ_SIZE_MAX) {
+        PyErr_NoMemory();
         return NULL;
     }
 
-    levenstein_distance_t small_bound = (levenstein_distance_t)bound;
-    levenstein_distance_t distance =
-        sz_levenstein(str1.start, str1.length, str2.start, str2.length, small_bound, temporary_memory.start);
+    return PyLong_FromSize_t(distance);
+}
 
-    return PyLong_FromLong(distance);
+static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *kwargs) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 2) {
+        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *str1_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *str2_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+    PyObject *substitutions_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *gap_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value))
+            if (PyUnicode_CompareWithASCIIString(key, "gap_score") == 0) {
+                if (gap_obj) {
+                    PyErr_Format(PyExc_TypeError, "Received the `gap_score` both as positional and keyword argument");
+                    return NULL;
+                }
+                gap_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "substitution_matrix") == 0) {
+                if (substitutions_obj) {
+                    PyErr_Format(PyExc_TypeError,
+                                 "Received the `substitution_matrix` both as positional and keyword argument");
+                    return NULL;
+                }
+                substitutions_obj = value;
+            }
+    }
+
+    Py_ssize_t gap = 1; // Default value for gap costs
+    if (gap_obj && (gap = PyLong_AsSsize_t(gap_obj)) && (gap >= 128 || gap <= -128)) {
+        PyErr_Format(PyExc_ValueError, "The `gap_score` must fit into an 8-bit signed integer");
+        return NULL;
+    }
+
+    // Now extract the substitution matrix from the `substitutions_obj`.
+    // It must conform to the buffer protocol, and contain a continuous 256x256 matrix of 8-bit signed integers.
+    sz_error_cost_t const *substitutions;
+
+    // Ensure the substitution matrix object is provided
+    if (!substitutions_obj) {
+        PyErr_Format(PyExc_TypeError, "No substitution matrix provided");
+        return NULL;
+    }
+
+    // Request a buffer view
+    Py_buffer substitutions_view;
+    if (PyObject_GetBuffer(substitutions_obj, &substitutions_view, PyBUF_FULL)) {
+        PyErr_Format(PyExc_TypeError, "Failed to get buffer from substitution matrix");
+        return NULL;
+    }
+
+    // Validate the buffer
+    if (substitutions_view.ndim != 2 || substitutions_view.shape[0] != 256 || substitutions_view.shape[1] != 256 ||
+        substitutions_view.itemsize != sizeof(sz_error_cost_t)) {
+        PyErr_Format(PyExc_ValueError, "Substitution matrix must be a 256x256 matrix of 8-bit signed integers");
+        PyBuffer_Release(&substitutions_view);
+        return NULL;
+    }
+
+    sz_string_view_t str1, str2;
+    if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
+        !export_string_like(str2_obj, &str2.start, &str2.length)) {
+        PyErr_Format(PyExc_TypeError, "Both arguments must be string-like");
+        return NULL;
+    }
+
+    // Assign the buffer's data to substitutions
+    substitutions = (sz_error_cost_t const *)substitutions_view.buf;
+
+    // Allocate memory for the Levenshtein matrix
+    sz_memory_allocator_t reusing_allocator;
+    reusing_allocator.allocate = &temporary_memory_allocate;
+    reusing_allocator.free = &temporary_memory_free;
+    reusing_allocator.handle = &temporary_memory;
+
+    sz_ssize_t score = sz_alignment_score(str1.start, str1.length, str2.start, str2.length, substitutions,
+                                          (sz_error_cost_t)gap, &reusing_allocator);
+
+    // Don't forget to release the buffer view
+    PyBuffer_Release(&substitutions_view);
+
+    // Check for memory allocation issues
+    if (score == SZ_SSIZE_MAX) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+
+    return PyLong_FromSsize_t(score);
 }
 
 static PyObject *Str_startswith(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -1183,9 +1319,44 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
     else { Py_RETURN_FALSE; }
 }
 
-static Strs *Str_split_(
-    PyObject *parent, sz_string_view_t text, sz_string_view_t separator, int keepseparator, Py_ssize_t maxsplit) {
+static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset;
+    sz_string_view_t text;
+    sz_string_view_t separator;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_from, &signed_offset, &text, &separator))
+        return NULL;
+    return PyLong_FromSsize_t(signed_offset);
+}
 
+static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset;
+    sz_string_view_t text;
+    sz_string_view_t separator;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_not_from, &signed_offset, &text, &separator))
+        return NULL;
+    return PyLong_FromSsize_t(signed_offset);
+}
+
+static PyObject *Str_find_last_of(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset;
+    sz_string_view_t text;
+    sz_string_view_t separator;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_from, &signed_offset, &text, &separator))
+        return NULL;
+    return PyLong_FromSsize_t(signed_offset);
+}
+
+static PyObject *Str_find_last_not_of(PyObject *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t signed_offset;
+    sz_string_view_t text;
+    sz_string_view_t separator;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_not_from, &signed_offset, &text, &separator))
+        return NULL;
+    return PyLong_FromSsize_t(signed_offset);
+}
+
+static Strs *Str_split_(PyObject *parent, sz_string_view_t text, sz_string_view_t separator, int keepseparator,
+                        Py_ssize_t maxsplit) {
     // Create Strs object
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
     if (!result) return NULL;
@@ -1213,8 +1384,7 @@ static Strs *Str_split_(
     // Iterate through string, keeping track of the
     sz_size_t last_start = 0;
     while (last_start <= text.length && offsets_count < maxsplit) {
-        sz_string_start_t match =
-            sz_find_substring(text.start + last_start, text.length - last_start, separator.start, separator.length);
+        sz_cptr_t match = sz_find(text.start + last_start, text.length - last_start, separator.start, separator.length);
         sz_size_t offset_in_remaining = match ? match - text.start - last_start : text.length - last_start;
 
         // Reallocate offsets array if needed
@@ -1259,7 +1429,6 @@ static Strs *Str_split_(
 }
 
 static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
-
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -1334,7 +1503,6 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs) {
-
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -1453,20 +1621,40 @@ static PyNumberMethods Str_as_number = {
     .nb_add = Str_concat,
 };
 
-#define sz_method_flags_m METH_VARARGS | METH_KEYWORDS
+#define SZ_METHOD_FLAGS METH_VARARGS | METH_KEYWORDS
 
 static PyMethodDef Str_methods[] = {
-    //
-    {"find", Str_find, sz_method_flags_m, "Find the first occurrence of a substring."},
-    {"index", Str_index, sz_method_flags_m, "Find the first occurrence of a substring or raise error if missing."},
-    {"contains", Str_contains, sz_method_flags_m, "Check if a string contains a substring."},
-    {"partition", Str_partition, sz_method_flags_m, "Splits string into 3-tuple: before, match, after."},
-    {"count", Str_count, sz_method_flags_m, "Count the occurrences of a substring."},
-    {"split", Str_split, sz_method_flags_m, "Split a string by a separator."},
-    {"splitlines", Str_splitlines, sz_method_flags_m, "Split a string by line breaks."},
-    {"startswith", Str_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
-    {"endswith", Str_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
-    {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    // Basic `str`-like functionality
+    {"contains", Str_contains, SZ_METHOD_FLAGS, "Check if a string contains a substring."},
+    {"count", Str_count, SZ_METHOD_FLAGS, "Count the occurrences of a substring."},
+    {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
+    {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
+    {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
+    {"split", Str_split, SZ_METHOD_FLAGS, "Split a string by a separator."},
+
+    // Bidirectional operations
+    {"find", Str_find, SZ_METHOD_FLAGS, "Find the first occurrence of a substring."},
+    {"index", Str_index, SZ_METHOD_FLAGS, "Find the first occurrence of a substring or raise error if missing."},
+    {"partition", Str_partition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, first match, after."},
+    {"rfind", Str_rfind, SZ_METHOD_FLAGS, "Find the last occurrence of a substring."},
+    {"rindex", Str_rindex, SZ_METHOD_FLAGS, "Find the last occurrence of a substring or raise error if missing."},
+    {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
+
+    // Edit distance extensions
+    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS, "Calculate the Levenshtein distance between two strings."},
+    {"alignment_score", Str_alignment_score, SZ_METHOD_FLAGS,
+     "Calculate the Needleman-Wunsch alignment score given a substitution cost matrix."},
+
+    // Character search extensions
+    {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS,
+     "Finds the first occurrence of a character from another string."},
+    {"find_last_of", Str_find_last_of, SZ_METHOD_FLAGS,
+     "Finds the last occurrence of a character from another string."},
+    {"find_first_not_of", Str_find_first_not_of, SZ_METHOD_FLAGS,
+     "Finds the first occurrence of a character not present in another string."},
+    {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS,
+     "Finds the last occurrence of a character not present in another string."},
+
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrType = {
@@ -1544,6 +1732,7 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
     size_t count = reordered->count;
 
     // Fisher-Yates Shuffle Algorithm
+    srand(seed);
     for (size_t i = count - 1; i > 0; --i) {
         size_t j = rand() % (i + 1);
         // Swap parts[i] and parts[j]
@@ -1555,11 +1744,8 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
     Py_RETURN_NONE;
 }
 
-static sz_bool_t Strs_sort_(Strs *self,
-                            sz_string_view_t **parts_output,
-                            sz_size_t **order_output,
+static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_size_t **order_output,
                             sz_size_t *count_output) {
-
     // Change the layout
     if (!prepare_strings_for_reordering(self)) {
         PyErr_Format(PyExc_TypeError, "Failed to prepare the sequence for sorting");
@@ -1584,16 +1770,14 @@ static sz_bool_t Strs_sort_(Strs *self,
 
     // Call our sorting algorithm
     sz_sequence_t sequence;
-    sz_sort_config_t sort_config;
     memset(&sequence, 0, sizeof(sequence));
-    memset(&sort_config, 0, sizeof(sort_config));
     sequence.order = (sz_size_t *)temporary_memory.start;
     sequence.count = count;
     sequence.handle = parts;
     sequence.get_start = parts_get_start;
     sequence.get_length = parts_get_length;
     for (sz_size_t i = 0; i != sequence.count; ++i) sequence.order[i] = i;
-    sz_sort(&sequence, &sort_config);
+    sz_sort(&sequence);
 
     // Export results
     *parts_output = parts;
@@ -1729,9 +1913,9 @@ static PyMappingMethods Strs_as_mapping = {
 };
 
 static PyMethodDef Strs_methods[] = {
-    {"shuffle", Strs_shuffle, sz_method_flags_m, "Shuffle the elements of the Strs object."},  //
-    {"sort", Strs_sort, sz_method_flags_m, "Sort the elements of the Strs object."},           //
-    {"order", Strs_order, sz_method_flags_m, "Provides the indexes to achieve sorted order."}, //
+    {"shuffle", Strs_shuffle, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."},  //
+    {"sort", Strs_sort, SZ_METHOD_FLAGS, "Sort the elements of the Strs object."},           //
+    {"order", Strs_order, SZ_METHOD_FLAGS, "Provides the indexes to achieve sorted order."}, //
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrsType = {
@@ -1755,22 +1939,46 @@ static void stringzilla_cleanup(PyObject *m) {
 }
 
 static PyMethodDef stringzilla_methods[] = {
-    {"find", Str_find, sz_method_flags_m, "Find the first occurrence of a substring."},
-    {"index", Str_index, sz_method_flags_m, "Find the first occurrence of a substring or raise error if missing."},
-    {"contains", Str_contains, sz_method_flags_m, "Check if a string contains a substring."},
-    {"partition", Str_partition, sz_method_flags_m, "Splits string into 3-tuple: before, match, after."},
-    {"count", Str_count, sz_method_flags_m, "Count the occurrences of a substring."},
-    {"split", Str_split, sz_method_flags_m, "Split a string by a separator."},
-    {"splitlines", Str_splitlines, sz_method_flags_m, "Split a string by line breaks."},
-    {"startswith", Str_startswith, sz_method_flags_m, "Check if a string starts with a given prefix."},
-    {"endswith", Str_endswith, sz_method_flags_m, "Check if a string ends with a given suffix."},
-    {"levenstein", Str_levenstein, sz_method_flags_m, "Calculate the Levenshtein distance between two strings."},
+    // Basic `str`-like functionality
+    {"contains", Str_contains, SZ_METHOD_FLAGS, "Check if a string contains a substring."},
+    {"count", Str_count, SZ_METHOD_FLAGS, "Count the occurrences of a substring."},
+    {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
+    {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
+    {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
+    {"split", Str_split, SZ_METHOD_FLAGS, "Split a string by a separator."},
+
+    // Bidirectional operations
+    {"find", Str_find, SZ_METHOD_FLAGS, "Find the first occurrence of a substring."},
+    {"index", Str_index, SZ_METHOD_FLAGS, "Find the first occurrence of a substring or raise error if missing."},
+    {"partition", Str_partition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, first match, after."},
+    {"rfind", Str_rfind, SZ_METHOD_FLAGS, "Find the last occurrence of a substring."},
+    {"rindex", Str_rindex, SZ_METHOD_FLAGS, "Find the last occurrence of a substring or raise error if missing."},
+    {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
+
+    // Edit distance extensions
+    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS, "Calculate the Levenshtein distance between two strings."},
+    {"alignment_score", Str_alignment_score, SZ_METHOD_FLAGS,
+     "Calculate the Needleman-Wunsch alignment score given a substitution cost matrix."},
+
+    // Character search extensions
+    {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS,
+     "Finds the first occurrence of a character from another string."},
+    {"find_last_of", Str_find_last_of, SZ_METHOD_FLAGS,
+     "Finds the last occurrence of a character from another string."},
+    {"find_first_not_of", Str_find_first_not_of, SZ_METHOD_FLAGS,
+     "Finds the first occurrence of a character not present in another string."},
+    {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS,
+     "Finds the last occurrence of a character not present in another string."},
+
+    // Global unary extensions
+    {"hash", Str_like_hash, SZ_METHOD_FLAGS, "Hash a string or a byte-array."},
+
     {NULL, NULL, 0, NULL}};
 
 static PyModuleDef stringzilla_module = {
     PyModuleDef_HEAD_INIT,
     "stringzilla",
-    "Crunch 100+ GB Strings in Python with ease",
+    "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
     -1,
     stringzilla_methods,
     NULL,
@@ -1790,6 +1998,31 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     m = PyModule_Create(&stringzilla_module);
     if (m == NULL) return NULL;
+
+    // Add version metadata
+    {
+        char version_str[50];
+        sprintf(version_str, "%d.%d.%d", STRINGZILLA_VERSION_MAJOR, STRINGZILLA_VERSION_MINOR,
+                STRINGZILLA_VERSION_PATCH);
+        PyModule_AddStringConstant(m, "__version__", version_str);
+    }
+
+    // Define SIMD capabilities
+    {
+        sz_capability_t caps = sz_capabilities();
+        char caps_str[512];
+        char const *serial = (caps & sz_cap_serial_k) ? "serial," : "";
+        char const *neon = (caps & sz_cap_arm_neon_k) ? "neon," : "";
+        char const *sve = (caps & sz_cap_arm_sve_k) ? "sve," : "";
+        char const *avx2 = (caps & sz_cap_x86_avx2_k) ? "avx2," : "";
+        char const *avx512f = (caps & sz_cap_x86_avx512f_k) ? "avx512f," : "";
+        char const *avx512vl = (caps & sz_cap_x86_avx512vl_k) ? "avx512vl," : "";
+        char const *avx512bw = (caps & sz_cap_x86_avx512bw_k) ? "avx512bw," : "";
+        char const *avx512vbmi = (caps & sz_cap_x86_avx512vbmi_k) ? "avx512vbmi," : "";
+        char const *gfni = (caps & sz_cap_x86_gfni_k) ? "gfni," : "";
+        sprintf(caps_str, "%s%s%s%s%s%s%s%s%s", serial, neon, sve, avx2, avx512f, avx512vl, avx512bw, avx512vbmi, gfni);
+        PyModule_AddStringConstant(m, "__capabilities__", caps_str);
+    }
 
     Py_INCREF(&StrType);
     if (PyModule_AddObject(m, "Str", (PyObject *)&StrType) < 0) {

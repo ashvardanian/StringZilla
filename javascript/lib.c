@@ -7,10 +7,12 @@
  *  @copyright  Copyright (c) 2023
  *  @see        NodeJS docs: https://nodejs.org/api/n-api.html
  */
+#include <stdio.h>  // `printf` for debug builds
+#include <stdlib.h> // `malloc` to export strings into UTF-8
 
-#include <node_api.h>    // `napi_*` functions
-#include <stdlib.h>      // `malloc`
-#include <stringzilla.h> // `sz_*` functions
+#include <node_api.h> // `napi_*` functions
+
+#include <stringzilla/stringzilla.h> // `sz_*` functions
 
 napi_value indexOfAPI(napi_env env, napi_callback_info info) {
     size_t argc = 2;
@@ -35,7 +37,7 @@ napi_value indexOfAPI(napi_env env, napi_callback_info info) {
     napi_value js_result;
     if (needle.length == 0) { napi_create_bigint_int64(env, 0, &js_result); }
     else {
-        sz_string_start_t result = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+        sz_cptr_t result = sz_find(haystack.start, haystack.length, needle.start, needle.length);
 
         // In JavaScript, if `indexOf` is unable to indexOf the specified value, then it should return -1
         if (result == NULL) { napi_create_bigint_int64(env, -1, &js_result); }
@@ -74,12 +76,11 @@ napi_value countAPI(napi_env env, napi_callback_info info) {
 
     size_t count = 0;
     if (needle.length == 0 || haystack.length == 0 || haystack.length < needle.length) { count = 0; }
-    else if (needle.length == 1) { count = sz_count_char(haystack.start, haystack.length, needle.start); }
     else if (overlap) {
         while (haystack.length) {
-            sz_string_start_t ptr = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+            sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
-            sz_size_t offset = found ? ptr - haystack.start : haystack.length;
+            sz_size_t offset = found ? (sz_size_t)(ptr - haystack.start) : haystack.length;
             count += found;
             haystack.start += offset + found;
             haystack.length -= offset + found;
@@ -87,9 +88,9 @@ napi_value countAPI(napi_env env, napi_callback_info info) {
     }
     else {
         while (haystack.length) {
-            sz_string_start_t ptr = sz_find_substring(haystack.start, haystack.length, needle.start, needle.length);
+            sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
-            sz_size_t offset = found ? ptr - haystack.start : haystack.length;
+            sz_size_t offset = found ? (sz_size_t)(ptr - haystack.start) : haystack.length;
             count += found;
             haystack.start += offset + needle.length;
             haystack.length -= offset + needle.length * found;
