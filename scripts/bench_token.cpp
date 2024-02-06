@@ -77,8 +77,7 @@ tracked_unary_functions_t random_generation_functions(std::size_t token_length) 
              for (std::size_t i = 0; i < token_length; ++i) { buffer[i] = alphabet[std::rand() % max_alphabet_size]; }
              return token_length;
          })},
-        {"std::uniform_int_ditribtution<uint8>" + suffix,
-         unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
+        {"std::uniform_int<uint8>" + suffix, unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
              randomize_string(buffer.data(), token_length, alphabet.data(), alphabet.size());
              return token_length;
          })},

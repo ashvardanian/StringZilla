@@ -3041,7 +3041,7 @@ SZ_PUBLIC void sz_sort_recursion( //
         // On pointer walks left-to-right from the start, and the other walks right-to-left from the end.
         sz_size_t left = 0;
         sz_size_t right = sequence->count - 1;
-        while (true) {
+        while (1) {
             // Find the next element with the bit set on the left side.
             while (left < split && !(sequence->order[left] & mask)) ++left;
             // Find the next element without the bit set on the right side.
