@@ -1093,6 +1093,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
 #define SZ_NULL __null
 #else
 #define SZ_NULL ((void *)0)
+#define SZ_NULL_CHAR ((char*)0)
 #endif
 
 /**
@@ -1121,17 +1122,31 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
 #endif
 
 /*
- *  Intrinsics aliases for MSVC, GCC, and Clang.
+ *  Intrinsics aliases for MSVC, GCC, and Clang. (and Clang-Cl)
  */
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && defined(__clang__)
+#include <immintrin.h>
+SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) { return __tzcnt_u64(x); }
+SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return __tzcnt_u32(x); }
+SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return  __lzcnt(x); }
+#elif defined(_MSC_VER)
 #include <intrin.h>
-SZ_INTERNAL sz_size_t sz_u64_popcount(sz_u64_t x) { return __popcnt64(x); }
-SZ_INTERNAL sz_size_t sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
 SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
-SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
-SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __popcnt(x); }
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return _tzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return _lzcnt_u32(x); }
+#endif
+
+#if defined(_MSC_VER)
+
+#include <intrin.h>
+
+SZ_INTERNAL sz_size_t sz_u64_popcount(sz_u64_t x) { return __popcnt64(x); }
+SZ_INTERNAL sz_size_t sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
+
+SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
+SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __popcnt(x); }
+
+
 SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
 #else
 SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
@@ -1282,7 +1297,7 @@ SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
     result.u8s[0] = ptr[0];
     result.u8s[1] = ptr[1];
     return result;
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER) && !defined(__clang__)
     return *((__unaligned sz_u16_vec_t *)ptr);
 #else
     __attribute__((aligned(1))) sz_u16_vec_t const *result = (sz_u16_vec_t const *)ptr;
@@ -1311,7 +1326,7 @@ SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
     result.u8s[2] = ptr[2];
     result.u8s[3] = ptr[3];
     return result;
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER) && !defined(__clang__)
     return *((__unaligned sz_u32_vec_t *)ptr);
 #else
     __attribute__((aligned(1))) sz_u32_vec_t const *result = (sz_u32_vec_t const *)ptr;
@@ -1345,7 +1360,7 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
     result.u8s[6] = ptr[6];
     result.u8s[7] = ptr[7];
     return result;
-#elif defined(_MSC_VER)
+#elif defined(_MSC_VER) && !defined(__clang__)
     return *((__unaligned sz_u64_vec_t *)ptr);
 #else
     __attribute__((aligned(1))) sz_u64_vec_t const *result = (sz_u64_vec_t const *)ptr;
@@ -1358,7 +1373,7 @@ SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
     sz_size_t capacity;
     sz_copy((sz_ptr_t)&capacity, (sz_cptr_t)handle, sizeof(sz_size_t));
     sz_size_t consumed_capacity = sizeof(sz_size_t);
-    if (consumed_capacity + length > capacity) return SZ_NULL;
+    if (consumed_capacity + length > capacity) return SZ_NULL_CHAR;
     return (sz_ptr_t)handle + consumed_capacity;
 }
 
@@ -1438,7 +1453,7 @@ SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, 
 #if !SZ_AVOID_LIBC
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
-#else
+#elif defined(MSVC) && !defined(__clang__)
 extern void *malloc(size_t);
 extern void free(void *);
 #endif
@@ -1471,7 +1486,7 @@ SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
 SZ_PUBLIC sz_cptr_t sz_find_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
     for (sz_cptr_t const end = text + length; text != end; ++text)
         if (sz_charset_contains(set, *text)) return text;
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
@@ -1480,7 +1495,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
     sz_cptr_t const end = text;
     for (text += length; text != end;)
         if (sz_charset_contains(set, *(text -= 1))) return text;
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 #pragma GCC diagnostic pop
 }
 
@@ -1522,7 +1537,7 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_byte_equal(sz_u64_vec_t a, sz_u64_vec_t b)
  */
 SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    if (!h_length) return SZ_NULL;
+    if (!h_length) return SZ_NULL_CHAR;
     sz_cptr_t const h_end = h + h_length;
 
 #if !SZ_USE_MISALIGNED_LOADS
@@ -1545,7 +1560,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     // Handle the misaligned tail.
     for (; h < h_end; ++h)
         if (*h == *n) return h;
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -1555,7 +1570,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
  */
 sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
-    if (!h_length) return SZ_NULL;
+    if (!h_length) return SZ_NULL_CHAR;
     sz_cptr_t const h_start = h;
 
     // Reposition the `h` pointer to the end, as we will be walking backwards.
@@ -1579,7 +1594,7 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
     for (; h >= h_start; --h)
         if (*h == *n) return h;
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -1633,7 +1648,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
     for (; h + 2 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) == 2) return h;
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -1697,7 +1712,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
     for (; h + 4 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) + (h[3] == n[3]) == 4) return h;
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -1768,7 +1783,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 
     for (; h + 3 <= h_end; ++h)
         if ((h[0] == n[0]) + (h[1] == n[1]) + (h[2] == n[2]) == 3) return h;
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -1821,7 +1836,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h_chars, 
         if (h_vec.u32 == n_vec.u32 && sz_equal((sz_cptr_t)h + i, n_chars, n_length)) return (sz_cptr_t)h + i;
         i += bad_shift_table.jumps[h[i + n_length - 1]];
     }
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -1872,7 +1887,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_upto_256bytes_serial(sz_cptr_t h_chars,
         if (h_vec.u32 == n_vec.u32 && sz_equal((sz_cptr_t)h + i, n_chars, n_length)) return (sz_cptr_t)h + i;
         j += bad_shift_table.jumps[h[i]];
     }
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -1885,11 +1900,11 @@ SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_c
     sz_size_t suffix_length = n_length - prefix_length;
     while (1) {
         sz_cptr_t found = find_prefix(h, h_length, n, prefix_length);
-        if (!found) return SZ_NULL;
+        if (!found) return SZ_NULL_CHAR;
 
         // Verify the remaining part of the needle
         sz_size_t remaining = h_length - (found - h);
-        if (remaining < suffix_length) return SZ_NULL;
+        if (remaining < suffix_length) return SZ_NULL_CHAR;
         if (sz_equal(found + prefix_length, n + prefix_length, suffix_length)) return found;
 
         // Adjust the position.
@@ -1898,7 +1913,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_c
     }
 
     // Unreachable, but helps silence compiler warnings:
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -1911,11 +1926,11 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_with_suffix(sz_cptr_t h, sz_size_t h_length, sz_
     sz_size_t prefix_length = n_length - suffix_length;
     while (1) {
         sz_cptr_t found = find_suffix(h, h_length, n + prefix_length, suffix_length);
-        if (!found) return SZ_NULL;
+        if (!found) return SZ_NULL_CHAR;
 
         // Verify the remaining part of the needle
         sz_size_t remaining = found - h;
-        if (remaining < prefix_length) return SZ_NULL;
+        if (remaining < prefix_length) return SZ_NULL_CHAR;
         if (sz_equal(found - prefix_length, n, prefix_length)) return found - prefix_length;
 
         // Adjust the position.
@@ -1923,7 +1938,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_with_suffix(sz_cptr_t h, sz_size_t h_length, sz_
     }
 
     // Unreachable, but helps silence compiler warnings:
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 SZ_INTERNAL sz_cptr_t _sz_find_over_4bytes_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -1943,7 +1958,7 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_over_256bytes_serial(sz_cptr_t h, sz_si
 SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
@@ -1970,7 +1985,7 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
 SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
@@ -2670,7 +2685,7 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
     else {
         // If we are not lucky, we need to allocate memory.
         string->external.start = (sz_ptr_t)allocator->allocate(space_needed, allocator->handle);
-        if (!string->external.start) return SZ_NULL;
+        if (!string->external.start) return SZ_NULL_CHAR;
         string->external.length = length;
         string->external.space = space_needed;
     }
@@ -2694,7 +2709,7 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
     sz_assert(new_space > string_space && "New space must be larger than current.");
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
-    if (!new_start) return SZ_NULL;
+    if (!new_start) return SZ_NULL_CHAR;
 
     sz_copy(new_start, string_start, string_length);
     string->external.start = new_start;
@@ -2734,7 +2749,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
         sz_size_t min_needed_space = sz_size_bit_ceil(offset + string_length + added_length + 1);
         sz_size_t new_space = sz_max_of_two(min_needed_space, next_planned_size);
         string_start = sz_string_reserve(string, new_space - 1, allocator);
-        if (!string_start) return SZ_NULL;
+        if (!string_start) return SZ_NULL_CHAR;
 
         // Copy into the new buffer.
         sz_move(string_start + offset + added_length, string_start + offset, string_length - offset);
