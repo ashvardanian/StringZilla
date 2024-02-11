@@ -550,6 +550,17 @@ static void test_api_readonly_extensions() {
     assert(sz::edit_distance(str("ggbuzgjux{}l"), str("gbuzgjux{}l")) == 1); // one insertion (prepended)
     assert(sz::edit_distance(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg")) == 14);
 
+    assert(sz::edit_distance_utf8(str("hello"), str("hell")) == 1);           // no unicode symbols, just ASCII
+    assert(sz::edit_distance_utf8(str("𠜎 𠜱 𠝹 𠱓"), str("𠜎𠜱𠝹𠱓")) == 3); // add 3 whitespaces in Chinese
+    assert(sz::edit_distance_utf8(str("💖"), str("💗")) == 1);
+
+    assert(sz::edit_distance_utf8(str("αβγδ"), str("αγδ")) == 1);      // insert Beta
+    assert(sz::edit_distance_utf8(str("école"), str("école")) == 2);   // etter "é" as a single character vs "e" + "´"
+    assert(sz::edit_distance_utf8(str("façade"), str("facade")) == 1); // "ç" with cedilla vs. plain
+    assert(sz::edit_distance_utf8(str("Schön"), str("Scho\u0308n")) == 2); // "ö" represented as "o" + "¨"
+    assert(sz::edit_distance_utf8(str("München"), str("Muenchen")) == 2);  // German with umlaut vs. transcription
+    assert(sz::edit_distance_utf8(str("こんにちは世界"), str("こんばんは世界")) == 2);
+
     // Computing alignment scores.
     using matrix_t = std::int8_t[256][256];
     std::vector<std::int8_t> costs_vector = unary_substitution_costs();

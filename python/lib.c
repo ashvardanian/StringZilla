@@ -1081,7 +1081,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSize_t(count);
 }
 
-static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwargs, sz_edit_distance_t function) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 2) {
@@ -1126,7 +1126,7 @@ static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwa
     reusing_allocator.handle = &temporary_memory;
 
     sz_size_t distance =
-        sz_edit_distance(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &reusing_allocator);
+        function(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &reusing_allocator);
 
     // Check for memory allocation issues
     if (distance == SZ_SIZE_MAX) {
@@ -1135,6 +1135,14 @@ static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwa
     }
 
     return PyLong_FromSize_t(distance);
+}
+
+static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return _Str_edit_distance(self, args, kwargs, &sz_edit_distance);
+}
+
+static PyObject *Str_edit_distance_unicode(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return _Str_edit_distance(self, args, kwargs, &sz_edit_distance_utf8);
 }
 
 static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -1641,9 +1649,12 @@ static PyMethodDef Str_methods[] = {
     {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
 
     // Edit distance extensions
-    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS, "Calculate the Levenshtein distance between two strings."},
+    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS,
+     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced bytes."},
+    {"edit_distance_unicode", Str_edit_distance_unicode, SZ_METHOD_FLAGS,
+     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced unicode characters."},
     {"alignment_score", Str_alignment_score, SZ_METHOD_FLAGS,
-     "Calculate the Needleman-Wunsch alignment score given a substitution cost matrix."},
+     "Needleman-Wunsch alignment score given a substitution cost matrix."},
 
     // Character search extensions
     {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS,
@@ -1956,9 +1967,12 @@ static PyMethodDef stringzilla_methods[] = {
     {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
 
     // Edit distance extensions
-    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS, "Calculate the Levenshtein distance between two strings."},
+    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS,
+     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced bytes."},
+    {"edit_distance_unicode", Str_edit_distance_unicode, SZ_METHOD_FLAGS,
+     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced unicode characters."},
     {"alignment_score", Str_alignment_score, SZ_METHOD_FLAGS,
-     "Calculate the Needleman-Wunsch alignment score given a substitution cost matrix."},
+     "Needleman-Wunsch alignment score given a substitution cost matrix."},
 
     // Character search extensions
     {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS,

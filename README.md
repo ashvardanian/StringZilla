@@ -355,17 +355,18 @@ count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, al
 ### Edit Distances
 
 ```py
-edit_distance: int = sz.edit_distance("needle", "nidl")
+assert sz.edit_distance("apple", "aple") == 1 # skip one ASCII character
+assert sz.edit_distance("αβγδ", "αγδ") == 2 # skip two bytes forming one codepoint
+assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1 # one unicode codepoint
 ```
 
 Several Python libraries provide edit distance computation.
-Most of them are implemented in C, but are rarely as fast as StringZilla.
-Computing pairwise distances between words in an English text you may expect following results:
+Most of them are implemented in C, but are not always as fast as StringZilla.
+Taking a 1'000 long proteins around 10'000 characters long, computing just a 100 distances:
 
-- [EditDistance](https://github.com/roy-ht/editdistance): 28.7s
-- [JellyFish](https://github.com/jamesturk/jellyfish/): 26.8s
-- [Levenshtein](https://github.com/maxbachmann/Levenshtein): 8.6s
-- StringZilla: __4.2s__
+- [JellyFish](https://github.com/jamesturk/jellyfish): 62.3s
+- [EditDistance](https://github.com/roy-ht/editdistance): 32.9s
+- StringZilla: __0.8s__
 
 Moreover, you can pass custom substitution matrices to compute the Needleman-Wunsch alignment scores.
 That task is very common in bioinformatics and computational biology.
@@ -383,6 +384,11 @@ np.fill_diagonal(costs, 0)
 
 assert sz.alignment_score("first", "second", substitution_matrix=costs, gap_score=-1) == -sz.edit_distance(a, b)
 ```
+
+Using the same proteins as for Levenshtein distance benchmarks:
+
+- [BioPython](https://github.com/biopython/biopython): 25.8s
+- StringZilla: __7.8s__
 
 <details>
   <summary><b>§ Example converting from BioPython to StringZilla.</b></summary>

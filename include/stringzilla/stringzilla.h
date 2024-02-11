@@ -414,6 +414,15 @@ SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
 SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
 
 /**
+ *  @brief  Checks if all characters in the range are valid ASCII characters.
+ *
+ *  @param text     String to be analyzed.
+ *  @param length   Number of bytes in the string.
+ *  @return         Whether all characters are valid ASCII characters.
+ */
+SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length);
+
+/**
  *  @brief  Generates a random string for a given alphabet, avoiding integer division and modulo operations.
  *          Similar to `text[i] = alphabet[rand() % cardinality]`.
  *
@@ -707,6 +716,29 @@ SZ_DYNAMIC sz_size_t sz_edit_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
 /** @copydoc sz_edit_distance */
 SZ_PUBLIC sz_size_t sz_edit_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                             sz_size_t bound, sz_memory_allocator_t *alloc);
+
+/**
+ *  @brief  Computes the Levenshtein edit-distance between two UTF8 strings.
+ *          Unlike `sz_edit_distance`, reports the distance in Unicode codepoints, and not in bytes.
+ *
+ *  @param a        First string to compare.
+ *  @param a_length Number of bytes in the first string.
+ *  @param b        Second string to compare.
+ *  @param b_length Number of bytes in the second string.
+ *
+ *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
+ *                  so the memory usage is linear in relation to ::a_length and ::b_length.
+ *                  If SZ_NULL is passed, will initialize to the systems default `malloc`.
+ *  @param bound    Upper bound on the distance, that allows us to exit early.
+ *                  If zero is passed, the maximum possible distance will be equal to the length of the longer input.
+ *  @return         Unsigned integer for edit distance, the `bound` if was exceeded or `SZ_SIZE_MAX`
+ *                  if the memory allocation failed.
+ *
+ *  @see    sz_memory_allocator_init_fixed, sz_memory_allocator_init_default, sz_edit_distance
+ *  @see    https://en.wikipedia.org/wiki/Levenshtein_distance
+ */
+SZ_PUBLIC sz_size_t sz_edit_distance_utf8(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                          sz_size_t bound, sz_memory_allocator_t *alloc);
 
 typedef sz_size_t (*sz_edit_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_memory_allocator_t *);
 
@@ -2073,10 +2105,64 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
     return result;
 }
 
+/**
+ *  @brief  Exports a UTF8 string into a UTF32 buffer.
+ *          ! The result is undefined id the UTF8 string is corrputed.
+ *  @return The length in the number of codepoints.
+ */
+SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_length, sz_u32_t *utf32) {
+    sz_u8_t const *current = (sz_u8_t const *)utf8;
+    sz_u8_t const *end = (sz_u8_t const *)utf8 + utf8_length;
+    sz_size_t count = 0;
+
+    while (current < end) {
+        sz_u32_t ch = 0;
+        sz_u8_t leading_byte = *current++;
+
+        if (leading_byte < 0x80) {
+            // Single-byte character (0xxxxxxx)
+            ch = leading_byte;
+        }
+        else if ((leading_byte & 0xE0) == 0xC0) {
+            // Two-byte character (110xxxxx 10xxxxxx)
+            ch = (leading_byte & 0x1F) << 6;
+            ch |= (*current++ & 0x3F);
+        }
+        else if ((leading_byte & 0xF0) == 0xE0) {
+            // Three-byte character (1110xxxx 10xxxxxx 10xxxxxx)
+            ch = (leading_byte & 0x0F) << 12;
+            ch |= (*current++ & 0x3F) << 6;
+            ch |= (*current++ & 0x3F);
+        }
+        else if ((leading_byte & 0xF8) == 0xF0) {
+            // Four-byte character (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
+            ch = (leading_byte & 0x07) << 18;
+            ch |= (*current++ & 0x3F) << 12;
+            ch |= (*current++ & 0x3F) << 6;
+            ch |= (*current++ & 0x3F);
+        }
+
+        // Store the decoded character into the UTF-32 buffer
+        *utf32++ = ch;
+        count++;
+    }
+    return count;
+}
+
+/**
+ *  @brief  Compute the Levenshtein distance between two strings using the Wagner-Fisher algorithm.
+ *          Stores only 2 rows of the Levenshtein matrix, but uses 64-bit integers for the distance values,
+ *          and upcasts UTF8 variable-length codepoints to 64-bit integers for faster addressing.
+ *
+ *  ! In the worst case for 2 strings of length 100, that contain just one 16-bit codepoint this will result in extra:
+ *      + 2 rows * 100 slots * 8 bytes/slot = 1600 bytes of memory for the two rows of the Levenshtein matrix rows.
+ *      + 100 codepoints * 2 strings * 4 bytes/codepoint = 800 bytes of memory for the UTF8 buffer.
+ *      = 2400 bytes of memory or @b 12x memory amplification!
+ */
 SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     sz_cptr_t longer, sz_size_t longer_length,                //
     sz_cptr_t shorter, sz_size_t shorter_length,              //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
+    sz_size_t bound, sz_bool_t can_be_unicode, sz_memory_allocator_t *alloc) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_memory_allocator_t global_alloc;
@@ -2085,71 +2171,130 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
         alloc = &global_alloc;
     }
 
+    // A good idea may be to dispatch different kernels for different string lengths.
+    // Like using `uint8_t` counters for strings under 255 characters long.
+    // Good in theory, this results in frequent upcasts and downcasts in serial code.
+    // On strings over 20 bytes, using `uint8` over `uint64` on 64-bit x86 CPU doubles the execution time.
+    // So one must be very cautious with such optimizations.
+    typedef sz_size_t _distance_t;
+
+    // Compute the number of columns in our Levenshtein matrix.
+    sz_size_t n = shorter_length + 1;
+
     // If a buffering memory-allocator is provided, this operation is practically free,
     // and cheaper than allocating even 512 bytes (for small distance matrices) on stack.
-    sz_size_t buffer_length = sizeof(sz_size_t) * ((shorter_length + 1) * 2);
-    sz_size_t *distances = (sz_size_t *)alloc->allocate(buffer_length, alloc->handle);
-    if (!distances) return SZ_SIZE_MAX;
+    sz_size_t buffer_length = sizeof(_distance_t) * (n * 2);
 
-    sz_size_t *previous_distances = distances;
-    sz_size_t *current_distances = previous_distances + shorter_length + 1;
-
-    for (sz_size_t idx_shorter = 0; idx_shorter != (shorter_length + 1); ++idx_shorter)
-        previous_distances[idx_shorter] = idx_shorter;
-
-    // Keeping track of the bound parameter introduces a very noticeable performance penalty.
-    // So if it's not provided, we can skip the check altogether.
-    if (!bound) {
-        for (sz_size_t idx_longer = 0; idx_longer != longer_length; ++idx_longer) {
-            current_distances[0] = idx_longer + 1;
-            for (sz_size_t idx_shorter = 0; idx_shorter != shorter_length; ++idx_shorter) {
-                sz_size_t cost_deletion = previous_distances[idx_shorter + 1] + 1;
-                sz_size_t cost_insertion = current_distances[idx_shorter] + 1;
-                sz_size_t cost_substitution =
-                    previous_distances[idx_shorter] + (longer[idx_longer] != shorter[idx_shorter]);
-                // ? It might be a good idea to enforce branchless execution here.
-                // ? The caveat being that the benchmarks on longer sequences backfire and more research is needed.
-                current_distances[idx_shorter + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
-            }
-            sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
-        }
-        // Cache scalar before `free` call.
-        sz_size_t result = previous_distances[shorter_length];
-        alloc->free(distances, buffer_length, alloc->handle);
-        return result;
+    // If the strings contain Unicode characters, let's estimate the max character width,
+    // and use it to allocate a larger buffer to decode UTF8.
+    if ((can_be_unicode == sz_true_k) &&
+        (sz_isascii(longer, longer_length) == sz_false_k || sz_isascii(shorter, shorter_length) == sz_false_k)) {
+        buffer_length += (shorter_length + longer_length) * sizeof(sz_u32_t);
     }
-    //
+    else { can_be_unicode = sz_false_k; }
+
+    // If the allocation fails, return the maximum distance.
+    sz_ptr_t buffer = (sz_ptr_t)alloc->allocate(buffer_length, alloc->handle);
+    if (!buffer) return SZ_SIZE_MAX;
+
+    // Let's export the UTF8 sequence into the newly allocated buffer at the end.
+    if (can_be_unicode == sz_true_k) {
+        sz_u32_t *longer_utf32 = (sz_u32_t *)(buffer + sizeof(_distance_t) * (n * 2));
+        sz_u32_t *shorter_utf32 = longer_utf32 + longer_length;
+        // Export the UTF8 sequences into the newly allocated buffer.
+        longer_length = _sz_export_utf8_to_utf32(longer, longer_length, longer_utf32);
+        shorter_length = _sz_export_utf8_to_utf32(shorter, shorter_length, shorter_utf32);
+        longer = (sz_cptr_t)longer_utf32;
+        shorter = (sz_cptr_t)shorter_utf32;
+    }
+
+    // Let's parameterize the core logic for different character types and distance types.
+#define _wagner_fisher_unbounded(_distance_t, _char_t)                                                                \
+    /* Now let's cast our pointer to avoid it in subsequent sections. */                                              \
+    _char_t const *longer_chars = (_char_t const *)longer;                                                            \
+    _char_t const *shorter_chars = (_char_t const *)shorter;                                                          \
+    _distance_t *previous_distances = (_distance_t *)buffer;                                                          \
+    _distance_t *current_distances = previous_distances + n;                                                          \
+    /*  Initialize the first row of the Levenshtein matrix with `iota`-style arithmetic progression. */               \
+    for (_distance_t idx_shorter = 0; idx_shorter != n; ++idx_shorter) previous_distances[idx_shorter] = idx_shorter; \
+    /* The main loop of the lagorithm with quadratic complexity. */                                                   \
+    for (_distance_t idx_longer = 0; idx_longer != longer_length; ++idx_longer) {                                     \
+        _char_t const longer_char = longer_chars[idx_longer];                                                         \
+        /* Using pure pointer arithmetic is faster than iterating with an index. */                                   \
+        _char_t const *shorter_ptr = shorter_chars;                                                                   \
+        _distance_t const *previous_ptr = previous_distances;                                                         \
+        _distance_t *current_ptr = current_distances;                                                                 \
+        _distance_t *const current_end = current_ptr + shorter_length;                                                \
+        current_ptr[0] = idx_longer + 1;                                                                              \
+        for (; current_ptr != current_end; ++previous_ptr, ++current_ptr, ++shorter_ptr) {                            \
+            _distance_t cost_substitution = previous_ptr[0] + (_distance_t)(longer_char != shorter_ptr[0]);           \
+            /* We can avoid `+1` for costs here, shifting it to post-minimum computation, */                          \
+            /* saving one increment operation. */                                                                     \
+            _distance_t cost_deletion = previous_ptr[1];                                                              \
+            _distance_t cost_insertion = current_ptr[0];                                                              \
+            /* ? It might be a good idea to enforce branchless execution here. */                                     \
+            /* ? The caveat being that the benchmarks on longer sequences backfire and more research is needed. */    \
+            current_ptr[1] = sz_min_of_two(cost_substitution, sz_min_of_two(cost_deletion, cost_insertion) + 1);      \
+        }                                                                                                             \
+        /* Swap `previous_distances` and `current_distances` pointers. */                                             \
+        _distance_t *temporary = previous_distances;                                                                  \
+        previous_distances = current_distances;                                                                       \
+        current_distances = temporary;                                                                                \
+    }                                                                                                                 \
+    /* Cache scalar before `free` call. */                                                                            \
+    sz_size_t result = previous_distances[shorter_length];                                                            \
+    alloc->free(buffer, buffer_length, alloc->handle);                                                                \
+    return result;
+
+    // Let's define a separate variant for bounded distance computation.
+    // Practically the same as unbounded, but also collecting the running minimum within each row for early exit.
+#define _wagner_fisher_bounded(_distance_t, _char_t)                                                                  \
+    sz_size_t buffer_length = sizeof(_distance_t) * (n * 2);                                                          \
+    _distance_t *buffer = (_distance_t *)alloc->allocate(buffer_length, alloc->handle);                               \
+    if (!buffer) return SZ_SIZE_MAX;                                                                                  \
+    _char_t const *longer_chars = (_char_t const *)longer;                                                            \
+    _char_t const *shorter_chars = (_char_t const *)shorter;                                                          \
+    _distance_t *previous_distances = (_distance_t *)buffer;                                                          \
+    _distance_t *current_distances = previous_distances + n;                                                          \
+    for (_distance_t idx_shorter = 0; idx_shorter != n; ++idx_shorter) previous_distances[idx_shorter] = idx_shorter; \
+    for (_distance_t idx_longer = 0; idx_longer != longer_length; ++idx_longer) {                                     \
+        _char_t const longer_char = longer_chars[idx_longer];                                                         \
+        _char_t const *shorter_ptr = shorter_chars;                                                                   \
+        _distance_t const *previous_ptr = previous_distances;                                                         \
+        _distance_t *current_ptr = current_distances;                                                                 \
+        _distance_t *const current_end = current_ptr + shorter_length;                                                \
+        current_ptr[0] = idx_longer + 1;                                                                              \
+        /* Initialize min_distance with a value greater than bound */                                                 \
+        _distance_t min_distance = bound - 1;                                                                         \
+        for (; current_ptr != current_end; ++previous_ptr, ++current_ptr, ++shorter_ptr) {                            \
+            _distance_t cost_substitution = previous_ptr[0] + (_distance_t)(longer_char != shorter_ptr[0]);           \
+            _distance_t cost_deletion = previous_ptr[1];                                                              \
+            _distance_t cost_insertion = current_ptr[0];                                                              \
+            current_ptr[1] = sz_min_of_two(cost_substitution, sz_min_of_two(cost_deletion, cost_insertion) + 1);      \
+            /* Keep track of the minimum distance seen so far in this row */                                          \
+            min_distance = sz_min_of_two(current_ptr[1], min_distance);                                               \
+        }                                                                                                             \
+        /* If the minimum distance in this row exceeded the bound, return early */                                    \
+        if (min_distance >= bound) {                                                                                  \
+            alloc->free(buffer, buffer_length, alloc->handle);                                                        \
+            return bound;                                                                                             \
+        }                                                                                                             \
+        _distance_t *temporary = previous_distances;                                                                  \
+        previous_distances = current_distances;                                                                       \
+        current_distances = temporary;                                                                                \
+    }                                                                                                                 \
+    sz_size_t result = previous_distances[shorter_length];                                                            \
+    alloc->free(buffer, buffer_length, alloc->handle);                                                                \
+    return result;
+
+    // Dispatch the actual computation.
+    if (!bound) {
+        if (can_be_unicode == sz_true_k) { _wagner_fisher_unbounded(sz_size_t, sz_u32_t); }
+        else { _wagner_fisher_unbounded(sz_size_t, sz_u8_t); }
+    }
     else {
-        for (sz_size_t idx_longer = 0; idx_longer != longer_length; ++idx_longer) {
-            current_distances[0] = idx_longer + 1;
-
-            // Initialize min_distance with a value greater than bound
-            sz_size_t min_distance = bound - 1;
-
-            for (sz_size_t idx_shorter = 0; idx_shorter != shorter_length; ++idx_shorter) {
-                sz_size_t cost_deletion = previous_distances[idx_shorter + 1] + 1;
-                sz_size_t cost_insertion = current_distances[idx_shorter] + 1;
-                sz_size_t cost_substitution =
-                    previous_distances[idx_shorter] + (longer[idx_longer] != shorter[idx_shorter]);
-                current_distances[idx_shorter + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
-
-                // Keep track of the minimum distance seen so far in this row
-                min_distance = sz_min_of_two(current_distances[idx_shorter + 1], min_distance);
-            }
-
-            // If the minimum distance in this row exceeded the bound, return early
-            if (min_distance >= bound) {
-                alloc->free(distances, buffer_length, alloc->handle);
-                return bound;
-            }
-
-            // Swap previous_distances and current_distances pointers
-            sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
-        }
-        // Cache scalar before `free` call.
-        sz_size_t result = previous_distances[shorter_length] < bound ? previous_distances[shorter_length] : bound;
-        alloc->free(distances, buffer_length, alloc->handle);
-        return result;
+        if (can_be_unicode == sz_true_k) { _wagner_fisher_bounded(sz_size_t, sz_u32_t); }
+        else { _wagner_fisher_bounded(sz_size_t, sz_u8_t); }
     }
 }
 
@@ -2186,7 +2331,8 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     if (shorter_length == 0) return longer_length; // If no mismatches were found - the distance is zero.
     if (shorter_length == longer_length && !bound)
         return _sz_edit_distance_skewed_diagonals_serial(longer, longer_length, shorter, shorter_length, bound, alloc);
-    return _sz_edit_distance_wagner_fisher_serial(longer, longer_length, shorter, shorter_length, bound, alloc);
+    return _sz_edit_distance_wagner_fisher_serial(longer, longer_length, shorter, shorter_length, bound, sz_false_k,
+                                                  alloc);
 }
 
 SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
@@ -2551,6 +2697,35 @@ SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t resu
     sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
     sz_u8_t const *end = unsigned_text + length;
     for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = *unsigned_text & 0x7F;
+}
+
+/**
+ *  @brief  Check if there is a byte in this buffer, that exceeds 127 and can't be an ASCII character.
+ *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
+ */
+SZ_PUBLIC sz_bool_t sz_isascii_serial(sz_cptr_t text, sz_size_t length) {
+
+    if (!length) return sz_true_k;
+    sz_u8_t const *h = (sz_u8_t const *)text;
+    sz_u8_t const *const h_end = h + length;
+
+#if !SZ_USE_MISALIGNED_LOADS
+    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+    for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
+        if (*h & 0x80ull) return sz_false_k;
+#endif
+
+    // Validate eight bytes at once using SWAR.
+    sz_u64_vec_t text_vec;
+    for (; h + 8 <= h_end; h += 8) {
+        text_vec.u64 = *(sz_u64_t const *)h;
+        if (text_vec.u64 & 0x8080808080808080ull) return sz_false_k;
+    }
+
+    // Handle the misaligned tail.
+    for (; h < h_end; ++h)
+        if (*h & 0x80ull) return sz_false_k;
+    return sz_true_k;
 }
 
 SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
@@ -4573,6 +4748,7 @@ SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t ins, sz_size_t length) { return sz_hash_ser
 SZ_PUBLIC void sz_tolower(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_tolower_serial(ins, length, outs); }
 SZ_PUBLIC void sz_toupper(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_toupper_serial(ins, length, outs); }
 SZ_PUBLIC void sz_toascii(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_toascii_serial(ins, length, outs); }
+SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t ins, sz_size_t length) { return sz_isascii_serial(ins, length); }
 
 SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_ptr_t fingerprint,
                                      sz_size_t fingerprint_bytes) {
@@ -4587,6 +4763,13 @@ SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_
         sz_hashes(start, length, window_length, 1, _sz_hashes_fingerprint_non_pow2_callback, &fingerprint_buffer);
     else
         sz_hashes(start, length, window_length, 1, _sz_hashes_fingerprint_pow2_callback, &fingerprint_buffer);
+}
+
+SZ_PUBLIC sz_size_t sz_edit_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length,       //
+    sz_cptr_t b, sz_size_t b_length,       //
+    sz_size_t bound, sz_memory_allocator_t *alloc) {
+    return _sz_edit_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc);
 }
 
 #if !SZ_DYNAMIC_DISPATCH

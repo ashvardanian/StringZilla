@@ -3513,7 +3513,7 @@ typename concatenation_result<first_type, second_type, following_types...>::type
 }
 
 /**
- *  @brief  Calculates the Levenshtein edit distance between two strings.
+ *  @brief  Calculates the Levenshtein edit distance in @b bytes between two strings.
  *  @see    sz_edit_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
@@ -3529,13 +3529,39 @@ std::size_t edit_distance(basic_string_slice<char_type_> const &a, basic_string_
 }
 
 /**
- *  @brief  Calculates the Levenshtein edit distance between two strings.
+ *  @brief  Calculates the Levenshtein edit distance in @b bytes between two strings.
  *  @see    sz_edit_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
 std::size_t edit_distance(basic_string<char_type_, allocator_type_> const &a,
                           basic_string<char_type_, allocator_type_> const &b) noexcept(false) {
     return ashvardanian::stringzilla::edit_distance(a.view(), b.view(), a.get_allocator());
+}
+
+/**
+ *  @brief  Calculates the Levenshtein edit distance in @b unicode codepoints between two strings.
+ *  @see    sz_edit_distance_utf8
+ */
+template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
+std::size_t edit_distance_utf8(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
+                               allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
+    std::size_t result;
+    if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
+            result = sz_edit_distance_utf8(a.data(), a.size(), b.data(), b.size(), SZ_SIZE_MAX, &alloc);
+            return result != SZ_SIZE_MAX;
+        }))
+        throw std::bad_alloc();
+    return result;
+}
+
+/**
+ *  @brief  Calculates the Levenshtein edit distance in @b unicode codepoints between two strings.
+ *  @see    sz_edit_distance_utf8
+ */
+template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
+std::size_t edit_distance_utf8(basic_string<char_type_, allocator_type_> const &a,
+                               basic_string<char_type_, allocator_type_> const &b) noexcept(false) {
+    return ashvardanian::stringzilla::edit_distance_utf8(a.view(), b.view(), a.get_allocator());
 }
 
 /**
