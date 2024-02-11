@@ -1091,9 +1091,10 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
  */
 #ifdef __GNUG__
 #define SZ_NULL __null
+#define SZ_NULL_CHAR __null
 #else
 #define SZ_NULL ((void *)0)
-#define SZ_NULL_CHAR ((char*)0)
+#define SZ_NULL_CHAR ((char *)0)
 #endif
 
 /**
