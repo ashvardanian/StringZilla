@@ -1,7 +1,5 @@
 #![cfg_attr(not(test), no_std)]
 
-extern crate alloc;
-
 use core::ffi::c_void;
 
 // Import the functions from the StringZilla C library.
@@ -68,6 +66,7 @@ extern "C" {
     ) -> isize;
 }
 
+/// The [StringZilla] trait provides a collection of string searching and manipulation functionalities.
 pub trait StringZilla<N>
 where
     N: AsRef<[u8]>,
