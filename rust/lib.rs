@@ -1,50 +1,70 @@
 #![cfg_attr(not(test), no_std)]
 
+extern crate alloc;
+
 use core::ffi::c_void;
 
 // Import the functions from the StringZilla C library.
 extern "C" {
     fn sz_find(
-        haystack: *mut c_void,
+        haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
-    ) -> *mut c_void;
+    ) -> *const c_void;
 
     fn sz_rfind(
-        haystack: *mut c_void,
+        haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
-    ) -> *mut c_void;
+    ) -> *const c_void;
 
     fn sz_find_char_from(
-        haystack: *mut c_void,
+        haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
-    ) -> *mut c_void;
+    ) -> *const c_void;
 
     fn sz_rfind_char_from(
-        haystack: *mut c_void,
+        haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
-    ) -> *mut c_void;
+    ) -> *const c_void;
 
     fn sz_find_char_not_from(
-        haystack: *mut c_void,
+        haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
-    ) -> *mut c_void;
+    ) -> *const c_void;
 
     fn sz_rfind_char_not_from(
-        haystack: *mut c_void,
+        haystack: *const c_void,
         haystack_length: usize,
         needle: *const c_void,
         needle_length: usize,
-    ) -> *mut c_void;
+    ) -> *const c_void;
+
+    fn sz_edit_distance(
+        haystack1: *const c_void,
+        haystack1_length: usize,
+        haystack2: *const c_void,
+        haystack2_length: usize,
+        bound: usize,
+        allocator: *const c_void,
+    ) -> usize;
+
+    // fn sz_alignment_score(
+    //     haystack1: *const c_void,
+    //     haystack1_length: usize,
+    //     haystack2: *const c_void,
+    //     haystack2_length: usize,
+    //     gap: i8,
+    //     substitution_matrix: *mut c_void,
+    // ) -> usize;
 }
 
 pub trait StringZilla<N>
@@ -63,6 +83,12 @@ where
     fn sz_find_char_not_from(&self, needles: N) -> Option<usize>;
     /// Generic function to find the last occurrence of a character/element from the second argument.
     fn sz_rfind_char_not_from(&self, needles: N) -> Option<usize>;
+    /// Computes the Levenshtein edit-distance between two strings using the Wagner-Fisher algorithm.
+    /// Similar to the Needleman-Wunsch alignment algorithm. Often used in fuzzy string matching.
+    fn sz_edit_distance(&self, needle: N) -> usize;
+    // Computes Needleman–Wunsch alignment score for two strings. Often used in bioinformatics and cheminformatics.
+    // Similar to the Levenshtein edit-distance, parameterized for gap and substitution penalties.
+    // fn sz_alignment_score(&self, needle: N, gap: i8, matrix: &mut [[i8; 256]; 256]) -> usize;
 }
 
 impl<T, N> StringZilla<N> for T
@@ -73,9 +99,9 @@ where
     fn sz_find(&self, needle: N) -> Option<usize> {
         let haystack_ref = self.as_ref();
         let needle_ref = needle.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+        let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needle_pointer = needle_ref.as_ptr() as *const c_void;
+        let needle_pointer = needle_ref.as_ptr() as _;
         let needle_length = needle_ref.len();
         let result = unsafe {
             sz_find(
@@ -96,9 +122,9 @@ where
     fn sz_rfind(&self, needle: N) -> Option<usize> {
         let haystack_ref = self.as_ref();
         let needle_ref = needle.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+        let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needle_pointer = needle_ref.as_ptr() as *const c_void;
+        let needle_pointer = needle_ref.as_ptr() as _;
         let needle_length = needle_ref.len();
         let result = unsafe {
             sz_rfind(
@@ -119,9 +145,9 @@ where
     fn sz_find_char_from(&self, needles: N) -> Option<usize> {
         let haystack_ref = self.as_ref();
         let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+        let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as *const c_void;
+        let needles_pointer = needles_ref.as_ptr() as _;
         let needles_length = needles_ref.len();
         let result = unsafe {
             sz_find_char_from(
@@ -141,9 +167,9 @@ where
     fn sz_rfind_char_from(&self, needles: N) -> Option<usize> {
         let haystack_ref = self.as_ref();
         let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+        let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as *const c_void;
+        let needles_pointer = needles_ref.as_ptr() as _;
         let needles_length = needles_ref.len();
         let result = unsafe {
             sz_rfind_char_from(
@@ -163,9 +189,9 @@ where
     fn sz_find_char_not_from(&self, needles: N) -> Option<usize> {
         let haystack_ref = self.as_ref();
         let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+        let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as *const c_void;
+        let needles_pointer = needles_ref.as_ptr() as _;
         let needles_length = needles_ref.len();
         let result = unsafe {
             sz_find_char_not_from(
@@ -185,9 +211,9 @@ where
     fn sz_rfind_char_not_from(&self, needles: N) -> Option<usize> {
         let haystack_ref = self.as_ref();
         let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as *mut c_void;
+        let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as *const c_void;
+        let needles_pointer = needles_ref.as_ptr() as _;
         let needles_length = needles_ref.len();
         let result = unsafe {
             sz_rfind_char_not_from(
@@ -203,6 +229,29 @@ where
             Some(unsafe { result.offset_from(haystack_pointer) } as usize)
         }
     }
+
+    fn sz_edit_distance(&self, needle: N) -> usize {
+        let haystack_ref = self.as_ref();
+        let needle_ref = needle.as_ref();
+        let haystack_length = haystack_ref.len();
+        let needle_length = needle_ref.len();
+        let haystack_pointer = haystack_ref.as_ptr() as _;
+        let needle_pointer = needle_ref.as_ptr() as _;
+        unsafe {
+            sz_edit_distance(
+                haystack_pointer,
+                haystack_length,
+                needle_pointer,
+                needle_length,
+                // Upper bound on the distance, that allows us to exit early. If zero is
+                // passed, the maximum possible distance will be equal to the length of
+                // the longer input.
+                0,
+                // Uses the default allocator
+                core::ptr::null(),
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -210,6 +259,20 @@ mod tests {
     use std::borrow::Cow;
 
     use crate::StringZilla;
+
+    #[test]
+    fn levenshtein() {
+        assert_eq!("hello".sz_edit_distance("hell"), 1);
+        assert_eq!("hello".sz_edit_distance("hell"), 1);
+        assert_eq!("abc".sz_edit_distance(""), 3);
+        assert_eq!("abc".sz_edit_distance("ac"), 1);
+        assert_eq!("abc".sz_edit_distance("a_bc"), 1);
+        assert_eq!("abc".sz_edit_distance("adc"), 1);
+        assert_eq!("ggbuzgjux{}l".sz_edit_distance("gbuzgjux{}l"), 1);
+        assert_eq!("abcdefgABCDEFG".sz_edit_distance("ABCDEFGabcdefg"), 14);
+        assert_eq!("fitting".sz_edit_distance("kitty"), 4);
+        assert_eq!("smitten".sz_edit_distance("mitten"), 1);
+    }
 
     #[test]
     fn basics() {
