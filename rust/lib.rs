@@ -57,14 +57,15 @@ extern "C" {
         allocator: *const c_void,
     ) -> usize;
 
-    // fn sz_alignment_score(
-    //     haystack1: *const c_void,
-    //     haystack1_length: usize,
-    //     haystack2: *const c_void,
-    //     haystack2_length: usize,
-    //     gap: i8,
-    //     substitution_matrix: *mut c_void,
-    // ) -> usize;
+    fn sz_alignment_score(
+        haystack1: *const c_void,
+        haystack1_length: usize,
+        haystack2: *const c_void,
+        haystack2_length: usize,
+        matrix: *mut c_void,
+        gap: i8,
+        allocator: *const c_void,
+    ) -> isize;
 }
 
 pub trait StringZilla<N>
@@ -86,9 +87,9 @@ where
     /// Computes the Levenshtein edit-distance between two strings using the Wagner-Fisher algorithm.
     /// Similar to the Needleman-Wunsch alignment algorithm. Often used in fuzzy string matching.
     fn sz_edit_distance(&self, needle: N) -> usize;
-    // Computes Needleman–Wunsch alignment score for two strings. Often used in bioinformatics and cheminformatics.
-    // Similar to the Levenshtein edit-distance, parameterized for gap and substitution penalties.
-    // fn sz_alignment_score(&self, needle: N, gap: i8, matrix: &mut [[i8; 256]; 256]) -> usize;
+    /// Computes Needleman–Wunsch alignment score for two strings. Often used in bioinformatics and cheminformatics.
+    /// Similar to the Levenshtein edit-distance, parameterized for gap and substitution penalties.
+    fn sz_alignment_score(&self, needle: N, matrix: &mut [[i8; 256]; 256], gap: i8) -> isize;
 }
 
 impl<T, N> StringZilla<N> for T
@@ -252,6 +253,26 @@ where
             )
         }
     }
+
+    fn sz_alignment_score(&self, needle: N, matrix: &mut [[i8; 256]; 256], gap: i8) -> isize {
+        let haystack_ref = self.as_ref();
+        let needle_ref = needle.as_ref();
+        let haystack_length = haystack_ref.len();
+        let needle_length = needle_ref.len();
+        let haystack_pointer = haystack_ref.as_ptr() as _;
+        let needle_pointer = needle_ref.as_ptr() as _;
+        unsafe {
+            sz_alignment_score(
+                haystack_pointer,
+                haystack_length,
+                needle_pointer,
+                needle_length,
+                matrix.as_mut_ptr() as _,
+                gap,
+                core::ptr::null(),
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -259,6 +280,18 @@ mod tests {
     use std::borrow::Cow;
 
     use crate::StringZilla;
+
+    fn unary_substitution_costs() -> [[i8; 256]; 256] {
+        let mut result = [[0; 256]; 256];
+
+        for i in 0..256 {
+            for j in 0..256 {
+                result[i][j] = if i == j { 0 } else { -1 };
+            }
+        }
+
+        result
+    }
 
     #[test]
     fn levenshtein() {
@@ -272,6 +305,27 @@ mod tests {
         assert_eq!("abcdefgABCDEFG".sz_edit_distance("ABCDEFGabcdefg"), 14);
         assert_eq!("fitting".sz_edit_distance("kitty"), 4);
         assert_eq!("smitten".sz_edit_distance("mitten"), 1);
+    }
+
+    #[test]
+    fn needleman() {
+        let mut costs_vector = unary_substitution_costs();
+        assert_eq!(
+            "listen".sz_alignment_score("silent", &mut costs_vector, -1),
+            -4
+        );
+        assert_eq!(
+            "abcdefgABCDEFG".sz_alignment_score("ABCDEFGabcdefg", &mut costs_vector, -1),
+            -14
+        );
+        assert_eq!(
+            "hello".sz_alignment_score("hello", &mut costs_vector, -1),
+            0
+        );
+        assert_eq!(
+            "hello".sz_alignment_score("hell", &mut costs_vector, -1),
+            -1
+        );
     }
 
     #[test]
