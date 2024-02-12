@@ -60,7 +60,7 @@ extern "C" {
         haystack1_length: usize,
         haystack2: *const c_void,
         haystack2_length: usize,
-        matrix: *mut c_void,
+        matrix: *const c_void,
         gap: i8,
         allocator: *const c_void,
     ) -> isize;
@@ -96,7 +96,7 @@ where
 
     /// Computes Needleman–Wunsch alignment score for two strings. Often used in bioinformatics and cheminformatics.
     /// Similar to the Levenshtein edit-distance, parameterized for gap and substitution penalties.
-    fn sz_alignment_score(&self, needle: N, matrix: &mut [[i8; 256]; 256], gap: i8) -> isize;
+    fn sz_alignment_score(&self, needle: N, matrix: [[i8; 256]; 256], gap: i8) -> isize;
 }
 
 impl<T, N> StringZilla<N> for T
@@ -261,7 +261,7 @@ where
         }
     }
 
-    fn sz_alignment_score(&self, needle: N, matrix: &mut [[i8; 256]; 256], gap: i8) -> isize {
+    fn sz_alignment_score(&self, needle: N, matrix: [[i8; 256]; 256], gap: i8) -> isize {
         let haystack_ref = self.as_ref();
         let needle_ref = needle.as_ref();
         let haystack_length = haystack_ref.len();
@@ -274,7 +274,7 @@ where
                 haystack_length,
                 needle_pointer,
                 needle_length,
-                matrix.as_mut_ptr() as _,
+                matrix.as_ptr() as _,
                 gap,
                 core::ptr::null(),
             )
@@ -316,23 +316,14 @@ mod tests {
 
     #[test]
     fn needleman() {
-        let mut costs_vector = unary_substitution_costs();
+        let costs_vector = unary_substitution_costs();
+        assert_eq!("listen".sz_alignment_score("silent", costs_vector, -1), -4);
         assert_eq!(
-            "listen".sz_alignment_score("silent", &mut costs_vector, -1),
-            -4
-        );
-        assert_eq!(
-            "abcdefgABCDEFG".sz_alignment_score("ABCDEFGabcdefg", &mut costs_vector, -1),
+            "abcdefgABCDEFG".sz_alignment_score("ABCDEFGabcdefg", costs_vector, -1),
             -14
         );
-        assert_eq!(
-            "hello".sz_alignment_score("hello", &mut costs_vector, -1),
-            0
-        );
-        assert_eq!(
-            "hello".sz_alignment_score("hell", &mut costs_vector, -1),
-            -1
-        );
+        assert_eq!("hello".sz_alignment_score("hello", costs_vector, -1), 0);
+        assert_eq!("hello".sz_alignment_score("hell", costs_vector, -1), -1);
     }
 
     #[test]
