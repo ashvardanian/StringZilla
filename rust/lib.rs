@@ -71,21 +71,29 @@ pub trait StringZilla<N>
 where
     N: AsRef<[u8]>,
 {
-    /// Generic function to find the first occurrence of a substring or a subarray.
+    /// Locates first matching substring. Equivalent to `memmem(haystack, h_length, needle, n_length)` in LibC. Similar
+    /// to `strstr(haystack, needle)` in LibC, but requires known length.
     fn sz_find(&self, needle: N) -> Option<usize>;
-    /// Generic function to find the last occurrence of a substring or a subarray.
+
+    /// Locates the last matching substring.
     fn sz_rfind(&self, needle: N) -> Option<usize>;
-    /// Generic function to find the first occurrence of a character/element from the second argument.
+
+    /// Finds the first character in the haystack, that is present in the needle.
     fn sz_find_char_from(&self, needles: N) -> Option<usize>;
-    /// Generic function to find the last occurrence of a character/element from the second argument.
+
+    /// Finds the last character in the haystack, that is present in the needle.
     fn sz_rfind_char_from(&self, needles: N) -> Option<usize>;
-    /// Generic function to find the first occurrence of a character/element from the second argument.
+
+    /// Finds the first character in the haystack, that is __not__ present in the needle.
     fn sz_find_char_not_from(&self, needles: N) -> Option<usize>;
-    /// Generic function to find the last occurrence of a character/element from the second argument.
+
+    /// Finds the last character in the haystack, that is __not__ present in the needle.
     fn sz_rfind_char_not_from(&self, needles: N) -> Option<usize>;
+
     /// Computes the Levenshtein edit-distance between two strings using the Wagner-Fisher algorithm.
     /// Similar to the Needleman-Wunsch alignment algorithm. Often used in fuzzy string matching.
     fn sz_edit_distance(&self, needle: N) -> usize;
+
     /// Computes Needleman–Wunsch alignment score for two strings. Often used in bioinformatics and cheminformatics.
     /// Similar to the Levenshtein edit-distance, parameterized for gap and substitution penalties.
     fn sz_alignment_score(&self, needle: N, matrix: &mut [[i8; 256]; 256], gap: i8) -> isize;
