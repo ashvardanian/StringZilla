@@ -229,7 +229,9 @@
     "variant": "cpp",
     "vector": "cpp",
     "stddef.h": "c",
-    "immintrin.h": "c"
+    "immintrin.h": "c",
+    "xiosbase": "cpp",
+    "xstring": "cpp"
   },
   "python.pythonPath": "~/miniconda3/bin/python"
 }

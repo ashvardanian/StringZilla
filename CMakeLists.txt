@@ -216,7 +216,7 @@ if(${STRINGZILLA_BUILD_TEST})
     define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "ivybridge")
     define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
     define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|ARM|aarch64|AARCH64")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
     # ARM specific backends
     define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a")
     define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8-a+simd")

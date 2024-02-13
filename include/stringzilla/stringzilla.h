@@ -75,6 +75,23 @@
 #define SZ_SSIZE_MAX (0x7FFFFFFFu) // Largest signed integer that fits into 32 bits.
 #endif
 
+/**
+ *  @brief  On Big-Endian machines StringZilla will work in compatibility mode.
+ *          This disables SWAR hacks to minimize code duplication, assuming practically
+ *          all modern popular platforms are Little-Endian.
+ *
+ *  @see    https://stackoverflow.com/a/27054190
+ */
+#if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || defined(__BIG_ENDIAN__) || defined(__ARMEB__) || \
+    defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__)
+#define SZ_DETECT_BIG_ENDIAN (1) //< It's a big-endian target architecture
+#elif defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || defined(__LITTLE_ENDIAN__) || defined(__ARMEL__) || \
+    defined(__THUMBEL__) || defined(__AARCH64EL__) || defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__)
+#define SZ_DETECT_BIG_ENDIAN (0) //< It's a little-endian target architecture
+#else
+#error "Can't infer the architecture is little-endian or big-endian!"
+#endif
+
 /*
  *  Debugging and testing.
  */
@@ -285,13 +302,13 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
 #ifdef SZ_STRING_INTERNAL_SPACE
 #undef SZ_STRING_INTERNAL_SPACE
 #endif
-#define SZ_STRING_INTERNAL_SPACE (23)
+#define SZ_STRING_INTERNAL_SPACE (sizeof(sz_size_t) * 3 - 1) // 3 pointers minus one byte for an 8-bit length
 
 /**
  *  @brief  Tiny memory-owning string structure with a Small String Optimization (SSO).
  *          Differs in layout from Folly, Clang, GCC, and probably most other implementations.
  *          It's designed to avoid any branches on read-only operations, and can store up
- *          to 22 characters on stack, followed by the SZ_NULL-termination character.
+ *          to 22 characters on stack on 64-bit machines, followed by the SZ_NULL-termination character.
  *
  *  @section Changing Length
  *
@@ -302,21 +319,39 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
  */
 typedef union sz_string_t {
 
+#if !SZ_DETECT_BIG_ENDIAN
+
+    struct external {
+        sz_ptr_t start;
+        sz_size_t length;
+        sz_size_t space;
+        sz_size_t padding;
+    } external;
+
     struct internal {
         sz_ptr_t start;
         sz_u8_t length;
         char chars[SZ_STRING_INTERNAL_SPACE];
     } internal;
 
+#else
+
     struct external {
         sz_ptr_t start;
-        sz_size_t length;
-        /// @brief Number of bytes, that have been allocated for this string, equals to (capacity + 1).
         sz_size_t space;
         sz_size_t padding;
+        sz_size_t length;
     } external;
 
-    sz_u64_t u64s[4];
+    struct internal {
+        sz_ptr_t start;
+        char chars[SZ_STRING_INTERNAL_SPACE];
+        sz_u8_t length;
+    } internal;
+
+#endif
+
+    sz_size_t words[4];
 
 } sz_string_t;
 
@@ -1263,7 +1298,9 @@ SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
     x |= x >> 4;
     x |= x >> 8;
     x |= x >> 16;
+#if SZ_DETECT_64_BIT
     x |= x >> 32;
+#endif
     x++;
     return x;
 }
@@ -1292,6 +1329,15 @@ SZ_INTERNAL sz_u64_t sz_u64_transpose(sz_u64_t x) {
  */
 SZ_INTERNAL void sz_u64_swap(sz_u64_t *a, sz_u64_t *b) {
     sz_u64_t t = *a;
+    *a = *b;
+    *b = t;
+}
+
+/**
+ *  @brief  Helper, that swaps two 64-bit integers representing the order of elements in the sequence.
+ */
+SZ_INTERNAL void sz_pointer_swap(void **a, void **b) {
+    void *t = *a;
     *a = *b;
     *b = t;
 }
@@ -1521,7 +1567,7 @@ SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr
     sz_bool_t a_shorter = (sz_bool_t)(a_length < b_length);
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
-#if SZ_USE_MISALIGNED_LOADS
+#if SZ_USE_MISALIGNED_LOADS && !SZ_DETECT_BIG_ENDIAN
     for (sz_u64_vec_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
         a_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(a).u64);
         b_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(b).u64);
@@ -1557,8 +1603,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     if (!h_length) return SZ_NULL;
     sz_cptr_t const h_end = h + h_length;
 
-#if !SZ_USE_MISALIGNED_LOADS
-    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevety.
+#if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
         if (*h == *n) return h;
 #endif
@@ -1573,6 +1619,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
         match_vec = _sz_u64_each_byte_equal(h_vec, n_vec);
         if (match_vec.u64) return h + sz_u64_ctz(match_vec.u64) / 8;
     }
+#endif
 
     // Handle the misaligned tail.
     for (; h < h_end; ++h)
@@ -1593,8 +1640,8 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     // Reposition the `h` pointer to the end, as we will be walking backwards.
     h = h + h_length - 1;
 
-#if !SZ_USE_MISALIGNED_LOADS
-    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevety.
+#if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)(h + 1) & 7ull) && h >= h_start; --h)
         if (*h == *n) return h;
 #endif
@@ -1608,6 +1655,7 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
         match_vec = _sz_u64_each_byte_equal(h_vec, n_vec);
         if (match_vec.u64) return h - sz_u64_clz(match_vec.u64) / 8;
     }
+#endif
 
     for (; h >= h_start; --h)
         if (*h == *n) return h;
@@ -1977,6 +2025,15 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return SZ_NULL;
 
+#if SZ_DETECT_BIG_ENDIAN
+    sz_find_t backends[] = {
+        (sz_find_t)sz_find_byte_serial,
+        (sz_find_t)_sz_find_horspool_upto_256bytes_serial,
+        (sz_find_t)_sz_find_horspool_over_256bytes_serial,
+    };
+
+    return backends[(n_length > 1) + (n_length > 256)](h, h_length, n, n_length);
+#else
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_byte_serial,
@@ -1997,6 +2054,7 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         (n_length > 4) +
         // For longer needles - use skip tables.
         (n_length > 8) + (n_length > 256)](h, h_length, n, n_length);
+#endif
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -2306,8 +2364,8 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
-        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
-        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+        sz_pointer_swap((void **)&longer_length, (void **)&shorter_length);
+        sz_pointer_swap((void **)&longer, (void **)&shorter);
     }
 
     // Skip the matching prefixes and suffixes, they won't affect the distance.
@@ -2348,8 +2406,8 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
-        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
-        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+        sz_pointer_swap((void **)&longer_length, (void **)&shorter_length);
+        sz_pointer_swap((void **)&longer, (void **)&shorter);
     }
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
@@ -2383,7 +2441,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
         }
 
         // Swap previous_distances and current_distances pointers
-        sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
+        sz_pointer_swap((void **)&previous_distances, (void **)&current_distances);
     }
 
     // Cache scalar before `free` call.
@@ -2756,7 +2814,7 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
  *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
  */
 #ifndef SZ_SWAR_THRESHOLD
-#define SZ_SWAR_THRESHOLD (24) // bytes
+#define SZ_SWAR_THRESHOLD (24u) // bytes
 #endif
 
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
@@ -2825,18 +2883,18 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
     // But for safety let's initialize the entire structure to zeros.
     // string->internal.chars[0] = 0;
     // string->internal.length = 0;
-    string->u64s[1] = 0;
-    string->u64s[2] = 0;
-    string->u64s[3] = 0;
+    string->words[1] = 0;
+    string->words[2] = 0;
+    string->words[3] = 0;
 }
 
 SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
     sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
     // Initialize the string to zeros for safety.
-    string->u64s[1] = 0;
-    string->u64s[2] = 0;
-    string->u64s[3] = 0;
+    string->words[1] = 0;
+    string->words[2] = 0;
+    string->words[3] = 0;
     // If we are lucky, no memory allocations will be needed.
     if (space_needed <= SZ_STRING_INTERNAL_SPACE) {
         string->internal.start = &string->internal.chars[0];
@@ -3269,20 +3327,33 @@ SZ_INTERNAL sz_bool_t _sz_sort_is_less(sz_sequence_t *sequence, sz_size_t i_key,
 
 SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_length) {
 
+#if SZ_DETECT_BIG_ENDIAN
+    // TODO: Implement partial sort for big-endian systems. For now this sorts the whole thing.
+    sz_unused(partial_order_length);
+    sz_sort_introsort(sequence, (sz_sequence_comparator_t)_sz_sort_is_less);
+#else
+
     // Export up to 4 bytes into the `sequence` bits themselves
     for (sz_size_t i = 0; i != sequence->count; ++i) {
         sz_cptr_t begin = sequence->get_start(sequence, sequence->order[i]);
         sz_size_t length = sequence->get_length(sequence, sequence->order[i]);
-        length = length > 4ull ? 4ull : length;
+        length = length > 4u ? 4u : length;
         sz_ptr_t prefix = (sz_ptr_t)&sequence->order[i];
         for (sz_size_t j = 0; j != length; ++j) prefix[7 - j] = begin[j];
     }
 
     // Perform optionally-parallel radix sort on them
     sz_sort_recursion(sequence, 0, 32, (sz_sequence_comparator_t)_sz_sort_is_less, partial_order_length);
+#endif
 }
 
-SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequence->count); }
+SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) {
+#if SZ_DETECT_BIG_ENDIAN
+    sz_sort_introsort(sequence, (sz_sequence_comparator_t)_sz_sort_is_less);
+#else
+    sz_sort_partial(sequence, sequence->count);
+#endif
+}
 
 #pragma endregion
 
@@ -4332,8 +4403,8 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
-        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
-        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+        sz_pointer_swap((void **)&longer_length, (void **)&shorter_length);
+        sz_pointer_swap((void **)&longer, (void **)&shorter);
     }
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
@@ -4514,7 +4585,7 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
         }
 
         // Swap previous_distances and current_distances pointers
-        sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
+        sz_pointer_swap((void **)&previous_distances, (void **)&current_distances);
     }
 
     // Cache scalar before `free` call.
