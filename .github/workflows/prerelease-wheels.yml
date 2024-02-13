@@ -1,0 +1,61 @@
+name: Pre-Release Wheels
+
+on:
+  push:
+    branches: ["main-dev"]
+  pull_request:
+    branches: ["main-dev"]
+  workflow_dispatch:
+
+env:
+  BUILD_TYPE: Release
+  GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
+  PYTHON_VERSION: 3.11
+  PYTHONUTF8: 1
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+
+jobs:
+  build_wheels_linux:
+    name: Build wheels (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+
+  build_wheels_macos:
+    name: Build wheels (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+
+  build_wheels_windows:
+    name: Build wheels (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install cibuildwheel
+        run: python -m pip install cibuildwheel
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
