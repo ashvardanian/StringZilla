@@ -2252,7 +2252,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     else { can_be_unicode = sz_false_k; }
 
     // If the allocation fails, return the maximum distance.
-    sz_ptr_t buffer = (sz_ptr_t)alloc->allocate(buffer_length, alloc->handle);
+    sz_ptr_t const buffer = (sz_ptr_t)alloc->allocate(buffer_length, alloc->handle);
     if (!buffer) return SZ_SIZE_MAX;
 
     // Let's export the UTF8 sequence into the newly allocated buffer at the end.
@@ -2269,8 +2269,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     // Let's parameterize the core logic for different character types and distance types.
 #define _wagner_fisher_unbounded(_distance_t, _char_t)                                                                \
     /* Now let's cast our pointer to avoid it in subsequent sections. */                                              \
-    _char_t const *longer_chars = (_char_t const *)longer;                                                            \
-    _char_t const *shorter_chars = (_char_t const *)shorter;                                                          \
+    _char_t const *const longer_chars = (_char_t const *)longer;                                                      \
+    _char_t const *const shorter_chars = (_char_t const *)shorter;                                                    \
     _distance_t *previous_distances = (_distance_t *)buffer;                                                          \
     _distance_t *current_distances = previous_distances + n;                                                          \
     /*  Initialize the first row of the Levenshtein matrix with `iota`-style arithmetic progression. */               \
@@ -2307,11 +2307,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     // Let's define a separate variant for bounded distance computation.
     // Practically the same as unbounded, but also collecting the running minimum within each row for early exit.
 #define _wagner_fisher_bounded(_distance_t, _char_t)                                                                  \
-    sz_size_t buffer_length = sizeof(_distance_t) * (n * 2);                                                          \
-    _distance_t *buffer = (_distance_t *)alloc->allocate(buffer_length, alloc->handle);                               \
-    if (!buffer) return SZ_SIZE_MAX;                                                                                  \
-    _char_t const *longer_chars = (_char_t const *)longer;                                                            \
-    _char_t const *shorter_chars = (_char_t const *)shorter;                                                          \
+    _char_t const *const longer_chars = (_char_t const *)longer;                                                      \
+    _char_t const *const shorter_chars = (_char_t const *)shorter;                                                    \
     _distance_t *previous_distances = (_distance_t *)buffer;                                                          \
     _distance_t *current_distances = previous_distances + n;                                                          \
     for (_distance_t idx_shorter = 0; idx_shorter != n; ++idx_shorter) previous_distances[idx_shorter] = idx_shorter; \
