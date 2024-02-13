@@ -1121,9 +1121,11 @@ class basic_string_slice {
     using partition_type = string_partition_result<string_slice>;
 
     /** @brief  Special value for missing matches.
-     *          We take the largest 63-bit unsigned integer.
+     *
+     *  We take the largest 63-bit unsigned integer on 64-bit machines.
+     *  We take the largest 31-bit unsigned integer on 32-bit machines.
      */
-    static constexpr size_type npos = 0x7FFFFFFFFFFFFFFFull;
+    static constexpr size_type npos = SZ_SSIZE_MAX;
 
 #pragma region Constructors and STL Utilities
 
@@ -1956,18 +1958,20 @@ class basic_string {
     using partition_type = string_partition_result<string_view>;
 
     /** @brief  Special value for missing matches.
-     *          We take the largest 63-bit unsigned integer.
+     *
+     *  We take the largest 63-bit unsigned integer on 64-bit machines.
+     *  We take the largest 31-bit unsigned integer on 32-bit machines.
      */
-    static constexpr size_type npos = 0x7FFFFFFFFFFFFFFFull;
+    static constexpr size_type npos = SZ_SSIZE_MAX;
 
 #pragma region Constructors and STL Utilities
 
     sz_constexpr_if_cpp20 basic_string() noexcept {
         // ! Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
         string_.internal.start = &string_.internal.chars[0];
-        string_.u64s[1] = 0;
-        string_.u64s[2] = 0;
-        string_.u64s[3] = 0;
+        string_.words[1] = 0;
+        string_.words[2] = 0;
+        string_.words[3] = 0;
     }
 
     ~basic_string() noexcept {
@@ -3598,6 +3602,8 @@ void randomize(basic_string_slice<char_type_> string, string_view alphabet = "ab
     randomize(string, &std::rand, alphabet);
 }
 
+using sorted_idx_t = std::uint64_t;
+
 /**
  *  @brief  Internal data-structure used to forward the arguments to the `sz_sort` function.
  *  @see    sorted_order
@@ -3606,7 +3612,7 @@ template <typename objects_type_, typename string_extractor_>
 struct _sequence_args {
     objects_type_ const *begin;
     std::size_t count;
-    std::size_t *order;
+    sorted_idx_t *order;
     string_extractor_ extractor;
 };
 
@@ -3639,17 +3645,17 @@ sz_size_t _call_sequence_member_length(struct sz_sequence_t const *sequence, sz_
  *  @see    sz_sort
  */
 template <typename objects_type_, typename string_extractor_>
-void sorted_order(objects_type_ const *begin, objects_type_ const *end, std::size_t *order,
+void sorted_order(objects_type_ const *begin, objects_type_ const *end, sorted_idx_t *order,
                   string_extractor_ &&extractor) noexcept {
 
     // Pack the arguments into a single structure to reference it from the callback.
     _sequence_args<objects_type_, string_extractor_> args = {begin, static_cast<std::size_t>(end - begin), order,
                                                              std::forward<string_extractor_>(extractor)};
     // Populate the array with `iota`-style order.
-    for (std::size_t i = 0; i != args.count; ++i) order[i] = i;
+    for (std::size_t i = 0; i != args.count; ++i) order[i] = static_cast<sorted_idx_t>(i);
 
     sz_sequence_t array;
-    array.order = reinterpret_cast<sz_u64_t *>(order);
+    array.order = reinterpret_cast<sorted_idx_t *>(order);
     array.count = args.count;
     array.handle = &args;
     array.get_start = _call_sequence_member_start<objects_type_, string_extractor_>;
@@ -3697,9 +3703,9 @@ std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename objects_type_, typename string_extractor_>
-std::vector<std::size_t> sorted_order(objects_type_ const *begin, objects_type_ const *end,
-                                      string_extractor_ &&extractor) noexcept(false) {
-    std::vector<std::size_t> order(end - begin);
+std::vector<sorted_idx_t> sorted_order(objects_type_ const *begin, objects_type_ const *end,
+                                       string_extractor_ &&extractor) noexcept(false) {
+    std::vector<sorted_idx_t> order(end - begin);
     sorted_order(begin, end, order.data(), std::forward<string_extractor_>(extractor));
     return order;
 }
@@ -3710,7 +3716,7 @@ std::vector<std::size_t> sorted_order(objects_type_ const *begin, objects_type_ 
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename string_like_type_>
-std::vector<std::size_t> sorted_order(string_like_type_ const *begin, string_like_type_ const *end) noexcept(false) {
+std::vector<sorted_idx_t> sorted_order(string_like_type_ const *begin, string_like_type_ const *end) noexcept(false) {
     static_assert(std::is_convertible<string_like_type_, string_view>::value,
                   "The type must be convertible to string_view.");
     return sorted_order(begin, end, [](string_like_type_ const &s) -> string_view { return s; });
@@ -3722,7 +3728,7 @@ std::vector<std::size_t> sorted_order(string_like_type_ const *begin, string_lik
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename string_like_type_>
-std::vector<std::size_t> sorted_order(std::vector<string_like_type_> const &array) noexcept(false) {
+std::vector<sorted_idx_t> sorted_order(std::vector<string_like_type_> const &array) noexcept(false) {
     static_assert(std::is_convertible<string_like_type_, string_view>::value,
                   "The type must be convertible to string_view.");
     return sorted_order(array.data(), array.data() + array.size(),

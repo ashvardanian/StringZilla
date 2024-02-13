@@ -181,10 +181,9 @@ inline dataset_t make_dataset_from_path(std::string path) {
     data.lines.resize(bit_floor(data.lines.size()));
 
 #ifdef NDEBUG // Shuffle only in release mode
-    std::random_device random_device;
-    std::mt19937 random_generator(random_device());
-    std::shuffle(data.tokens.begin(), data.tokens.end(), random_generator);
-    std::shuffle(data.lines.begin(), data.lines.end(), random_generator);
+    auto &generator = global_random_generator();
+    std::shuffle(data.tokens.begin(), data.tokens.end(), generator());
+    std::shuffle(data.lines.begin(), data.lines.end(), generator());
 #endif
 
     // Report some basic stats about the dataset
@@ -268,7 +267,7 @@ benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&
     stdcc::time_point t1 = stdcc::now();
     benchmark_result_t result;
     std::size_t lookup_mask = bit_floor(strings.size()) - 1;
-    std::size_t largest_prime = 18446744073709551557ull;
+    std::size_t largest_prime = static_cast<std::size_t>(18446744073709551557ull);
 
     while (true) {
         // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
