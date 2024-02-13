@@ -69,29 +69,31 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil(127) == 128);
     assert(sz_size_bit_ceil(128) == 128);
 
-    assert(sz_size_bit_ceil(uint64_t(1e6)) == (1ull << 20));
-    assert(sz_size_bit_ceil(uint64_t(2e6)) == (1ull << 21));
-    assert(sz_size_bit_ceil(uint64_t(4e6)) == (1ull << 22));
-    assert(sz_size_bit_ceil(uint64_t(8e6)) == (1ull << 23));
+    assert(sz_size_bit_ceil(1000000ull) == (1ull << 20));
+    assert(sz_size_bit_ceil(2000000ull) == (1ull << 21));
+    assert(sz_size_bit_ceil(4000000ull) == (1ull << 22));
+    assert(sz_size_bit_ceil(8000000ull) == (1ull << 23));
 
-    assert(sz_size_bit_ceil(uint64_t(1.6e7)) == (1ull << 24));
-    assert(sz_size_bit_ceil(uint64_t(3.2e7)) == (1ull << 25));
-    assert(sz_size_bit_ceil(uint64_t(6.4e7)) == (1ull << 26));
+    assert(sz_size_bit_ceil(16000000ull) == (1ull << 24));
+    assert(sz_size_bit_ceil(32000000ull) == (1ull << 25));
+    assert(sz_size_bit_ceil(64000000ull) == (1ull << 26));
 
-    assert(sz_size_bit_ceil(uint64_t(1.28e8)) == (1ull << 27));
-    assert(sz_size_bit_ceil(uint64_t(2.56e8)) == (1ull << 28));
-    assert(sz_size_bit_ceil(uint64_t(5.12e8)) == (1ull << 29));
+    assert(sz_size_bit_ceil(128000000ull) == (1ull << 27));
+    assert(sz_size_bit_ceil(256000000ull) == (1ull << 28));
+    assert(sz_size_bit_ceil(512000000ull) == (1ull << 29));
 
-    assert(sz_size_bit_ceil(uint64_t(1e9)) == (1ull << 30));
-    assert(sz_size_bit_ceil(uint64_t(2e9)) == (1ull << 31));
-    assert(sz_size_bit_ceil(uint64_t(4e9)) == (1ull << 32));
-    assert(sz_size_bit_ceil(uint64_t(8e9)) == (1ull << 33));
+    assert(sz_size_bit_ceil(1000000000ull) == (1ull << 30));
+    assert(sz_size_bit_ceil(2000000000ull) == (1ull << 31));
 
-    assert(sz_size_bit_ceil(uint64_t(1.6e10)) == (1ull << 34));
+#if SZ_DETECT_64_BIT
+    assert(sz_size_bit_ceil(4000000000ull) == (1ull << 32));
+    assert(sz_size_bit_ceil(8000000000ull) == (1ull << 33));
+    assert(sz_size_bit_ceil(16000000000ull) == (1ull << 34));
 
     assert(sz_size_bit_ceil((1ull << 62)) == (1ull << 62));
     assert(sz_size_bit_ceil((1ull << 62) + 1) == (1ull << 63));
     assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
+#endif
 }
 
 /**
@@ -103,11 +105,9 @@ static void test_memory_utilities() {
     char body_stl[size];
     char body_sz[size];
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 255);
-
-    std::generate(body_stl, body_stl + size, [&]() { return static_cast<char>(dis(gen)); });
+    auto &gen = global_random_generator();
+    std::uniform_int_distribution<char> distribution;
+    std::generate(body_stl, body_stl + size, [&]() { return distribution(gen); });
     std::copy(body_stl, body_stl + size, body_sz);
 
     // Move the contents of both strings around, validating overall
@@ -1184,11 +1184,11 @@ static void test_levenshtein_distances() {
  */
 static void test_sequence_algorithms() {
     using strs_t = std::vector<std::string>;
-    using order_t = std::vector<std::size_t>;
+    using order_t = std::vector<sz::sorted_idx_t>;
 
-    assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::sorted_order(x) == order_t({0, 1, 2, 3}));
-    assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::sorted_order(x) == order_t({3, 0, 1, 2}));
-    assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::sorted_order(x) == order_t({1, 0, 3, 2}));
+    assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::sorted_order(x) == order_t({0u, 1u, 2u, 3u}));
+    assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::sorted_order(x) == order_t({3u, 0u, 1u, 2u}));
+    assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::sorted_order(x) == order_t({1u, 0u, 3u, 2u}));
 
     // Generate random strings of different lengths.
     for (std::size_t dataset_size : {10, 100, 1000, 10000}) {

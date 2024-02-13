@@ -285,13 +285,13 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
 #ifdef SZ_STRING_INTERNAL_SPACE
 #undef SZ_STRING_INTERNAL_SPACE
 #endif
-#define SZ_STRING_INTERNAL_SPACE (23)
+#define SZ_STRING_INTERNAL_SPACE (sizeof(sz_size_t) * 3 - 1) // 3 pointers minus one byte for an 8-bit length
 
 /**
  *  @brief  Tiny memory-owning string structure with a Small String Optimization (SSO).
  *          Differs in layout from Folly, Clang, GCC, and probably most other implementations.
  *          It's designed to avoid any branches on read-only operations, and can store up
- *          to 22 characters on stack, followed by the SZ_NULL-termination character.
+ *          to 22 characters on stack on 64-bit machines, followed by the SZ_NULL-termination character.
  *
  *  @section Changing Length
  *
@@ -316,7 +316,7 @@ typedef union sz_string_t {
         sz_size_t padding;
     } external;
 
-    sz_u64_t u64s[4];
+    sz_size_t words[4];
 
 } sz_string_t;
 
@@ -1231,7 +1231,9 @@ SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
     x |= x >> 4;
     x |= x >> 8;
     x |= x >> 16;
+#if SZ_DETECT_64_BIT
     x |= x >> 32;
+#endif
     x++;
     return x;
 }
@@ -1260,6 +1262,15 @@ SZ_INTERNAL sz_u64_t sz_u64_transpose(sz_u64_t x) {
  */
 SZ_INTERNAL void sz_u64_swap(sz_u64_t *a, sz_u64_t *b) {
     sz_u64_t t = *a;
+    *a = *b;
+    *b = t;
+}
+
+/**
+ *  @brief  Helper, that swaps two 64-bit integers representing the order of elements in the sequence.
+ */
+SZ_INTERNAL void sz_pointer_swap(void **a, void **b) {
+    void *t = *a;
     *a = *b;
     *b = t;
 }
@@ -2111,7 +2122,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
                 // ? The caveat being that the benchmarks on longer sequences backfire and more research is needed.
                 current_distances[idx_shorter + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
             }
-            sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
+            sz_pointer_swap((void **)&previous_distances, (void **)&current_distances);
         }
         // Cache scalar before `free` call.
         sz_size_t result = previous_distances[shorter_length];
@@ -2144,7 +2155,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
             }
 
             // Swap previous_distances and current_distances pointers
-            sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
+            sz_pointer_swap((void **)&previous_distances, (void **)&current_distances);
         }
         // Cache scalar before `free` call.
         sz_size_t result = previous_distances[shorter_length] < bound ? previous_distances[shorter_length] : bound;
@@ -2161,8 +2172,8 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
-        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
-        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+        sz_pointer_swap((void **)&longer_length, (void **)&shorter_length);
+        sz_pointer_swap((void **)&longer, (void **)&shorter);
     }
 
     // Skip the matching prefixes and suffixes, they won't affect the distance.
@@ -2202,8 +2213,8 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
-        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
-        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+        sz_pointer_swap((void **)&longer_length, (void **)&shorter_length);
+        sz_pointer_swap((void **)&longer, (void **)&shorter);
     }
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
@@ -2237,7 +2248,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
         }
 
         // Swap previous_distances and current_distances pointers
-        sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
+        sz_pointer_swap((void **)&previous_distances, (void **)&current_distances);
     }
 
     // Cache scalar before `free` call.
@@ -2650,18 +2661,18 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
     // But for safety let's initialize the entire structure to zeros.
     // string->internal.chars[0] = 0;
     // string->internal.length = 0;
-    string->u64s[1] = 0;
-    string->u64s[2] = 0;
-    string->u64s[3] = 0;
+    string->words[1] = 0;
+    string->words[2] = 0;
+    string->words[3] = 0;
 }
 
 SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
     sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
     // Initialize the string to zeros for safety.
-    string->u64s[1] = 0;
-    string->u64s[2] = 0;
-    string->u64s[3] = 0;
+    string->words[1] = 0;
+    string->words[2] = 0;
+    string->words[3] = 0;
     // If we are lucky, no memory allocations will be needed.
     if (space_needed <= SZ_STRING_INTERNAL_SPACE) {
         string->internal.start = &string->internal.chars[0];
@@ -3098,7 +3109,7 @@ SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_
     for (sz_size_t i = 0; i != sequence->count; ++i) {
         sz_cptr_t begin = sequence->get_start(sequence, sequence->order[i]);
         sz_size_t length = sequence->get_length(sequence, sequence->order[i]);
-        length = length > 4ull ? 4ull : length;
+        length = length > 4u ? 4u : length;
         sz_ptr_t prefix = (sz_ptr_t)&sequence->order[i];
         for (sz_size_t j = 0; j != length; ++j) prefix[7 - j] = begin[j];
     }
@@ -4157,8 +4168,8 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
-        sz_u64_swap((sz_u64_t *)&longer_length, (sz_u64_t *)&shorter_length);
-        sz_u64_swap((sz_u64_t *)&longer, (sz_u64_t *)&shorter);
+        sz_pointer_swap((void **)&longer_length, (void **)&shorter_length);
+        sz_pointer_swap((void **)&longer, (void **)&shorter);
     }
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
@@ -4339,7 +4350,7 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
         }
 
         // Swap previous_distances and current_distances pointers
-        sz_u64_swap((sz_u64_t *)&previous_distances, (sz_u64_t *)&current_distances);
+        sz_pointer_swap((void **)&previous_distances, (void **)&current_distances);
     }
 
     // Cache scalar before `free` call.
