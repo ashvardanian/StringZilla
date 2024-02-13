@@ -26,6 +26,10 @@ def is_64bit_arm() -> bool:
     return arch.startswith("arm")
 
 
+def is_big_endian() -> bool:
+    return sys.byteorder == "big"
+
+
 def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     compile_args = [
         "-std=c99",  # use the C 99 language dialect
@@ -49,6 +53,7 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_ARM_SVE", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
+        ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
 
     if is_64bit_arm():
