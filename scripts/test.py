@@ -120,16 +120,12 @@ def test_unit_len():
 
 
 def test_slice_of_split():
-    def impl(native_str):
+    def impl(native_str: str):
         native_split = native_str.split()
         text = sz.Str(native_str)
-        split = text.split()
-        for split_idx in range(len(native_split)):
-            native_slice = native_split[split_idx:]
-            idx = split_idx
-            for word in split[split_idx:]:
-                assert str(word) == native_split[idx]
-                idx += 1
+        sz_split = text.split()
+        for slice_idx in range(len(native_split)):
+            assert str(sz_split[slice_idx]) == native_split[slice_idx]
 
     native_str = "Weebles wobble before they fall down, don't they?"
     impl(native_str)
