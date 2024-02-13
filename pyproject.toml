@@ -25,14 +25,32 @@ build-verbosity = 0
 archs = ["all"]
 
 # Skip PyPy builds... we are implementing a CPython binding after all :)
-skip = ["pp*"]
+skip = ["pp*", "*manylinux*"]
 
 [tool.cibuildwheel.linux]
 before-build = ["rm -rf {project}/build"]
+repair-wheel-command = "auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
+
+# Use more recent images for the most popular SIMD-capable CPU architectures, to have access to newer compilers.
+# Otherwise, prepare yourself to all kinds of AVX-512 issues and other SIMD-related pain.
+# You can keep track of the most recent images on Quay:
+# - for `manylinux`: https://quay.io/search?q=manylinux
+# - for `musllinux`: https://quay.io/search?q=musllinux
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-before-all = ["sh ./.github/workflows/pre_cibuildwheel.sh"]
-repair-wheel-command = "auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
+musllinux-x86_64-image = "musllinux_1_2"
+musllinux-aarch64-image = "musllinux_1_2"
+
+# On CentOS we have to use `yum`.
+# The healthy version would be: `apt-get update && apt-get install -y libc6-dev wget python3-dev`.
+before-all = ["yum update -y && yum install -y glibc-devel wget python3-devel"]
+
+# With `musl` builds, we obviously don't need the `glibc` and can't use `yum`.
+# This may also be handy for using custom dependencies for different Python versions:
+# https://cibuildwheel.readthedocs.io/en/stable/options/#overrides
+[[tool.cibuildwheel.overrides]]
+select = "*-musllinux*"
+before-all = "apk add --update wget python3-dev"
 
 [tool.cibuildwheel.macos]
 before-build = ["rm -rf {project}/build"]
