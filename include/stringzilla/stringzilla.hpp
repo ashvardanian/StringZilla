@@ -3628,7 +3628,7 @@ void randomize(basic_string_slice<char_type_> string, string_view alphabet = "ab
     randomize(string, &std::rand, alphabet);
 }
 
-using sorted_idx_t = std::uint64_t;
+using sorted_idx_t = sz_sorted_idx_t;
 
 /**
  *  @brief  Internal data-structure used to forward the arguments to the `sz_sort` function.

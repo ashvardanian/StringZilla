@@ -187,6 +187,8 @@ typedef char *sz_ptr_t;          // A type alias for `char *`
 typedef char const *sz_cptr_t;   // A type alias for `char const *`
 typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching functions
 
+typedef sz_u64_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
+
 typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        // Only one relevant bit
 typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; // Only three possible states: <=>
 
@@ -939,7 +941,7 @@ typedef sz_bool_t (*sz_sequence_comparator_t)(struct sz_sequence_t const *, sz_s
 typedef sz_bool_t (*sz_string_is_less_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 typedef struct sz_sequence_t {
-    sz_u64_t *order;
+    sz_sorted_idx_t *order;
     sz_size_t count;
     sz_sequence_member_start_t get_start;
     sz_sequence_member_length_t get_length;

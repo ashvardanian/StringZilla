@@ -174,11 +174,11 @@ static sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
     return ((sz_string_view_t const *)seq->handle)[i].length;
 }
 
-void reverse_offsets(sz_size_t *array, size_t length) {
+void reverse_offsets(sz_sorted_idx_t *array, size_t length) {
     size_t i, j;
     // Swap array[i] and array[j]
     for (i = 0, j = length - 1; i < j; i++, j--) {
-        sz_size_t temp = array[i];
+        sz_sorted_idx_t temp = array[i];
         array[i] = array[j];
         array[j] = temp;
     }
@@ -194,12 +194,12 @@ void reverse_haystacks(sz_string_view_t *array, size_t length) {
     }
 }
 
-void apply_order(sz_string_view_t *array, sz_u64_t *order, size_t length) {
-    for (sz_u64_t i = 0; i < length; ++i) {
+void apply_order(sz_string_view_t *array, sz_sorted_idx_t *order, size_t length) {
+    for (size_t i = 0; i < length; ++i) {
         if (i == order[i]) continue;
         sz_string_view_t temp = array[i];
-        sz_u64_t k = i, j;
-        while (i != (j = order[k])) {
+        size_t k = i, j;
+        while (i != (j = (size_t)order[k])) {
             array[k] = array[j];
             order[k] = k;
             k = j;
@@ -1755,7 +1755,7 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
     Py_RETURN_NONE;
 }
 
-static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_size_t **order_output,
+static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_sorted_idx_t **order_output,
                             sz_size_t *count_output) {
     // Change the layout
     if (!prepare_strings_for_reordering(self)) {
@@ -1769,7 +1769,7 @@ static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_size
     size_t count = self->data.reordered.count;
 
     // Allocate temporary memory to store the ordering offsets
-    size_t memory_needed = sizeof(sz_size_t) * count;
+    size_t memory_needed = sizeof(sz_sorted_idx_t) * count;
     if (temporary_memory.length < memory_needed) {
         temporary_memory.start = realloc(temporary_memory.start, memory_needed);
         temporary_memory.length = memory_needed;
@@ -1782,12 +1782,12 @@ static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_size
     // Call our sorting algorithm
     sz_sequence_t sequence;
     memset(&sequence, 0, sizeof(sequence));
-    sequence.order = (sz_size_t *)temporary_memory.start;
+    sequence.order = (sz_sorted_idx_t *)temporary_memory.start;
     sequence.count = count;
     sequence.handle = parts;
     sequence.get_start = parts_get_start;
     sequence.get_length = parts_get_length;
-    for (sz_size_t i = 0; i != sequence.count; ++i) sequence.order[i] = i;
+    for (sz_sorted_idx_t i = 0; i != sequence.count; ++i) sequence.order[i] = i;
     sz_sort(&sequence);
 
     // Export results
@@ -1890,7 +1890,7 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
     }
 
     sz_string_view_t *parts = NULL;
-    sz_size_t *order = NULL;
+    sz_sorted_idx_t *order = NULL;
     sz_size_t count = 0;
     if (!Strs_sort_(self, &parts, &order, &count)) return NULL;
 
@@ -1907,8 +1907,8 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
     }
 
     // Copy the data from the order array to the newly created NumPy array
-    sz_size_t *numpy_data_ptr = (sz_size_t *)PyArray_DATA((PyArrayObject *)array);
-    memcpy(numpy_data_ptr, order, count * sizeof(sz_size_t));
+    sz_sorted_idx_t *numpy_data_ptr = (sz_sorted_idx_t *)PyArray_DATA((PyArrayObject *)array);
+    memcpy(numpy_data_ptr, order, count * sizeof(sz_sorted_idx_t));
     return array;
 }
 
