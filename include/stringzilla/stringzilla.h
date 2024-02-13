@@ -75,6 +75,23 @@
 #define SZ_SSIZE_MAX (0x7FFFFFFFu) // Largest signed integer that fits into 32 bits.
 #endif
 
+/**
+ *  @brief  On Big-Endian machines StringZilla will work in compatibility mode.
+ *          This disables SWAR hacks to minimize code duplication, assuming practically
+ *          all modern popular platforms are Little-Endian.
+ *
+ *  @see    https://stackoverflow.com/a/27054190
+ */
+#if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || defined(__BIG_ENDIAN__) || defined(__ARMEB__) || \
+    defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__)
+#define SZ_DETECT_BIG_ENDIAN (1) //< It's a big-endian target architecture
+#elif defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || defined(__LITTLE_ENDIAN__) || defined(__ARMEL__) || \
+    defined(__THUMBEL__) || defined(__AARCH64EL__) || defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__)
+#define SZ_DETECT_BIG_ENDIAN (0) //< It's a little-endian target architecture
+#else
+#error "Can't infer the architecture is little-endian or big-endian!"
+#endif
+
 /*
  *  Debugging and testing.
  */
@@ -302,19 +319,37 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
  */
 typedef union sz_string_t {
 
+#if !SZ_DETECT_BIG_ENDIAN
+
+    struct external {
+        sz_ptr_t start;
+        sz_size_t length;
+        sz_size_t space;
+        sz_size_t padding;
+    } external;
+
     struct internal {
         sz_ptr_t start;
         sz_u8_t length;
         char chars[SZ_STRING_INTERNAL_SPACE];
     } internal;
 
+#else
+
     struct external {
         sz_ptr_t start;
-        sz_size_t length;
-        /// @brief Number of bytes, that have been allocated for this string, equals to (capacity + 1).
         sz_size_t space;
         sz_size_t padding;
+        sz_size_t length;
     } external;
+
+    struct internal {
+        sz_ptr_t start;
+        char chars[SZ_STRING_INTERNAL_SPACE];
+        sz_u8_t length;
+    } internal;
+
+#endif
 
     sz_size_t words[4];
 
@@ -1500,7 +1535,7 @@ SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr
     sz_bool_t a_shorter = (sz_bool_t)(a_length < b_length);
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
-#if SZ_USE_MISALIGNED_LOADS
+#if SZ_USE_MISALIGNED_LOADS && !SZ_DETECT_BIG_ENDIAN
     for (sz_u64_vec_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
         a_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(a).u64);
         b_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(b).u64);
@@ -1536,8 +1571,8 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     if (!h_length) return SZ_NULL;
     sz_cptr_t const h_end = h + h_length;
 
-#if !SZ_USE_MISALIGNED_LOADS
-    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevety.
+#if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
         if (*h == *n) return h;
 #endif
@@ -1552,6 +1587,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
         match_vec = _sz_u64_each_byte_equal(h_vec, n_vec);
         if (match_vec.u64) return h + sz_u64_ctz(match_vec.u64) / 8;
     }
+#endif
 
     // Handle the misaligned tail.
     for (; h < h_end; ++h)
@@ -1572,8 +1608,8 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     // Reposition the `h` pointer to the end, as we will be walking backwards.
     h = h + h_length - 1;
 
-#if !SZ_USE_MISALIGNED_LOADS
-    // Process the misaligned head, to void UB on unaligned 64-bit loads.
+#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevety.
+#if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)(h + 1) & 7ull) && h >= h_start; --h)
         if (*h == *n) return h;
 #endif
@@ -1587,6 +1623,7 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
         match_vec = _sz_u64_each_byte_equal(h_vec, n_vec);
         if (match_vec.u64) return h - sz_u64_clz(match_vec.u64) / 8;
     }
+#endif
 
     for (; h >= h_start; --h)
         if (*h == *n) return h;
@@ -1956,6 +1993,15 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return SZ_NULL;
 
+#if SZ_DETECT_BIG_ENDIAN
+    sz_find_t backends[] = {
+        (sz_find_t)sz_find_byte_serial,
+        (sz_find_t)_sz_find_horspool_upto_256bytes_serial,
+        (sz_find_t)_sz_find_horspool_over_256bytes_serial,
+    };
+
+    return backends[(n_length > 1) + (n_length > 256)](h, h_length, n, n_length);
+#else
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
         (sz_find_t)sz_find_byte_serial,
@@ -1976,6 +2022,7 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
         (n_length > 4) +
         // For longer needles - use skip tables.
         (n_length > 8) + (n_length > 256)](h, h_length, n, n_length);
+#endif
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -2592,7 +2639,7 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
  *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
  */
 #ifndef SZ_SWAR_THRESHOLD
-#define SZ_SWAR_THRESHOLD (24) // bytes
+#define SZ_SWAR_THRESHOLD (24u) // bytes
 #endif
 
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
@@ -3105,6 +3152,12 @@ SZ_INTERNAL sz_bool_t _sz_sort_is_less(sz_sequence_t *sequence, sz_size_t i_key,
 
 SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_length) {
 
+#if SZ_DETECT_BIG_ENDIAN
+    // TODO: Implement partial sort for big-endian systems. For now this sorts the whole thing.
+    sz_unused(partial_order_length);
+    sz_sort_introsort(sequence, (sz_sequence_comparator_t)_sz_sort_is_less);
+#else
+
     // Export up to 4 bytes into the `sequence` bits themselves
     for (sz_size_t i = 0; i != sequence->count; ++i) {
         sz_cptr_t begin = sequence->get_start(sequence, sequence->order[i]);
@@ -3116,9 +3169,16 @@ SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_
 
     // Perform optionally-parallel radix sort on them
     sz_sort_recursion(sequence, 0, 32, (sz_sequence_comparator_t)_sz_sort_is_less, partial_order_length);
+#endif
 }
 
-SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) { sz_sort_partial(sequence, sequence->count); }
+SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) {
+#if SZ_DETECT_BIG_ENDIAN
+    sz_sort_introsort(sequence, (sz_sequence_comparator_t)_sz_sort_is_less);
+#else
+    sz_sort_partial(sequence, sequence->count);
+#endif
+}
 
 #pragma endregion
 

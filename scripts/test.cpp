@@ -391,6 +391,7 @@ static void test_api_mutable() {
     assert_scoped(str s = "obsolete", s.assign("hello"), s == "hello");
     assert_scoped(str s = "obsolete", s.assign("hello", 4), s == "hell");
     assert_scoped(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
+    assert_scoped(str s = "obsolete", s.assign(32, 'a'), s == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     assert_scoped(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
     assert_scoped(str s = "obsolete", s.assign(str("hello")), s == "hello");
     assert_scoped(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
