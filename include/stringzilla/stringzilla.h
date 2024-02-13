@@ -80,16 +80,18 @@
  *          This disables SWAR hacks to minimize code duplication, assuming practically
  *          all modern popular platforms are Little-Endian.
  *
- *  @see    https://stackoverflow.com/a/27054190
+ *  This variable is hard to infer from macros reliably. It's best to set it manually.
+ *  For that CMake provides the `TestBigEndian` and `CMAKE_<LANG>_BYTE_ORDER` (from 3.20 onwards).
+ *  In Python one can check `sys.byteorder == 'big'` in the `setup.py` script and pass the appropriate macro.
+ *  https://stackoverflow.com/a/27054190
  */
+#ifndef SZ_DETECT_BIG_ENDIAN
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || defined(__BIG_ENDIAN__) || defined(__ARMEB__) || \
     defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__)
 #define SZ_DETECT_BIG_ENDIAN (1) //< It's a big-endian target architecture
-#elif defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || defined(__LITTLE_ENDIAN__) || defined(__ARMEL__) || \
-    defined(__THUMBEL__) || defined(__AARCH64EL__) || defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__)
-#define SZ_DETECT_BIG_ENDIAN (0) //< It's a little-endian target architecture
 #else
-#error "Can't infer the architecture is little-endian or big-endian!"
+#define SZ_DETECT_BIG_ENDIAN (0) //< It's a little-endian target architecture
+#endif
 #endif
 
 /*
