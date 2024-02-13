@@ -36,6 +36,28 @@ The role of Python benchmarks is less to provide absolute number, but to compare
 - `bench_sort.(py|ipynb)` - compares against `pandas`.
 - `bench_similarity.(ipynb)` - compares against `jellyfish`, `editdistance`, etc.
 
+## Benchmarking Datasets
+
+It's not always easy to find good datasets for benchmarking strings workloads.
+I use several ASCII and UTF8 international datasets.
+You can download them using the following commands:
+
+```sh
+# English Leipzig Corpora Collection
+# 124 MB, 1'000'000 lines of ASCII, 8'388'608 tokens of mean length 5
+wget --no-clobber -O leipzig1M.txt https://introcs.cs.princeton.edu/python/42sort/leipzig1m.txt 
+
+# Hutter Prize "enwik9" dataset for compression
+# 1 GB (0.3 GB compressed), 13'147'025 lines of ASCII, 67'108'864 tokens of mean length 6
+wget --no-clobber -O enwik9.zip http://mattmahoney.net/dc/enwik9.zip
+unzip enwik9.zip && rm enwik9.zip && mv enwik9 enwik9.txt
+
+# XL Sum dataset for multilingual extractive summarization
+# 4.7 GB (1.7 GB compressed), 1'004'598 lines of UTF8, 268'435'456 tokens of mean length 8
+wget --no-clobber -O xlsum.csv.gz https://github.com/ashvardanian/xl-sum/releases/download/v1.0.0/xlsum.csv.gz
+gzip -d xlsum.csv.gz
+```
+
 ## IDE Integrations
 
 The project was originally developed in VS Code, and contains a set of configuration files for that IDE under `.vscode/`.
@@ -85,6 +107,8 @@ sudo apt-get update && sudo apt-get install cmake build-essential libjemalloc-de
 brew install libomp llvm # MacOS
 ```
 
+### Testing
+
 Using modern syntax, this is how you build and run the test suite:
 
 ```bash
@@ -93,64 +117,6 @@ cmake --build ./build_debug --config Debug          # Which will produce the fol
 ./build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
 ./build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
 ./build_debug/stringzilla_test_cpp20_arm_serial     # Arm variant compiled without Neon
-```
-
-For benchmarks, you can use the following commands:
-
-```bash
-cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build ./build_release --config Release      # Which will produce the following targets:
-./build_release/stringzilla_bench_search <path>     # for substring search
-./build_release/stringzilla_bench_token <path>      # for hashing, equality comparisons, etc.
-./build_release/stringzilla_bench_similarity <path> # for edit distances and alignment scores
-./build_release/stringzilla_bench_sort <path>       # for sorting arrays of strings
-./build_release/stringzilla_bench_container <path>  # for STL containers with string keys
-```
-
-You may want to download some datasets for benchmarks, like these:
-
-```sh
-# English Leipzig Corpora Collection
-# 124 MB, 1'000'000 lines of ASCII, 8'388'608 tokens of mean length 5
-wget --no-clobber -O leipzig1M.txt https://introcs.cs.princeton.edu/python/42sort/leipzig1m.txt 
-
-# Hutter Prize "enwik9" dataset for compression
-# 1 GB (0.3 GB compressed), 13'147'025 lines of ASCII, 67'108'864 tokens of mean length 6
-wget --no-clobber -O enwik9.zip http://mattmahoney.net/dc/enwik9.zip
-unzip enwik9.zip && rm enwik9.zip && mv enwik9 enwik9.txt
-
-# XL Sum dataset for multilingual extractive summarization
-# 4.7 GB (1.7 GB compressed), 1'004'598 lines of UTF8, 268'435'456 tokens of mean length 8
-wget --no-clobber -O xlsum.csv.gz https://github.com/ashvardanian/xl-sum/releases/download/v1.0.0/xlsum.csv.gz
-gzip -d xlsum.csv.gz
-```
-
-Running on modern hardware, you may want to compile the code for older generations to compare the relative performance.
-The assumption would be that newer ISA extensions would provide better performance.
-On x86_64, you can use the following commands to compile for Sandy Bridge, Haswell, and Sapphire Rapids:
-
-```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_release/ivybridge && \
-    cmake --build build_release/ivybridge --config Release
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DSTRINGZILLA_TARGET_ARCH="haswell" -B build_release/haswell && \
-    cmake --build build_release/haswell --config Release
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
-    -DSTRINGZILLA_TARGET_ARCH="sapphirerapids" -B build_release/sapphirerapids && \
-    cmake --build build_release/sapphirerapids --config Release
-```
-
-Alternatively, you may want to compare the performance of the code compiled with different compilers.
-On x86_64, you may want to compare GCC, Clang, and ICX.
-
-```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_SHARED=1 \
-    -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_C_COMPILER=gcc-12 \
-    -B build_release/gcc && cmake --build build_release/gcc --config Release
-cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_SHARED=1 \
-    -DCMAKE_CXX_COMPILER=clang++-14 -DCMAKE_C_COMPILER=clang-14 \
-    -B build_release/clang && cmake --build build_release/clang --config Release
 ```
 
 To use CppCheck for static analysis make sure to export the compilation commands.
@@ -169,6 +135,54 @@ cppcheck --project=build_artifacts/compile_commands.json --enable=all
 
 clang-tidy-11 -p build_artifacts
 ```
+
+### Benchmarking
+
+For benchmarks, you can use the following commands:
+
+```bash
+cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -B build_release
+cmake --build ./build_release --config Release      # Which will produce the following targets:
+./build_release/stringzilla_bench_search <path>     # for substring search
+./build_release/stringzilla_bench_token <path>      # for hashing, equality comparisons, etc.
+./build_release/stringzilla_bench_similarity <path> # for edit distances and alignment scores
+./build_release/stringzilla_bench_sort <path>       # for sorting arrays of strings
+./build_release/stringzilla_bench_container <path>  # for STL containers with string keys
+```
+
+### Benchmarking Hardware-Specific Optimizations
+
+Running on modern hardware, you may want to compile the code for older generations to compare the relative performance.
+The assumption would be that newer ISA extensions would provide better performance.
+On x86_64, you can use the following commands to compile for Sandy Bridge, Haswell, and Sapphire Rapids:
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+    -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_release/ivybridge && \
+    cmake --build build_release/ivybridge --config Release
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+    -DSTRINGZILLA_TARGET_ARCH="haswell" -B build_release/haswell && \
+    cmake --build build_release/haswell --config Release
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+    -DSTRINGZILLA_TARGET_ARCH="sapphirerapids" -B build_release/sapphirerapids && \
+    cmake --build build_release/sapphirerapids --config Release
+```
+
+### Benchmarking Compiler-Specific Optimizations
+
+Alternatively, you may want to compare the performance of the code compiled with different compilers.
+On x86_64, you may want to compare GCC, Clang, and ICX.
+
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_SHARED=1 \
+    -DCMAKE_CXX_COMPILER=g++-12 -DCMAKE_C_COMPILER=gcc-12 \
+    -B build_release/gcc && cmake --build build_release/gcc --config Release
+cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_BENCHMARK=1 -DSTRINGZILLA_BUILD_SHARED=1 \
+    -DCMAKE_CXX_COMPILER=clang++-14 -DCMAKE_C_COMPILER=clang-14 \
+    -B build_release/clang && cmake --build build_release/clang --config Release
+```
+
+### Profiling
 
 To simplify tracing and profiling, build with symbols using the `RelWithDebInfo` configuration.
 Here is an example for profiling one target - `stringzilla_bench_token`.
@@ -198,21 +212,38 @@ Python bindings are implemented using pure CPython, so you wouldn't need to inst
 pip install -e . # To build locally from source
 ```
 
+### Testing
+
 For testing we use PyTest, which may not be installed on your system.
 
 ```bash
 pip install pytest              # To install PyTest
-pytest scripts/test.py -s -x    # To run the test suite
+pytest scripts/test.py -s -x    # Runs tests printing logs and stops on the first failure
 ```
 
-For fuzzing we love the ability to call the native C implementation from Python bypassing the binding layer.
-For that we use Cppyy, derived from Cling, a Clang-based C++ interpreter.
+Before you ship, please make sure the `cibuilwheel` packaging works and tests pass on other platforms.
+Don't forget to use the right [CLI arguments][cibuildwheel-cli] to avoid overloading your Docker runtime.
 
 ```bash
-pip install cppyy                       # To install Cppyy
-python scripts/similarity_fuzz.py       # To run the fuzzing script
+cibuildwheel
+cibuildwheel --platform linux                   # works on any OS and builds all Linux backends
+cibuildwheel --platform linux --target i686     # 32-bit Linux
+cibuildwheel --platform linux --target s390x    # emulating big-endian IBM Z
+cibuildwheel --platform macos                   # works only on MacOS
+cibuildwheel --platform windows                 # works only on Windows
 ```
 
+You may need root previligies for multi-architecture builds:
+
+```bash
+sudo $(which cibuildwheel) --platform linux
+```
+
+[cibuildwheel-cli]: https://cibuildwheel.readthedocs.io/en/stable/options/#command-line
+
+### Benchmarking
+
+For high-performance low-latency benchmarking, stick to C/C++ native benchmarks, as the CPython is likely to cause bottlenecks.
 For benchmarking, the following scripts are provided.
 
 ```sh
@@ -221,11 +252,7 @@ python scripts/bench_search.py --haystack_pattern "abcd" --haystack_length 1e9 -
 python scripts/similarity_bench.py --text_path "your file" # edit ditance computations
 ```
 
-Before you ship, please make sure the packaging works.
-
-```bash
-cibuildwheel --platform linux
-```
+Alternatively, you can explore the Jupyter notebooks in `scripts/` directory.
 
 ## Contributing in JavaScript
 
@@ -255,6 +282,12 @@ Alternatively, on Linux, the official Swift Docker image can be used for builds 
 
 ```bash
 sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:5.9 /bin/bash -cl "swift build -c release --static-swift-stdlib && swift test -c release --enable-test-discovery"
+```
+
+## Contributing in Rust
+
+```bash
+cargo test
 ```
 
 ## General Performance Observations
