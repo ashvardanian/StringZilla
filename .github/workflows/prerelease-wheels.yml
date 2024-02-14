@@ -1,10 +1,6 @@
-name: Pre-Release Wheels
+name: "Pre-Release Wheels"
 
 on:
-  push:
-    branches: ["main-dev"]
-  pull_request:
-    branches: ["main-dev"]
   workflow_run:
     workflows: ["Pre-Release"]
     types: [completed]
