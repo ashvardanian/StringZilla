@@ -284,6 +284,8 @@ typedef struct sz_memory_allocator_t {
 
 /**
  *  @brief  Initializes a memory allocator to use the system default `malloc` and `free`.
+ *          ! The function is not available if the library was compiled with `SZ_AVOID_LIBC`.
+ *
  *  @param alloc    Memory allocator to initialize.
  */
 SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
@@ -1200,7 +1202,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
 #include <immintrin.h>
 SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) { return __tzcnt_u64(x); }
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return __tzcnt_u32(x); }
-SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return  __lzcnt(x); }
+SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return __lzcnt(x); }
 #elif defined(_MSC_VER) // Other compilers on Windows.
 #include <intrin.h>
 SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
@@ -1535,14 +1537,16 @@ SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, 
 #if !SZ_AVOID_LIBC
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
-#elif defined(MSVC) && !defined(__clang__)
-extern void *malloc(size_t);
-extern void free(void *);
 #endif
 
 SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc) {
+#if !SZ_AVOID_LIBC
     alloc->allocate = (sz_memory_allocate_t)malloc;
     alloc->free = (sz_memory_free_t)free;
+#else
+    alloc->allocate = (sz_memory_allocate_t)SZ_NULL;
+    alloc->free = (sz_memory_free_t)SZ_NULL;
+#endif
     alloc->handle = SZ_NULL;
 }
 
