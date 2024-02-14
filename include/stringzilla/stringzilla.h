@@ -1194,39 +1194,50 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
 #endif
 
 /*  Intrinsics aliases for MSVC, GCC, Clang, and Clang-Cl.
- *  The following section of compiler intrinsics comes in 3 flavors.
- */
-#if defined(_MSC_VER) && defined(__clang__) // Clang-Cl on Windows.
-#include <immintrin.h>
-SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) { return __tzcnt_u64(x); }
-SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return __tzcnt_u32(x); }
-SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return  __lzcnt(x); }
-#elif defined(_MSC_VER) // Other compilers on Windows.
-#include <intrin.h>
-SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
-SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return _tzcnt_u32(x); }
-SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return _lzcnt_u32(x); }
-#else // GCC and Clang-based compilers.
-SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
-SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); } // ! Undefined if `x == 0`
-SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefined if `x == 0`
-#endif
-
-/*  Intrinsics aliases for MSVC, GCC, Clang, and Clang-Cl.
  *  The following section of compiler intrinsics comes in 2 flavors.
  */
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__) // On Clang-CL
 #include <intrin.h>
 SZ_INTERNAL sz_size_t sz_u64_popcount(sz_u64_t x) { return __popcnt64(x); }
-SZ_INTERNAL sz_size_t sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
-SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
 SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __popcnt(x); }
+
+// Sadly, when building Win32 images, we can't use the `_tzcnt_u64`, `_lzcnt_u64`,
+// `_BitScanForward64`, or `_BitScanReverse64` intrinsics. For now it's a simple `for`-loop.
+// In the future we can switch to a more efficient DeBrujin's algorithm.
+// https://www.chessprogramming.org/BitScan
+// https://www.chessprogramming.org/De_Bruijn_Sequence
+// https://gist.github.com/resilar/e722d4600dbec9752771ab4c9d47044f
+//
+// Use the serial version on 32-bit x86 and on Arm.
+#if (defined(_WIN32) && !defined(_WIN64)) || defined(_M_ARM) || defined(_M_ARM64)
+SZ_INTERNAL sz_size_t sz_u64_ctz(sz_u64_t x) {
+    sz_assert(x != 0);
+    sz_size_t n = 0;
+    while ((x & 1) == 0) { n++, x >>= 1; }
+    return n;
+}
+SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) {
+    sz_assert(x != 0);
+    sz_size_t n = 0;
+    while ((x & 0x8000000000000000ULL) == 0) { n++, x <<= 1; }
+    return n;
+}
+#else
+SZ_INTERNAL sz_size_t sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
+SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
+#endif
+SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return _tzcnt_u32(x); }
+SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return _lzcnt_u32(x); }
+SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
 SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
 #else
 SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
-SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
-SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
 SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __builtin_popcount(x); }
+SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return __builtin_ctzll(x); }
+SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return __builtin_clzll(x); }
+SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return __builtin_ctz(x); } // ! Undefined if `x == 0`
+SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return __builtin_clz(x); } // ! Undefined if `x == 0`
+SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap64(val); }
 SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
 
