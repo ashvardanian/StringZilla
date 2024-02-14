@@ -18,7 +18,7 @@ For some languages, it also provides lazily-evaluated ranges, to avoid memory al
 - 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
 - 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
-- 🤝 Want to help? Jump to [Contributing](CONTRIBUTING.md)
+- 🤝 Want to benchmark or contribute? Jump to [Contributing](CONTRIBUTING.md)
 - Code in other languages? Let [me](https://github.com/ashvardanian) know!
 
 __Who is this for?__
