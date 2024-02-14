@@ -33,9 +33,7 @@ typedef SSIZE_T ssize_t;
 #define SSIZE_MAX (SIZE_MAX / 2)
 #endif
 
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
-#include <Python.h>            // Core CPython interfaces
-#include <numpy/arrayobject.h> // NumPy
+#include <Python.h> // Core CPython interfaces
 
 #include <string.h> // `memset`, `memcpy`
 
@@ -1899,17 +1897,34 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
 
     // Here, instead of applying the order, we want to return the copy of the
     // order as a NumPy array of 64-bit unsigned integers.
-    npy_intp numpy_size = count;
-    PyObject *array = PyArray_SimpleNew(1, &numpy_size, NPY_UINT64);
-    if (!array) {
-        PyErr_SetString(PyExc_RuntimeError, "Failed to create a NumPy array");
+    //
+    //      npy_intp numpy_size = count;
+    //      PyObject *array = PyArray_SimpleNew(1, &numpy_size, NPY_UINT64);
+    //      if (!array) {
+    //          PyErr_SetString(PyExc_RuntimeError, "Failed to create a NumPy array");
+    //          return NULL;
+    //      }
+    //      sz_sorted_idx_t *numpy_data_ptr = (sz_sorted_idx_t *)PyArray_DATA((PyArrayObject *)array);
+    //      memcpy(numpy_data_ptr, order, count * sizeof(sz_sorted_idx_t));
+    //
+    // There are compilation issues with NumPy.
+    // Here is an example for `cp312-musllinux_s390x`: https://x.com/ashvardanian/status/1757880762278531447?s=20
+    // So instead of NumPy, let's produce a tuple of integers.
+    PyObject *tuple = PyTuple_New(count);
+    if (!tuple) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to create a tuple");
         return NULL;
     }
-
-    // Copy the data from the order array to the newly created NumPy array
-    sz_sorted_idx_t *numpy_data_ptr = (sz_sorted_idx_t *)PyArray_DATA((PyArrayObject *)array);
-    memcpy(numpy_data_ptr, order, count * sizeof(sz_sorted_idx_t));
-    return array;
+    for (sz_size_t i = 0; i < count; ++i) {
+        PyObject *index = PyLong_FromUnsignedLong(order[i]);
+        if (!index) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to create a tuple element");
+            Py_DECREF(tuple);
+            return NULL;
+        }
+        PyTuple_SET_ITEM(tuple, i, index);
+    }
+    return tuple;
 }
 
 static PySequenceMethods Strs_as_sequence = {
@@ -2003,8 +2018,6 @@ static PyModuleDef stringzilla_module = {
 
 PyMODINIT_FUNC PyInit_stringzilla(void) {
     PyObject *m;
-
-    import_array();
 
     if (PyType_Ready(&StrType) < 0) return NULL;
     if (PyType_Ready(&FileType) < 0) return NULL;

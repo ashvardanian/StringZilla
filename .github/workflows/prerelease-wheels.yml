@@ -5,8 +5,10 @@ on:
     branches: ["main-dev"]
   pull_request:
     branches: ["main-dev"]
-  workflow_dispatch:
-
+  workflow_run:
+    workflows: ["Pre-Release"]
+    types: [completed]
+  
 env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
@@ -21,6 +23,7 @@ jobs:
   build_wheels:
     name: Build wheels ${{ matrix.os }} Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]

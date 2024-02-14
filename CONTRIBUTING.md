@@ -221,6 +221,14 @@ pip install pytest              # To install PyTest
 pytest scripts/test.py -s -x    # Runs tests printing logs and stops on the first failure
 ```
 
+On a related note, StringZilla for Python seems to cover more OS and hardware combinations, than NumPy.
+That's why NumPy isn't a required dependency.
+Still, many tests may use NumPy, so consider installing it on mainstream platforms.
+
+```bash
+pip install numpy
+```
+
 Before you ship, please make sure the `cibuilwheel` packaging works and tests pass on other platforms.
 Don't forget to use the right [CLI arguments][cibuildwheel-cli] to avoid overloading your Docker runtime.
 
