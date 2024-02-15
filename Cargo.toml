@@ -7,6 +7,16 @@ edition = "2021"
 license = "Apache-2.0"
 publish = true
 repository = "https://github.com/ashvardanian/stringzilla"
+documentation = "https://docs.rs/stringzilla"
+homepage = "https://ashvardanian.com/posts/stringzilla/"
+keywords = ["simd", "search", "retrieval", "hash", "sort"]
+categories = [
+    "text-processing",
+    "hardware-support",
+    "no-std",
+    "wasm",
+    "external-ffi-bindings",
+]
 
 [lib]
 name = "stringzilla"

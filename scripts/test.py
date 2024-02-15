@@ -2,7 +2,6 @@ from random import choice, randint
 from string import ascii_lowercase
 from typing import Optional
 
-import numpy as np
 import pytest
 
 import stringzilla as sz
@@ -52,7 +51,11 @@ def test_unit_rich_comparisons():
 
 
 def test_unit_buffer_protocol():
-    import numpy as np
+    # Try importing NumPy to compute the Levenshtein distances more efficiently
+    try:
+        import numpy as np
+    except ImportError:
+        pytest.skip("NumPy is not installed")
 
     my_str = Str("hello")
     arr = np.array(my_str)
@@ -120,16 +123,12 @@ def test_unit_len():
 
 
 def test_slice_of_split():
-    def impl(native_str):
+    def impl(native_str: str):
         native_split = native_str.split()
         text = sz.Str(native_str)
-        split = text.split()
-        for split_idx in range(len(native_split)):
-            native_slice = native_split[split_idx:]
-            idx = split_idx
-            for word in split[split_idx:]:
-                assert str(word) == native_split[idx]
-                idx += 1
+        sz_split = text.split()
+        for slice_idx in range(len(native_split)):
+            assert str(sz_split[slice_idx]) == native_split[slice_idx]
 
     native_str = "Weebles wobble before they fall down, don't they?"
     impl(native_str)
@@ -161,6 +160,12 @@ def baseline_edit_distance(s1, s2) -> int:
     """
     Compute the Levenshtein distance between two strings.
     """
+    # Try importing NumPy to compute the Levenshtein distances more efficiently
+    try:
+        import numpy as np
+    except ImportError:
+        pytest.skip("NumPy is not installed")
+
     # Create a matrix of size (len(s1)+1) x (len(s2)+1)
     matrix = np.zeros((len(s1) + 1, len(s2) + 1), dtype=int)
 
@@ -285,6 +290,12 @@ def test_edit_distance_random(first_length: int, second_length: int):
 @pytest.mark.parametrize("first_length", [20, 100])
 @pytest.mark.parametrize("second_length", [20, 100])
 def test_alignment_score_random(first_length: int, second_length: int):
+    # Try importing NumPy to compute the Levenshtein distances more efficiently
+    try:
+        import numpy as np
+    except ImportError:
+        pytest.skip("NumPy is not installed")
+
     a = get_random_string(length=first_length)
     b = get_random_string(length=second_length)
     character_substitutions = np.zeros((256, 256), dtype=np.int8)

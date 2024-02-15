@@ -5,9 +5,8 @@
 ![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
 
 StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations on modern CPUs.
-It is up to 10x faster than the default string libraries in C, C++, Python, and other languages, while covering broad functionality.
-Aside from exact search, the library also accelerates fuzzy string matching, edit distance computation, and sorting.
-For some languages, it also provides lazily-evaluated ranges, to avoid memory allocations, and even random-string generators.
+It is up to __10x faster than the default and even other SIMD-accelerated string libraries__ in C, C++, Python, and other languages, while covering broad functionality.
+It __accelerates exact and fuzzy string matching, edit distance computations, sorting, lazily-evaluated ranges to avoid memory allocations, and even random-string generators__.
 
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
 [faq-swar]: https://en.wikipedia.org/wiki/SWAR
@@ -18,7 +17,7 @@ For some languages, it also provides lazily-evaluated ranges, to avoid memory al
 - 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
 - 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
-- 🤝 Want to help? Jump to [Contributing](CONTRIBUTING.md)
+- 🤝 Want to benchmark or contribute? Jump to [Contributing](CONTRIBUTING.md)
 - Code in other languages? Let [me](https://github.com/ashvardanian) know!
 
 __Who is this for?__
@@ -32,13 +31,9 @@ __Who is this for?__
 
 [faq-dbms]: https://en.wikipedia.org/wiki/Database
 
-## Throughput Benchmarks
+## Performance
 
 ![StringZilla Cover](assets/cover-strinzilla.jpeg)
-
-StringZilla has a lot of functionality, most of which is covered by benchmarks across C, C++, Python and other languages.
-You can find those in the `./scripts` directory, with usage notes listed in the `CONTRIBUTING.md` file.
-Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are faster than either standard library.
 
 <table style="width: 100%; text-align: center; table-layout: fixed;">
   <colgroup>
@@ -48,8 +43,8 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
     <col style="width: 25%;">
   </colgroup>
   <tr>
-    <th align="center">LibC</th>
-    <th align="center">C++ Standard</th>
+    <th align="center">C</th>
+    <th align="center">C++</th>
     <th align="center">Python</th>
     <th align="center">StringZilla</th>
   </tr>
@@ -84,7 +79,7 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
     <td colspan="4" align="center">find the last occurrence of a random word from text, ≅ 5 bytes long</td>
   </tr>
   <tr>
-    <td align="center">❌</td>
+    <td align="center">⚪</td>
     <td align="center">
       <code>.rfind</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.5</b> &centerdot;
@@ -132,13 +127,13 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
     <td colspan="4" align="center">find the last occurrence of any of 6 whitespaces <sup>2</sup></td>
   </tr>
   <tr>
-    <td align="center">❌</td>
+    <td align="center">⚪</td>
     <td align="center">
       <code>.find_last_of</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.25</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>0.25</b> GB/s
     </td>
-    <td align="center">❌</td>
+    <td align="center">⚪</td>
     <td align="center">
       <code>sz_rfind_charset</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
@@ -202,8 +197,8 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
     <td colspan="4" align="center">Levenshtein edit distance, ≅ 5 bytes long</td>
   </tr>
   <tr>
-    <td align="center">❌</td>
-    <td align="center">❌</td>
+    <td align="center">⚪</td>
+    <td align="center">⚪</td>
     <td align="center">
       via <code>jellyfish</code> <sup>3</sup><br/>
       <span style="color:#ABABAB;">x86:</span> <b>1,550</b> &centerdot;
@@ -220,8 +215,8 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
     <td colspan="4" align="center">Needleman-Wunsch alignment scores, ≅ 10 K aminoacids long</td>
   </tr>
   <tr>
-    <td align="center">❌</td>
-    <td align="center">❌</td>
+    <td align="center">⚪</td>
+    <td align="center">⚪</td>
     <td align="center">
       via <code>biopython</code> <sup>4</sup><br/>
       <span style="color:#ABABAB;">x86:</span> <b>257</b> &centerdot;
@@ -234,6 +229,10 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
     </td>
   </tr>
 </table>
+
+StringZilla has a lot of functionality, most of which is covered by benchmarks across C, C++, Python and other languages.
+You can find those in the `./scripts` directory, with usage notes listed in the [`CONTRIBUTING.md`](CONTRIBUTING.md) file.
+Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are faster than either standard library.
 
 > Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
 > The code was compiled with GCC 12, using `glibc` v2.35.
@@ -255,26 +254,33 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
 
 [faq-mersenne-twister]: https://en.wikipedia.org/wiki/Mersenne_Twister
 
-## Supported Functionality
+## Functionality
 
-| Functionality                  | Maturity | C 99 | C++ 11 | Python | Swift | Rust |
-| :----------------------------- | :------- | :--- | :----- | :----- | :---- | :--- |
-| Substring Search               | 🌳        | ✅    | ✅      | ✅      | ✅     | ✅    |
-| Character Set Search           | 🌳        | ✅    | ✅      | ✅      | ✅     | ✅    |
-| Edit Distance                  | 🧐        | ✅    | ✅      | ✅      | ✅     | ❌    |
-| Small String Class             | 🧐        | ✅    | ✅      | ❌      | ❌     | ❌    |
-| Sorting & Sequence Operations  | 🚧        | ✅    | ✅      | ✅      | ❌     | ❌    |
-| Lazy Ranges, Compressed Arrays | 🧐        | ❌    | ✅      | ✅      | ❌     | ❌    |
-| Hashes & Fingerprints          | 🚧        | ✅    | ✅      | ❌      | ❌     | ❌    |
+StringZilla is compatible with most modern CPUs, and provides a broad range of functionality.
 
-> [!NOTE]
-> Current StringZilla design assumes little-endian architecture, ASCII or UTF-8 encoding, and 64-bit address space.
-> This covers most modern CPUs, including x86, Arm, RISC-V.
-> Feel free to open an issue if you need support for other architectures.
+- [x] works on both Little-Endian and Big-Endian architectures.
+- [x] works on 32-bit and 64-bit hardware architectures.
+- [x] compatible with ASCII and UTF-8 encoding.
+
+Not all features are available across all bindings.
+Consider contributing, if you need a feature that's not yet implemented.
+
+|                                | Maturity | C 99  | C++ 11 | Python | Swift | Rust  |
+| :----------------------------- | :------: | :---: | :----: | :----: | :---: | :---: |
+| Substring Search               |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |
+| Character Set Search           |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |
+| Edit Distances                 |    🧐     |   ✅   |   ✅    |   ✅    |   ✅   |   ⚪   |
+| Small String Class             |    🧐     |   ✅   |   ✅    |   ❌    |   ❌   |   ⚪   |
+| Sorting & Sequence Operations  |    🚧     |   ✅   |   ✅    |   ✅    |   ⚪   |   ⚪   |
+| Lazy Ranges, Compressed Arrays |    🧐     |   ⚪   |   ✅    |   ✅    |   ⚪   |   ⚪   |
+| Hashes & Fingerprints          |    🚧     |   ✅   |   ✅    |   ⚪    |   ⚪   |   ⚪   |
 
 > 🌳 parts are used in production.
 > 🧐 parts are in beta.
 > 🚧 parts are under active development, and are likely to break in subsequent releases.
+> ✅ are implemented.
+> ⚪ are considered.
+> ❌ are not intended.
 
 ## Quick Start: Python 🐍
 
@@ -355,17 +361,18 @@ count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, al
 ### Edit Distances
 
 ```py
-edit_distance: int = sz.edit_distance("needle", "nidl")
+assert sz.edit_distance("apple", "aple") == 1 # skip one ASCII character
+assert sz.edit_distance("αβγδ", "αγδ") == 2 # skip two bytes forming one codepoint
+assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1 # one unicode codepoint
 ```
 
 Several Python libraries provide edit distance computation.
-Most of them are implemented in C, but are rarely as fast as StringZilla.
-Computing pairwise distances between words in an English text you may expect following results:
+Most of them are implemented in C, but are not always as fast as StringZilla.
+Taking a 1'000 long proteins around 10'000 characters long, computing just a 100 distances:
 
-- [EditDistance](https://github.com/roy-ht/editdistance): 28.7s
-- [JellyFish](https://github.com/jamesturk/jellyfish/): 26.8s
-- [Levenshtein](https://github.com/maxbachmann/Levenshtein): 8.6s
-- StringZilla: __4.2s__
+- [JellyFish](https://github.com/jamesturk/jellyfish): 62.3s
+- [EditDistance](https://github.com/roy-ht/editdistance): 32.9s
+- StringZilla: __0.8s__
 
 Moreover, you can pass custom substitution matrices to compute the Needleman-Wunsch alignment scores.
 That task is very common in bioinformatics and computational biology.
@@ -383,6 +390,11 @@ np.fill_diagonal(costs, 0)
 
 assert sz.alignment_score("first", "second", substitution_matrix=costs, gap_score=-1) == -sz.edit_distance(a, b)
 ```
+
+Using the same proteins as for Levenshtein distance benchmarks:
+
+- [BioPython](https://github.com/biopython/biopython): 25.8s
+- StringZilla: __7.8s__
 
 <details>
   <summary><b>§ Example converting from BioPython to StringZilla.</b></summary>

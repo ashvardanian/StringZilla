@@ -6,8 +6,6 @@ from typing import List, Tuple
 import sysconfig
 import glob
 
-import numpy as np
-
 
 def get_compiler() -> str:
     if platform.python_implementation() == "CPython":
@@ -24,6 +22,10 @@ def is_64bit_x86() -> bool:
 def is_64bit_arm() -> bool:
     arch = platform.machine()
     return arch.startswith("arm")
+
+
+def is_big_endian() -> bool:
+    return sys.byteorder == "big"
 
 
 def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
@@ -49,6 +51,7 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_ARM_SVE", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
+        ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
 
     if is_64bit_arm():
@@ -122,7 +125,9 @@ ext_modules = [
     Extension(
         "stringzilla",
         ["python/lib.c"] + glob.glob("c/*.c"),
-        include_dirs=["include", np.get_include()],
+        # In the past I've used `np.get_include()` to include NumPy headers,
+        # but it's not necessary for this library.
+        include_dirs=["include"],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
@@ -166,6 +171,6 @@ setup(
         "Topic :: Text Processing :: Indexing",
     ],
     include_dirs=[],
-    setup_requires=["numpy"],
+    setup_requires=[],
     ext_modules=ext_modules,
 )

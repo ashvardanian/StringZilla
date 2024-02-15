@@ -7,7 +7,8 @@ project(
   HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla")
 
 set(CMAKE_C_STANDARD 99)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 17) # This gives many issues for msvc and clang-cl, especially if later on you set it to std-c++11 later on in the tests...
+
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_COMPILE_WARNING_AS_ERROR)
@@ -144,9 +145,12 @@ function(set_compiler_flags target cpp_standard target_arch)
     "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/Zi>"
   )
 
-  # Enable Position Independent Code
-  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
-  target_link_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
+  # If available, enable Position Independent Code
+  if(CMAKE_POSITION_INDEPENDENT_CODE)
+    target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
+    target_link_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
+  endif()
+  
 
   # Check for ${target_arch} and set it or use "march=native" if not defined
   if("${target_arch}" STREQUAL "")
@@ -162,6 +166,19 @@ function(set_compiler_flags target cpp_standard target_arch)
       "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<NOT:$<CXX_COMPILER_ID:AppleClang>>>:-march=${target_arch}>"
       "$<$<CXX_COMPILER_ID:MSVC>:/arch:${target_arch}>")
   endif()
+
+  # Define SZ_DETECT_BIG_ENDIAN macro based on system byte order
+  if(CMAKE_C_BYTE_ORDER STREQUAL "BIG_ENDIAN")
+    set(SZ_DETECT_BIG_ENDIAN 1)
+  else()
+    set(SZ_DETECT_BIG_ENDIAN 0)
+  endif()
+
+  target_compile_definitions(
+    ${target}
+    PRIVATE
+    "SZ_DETECT_BIG_ENDIAN=${SZ_DETECT_BIG_ENDIAN}"
+  )
 
   # Sanitizer options for Debug mode
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -216,7 +233,7 @@ if(${STRINGZILLA_BUILD_TEST})
     define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "ivybridge")
     define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
     define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm|ARM|aarch64|AARCH64")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
     # ARM specific backends
     define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a")
     define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8-a+simd")
