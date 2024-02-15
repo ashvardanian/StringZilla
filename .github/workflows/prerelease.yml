@@ -91,7 +91,7 @@ jobs:
       # - name: Build and test JavaScript
       #   run: npm ci && npm test
 
-        # Rust
+      # Rust
       - name: Test Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -270,7 +270,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['36', '37', '38', '39', '310', '311', '312']
+        python-version: ["36", "37", "38", "39", "310", "311", "312"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -288,4 +288,3 @@ jobs:
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
-  
