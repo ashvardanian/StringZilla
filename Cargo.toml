@@ -1,6 +1,6 @@
 [package]
 name = "stringzilla"
-version = "3.0.0"
+version = "3.1.0"
 authors = ["Ash Vardanian <1983160+ashvardanian@users.noreply.github.com>"]
 description = "Faster SIMD-accelerated string search, sorting, fingerprints, and edit distances"
 edition = "2021"
