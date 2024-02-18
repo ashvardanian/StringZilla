@@ -1,7 +1,9 @@
 #undef NDEBUG      // Enable all assertions
 #include <cassert> // assertions
 
+#if defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/asan_interface.h> // ASAN
+#endif
 
 #include <algorithm> // `std::transform`
 #include <cstdio>    // `std::printf`
@@ -25,6 +27,10 @@
 #include <string>                      // Baseline
 #include <string_view>                 // Baseline
 #include <stringzilla/stringzilla.hpp> // Contender
+
+#if !SZ_DETECT_CPP_11
+#error "This test requires C++11 or later."
+#endif
 
 #include <test.hpp> // `levenshtein_baseline`
 
@@ -540,6 +546,13 @@ static void test_api_readonly_extensions() {
     assert((str("hello")[{-100, -100}] == ""));
 
     // Computing edit-distances.
+    assert(sz::hamming_distance(str("hello"), str("hello")) == 0);
+    assert(sz::hamming_distance(str("hello"), str("hell")) == 1);
+    assert(sz::hamming_distance(str("abc"), str("adc")) == 1);                // one substitution
+    assert(sz::hamming_distance(str("αβγδ"), str("αxxγδ")) == 2);             // replace Beta UTF8 codepoint
+    assert(sz::hamming_distance_utf8(str("abcdefgh"), str("_bcdefg_")) == 2); // replace ASCI prefix and suffix
+    assert(sz::hamming_distance_utf8(str("αβγδ"), str("αγγδ")) == 1);         // replace Beta UTF8 codepoint
+
     assert(sz::edit_distance(str("hello"), str("hello")) == 0);
     assert(sz::edit_distance(str("hello"), str("hell")) == 1);
     assert(sz::edit_distance(str(""), str("")) == 0);
@@ -941,12 +954,14 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
 
     for (std::size_t repeats = 0; repeats != max_repeats; ++repeats) {
         std::size_t haystack_length = (repeats + 1) * haystack_pattern.size();
+
+#if defined(__SANITIZE_ADDRESS__)
+        // Let's manually poison the prefix and the suffix.
         std::size_t poisoned_prefix_length = haystack - haystack_buffer.data();
         std::size_t poisoned_suffix_length = haystack_buffer_length - haystack_length - poisoned_prefix_length;
-
-        // Let's manually poison the prefix and the suffix.
         ASAN_POISON_MEMORY_REGION(haystack_buffer.data(), poisoned_prefix_length);
         ASAN_POISON_MEMORY_REGION(haystack + haystack_length, poisoned_suffix_length);
+#endif
 
         // Append the new repetition to our buffer.
         std::memcpy(haystack + repeats * haystack_pattern.size(), haystack_pattern.data(), haystack_pattern.size());
@@ -1004,9 +1019,11 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
         offsets_stl.clear();
         offsets_sz.clear();
 
+#if defined(__SANITIZE_ADDRESS__)
         // Don't forget to manually unpoison the prefix and the suffix.
         ASAN_UNPOISON_MEMORY_REGION(haystack_buffer.data(), poisoned_prefix_length);
         ASAN_UNPOISON_MEMORY_REGION(haystack + haystack_length, poisoned_suffix_length);
+#endif
     }
 }
 

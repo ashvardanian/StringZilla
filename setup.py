@@ -6,8 +6,6 @@ from typing import List, Tuple
 import sysconfig
 import glob
 
-import numpy as np
-
 
 def get_compiler() -> str:
     if platform.python_implementation() == "CPython":
@@ -127,7 +125,9 @@ ext_modules = [
     Extension(
         "stringzilla",
         ["python/lib.c"] + glob.glob("c/*.c"),
-        include_dirs=["include", np.get_include()],
+        # In the past I've used `np.get_include()` to include NumPy headers,
+        # but it's not necessary for this library.
+        include_dirs=["include"],
         extra_compile_args=compile_args,
         extra_link_args=link_args,
         define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
@@ -171,6 +171,6 @@ setup(
         "Topic :: Text Processing :: Indexing",
     ],
     include_dirs=[],
-    setup_requires=["numpy"],
+    setup_requires=[],
     ext_modules=ext_modules,
 )

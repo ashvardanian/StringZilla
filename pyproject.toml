@@ -5,10 +5,10 @@
 #   - `windows` wheels for AMD64, x86, and ARM64.
 #   * for Python versions from 3.6 to 3.12.
 #   * running over 5,000 tests on each wheel.
-#   = meaning 16 platforms  * 7 Python versions = 112 builds.
+#   = meaning 16 platforms * 7 Python versions = 112 builds.
 #   = meaning over 500,000 tests.
 [build-system]
-requires = ["setuptools>=42", "wheel", "cmake>=3.22", "numpy"]
+requires = ["setuptools>=42", "wheel", "cmake>=3.22"]
 build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
@@ -18,7 +18,7 @@ xfail_strict = true
 filterwarnings = ["error"]
 
 [tool.cibuildwheel]
-test-requires = ["pytest", "pytest-repeat", "numpy"]
+test-requires = ["pytest", "pytest-repeat"]
 test-command = "pytest {project}/scripts/test.py -x"
 build-verbosity = 0
 
@@ -33,8 +33,10 @@ build-verbosity = 0
 # The `i686` is 32-bit x86, and `x86_64` is 64-bit x86.
 archs = ["all"]
 
-# Skip PyPy builds... we are implementing a CPython binding after all :)
-skip = ["pp*"]
+# Add "pp*" to skip PyPy builds, but they should work fine these days :)
+# https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip
+# https://cibuildwheel.readthedocs.io/en/stable/#what-does-it-do
+skip = []
 
 [tool.cibuildwheel.linux]
 before-build = ["rm -rf {project}/build"]

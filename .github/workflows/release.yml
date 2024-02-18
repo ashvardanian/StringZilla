@@ -1,4 +1,4 @@
-name: Release
+name: "Release"
 
 on:
   push:
@@ -61,7 +61,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['36', '37', '38', '39', '310', '311', '312']
+        python-version: ["36", "37", "38", "39", "310", "311", "312"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -80,6 +80,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
           overwrite: true
 
@@ -97,12 +98,15 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: ./dist/
+          # unpacks all CIBW artifacts into dist/
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
 
       - name: Publish to PyPi
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: ./dist/artifact
+          packages-dir: dist
           verbose: true
           print-hash: true
 

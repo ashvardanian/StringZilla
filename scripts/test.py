@@ -2,7 +2,6 @@ from random import choice, randint
 from string import ascii_lowercase
 from typing import Optional
 
-import numpy as np
 import pytest
 
 import stringzilla as sz
@@ -52,7 +51,11 @@ def test_unit_rich_comparisons():
 
 
 def test_unit_buffer_protocol():
-    import numpy as np
+    # Try importing NumPy to compute the Levenshtein distances more efficiently
+    try:
+        import numpy as np
+    except ImportError:
+        pytest.skip("NumPy is not installed")
 
     my_str = Str("hello")
     arr = np.array(my_str)
@@ -107,6 +110,12 @@ def test_unit_globals():
     assert sz.count("aaaaa", "aa") == 2
     assert sz.count("aaaaa", "aa", allowoverlap=True) == 4
 
+    assert sz.hamming_distance("aaa", "aaa") == 0
+    assert sz.hamming_distance("aaa", "bbb") == 3
+    assert sz.hamming_distance("abababab", "aaaaaaaa") == 4
+    assert sz.hamming_distance("abababab", "aaaaaaaa", 2) == 2
+    assert sz.hamming_distance("abababab", "aaaaaaaa", bound=2) == 2
+
     assert sz.edit_distance("aaa", "aaa") == 0
     assert sz.edit_distance("aaa", "bbb") == 3
     assert sz.edit_distance("abababab", "aaaaaaaa") == 4
@@ -157,6 +166,12 @@ def baseline_edit_distance(s1, s2) -> int:
     """
     Compute the Levenshtein distance between two strings.
     """
+    # Try importing NumPy to compute the Levenshtein distances more efficiently
+    try:
+        import numpy as np
+    except ImportError:
+        pytest.skip("NumPy is not installed")
+
     # Create a matrix of size (len(s1)+1) x (len(s2)+1)
     matrix = np.zeros((len(s1) + 1, len(s2) + 1), dtype=int)
 
@@ -268,6 +283,56 @@ def test_edit_distance_insertions(max_edit_distance: int):
         assert sz.edit_distance(a, b, bound=200) == i + 1
 
 
+def test_edit_distances():
+
+    assert sz.hamming_distance("hello", "hello") == 0
+    assert sz.hamming_distance("hello", "hell") == 1
+    assert sz.hamming_distance("abc", "adc") == 1, "one substitution"
+    assert sz.hamming_distance("αβγδ", "αxxγδ") == 2, "replace Beta UTF8 codepoint"
+    assert (
+        sz.hamming_distance_unicode("abcdefgh", "_bcdefg_") == 2
+    ), "replace ASCI prefix and suffix"
+    assert (
+        sz.hamming_distance_unicode("αβγδ", "αγγδ") == 1
+    ), "replace Beta UTF8 codepoint"
+
+    assert sz.edit_distance("hello", "hello") == 0
+    assert sz.edit_distance("hello", "hell") == 1
+    assert sz.edit_distance("", "") == 0
+    assert sz.edit_distance("", "abc") == 3
+    assert sz.edit_distance("abc", "") == 3
+    assert sz.edit_distance("abc", "ac") == 1, "one deletion"
+    assert sz.edit_distance("abc", "a_bc") == 1, "one insertion"
+    assert sz.edit_distance("abc", "adc") == 1, "one substitution"
+    assert (
+        sz.edit_distance("ggbuzgjux{}l", "gbuzgjux{}l") == 1
+    ), "one insertion (prepended)"
+    assert sz.edit_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == 14
+
+    assert (
+        sz.edit_distance_unicode("hello", "hell") == 1
+    ), "no unicode symbols, just ASCII"
+    assert (
+        sz.edit_distance_unicode("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓") == 3
+    ), "add 3 whitespaces in Chinese"
+    assert sz.edit_distance_unicode("💖", "💗") == 1
+
+    assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1, "insert Beta"
+    assert (
+        sz.edit_distance_unicode("école", "école") == 2
+    ), "etter 'é' as a single character vs 'e' + '´'"
+    assert (
+        sz.edit_distance_unicode("façade", "facade") == 1
+    ), "'ç' with cedilla vs. plain"
+    assert (
+        sz.edit_distance_unicode("Schön", "Scho\u0308n") == 2
+    ), "'ö' represented as 'o' + '¨'"
+    assert (
+        sz.edit_distance_unicode("München", "Muenchen") == 2
+    ), "German with umlaut vs. transcription"
+    assert sz.edit_distance_unicode("こんにちは世界", "こんばんは世界") == 2
+
+
 @pytest.mark.repeat(30)
 @pytest.mark.parametrize("first_length", [20, 100])
 @pytest.mark.parametrize("second_length", [20, 100])
@@ -281,6 +346,12 @@ def test_edit_distance_random(first_length: int, second_length: int):
 @pytest.mark.parametrize("first_length", [20, 100])
 @pytest.mark.parametrize("second_length", [20, 100])
 def test_alignment_score_random(first_length: int, second_length: int):
+    # Try importing NumPy to compute the Levenshtein distances more efficiently
+    try:
+        import numpy as np
+    except ImportError:
+        pytest.skip("NumPy is not installed")
+
     a = get_random_string(length=first_length)
     b = get_random_string(length=second_length)
     character_substitutions = np.zeros((256, 256), dtype=np.int8)
