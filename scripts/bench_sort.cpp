@@ -6,7 +6,8 @@
  *  This file is the sibling of `bench_similarity.cpp`, `bench_search.cpp` and `bench_token.cpp`.
  *  It accepts a file with a list of words, and benchmarks the sorting operations on them.
  */
-#include <memory> // `std::memcpy`
+#include <memory>  // `std::memcpy`
+#include <numeric> // `std::iota`
 
 #if __linux__ && defined(_GNU_SOURCE)
 #include <stdlib.h> // `qsort_r`
