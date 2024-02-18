@@ -41,13 +41,17 @@
 
 /**
  *  @brief  A misaligned load can be - trying to fetch eight consecutive bytes from an address
- *          that is not divisible by eight.
+ *          that is not divisible by eight. On x86 enabled by default. On ARM it's not.
  *
  *  Most platforms support it, but there is no industry standard way to check for those.
  *  This value will mostly affect the performance of the serial (SWAR) backend.
  */
 #ifndef SZ_USE_MISALIGNED_LOADS
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#define SZ_USE_MISALIGNED_LOADS (1) // true or false
+#else
 #define SZ_USE_MISALIGNED_LOADS (0) // true or false
+#endif
 #endif
 
 /**
@@ -102,6 +106,19 @@
 #define SZ_DEBUG (1)
 #else
 #define SZ_DEBUG (0)
+#endif
+#endif
+
+/**
+ *  @brief  Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops.
+ *          On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
+ *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
+ */
+#ifndef SZ_SWAR_THRESHOLD
+#if SZ_DEBUG
+#define SZ_SWAR_THRESHOLD (8u) // 8 bytes in debug builds
+#else
+#define SZ_SWAR_THRESHOLD (24u) // 24 bytes in release builds
 #endif
 #endif
 
@@ -2838,15 +2855,6 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
  *  Serial implementation of string class operations.
  */
 #pragma region Serial Implementation for the String Class
-
-/**
- *  @brief  Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops.
- *          On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
- *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
- */
-#ifndef SZ_SWAR_THRESHOLD
-#define SZ_SWAR_THRESHOLD (24u) // bytes
-#endif
 
 SZ_PUBLIC sz_bool_t sz_string_is_on_stack(sz_string_t const *string) {
     // It doesn't matter if it's on stack or heap, the pointer location is the same.
