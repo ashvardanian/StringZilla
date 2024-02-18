@@ -540,6 +540,13 @@ static void test_api_readonly_extensions() {
     assert((str("hello")[{-100, -100}] == ""));
 
     // Computing edit-distances.
+    assert(sz::hamming_distance(str("hello"), str("hello")) == 0);
+    assert(sz::hamming_distance(str("hello"), str("hell")) == 1);
+    assert(sz::hamming_distance(str("abc"), str("adc")) == 1);                // one substitution
+    assert(sz::hamming_distance(str("αβγδ"), str("αxxγδ")) == 2);             // replace Beta UTF8 codepoint
+    assert(sz::hamming_distance_utf8(str("abcdefgh"), str("_bcdefg_")) == 2); // replace ASCI prefix and suffix
+    assert(sz::hamming_distance_utf8(str("αβγδ"), str("αγγδ")) == 1);         // replace Beta UTF8 codepoint
+
     assert(sz::edit_distance(str("hello"), str("hello")) == 0);
     assert(sz::edit_distance(str("hello"), str("hell")) == 1);
     assert(sz::edit_distance(str(""), str("")) == 0);

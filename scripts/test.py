@@ -110,6 +110,12 @@ def test_unit_globals():
     assert sz.count("aaaaa", "aa") == 2
     assert sz.count("aaaaa", "aa", allowoverlap=True) == 4
 
+    assert sz.hamming_distance("aaa", "aaa") == 0
+    assert sz.hamming_distance("aaa", "bbb") == 3
+    assert sz.hamming_distance("abababab", "aaaaaaaa") == 4
+    assert sz.hamming_distance("abababab", "aaaaaaaa", 2) == 2
+    assert sz.hamming_distance("abababab", "aaaaaaaa", bound=2) == 2
+
     assert sz.edit_distance("aaa", "aaa") == 0
     assert sz.edit_distance("aaa", "bbb") == 3
     assert sz.edit_distance("abababab", "aaaaaaaa") == 4
@@ -275,6 +281,56 @@ def test_edit_distance_insertions(max_edit_distance: int):
         target_offset = randint(0, len(b) - 1)
         b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
         assert sz.edit_distance(a, b, bound=200) == i + 1
+
+
+def test_edit_distances():
+
+    assert sz.hamming_distance("hello", "hello") == 0
+    assert sz.hamming_distance("hello", "hell") == 1
+    assert sz.hamming_distance("abc", "adc") == 1, "one substitution"
+    assert sz.hamming_distance("αβγδ", "αxxγδ") == 2, "replace Beta UTF8 codepoint"
+    assert (
+        sz.hamming_distance_unicode("abcdefgh", "_bcdefg_") == 2
+    ), "replace ASCI prefix and suffix"
+    assert (
+        sz.hamming_distance_unicode("αβγδ", "αγγδ") == 1
+    ), "replace Beta UTF8 codepoint"
+
+    assert sz.edit_distance("hello", "hello") == 0
+    assert sz.edit_distance("hello", "hell") == 1
+    assert sz.edit_distance("", "") == 0
+    assert sz.edit_distance("", "abc") == 3
+    assert sz.edit_distance("abc", "") == 3
+    assert sz.edit_distance("abc", "ac") == 1, "one deletion"
+    assert sz.edit_distance("abc", "a_bc") == 1, "one insertion"
+    assert sz.edit_distance("abc", "adc") == 1, "one substitution"
+    assert (
+        sz.edit_distance("ggbuzgjux{}l", "gbuzgjux{}l") == 1
+    ), "one insertion (prepended)"
+    assert sz.edit_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == 14
+
+    assert (
+        sz.edit_distance_unicode("hello", "hell") == 1
+    ), "no unicode symbols, just ASCII"
+    assert (
+        sz.edit_distance_unicode("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓") == 3
+    ), "add 3 whitespaces in Chinese"
+    assert sz.edit_distance_unicode("💖", "💗") == 1
+
+    assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1, "insert Beta"
+    assert (
+        sz.edit_distance_unicode("école", "école") == 2
+    ), "etter 'é' as a single character vs 'e' + '´'"
+    assert (
+        sz.edit_distance_unicode("façade", "facade") == 1
+    ), "'ç' with cedilla vs. plain"
+    assert (
+        sz.edit_distance_unicode("Schön", "Scho\u0308n") == 2
+    ), "'ö' represented as 'o' + '¨'"
+    assert (
+        sz.edit_distance_unicode("München", "Muenchen") == 2
+    ), "German with umlaut vs. transcription"
+    assert sz.edit_distance_unicode("こんにちは世界", "こんばんは世界") == 2
 
 
 @pytest.mark.repeat(30)

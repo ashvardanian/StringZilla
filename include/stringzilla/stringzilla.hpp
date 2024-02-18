@@ -3517,6 +3517,46 @@ typename concatenation_result<first_type, second_type, following_types...>::type
 }
 
 /**
+ *  @brief  Calculates the Hamming edit distance in @b bytes between two strings.
+ *  @see    sz_edit_distance
+ */
+template <typename char_type_>
+std::size_t hamming_distance(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
+                             std::size_t bound = 0) noexcept {
+    return sz_hamming_distance(a.data(), a.size(), b.data(), b.size(), bound);
+}
+
+/**
+ *  @brief  Calculates the Hamming edit distance in @b bytes between two strings.
+ *  @see    sz_edit_distance
+ */
+template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
+std::size_t hamming_distance(basic_string<char_type_, allocator_type_> const &a,
+                             basic_string<char_type_, allocator_type_> const &b, std::size_t bound = 0) noexcept {
+    return ashvardanian::stringzilla::hamming_distance(a.view(), b.view(), bound);
+}
+
+/**
+ *  @brief  Calculates the Hamming edit distance in @b unicode codepoints between two strings.
+ *  @see    sz_hamming_distance_utf8
+ */
+template <typename char_type_>
+std::size_t hamming_distance_utf8(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
+                                  std::size_t bound = 0) noexcept {
+    return sz_hamming_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound);
+}
+
+/**
+ *  @brief  Calculates the Hamming edit distance in @b unicode codepoints between two strings.
+ *  @see    sz_edit_distance
+ */
+template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
+std::size_t hamming_distance_utf8(basic_string<char_type_, allocator_type_> const &a,
+                                  basic_string<char_type_, allocator_type_> const &b, std::size_t bound = 0) noexcept {
+    return ashvardanian::stringzilla::hamming_distance_utf8(a.view(), b.view(), bound);
+}
+
+/**
  *  @brief  Calculates the Levenshtein edit distance in @b bytes between two strings.
  *  @see    sz_edit_distance
  */

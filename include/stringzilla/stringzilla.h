@@ -749,6 +749,46 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
 #pragma region String Similarity Measures API
 
 /**
+ *  @brief  Computes the Hamming distance between two strings - number of not matching characters.
+ *          Difference in length is is counted as a mismatch.
+ *
+ *  @param a        First string to compare.
+ *  @param a_length Number of bytes in the first string.
+ *  @param b        Second string to compare.
+ *  @param b_length Number of bytes in the second string.
+ *
+ *  @param bound    Upper bound on the distance, that allows us to exit early.
+ *                  If zero is passed, the maximum possible distance will be equal to the length of the longer input.
+ *  @return         Unsigned integer for the distance, the `bound` if was exceeded.
+ *
+ *  @see    sz_hamming_distance_utf8
+ *  @see    https://en.wikipedia.org/wiki/Hamming_distance
+ */
+SZ_PUBLIC sz_size_t sz_hamming_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                        sz_size_t bound);
+
+/**
+ *  @brief  Computes the Hamming distance between two @b UTF8 strings - number of not matching characters.
+ *          Difference in length is is counted as a mismatch.
+ *
+ *  @param a        First string to compare.
+ *  @param a_length Number of bytes in the first string.
+ *  @param b        Second string to compare.
+ *  @param b_length Number of bytes in the second string.
+ *
+ *  @param bound    Upper bound on the distance, that allows us to exit early.
+ *                  If zero is passed, the maximum possible distance will be equal to the length of the longer input.
+ *  @return         Unsigned integer for the distance, the `bound` if was exceeded.
+ *
+ *  @see    sz_hamming_distance
+ *  @see    https://en.wikipedia.org/wiki/Hamming_distance
+ */
+SZ_PUBLIC sz_size_t sz_hamming_distance_utf8(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                             sz_size_t bound);
+
+typedef sz_size_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t);
+
+/**
  *  @brief  Computes the Levenshtein edit-distance between two strings using the Wagner-Fisher algorithm.
  *          Similar to the Needleman-Wunsch alignment algorithm. Often used in fuzzy string matching.
  *
@@ -776,7 +816,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_
                                             sz_size_t bound, sz_memory_allocator_t *alloc);
 
 /**
- *  @brief  Computes the Levenshtein edit-distance between two UTF8 strings.
+ *  @brief  Computes the Levenshtein edit-distance between two @b UTF8 strings.
  *          Unlike `sz_edit_distance`, reports the distance in Unicode codepoints, and not in bytes.
  *
  *  @param a        First string to compare.
@@ -2225,46 +2265,73 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
 }
 
 /**
+ *  @brief  Describes the length of a UTF8 character / codepoint / rune in bytes.
+ */
+typedef enum {
+    sz_utf8_invalid_k = 0,     //!< Invalid UTF8 character.
+    sz_utf8_rune_1byte_k = 1,  //!< 1-byte UTF8 character.
+    sz_utf8_rune_2bytes_k = 2, //!< 2-byte UTF8 character.
+    sz_utf8_rune_3bytes_k = 3, //!< 3-byte UTF8 character.
+    sz_utf8_rune_4bytes_k = 4, //!< 4-byte UTF8 character.
+} sz_rune_length_t;
+
+typedef sz_u32_t sz_rune_t;
+
+/**
+ *  @brief  Extracts just one UTF8 codepoint from a UTF8 string into a 32-bit unsigned integer.
+ */
+SZ_INTERNAL void _sz_extract_utf8_rune(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *code_length) {
+    sz_u8_t const *current = (sz_u8_t const *)utf8;
+    sz_u8_t leading_byte = *current++;
+    sz_rune_t ch;
+    sz_rune_length_t ch_length;
+
+    // TODO: This can be made entirely branchless uing 32-bit SWAR.
+    if (leading_byte < 0x80) {
+        // Single-byte rune (0xxxxxxx)
+        ch = leading_byte;
+        ch_length = sz_utf8_rune_1byte_k;
+    }
+    else if ((leading_byte & 0xE0) == 0xC0) {
+        // Two-byte rune (110xxxxx 10xxxxxx)
+        ch = (leading_byte & 0x1F) << 6;
+        ch |= (*current++ & 0x3F);
+        ch_length = sz_utf8_rune_2bytes_k;
+    }
+    else if ((leading_byte & 0xF0) == 0xE0) {
+        // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
+        ch = (leading_byte & 0x0F) << 12;
+        ch |= (*current++ & 0x3F) << 6;
+        ch |= (*current++ & 0x3F);
+        ch_length = sz_utf8_rune_3bytes_k;
+    }
+    else if ((leading_byte & 0xF8) == 0xF0) {
+        // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
+        ch = (leading_byte & 0x07) << 18;
+        ch |= (*current++ & 0x3F) << 12;
+        ch |= (*current++ & 0x3F) << 6;
+        ch |= (*current++ & 0x3F);
+        ch_length = sz_utf8_rune_4bytes_k;
+    }
+    else {
+        // Invalid UTF8 rune.
+        ch = 0;
+        ch_length = sz_utf8_invalid_k;
+    }
+    *code = ch;
+    *code_length = ch_length;
+}
+
+/**
  *  @brief  Exports a UTF8 string into a UTF32 buffer.
  *          ! The result is undefined id the UTF8 string is corrputed.
  *  @return The length in the number of codepoints.
  */
-SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_length, sz_u32_t *utf32) {
-    sz_u8_t const *current = (sz_u8_t const *)utf8;
-    sz_u8_t const *end = (sz_u8_t const *)utf8 + utf8_length;
+SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_length, sz_rune_t *utf32) {
+    sz_cptr_t const end = utf8 + utf8_length;
     sz_size_t count = 0;
-
-    while (current < end) {
-        sz_u32_t ch = 0;
-        sz_u8_t leading_byte = *current++;
-
-        if (leading_byte < 0x80) {
-            // Single-byte character (0xxxxxxx)
-            ch = leading_byte;
-        }
-        else if ((leading_byte & 0xE0) == 0xC0) {
-            // Two-byte character (110xxxxx 10xxxxxx)
-            ch = (leading_byte & 0x1F) << 6;
-            ch |= (*current++ & 0x3F);
-        }
-        else if ((leading_byte & 0xF0) == 0xE0) {
-            // Three-byte character (1110xxxx 10xxxxxx 10xxxxxx)
-            ch = (leading_byte & 0x0F) << 12;
-            ch |= (*current++ & 0x3F) << 6;
-            ch |= (*current++ & 0x3F);
-        }
-        else if ((leading_byte & 0xF8) == 0xF0) {
-            // Four-byte character (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-            ch = (leading_byte & 0x07) << 18;
-            ch |= (*current++ & 0x3F) << 12;
-            ch |= (*current++ & 0x3F) << 6;
-            ch |= (*current++ & 0x3F);
-        }
-
-        // Store the decoded character into the UTF-32 buffer
-        *utf32++ = ch;
-        count++;
-    }
+    sz_rune_length_t rune_length;
+    for (; utf8 != end; utf8 += rune_length, utf32++, count++) _sz_extract_utf8_rune(utf8, utf32, &rune_length);
     return count;
 }
 
@@ -2308,7 +2375,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     // and use it to allocate a larger buffer to decode UTF8.
     if ((can_be_unicode == sz_true_k) &&
         (sz_isascii(longer, longer_length) == sz_false_k || sz_isascii(shorter, shorter_length) == sz_false_k)) {
-        buffer_length += (shorter_length + longer_length) * sizeof(sz_u32_t);
+        buffer_length += (shorter_length + longer_length) * sizeof(sz_rune_t);
     }
     else { can_be_unicode = sz_false_k; }
 
@@ -2318,8 +2385,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
 
     // Let's export the UTF8 sequence into the newly allocated buffer at the end.
     if (can_be_unicode == sz_true_k) {
-        sz_u32_t *const longer_utf32 = (sz_u32_t *)(buffer + sizeof(_distance_t) * (n * 2));
-        sz_u32_t *const shorter_utf32 = longer_utf32 + longer_length;
+        sz_rune_t *const longer_utf32 = (sz_rune_t *)(buffer + sizeof(_distance_t) * (n * 2));
+        sz_rune_t *const shorter_utf32 = longer_utf32 + longer_length;
         // Export the UTF8 sequences into the newly allocated buffer.
         longer_length = _sz_export_utf8_to_utf32(longer, longer_length, longer_utf32);
         shorter_length = _sz_export_utf8_to_utf32(shorter, shorter_length, shorter_utf32);
@@ -2405,11 +2472,11 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
 
     // Dispatch the actual computation.
     if (!bound) {
-        if (can_be_unicode == sz_true_k) { _wagner_fisher_unbounded(sz_size_t, sz_u32_t); }
+        if (can_be_unicode == sz_true_k) { _wagner_fisher_unbounded(sz_size_t, sz_rune_t); }
         else { _wagner_fisher_unbounded(sz_size_t, sz_u8_t); }
     }
     else {
-        if (can_be_unicode == sz_true_k) { _wagner_fisher_bounded(sz_size_t, sz_u32_t); }
+        if (can_be_unicode == sz_true_k) { _wagner_fisher_bounded(sz_size_t, sz_rune_t); }
         else { _wagner_fisher_bounded(sz_size_t, sz_u8_t); }
     }
 }
@@ -4876,6 +4943,8 @@ SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_
     sz_bool_t fingerprint_length_is_power_of_two = (sz_bool_t)((fingerprint_bytes & (fingerprint_bytes - 1)) == 0);
     sz_string_view_t fingerprint_buffer = {fingerprint, fingerprint_bytes};
 
+    // There are several issues related to the fingerprinting algorithm.
+    // First, the memory traversal order is important.
     // https://blog.stuffedcow.net/2015/08/pagewalk-coherence/
 
     // In most cases the fingerprint length will be a power of two.
@@ -4883,6 +4952,74 @@ SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_
         sz_hashes(start, length, window_length, 1, _sz_hashes_fingerprint_non_pow2_callback, &fingerprint_buffer);
     else
         sz_hashes(start, length, window_length, 1, _sz_hashes_fingerprint_pow2_callback, &fingerprint_buffer);
+}
+
+SZ_PUBLIC sz_size_t sz_hamming_distance( //
+    sz_cptr_t a, sz_size_t a_length,     //
+    sz_cptr_t b, sz_size_t b_length,     //
+    sz_size_t bound) {
+
+    sz_size_t const min_length = sz_min_of_two(a_length, b_length);
+    sz_size_t const max_length = sz_max_of_two(a_length, b_length);
+    sz_cptr_t const a_end = a + min_length;
+    bound = bound == 0 ? max_length : bound;
+
+    // Walk through both strings using SWAR and counting the number of differing characters.
+    sz_size_t distance = max_length - min_length;
+#if SZ_USE_MISALIGNED_LOADS && !SZ_DETECT_BIG_ENDIAN
+    if (min_length >= SZ_SWAR_THRESHOLD) {
+        sz_u64_vec_t a_vec, b_vec, match_vec;
+        for (; a + 8 <= a_end && distance < bound; a += 8, b += 8) {
+            a_vec.u64 = sz_u64_load(a).u64;
+            b_vec.u64 = sz_u64_load(b).u64;
+            match_vec = _sz_u64_each_byte_equal(a_vec, b_vec);
+            distance += sz_u64_popcount((~match_vec.u64) & 0x8080808080808080ull);
+        }
+    }
+#endif
+
+    for (; a != a_end && distance < bound; ++a, ++b) { distance += (*a != *b); }
+    return sz_min_of_two(distance, bound);
+}
+
+SZ_PUBLIC sz_size_t sz_hamming_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length,          //
+    sz_cptr_t b, sz_size_t b_length,          //
+    sz_size_t bound) {
+
+    sz_cptr_t const a_end = a + a_length;
+    sz_cptr_t const b_end = b + b_length;
+    sz_size_t distance = 0;
+
+    sz_rune_t a_rune, b_rune;
+    sz_rune_length_t a_rune_length, b_rune_length;
+
+    if (bound) {
+        for (; a < a_end && b < b_end && distance < bound; a += a_rune_length, b += b_rune_length) {
+            _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
+            _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+            distance += (a_rune != b_rune);
+        }
+        // If one string has more runes, we need to go through the tail.
+        if (distance < bound) {
+            for (; a < a_end && distance < bound; a += a_rune_length, ++distance)
+                _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
+
+            for (; b < b_end && distance < bound; b += b_rune_length, ++distance)
+                _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+        }
+    }
+    else {
+        for (; a < a_end && b < b_end; a += a_rune_length, b += b_rune_length) {
+            _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
+            _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+            distance += (a_rune != b_rune);
+        }
+        // If one string has more runes, we need to go through the tail.
+        for (; a < a_end; a += a_rune_length, ++distance) _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
+        for (; b < b_end; b += b_rune_length, ++distance) _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+    }
+    return distance;
 }
 
 SZ_PUBLIC sz_size_t sz_edit_distance_utf8( //
