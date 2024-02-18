@@ -122,11 +122,14 @@ function(set_compiler_flags target cpp_standard target_arch)
     )
   endif()
 
-  # Maximum warnings level & warnings as error
+  # Maximum warnings level & warnings as error.
+  # MVC uses numeric values:
+  # > 4068 for "unknown pragmas".
+  # > 4146 for "unary minus operator applied to unsigned type, result still unsigned".
   target_compile_options(
     ${target}
     PRIVATE
-    "$<$<CXX_COMPILER_ID:MSVC>:/STOP>" # For MSVC, /WX would have been sufficient
+    "$<$<CXX_COMPILER_ID:MSVC>:/STOP;/wd4068;/wd4146>" # For MSVC, /WX would have been sufficient
     "$<$<CXX_COMPILER_ID:GNU>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function>"
     "$<$<CXX_COMPILER_ID:Clang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
     "$<$<CXX_COMPILER_ID:AppleClang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"

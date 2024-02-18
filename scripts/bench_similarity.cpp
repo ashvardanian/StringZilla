@@ -25,6 +25,7 @@ static void free_from_vector(void *buffer, sz_size_t length, void *handle) { sz_
 tracked_binary_functions_t distance_functions() {
     // Populate the unary substitutions matrix
     static std::vector<std::int8_t> costs = unary_substitution_costs();
+    sz_error_cost_t const *costs_ptr = reinterpret_cast<sz_error_cost_t const *>(costs.data());
 
     // Two rows of the Levenshtein matrix will occupy this much:
     sz_memory_allocator_t alloc;
@@ -40,14 +41,14 @@ tracked_binary_functions_t distance_functions() {
             return function(a.data(), a.length(), b.data(), b.length(), (sz_size_t)0, &alloc);
         });
     };
-    auto wrap_sz_scoring = [alloc](auto function) mutable -> binary_function_t {
-        return binary_function_t([function, alloc](std::string_view a, std::string_view b) mutable -> std::size_t {
-            sz_memory_allocator_t *alloc_ptr = &alloc;
-            sz_ssize_t signed_result =
-                function(a.data(), a.length(), b.data(), b.length(),
-                         reinterpret_cast<sz_error_cost_t const *>(costs.data()), (sz_error_cost_t)-1, alloc_ptr);
-            return (std::size_t)(-signed_result);
-        });
+    auto wrap_sz_scoring = [alloc, costs_ptr](auto function) mutable -> binary_function_t {
+        return binary_function_t(
+            [function, alloc, costs_ptr](std::string_view a, std::string_view b) mutable -> std::size_t {
+                sz_memory_allocator_t *alloc_ptr = &alloc;
+                sz_ssize_t signed_result =
+                    function(a.data(), a.length(), b.data(), b.length(), costs_ptr, (sz_error_cost_t)-1, alloc_ptr);
+                return (std::size_t)(-signed_result);
+            });
     };
     tracked_binary_functions_t result = {
         {"naive", wrap_baseline},
