@@ -136,6 +136,63 @@ cppcheck --project=build_artifacts/compile_commands.json --enable=all
 clang-tidy-11 -p build_artifacts
 ```
 
+### Testing in Docker
+
+It might be a good idea to check the compatibility against the most popular Linux distributions.
+Docker is the goto-choice for that.
+
+#### Alpine
+
+Alpine is one of the most popular Linux distributions for containers, due to it's size.
+The base image is only ~3 MB, and it's based on musl libc, which is different from glibc.
+
+```bash
+sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla alpine:latest /bin/ash
+cd /workspace/StringZilla
+apk add --update make cmake g++ gcc
+cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
+cmake --build ./build_debug --config Debug
+./build_debug/stringzilla_test_cpp20
+```
+
+#### Amazon Linux
+
+For CentOS-based __Amazon Linux 2023__:
+
+```bash
+sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2023 bash
+cd /workspace/StringZilla
+yum install -y make cmake3 gcc g++
+cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_debug
+cmake3 --build ./build_debug --config Debug --target stringzilla_test_cpp11
+build_debug/stringzilla_test_cpp11
+```
+
+The CentOS-based __Amazon Linux 2__ is still used in older AWS Lambda functions.
+Sadly, the newest GCC version it supports is 10, and it can't handle AVX-512 instructions.
+
+```bash
+sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2 bash
+cd /workspace/StringZilla
+yum install -y make cmake3 gcc10 gcc10-c++
+cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_debug
+cmake3 --build ./build_debug --config Debug --target stringzilla_test_cpp11
+build_debug/stringzilla_test_cpp11
+```
+
+> [!CAUTION]
+> 
+> Even with GCC 10 the tests compilation will fail, as the STL implementation of the `insert` function doesn't conform to standard.
+> The `s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1)` expression is illformed, as the `std::string::insert` return `void`.
+
+---
+
+Don't forget to clean up Docker afterwards.
+
+```bash
+docker system prune -a --volumes
+```
+
 ### Benchmarking
 
 For benchmarks, you can use the following commands:
@@ -235,8 +292,10 @@ Don't forget to use the right [CLI arguments][cibuildwheel-cli] to avoid overloa
 ```bash
 cibuildwheel
 cibuildwheel --platform linux                   # works on any OS and builds all Linux backends
-cibuildwheel --platform linux --target i686     # 32-bit Linux
-cibuildwheel --platform linux --target s390x    # emulating big-endian IBM Z
+cibuildwheel --platform linux --archs x86_64    # 64-bit x86, the most common on desktop and servers
+cibuildwheel --platform linux --archs aarch64   # 64-bit Arm for mobile devices, Apple M-series, and AWS Graviton
+cibuildwheel --platform linux --archs i686      # 32-bit Linux
+cibuildwheel --platform linux --archs s390x     # emulating big-endian IBM Z
 cibuildwheel --platform macos                   # works only on MacOS
 cibuildwheel --platform windows                 # works only on Windows
 ```
