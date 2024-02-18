@@ -3466,7 +3466,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_
 SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
     if (n_length == 1) return sz_find_byte_avx2(h, h_length, n);
 
     // Pick the parts of the needle that are worth comparing.
@@ -3501,7 +3501,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
 SZ_PUBLIC sz_cptr_t sz_rfind_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
     if (n_length == 1) return sz_rfind_byte_avx2(h, h_length, n);
 
     // Pick the parts of the needle that are worth comparing.
@@ -3857,13 +3857,13 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
         if (mask) return h + sz_u64_ctz(mask);
     }
 
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
     if (n_length == 1) return sz_find_byte_avx512(h, h_length, n);
 
     // Pick the parts of the needle that are worth comparing.
@@ -3913,7 +3913,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
             matches &= matches - 1;
         }
     }
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
@@ -3936,13 +3936,13 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cpt
         if (mask) return h + 64 - sz_u64_clz(mask) - 1;
     }
 
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
     if (n_length == 1) return sz_rfind_byte_avx512(h, h_length, n);
 
     // Pick the parts of the needle that are worth comparing.
@@ -3998,7 +3998,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
         }
     }
 
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
@@ -4347,7 +4347,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_
         else { text += load_length, length -= load_length; }
     }
 
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
@@ -4402,7 +4402,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz
         else { length -= load_length; }
     }
 
-    return SZ_NULL;
+    return SZ_NULL_CHAR;
 }
 
 /**
@@ -4725,7 +4725,7 @@ SZ_PUBLIC sz_u64_t _sz_find_charset_neon_register(sz_u128_vec_t h_vec, uint8x16_
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
     if (n_length == 1) return sz_find_byte_neon(h, h_length, n);
 
     // Pick the parts of the needle that are worth comparing.
@@ -4763,7 +4763,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
 SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
-    if (h_length < n_length || !n_length) return SZ_NULL;
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
     if (n_length == 1) return sz_rfind_byte_neon(h, h_length, n);
 
     // Pick the parts of the needle that are worth comparing.
