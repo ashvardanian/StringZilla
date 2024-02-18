@@ -1593,6 +1593,16 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
  */
 SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     sz_cptr_t const a_end = a + length;
+#if SZ_USE_MISALIGNED_LOADS
+    if (length >= SZ_SWAR_THRESHOLD) {
+        sz_u64_vec_t a_vec, b_vec;
+        for (; a + 8 <= a_end; a += 8, b += 8) {
+            a_vec = sz_u64_load(a);
+            b_vec = sz_u64_load(b);
+            if (a_vec.u64 != b_vec.u64) return sz_false_k;
+        }
+    }
+#endif
     while (a != a_end && *a == *b) a++, b++;
     return (sz_bool_t)(a_end == a);
 }
