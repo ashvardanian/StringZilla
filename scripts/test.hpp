@@ -31,9 +31,26 @@ inline std::mt19937 &global_random_generator() {
     return generator;
 }
 
+/**
+ *  @brief  A uniform distribution of characters, with a given alphabet size.
+ *          The alphabet size is the number of distinct characters in the distribution.
+ *
+ *  We can't use `std::uniform_int_distribution<char>` because `char` overload is not supported by some platforms.
+ *  MSVC, for example, requires one of short, int, long, long long, unsigned short, unsigned int, unsigned long,
+ *  or unsigned long long
+ */
+struct uniform_uint8_distribution_t {
+    std::uniform_int_distribution<std::uint32_t> distribution;
+    inline uniform_uint8_distribution_t(std::size_t alphabet_size = 255)
+        : distribution(1, static_cast<std::uint32_t>(alphabet_size)) {}
+    template <typename generator_type>
+    std::uint8_t operator()(generator_type &&generator) {
+        return static_cast<std::uint8_t>(distribution(generator));
+    }
+};
+
 inline void randomize_string(char *string, std::size_t length, char const *alphabet, std::size_t cardinality) {
-    using max_alphabet_size_t = std::uint8_t;
-    std::uniform_int_distribution<max_alphabet_size_t> distribution(1, static_cast<max_alphabet_size_t>(cardinality));
+    uniform_uint8_distribution_t distribution(cardinality);
     std::generate(string, string + length, [&]() -> char { return alphabet[distribution(global_random_generator())]; });
 }
 

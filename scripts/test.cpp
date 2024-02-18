@@ -106,7 +106,7 @@ static void test_memory_utilities() {
     char body_sz[size];
 
     auto &gen = global_random_generator();
-    std::uniform_int_distribution<char> distribution;
+    uniform_uint8_distribution_t distribution;
     std::generate(body_stl, body_stl + size, [&]() { return distribution(gen); });
     std::copy(body_stl, body_stl + size, body_sz);
 
