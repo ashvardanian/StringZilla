@@ -3155,7 +3155,7 @@ SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) 
 
 SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_MISALIGNED_LOADS
-    while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, length -= 8;
+    while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)source, target += 8, source += 8, length -= 8;
 #endif
     while (length--) *(target++) = *(source++);
 }
@@ -3172,7 +3172,7 @@ SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     // but older CPUs may predict and fetch forward-passes better.
     if (target < source || target >= source + length) {
 #if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, length -= 8;
+        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)(source), target += 8, source += 8, length -= 8;
 #endif
         while (length--) *(target++) = *(source++);
     }
@@ -3180,7 +3180,7 @@ SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         // Jump to the end and walk backwards.
         target += length, source += length;
 #if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)(target -= 8) = *(sz_u64_t *)(source -= 8), length -= 8;
+        while (length >= 8) *(sz_u64_t *)(target -= 8) = *(sz_u64_t const *)(source -= 8), length -= 8;
 #endif
         while (length--) *(--target) = *(--source);
     }
