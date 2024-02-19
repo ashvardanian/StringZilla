@@ -1260,7 +1260,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
 
 // Sadly, when building Win32 images, we can't use the `_tzcnt_u64`, `_lzcnt_u64`,
 // `_BitScanForward64`, or `_BitScanReverse64` intrinsics. For now it's a simple `for`-loop.
-// In the future we can switch to a more efficient DeBrujin's algorithm.
+// In the future we can switch to a more efficient De Bruijn's algorithm.
 // https://www.chessprogramming.org/BitScan
 // https://www.chessprogramming.org/De_Bruijn_Sequence
 // https://gist.github.com/resilar/e722d4600dbec9752771ab4c9d47044f
@@ -2308,7 +2308,7 @@ SZ_INTERNAL void _sz_extract_utf8_rune(sz_cptr_t utf8, sz_rune_t *code, sz_rune_
     sz_rune_t ch;
     sz_rune_length_t ch_length;
 
-    // TODO: This can be made entirely branchless uing 32-bit SWAR.
+    // TODO: This can be made entirely branchless using 32-bit SWAR.
     if (leading_byte < 0x80) {
         // Single-byte rune (0xxxxxxx)
         ch = leading_byte;
@@ -2346,7 +2346,7 @@ SZ_INTERNAL void _sz_extract_utf8_rune(sz_cptr_t utf8, sz_rune_t *code, sz_rune_
 
 /**
  *  @brief  Exports a UTF8 string into a UTF32 buffer.
- *          ! The result is undefined id the UTF8 string is corrputed.
+ *          ! The result is undefined id the UTF8 string is corrupted.
  *  @return The length in the number of codepoints.
  */
 SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_length, sz_rune_t *utf32) {
@@ -2425,7 +2425,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     _distance_t *current_distances = previous_distances + n;                                                          \
     /*  Initialize the first row of the Levenshtein matrix with `iota`-style arithmetic progression. */               \
     for (_distance_t idx_shorter = 0; idx_shorter != n; ++idx_shorter) previous_distances[idx_shorter] = idx_shorter; \
-    /* The main loop of the lagorithm with quadratic complexity. */                                                   \
+    /* The main loop of the algorithm with quadratic complexity. */                                                   \
     for (_distance_t idx_longer = 0; idx_longer != longer_length; ++idx_longer) {                                     \
         _char_t const longer_char = longer_chars[idx_longer];                                                         \
         /* Using pure pointer arithmetic is faster than iterating with an index. */                                   \
@@ -3399,7 +3399,7 @@ SZ_PUBLIC void sz_sort_recursion( //
     //        if (!(sequence->order[i] & mask)) sz_u64_swap(sequence->order + i, sequence->order + split), ++split;
     //
     // This, however, doesn't take into account the high relative cost of writes and swaps.
-    // To cercumvent that, we can first count the total number entries to be mapped into either part.
+    // To circumvent that, we can first count the total number entries to be mapped into either part.
     // And then walk through both parts, swapping the entries that are in the wrong part.
     // This would often lead to ~15% performance gain.
     sz_size_t count_with_bit_set = 0;

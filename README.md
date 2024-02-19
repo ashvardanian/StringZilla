@@ -366,8 +366,8 @@ count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, al
 
 ```py
 assert sz.edit_distance("apple", "aple") == 1 # skip one ASCII character
-assert sz.edit_distance("αβγδ", "αγδ") == 2 # skip two bytes forming one codepoint
-assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1 # one unicode codepoint
+assert sz.edit_distance("αβγδ", "αγδ") == 2 # skip two bytes forming one rune
+assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1 # one unicode rune
 ```
 
 Several Python libraries provide edit distance computation.

@@ -117,7 +117,6 @@ typedef struct sz_implementations_t {
     sz_find_set_t find_from_set;
     sz_find_set_t rfind_from_set;
 
-    // TODO: Upcoming vectorization
     sz_edit_distance_t edit_distance;
     sz_alignment_score_t alignment_score;
     sz_hashes_t hashes;
