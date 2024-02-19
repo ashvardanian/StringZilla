@@ -231,7 +231,20 @@
     "stddef.h": "c",
     "immintrin.h": "c",
     "xiosbase": "cpp",
-    "xstring": "cpp"
+    "xstring": "cpp",
+    "xfacet": "cpp",
+    "xhash": "cpp",
+    "xlocale": "cpp",
+    "xlocbuf": "cpp",
+    "xlocinfo": "cpp",
+    "xlocmes": "cpp",
+    "xlocmon": "cpp",
+    "xlocnum": "cpp",
+    "xloctime": "cpp",
+    "xmemory": "cpp",
+    "xtr1common": "cpp",
+    "xtree": "cpp",
+    "xutility": "cpp"
   },
   "python.pythonPath": "~/miniconda3/bin/python"
 }

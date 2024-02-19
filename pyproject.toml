@@ -33,8 +33,10 @@ build-verbosity = 0
 # The `i686` is 32-bit x86, and `x86_64` is 64-bit x86.
 archs = ["all"]
 
-# Skip PyPy builds... we are implementing a CPython binding after all :)
-skip = ["pp*"]
+# Add "pp*" to skip PyPy builds, but they should work fine these days :)
+# https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip
+# https://cibuildwheel.readthedocs.io/en/stable/#what-does-it-do
+skip = []
 
 [tool.cibuildwheel.linux]
 before-build = ["rm -rf {project}/build"]

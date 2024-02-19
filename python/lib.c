@@ -1143,6 +1143,64 @@ static PyObject *Str_edit_distance_unicode(PyObject *self, PyObject *args, PyObj
     return _Str_edit_distance(self, args, kwargs, &sz_edit_distance_utf8);
 }
 
+static PyObject *_Str_hamming_distance(PyObject *self, PyObject *args, PyObject *kwargs,
+                                       sz_hamming_distance_t function) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 2) {
+        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *str1_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *str2_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+    PyObject *bound_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+
+    if (kwargs) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwargs, &pos, &key, &value))
+            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0) {
+                if (bound_obj) {
+                    PyErr_Format(PyExc_TypeError, "Received bound both as positional and keyword argument");
+                    return NULL;
+                }
+                bound_obj = value;
+            }
+    }
+
+    Py_ssize_t bound = 0; // Default value for bound
+    if (bound_obj && ((bound = PyLong_AsSsize_t(bound_obj)) < 0)) {
+        PyErr_Format(PyExc_ValueError, "Bound must be a non-negative integer");
+        return NULL;
+    }
+
+    sz_string_view_t str1, str2;
+    if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
+        !export_string_like(str2_obj, &str2.start, &str2.length)) {
+        PyErr_Format(PyExc_TypeError, "Both arguments must be string-like");
+        return NULL;
+    }
+
+    sz_size_t distance = function(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound);
+
+    // Check for memory allocation issues
+    if (distance == SZ_SIZE_MAX) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+
+    return PyLong_FromSize_t(distance);
+}
+
+static PyObject *Str_hamming_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return _Str_hamming_distance(self, args, kwargs, &sz_hamming_distance);
+}
+
+static PyObject *Str_hamming_distance_unicode(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return _Str_hamming_distance(self, args, kwargs, &sz_hamming_distance_utf8);
+}
+
 static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -1647,6 +1705,10 @@ static PyMethodDef Str_methods[] = {
     {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
 
     // Edit distance extensions
+    {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS,
+     "Hamming distance between two strings, as the number of replaced bytes, and difference in length."},
+    {"hamming_distance_unicode", Str_hamming_distance_unicode, SZ_METHOD_FLAGS,
+     "Hamming distance between two strings, as the number of replaced unicode characters, and difference in length."},
     {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS,
      "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced bytes."},
     {"edit_distance_unicode", Str_edit_distance_unicode, SZ_METHOD_FLAGS,
@@ -1982,6 +2044,10 @@ static PyMethodDef stringzilla_methods[] = {
     {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
 
     // Edit distance extensions
+    {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS,
+     "Hamming distance between two strings, as the number of replaced bytes, and difference in length."},
+    {"hamming_distance_unicode", Str_hamming_distance_unicode, SZ_METHOD_FLAGS,
+     "Hamming distance between two strings, as the number of replaced unicode characters, and difference in length."},
     {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS,
      "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced bytes."},
     {"edit_distance_unicode", Str_edit_distance_unicode, SZ_METHOD_FLAGS,

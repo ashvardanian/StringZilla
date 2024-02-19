@@ -122,11 +122,14 @@ function(set_compiler_flags target cpp_standard target_arch)
     )
   endif()
 
-  # Maximum warnings level & warnings as error
+  # Maximum warnings level & warnings as error.
+  # MVC uses numeric values:
+  # > 4068 for "unknown pragmas".
+  # > 4146 for "unary minus operator applied to unsigned type, result still unsigned".
   target_compile_options(
     ${target}
     PRIVATE
-    "$<$<CXX_COMPILER_ID:MSVC>:/STOP>" # For MSVC, /WX would have been sufficient
+    "$<$<CXX_COMPILER_ID:MSVC>:/STOP;/wd4068;/wd4146>" # For MSVC, /WX would have been sufficient
     "$<$<CXX_COMPILER_ID:GNU>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function>"
     "$<$<CXX_COMPILER_ID:Clang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
     "$<$<CXX_COMPILER_ID:AppleClang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
@@ -150,7 +153,13 @@ function(set_compiler_flags target cpp_standard target_arch)
     target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
     target_link_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
   endif()
-  
+
+  # Ask GCC to avoid `__builtin_memcpy` where we know what we are doing.
+  # https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memcmp>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memchr>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memcpy>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memset>")
 
   # Check for ${target_arch} and set it or use "march=native" if not defined
   if("${target_arch}" STREQUAL "")
