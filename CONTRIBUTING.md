@@ -329,6 +329,12 @@ You may need root previligies for multi-architecture builds:
 sudo $(which cibuildwheel) --platform linux
 ```
 
+On Windows and MacOS, to avoid frequent path resolution issues, you may want to use:
+
+```bash
+python -m cibuildwheel --platform windows
+```
+
 [cibuildwheel-cli]: https://cibuildwheel.readthedocs.io/en/stable/options/#command-line
 
 ### Benchmarking

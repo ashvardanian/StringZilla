@@ -1257,8 +1257,6 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
  */
 #if defined(_MSC_VER) && !defined(__clang__) // On Clang-CL
 #include <intrin.h>
-SZ_INTERNAL sz_size_t sz_u64_popcount(sz_u64_t x) { return __popcnt64(x); }
-SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __popcnt(x); }
 
 // Sadly, when building Win32 images, we can't use the `_tzcnt_u64`, `_lzcnt_u64`,
 // `_BitScanForward64`, or `_BitScanReverse64` intrinsics. For now it's a simple `for`-loop.
@@ -1269,21 +1267,33 @@ SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __popcnt(x); }
 //
 // Use the serial version on 32-bit x86 and on Arm.
 #if (defined(_WIN32) && !defined(_WIN64)) || defined(_M_ARM) || defined(_M_ARM64)
-SZ_INTERNAL sz_size_t sz_u64_ctz(sz_u64_t x) {
+SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) {
     sz_assert(x != 0);
-    sz_size_t n = 0;
+    int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
-SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) {
+SZ_INTERNAL int sz_u64_clz(sz_u64_t x) {
     sz_assert(x != 0);
-    sz_size_t n = 0;
+    int n = 0;
     while ((x & 0x8000000000000000ULL) == 0) { n++, x <<= 1; }
     return n;
 }
+SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) {
+    x = x - ((x >> 1) & 0x5555555555555555);
+    x = (x & 0x3333333333333333) + ((x >> 2) & 0x3333333333333333);
+    return (((x + (x >> 4)) & 0x0F0F0F0F0F0F0F0F) * 0x0101010101010101) >> 56;
+}
+SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) {
+    x = x - ((x >> 1) & 0x55555555);
+    x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
+    return (((x + (x >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
+}
 #else
-SZ_INTERNAL sz_size_t sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
-SZ_INTERNAL sz_size_t sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
+SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return _tzcnt_u64(x); }
+SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return _lzcnt_u64(x); }
+SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __popcnt64(x); }
+SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return __popcnt(x); }
 #endif
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return _tzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return _lzcnt_u32(x); }
@@ -1450,7 +1460,11 @@ SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
     result.u8s[1] = ptr[1];
     return result;
 #elif defined(_MSC_VER) && !defined(__clang__)
+#if defined(_M_IX86) //< The __unaligned modifier isn't valid for the x86 platform.
+    return *((sz_u16_vec_t *)ptr);
+#else
     return *((__unaligned sz_u16_vec_t *)ptr);
+#endif
 #else
     __attribute__((aligned(1))) sz_u16_vec_t const *result = (sz_u16_vec_t const *)ptr;
     return *result;
@@ -1479,7 +1493,11 @@ SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
     result.u8s[3] = ptr[3];
     return result;
 #elif defined(_MSC_VER) && !defined(__clang__)
+#if defined(_M_IX86) //< The __unaligned modifier isn't valid for the x86 platform.
+    return *((sz_u32_vec_t *)ptr);
+#else
     return *((__unaligned sz_u32_vec_t *)ptr);
+#endif
 #else
     __attribute__((aligned(1))) sz_u32_vec_t const *result = (sz_u32_vec_t const *)ptr;
     return *result;
@@ -1513,7 +1531,11 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
     result.u8s[7] = ptr[7];
     return result;
 #elif defined(_MSC_VER) && !defined(__clang__)
+#if defined(_M_IX86) //< The __unaligned modifier isn't valid for the x86 platform.
+    return *((sz_u64_vec_t *)ptr);
+#else
     return *((__unaligned sz_u64_vec_t *)ptr);
+#endif
 #else
     __attribute__((aligned(1))) sz_u64_vec_t const *result = (sz_u64_vec_t const *)ptr;
     return *result;
