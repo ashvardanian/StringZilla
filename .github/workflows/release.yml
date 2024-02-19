@@ -14,6 +14,7 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  packages: write
 
 jobs:
   versioning:
@@ -64,6 +65,9 @@ jobs:
         python-version: ["36", "37", "38", "39", "310", "311", "312"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: "main"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
