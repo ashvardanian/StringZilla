@@ -6,7 +6,7 @@ The `wc` utility on Linux can be used to count the number of lines, words, and b
 Using SIMD-accelerated character and character-set search, StringZilla, even with slow SSDs, it can be noticeably faster.
 
 ```bash
-$ time wc enwik9.txt 
+$ time wc enwik9.txt
   13147025  129348346 1000000000 enwik9.txt
 
 real    0m3.562s
@@ -33,7 +33,7 @@ real    0m6.424s
 user    0m0.179s
 sys     0m0.663s
 
-$ time cli/split.py 100000 enwik9.txt ...
+$ time cli/split.py -l 100000 enwik9.txt ...
 
 real    0m1.482s
 user    0m1.020s
