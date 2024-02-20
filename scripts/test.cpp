@@ -1,6 +1,19 @@
 #undef NDEBUG      // Enable all assertions
 #include <cassert> // assertions
 
+// Overload the following with caution.
+// Those parameters must never be explicitly set during releases,
+// but they come handy during development, if you want to validate
+// different ISA-specific implementations.
+// #define SZ_USE_X86_AVX2 0
+// #define SZ_USE_X86_AVX512 0
+// #define SZ_USE_ARM_NEON 0
+// #define SZ_USE_ARM_SVE 0
+#define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
+
+// Put this at the top to make sure it pulls all the right dependencies
+#include <stringzilla/stringzilla.hpp>
+
 #if defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/asan_interface.h> // ASAN
 #endif
@@ -14,19 +27,8 @@
 #include <sstream>   // `std::ostringstream`
 #include <vector>    // `std::vector`
 
-// Overload the following with caution.
-// Those parameters must never be explicitly set during releases,
-// but they come handy during development, if you want to validate
-// different ISA-specific implementations.
-// #define SZ_USE_X86_AVX2 0
-// #define SZ_USE_X86_AVX512 0
-// #define SZ_USE_ARM_NEON 0
-// #define SZ_USE_ARM_SVE 0
-#define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
-
-#include <string>                      // Baseline
-#include <string_view>                 // Baseline
-#include <stringzilla/stringzilla.hpp> // Contender
+#include <string>      // Baseline
+#include <string_view> // Baseline
 
 #if !SZ_DETECT_CPP_11
 #error "This test requires C++11 or later."

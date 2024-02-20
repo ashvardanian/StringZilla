@@ -45,8 +45,10 @@
 #endif
 
 #if !SZ_AVOID_STL
+#include <array>
 #include <bitset>
 #include <string>
+#include <vector>
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
 #include <string_view>
 #endif
@@ -54,6 +56,7 @@
 
 #include <cassert>   // `assert`
 #include <cstddef>   // `std::size_t`
+#include <cstdint>   // `std::int8_t`
 #include <iosfwd>    // `std::basic_ostream`
 #include <stdexcept> // `std::out_of_range`
 #include <utility>   // `std::swap`
