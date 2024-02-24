@@ -35,6 +35,7 @@ typedef SSIZE_T ssize_t;
 
 #include <Python.h> // Core CPython interfaces
 
+#include <stdio.h>  // `fopen`
 #include <string.h> // `memset`, `memcpy`
 
 #include <stringzilla/stringzilla.h>
@@ -828,6 +829,113 @@ static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 }
 
 /**
+ *  @brief  Saves a StringZilla string to disk.
+ */
+static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) {
+
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs != !is_member + 1) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *path_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+
+    // Parse keyword arguments
+    if (kwargs) {
+        PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument");
+        return NULL;
+    }
+
+    sz_string_view_t text;
+    sz_string_view_t path;
+
+    // Validate and convert `text` and `path`
+    if (!export_string_like(text_obj, &text.start, &text.length) ||
+        !export_string_like(path_obj, &path.start, &path.length)) {
+        PyErr_SetString(PyExc_TypeError, "Text and path must be string-like");
+        return NULL;
+    }
+
+    // There is a chance, the path isn't NULL-terminated, so copy it to a new buffer.
+    // Many OSes have fairly low limit for the maximum path length.
+    // On Windows its 260, but up to __around__ 32,767 characters are supported in extended API.
+    // But it's better to be safe than sorry and use malloc :)
+    //
+    // https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry
+    // https://doc.owncloud.com/server/next/admin_manual/troubleshooting/path_filename_length.html
+    char *path_buffer = (char *)malloc(path.length + 1);
+    if (path_buffer == NULL) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for the path");
+        return NULL;
+    }
+    memcpy(path_buffer, path.start, path.length);
+
+    FILE *file_pointer = fopen(path_buffer, "wb");
+    if (file_pointer == NULL) {
+        PyErr_SetFromErrnoWithFilename(PyExc_OSError, path_buffer);
+        free(path_buffer);
+        return NULL;
+    }
+
+    setbuf(file_pointer, NULL); // Set the stream to unbuffered
+    int status = fwrite(text.start, 1, text.length, file_pointer);
+    if (status != text.length) {
+        PyErr_SetFromErrnoWithFilename(PyExc_OSError, path_buffer);
+        free(path_buffer);
+        fclose(file_pointer);
+        return NULL;
+    }
+
+    free(path_buffer);
+    fclose(file_pointer);
+    Py_RETURN_NONE;
+}
+
+/**
+ *  @brief  Given a native StringZilla string, suggests it's offset within another native StringZilla string.
+ *          Very practical when dealing with large files.
+ *  @return Unsigned integer on success.
+ */
+static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwargs) {
+
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs != !is_member + 1) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *slice_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *text_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+
+    // Parse keyword arguments
+    if (kwargs) {
+        PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument");
+        return NULL;
+    }
+
+    sz_string_view_t text;
+    sz_string_view_t slice;
+
+    // Validate and convert `text` and `slice`
+    if (!export_string_like(text_obj, &text.start, &text.length) ||
+        !export_string_like(slice_obj, &slice.start, &slice.length)) {
+        PyErr_SetString(PyExc_TypeError, "Text and slice must be string-like");
+        return NULL;
+    }
+
+    if (slice.start < text.start || slice.start + slice.length > text.start + text.length) {
+        PyErr_SetString(PyExc_ValueError, "The slice is not within the text bounds");
+        return NULL;
+    }
+
+    return PyLong_FromSize_t((size_t)(slice.start - text.start));
+}
+
+/**
  *  @brief  Implementation function for all search-like operations, parameterized by a function callback.
  *  @return 1 on success, 0 on failure.
  */
@@ -1531,12 +1639,10 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
 
     // Validate and convert `separator`
     if (separator_obj) {
-        Py_ssize_t len;
-        if (!export_string_like(separator_obj, &separator.start, &len)) {
+        if (!export_string_like(separator_obj, &separator.start, &separator.length)) {
             PyErr_SetString(PyExc_TypeError, "The separator argument must be string-like");
             return NULL;
         }
-        separator.length = (size_t)len;
     }
     else {
         separator.start = " ";
@@ -1725,6 +1831,11 @@ static PyMethodDef Str_methods[] = {
      "Finds the first occurrence of a character not present in another string."},
     {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS,
      "Finds the last occurrence of a character not present in another string."},
+
+    // Dealing with larger-than-memory datasets
+    {"offset_within", Str_offset_within, SZ_METHOD_FLAGS,
+     "Return the raw byte offset of one binary string within another."},
+    {"write_to", Str_write_to, SZ_METHOD_FLAGS, "Return the raw byte offset of one binary string within another."},
 
     {NULL, NULL, 0, NULL}};
 

@@ -1,7 +1,7 @@
 import os
 import sys
 import platform
-from setuptools import setup, Extension
+from setuptools import setup, find_packages, Extension
 from typing import List, Tuple
 import sysconfig
 import glob
@@ -159,10 +159,16 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Programming Language :: C++",
         "Programming Language :: Python :: 3 :: Only",
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Programming Language :: Python :: Implementation :: CPython",
-        "Operating System :: MacOS",
-        "Operating System :: Unix",
-        "Operating System :: Microsoft :: Windows",
+        "Programming Language :: Python :: Implementation :: PyPy",
+        "Operating System :: OS Independent",
         "Topic :: File Formats",
         "Topic :: Internet :: Log Analysis",
         "Topic :: Scientific/Engineering :: Information Analysis",
@@ -173,4 +179,11 @@ setup(
     include_dirs=[],
     setup_requires=[],
     ext_modules=ext_modules,
+    packages=find_packages(),
+    entry_points={
+        "console_scripts": [
+            "sz_split=cli.split:main",
+            "sz_wc=cli.wc:main",
+        ],
+    },
 )
