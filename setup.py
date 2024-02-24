@@ -1,7 +1,7 @@
 import os
 import sys
 import platform
-from setuptools import setup, Extension
+from setuptools import setup, find_packages, Extension
 from typing import List, Tuple
 import sysconfig
 import glob
@@ -179,4 +179,11 @@ setup(
     include_dirs=[],
     setup_requires=[],
     ext_modules=ext_modules,
+    packages=find_packages(),
+    entry_points={
+        "console_scripts": [
+            "sz_split=cli.split:main",
+            "sz_wc=cli.wc:main",
+        ],
+    },
 )

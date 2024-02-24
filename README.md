@@ -20,9 +20,12 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 - 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
 - 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
 - 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
+- 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
 - 🤝 Want to benchmark or contribute? Jump to [Contributing](CONTRIBUTING.md)
 - Code in other languages? Let [me](https://github.com/ashvardanian) know!
+
+[faq-shell]: https://github.com/ashvardanian/StringZilla/blob/main/cli/README.md
 
 __Who is this for?__
 
