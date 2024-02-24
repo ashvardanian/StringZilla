@@ -32,7 +32,7 @@ fn main() {
             build.define("SZ_USE_X86_AVX2", "0");
         }
 
-        if target_arch.starts_with("arm") {
+        if target_arch == "aarch64" {
             build.flag_if_supported("-march=armv8-a+simd");
             build.define("SZ_USE_ARM_SVE", "1");
             build.define("SZ_USE_ARM_NEON", "1");
@@ -54,7 +54,7 @@ fn main() {
             build.define("SZ_USE_X86_AVX2", "0");
         }
 
-        if target_arch.starts_with("arm") {
+        if target_arch == "aarch64" {
             build.define("SZ_USE_ARM_SVE", "0"); // Assuming no SVE support for Darwin
             build.define("SZ_USE_ARM_NEON", "1");
         } else {
