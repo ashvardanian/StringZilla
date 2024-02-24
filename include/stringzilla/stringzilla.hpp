@@ -45,8 +45,10 @@
 #endif
 
 #if !SZ_AVOID_STL
+#include <array>
 #include <bitset>
 #include <string>
+#include <vector>
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
 #include <string_view>
 #endif
@@ -54,6 +56,7 @@
 
 #include <cassert>   // `assert`
 #include <cstddef>   // `std::size_t`
+#include <cstdint>   // `std::int8_t`
 #include <iosfwd>    // `std::basic_ostream`
 #include <stdexcept> // `std::out_of_range`
 #include <utility>   // `std::swap`
@@ -1037,8 +1040,6 @@ class reversed_iterator_for {
 
 /**
  *  @brief  An "expression template" for lazy concatenation of strings using the `operator|`.
- *
- *  TODO: Ensure eqnership passing and move semantics are preserved.
  */
 template <typename first_type, typename second_type>
 struct concatenation {
@@ -1860,7 +1861,7 @@ class basic_string_slice {
  *
  *  Functions defined for `basic_string`, but not present in `basic_string_slice`:
  *      * `replace`, `insert`, `erase`, `append`, `push_back`, `pop_back`, `resize`, `shrink_to_fit`... from STL,
- *      * `try_` exception-free "try" operations that returning non-zero values on succces,
+ *      * `try_` exception-free "try" operations that returning non-zero values on success,
  *      * `replace_all` and `erase_all` similar to Boost,
  *      * `edit_distance` - Levenshtein distance computation reusing the allocator,
  *      * `randomize`, `random` - for fast random string generation.
@@ -1874,7 +1875,7 @@ class basic_string_slice {
  *  Default constructor is `constexpr`. Move constructor and move assignment operator are `noexcept`.
  *  Copy constructor and copy assignment operator are not! They may throw `std::bad_alloc` if the memory
  *  allocation fails. Similar to STL `std::out_of_range` if the position argument to some of the functions
- *  is out of bounds. Same as with STL, the bound checks are often assymetric, so pay attention to docs.
+ *  is out of bounds. Same as with STL, the bound checks are often asymmetric, so pay attention to docs.
  *  If exceptions are disabled, on failure, `std::terminate` is called.
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
@@ -2791,8 +2792,8 @@ class basic_string {
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
      */
-    iterator insert(const_iterator it, std::initializer_list<char_type> ilist) noexcept(false) {
-        return insert(it, ilist.begin(), ilist.end());
+    iterator insert(const_iterator it, std::initializer_list<char_type> list) noexcept(false) {
+        return insert(it, list.begin(), list.end());
     }
 
     /**
@@ -2951,8 +2952,8 @@ class basic_string {
      *  @see    `try_replace` for a cleaner exception-less alternative.
      */
     basic_string &replace(const_iterator first, const_iterator last,
-                          std::initializer_list<char_type> ilist) noexcept(false) {
-        return replace(first, last, ilist.begin(), ilist.end());
+                          std::initializer_list<char_type> list) noexcept(false) {
+        return replace(first, last, list.begin(), list.end());
     }
 
     /**
@@ -3031,8 +3032,8 @@ class basic_string {
      *  @throw  `std::bad_alloc` if the allocation fails.
      *  @see    `try_assign` for a cleaner exception-less alternative.
      */
-    basic_string &assign(std::initializer_list<char_type> ilist) noexcept(false) {
-        return assign(ilist.begin(), ilist.end());
+    basic_string &assign(std::initializer_list<char_type> list) noexcept(false) {
+        return assign(list.begin(), list.end());
     }
 
     /**
@@ -3357,7 +3358,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
 
     // 2. The pattern is longer than the replacement. We need to compact the strings.
     else if (matcher.needle_length() > replacement.length()) {
-        // Dealing with shorter replacements, we will avoid memory allocations, but we can also mimnimize the number
+        // Dealing with shorter replacements, we will avoid memory allocations, but we can also minimize the number
         // of `memmove`-s, by keeping one more iterator, pointing to the end of the last compacted area.
         // Having the split-ranges, however, we reuse their logic.
         using splits_type = range_splits<string_view, matcher_type>;

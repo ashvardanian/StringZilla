@@ -1,7 +1,11 @@
 # StringZilla 🦖
 
 [![StringZilla Python installs](https://static.pepy.tech/personalized-badge/stringzilla?period=total&units=abbreviation&left_color=black&right_color=blue&left_text=StringZilla%20Python%20installs)](https://github.com/ashvardanian/stringzilla)
-[![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust")](https://crates.io/crates/stringzilla)
+[![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=Ubuntu)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=Windows)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=MacOS)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=Alpine%20Linux)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 ![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
 
 StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations on modern CPUs.
@@ -16,9 +20,12 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 - 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
 - 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
 - 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
+- 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
 - 🤝 Want to benchmark or contribute? Jump to [Contributing](CONTRIBUTING.md)
 - Code in other languages? Let [me](https://github.com/ashvardanian) know!
+
+[faq-shell]: https://github.com/ashvardanian/StringZilla/blob/main/cli/README.md
 
 __Who is this for?__
 
@@ -362,8 +369,8 @@ count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, al
 
 ```py
 assert sz.edit_distance("apple", "aple") == 1 # skip one ASCII character
-assert sz.edit_distance("αβγδ", "αγδ") == 2 # skip two bytes forming one codepoint
-assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1 # one unicode codepoint
+assert sz.edit_distance("αβγδ", "αγδ") == 2 # skip two bytes forming one rune
+assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1 # one unicode rune
 ```
 
 Several Python libraries provide edit distance computation.
