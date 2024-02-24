@@ -2842,10 +2842,11 @@ SZ_INTERNAL sz_u8_t sz_u8_toupper(sz_u8_t c) {
  *  @brief  Uses two small lookup tables (768 bytes total) to accelerate division by a small
  *          unsigned integer. Performs two lookups, one multiplication, two shifts, and two accumulations.
  *
- *  @param  divisor Integral value larger than one.
+ *  @param  divisor Integral value @b larger than one.
  *  @param  number  Integral value to divide.
  */
 SZ_INTERNAL sz_u8_t sz_u8_divide(sz_u8_t number, sz_u8_t divisor) {
+    sz_assert(divisor > 1);
     static sz_u16_t const multipliers[256] = {
         0,     0,     0,     21846, 0,     39322, 21846, 9363,  0,     50973, 39322, 29790, 21846, 15124, 9363,  4370,
         0,     57826, 50973, 44841, 39322, 34329, 29790, 25645, 21846, 18351, 15124, 12137, 9363,  6780,  4370,  2115,
@@ -2938,13 +2939,16 @@ SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t
 
     sz_assert(alphabet_size > 0 && alphabet_size <= 256 && "Inadequate alphabet size");
 
-    if (alphabet_size == 1)
-        for (sz_cptr_t end = result + result_length; result != end; ++result) *result = *alphabet;
+    if (alphabet_size == 1) sz_fill(result, result_length, *alphabet);
 
     else {
         sz_assert(generator && "Expects a valid random generator");
-        for (sz_cptr_t end = result + result_length; result != end; ++result)
-            *result = alphabet[sz_u8_divide(generator(generator_user_data) & 0xFF, (sz_u8_t)alphabet_size)];
+        sz_u8_t divisor = (sz_u8_t)alphabet_size;
+        for (sz_cptr_t end = result + result_length; result != end; ++result) {
+            sz_u8_t random = generator(generator_user_data) & 0xFF;
+            sz_u8_t quotient = sz_u8_divide(random, divisor);
+            *result = alphabet[random - quotient * divisor];
+        }
     }
 }
 

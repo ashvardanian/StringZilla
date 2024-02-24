@@ -3157,7 +3157,8 @@ class basic_string {
      *  @param  alphabet   A string of characters to choose from.
      */
     basic_string &randomize(string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
-        return randomize(&std::rand, alphabet);
+        auto generator = []() { return static_cast<sz_u64_t>(std::rand()); };
+        return randomize(generator, alphabet);
     }
 
     /**
