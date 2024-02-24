@@ -1609,13 +1609,50 @@ SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, 
 
     // Loop through letters to find non-colliding variants.
     if (length > 3 && has_duplicates) {
-        // Pivot the middle point left, until we find a character different from the first one.
-        for (; start[*second] == start[*first] && *second; --(*second)) {}
         // Pivot the middle point right, until we find a character different from the first one.
         for (; start[*second] == start[*first] && *second + 1 < *third; ++(*second)) {}
         // Pivot the third (last) point left, until we find a different character.
         for (; (start[*third] == start[*second] || start[*third] == start[*first]) && *third > (*second + 1);
              --(*third)) {}
+    }
+
+    // TODO: Investigate alternative strategies for long needles.
+    // On very long needles we have the luxury to choose!
+    // Often dealing with UTF8, we will likely benfit from shifting the first and second characters
+    // further to the right, to achieve not only uniqness within the needle, but also avoid common
+    // rune prefixes of 2-, 3-, and 4-byte codes.
+    if (length > 8) {
+        // Pivot the first and second points right, until we find a character, that:
+        // > is different from others.
+        // > doesn't start with 0b'110x'xxxx - only 5 bits of relevant info.
+        // > doesn't start with 0b'1110'xxxx - only 4 bits of relevant info.
+        // > doesn't start with 0b'1111'0xxx - only 3 bits of relevant info.
+        //
+        // So we are practically searching for byte values that start with 0b0xxx'xxxx or 0b'10xx'xxxx.
+        // Meaning they fall in the range [0, 127] and [128, 191], in other words any unsigned int up to 191.
+        sz_u8_t const *start_u8 = (sz_u8_t const *)start;
+        sz_size_t vibrant_first = *first, vibrant_second = *second, vibrant_third = *third;
+
+        // Let's begin with the seccond character, as the termination criterea there is more obvious
+        // and we may end up with more variants to check for the first candidate.
+        for (; (start_u8[vibrant_second] > 191 || start_u8[vibrant_second] == start_u8[vibrant_third]) &&
+               (vibrant_second + 1 < vibrant_third);
+             ++vibrant_second) {}
+
+        // Now check if we've indeed found a good candidate or should revert the `vibrant_second` to `second`.
+        if (start_u8[vibrant_second] < 191) { *second = vibrant_second; }
+        else { vibrant_second = *second; }
+
+        // Now check the first character.
+        for (; (start_u8[vibrant_first] > 191 || start_u8[vibrant_first] == start_u8[vibrant_second] ||
+                start_u8[vibrant_first] == start_u8[vibrant_third]) &&
+               (vibrant_first + 1 < vibrant_second);
+             ++vibrant_first) {}
+
+        // Now check if we've indeed found a good candidate or should revert the `vibrant_first` to `first`.
+        // We don't need to shift the third one when dealing with texts as the last byte of the text is
+        // also the last byte of a rune and contains the most information.
+        if (start_u8[vibrant_first] < 191) { *first = vibrant_first; }
     }
 }
 
