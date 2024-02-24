@@ -1,13 +1,14 @@
 # SIMD-accelerated CLI utilities based on StringZilla
 
-This section of the project is pretty much a work-in-progress.
+This section of the project is pretty much a work in progress.
 The goal is to provide a set of command-line utilities that:
 
-- ✅ are accelerated by SIMD instructions, 
-- ✅ are extremely core StringZilla functionality,
-- ✅ work the same on Linux, MacOS, and Windows.
+- ✅ that benefit the most from SIMD instructions, 
+- ✅ rely solely on core StringZilla functionality,
+- ✅ works the same on Linux, MacOS, and Windows.
 
-To install, just pull the Python package from PyPi:
+Other utilities are, of course, welcome to use StringZilla but may not be good candidates for this repository.
+To install, pull the Python package from PyPi:
 
 ```bash
 pip install stringzilla
