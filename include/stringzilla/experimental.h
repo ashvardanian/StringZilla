@@ -368,6 +368,127 @@ sz_u512_vec_t sz_inclusive_min(sz_i32_t previous, sz_error_cost_t gap, sz_u512_v
 
 #if SZ_USE_ARM_NEON
 
+SZ_PUBLIC sz_cptr_t sz_find_neon_too_smart(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+
+    // This almost never fires, but it's better to be safe than sorry.
+    if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
+    if (n_length == 1) return sz_find_byte_neon(h, h_length, n);
+
+    // Scan through the string.
+    // Assuming how tiny the Arm NEON registers are, we should avoid internal branches at all costs.
+    // That's why, for smaller needles, we use different loops.
+    if (n_length == 2) {
+        // This is a common case. Aside from ASCII bigrams, it's also the most common case for UTF-16,
+        // or any UTF8 content in Cyrillic, Greek, Armenian, Hebrew, Arabic, Coptic, Syriac, Thaana,
+        // N'Ko writing system of West-African nations, and, of course, Latin scripts.
+        // Dealing with 16-bit values, we can check 15 possible offsets in a single loop iteration.
+        // For that we are going to keep 2 registers populated with haystack data.
+        // First - bigrams at even offsets - 0, 2, 4, 6, 8, 10, 12, 14.
+        // Second - bigrams at odd offsets - 1, 3, 5, 7, 9, 11, 13. One less than the first one.
+        sz_u64_t matches;
+        sz_u128_vec_t h_even_vec, h_odd_vec, n_vec, interleave_mask_vec, matches_vec;
+        // Broadcast needle characters into SIMD registers.
+        n_vec.u16x8 = vdupq_n_u16(sz_u16_load(n).u16);
+        interleave_mask_vec.u16x8 = vdupq_n_u16(0x00FFu);
+        for (; h_length >= 16; h += 15, h_length -= 15) {
+            h_even_vec.u8x16 = vld1q_u8((sz_u8_t const *)h);
+            h_odd_vec.u8x16 = vextq_u8(h_even_vec.u8x16, /* can be any noise: */ h_even_vec.u8x16, 1);
+            // We can now compare both 16-bit arrays with the needle.
+            // The result of each comparison will also be 16 bits long.
+            // Then - we blend!
+            // For odd offsets we are gonna take the bottom 8 bits, and for even - the top ones!
+            matches_vec.u8x16 =
+                vbslq_u8(interleave_mask_vec.u8x16, vreinterpretq_u8_u16(vceqq_u16(h_even_vec.u16x8, n_vec.u16x8)),
+                         vreinterpretq_u8_u16(vceqq_u16(h_odd_vec.u16x8, n_vec.u16x8)));
+            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            if (matches) return h + sz_u64_ctz(matches) / 4;
+        }
+    }
+    else if (n_length == 3) {
+        // Comparing 24-bit values is a bumer. Being lazy, I went with a simple design.
+        // Instead of keeping one register per haystack offset, I keep a register per needle character.
+        sz_u64_t matches;
+        sz_u128_vec_t h_vec, n_first_vec, n_second_vec, n_third_vec, matches_vec;
+        // Broadcast needle characters into SIMD registers.
+        n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
+        n_second_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[1]);
+        n_third_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[2]);
+        for (; h_length >= 16; h += 14, h_length -= 14) {
+            h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h);
+            // Let's compare the first character.
+            matches_vec.u8x16 = vceqq_u8(h_vec.u8x16, n_first_vec.u8x16);
+            // Let's compare the second one, shift the equality indicators left by 8 bits, and blend.
+            matches_vec.u8x16 =
+                vandq_u8(matches_vec.u8x16, vextq_u8(vceqq_u8(h_vec.u8x16, n_second_vec.u8x16), vdupq_n_u8(0), 1));
+            // Let's compare the third one, shift the equality indicators left by 16 bits, and blend.
+            matches_vec.u8x16 =
+                vandq_u8(matches_vec.u8x16, vextq_u8(vceqq_u8(h_vec.u8x16, n_third_vec.u8x16), vdupq_n_u8(0), 2));
+            // Now reduce bytes to nibbles, and check for matches.
+            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            if (matches) return h + sz_u64_ctz(matches) / 4;
+        }
+    }
+    else if (n_length == 4) {
+        // This is a common case not only for ASCII 4-grams, but also UTF-32 content,
+        // emojis, Chinese, and many other east-Asian languages.
+        // Dealing with 32-bit values, we can analyze 13 offsets at once.
+        sz_u128_vec_t h_first_vec, h_second_vec, h_third_vec, h_fourth_vec, interleave_2mask_vec, interleave_4mask_vec,
+            n_vec, matches_vec;
+        sz_u64_t matches;
+        // Broadcast needle characters into SIMD registers.
+        n_vec.u32x4 = vdupq_n_u32(sz_u32_load(n).u32);
+        interleave_2mask_vec.u16x8 = vdupq_n_u16(0x00FFu);
+        interleave_4mask_vec.u32x4 = vdupq_n_u32(0x0000FFFFu);
+        for (; h_length >= 16; h += 13, h_length -= 13) {
+            h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)h);
+            h_second_vec.u8x16 = vextq_u8(h_first_vec.u8x16, /* can be any noise: */ h_first_vec.u8x16, 1);
+            h_third_vec.u8x16 = vextq_u8(h_first_vec.u8x16, /* can be any noise: */ h_first_vec.u8x16, 2);
+            h_fourth_vec.u8x16 = vextq_u8(h_first_vec.u8x16, /* can be any noise: */ h_first_vec.u8x16, 3);
+            // We can now compare all four arrays of 32-bit values with the needle.
+            // The result of each comparison will also be 32 bits long.
+            // Then - we blend!
+            matches_vec.u8x16 = vbslq_u8(
+                interleave_4mask_vec.u8x16,
+                vbslq_u8(interleave_2mask_vec.u8x16, vreinterpretq_u8_u32(vceqq_u32(h_first_vec.u32x4, n_vec.u32x4)),
+                         vreinterpretq_u8_u32(vceqq_u32(h_second_vec.u32x4, n_vec.u32x4))),
+                vbslq_u8(interleave_2mask_vec.u8x16, vreinterpretq_u8_u32(vceqq_u32(h_third_vec.u32x4, n_vec.u32x4)),
+                         vreinterpretq_u8_u32(vceqq_u32(h_fourth_vec.u32x4, n_vec.u32x4))));
+            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            if (matches) return h + sz_u64_ctz(matches) / 4;
+        }
+    }
+    else {
+        // Pick the parts of the needle that are worth comparing.
+        sz_size_t offset_first, offset_mid, offset_last;
+        _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
+        // Broadcast those characters into SIMD registers.
+        sz_u64_t matches;
+        sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
+        n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_first]);
+        n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_mid]);
+        n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_last]);
+        // Walk through the string.
+        for (; h_length >= n_length + 16; h += 16, h_length -= 16) {
+            h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_first));
+            h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_mid));
+            h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_last));
+            matches_vec.u8x16 = vandq_u8(                           //
+                vandq_u8(                                           //
+                    vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
+                    vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
+                vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
+            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            while (matches) {
+                int potential_offset = sz_u64_ctz(matches) / 4;
+                if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
+                matches &= matches - 1;
+            }
+        }
+    }
+
+    return sz_find_serial(h, h_length, n, n_length);
+}
+
 SZ_INTERNAL void interleave_uint32x4_to_uint64x2(uint32x4_t in_low, uint32x4_t in_high, uint64x2_t *out_first_second,
                                                  uint64x2_t *out_third_fourth) {
     // Interleave elements
@@ -588,7 +709,7 @@ SZ_PUBLIC void sz_hashes_neon_reusing_loads(sz_cptr_t start, sz_size_t length, s
 }
 
 SZ_PUBLIC void sz_hashes_neon_readahead(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step,
-                                       sz_hash_callback_t callback, void *callback_handle) {
+                                        sz_hash_callback_t callback, void *callback_handle) {
 
     if (length < window_length || !window_length) return;
     if (length < 2 * window_length) {

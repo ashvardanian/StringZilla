@@ -4839,32 +4839,74 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
     if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
     if (n_length == 1) return sz_find_byte_neon(h, h_length, n);
 
-    // Pick the parts of the needle that are worth comparing.
-    sz_size_t offset_first, offset_mid, offset_last;
-    _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
-
-    // Broadcast those characters into SIMD registers.
-    sz_u64_t matches;
-    sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
-    n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_first]);
-    n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_mid]);
-    n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_last]);
-
     // Scan through the string.
-    for (; h_length >= n_length + 16; h += 16, h_length -= 16) {
-        h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_first));
-        h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_mid));
-        h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_last));
-        matches_vec.u8x16 = vandq_u8(                           //
-            vandq_u8(                                           //
-                vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
-                vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
-            vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
-        while (matches) {
-            int potential_offset = sz_u64_ctz(matches) / 4;
-            if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
-            matches &= matches - 1;
+    // Assuming how tiny the Arm NEON registers are, we should avoid internal branches at all costs.
+    // That's why, for smaller needles, we use different loops.
+    if (n_length == 2) {
+        // Broadcast needle characters into SIMD registers.
+        sz_u64_t matches;
+        sz_u128_vec_t h_first_vec, h_last_vec, n_first_vec, n_last_vec, matches_vec;
+        // Dealing with 16-bit values, we can load 2 registers at a time and compare 31 possible offsets
+        // in a single loop iteration.
+        n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
+        n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[1]);
+        for (; h_length >= 17; h += 16, h_length -= 16) {
+            h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + 0));
+            h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + 1));
+            matches_vec.u8x16 =
+                vandq_u8(vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
+            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            if (matches) return h + sz_u64_ctz(matches) / 4;
+        }
+    }
+    else if (n_length == 3) {
+        // Broadcast needle characters into SIMD registers.
+        sz_u64_t matches;
+        sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
+        // Comparing 24-bit values is a bumer. Being lazy, I went with the same approach
+        // as when searching for string over 4 characters long. I only avoid the last comparison.
+        n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[0]);
+        n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[1]);
+        n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[2]);
+        for (; h_length >= 18; h += 16, h_length -= 16) {
+            h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + 0));
+            h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + 1));
+            h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + 2));
+            matches_vec.u8x16 = vandq_u8(                           //
+                vandq_u8(                                           //
+                    vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
+                    vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
+                vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
+            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            if (matches) return h + sz_u64_ctz(matches) / 4;
+        }
+    }
+    else {
+        // Pick the parts of the needle that are worth comparing.
+        sz_size_t offset_first, offset_mid, offset_last;
+        _sz_locate_needle_anomalies(n, n_length, &offset_first, &offset_mid, &offset_last);
+        // Broadcast those characters into SIMD registers.
+        sz_u64_t matches;
+        sz_u128_vec_t h_first_vec, h_mid_vec, h_last_vec, n_first_vec, n_mid_vec, n_last_vec, matches_vec;
+        n_first_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_first]);
+        n_mid_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_mid]);
+        n_last_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)&n[offset_last]);
+        // Walk through the string.
+        for (; h_length >= n_length + 16; h += 16, h_length -= 16) {
+            h_first_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_first));
+            h_mid_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_mid));
+            h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + offset_last));
+            matches_vec.u8x16 = vandq_u8(                           //
+                vandq_u8(                                           //
+                    vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
+                    vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
+                vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
+            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            while (matches) {
+                int potential_offset = sz_u64_ctz(matches) / 4;
+                if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
+                matches &= matches - 1;
+            }
         }
     }
 
