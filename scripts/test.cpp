@@ -102,6 +102,10 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil((1ull << 62) + 1) == (1ull << 63));
     assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
 #endif
+
+    for (sz_u16_t number = 0; number != 256; ++number)
+        for (sz_u16_t divisor = 2; divisor != 256; ++divisor)
+            assert(sz_u8_divide(number, divisor) == (number / divisor));
 }
 
 /**
@@ -640,6 +644,14 @@ void test_api_mutable_extensions() {
 
     assert(str(sz::concatenate("a"_sz, "b"_sz)) == "ab");
     assert(str(sz::concatenate("a"_sz, "b"_sz, "c"_sz)) == "abc");
+
+    // Randomization.
+    assert(str::random(0).empty());
+    assert(str::random(4, "a") == "aaaa");
+    assert(str::random(4, "aaaa") == "aaaa");
+    assert(str::random(global_random_generator(), 4, "aaaa") == "aaaa");
+    assert_scoped(str s = str::random(128, "ACGT"), (void)s,
+                  s.contains('A') && s.contains('C') && s.contains('G') && s.contains('T'));
 }
 
 /**
