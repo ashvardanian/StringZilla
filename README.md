@@ -1,5 +1,16 @@
 # StringZilla 🦖
 
+_The world wastes a minimum of $100M annually due to inefficient string operations.
+A typical codebase processes strings character by character, resulting in too many branches and data-dependencies, neglecting 90% of modern CPU's potential.
+LibC is different.
+It attempts to leverage SIMD instructions to boost some operations, and is often used by higher-level languages, runtimes, and databases.
+But it isn't perfect.
+1️⃣ First, even on common hardware, including over a billion 64-bit ARM CPUs, common functions like `strstr` and `memmem` only achieve 1/3 of the CPU's thoughput.
+2️⃣ Second, SIMD coverage is inconsistent: acceleration in forward scans does not guarantee speed in the reverse-order search.
+3️⃣ At last, most high-level languages can't always use LibC, as the strings are often not NULL-terminated or may contain the Unicode "Zero" character in the middle of the string.
+That's why StringZilla was created.
+To provide predictably high performance, portable to any modern platform, operating system, and programming language._
+
 [![StringZilla Python installs](https://static.pepy.tech/personalized-badge/stringzilla?period=total&units=abbreviation&left_color=black&right_color=blue&left_text=StringZilla%20Python%20installs)](https://github.com/ashvardanian/stringzilla)
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=Ubuntu)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
@@ -20,12 +31,14 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 - 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
 - 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
 - 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
-- 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools
+- 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz_` prefix
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
-- 🤝 Want to benchmark or contribute? Jump to [Contributing](CONTRIBUTING.md)
-- Code in other languages? Let [me](https://github.com/ashvardanian) know!
+- 💡 Thinking to contribute? Look for ["good first issues"][first-issues]
+- 🤝 And check the [guide](CONTRIBUTING.md) to setup the environment
+- Want more bindings or features? Let [me](https://github.com/ashvardanian) know!
 
 [faq-shell]: https://github.com/ashvardanian/StringZilla/blob/main/cli/README.md
+[first-issues]: https://github.com/ashvardanian/StringZilla/issues
 
 __Who is this for?__
 
@@ -641,8 +654,8 @@ sz_string_is_on_stack(&string); // == sz_true_k
 sz_string_grow(&string, 100, &allocator); // == sz_true_k
 
 // Append, erase, insert into the string.
-sz_string_append(&string, "_Hello_", 7, &allocator); // == sz_true_k
-sz_string_append(&string, "world", 5, &allocator); // == sz_true_k
+sz_string_expand(&string, 0, "_Hello_", 7, &allocator); // == sz_true_k
+sz_string_expand(&string, SZ_SIZE_MAX, "world", 5, &allocator); // == sz_true_k
 sz_string_erase(&string, 0, 1);
 
 // Unpacking & introspection.
@@ -1278,6 +1291,13 @@ If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall],
 [ucall]: https://github.com/unum-cloud/ucall
 [uform]: https://github.com/unum-cloud/uform
 [simsimd]: https://github.com/ashvardanian/simsimd
+
+If you like strings and value efficiency, you may also enjoy the following projects:
+
+- [simdutf](https://github.com/simdutf/simdutf) - transcoding UTF8, UTF16, and UTF32 LE and BE.
+- [hyperscan](https://github.com/intel/hyperscan) - regular expressions with SIMD acceleration.
+- [pyahocorasick](https://github.com/WojciechMula/pyahocorasick) - Aho-Corasick algorithm in Python.
+- [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) - fast string matching in C++ and Python.
 
 ## License 📜
 

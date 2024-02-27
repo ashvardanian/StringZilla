@@ -374,6 +374,17 @@ echo "export PATH=/usr/share/swift/usr/bin:$PATH" >> ~/.bashrc
 source ~/.bashrc
 ```
 
+You can check the available images on [`swift.org/download` page](https://www.swift.org/download/#releases).
+For x86 CPUs, the following commands would work:
+
+```bash
+wget https://download.swift.org/swift-5.9.2-release/ubuntu2204/swift-5.9.2-RELEASE/swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
+tar xzf swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
+sudo mv swift-5.9.2-RELEASE-ubuntu22.04 /usr/share/swift
+echo "export PATH=/usr/share/swift/usr/bin:$PATH" >> ~/.bashrc
+source ~/.bashrc
+```
+
 Alternatively, on Linux, the official Swift Docker image can be used for builds and tests:
 
 ```bash
