@@ -88,6 +88,8 @@ def test_unit_sequence():
 
     lines = big.splitlines()
     assert [2, 1, 0] == list(lines.order())
+    assert "p3" in lines
+    assert "p4" not in lines
 
     lines.sort()
     assert [0, 1, 2] == list(lines.order())

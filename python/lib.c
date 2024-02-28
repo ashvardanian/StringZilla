@@ -801,7 +801,34 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 }
 
 // Will be called by the `PySequence_Contains`
-static int Strs_contains(Str *self, PyObject *arg) { return 0; }
+static int Strs_contains(Str *self, PyObject *needle_obj) {
+
+    // Validate and convert `needle`
+    sz_string_view_t needle;
+    if (!export_string_like(needle_obj, &needle.start, &needle.length)) {
+        PyErr_SetString(PyExc_TypeError, "The needle argument must be string-like");
+        return NULL;
+    }
+
+    // Depending on the layout, we will need to use different logic
+    Py_ssize_t count = Strs_len(self);
+    get_string_at_offset_t getter = str_at_offset_getter(self);
+    if (!getter) {
+        PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
+        return NULL;
+    }
+
+    // Time for a full-scan
+    for (Py_ssize_t i = 0; i < count; ++i) {
+        PyObject *parent = NULL;
+        char const *start = NULL;
+        size_t length = 0;
+        getter(self, i, count, &parent, &start, &length);
+        if (length == needle.length && sz_equal(start, needle.start, needle.length) == sz_true_k) return 1;
+    }
+
+    return 0;
+}
 
 static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 
