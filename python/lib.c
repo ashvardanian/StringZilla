@@ -837,13 +837,7 @@ static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
     if (!export_string_like(self, &a_start, &a_length) || !export_string_like(other, &b_start, &b_length))
         Py_RETURN_NOTIMPLEMENTED;
 
-    // Perform byte-wise comparison up to the minimum length
-    sz_size_t min_length = a_length < b_length ? a_length : b_length;
-    int order = memcmp(a_start, b_start, min_length);
-
-    // If the strings are equal up to `min_length`, then the shorter string is smaller
-    if (order == 0) order = (a_length > b_length) - (a_length < b_length);
-
+    int order = (int)sz_order(a_start, a_length, b_start, b_length);
     switch (op) {
     case Py_LT: return PyBool_FromLong(order < 0);
     case Py_LE: return PyBool_FromLong(order <= 0);
@@ -851,6 +845,170 @@ static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
     case Py_NE: return PyBool_FromLong(order != 0);
     case Py_GT: return PyBool_FromLong(order > 0);
     case Py_GE: return PyBool_FromLong(order >= 0);
+    default: Py_RETURN_NOTIMPLEMENTED;
+    }
+}
+
+static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
+
+    Strs *a = (Strs *)self;
+    Py_ssize_t a_length = Strs_len(a);
+    get_string_at_offset_t a_getter = str_at_offset_getter(a);
+    if (!a_getter) {
+        PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
+        return NULL;
+    }
+
+    // If the other object is also a Strs, we can compare them much faster,
+    // avoiding the CPython API entirely
+    if (PyObject_TypeCheck(other, &StrsType)) {
+        Strs *b = (Strs *)other;
+
+        // Check if lengths are equal
+        Py_ssize_t b_length = Strs_len(b);
+        if (a_length != b_length) {
+            if (op == Py_EQ) { Py_RETURN_FALSE; }
+            if (op == Py_NE) { Py_RETURN_TRUE; }
+        }
+
+        // The second array may have a different layout
+        get_string_at_offset_t b_getter = str_at_offset_getter(b);
+        if (!b_getter) {
+            PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
+            return NULL;
+        }
+
+        // Check each item for equality
+        Py_ssize_t min_length = sz_min_of_two(a_length, b_length);
+        for (Py_ssize_t i = 0; i < min_length; i++) {
+            PyObject *ai_parent = NULL, *bi_parent = NULL;
+            char const *ai_start = NULL, *bi_start = NULL;
+            size_t ai_length = 0, bi_length = 0;
+            a_getter(a, i, a_length, &ai_parent, &ai_start, &ai_length);
+            b_getter(b, i, b_length, &bi_parent, &bi_start, &bi_length);
+
+            // When dealing with arrays, early exists make sense only in some cases
+            int order = (int)sz_order(ai_start, ai_length, bi_start, bi_length);
+            switch (op) {
+            case Py_LT:
+            case Py_LE:
+                if (order > 0) { Py_RETURN_FALSE; }
+                break;
+            case Py_EQ:
+                if (order != 0) { Py_RETURN_FALSE; }
+                break;
+            case Py_NE:
+                if (order == 0) { Py_RETURN_TRUE; }
+                break;
+            case Py_GT:
+            case Py_GE:
+                if (order < 0) { Py_RETURN_FALSE; }
+                break;
+            default: break;
+            }
+        }
+
+        // Prefixes are identical, compare lengths
+        switch (op) {
+        case Py_LT: return PyBool_FromLong(a_length < b_length);
+        case Py_LE: return PyBool_FromLong(a_length <= b_length);
+        case Py_EQ: return PyBool_FromLong(a_length == b_length);
+        case Py_NE: return PyBool_FromLong(a_length != b_length);
+        case Py_GT: return PyBool_FromLong(a_length > b_length);
+        case Py_GE: return PyBool_FromLong(a_length >= b_length);
+        default: Py_RETURN_NOTIMPLEMENTED;
+        }
+    }
+
+    // The second argument is a sequence, but not a `Strs` object,
+    // so we need to iterate through it.
+    PyObject *other_iter = PyObject_GetIter(other);
+    if (!other_iter) {
+        PyErr_Clear();
+        PyErr_SetString(PyExc_TypeError, "The second argument is not iterable");
+        return NULL;
+    }
+
+    // We may not even know the length of the second sequence, so
+    // let's just iterate as far as we can.
+    Py_ssize_t i = 0;
+    PyObject *other_item;
+    for (; (other_item = PyIter_Next(other_iter)); ++i) {
+        // Check if the second array is longer than the first
+        if (a_length <= i) {
+            Py_DECREF(other_item);
+            Py_DECREF(other_iter);
+            switch (op) {
+            case Py_LT: Py_RETURN_TRUE;
+            case Py_LE: Py_RETURN_TRUE;
+            case Py_EQ: Py_RETURN_FALSE;
+            case Py_NE: Py_RETURN_TRUE;
+            case Py_GT: Py_RETURN_FALSE;
+            case Py_GE: Py_RETURN_FALSE;
+            default: Py_RETURN_NOTIMPLEMENTED;
+            }
+        }
+
+        // Try unpacking the element from the second sequence
+        sz_string_view_t bi;
+        if (!export_string_like(other_item, &bi.start, &bi.length)) {
+            Py_DECREF(other_item);
+            Py_DECREF(other_iter);
+            PyErr_SetString(PyExc_TypeError, "The second container must contain string-like objects");
+            return NULL;
+        }
+
+        // Both sequences aren't exhausted yet
+        PyObject *ai_parent = NULL;
+        char const *ai_start = NULL;
+        size_t ai_length = 0;
+        a_getter(a, i, a_length, &ai_parent, &ai_start, &ai_length);
+
+        // When dealing with arrays, early exists make sense only in some cases
+        int order = (int)sz_order(ai_start, ai_length, bi.start, bi.length);
+        switch (op) {
+        case Py_LT:
+        case Py_LE:
+            if (order > 0) {
+                Py_DECREF(other_item);
+                Py_DECREF(other_iter);
+                Py_RETURN_FALSE;
+            }
+            break;
+        case Py_EQ:
+            if (order != 0) {
+                Py_DECREF(other_item);
+                Py_DECREF(other_iter);
+                Py_RETURN_FALSE;
+            }
+            break;
+        case Py_NE:
+            if (order == 0) {
+                Py_DECREF(other_item);
+                Py_DECREF(other_iter);
+                Py_RETURN_TRUE;
+            }
+            break;
+        case Py_GT:
+        case Py_GE:
+            if (order < 0) {
+                Py_DECREF(other_item);
+                Py_DECREF(other_iter);
+                Py_RETURN_FALSE;
+            }
+            break;
+        default: break;
+        }
+    }
+
+    // The prefixes are equal and the second sequence is exhausted, but the first one may not be
+    switch (op) {
+    case Py_LT: return PyBool_FromLong(i < a_length);
+    case Py_LE: Py_RETURN_TRUE;
+    case Py_EQ: return PyBool_FromLong(i == a_length);
+    case Py_NE: return PyBool_FromLong(i != a_length);
+    case Py_GT: Py_RETURN_FALSE;
+    case Py_GE: return PyBool_FromLong(i == a_length);
     default: Py_RETURN_NOTIMPLEMENTED;
     }
 }
@@ -2154,6 +2312,7 @@ static PyTypeObject StrsType = {
     .tp_methods = Strs_methods,
     .tp_as_sequence = &Strs_as_sequence,
     .tp_as_mapping = &Strs_as_mapping,
+    .tp_richcompare = Strs_richcompare,
 };
 
 #pragma endregion

@@ -41,14 +41,72 @@ def test_unit_contains():
     assert "xxx" not in big
 
 
-def test_unit_rich_comparisons():
+def test_unit_str_rich_comparisons():
+    # Equality
     assert Str("aa") == "aa"
+    assert Str("a") != "b"
+    assert Str("abc") == Str("abc")
+    assert Str("abc") != Str("abd")
+
+    # Less than and less than or equal to
     assert Str("aa") < "b"
+    assert Str("ab") <= "ab"
+    assert Str("a") < Str("b")
+    assert Str("abc") <= Str("abcd")
+
+    # Greater than and greater than or equal to
+    assert Str("b") > "aa"
+    assert Str("ab") >= "ab"
+    assert Str("b") > Str("a")
+    assert Str("abcd") >= Str("abc")
+
+    # Slicing and comparisons
     s2 = Str("abb")
     assert s2[1:] == "bb"
     assert s2[:-1] == "ab"
     assert s2[-1:] == "b"
+    assert s2[1:] != "abb"
+    assert s2[:-2] == "a"
+    assert s2[-2:] == "bb"
 
+
+def test_unit_strs_rich_comparisons():
+    arr: Strs = Str("a b c d e f g h").split()
+
+    # Test against another Strs object
+    identical_arr: Strs = Str("a b c d e f g h").split()
+    different_arr: Strs = Str("a b c d e f g i").split()
+    shorter_arr: Strs = Str("a b c d e").split()
+    longer_arr: Strs = Str("a b c d e f g h i j").split()
+
+    assert arr == identical_arr
+    assert arr != different_arr
+    assert arr != shorter_arr
+    assert arr != longer_arr
+    assert shorter_arr < arr
+    assert longer_arr > arr
+
+    # Test against a Python list and a tuple
+    list_equal = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    list_different = ["a", "b", "c", "d", "x", "f", "g", "h"]
+    tuple_equal = ("a", "b", "c", "d", "e", "f", "g", "h")
+    tuple_different = ("a", "b", "c", "d", "e", "f", "g", "i")
+
+    assert arr == list_equal
+    assert arr != list_different
+    assert arr == tuple_equal
+    assert arr != tuple_different
+
+    # Test against a generator of unknown length
+    generator_equal = (x for x in "a b c d e f g h".split())
+    generator_different = (x for x in "a b c d e f g i".split())
+    generator_shorter = (x for x in "a b c d e".split())
+    generator_longer = (x for x in "a b c d e f g h i j".split())
+
+    assert arr == generator_equal
+    assert arr != generator_different
+    assert arr != generator_shorter
+    assert arr != generator_longer
 
 def test_unit_buffer_protocol():
     # Try importing NumPy to compute the Levenshtein distances more efficiently

@@ -1722,21 +1722,34 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
 #pragma GCC diagnostic pop
 }
 
+/**
+ *  One option to avoid branching is to use conditional moves and lookup the comparison result in a table:
+ *       sz_ordering_t ordering_lookup[2] = {sz_greater_k, sz_less_k};
+ *       for (; a != min_end; ++a, ++b)
+ *           if (*a != *b) return ordering_lookup[*a < *b];
+ *  That, however, introduces a data-dependency.
+ *  A cleaner option is to perform two comparisons and a subtraction.
+ *  One instruction more, but no data-dependency.
+ */
+#define _sz_order_scalars(a, b) ((sz_ordering_t)((a > b) - (a < b)))
+
 SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
-    sz_ordering_t ordering_lookup[2] = {sz_greater_k, sz_less_k};
     sz_bool_t a_shorter = (sz_bool_t)(a_length < b_length);
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
 #if SZ_USE_MISALIGNED_LOADS && !SZ_DETECT_BIG_ENDIAN
     for (sz_u64_vec_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
-        a_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(a).u64);
-        b_vec.u64 = sz_u64_bytes_reverse(sz_u64_load(b).u64);
-        if (a_vec.u64 != b_vec.u64) return ordering_lookup[a_vec.u64 < b_vec.u64];
+        a_vec = sz_u64_load(a);
+        b_vec = sz_u64_load(b);
+        if (a_vec.u64 != b_vec.u64)
+            return _sz_order_scalars(sz_u64_bytes_reverse(a_vec.u64), sz_u64_bytes_reverse(b_vec.u64));
     }
 #endif
     for (; a != min_end; ++a, ++b)
-        if (*a != *b) return ordering_lookup[*a < *b];
-    return a_length != b_length ? ordering_lookup[a_shorter] : sz_equal_k;
+        if (*a != *b) return _sz_order_scalars(*a, *b);
+
+    // If the strings are equal up to `min_end`, then the shorter string is smaller
+    return _sz_order_scalars(a_length, b_length);
 }
 
 /**
@@ -3890,7 +3903,6 @@ SZ_INTERNAL __mmask64 _sz_u64_mask_until(sz_size_t n) {
 }
 
 SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
-    sz_ordering_t ordering_lookup[2] = {sz_greater_k, sz_less_k};
     sz_u512_vec_t a_vec, b_vec;
     __mmask64 a_mask, b_mask, mask_not_equal;
 
@@ -3903,7 +3915,7 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
             int first_diff = _tzcnt_u64(mask_not_equal);
             char a_char = a[first_diff];
             char b_char = b[first_diff];
-            return ordering_lookup[a_char < b_char];
+            return _sz_order_scalars(a_char, b_char);
         }
         a += 64, b += 64, a_length -= 64, b_length -= 64;
     }
@@ -3922,12 +3934,12 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
             int first_diff = _tzcnt_u64(mask_not_equal);
             char a_char = a[first_diff];
             char b_char = b[first_diff];
-            return ordering_lookup[a_char < b_char];
+            return _sz_order_scalars(a_char, b_char);
         }
         else
             // From logic perspective, the hardest cases are "abc\0" and "abc".
             // The result must be `sz_greater_k`, as the latter is shorter.
-            return a_length != b_length ? ordering_lookup[a_length < b_length] : sz_equal_k;
+            return _sz_order_scalars(a_length, b_length);
     }
     else
         return sz_equal_k;
