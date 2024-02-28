@@ -2,6 +2,8 @@
 
 use core::ffi::c_void;
 
+type SzRandomGeneratorT = extern "C" fn(*mut c_void) -> u64;
+
 // Import the functions from the StringZilla C library.
 extern "C" {
     fn sz_find(
@@ -64,6 +66,15 @@ extern "C" {
         gap: i8,
         allocator: *const c_void,
     ) -> isize;
+
+    fn sz_generate(
+        alphabet: *const c_void,
+        alphabet_size: usize,
+        text: *mut c_void,
+        length: usize,
+        generate: SzRandomGeneratorT,
+        generator: *mut c_void,
+    );
 }
 
 /// The [StringZilla] trait provides a collection of string searching and manipulation functionalities.
@@ -97,6 +108,39 @@ where
     /// Computes Needleman–Wunsch alignment score for two strings. Often used in bioinformatics and cheminformatics.
     /// Similar to the Levenshtein edit-distance, parameterized for gap and substitution penalties.
     fn sz_alignment_score(&self, needle: N, matrix: [[i8; 256]; 256], gap: i8) -> isize;
+}
+
+trait MutableStringZilla<N>
+where
+    N: AsRef<[u8]>,
+{
+    /// Generates a random string for a given alphabet.
+    /// Replaces the buffer with a random string of the same length.
+    // Cannot be String, as it is not AsMut<[u8]>
+    fn randomize(&mut self, alphabet: N, generate: SzRandomGeneratorT);
+}
+
+impl<T, N> MutableStringZilla<N> for T
+where
+    T: AsMut<[u8]>,
+    N: AsRef<[u8]>,
+{
+    fn randomize(&mut self, alphabet: N, generate: SzRandomGeneratorT) {
+        let text = self.as_mut();
+        let text_len = text.len();
+        let alphabet_slice = alphabet.as_ref(); // Convert N to &[u8];
+
+        unsafe {
+            sz_generate(
+                alphabet_slice.as_ptr() as *const c_void,
+                alphabet_slice.len(),
+                text.as_mut_ptr() as *mut c_void,
+                text_len,
+                generate,              // Directly use the function pointer
+                core::ptr::null_mut(), // No need for a generator context
+            );
+        }
+    }
 }
 
 impl<T, N> StringZilla<N> for T
@@ -284,9 +328,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use core::ffi::c_void;
     use std::borrow::Cow;
 
-    use crate::StringZilla;
+    use crate::{MutableStringZilla, StringZilla, SzRandomGeneratorT};
 
     fn unary_substitution_costs() -> [[i8; 256]; 256] {
         let mut result = [[0; 256]; 256];
@@ -298,6 +343,11 @@ mod tests {
         }
 
         result
+    }
+
+    // Define a simple deterministic generator for testing purposes.
+    extern "C" fn test_generator(_: *mut c_void) -> u64 {
+        4 // Always returns 4 for predictability in tests
     }
 
     #[test]
@@ -358,5 +408,35 @@ mod tests {
             my_cow_str.as_ref().sz_rfind_char_not_from("world"),
             Some(12)
         );
+    }
+
+    #[test]
+    fn test_randomize_with_byte_slice() {
+        let mut my_bytes: Vec<u8> = vec![0; 10]; // A buffer of ten zeros
+        let alphabet: &[u8] = b"abcd"; // A byte slice alphabet
+        my_bytes.randomize(alphabet, test_generator);
+
+        // Assert that all bytes in `my_bytes` are now 'd' (ASCII 100), based on the test_generator
+        assert!(my_bytes.iter().all(|&b| b == b'd'));
+    }
+
+    #[test]
+    fn test_randomize_with_vec() {
+        let mut my_bytes: Vec<u8> = vec![0; 10];
+        let alphabet = vec![b'a', b'b', b'c', b'd']; // A Vec<u8> alphabet
+        my_bytes.randomize(&alphabet, test_generator);
+
+        // Assert similar to the previous test
+        assert!(my_bytes.iter().all(|&b| b == b'd'));
+    }
+
+    #[test]
+    fn test_randomize_with_string() {
+        let mut my_bytes: Vec<u8> = vec![0; 10];
+        let alphabet = "abcd".to_string(); // A String alphabet
+        my_bytes.randomize(&alphabet, test_generator);
+
+        // Assert similar to the previous test
+        assert!(my_bytes.iter().all(|&b| b == b'd'));
     }
 }
