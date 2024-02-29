@@ -106,11 +106,14 @@ typedef struct {
          *  offsets. The starting offset of the first element is zero bytes after the `start`.
          *  Every chunk will include a separator of length `separator_length` at the end, except for the
          *  last one.
+         *
+         *  The layout isn't exactly identical to Arrow, as we have an optional separator and we have one less offset.
+         *  https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
          */
         struct consecutive_slices_32bit_t {
             size_t count;
             size_t separator_length;
-            PyObject *parent;
+            PyObject *parent_string;
             char const *start;
             uint32_t *end_offsets;
         } consecutive_32bit;
@@ -123,11 +126,14 @@ typedef struct {
          *  offsets. The starting offset of the first element is zero bytes after the `start`.
          *  Every chunk will include a separator of length `separator_length` at the end, except for the
          *  last one.
+         *
+         *  The layout isn't exactly identical to Arrow, as we have an optional separator and we have one less offset.
+         *  https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
          */
         struct consecutive_slices_64bit_t {
             size_t count;
             size_t separator_length;
-            PyObject *parent;
+            PyObject *parent_string;
             char const *start;
             uint64_t *end_offsets;
         } consecutive_64bit;
@@ -138,7 +144,7 @@ typedef struct {
          */
         struct reordered_slices_t {
             size_t count;
-            PyObject *parent;
+            PyObject *parent_string;
             sz_string_view_t *parts;
         } reordered;
 
@@ -243,29 +249,29 @@ sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *len
 
 typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject **, char const **, size_t *);
 
-void str_at_offset_consecutive_32bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start,
-                                     size_t *length) {
+void str_at_offset_consecutive_32bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
+                                     PyObject **parent_string, char const **start, size_t *length) {
     uint32_t start_offset = (i == 0) ? 0 : strs->data.consecutive_32bit.end_offsets[i - 1];
     uint32_t end_offset = strs->data.consecutive_32bit.end_offsets[i];
     *start = strs->data.consecutive_32bit.start + start_offset;
     *length = end_offset - start_offset - strs->data.consecutive_32bit.separator_length * (i + 1 != count);
-    *parent = strs->data.consecutive_32bit.parent;
+    *parent_string = strs->data.consecutive_32bit.parent_string;
 }
 
-void str_at_offset_consecutive_64bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start,
-                                     size_t *length) {
+void str_at_offset_consecutive_64bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
+                                     PyObject **parent_string, char const **start, size_t *length) {
     uint64_t start_offset = (i == 0) ? 0 : strs->data.consecutive_64bit.end_offsets[i - 1];
     uint64_t end_offset = strs->data.consecutive_64bit.end_offsets[i];
     *start = strs->data.consecutive_64bit.start + start_offset;
     *length = end_offset - start_offset - strs->data.consecutive_64bit.separator_length * (i + 1 != count);
-    *parent = strs->data.consecutive_64bit.parent;
+    *parent_string = strs->data.consecutive_64bit.parent_string;
 }
 
-void str_at_offset_reordered(Strs *strs, Py_ssize_t i, Py_ssize_t count, PyObject **parent, char const **start,
-                             size_t *length) {
+void str_at_offset_reordered(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
+                             PyObject **parent_string, char const **start, size_t *length) {
     *start = strs->data.reordered.parts[i].start;
     *length = strs->data.reordered.parts[i].length;
-    *parent = strs->data.reordered.parent;
+    *parent_string = strs->data.reordered.parent_string;
 }
 
 get_string_at_offset_t str_at_offset_getter(Strs *strs) {
@@ -286,18 +292,18 @@ sz_bool_t prepare_strings_for_reordering(Strs *strs) {
     size_t count = 0;
     void *old_buffer = NULL;
     get_string_at_offset_t getter = NULL;
-    PyObject *parent = NULL;
+    PyObject *parent_string = NULL;
     switch (strs->type) {
     case STRS_CONSECUTIVE_32:
         count = strs->data.consecutive_32bit.count;
         old_buffer = strs->data.consecutive_32bit.end_offsets;
-        parent = strs->data.consecutive_32bit.parent;
+        parent_string = strs->data.consecutive_32bit.parent_string;
         getter = str_at_offset_consecutive_32bit;
         break;
     case STRS_CONSECUTIVE_64:
         count = strs->data.consecutive_64bit.count;
         old_buffer = strs->data.consecutive_64bit.end_offsets;
-        parent = strs->data.consecutive_64bit.parent;
+        parent_string = strs->data.consecutive_64bit.parent_string;
         getter = str_at_offset_consecutive_64bit;
         break;
     // Already in reordered form
@@ -317,10 +323,10 @@ sz_bool_t prepare_strings_for_reordering(Strs *strs) {
 
     // Populate the new reordered array using get_string_at_offset
     for (size_t i = 0; i < count; ++i) {
-        PyObject *parent;
+        PyObject *parent_string;
         char const *start;
         size_t length;
-        getter(strs, (Py_ssize_t)i, count, &parent, &start, &length);
+        getter(strs, (Py_ssize_t)i, count, &parent_string, &start, &length);
         new_parts[i].start = start;
         new_parts[i].length = length;
     }
@@ -332,7 +338,7 @@ sz_bool_t prepare_strings_for_reordering(Strs *strs) {
     strs->type = STRS_REORDERED;
     strs->data.reordered.count = count;
     strs->data.reordered.parts = new_parts;
-    strs->data.reordered.parent = parent;
+    strs->data.reordered.parent_string = parent_string;
     return 1;
 }
 
@@ -593,6 +599,9 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs)
     return PyLong_FromSize_t((size_t)result);
 }
 
+static PyObject *Str_get_address(Str *self, void *closure) { return PyLong_FromSize_t((sz_size_t)self->start); }
+static PyObject *Str_get_nbytes(Str *self, void *closure) { return PyLong_FromSize_t(self->length); }
+
 static Py_ssize_t Str_len(Str *self) { return self->length; }
 
 static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
@@ -680,6 +689,13 @@ static int Str_in(Str *self, PyObject *arg) {
     return sz_find(self->start, self->length, needle_struct.start, needle_struct.length) != NULL;
 }
 
+static PyObject *Strs_get_tape(Str *self, void *closure) { return NULL; }
+static PyObject *Strs_get_offsets_are_large(Str *self, void *closure) { return NULL; }
+static PyObject *Strs_get_tape_address(Str *self, void *closure) { return NULL; }
+static PyObject *Strs_get_offsets_address(Str *self, void *closure) { return NULL; }
+static PyObject *Strs_get_tape_nbytes(Str *self, void *closure) { return NULL; }
+static PyObject *Strs_get_offsets_nbytes(Str *self, void *closure) { return NULL; }
+
 static Py_ssize_t Strs_len(Strs *self) {
     switch (self->type) {
     case STRS_CONSECUTIVE_32: return self->data.consecutive_32bit.count;
@@ -721,83 +737,152 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
 }
 
 static PyObject *Strs_subscript(Strs *self, PyObject *key) {
-    if (PySlice_Check(key)) {
-        // Sanity checks
-        Py_ssize_t count = Strs_len(self);
-        Py_ssize_t start, stop, step;
-        if (PySlice_Unpack(key, &start, &stop, &step) < 0) return NULL;
-        if (PySlice_AdjustIndices(count, &start, &stop, step) < 0) return NULL;
-        if (step != 1) {
-            PyErr_SetString(PyExc_IndexError, "Efficient step is not supported");
-            return NULL;
-        }
 
-        // Create a new `Strs` object
-        Strs *self_slice = (Strs *)StrsType.tp_alloc(&StrsType, 0);
-        if (self_slice == NULL && PyErr_NoMemory()) return NULL;
+    if (PyLong_Check(key)) { return Strs_getitem(self, PyLong_AsSsize_t(key)); }
 
-        // Depending on the layout, the procedure will be different.
-        self_slice->type = self->type;
-        switch (self->type) {
-
-/* Usable as consecutive_logic(64bit), e.g. */
-#define consecutive_logic(type)                                                                               \
-    typedef index_##type##_t index_t;                                                                         \
-    typedef struct consecutive_slices_##type##_t slice_t;                                                     \
-    slice_t *from = &self->data.consecutive_##type;                                                           \
-    slice_t *to = &self_slice->data.consecutive_##type;                                                       \
-    to->count = stop - start;                                                                                 \
-    to->separator_length = from->separator_length;                                                            \
-    to->parent = from->parent;                                                                                \
-    size_t first_length;                                                                                      \
-    str_at_offset_consecutive_##type(self, start, count, &to->parent, &to->start, &first_length);             \
-    index_t first_offset = to->start - from->start;                                                           \
-    to->end_offsets = malloc(sizeof(index_t) * to->count);                                                    \
-    if (to->end_offsets == NULL && PyErr_NoMemory()) {                                                        \
-        Py_XDECREF(self_slice);                                                                               \
-        return NULL;                                                                                          \
-    }                                                                                                         \
-    for (size_t i = 0; i != to->count; ++i) to->end_offsets[i] = from->end_offsets[i + start] - first_offset; \
-    Py_INCREF(to->parent);
-        case STRS_CONSECUTIVE_32: {
-            typedef uint32_t index_32bit_t;
-            consecutive_logic(32bit);
-            break;
-        }
-        case STRS_CONSECUTIVE_64: {
-            typedef uint64_t index_64bit_t;
-            consecutive_logic(64bit);
-            break;
-        }
-#undef consecutive_logic
-        case STRS_REORDERED: {
-            struct reordered_slices_t *from = &self->data.reordered;
-            struct reordered_slices_t *to = &self_slice->data.reordered;
-            to->count = stop - start;
-            to->parent = from->parent;
-
-            to->parts = malloc(sizeof(sz_string_view_t) * to->count);
-            if (to->parts == NULL && PyErr_NoMemory()) {
-                Py_XDECREF(self_slice);
-                return NULL;
-            }
-            memcpy(to->parts, from->parts + start, sizeof(sz_string_view_t) * to->count);
-            Py_INCREF(to->parent);
-            break;
-        }
-        default:
-            // Unsupported type
-            PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
-            return NULL;
-        }
-
-        return (PyObject *)self_slice;
-    }
-    else if (PyLong_Check(key)) { return Strs_getitem(self, PyLong_AsSsize_t(key)); }
-    else {
+    if (!PySlice_Check(key)) {
         PyErr_SetString(PyExc_TypeError, "Strs indices must be integers or slices");
         return NULL;
     }
+
+    // Sanity checks
+    Py_ssize_t count = Strs_len(self);
+    Py_ssize_t start, stop, step;
+    if (PySlice_Unpack(key, &start, &stop, &step) < 0) return NULL;
+    Py_ssize_t result_count = PySlice_AdjustIndices(count, &start, &stop, step);
+    if (result_count < 0) return NULL;
+
+    // Create a new `Strs` object
+    Strs *result = (Strs *)StrsType.tp_alloc(&StrsType, 0);
+    if (result == NULL && PyErr_NoMemory()) return NULL;
+    if (result_count == 0) {
+        result->type = STRS_REORDERED;
+        result->data.reordered.count = 0;
+        result->data.reordered.parts = NULL;
+        result->data.reordered.parent_string = NULL;
+        return (PyObject *)result;
+    }
+
+    // If a step is requested, we have to create a new `REORDERED` Strs object,
+    // even if the original one was `CONSECUTIVE`.
+    if (step != 1) {
+        sz_string_view_t *new_parts = (sz_string_view_t *)malloc(result_count * sizeof(sz_string_view_t));
+        if (new_parts == NULL) {
+            Py_XDECREF(result);
+            PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
+            return 0;
+        }
+
+        get_string_at_offset_t getter = str_at_offset_getter(self);
+        result->type = STRS_REORDERED;
+        result->data.reordered.count = result_count;
+        result->data.reordered.parts = new_parts;
+        result->data.reordered.parent_string = NULL;
+
+        // Populate the new reordered array using get_string_at_offset
+        size_t j = 0;
+        if (step > 0)
+            for (Py_ssize_t i = start; i < stop; i += step, ++j) {
+                getter(self, i, count, &result->data.reordered.parent_string, &new_parts[j].start,
+                       &new_parts[j].length);
+            }
+        else
+            for (Py_ssize_t i = start; i > stop; i += step, ++j) {
+                getter(self, i, count, &result->data.reordered.parent_string, &new_parts[j].start,
+                       &new_parts[j].length);
+            }
+
+        return (PyObject *)result;
+    }
+
+    // Depending on the layout, the procedure will be different, but by now we know that:
+    // - `start` and `stop` are valid indices
+    // - `step` is 1
+    // - `result_count` is positive
+    // - the resulting object will have the same type as the original one
+    result->type = self->type;
+    switch (self->type) {
+
+    case STRS_CONSECUTIVE_32: {
+        typedef struct consecutive_slices_32bit_t consecutive_slices_t;
+        consecutive_slices_t *from = &self->data.consecutive_32bit;
+        consecutive_slices_t *to = &result->data.consecutive_32bit;
+        to->count = result_count;
+
+        // Allocate memory for the end offsets
+        to->separator_length = from->separator_length;
+        to->end_offsets = malloc(sizeof(index_32bit_t) * result_count);
+        if (to->end_offsets == NULL && PyErr_NoMemory()) {
+            Py_XDECREF(result);
+            return NULL;
+        }
+
+        // Now populate the offsets
+        size_t element_length;
+        str_at_offset_consecutive_32bit(self, start, count, &to->parent_string, &to->start, &element_length);
+        to->end_offsets[0] = element_length;
+        for (size_t i = 1; i < result_count; ++i) {
+            to->end_offsets[i - 1] += from->separator_length;
+            PyObject *element_parent = NULL;
+            char const *element_start = NULL;
+            str_at_offset_consecutive_32bit(self, start, count, &element_parent, &element_start, &element_length);
+            to->end_offsets[i] = element_length + to->end_offsets[i - 1];
+        }
+        Py_INCREF(to->parent_string);
+        break;
+    }
+
+    case STRS_CONSECUTIVE_64: {
+        typedef struct consecutive_slices_64bit_t consecutive_slices_t;
+        consecutive_slices_t *from = &self->data.consecutive_64bit;
+        consecutive_slices_t *to = &result->data.consecutive_64bit;
+        to->count = result_count;
+
+        // Allocate memory for the end offsets
+        to->separator_length = from->separator_length;
+        to->end_offsets = malloc(sizeof(index_64bit_t) * result_count);
+        if (to->end_offsets == NULL && PyErr_NoMemory()) {
+            Py_XDECREF(result);
+            return NULL;
+        }
+
+        // Now populate the offsets
+        size_t element_length;
+        str_at_offset_consecutive_64bit(self, start, count, &to->parent_string, &to->start, &element_length);
+        to->end_offsets[0] = element_length;
+        for (size_t i = 1; i < result_count; ++i) {
+            to->end_offsets[i - 1] += from->separator_length;
+            PyObject *element_parent = NULL;
+            char const *element_start = NULL;
+            str_at_offset_consecutive_64bit(self, start, count, &element_parent, &element_start, &element_length);
+            to->end_offsets[i] = element_length + to->end_offsets[i - 1];
+        }
+        Py_INCREF(to->parent_string);
+        break;
+    }
+
+    case STRS_REORDERED: {
+        struct reordered_slices_t *from = &self->data.reordered;
+        struct reordered_slices_t *to = &result->data.reordered;
+        to->count = result_count;
+        to->parent_string = from->parent_string;
+
+        to->parts = malloc(sizeof(sz_string_view_t) * to->count);
+        if (to->parts == NULL && PyErr_NoMemory()) {
+            Py_XDECREF(result);
+            return NULL;
+        }
+        memcpy(to->parts, from->parts + start, sizeof(sz_string_view_t) * to->count);
+        Py_INCREF(to->parent_string);
+        break;
+    }
+    default:
+        // Unsupported type
+        PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
+        return NULL;
+    }
+
+    return (PyObject *)result;
 }
 
 // Will be called by the `PySequence_Contains`
@@ -1712,7 +1797,7 @@ static PyObject *Str_find_last_not_of(PyObject *self, PyObject *args, PyObject *
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static Strs *Str_split_(PyObject *parent, sz_string_view_t text, sz_string_view_t separator, int keepseparator,
+static Strs *Str_split_(PyObject *parent_string, sz_string_view_t text, sz_string_view_t separator, int keepseparator,
                         Py_ssize_t maxsplit) {
     // Create Strs object
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
@@ -1727,14 +1812,14 @@ static Strs *Str_split_(PyObject *parent, sz_string_view_t text, sz_string_view_
         bytes_per_offset = 8;
         result->type = STRS_CONSECUTIVE_64;
         result->data.consecutive_64bit.start = text.start;
-        result->data.consecutive_64bit.parent = parent;
+        result->data.consecutive_64bit.parent_string = parent_string;
         result->data.consecutive_64bit.separator_length = !keepseparator * separator.length;
     }
     else {
         bytes_per_offset = 4;
         result->type = STRS_CONSECUTIVE_32;
         result->data.consecutive_32bit.start = text.start;
-        result->data.consecutive_32bit.parent = parent;
+        result->data.consecutive_32bit.parent_string = parent_string;
         result->data.consecutive_32bit.separator_length = !keepseparator * separator.length;
     }
 
@@ -1781,7 +1866,7 @@ static Strs *Str_split_(PyObject *parent, sz_string_view_t text, sz_string_view_
         result->data.consecutive_32bit.count = offsets_count;
     }
 
-    Py_INCREF(parent);
+    Py_INCREF(parent_string);
     return result;
 }
 
@@ -1976,6 +2061,13 @@ static PyNumberMethods Str_as_number = {
     .nb_add = Str_concat,
 };
 
+static PyGetSetDef Str_getsetters[] = {
+    // Compatibility with PyArrow
+    {"address", (getter)Str_get_address, NULL, "Get the memory address of the first byte of the string", NULL},
+    {"nbytes", (getter)Str_get_nbytes, NULL, "Get the length of the string in bytes", NULL},
+    {NULL} // Sentinel
+};
+
 #define SZ_METHOD_FLAGS METH_VARARGS | METH_KEYWORDS
 
 static PyMethodDef Str_methods[] = {
@@ -2040,6 +2132,7 @@ static PyTypeObject StrType = {
     .tp_as_mapping = &Str_as_mapping,
     .tp_as_buffer = &Str_as_buffer,
     .tp_as_number = &Str_as_number,
+    .tp_getset = Str_getsetters,
 };
 
 #pragma endregion
@@ -2296,6 +2389,18 @@ static PyMappingMethods Strs_as_mapping = {
     .mp_subscript = Strs_subscript, // Is used to implement slices in Python
 };
 
+static PyGetSetDef Strs_getsetters[] = {
+    // Compatibility with PyArrow
+    {"tape", (getter)Strs_get_tape, NULL, "In-place transforms the string representation to match Apache Arrow", NULL},
+    {"tape_address", (getter)Strs_get_tape_address, NULL, "Address of the first byte of the first string", NULL},
+    {"tape_nbytes", (getter)Strs_get_tape_nbytes, NULL, "Length of the entire tape of strings in bytes", NULL},
+    {"offsets_address", (getter)Strs_get_offsets_address, NULL, "Address of the first byte of offsets array", NULL},
+    {"offsets_nbytes", (getter)Strs_get_offsets_nbytes, NULL, "Get teh length of offsets array in bytes", NULL},
+    {"offsets_are_large", (getter)Strs_get_offsets_are_large, NULL,
+     "Checks if 64-bit addressing should be used to convert to Arrow", NULL},
+    {NULL} // Sentinel
+};
+
 static PyMethodDef Strs_methods[] = {
     {"shuffle", Strs_shuffle, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."},  //
     {"sort", Strs_sort, SZ_METHOD_FLAGS, "Sort the elements of the Strs object."},           //
@@ -2312,6 +2417,7 @@ static PyTypeObject StrsType = {
     .tp_methods = Strs_methods,
     .tp_as_sequence = &Strs_as_sequence,
     .tp_as_mapping = &Strs_as_mapping,
+    .tp_getset = Strs_getsetters,
     .tp_richcompare = Strs_richcompare,
 };
 
