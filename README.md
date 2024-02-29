@@ -354,14 +354,29 @@ Assuming superior search speed splitting should also work 3x faster than with na
 Need copies?
 
 ```python
-sorted_copy: Strs = lines.sorted()
-shuffled_copy: Strs = lines.shuffled(seed=42)
+words = Str('b a c').split()
+sorted_copy: Strs = words.sorted()
+assert words == ['a', 'b', 'c'] # Supports all comparison operators
+shuffled_copy: Strs = words.shuffled(seed=42)
 ```
 
 Those collections of `Strs` are designed to keep the memory consumption low.
 If all the chunks are located in consecutive memory regions, the memory overhead can be as low as 4 bytes per chunk.
 That's designed to handle very large datasets, like [RedPajama][redpajama].
 To address all 20 Billion annotated english documents in it, one will need only 160 GB of RAM instead of Terabytes.
+Once memory mapped, you can random-sample the data without loading it into RAM:
+
+```python
+lines.sample(seed=42) # 10x faster than `random.choices`
+```
+
+Or you can batch and shard the data using slicing in any order with any steps:
+
+```python
+lines[::3] # every third line
+lines[1::1] # every odd line
+lines[:-100:-1] # last 100 lines in reverse order
+```
 
 [redpajama]: https://github.com/togethercomputer/RedPajama-Data
 
@@ -453,6 +468,21 @@ assert sz.alignment_score(
 ```
 
 </details>
+
+### Serialization
+
+#### Filesystem
+
+Similar to how `File` can be used to read a large file, other interfaces can be used to dump strings to disk faster.
+The `Str` class has `write_to` to write the string to a file, and `offset_within` to obtain integer offsets of substring view in larger string for navigation.
+
+```py
+web_archieve = Str("<html>...</html><html>...</html>")
+_, end_tag, next_doc = web_archieve.partition("</html>") # or use `find`
+next_doc_offset = next_doc.offset_within(web_archieve)
+web_archieve.write_to("next_doc.html")
+```
+
 
 ## Quick Start: C/C++ 🛠️
 

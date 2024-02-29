@@ -179,6 +179,11 @@ def test_unit_strs_sequence():
     lines.sort(reverse=True)
     assert ["p3", "p2", "p1"] == list(lines)
 
+    # Sampling an array
+    sampled = lines.sample(100, seed=42)
+    assert "p3" in sampled
+    assert "p4" not in sampled
+
 
 def test_unit_slicing():
     native = "abcdef"

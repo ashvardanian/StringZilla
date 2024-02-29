@@ -36,7 +36,9 @@ typedef SSIZE_T ssize_t;
 #include <Python.h> // Core CPython interfaces
 
 #include <stdio.h>  // `fopen`
+#include <stdlib.h> // `rand`, `srand`
 #include <string.h> // `memset`, `memcpy`
+#include <time.h>   // `time`
 
 #include <stringzilla/stringzilla.h>
 
@@ -811,7 +813,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
         // Allocate memory for the end offsets
         to->separator_length = from->separator_length;
-        to->end_offsets = malloc(sizeof(index_32bit_t) * result_count);
+        to->end_offsets = malloc(sizeof(uint32_t) * result_count);
         if (to->end_offsets == NULL && PyErr_NoMemory()) {
             Py_XDECREF(result);
             return NULL;
@@ -840,7 +842,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
         // Allocate memory for the end offsets
         to->separator_length = from->separator_length;
-        to->end_offsets = malloc(sizeof(index_64bit_t) * result_count);
+        to->end_offsets = malloc(sizeof(uint64_t) * result_count);
         if (to->end_offsets == NULL && PyErr_NoMemory()) {
             Py_XDECREF(result);
             return NULL;
@@ -2378,6 +2380,90 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
     return tuple;
 }
 
+static PyObject *Strs_sample(Strs *self, PyObject *args, PyObject *kwargs) {
+    PyObject *seed_obj = NULL;
+    PyObject *sample_size_obj = NULL;
+
+    // Check for positional arguments
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs > 1) {
+        PyErr_SetString(PyExc_TypeError, "sample() takes 1 positional argument and 1 keyword argument");
+        return NULL;
+    }
+    else if (nargs == 1) { sample_size_obj = PyTuple_GET_ITEM(args, 0); }
+
+    // Parse keyword arguments
+    if (kwargs) {
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "seed") == 0) { seed_obj = value; }
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return 0;
+            }
+        }
+    }
+
+    // Translate the seed and the sample size to C types
+    size_t sample_size = 0;
+    if (sample_size_obj) {
+        if (!PyLong_Check(sample_size_obj)) {
+            PyErr_SetString(PyExc_TypeError, "The sample size must be an integer");
+            return NULL;
+        }
+        sample_size = PyLong_AsSize_t(sample_size_obj);
+    }
+    unsigned int seed = time(NULL); // Default seed
+    if (seed_obj) {
+        if (!PyLong_Check(seed_obj)) {
+            PyErr_SetString(PyExc_TypeError, "The seed must be an integer");
+            return NULL;
+        }
+        seed = PyLong_AsUnsignedLong(seed_obj);
+    }
+
+    // Create a new `Strs` object
+    Strs *result = (Strs *)StrsType.tp_alloc(&StrsType, 0);
+    if (result == NULL && PyErr_NoMemory()) return NULL;
+
+    result->type = STRS_REORDERED;
+    result->data.reordered.count = 0;
+    result->data.reordered.parts = NULL;
+    result->data.reordered.parent_string = NULL;
+    if (sample_size == 0) { return (PyObject *)result; }
+
+    // Now create a new Strs object with the sampled strings
+    sz_string_view_t *result_parts = malloc(sample_size * sizeof(sz_string_view_t));
+    if (!result_parts) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for the sample");
+        return NULL;
+    }
+
+    // Introspect the Strs object to know the from which will be sampling
+    Py_ssize_t count = Strs_len(self);
+    get_string_at_offset_t getter = str_at_offset_getter(self);
+    if (!getter) {
+        PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
+        return NULL;
+    }
+
+    // Randomly sample the strings
+    srand(seed);
+    PyObject *parent_string;
+    for (Py_ssize_t i = 0; i < sample_size; i++) {
+        size_t index = rand() % count;
+        getter(self, index, count, &parent_string, &result_parts[i].start, &result_parts[i].length);
+    }
+
+    // Update the Strs object
+    result->type = STRS_REORDERED;
+    result->data.reordered.count = sample_size;
+    result->data.reordered.parts = result_parts;
+    result->data.reordered.parent_string = parent_string;
+    return result;
+}
+
 static PySequenceMethods Strs_as_sequence = {
     .sq_length = Strs_len,        //
     .sq_item = Strs_getitem,      //
@@ -2402,9 +2488,11 @@ static PyGetSetDef Strs_getsetters[] = {
 };
 
 static PyMethodDef Strs_methods[] = {
-    {"shuffle", Strs_shuffle, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."},  //
-    {"sort", Strs_sort, SZ_METHOD_FLAGS, "Sort the elements of the Strs object."},           //
-    {"order", Strs_order, SZ_METHOD_FLAGS, "Provides the indexes to achieve sorted order."}, //
+    {"shuffle", Strs_shuffle, SZ_METHOD_FLAGS, "Shuffle (in-place) the elements of the Strs object."}, //
+    {"sort", Strs_sort, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},          //
+    {"order", Strs_order, SZ_METHOD_FLAGS, "Provides the indexes to achieve sorted order."},           //
+    {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},             //
+    // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrsType = {
