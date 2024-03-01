@@ -136,6 +136,12 @@ cppcheck --project=build_artifacts/compile_commands.json --enable=all
 clang-tidy-11 -p build_artifacts
 ```
 
+I'd recommend putting the following breakpoints:
+
+- `__asan::ReportGenericError` - to detect illegal memory accesses.
+- `__GI_exit` - to stop at exit points - the end of running any executable.
+- `__builtin_unreachable` - to catch all the places where the code is expected to be unreachable.
+
 ### Benchmarking
 
 For benchmarks, you can use the following commands:
