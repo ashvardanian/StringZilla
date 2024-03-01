@@ -497,8 +497,12 @@ SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length);
  *  @param generate     Callback producing random numbers given the generator state.
  *  @param generator    Generator state, can be a pointer to a seed, or a pointer to a random number generator.
  */
-SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
+SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
                            sz_random_generator_t generate, void *generator);
+
+/** @copydoc sz_generate */
+SZ_PUBLIC void sz_generate_serial(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
+                                  sz_random_generator_t generate, void *generator);
 
 /**
  *  @brief  Similar to `memcpy`, copies contents of one string into another.
@@ -2984,7 +2988,7 @@ SZ_PUBLIC sz_bool_t sz_isascii_serial(sz_cptr_t text, sz_size_t length) {
     return sz_true_k;
 }
 
-SZ_PUBLIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
+SZ_PUBLIC void sz_generate_serial(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
                            sz_random_generator_t generator, void *generator_user_data) {
 
     sz_assert(alphabet_size > 0 && alphabet_size <= 256 && "Inadequate alphabet size");
@@ -5322,6 +5326,11 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_
     for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
     sz_charset_invert(&set);
     return sz_rfind_charset(h, h_length, &set);
+}
+
+SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
+                            sz_random_generator_t generator, void *generator_user_data) {
+    return sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }
 
 #endif
