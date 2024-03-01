@@ -337,40 +337,48 @@ A standard dataset pre-processing use case would be to map a sizeable textual da
 - `text.contains('substring', start=0, end=9223372036854775807) -> bool`
 - `text.find('substring', start=0, end=9223372036854775807) -> int`
 - `text.count('substring', start=0, end=9223372036854775807, allowoverlap=False) -> int`
-- `text.splitlines(keeplinebreaks=False, separator='\n') -> Strs`
 - `text.split(separator=' ', maxsplit=9223372036854775807, keepseparator=False) -> Strs`
+- `text.rsplit(separator=' ', maxsplit=9223372036854775807, keepseparator=False) -> Strs`
+- `text.splitlines(keeplinebreaks=False, maxsplit=9223372036854775807) -> Strs`
+
+It's important to note, that the last function behavior is slightly different from Python's `str.splitlines`.
+The [native version][faq-splitlines] matches `\n`, `\r`, `\v` or `\x0b`, `\f` or `\x0c`, `\x1c`, `\x1d`, `\x1e`, `\x85`, `\r\n`, `\u2028`, `\u2029`, including 3x two-bytes-long runes.
+The StringZilla version matches only `\n` and is practically a shortcut for `text.split('\n')`.
+
+[faq-splitlines]: https://docs.python.org/3/library/stdtypes.html#str.splitlines
+
+### Character Set Operations
+
+Python strings don't natively support character set operations.
+This forces people to use regular expressions, which are slow and hard to read.
+To avoid the need for `re.finditer`, StringZilla provides the following interfaces:
+
+- `text.find_first_of('chars', start=0, end=9223372036854775807) -> int`
+- `text.find_last_of('chars', start=0, end=9223372036854775807) -> int`
+- `text.find_first_not_of('chars', start=0, end=9223372036854775807) -> int`
+- `text.find_last_not_of('chars', start=0, end=9223372036854775807) -> int`
+
+Similarly, for splitting operations:
+
+- `text.split_charset(separator='chars', maxsplit=9223372036854775807, keepseparator=False) -> Strs`
+- `text.rsplit_charset(separator='chars', maxsplit=9223372036854775807, keepseparator=False) -> Strs`
 
 ### Collection-Level Operations
 
-Once split into a `Strs` object, you can sort, shuffle, and reorganize the slices.
+Once split into a `Strs` object, you can sort, shuffle, and reorganize the slices, with minimum memory footprint.
+If all the chunks are located in consecutive memory regions, the memory overhead can be as low as 4 bytes per chunk.
 
 ```python
 lines: Strs = text.split(separator='\n') # 4 bytes per line overhead for under 4 GB of text
-lines.sort() # explodes to 16 bytes per line overhead for any length text
-lines.shuffle(seed=42) # reproducing dataset shuffling with a seed
+batch: Strs = lines.sample(seed=42) # 10x faster than `random.choices`
+lines.shuffle(seed=42) # or shuffle all lines in place and shard with slices
+# WIP: lines.sort() # explodes to 16 bytes per line overhead for any length text
+# WIP: sorted_order: tuple = lines.argsort() # similar to `numpy.argsort`
 ```
 
-Assuming superior search speed splitting should also work 3x faster than with native Python strings.
-Need copies?
-
-```python
-words = Str('b a c').split()
-sorted_copy: Strs = words.sorted()
-assert words == ['a', 'b', 'c'] # Supports all comparison operators
-shuffled_copy: Strs = words.shuffled(seed=42)
-```
-
-Those collections of `Strs` are designed to keep the memory consumption low.
-If all the chunks are located in consecutive memory regions, the memory overhead can be as low as 4 bytes per chunk.
-That's designed to handle very large datasets, like [RedPajama][redpajama].
-To address all 20 Billion annotated english documents in it, one will need only 160 GB of RAM instead of Terabytes.
-Once memory mapped, you can random-sample the data without loading it into RAM:
-
-```python
-lines.sample(seed=42) # 10x faster than `random.choices`
-```
-
-Or you can batch and shard the data using slicing in any order with any steps:
+Working on [RedPajama][redpajama], addressing 20 Billion annotated english documents, one will need only 160 GB of RAM instead of Terabytes.
+Once loaded, the data will be memory-mapped, and can be reused between multiple Python processes without copies.
+And of course, you can use slices to navigate the dataset and shard it between multiple workers.
 
 ```python
 lines[::3] # every third line
@@ -379,6 +387,30 @@ lines[:-100:-1] # last 100 lines in reverse order
 ```
 
 [redpajama]: https://github.com/togethercomputer/RedPajama-Data
+
+### Iterators and Memory Efficiency
+
+Python's operations like `split()` and `readlines()` immediately materialize a `list` of copied parts.
+This can be very memory-inefficient for large datasets.
+StringZilla saves a lot of memory by viewing existing memory regions as substrings, but even more memory can be saved by using lazily evaluated iterators.
+
+- `text.split_iter(separator=' ', keepseparator=False) -> SplitIterator[Str]`
+- `text.rsplit_iter(separator=' ', keepseparator=False) -> SplitIterator[Str]`
+- `text.split_charset_iter(separator='chars', keepseparator=False) -> SplitIterator[Str]`
+- `text.rsplit_charset_iter(separator='chars', keepseparator=False) -> SplitIterator[Str]`
+
+StringZilla can easily be 10x more memory efficient than native Python classes for tokenization.
+With lazy operations, it practically becomes free.
+
+```py
+import stringzilla as sz
+%load_ext memory_profiler
+
+text = open("enwik9.txt", "r").read() # 1 GB, mean word length 7.73 bytes
+%memit text.split() # increment: 8670.12 MiB (152 ms)
+%memit sz.split(text) # increment: 530.75 MiB (25 ms)
+%memit sum(1 for _ in sz.split_iter(text)) # increment: 0.00 MiB
+```
 
 ### Low-Level Python API
 

@@ -47,6 +47,7 @@ typedef SSIZE_T ssize_t;
 static PyTypeObject FileType;
 static PyTypeObject StrType;
 static PyTypeObject StrsType;
+static PyTypeObject SplitIteratorType;
 
 static sz_string_view_t temporary_memory = {NULL, 0};
 
@@ -55,12 +56,12 @@ static sz_string_view_t temporary_memory = {NULL, 0};
  *          native `mmap` module, as it exposes the address of the mapping in memory.
  */
 typedef struct {
-    PyObject_HEAD
+    PyObject_HEAD;
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
-        HANDLE file_handle;
+    HANDLE file_handle;
     HANDLE mapping_handle;
 #else
-        int file_descriptor;
+    int file_descriptor;
 #endif
     sz_cptr_t start;
     sz_size_t length;
@@ -79,25 +80,59 @@ typedef struct {
  *      - Str(File("some-path.txt"), from=0, to=sys.maxint)
  */
 typedef struct {
-    PyObject_HEAD //
-        PyObject *parent;
+    PyObject_HEAD;
+    PyObject *parent;
     sz_cptr_t start;
     sz_size_t length;
 } Str;
+
+/**
+ *  @brief  String-splitting separator.
+ *
+ *  Allows lazy evaluation of the `split` and `rsplit`, and can be used to create a `Strs` object.
+ *  which might be more memory-friendly, than greedily invoking `str.split`.
+ */
+typedef struct {
+    PyObject_HEAD;
+
+    PyObject *text_object;      //< For reference counting
+    PyObject *separator_object; //< For reference counting
+
+    sz_string_view_t text;
+    sz_string_view_t separator;
+    sz_find_t finder;
+
+    /// @brief  How many bytes to skip after each successful find.
+    ///         Generally equal to `needle_length`, or 1 for character sets.
+    sz_size_t match_length;
+
+    /// @brief  Should we include the separator in the resulting slices?
+    sz_bool_t include_match;
+
+    /// @brief  Should we enumerate the slices in normal or reverse order?
+    sz_bool_t is_reverse;
+
+    /// @brief  Upper limit for the number of splits to report. Monotonically decreases during iteration.
+    sz_size_t max_parts;
+
+    /// @brief  Indicates that we've already reported the tail of the split, and should return NULL next.
+    sz_bool_t reached_tail;
+
+} SplitIterator;
 
 /**
  *  @brief  Variable length Python object similar to `Tuple[Union[Str, str]]`,
  *          for faster sorting, shuffling, joins, and lookups.
  */
 typedef struct {
-    PyObject_HEAD
+    PyObject_HEAD;
 
-        enum {
-            STRS_CONSECUTIVE_32,
-            STRS_CONSECUTIVE_64,
-            STRS_REORDERED,
-            STRS_MULTI_SOURCE,
-        } type;
+    enum {
+        STRS_CONSECUTIVE_32,
+        STRS_CONSECUTIVE_64,
+        STRS_REORDERED,
+        STRS_MULTI_SOURCE,
+    } type;
 
     union {
         /**
@@ -254,18 +289,20 @@ typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject 
 void str_at_offset_consecutive_32bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
                                      PyObject **parent_string, char const **start, size_t *length) {
     uint32_t start_offset = (i == 0) ? 0 : strs->data.consecutive_32bit.end_offsets[i - 1];
-    uint32_t end_offset = strs->data.consecutive_32bit.end_offsets[i];
+    uint32_t end_offset = strs->data.consecutive_32bit.end_offsets[i] - //
+                          strs->data.consecutive_32bit.separator_length * (i + 1 != count);
     *start = strs->data.consecutive_32bit.start + start_offset;
-    *length = end_offset - start_offset - strs->data.consecutive_32bit.separator_length * (i + 1 != count);
+    *length = end_offset - start_offset;
     *parent_string = strs->data.consecutive_32bit.parent_string;
 }
 
 void str_at_offset_consecutive_64bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
                                      PyObject **parent_string, char const **start, size_t *length) {
     uint64_t start_offset = (i == 0) ? 0 : strs->data.consecutive_64bit.end_offsets[i - 1];
-    uint64_t end_offset = strs->data.consecutive_64bit.end_offsets[i];
+    uint64_t end_offset = strs->data.consecutive_64bit.end_offsets[i] - //
+                          strs->data.consecutive_64bit.separator_length * (i + 1 != count);
     *start = strs->data.consecutive_64bit.start + start_offset;
-    *length = end_offset - start_offset - strs->data.consecutive_64bit.separator_length * (i + 1 != count);
+    *length = end_offset - start_offset;
     *parent_string = strs->data.consecutive_64bit.parent_string;
 }
 
@@ -348,7 +385,7 @@ sz_bool_t prepare_strings_for_extension(Strs *strs, size_t new_parents, size_t n
 
 #pragma endregion
 
-#pragma region MemoryMappingFile
+#pragma region Memory Mapping File
 
 static void File_dealloc(File *self) {
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
@@ -577,6 +614,20 @@ static void Str_dealloc(Str *self) {
 
 static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->start, self->length); }
 
+static PyObject *Str_repr(Str *self) {
+    // Interestingly, known-length string formatting only works in Python 3.12 and later.
+    // https://docs.python.org/3/c-api/unicode.html#c.PyUnicode_FromFormat
+    if (PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 12)
+        return PyUnicode_FromFormat("sz.Str('%.*s')", (int)self->length, self->start);
+    else {
+        // Use a simpler formatting rule for older versions
+        PyObject *str_obj = PyUnicode_FromStringAndSize(self->start, self->length);
+        PyObject *result = PyUnicode_FromFormat("sz.Str('%U')", str_obj);
+        Py_DECREF(str_obj);
+        return result;
+    }
+}
+
 static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->start, self->length); }
 
 static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -588,11 +639,11 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *text_object = is_member ? self : PyTuple_GET_ITEM(args, 0);
     sz_string_view_t text;
 
     // Validate and convert `text`
-    if (!export_string_like(text_obj, &text.start, &text.length)) {
+    if (!export_string_like(text_object, &text.start, &text.length)) {
         PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
         return NULL;
     }
@@ -680,15 +731,20 @@ static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
     // https://docs.python.org/3/c-api/typeobj.html#c.PyBufferProcs.bf_releasebuffer
 }
 
-static int Str_in(Str *self, PyObject *arg) {
+/**
+ *  @brief  Will be called by the `PySequence_Contains` to check presence of a substring.
+ *  @return 1 if the string is present, 0 if it is not, -1 in case of error.
+ *  @see    Docs: https://docs.python.org/3/c-api/sequence.html#c.PySequence_Contains
+ */
+static int Str_in(Str *self, PyObject *needle_obj) {
 
-    sz_string_view_t needle_struct;
-    if (!export_string_like(arg, &needle_struct.start, &needle_struct.length)) {
+    sz_string_view_t needle;
+    if (!export_string_like(needle_obj, &needle.start, &needle.length)) {
         PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
         return -1;
     }
 
-    return sz_find(self->start, self->length, needle_struct.start, needle_struct.length) != NULL;
+    return sz_find(self->start, self->length, needle.start, needle.length) != NULL;
 }
 
 static PyObject *Strs_get_tape(Str *self, void *closure) { return NULL; }
@@ -887,14 +943,18 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
     return (PyObject *)result;
 }
 
-// Will be called by the `PySequence_Contains`
-static int Strs_contains(Str *self, PyObject *needle_obj) {
+/**
+ *  @brief  Will be called by the `PySequence_Contains` to check the presence of a string in array.
+ *  @return 1 if the string is present, 0 if it is not, -1 in case of error.
+ *  @see    Docs: https://docs.python.org/3/c-api/sequence.html#c.PySequence_Contains
+ */
+static int Strs_in(Str *self, PyObject *needle_obj) {
 
     // Validate and convert `needle`
     sz_string_view_t needle;
     if (!export_string_like(needle_obj, &needle.start, &needle.length)) {
         PyErr_SetString(PyExc_TypeError, "The needle argument must be string-like");
-        return NULL;
+        return -1;
     }
 
     // Depending on the layout, we will need to use different logic
@@ -902,7 +962,7 @@ static int Strs_contains(Str *self, PyObject *needle_obj) {
     get_string_at_offset_t getter = str_at_offset_getter(self);
     if (!getter) {
         PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
-        return NULL;
+        return -1;
     }
 
     // Time for a full-scan
@@ -1112,7 +1172,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *text_object = is_member ? self : PyTuple_GET_ITEM(args, 0);
     PyObject *path_obj = PyTuple_GET_ITEM(args, !is_member + 0);
 
     // Parse keyword arguments
@@ -1125,7 +1185,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
     sz_string_view_t path;
 
     // Validate and convert `text` and `path`
-    if (!export_string_like(text_obj, &text.start, &text.length) ||
+    if (!export_string_like(text_object, &text.start, &text.length) ||
         !export_string_like(path_obj, &path.start, &path.length)) {
         PyErr_SetString(PyExc_TypeError, "Text and path must be string-like");
         return NULL;
@@ -1181,7 +1241,7 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwa
     }
 
     PyObject *slice_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *text_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+    PyObject *text_object = PyTuple_GET_ITEM(args, !is_member + 0);
 
     // Parse keyword arguments
     if (kwargs) {
@@ -1193,7 +1253,7 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwa
     sz_string_view_t slice;
 
     // Validate and convert `text` and `slice`
-    if (!export_string_like(text_obj, &text.start, &text.length) ||
+    if (!export_string_like(text_object, &text.start, &text.length) ||
         !export_string_like(slice_obj, &slice.start, &slice.length)) {
         PyErr_SetString(PyExc_TypeError, "Text and slice must be string-like");
         return NULL;
@@ -1212,7 +1272,7 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwa
  *  @return 1 on success, 0 on failure.
  */
 static int _Str_find_implementation_( //
-    PyObject *self, PyObject *args, PyObject *kwargs, sz_find_t finder, Py_ssize_t *offset_out,
+    PyObject *self, PyObject *args, PyObject *kwargs, sz_find_t finder, sz_bool_t is_reverse, Py_ssize_t *offset_out,
     sz_string_view_t *haystack_out, sz_string_view_t *needle_out) {
 
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -1278,6 +1338,14 @@ static int _Str_find_implementation_( //
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
+    // If the needle length is zero, the result is start index in normal order or end index in reverse order
+    if (needle.length == 0) {
+        *offset_out = !is_reverse ? normalized_offset : (normalized_offset + normalized_length);
+        *haystack_out = haystack;
+        *needle_out = needle;
+        return 1;
+    }
+
     // Perform contains operation
     sz_cptr_t match = finder(haystack.start, haystack.length, needle.start, needle.length);
     if (match == NULL) { *offset_out = -1; }
@@ -1292,7 +1360,8 @@ static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) 
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, &signed_offset, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, sz_false_k, &signed_offset, &text, &separator))
+        return NULL;
     if (signed_offset == -1) { Py_RETURN_FALSE; }
     else { Py_RETURN_TRUE; }
 }
@@ -1301,7 +1370,8 @@ static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, &signed_offset, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, sz_false_k, &signed_offset, &text, &separator))
+        return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
 
@@ -1309,7 +1379,8 @@ static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, &signed_offset, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, sz_false_k, &signed_offset, &text, &separator))
+        return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
         return NULL;
@@ -1321,7 +1392,8 @@ static PyObject *Str_rfind(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, &signed_offset, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, sz_true_k, &signed_offset, &text, &separator))
+        return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
 
@@ -1329,7 +1401,8 @@ static PyObject *Str_rindex(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, &signed_offset, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, sz_true_k, &signed_offset, &text, &separator))
+        return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
         return NULL;
@@ -1337,14 +1410,22 @@ static PyObject *Str_rindex(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static PyObject *_Str_partition_implementation(PyObject *self, PyObject *args, PyObject *kwargs, sz_find_t finder) {
+static PyObject *_Str_partition_implementation(PyObject *self, PyObject *args, PyObject *kwargs, sz_find_t finder,
+                                               sz_bool_t is_reverse) {
     Py_ssize_t separator_index;
     sz_string_view_t text;
     sz_string_view_t separator;
     PyObject *result_tuple;
 
     // Use _Str_find_implementation_ to get the index of the separator
-    if (!_Str_find_implementation_(self, args, kwargs, finder, &separator_index, &text, &separator)) return NULL;
+    if (!_Str_find_implementation_(self, args, kwargs, finder, is_reverse, &separator_index, &text, &separator))
+        return NULL;
+
+    // If the separator length is zero, we must raise a `ValueError`
+    if (separator.length == 0) {
+        PyErr_SetString(PyExc_ValueError, "empty separator");
+        return NULL;
+    }
 
     // If separator is not found, return a tuple (self, "", "")
     if (separator_index == -1) {
@@ -1384,11 +1465,11 @@ static PyObject *_Str_partition_implementation(PyObject *self, PyObject *args, P
 }
 
 static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_partition_implementation(self, args, kwargs, &sz_find);
+    return _Str_partition_implementation(self, args, kwargs, &sz_find, sz_false_k);
 }
 
 static PyObject *Str_rpartition(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_partition_implementation(self, args, kwargs, &sz_rfind);
+    return _Str_partition_implementation(self, args, kwargs, &sz_rfind, sz_true_k);
 }
 
 static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -1767,7 +1848,8 @@ static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwa
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_from, &signed_offset, &text, &separator))
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_from, sz_false_k, &signed_offset, &text,
+                                   &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -1776,7 +1858,8 @@ static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject 
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_not_from, &signed_offset, &text, &separator))
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_not_from, sz_false_k, &signed_offset, &text,
+                                   &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -1785,7 +1868,8 @@ static PyObject *Str_find_last_of(PyObject *self, PyObject *args, PyObject *kwar
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_from, &signed_offset, &text, &separator))
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_from, sz_true_k, &signed_offset, &text,
+                                   &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -1794,13 +1878,49 @@ static PyObject *Str_find_last_not_of(PyObject *self, PyObject *args, PyObject *
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_not_from, &signed_offset, &text, &separator))
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_not_from, sz_true_k, &signed_offset, &text,
+                                   &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static Strs *Str_split_(PyObject *parent_string, sz_string_view_t text, sz_string_view_t separator, int keepseparator,
-                        Py_ssize_t maxsplit) {
+/**
+ *  @brief  Given parsed split settings, constructs an iterator that would produce that split.
+ */
+static SplitIterator *Str_split_iter_(PyObject *text_object, PyObject *separator_object,             //
+                                      sz_string_view_t const text, sz_string_view_t const separator, //
+                                      int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length,
+                                      sz_bool_t is_reverse) {
+
+    // Create a new `SplitIterator` object
+    SplitIterator *result_obj = (SplitIterator *)SplitIteratorType.tp_alloc(&SplitIteratorType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    // Set its properties based on the slice
+    result_obj->text_object = text_object;
+    result_obj->separator_object = separator_object;
+    result_obj->text = text;
+    result_obj->separator = separator;
+    result_obj->finder = finder;
+
+    result_obj->match_length = match_length;
+    result_obj->include_match = keepseparator;
+    result_obj->is_reverse = is_reverse;
+    result_obj->max_parts = (sz_size_t)maxsplit + 1;
+    result_obj->reached_tail = 0;
+
+    // Increment the reference count of the parent
+    Py_INCREF(result_obj->text_object);
+    Py_XINCREF(result_obj->separator_object);
+    return result_obj;
+}
+
+/**
+ *  @brief  Implements the normal order split logic for both string-delimiters and character sets.
+ *          Produuces one of the consecutive layouts - `STRS_CONSECUTIVE_64` or `STRS_CONSECUTIVE_32`.
+ */
+static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
+                        int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length) {
     // Create Strs object
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
     if (!result) return NULL;
@@ -1815,21 +1935,36 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t text, sz_strin
         result->type = STRS_CONSECUTIVE_64;
         result->data.consecutive_64bit.start = text.start;
         result->data.consecutive_64bit.parent_string = parent_string;
-        result->data.consecutive_64bit.separator_length = !keepseparator * separator.length;
+        result->data.consecutive_64bit.separator_length = !keepseparator * match_length;
     }
     else {
         bytes_per_offset = 4;
         result->type = STRS_CONSECUTIVE_32;
         result->data.consecutive_32bit.start = text.start;
         result->data.consecutive_32bit.parent_string = parent_string;
-        result->data.consecutive_32bit.separator_length = !keepseparator * separator.length;
+        result->data.consecutive_32bit.separator_length = !keepseparator * match_length;
     }
 
-    // Iterate through string, keeping track of the
-    sz_size_t last_start = 0;
-    while (last_start <= text.length && offsets_count < maxsplit) {
-        sz_cptr_t match = sz_find(text.start + last_start, text.length - last_start, separator.start, separator.length);
-        sz_size_t offset_in_remaining = match ? match - text.start - last_start : text.length - last_start;
+    sz_bool_t reached_tail = 0;
+    sz_size_t total_skipped = 0;
+    sz_size_t max_parts = (sz_size_t)maxsplit + 1;
+    while (!reached_tail) {
+
+        sz_cptr_t match =
+            offsets_count + 1 < max_parts
+                ? finder(text.start + total_skipped, text.length - total_skipped, separator.start, separator.length)
+                : NULL;
+
+        sz_size_t part_end_offset;
+        if (match) {
+            part_end_offset = (match - text.start) + match_length;
+            total_skipped = part_end_offset;
+        }
+        else {
+            part_end_offset = text.length;
+            total_skipped = text.length;
+            reached_tail = 1;
+        }
 
         // Reallocate offsets array if needed
         if (offsets_count >= offsets_capacity) {
@@ -1849,17 +1984,13 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t text, sz_strin
         }
 
         // Export the offset
-        size_t will_continue = match != NULL;
-        size_t next_offset = last_start + offset_in_remaining + separator.length * will_continue;
-        if (text.length >= UINT32_MAX) { ((uint64_t *)offsets_endings)[offsets_count++] = (uint64_t)next_offset; }
-        else { ((uint32_t *)offsets_endings)[offsets_count++] = (uint32_t)next_offset; }
-
-        // Next time we want to start
-        last_start = last_start + offset_in_remaining + separator.length;
+        if (bytes_per_offset == 8) { ((uint64_t *)offsets_endings)[offsets_count] = (uint64_t)part_end_offset; }
+        else { ((uint32_t *)offsets_endings)[offsets_count] = (uint32_t)part_end_offset; }
+        offsets_count++;
     }
 
     // Populate the Strs object with the offsets
-    if (text.length >= UINT32_MAX) {
+    if (bytes_per_offset == 8) {
         result->data.consecutive_64bit.end_offsets = offsets_endings;
         result->data.consecutive_64bit.count = offsets_count;
     }
@@ -1872,7 +2003,92 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t text, sz_strin
     return result;
 }
 
-static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
+/**
+ *  @brief  Implements the reverse order split logic for both string-delimiters and character sets.
+ *          Unlike the `Str_split_` can't use consecutive layouts and produces a `REAORDERED` one.
+ */
+static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
+                         int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length) {
+    // Create Strs object
+    Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
+    if (!result) return NULL;
+
+    // Initialize Strs object based on the splitting logic
+    result->type = STRS_REORDERED;
+    result->data.reordered.parent_string = parent_string;
+    result->data.reordered.parts = NULL;
+    result->data.reordered.count = 0;
+
+    // Keep track of the memory usage
+    sz_string_view_t *parts = NULL;
+    sz_size_t parts_capacity = 0;
+    sz_size_t parts_count = 0;
+
+    sz_bool_t reached_tail = 0;
+    sz_size_t total_skipped = 0;
+    sz_size_t max_parts = (sz_size_t)maxsplit + 1;
+    while (!reached_tail) {
+
+        sz_cptr_t match = parts_count + 1 < max_parts
+                              ? finder(text.start, text.length - total_skipped, separator.start, separator.length)
+                              : NULL;
+
+        // Determine the next part
+        sz_string_view_t part;
+        if (match) {
+            part.start = match + match_length * !keepseparator;
+            part.length = text.start + text.length - total_skipped - part.start;
+            total_skipped = text.start + text.length - match;
+        }
+        else {
+            part.start = text.start;
+            part.length = text.length - total_skipped;
+            reached_tail = 1;
+        }
+
+        // Reallocate parts array if needed
+        if (parts_count >= parts_capacity) {
+            parts_capacity = (parts_capacity + 1) * 2;
+            sz_string_view_t *new_parts = (sz_string_view_t *)realloc(parts, parts_capacity * sizeof(sz_string_view_t));
+            if (!new_parts) {
+                if (parts) free(parts);
+            }
+            parts = new_parts;
+        }
+
+        // If the memory allocation has failed - discard the response
+        if (!parts) {
+            Py_XDECREF(result);
+            PyErr_NoMemory();
+            return NULL;
+        }
+
+        // Populate the parts array
+        parts[parts_count] = part;
+        parts_count++;
+    }
+
+    // Python does this weird thing, where the `rsplit` results appear in the same order as `split`
+    // so we need to reverse the order of elements in the `parts` array.
+    for (sz_size_t i = 0; i < parts_count / 2; i++) {
+        sz_string_view_t temp = parts[i];
+        parts[i] = parts[parts_count - i - 1];
+        parts[parts_count - i - 1] = temp;
+    }
+
+    result->data.reordered.parts = parts;
+    result->data.reordered.count = parts_count;
+    Py_INCREF(parent_string);
+    return result;
+}
+
+/**
+ *  @brief  Proxy routing requests like `Str.split`, `Str.rsplit`, `Str.split_charset` and `Str.rsplit_charset`
+ *          to `Str_split_` and `Str_rsplit_` implementations, parsing function arguments.
+ */
+static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, PyObject *kwargs, //
+                                               sz_find_t finder, sz_size_t match_length,         //
+                                               sz_bool_t is_reverse, sz_bool_t is_lazy_iterator) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -1881,8 +2097,8 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *separator_obj = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
+    PyObject *text_object = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *separator_object = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
     PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
     PyObject *keepseparator_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
 
@@ -1890,7 +2106,7 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
         PyObject *key, *value;
         Py_ssize_t pos = 0;
         while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "separator") == 0) { separator_obj = value; }
+            if (PyUnicode_CompareWithASCIIString(key, "separator") == 0) { separator_object = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0) { maxsplit_obj = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0) { keepseparator_obj = value; }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
@@ -1904,21 +2120,27 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t maxsplit;
 
     // Validate and convert `text`
-    if (!export_string_like(text_obj, &text.start, &text.length)) {
+    if (!export_string_like(text_object, &text.start, &text.length)) {
         PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
         return NULL;
     }
 
     // Validate and convert `separator`
-    if (separator_obj) {
-        if (!export_string_like(separator_obj, &separator.start, &separator.length)) {
+    if (separator_object) {
+        if (!export_string_like(separator_object, &separator.start, &separator.length)) {
             PyErr_SetString(PyExc_TypeError, "The separator argument must be string-like");
             return NULL;
         }
+        // Raise a `ValueError` if it's length is zero, like the native `str.split`
+        if (separator.length == 0) {
+            PyErr_SetString(PyExc_ValueError, "The separator argument must not be empty");
+            return NULL;
+        }
+        if (match_length == 0) match_length = separator.length;
     }
     else {
         separator.start = " ";
-        separator.length = 1;
+        match_length = separator.length = 1;
     }
 
     // Validate and convert `keepseparator`
@@ -1941,7 +2163,45 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
     }
     else { maxsplit = PY_SSIZE_T_MAX; }
 
-    return Str_split_(text_obj, text, separator, keepseparator, maxsplit);
+    // Dispatch the right backend
+    if (is_lazy_iterator)
+        return Str_split_iter_(text_object, separator_object, text, separator, //
+                               keepseparator, maxsplit, finder, match_length, is_reverse);
+    else
+        return !is_reverse ? Str_split_(text_object, text, separator, keepseparator, maxsplit, finder, match_length)
+                           : Str_rsplit_(text_object, text, separator, keepseparator, maxsplit, finder, match_length);
+}
+
+static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_find, 0, sz_false_k, sz_false_k);
+}
+
+static PyObject *Str_rsplit(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_false_k);
+}
+
+static PyObject *Str_split_charset(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_find_char_from, 1, sz_false_k, sz_false_k);
+}
+
+static PyObject *Str_rsplit_charset(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_char_from, 1, sz_true_k, sz_false_k);
+}
+
+static PyObject *Str_split_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_find, 0, sz_false_k, sz_true_k);
+}
+
+static PyObject *Str_rsplit_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_true_k);
+}
+
+static PyObject *Str_split_charset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_find_char_from, 1, sz_false_k, sz_true_k);
+}
+
+static PyObject *Str_rsplit_charset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_char_from, 1, sz_true_k, sz_true_k);
 }
 
 static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs) {
@@ -1953,7 +2213,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *text_object = is_member ? self : PyTuple_GET_ITEM(args, 0);
     PyObject *keeplinebreaks_obj = nargs > !is_member ? PyTuple_GET_ITEM(args, !is_member) : NULL;
     PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
 
@@ -1972,7 +2232,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
     Py_ssize_t maxsplit = PY_SSIZE_T_MAX; // Default value for maxsplit
 
     // Validate and convert `text`
-    if (!export_string_like(text_obj, &text.start, &text.length)) {
+    if (!export_string_like(text_object, &text.start, &text.length)) {
         PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
         return NULL;
     }
@@ -2003,7 +2263,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
     sz_string_view_t separator;
     separator.start = "\n";
     separator.length = 1;
-    return Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit);
+    return Str_split_(text_object, text, separator, keeplinebreaks, maxsplit, &sz_find, 1);
 }
 
 static PyObject *Str_concat(PyObject *self, PyObject *other) {
@@ -2079,15 +2339,16 @@ static PyMethodDef Str_methods[] = {
     {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
     {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
-    {"split", Str_split, SZ_METHOD_FLAGS, "Split a string by a separator."},
 
     // Bidirectional operations
     {"find", Str_find, SZ_METHOD_FLAGS, "Find the first occurrence of a substring."},
     {"index", Str_index, SZ_METHOD_FLAGS, "Find the first occurrence of a substring or raise error if missing."},
     {"partition", Str_partition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, first match, after."},
+    {"split", Str_split, SZ_METHOD_FLAGS, "Split a string by a separator."},
     {"rfind", Str_rfind, SZ_METHOD_FLAGS, "Find the last occurrence of a substring."},
     {"rindex", Str_rindex, SZ_METHOD_FLAGS, "Find the last occurrence of a substring or raise error if missing."},
     {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
+    {"rsplit", Str_rsplit, SZ_METHOD_FLAGS, "Split a string by a separator in reverse order."},
 
     // Edit distance extensions
     {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS,
@@ -2110,6 +2371,18 @@ static PyMethodDef Str_methods[] = {
      "Finds the first occurrence of a character not present in another string."},
     {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS,
      "Finds the last occurrence of a character not present in another string."},
+    {"split_charset", Str_split_charset, SZ_METHOD_FLAGS, "Split a string by a set of character separators."},
+    {"rsplit_charset", Str_rsplit_charset, SZ_METHOD_FLAGS,
+     "Split a string by a set of character separators in reverse order."},
+
+    // Lazily evaluated iterators
+    {"split_iter", Str_split_iter, SZ_METHOD_FLAGS, "Create an iterator for splitting a string by a separator."},
+    {"rsplit_iter", Str_rsplit_iter, SZ_METHOD_FLAGS,
+     "Create an iterator for splitting a string by a separator in reverse order."},
+    {"split_charset_iter", Str_split_charset_iter, SZ_METHOD_FLAGS,
+     "Create an iterator for splitting a string by a set of character separators."},
+    {"rsplit_charset_iter", Str_rsplit_charset_iter, SZ_METHOD_FLAGS,
+     "Create an iterator for splitting a string by a set of character separators in reverse order."},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", Str_offset_within, SZ_METHOD_FLAGS,
@@ -2128,6 +2401,7 @@ static PyTypeObject StrType = {
     .tp_dealloc = Str_dealloc,
     .tp_hash = Str_hash,
     .tp_richcompare = Str_richcompare,
+    .tp_repr = (reprfunc)Str_repr,
     .tp_str = Str_str,
     .tp_methods = Str_methods,
     .tp_as_sequence = &Str_as_sequence,
@@ -2139,7 +2413,84 @@ static PyTypeObject StrType = {
 
 #pragma endregion
 
-#pragma regions Strs
+#pragma region Split Iterator
+
+static PyObject *SplitIteratorType_next(SplitIterator *self) {
+    // No more data to split
+    if (self->reached_tail) return NULL;
+
+    // Create a new `Str` object
+    Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
+    if (result_obj == NULL && PyErr_NoMemory()) return NULL;
+
+    sz_cptr_t result_start;
+    sz_size_t result_length;
+
+    // Find the next needle
+    sz_cptr_t found =
+        self->max_parts > 1 //
+            ? self->finder(self->text.start, self->text.length, self->separator.start, self->separator.length)
+            : NULL;
+
+    // We've reached the end of the string
+    if (found == NULL) {
+        result_start = self->text.start;
+        result_length = self->text.length;
+        self->text.length = 0;
+        self->reached_tail = 1;
+        self->max_parts = 0;
+    }
+    else {
+        if (self->is_reverse) {
+            result_start = found + self->match_length * !self->include_match;
+            result_length = self->text.start + self->text.length - result_start;
+            self->text.length = found - self->text.start;
+        }
+        else {
+            result_start = self->text.start;
+            result_length = found - self->text.start;
+            result_length += self->match_length * self->include_match;
+            self->text.start = found + self->match_length;
+            self->text.length -= result_length + self->match_length;
+        }
+        self->max_parts--;
+    }
+
+    // Set its properties based on the slice
+    result_obj->start = result_start;
+    result_obj->length = result_length;
+    result_obj->parent = self->text_object;
+
+    // Increment the reference count of the parent
+    Py_INCREF(self->text_object);
+    return (PyObject *)result_obj;
+}
+
+static void SplitIteratorType_dealloc(SplitIterator *self) {
+    Py_XDECREF(self->text_object);
+    Py_XDECREF(self->separator_object);
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static PyObject *SplitIteratorType_iter(PyObject *self) {
+    Py_INCREF(self); // Iterator should return itself in __iter__.
+    return self;
+}
+
+static PyTypeObject SplitIteratorType = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.SplitIterator",
+    .tp_basicsize = sizeof(SplitIterator),
+    .tp_itemsize = 0,
+    .tp_dealloc = (destructor)SplitIteratorType_dealloc,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_doc = "Text-splitting iterator",
+    .tp_iter = SplitIteratorType_iter,
+    .tp_iternext = (iternextfunc)SplitIteratorType_next,
+};
+
+#pragma endregion
+
+#pragma region Strs
 
 static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
     unsigned int seed = time(NULL); // Default seed
@@ -2464,10 +2815,25 @@ static PyObject *Strs_sample(Strs *self, PyObject *args, PyObject *kwargs) {
     return result;
 }
 
+/**
+ *  @brief  Array to string conversion method, that concatenates all the strings in the array.
+ */
+static PyObject *Strs_str(Strs *self) {
+    // This is just an example, adapt it to your needs
+    // For instance, you could iterate over your Strs and concatenate them into a single string
+    return PyUnicode_FromFormat("<%s object at %p>", Py_TYPE(self)->tp_name, self);
+}
+
+static PyObject *Strs_repr(Strs *self) {
+    // This is just an example, adapt it to your needs
+    // For instance, you could iterate over your Strs and concatenate them into a single string
+    return PyUnicode_FromFormat("<%s object at %p>", Py_TYPE(self)->tp_name, self);
+}
+
 static PySequenceMethods Strs_as_sequence = {
-    .sq_length = Strs_len,        //
-    .sq_item = Strs_getitem,      //
-    .sq_contains = Strs_contains, //
+    .sq_length = Strs_len,   //
+    .sq_item = Strs_getitem, //
+    .sq_contains = Strs_in,  //
 };
 
 static PyMappingMethods Strs_as_mapping = {
@@ -2507,6 +2873,8 @@ static PyTypeObject StrsType = {
     .tp_as_mapping = &Strs_as_mapping,
     .tp_getset = Strs_getsetters,
     .tp_richcompare = Strs_richcompare,
+    .tp_repr = (reprfunc)Strs_repr,
+    .tp_str = (reprfunc)Strs_str,
 };
 
 #pragma endregion
@@ -2524,15 +2892,16 @@ static PyMethodDef stringzilla_methods[] = {
     {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
     {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
-    {"split", Str_split, SZ_METHOD_FLAGS, "Split a string by a separator."},
 
     // Bidirectional operations
     {"find", Str_find, SZ_METHOD_FLAGS, "Find the first occurrence of a substring."},
     {"index", Str_index, SZ_METHOD_FLAGS, "Find the first occurrence of a substring or raise error if missing."},
     {"partition", Str_partition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, first match, after."},
+    {"split", Str_split, SZ_METHOD_FLAGS, "Split a string by a separator."},
     {"rfind", Str_rfind, SZ_METHOD_FLAGS, "Find the last occurrence of a substring."},
     {"rindex", Str_rindex, SZ_METHOD_FLAGS, "Find the last occurrence of a substring or raise error if missing."},
     {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
+    {"rsplit", Str_rsplit, SZ_METHOD_FLAGS, "Split a string by a separator in reverse order."},
 
     // Edit distance extensions
     {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS,
@@ -2555,6 +2924,23 @@ static PyMethodDef stringzilla_methods[] = {
      "Finds the first occurrence of a character not present in another string."},
     {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS,
      "Finds the last occurrence of a character not present in another string."},
+    {"split_charset", Str_split_charset, SZ_METHOD_FLAGS, "Split a string by a set of character separators."},
+    {"rsplit_charset", Str_rsplit_charset, SZ_METHOD_FLAGS,
+     "Split a string by a set of character separators in reverse order."},
+
+    // Lazily evaluated iterators
+    {"split_iter", Str_split_iter, SZ_METHOD_FLAGS, "Create an iterator for splitting a string by a separator."},
+    {"rsplit_iter", Str_rsplit_iter, SZ_METHOD_FLAGS,
+     "Create an iterator for splitting a string by a separator in reverse order."},
+    {"split_charset_iter", Str_split_charset_iter, SZ_METHOD_FLAGS,
+     "Create an iterator for splitting a string by a set of character separators."},
+    {"rsplit_charset_iter", Str_rsplit_charset_iter, SZ_METHOD_FLAGS,
+     "Create an iterator for splitting a string by a set of character separators in reverse order."},
+
+    // Dealing with larger-than-memory datasets
+    {"offset_within", Str_offset_within, SZ_METHOD_FLAGS,
+     "Return the raw byte offset of one binary string within another."},
+    {"write_to", Str_write_to, SZ_METHOD_FLAGS, "Return the raw byte offset of one binary string within another."},
 
     // Global unary extensions
     {"hash", Str_like_hash, SZ_METHOD_FLAGS, "Hash a string or a byte-array."},
@@ -2579,6 +2965,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     if (PyType_Ready(&StrType) < 0) return NULL;
     if (PyType_Ready(&FileType) < 0) return NULL;
     if (PyType_Ready(&StrsType) < 0) return NULL;
+    if (PyType_Ready(&SplitIteratorType) < 0) return NULL;
 
     m = PyModule_Create(&stringzilla_module);
     if (m == NULL) return NULL;
@@ -2625,6 +3012,16 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     Py_INCREF(&StrsType);
     if (PyModule_AddObject(m, "Strs", (PyObject *)&StrsType) < 0) {
+        Py_XDECREF(&StrsType);
+        Py_XDECREF(&FileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    Py_INCREF(&SplitIteratorType);
+    if (PyModule_AddObject(m, "SplitIterator", (PyObject *)&SplitIteratorType) < 0) {
+        Py_XDECREF(&SplitIteratorType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);
         Py_XDECREF(&StrType);
