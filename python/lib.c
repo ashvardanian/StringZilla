@@ -2449,9 +2449,9 @@ static PyObject *SplitIteratorType_next(SplitIterator *self) {
         else {
             result_start = self->text.start;
             result_length = found - self->text.start;
-            result_length += self->match_length * self->include_match;
             self->text.start = found + self->match_length;
             self->text.length -= result_length + self->match_length;
+            result_length += self->match_length * self->include_match;
         }
         self->max_parts--;
     }
