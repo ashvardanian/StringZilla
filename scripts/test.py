@@ -587,6 +587,7 @@ def test_edit_distances():
 @pytest.mark.repeat(30)
 @pytest.mark.parametrize("first_length", [20, 100])
 @pytest.mark.parametrize("second_length", [20, 100])
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_edit_distance_random(first_length: int, second_length: int):
     a = get_random_string(length=first_length)
     b = get_random_string(length=second_length)
