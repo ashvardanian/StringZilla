@@ -305,5 +305,5 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_
 
 SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
                             sz_random_generator_t generator, void *generator_user_data) {
-    return sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
+    sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }

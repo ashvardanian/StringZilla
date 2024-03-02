@@ -498,7 +498,7 @@ SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length);
  *  @param generator    Generator state, can be a pointer to a seed, or a pointer to a random number generator.
  */
 SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
-                           sz_random_generator_t generate, void *generator);
+                            sz_random_generator_t generate, void *generator);
 
 /** @copydoc sz_generate */
 SZ_PUBLIC void sz_generate_serial(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
@@ -2989,7 +2989,7 @@ SZ_PUBLIC sz_bool_t sz_isascii_serial(sz_cptr_t text, sz_size_t length) {
 }
 
 SZ_PUBLIC void sz_generate_serial(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
-                           sz_random_generator_t generator, void *generator_user_data) {
+                                  sz_random_generator_t generator, void *generator_user_data) {
 
     sz_assert(alphabet_size > 0 && alphabet_size <= 256 && "Inadequate alphabet size");
 
@@ -5330,7 +5330,7 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_
 
 SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
                             sz_random_generator_t generator, void *generator_user_data) {
-    return sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
+    sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }
 
 #endif
