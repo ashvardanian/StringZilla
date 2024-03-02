@@ -1093,9 +1093,27 @@ __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH
 ## Quick Start: Rust 🦀
 
 StringZilla is available as a Rust crate.
-It currently covers only the most basic functionality, but is planned to be extended to cover the full C++ API.
+Some of the interfaces will look familiar to the users of the `memchr` crate.
 
 ```rust
+use stringzilla::sz;
+
+// Identical to `memchr::memmem::find` and `memchr::memmem::rfind` functions
+sz::find("Hello, world!", "world") // 7
+sz::rfind("Hello, world!", "world") // 7
+
+// Generalizations of `memchr::memrchr[123]`
+sz::find_char_from("Hello, world!", "world") // 2
+sz::rfind_char_from("Hello, world!", "world") // 11
+```
+
+Unlike `memchr`, the throughput of `stringzilla` is [high in both normal and reverse-order searches][memchr-benchmarks].
+It also provides no constraints on the size of the character set, while `memchr` allows only 1, 2, or 3 characters.
+In addition to global functions, `stringzilla` provides a `StringZilla` extension trait:
+
+```rust
+use stringzilla::StringZilla;
+
 let my_string: String = String::from("Hello, world!");
 let my_str = my_string.as_str();
 let my_cow_str = Cow::from(&my_string);
@@ -1112,6 +1130,23 @@ assert_eq!(my_string.sz_rfind_char_not_from("world"), Some(12));
 assert_eq!(my_str.sz_find("world"), Some(7));
 assert_eq!(my_cow_str.as_ref().sz_find("world"), Some(7));
 ```
+
+The library also exposes Levenshtein and Hamming edit-distances for byte-arrays and UTF-8 strings, as well as Needleman-Wunch alignment scores.
+
+```rust
+use stringzilla::sz;
+
+// Handling arbitrary byte arrays:
+sz::edit_distance("Hello, world!", "Hello, world?"); // 1
+sz::hamming_distance("Hello, world!", "Hello, world?"); // 1
+sz::alignment_score("Hello, world!", "Hello, world?", sz::unary_substitution_costs(), -1); // -1
+
+// Handling UTF-8 strings:
+sz::hamming_distance_utf8("αβγδ", "αγγδ") // 1
+sz::edit_distance_utf8("façade", "facade") // 1
+```
+
+[memchr-benchmarks]: https://github.com/ashvardanian/memchr_vs_stringzilla
 
 ## Quick Start: Swift 🍏
 

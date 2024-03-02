@@ -255,11 +255,32 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_chars
     return sz_dispatch_table.rfind_from_set(text, length, set);
 }
 
+SZ_DYNAMIC sz_size_t sz_hamming_distance( //
+    sz_cptr_t a, sz_size_t a_length,      //
+    sz_cptr_t b, sz_size_t b_length,      //
+    sz_size_t bound) {
+    return sz_hamming_distance_serial(a, a_length, b, b_length, bound);
+}
+
+SZ_DYNAMIC sz_size_t sz_hamming_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length,           //
+    sz_cptr_t b, sz_size_t b_length,           //
+    sz_size_t bound) {
+    return sz_hamming_distance_utf8_serial(a, a_length, b, b_length, bound);
+}
+
 SZ_DYNAMIC sz_size_t sz_edit_distance( //
     sz_cptr_t a, sz_size_t a_length,   //
     sz_cptr_t b, sz_size_t b_length,   //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
     return sz_dispatch_table.edit_distance(a, a_length, b, b_length, bound, alloc);
+}
+
+SZ_DYNAMIC sz_size_t sz_edit_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length,        //
+    sz_cptr_t b, sz_size_t b_length,        //
+    sz_size_t bound, sz_memory_allocator_t *alloc) {
+    return _sz_edit_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc);
 }
 
 SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,

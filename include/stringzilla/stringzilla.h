@@ -768,8 +768,12 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
  *  @see    sz_hamming_distance_utf8
  *  @see    https://en.wikipedia.org/wiki/Hamming_distance
  */
-SZ_PUBLIC sz_size_t sz_hamming_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                        sz_size_t bound);
+SZ_DYNAMIC sz_size_t sz_hamming_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                         sz_size_t bound);
+
+/** @copydoc sz_hamming_distance */
+SZ_PUBLIC sz_size_t sz_hamming_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                               sz_size_t bound);
 
 /**
  *  @brief  Computes the Hamming distance between two @b UTF8 strings - number of not matching characters.
@@ -787,8 +791,12 @@ SZ_PUBLIC sz_size_t sz_hamming_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr
  *  @see    sz_hamming_distance
  *  @see    https://en.wikipedia.org/wiki/Hamming_distance
  */
-SZ_PUBLIC sz_size_t sz_hamming_distance_utf8(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                             sz_size_t bound);
+SZ_DYNAMIC sz_size_t sz_hamming_distance_utf8(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                              sz_size_t bound);
+
+/** @copydoc sz_hamming_distance_utf8 */
+SZ_PUBLIC sz_size_t sz_hamming_distance_utf8_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                                    sz_size_t bound);
 
 typedef sz_size_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t);
 
@@ -839,10 +847,14 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_
  *  @see    sz_memory_allocator_init_fixed, sz_memory_allocator_init_default, sz_edit_distance
  *  @see    https://en.wikipedia.org/wiki/Levenshtein_distance
  */
-SZ_PUBLIC sz_size_t sz_edit_distance_utf8(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-                                          sz_size_t bound, sz_memory_allocator_t *alloc);
+SZ_DYNAMIC sz_size_t sz_edit_distance_utf8(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                           sz_size_t bound, sz_memory_allocator_t *alloc);
 
 typedef sz_size_t (*sz_edit_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_memory_allocator_t *);
+
+/** @copydoc sz_edit_distance_utf8 */
+SZ_PUBLIC sz_size_t sz_edit_distance_utf8_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+                                                 sz_size_t bound, sz_memory_allocator_t *alloc);
 
 /**
  *  @brief  Computes Needleman–Wunsch alignment score for two string. Often used in bioinformatics and cheminformatics.
@@ -2649,6 +2661,74 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     sz_ssize_t result = previous_distances[shorter_length];
     alloc->free(distances, buffer_length, alloc->handle);
     return result;
+}
+
+SZ_PUBLIC sz_size_t sz_hamming_distance_serial( //
+    sz_cptr_t a, sz_size_t a_length,            //
+    sz_cptr_t b, sz_size_t b_length,            //
+    sz_size_t bound) {
+
+    sz_size_t const min_length = sz_min_of_two(a_length, b_length);
+    sz_size_t const max_length = sz_max_of_two(a_length, b_length);
+    sz_cptr_t const a_end = a + min_length;
+    bound = bound == 0 ? max_length : bound;
+
+    // Walk through both strings using SWAR and counting the number of differing characters.
+    sz_size_t distance = max_length - min_length;
+#if SZ_USE_MISALIGNED_LOADS && !SZ_DETECT_BIG_ENDIAN
+    if (min_length >= SZ_SWAR_THRESHOLD) {
+        sz_u64_vec_t a_vec, b_vec, match_vec;
+        for (; a + 8 <= a_end && distance < bound; a += 8, b += 8) {
+            a_vec.u64 = sz_u64_load(a).u64;
+            b_vec.u64 = sz_u64_load(b).u64;
+            match_vec = _sz_u64_each_byte_equal(a_vec, b_vec);
+            distance += sz_u64_popcount((~match_vec.u64) & 0x8080808080808080ull);
+        }
+    }
+#endif
+
+    for (; a != a_end && distance < bound; ++a, ++b) { distance += (*a != *b); }
+    return sz_min_of_two(distance, bound);
+}
+
+SZ_PUBLIC sz_size_t sz_hamming_distance_utf8_serial( //
+    sz_cptr_t a, sz_size_t a_length,                 //
+    sz_cptr_t b, sz_size_t b_length,                 //
+    sz_size_t bound) {
+
+    sz_cptr_t const a_end = a + a_length;
+    sz_cptr_t const b_end = b + b_length;
+    sz_size_t distance = 0;
+
+    sz_rune_t a_rune, b_rune;
+    sz_rune_length_t a_rune_length, b_rune_length;
+
+    if (bound) {
+        for (; a < a_end && b < b_end && distance < bound; a += a_rune_length, b += b_rune_length) {
+            _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
+            _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+            distance += (a_rune != b_rune);
+        }
+        // If one string has more runes, we need to go through the tail.
+        if (distance < bound) {
+            for (; a < a_end && distance < bound; a += a_rune_length, ++distance)
+                _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
+
+            for (; b < b_end && distance < bound; b += b_rune_length, ++distance)
+                _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+        }
+    }
+    else {
+        for (; a < a_end && b < b_end; a += a_rune_length, b += b_rune_length) {
+            _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
+            _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+            distance += (a_rune != b_rune);
+        }
+        // If one string has more runes, we need to go through the tail.
+        for (; a < a_end; a += a_rune_length, ++distance) _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
+        for (; b < b_end; b += b_rune_length, ++distance) _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+    }
+    return distance;
 }
 
 /**
@@ -5075,81 +5155,6 @@ SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_
         sz_hashes(start, length, window_length, 1, _sz_hashes_fingerprint_pow2_callback, &fingerprint_buffer);
 }
 
-SZ_PUBLIC sz_size_t sz_hamming_distance( //
-    sz_cptr_t a, sz_size_t a_length,     //
-    sz_cptr_t b, sz_size_t b_length,     //
-    sz_size_t bound) {
-
-    sz_size_t const min_length = sz_min_of_two(a_length, b_length);
-    sz_size_t const max_length = sz_max_of_two(a_length, b_length);
-    sz_cptr_t const a_end = a + min_length;
-    bound = bound == 0 ? max_length : bound;
-
-    // Walk through both strings using SWAR and counting the number of differing characters.
-    sz_size_t distance = max_length - min_length;
-#if SZ_USE_MISALIGNED_LOADS && !SZ_DETECT_BIG_ENDIAN
-    if (min_length >= SZ_SWAR_THRESHOLD) {
-        sz_u64_vec_t a_vec, b_vec, match_vec;
-        for (; a + 8 <= a_end && distance < bound; a += 8, b += 8) {
-            a_vec.u64 = sz_u64_load(a).u64;
-            b_vec.u64 = sz_u64_load(b).u64;
-            match_vec = _sz_u64_each_byte_equal(a_vec, b_vec);
-            distance += sz_u64_popcount((~match_vec.u64) & 0x8080808080808080ull);
-        }
-    }
-#endif
-
-    for (; a != a_end && distance < bound; ++a, ++b) { distance += (*a != *b); }
-    return sz_min_of_two(distance, bound);
-}
-
-SZ_PUBLIC sz_size_t sz_hamming_distance_utf8( //
-    sz_cptr_t a, sz_size_t a_length,          //
-    sz_cptr_t b, sz_size_t b_length,          //
-    sz_size_t bound) {
-
-    sz_cptr_t const a_end = a + a_length;
-    sz_cptr_t const b_end = b + b_length;
-    sz_size_t distance = 0;
-
-    sz_rune_t a_rune, b_rune;
-    sz_rune_length_t a_rune_length, b_rune_length;
-
-    if (bound) {
-        for (; a < a_end && b < b_end && distance < bound; a += a_rune_length, b += b_rune_length) {
-            _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
-            _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
-            distance += (a_rune != b_rune);
-        }
-        // If one string has more runes, we need to go through the tail.
-        if (distance < bound) {
-            for (; a < a_end && distance < bound; a += a_rune_length, ++distance)
-                _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
-
-            for (; b < b_end && distance < bound; b += b_rune_length, ++distance)
-                _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
-        }
-    }
-    else {
-        for (; a < a_end && b < b_end; a += a_rune_length, b += b_rune_length) {
-            _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
-            _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
-            distance += (a_rune != b_rune);
-        }
-        // If one string has more runes, we need to go through the tail.
-        for (; a < a_end; a += a_rune_length, ++distance) _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
-        for (; b < b_end; b += b_rune_length, ++distance) _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
-    }
-    return distance;
-}
-
-SZ_PUBLIC sz_size_t sz_edit_distance_utf8( //
-    sz_cptr_t a, sz_size_t a_length,       //
-    sz_cptr_t b, sz_size_t b_length,       //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
-    return _sz_edit_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc);
-}
-
 #if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
@@ -5266,6 +5271,20 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_chars
 #endif
 }
 
+SZ_DYNAMIC sz_size_t sz_hamming_distance( //
+    sz_cptr_t a, sz_size_t a_length,      //
+    sz_cptr_t b, sz_size_t b_length,      //
+    sz_size_t bound) {
+    return sz_hamming_distance_serial(a, a_length, b, b_length, bound);
+}
+
+SZ_DYNAMIC sz_size_t sz_hamming_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length,           //
+    sz_cptr_t b, sz_size_t b_length,           //
+    sz_size_t bound) {
+    return sz_hamming_distance_utf8_serial(a, a_length, b, b_length, bound);
+}
+
 SZ_DYNAMIC sz_size_t sz_edit_distance( //
     sz_cptr_t a, sz_size_t a_length,   //
     sz_cptr_t b, sz_size_t b_length,   //
@@ -5275,6 +5294,13 @@ SZ_DYNAMIC sz_size_t sz_edit_distance( //
 #else
     return sz_edit_distance_serial(a, a_length, b, b_length, bound, alloc);
 #endif
+}
+
+SZ_DYNAMIC sz_size_t sz_edit_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length,        //
+    sz_cptr_t b, sz_size_t b_length,        //
+    sz_size_t bound, sz_memory_allocator_t *alloc) {
+    return _sz_edit_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc);
 }
 
 SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
