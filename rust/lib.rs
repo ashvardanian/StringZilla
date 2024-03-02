@@ -97,6 +97,17 @@ pub mod sz {
             gap: i8,
             allocator: *const c_void,
         ) -> isize;
+
+        // type RandomGeneratorT = fn(*mut c_void) -> u64;
+
+        fn sz_generate(
+            alphabet: *const c_void,
+            alphabet_size: usize,
+            text: *mut c_void,
+            length: usize,
+            generate: *const c_void,
+            generator: *mut c_void,
+        );
     }
 
     /// Locates the first matching substring within `haystack` that equals `needle`.
@@ -627,6 +638,25 @@ pub mod sz {
 
         result
     }
+
+    pub fn randomize<T, A>(text: &mut T, alphabet: &A)
+    where
+        T: AsMut<[u8]> + ?Sized, // Relaxing Sized restriction for T
+        A: AsRef<[u8]> + ?Sized, // Relaxing Sized restriction for A
+    {
+        let text_slice = text.as_mut();
+        let alphabet_slice = alphabet.as_ref();
+        unsafe {
+            sz_generate(
+                alphabet_slice.as_ptr() as *const c_void,
+                alphabet_slice.len(),
+                text_slice.as_mut_ptr() as *mut c_void,
+                text_slice.len(),
+                core::ptr::null(),
+                core::ptr::null_mut(),
+            );
+        }
+    }
 }
 
 /// The [StringZilla] trait provides a collection of string searching and manipulation functionalities.
@@ -682,11 +712,34 @@ where
     }
 }
 
+/// The [MutableStringZilla] trait provides tools for updating strings.
+trait MutableStringZilla<A>
+where
+    A: AsRef<[u8]>,
+{
+    /// Generates a random string for a given alphabet.
+    /// Replaces the buffer with a random string of the same length.
+    fn sz_randomize(&mut self, alphabet: A);
+}
+
+impl<T, A> MutableStringZilla<A> for T
+where
+    T: AsMut<[u8]>,
+    A: AsRef<[u8]>,
+{
+    fn sz_randomize(&mut self, alphabet: A) {
+        let self_mut = self.as_mut();
+        let alphabet_ref = alphabet.as_ref();
+        sz::randomize(self_mut, alphabet_ref);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
 
     use crate::sz;
+    use crate::MutableStringZilla;
     use crate::StringZilla;
 
     #[test]
@@ -767,5 +820,17 @@ mod tests {
             my_cow_str.as_ref().sz_rfind_char_not_from("world"),
             Some(12)
         );
+    }
+
+    #[test]
+    fn randomize() {
+        let mut text: Vec<u8> = vec![0; 10]; // A buffer of ten zeros
+        let alphabet: &[u8] = b"abcd"; // A byte slice alphabet
+        text.sz_randomize(alphabet);
+
+        // Iterate throught text and check that it only contains letters from the alphabet
+        assert!(text
+            .iter()
+            .all(|&b| b == b'd' || b == b'c' || b == b'b' || b == b'a'));
     }
 }
