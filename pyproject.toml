@@ -29,7 +29,7 @@ build-verbosity = 0
 # https://cibuildwheel.readthedocs.io/en/stable/options/#archs
 #
 # Important to note, not all those paltforms have recent images.
-# The `manylinux_2_28` seems to be missing for `s390x`, `i686`, and `ppc64le`.
+# The `manylinux_2_28` seems to be missing for `i686`.
 # The `i686` is 32-bit x86, and `x86_64` is 64-bit x86.
 archs = ["all"]
 
@@ -49,8 +49,13 @@ repair-wheel-command = "auditwheel repair --lib-sdir . -w {dest_dir} {wheel}"
 # - for `musllinux`: https://quay.io/search?q=musllinux
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
+manylinux-s390x-image = "manylinux_2_28"
+manylinux-ppc64le-image = "manylinux_2_28"
 musllinux-x86_64-image = "musllinux_1_2"
 musllinux-aarch64-image = "musllinux_1_2"
+musllinux-s390x-image = "musllinux_1_2"
+musllinux-ppc64le-image = "musllinux_1_2"
+musllinux-i686-image = "musllinux_1_2"
 
 # On CentOS we have to use `yum`.
 # The healthy version would be: `apt-get update && apt-get install -y libc6-dev wget python3-dev`.
