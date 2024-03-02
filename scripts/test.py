@@ -7,6 +7,31 @@ import pytest
 import stringzilla as sz
 from stringzilla import Str, Strs
 
+# NumPy is available on most platforms and is required for most tests.
+# When using PyPy on some platforms NumPy has internal issues, that will
+# raise a weird error, not an `ImportError`. That's why we intentionally
+# use a naked `except:`. Necessary evil!
+try:
+    import numpy as np
+
+    numpy_available = True
+except:
+    # NumPy is not installed, most tests will be skipped
+    numpy_available = False
+
+
+# PyArrow is not available on most platforms.
+# When using PyPy on some platforms PyArrow has internal issues, that will
+# raise a weird error, not an `ImportError`. That's why we intentionally
+# use a naked `except:`. Necessary evil!
+try:
+    import pyarrow as pa
+
+    pyarrow_available = True
+except:
+    # NumPy is not installed, most tests will be skipped
+    pyarrow_available = False
+
 
 def test_library_properties():
     assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
@@ -41,22 +66,37 @@ def test_unit_contains():
     assert "xxx" not in big
 
 
-def test_unit_rich_comparisons():
+def test_unit_str_rich_comparisons():
+    # Equality
     assert Str("aa") == "aa"
+    assert Str("a") != "b"
+    assert Str("abc") == Str("abc")
+    assert Str("abc") != Str("abd")
+
+    # Less than and less than or equal to
     assert Str("aa") < "b"
+    assert Str("ab") <= "ab"
+    assert Str("a") < Str("b")
+    assert Str("abc") <= Str("abcd")
+
+    # Greater than and greater than or equal to
+    assert Str("b") > "aa"
+    assert Str("ab") >= "ab"
+    assert Str("b") > Str("a")
+    assert Str("abcd") >= Str("abc")
+
+    # Slicing and comparisons
     s2 = Str("abb")
     assert s2[1:] == "bb"
     assert s2[:-1] == "ab"
     assert s2[-1:] == "b"
+    assert s2[1:] != "abb"
+    assert s2[:-2] == "a"
+    assert s2[-2:] == "bb"
 
 
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_unit_buffer_protocol():
-    # Try importing NumPy to compute the Levenshtein distances more efficiently
-    try:
-        import numpy as np
-    except ImportError:
-        pytest.skip("NumPy is not installed")
-
     my_str = Str("hello")
     arr = np.array(my_str)
     assert arr.dtype == np.dtype("c")
@@ -65,29 +105,137 @@ def test_unit_buffer_protocol():
 
 
 def test_unit_split():
-    native = "token1\ntoken2\ntoken3"
+    native = "line1\nline2\nline3"
     big = Str(native)
+
+    # Splitting using a string
+    lines = sz.split(big, "\n")
+    assert lines == ["line1", "line2", "line3"]
+
+    lines = sz.rsplit(big, "\n")
+    assert lines == ["line1", "line2", "line3"]
+
+    lines = sz.split(big, "\n", keepseparator=True)
+    assert lines == ["line1\n", "line2\n", "line3"]
+
+    letters = sz.split("a b c d")
+    assert letters == ["a", "b", "c", "d"]
+
+    # Splitting using character sets
+    letters = sz.split_charset("a b_c d", " _")
+    assert letters == ["a", "b", "c", "d"]
+
+    letters = sz.rsplit_charset("a b_c d", " _")
+    assert letters == ["a", "b", "c", "d"]
+
+    # Check for equivalence with native Python strings for newline separators
     assert native.splitlines() == list(big.splitlines())
     assert native.splitlines(True) == list(big.splitlines(keeplinebreaks=True))
-    assert native.split("token3") == list(big.split("token3"))
 
-    words = sz.split(big, "\n")
-    assert len(words) == 3
-    assert str(words[0]) == "token1"
-    assert str(words[2]) == "token3"
+    # Check for equivalence with native Python strings, including boundary conditions
+    assert native.split("line1") == list(big.split("line1"))
+    assert native.split("line3") == list(big.split("line3"))
+    assert native.split("\n", maxsplit=0) == list(big.split("\n", maxsplit=0))
+    assert native.split("\n", maxsplit=1) == list(big.split("\n", maxsplit=1))
+    assert native.split("\n", maxsplit=2) == list(big.split("\n", maxsplit=2))
+    assert native.split("\n", maxsplit=3) == list(big.split("\n", maxsplit=3))
+    assert native.split("\n", maxsplit=4) == list(big.split("\n", maxsplit=4))
 
-    parts = sz.split(big, "\n", keepseparator=True)
-    assert len(parts) == 3
-    assert str(parts[0]) == "token1\n"
-    assert str(parts[2]) == "token3"
+    # Check for equivalence with native Python strings in reverse order, including boundary conditions
+    assert native.rsplit("line1") == list(big.rsplit("line1"))
+    assert native.rsplit("line3") == list(big.rsplit("line3"))
+    assert native.rsplit("\n", maxsplit=0) == list(big.rsplit("\n", maxsplit=0))
+    assert native.rsplit("\n", maxsplit=1) == list(big.rsplit("\n", maxsplit=1))
+    assert native.rsplit("\n", maxsplit=2) == list(big.rsplit("\n", maxsplit=2))
+    assert native.rsplit("\n", maxsplit=3) == list(big.rsplit("\n", maxsplit=3))
+    assert native.rsplit("\n", maxsplit=4) == list(big.rsplit("\n", maxsplit=4))
+
+    # If the passed separator is an empty string, the library must raise a `ValueError`
+    with pytest.raises(ValueError):
+        sz.split(big, "")
+    with pytest.raises(ValueError):
+        sz.rsplit(big, "")
+    with pytest.raises(ValueError):
+        sz.split_charset(big, "")
+    with pytest.raises(ValueError):
+        sz.rsplit_charset(big, "")
 
 
-def test_unit_sequence():
+def test_unit_split_iterators():
+    """
+    Test the iterator-based split methods.
+    This is slightly different from `split` and `rsplit` in that it returns an iterator instead of a list.
+    Moreover, the native `rsplit` and even `rsplit_charset` report results in the identical order to `split`
+    and `split_charset`. Here `rsplit_iter` reports elements in the reverse order, compared to `split_iter`.
+    """
+    native = "line1\nline2\nline3"
+    big = Str(native)
+
+    # Splitting using a string
+    lines = list(sz.split_iter(big, "\n"))
+    assert lines == ["line1", "line2", "line3"]
+
+    lines = list(sz.rsplit_iter(big, "\n"))
+    assert lines == ["line3", "line2", "line1"]
+
+    lines = list(sz.split_iter(big, "\n", keepseparator=True))
+    assert lines == ["line1\n", "line2\n", "line3"]
+
+    lines = list(sz.rsplit_iter(big, "\n", keepseparator=True))
+    assert lines == ["\nline3", "\nline2", "line1"]
+
+    letters = list(sz.split_iter("a b c d"))
+    assert letters == ["a", "b", "c", "d"]
+
+    # Splitting using character sets
+    letters = list(sz.split_charset_iter("a-b_c-d", "-_"))
+    assert letters == ["a", "b", "c", "d"]
+
+    letters = list(sz.rsplit_charset_iter("a-b_c-d", "-_"))
+    assert letters == ["d", "c", "b", "a"]
+
+    # Check for equivalence with native Python strings, including boundary conditions
+    assert native.split("line1") == list(big.split_iter("line1"))
+    assert native.split("line3") == list(big.split_iter("line3"))
+    assert native.split("\n", maxsplit=0) == list(big.split_iter("\n", maxsplit=0))
+    assert native.split("\n", maxsplit=1) == list(big.split_iter("\n", maxsplit=1))
+    assert native.split("\n", maxsplit=2) == list(big.split_iter("\n", maxsplit=2))
+    assert native.split("\n", maxsplit=3) == list(big.split_iter("\n", maxsplit=3))
+    assert native.split("\n", maxsplit=4) == list(big.split_iter("\n", maxsplit=4))
+
+    def rlist(seq):
+        seq = list(seq)
+        seq.reverse()
+        return seq
+
+    # Check for equivalence with native Python strings in reverse order, including boundary conditions
+    assert native.rsplit("line1") == rlist(big.rsplit_iter("line1"))
+    assert native.rsplit("line3") == rlist(big.rsplit_iter("line3"))
+    assert native.rsplit("\n", maxsplit=0) == rlist(big.rsplit_iter("\n", maxsplit=0))
+    assert native.rsplit("\n", maxsplit=1) == rlist(big.rsplit_iter("\n", maxsplit=1))
+    assert native.rsplit("\n", maxsplit=2) == rlist(big.rsplit_iter("\n", maxsplit=2))
+    assert native.rsplit("\n", maxsplit=3) == rlist(big.rsplit_iter("\n", maxsplit=3))
+    assert native.rsplit("\n", maxsplit=4) == rlist(big.rsplit_iter("\n", maxsplit=4))
+
+    # If the passed separator is an empty string, the library must raise a `ValueError`
+    with pytest.raises(ValueError):
+        sz.split_iter(big, "")
+    with pytest.raises(ValueError):
+        sz.rsplit_iter(big, "")
+    with pytest.raises(ValueError):
+        sz.split_charset_iter(big, "")
+    with pytest.raises(ValueError):
+        sz.rsplit_charset_iter(big, "")
+
+
+def test_unit_strs_sequence():
     native = "p3\np2\np1"
     big = Str(native)
 
     lines = big.splitlines()
     assert [2, 1, 0] == list(lines.order())
+    assert "p3" in lines
+    assert "p4" not in lines
 
     lines.sort()
     assert [0, 1, 2] == list(lines.order())
@@ -98,12 +246,119 @@ def test_unit_sequence():
     lines.sort(reverse=True)
     assert ["p3", "p2", "p1"] == list(lines)
 
+    # Sampling an array
+    sampled = lines.sample(100, seed=42)
+    assert "p3" in sampled
+    assert "p4" not in sampled
+
+
+def test_unit_slicing():
+    native = "abcdef"
+    big = Str(native)
+    assert big[1:3] == "bc"
+    assert big[1:] == "bcdef"
+    assert big[:3] == "abc"
+    assert big[-1:] == "f"
+    assert big[:-1] == "abcde"
+    assert big[-3:] == "def"
+    assert big[:-3] == "abc"
+
+
+def test_unit_strs_rich_comparisons():
+    arr: Strs = Str("a b c d e f g h").split()
+
+    # Test against another Strs object
+    identical_arr: Strs = Str("a b c d e f g h").split()
+    different_arr: Strs = Str("a b c d e f g i").split()
+    shorter_arr: Strs = Str("a b c d e").split()
+    longer_arr: Strs = Str("a b c d e f g h i j").split()
+
+    assert arr == identical_arr
+    assert arr != different_arr
+    assert arr != shorter_arr
+    assert arr != longer_arr
+    assert shorter_arr < arr
+    assert longer_arr > arr
+
+    # Test against a Python list and a tuple
+    list_equal = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    list_different = ["a", "b", "c", "d", "x", "f", "g", "h"]
+    tuple_equal = ("a", "b", "c", "d", "e", "f", "g", "h")
+    tuple_different = ("a", "b", "c", "d", "e", "f", "g", "i")
+
+    assert arr == list_equal
+    assert arr != list_different
+    assert arr == tuple_equal
+    assert arr != tuple_different
+
+    # Test against a generator of unknown length
+    generator_equal = (x for x in "a b c d e f g h".split())
+    generator_different = (x for x in "a b c d e f g i".split())
+    generator_shorter = (x for x in "a b c d e".split())
+    generator_longer = (x for x in "a b c d e f g h i j".split())
+
+    assert arr == generator_equal
+    assert arr != generator_different
+    assert arr != generator_shorter
+    assert arr != generator_longer
+
+
+def test_unit_strs_sequence_slicing():
+    native = "1, 2, 3, 4, 5, 6"
+    big = Str(native)
+    big_sequence = big.split(", ")
+
+    def to_str(seq):
+        return "".join([str(x) for x in seq])
+
+    assert big_sequence[1:3] == ["2", "3"], to_str(big_sequence[1:3])
+    assert big_sequence[1:] == ["2", "3", "4", "5", "6"], to_str(big_sequence[1:])
+    assert big_sequence[:3] == ["1", "2", "3"], to_str(big_sequence[:3])
+
+    # Use negative indices to slice from the end
+    assert big_sequence[-1:] == ["6"], to_str(big_sequence[-1:])
+    assert big_sequence[:-1] == ["1", "2", "3", "4", "5"], to_str(big_sequence[:-1])
+    assert big_sequence[-3:] == ["4", "5", "6"], to_str(big_sequence[-3:])
+    assert big_sequence[:-3] == ["1", "2", "3"], to_str(big_sequence[:-3])
+
+    # Introduce a step to skip some values
+    assert big_sequence[::2] == ["1", "3", "5"], to_str(big_sequence[::2])
+    assert big_sequence[::-1] == ["6", "5", "4", "3", "2", "1"], to_str(
+        big_sequence[::-1]
+    )
+
+    # Let's go harder with nested slicing
+    assert big_sequence[1:][::-1] == ["6", "5", "4", "3", "2"]
+    assert big_sequence[1:][::-2] == ["6", "4", "2"]
+    assert big_sequence[1:][::-3] == ["6", "3"]
+
 
 def test_unit_globals():
     """Validates that the previously unit-tested member methods are also visible as global functions."""
 
     assert sz.find("abcdef", "bcdef") == 1
     assert sz.find("abcdef", "x") == -1
+    assert sz.rfind("abcdef", "bcdef") == 1
+    assert sz.rfind("abcdef", "x") == -1
+
+    # Corner-cases for `find` and `rfind`, when we pass empty strings
+    assert sz.find("abcdef", "") == "abcdef".find("")
+    assert sz.rfind("abcdef", "") == "abcdef".rfind("")
+    assert sz.find("abcdef", "", 1) == "abcdef".find("", 1)
+    assert sz.rfind("abcdef", "", 1) == "abcdef".rfind("", 1)
+    assert sz.find("abcdef", "", 1, 3) == "abcdef".find("", 1, 3)
+    assert sz.rfind("abcdef", "", 1, 3) == "abcdef".rfind("", 1, 3)
+    assert sz.find("", "abcdef") == "".find("abcdef")
+    assert sz.rfind("", "abcdef") == "".rfind("abcdef")
+
+    # Compare partitioning functions
+    assert sz.partition("abcdef", "c") == ("ab", "c", "def")
+    assert sz.rpartition("abcdef", "c") == ("ab", "c", "def")
+
+    with pytest.raises(ValueError):
+        sz.partition("abcdef", "")
+    with pytest.raises(ValueError):
+        sz.rpartition("abcdef", "")
 
     assert sz.count("abcdef", "x") == 0
     assert sz.count("aaaaa", "a") == 5
@@ -162,15 +417,11 @@ def is_equal_strings(native_strings, big_strings):
         ), f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
 
 
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def baseline_edit_distance(s1, s2) -> int:
     """
     Compute the Levenshtein distance between two strings.
     """
-    # Try importing NumPy to compute the Levenshtein distances more efficiently
-    try:
-        import numpy as np
-    except ImportError:
-        pytest.skip("NumPy is not installed")
 
     # Create a matrix of size (len(s1)+1) x (len(s2)+1)
     matrix = np.zeros((len(s1) + 1, len(s2) + 1), dtype=int)
@@ -336,6 +587,7 @@ def test_edit_distances():
 @pytest.mark.repeat(30)
 @pytest.mark.parametrize("first_length", [20, 100])
 @pytest.mark.parametrize("second_length", [20, 100])
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_edit_distance_random(first_length: int, second_length: int):
     a = get_random_string(length=first_length)
     b = get_random_string(length=second_length)
@@ -345,12 +597,8 @@ def test_edit_distance_random(first_length: int, second_length: int):
 @pytest.mark.repeat(30)
 @pytest.mark.parametrize("first_length", [20, 100])
 @pytest.mark.parametrize("second_length", [20, 100])
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_alignment_score_random(first_length: int, second_length: int):
-    # Try importing NumPy to compute the Levenshtein distances more efficiently
-    try:
-        import numpy as np
-    except ImportError:
-        pytest.skip("NumPy is not installed")
 
     a = get_random_string(length=first_length)
     b = get_random_string(length=second_length)
@@ -420,3 +668,14 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
     assert len(native_list) == len(big_list)
     for native_str, big_str in zip(native_list, big_list):
         assert native_str == str(big_str), "Order is wrong"
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_pyarrow_str_conversion():
+    native = "hello"
+    big = Str(native)
+    assert isinstance(big.address, int) and big.address != 0
+    assert isinstance(big.nbytes, int) and big.nbytes == len(native)
+
+    arrow_buffer = pa.foreign_buffer(big.address, big.nbytes, big)
+    assert arrow_buffer.to_pybytes() == native.encode("utf-8")
