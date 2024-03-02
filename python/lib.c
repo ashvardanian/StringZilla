@@ -56,7 +56,8 @@ static sz_string_view_t temporary_memory = {NULL, 0};
  *          native `mmap` module, as it exposes the address of the mapping in memory.
  */
 typedef struct {
-    PyObject_HEAD;
+    PyObject ob_base;
+
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
     HANDLE file_handle;
     HANDLE mapping_handle;
@@ -80,7 +81,8 @@ typedef struct {
  *      - Str(File("some-path.txt"), from=0, to=sys.maxint)
  */
 typedef struct {
-    PyObject_HEAD;
+    PyObject ob_base;
+
     PyObject *parent;
     sz_cptr_t start;
     sz_size_t length;
@@ -93,7 +95,7 @@ typedef struct {
  *  which might be more memory-friendly, than greedily invoking `str.split`.
  */
 typedef struct {
-    PyObject_HEAD;
+    PyObject ob_base;
 
     PyObject *text_object;      //< For reference counting
     PyObject *separator_object; //< For reference counting
@@ -125,7 +127,7 @@ typedef struct {
  *          for faster sorting, shuffling, joins, and lookups.
  */
 typedef struct {
-    PyObject_HEAD;
+    PyObject ob_base;
 
     enum {
         STRS_CONSECUTIVE_32,

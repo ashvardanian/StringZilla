@@ -625,8 +625,19 @@ pub mod sz {
         }
     }
 
-    /// The default substitution matrix for the Needleman-Wunsch alignment algorithm,
-    /// which will produce distances equal to the negative Levenshtein edit distance.
+    /// Generates a default substitution matrix for use with the Needleman-Wunsch
+    /// alignment algorithm. This matrix is initialized such that diagonal entries
+    /// (representing matching characters) are zero, and off-diagonal entries
+    /// (representing mismatches) are -1. This setup effectively produces distances
+    /// equal to the negative Levenshtein edit distance, suitable for basic sequence
+    /// alignment tasks where all mismatches are penalized equally and there are no
+    /// rewards for matches.
+    ///
+    /// # Returns
+    ///
+    /// A 256x256 array of `i8`, where each element represents the substitution cost
+    /// between two characters (byte values). Matching characters are assigned a cost
+    /// of 0, and non-matching characters are assigned a cost of -1.
     pub fn unary_substitution_costs() -> [[i8; 256]; 256] {
         let mut result = [[0; 256]; 256];
 
@@ -639,10 +650,36 @@ pub mod sz {
         result
     }
 
+    /// Randomizes the contents of a given byte slice `text` using characters from
+    /// a specified `alphabet`. This function mutates `text` in place, replacing each
+    /// byte with a random one from `alphabet`. It is designed for situations where
+    /// you need to generate random strings or data sequences based on a specific set
+    /// of characters, such as generating random DNA sequences or testing inputs.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `T`: The type of the text to be randomized. Must be mutable and convertible to a byte slice.
+    /// * `A`: The type of the alphabet. Must be convertible to a byte slice.
+    ///
+    /// # Arguments
+    ///
+    /// * `text`: A mutable reference to the data to randomize. This data will be mutated in place.
+    /// * `alphabet`: A reference to the byte slice representing the alphabet to use for randomization.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz;
+    /// let mut my_text = vec![0; 10]; // A buffer to randomize
+    /// let alphabet = b"ACTG"; // Using a DNA alphabet
+    /// sz::randomize(&mut my_text, &alphabet);
+    /// ```
+    ///
+    /// After than,  `my_text` is filled with random 'A', 'C', 'T', or 'G' values.
     pub fn randomize<T, A>(text: &mut T, alphabet: &A)
     where
-        T: AsMut<[u8]> + ?Sized, // Relaxing Sized restriction for T
-        A: AsRef<[u8]> + ?Sized, // Relaxing Sized restriction for A
+        T: AsMut<[u8]> + ?Sized, // Allows for mutable references to dynamically sized types.
+        A: AsRef<[u8]> + ?Sized, // Allows for references to dynamically sized types.
     {
         let text_slice = text.as_mut();
         let alphabet_slice = alphabet.as_ref();
