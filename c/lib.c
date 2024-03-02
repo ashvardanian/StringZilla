@@ -23,6 +23,7 @@ typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stri
 #else
 typedef __SIZE_TYPE__ size_t; // For GCC/Clang
 #endif
+int rand(void) { return 0; }
 void free(void *start) { sz_unused(start); }
 void *malloc(size_t length) {
     sz_unused(length);
@@ -324,7 +325,13 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_
     return sz_rfind_charset(h, h_length, &set);
 }
 
+sz_u64_t _sz_random_generator(void *empty_state) {
+    sz_unused(empty_state);
+    return (sz_u64_t)rand();
+}
+
 SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
                             sz_random_generator_t generator, void *generator_user_data) {
+    if (!generator) generator = _sz_random_generator;
     sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }
