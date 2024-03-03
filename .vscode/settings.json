@@ -252,7 +252,8 @@
     "xmemory": "cpp",
     "xtr1common": "cpp",
     "xtree": "cpp",
-    "xutility": "cpp"
+    "xutility": "cpp",
+    "errno.h": "c"
   },
   "python.pythonPath": "~/miniconda3/bin/python"
 }

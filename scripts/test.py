@@ -378,9 +378,38 @@ def test_unit_globals():
     assert sz.edit_distance("abababab", "aaaaaaaa", bound=2) == 2
 
 
-def test_unit_len():
-    w = sz.Str("abcd")
-    assert 4 == len(w)
+def test_string_lengths():
+    assert 4 == len(sz.Str("abcd"))
+    assert 8 == len(sz.Str("αβγδ"))
+
+
+@pytest.mark.parametrize(
+    "byte_string, encoding, expected",
+    [
+        (b"hello world", "utf-8", "hello world"),
+        (b"\xf0\x9f\x98\x81", "utf-8", "😁"),  # Emoji
+        (b"hello world", "ascii", "hello world"),
+        (b"\xf0hello world", "latin-1", "ðhello world"),
+        (b"", "utf-8", ""),  # Empty string case
+    ],
+)
+def test_decoding_valid_strings(byte_string, encoding, expected):
+    assert byte_string.decode(encoding) == expected
+    assert sz.Str(byte_string).decode(encoding) == expected
+
+
+@pytest.mark.parametrize(
+    "byte_string, encoding",
+    [
+        (b"\xff", "utf-8"),  # Invalid UTF-8 byte
+        (b"\x80hello", "ascii"),  # Non-ASCII byte in ASCII string
+    ],
+)
+def test_decoding_exceptions(byte_string, encoding):
+    with pytest.raises(UnicodeDecodeError):
+        byte_string.decode(encoding)
+    with pytest.raises(UnicodeDecodeError):
+        sz.Str(byte_string).decode(encoding)
 
 
 def test_slice_of_split():
