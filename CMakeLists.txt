@@ -239,9 +239,15 @@ if(${STRINGZILLA_BUILD_TEST})
   # compile multiple backends: disabling all SIMD, enabling only AVX2, only AVX-512, only Arm Neon.
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
     # x86 specific backends
-    define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "ivybridge")
-    define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
-    define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
+    if (MSVC)
+      define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "AVX")
+      define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "AVX2")
+      define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "AVX512")
+    else()
+      define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "ivybridge")
+      define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
+      define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
+    endif()
   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
     # ARM specific backends
     define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a")
