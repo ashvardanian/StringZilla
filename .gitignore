@@ -2,7 +2,7 @@
 build/
 build_debug/
 build_release/
-build_artifacts/
+build_artifacts*
 
 # Yes, everyone loves keeping this file in the history.
 # But with a very minimalistic binding and just a couple of dependencies 
