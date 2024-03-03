@@ -1,4 +1,10 @@
 #undef NDEBUG      // Enable all assertions
+
+// Enable assertions for iterators
+#if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
+#define _ITERATOR_DEBUG_LEVEL 1
+#endif
+
 #include <cassert> // assertions
 
 // Overload the following with caution.

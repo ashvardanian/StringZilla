@@ -4507,10 +4507,10 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t win
         chars_vec.zmm = _mm512_add_epi8(chars_vec.zmm, shift_vec.zmm);
 
         // ... and prefetch the next four characters into Level 2 or higher.
-        _mm_prefetch(text_fourth + 1, _MM_HINT_T1);
-        _mm_prefetch(text_third + 1, _MM_HINT_T1);
-        _mm_prefetch(text_second + 1, _MM_HINT_T1);
-        _mm_prefetch(text_first + 1, _MM_HINT_T1);
+        _mm_prefetch((sz_cptr_t)text_fourth + 1, _MM_HINT_T1);
+        _mm_prefetch((sz_cptr_t)text_third + 1, _MM_HINT_T1);
+        _mm_prefetch((sz_cptr_t)text_second + 1, _MM_HINT_T1);
+        _mm_prefetch((sz_cptr_t)text_first + 1, _MM_HINT_T1);
 
         // 3. Add the incoming characters.
         hash_vec.zmm = _mm512_add_epi64(hash_vec.zmm, chars_vec.zmm);
