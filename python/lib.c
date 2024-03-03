@@ -35,6 +35,7 @@ typedef SSIZE_T ssize_t;
 
 #include <Python.h> // Core CPython interfaces
 
+#include <errno.h>  // `errno`
 #include <stdio.h>  // `fopen`
 #include <stdlib.h> // `rand`, `srand`
 #include <string.h> // `memset`, `memcpy`
@@ -78,7 +79,7 @@ typedef struct {
  *      - Str() # Empty string
  *      - Str("some-string") # Full-range slice of a Python `str`
  *      - Str(File("some-path.txt")) # Full-range view of a persisted file
- *      - Str(File("some-path.txt"), from=0, to=sys.maxint)
+ *      - Str(File("some-path.txt"), from=0, to=sys.maxsize)
  */
 typedef struct {
     PyObject ob_base;
@@ -441,9 +442,18 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
     if (!PyArg_ParseTuple(positional_args, "s", &path)) return -1;
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
+    DWORD path_attributes = GetFileAttributes(path);
+    if (path_attributes == INVALID_FILE_ATTRIBUTES) {
+        PyErr_SetString(PyExc_OSError, "Couldn't get file attributes!");
+        return -1;
+    }
+    if (path_attributes & FILE_ATTRIBUTE_DIRECTORY) {
+        PyErr_SetString(PyExc_ValueError, "The provided path is a directory, not a normal file!");
+        return -1;
+    }
     self->file_handle = CreateFile(path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (self->file_handle == INVALID_HANDLE_VALUE) {
-        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
+        PyErr_SetString(PyExc_OSError, "Couldn't map the file!");
         return -1;
     }
 
@@ -451,7 +461,7 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
     if (self->mapping_handle == 0) {
         CloseHandle(self->file_handle);
         self->file_handle = NULL;
-        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
+        PyErr_SetString(PyExc_OSError, "Couldn't map the file!");
         return -1;
     }
 
@@ -461,18 +471,31 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
         self->mapping_handle = NULL;
         CloseHandle(self->file_handle);
         self->file_handle = NULL;
-        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
+        PyErr_SetString(PyExc_OSError, "Couldn't map the file!");
         return -1;
     }
     self->start = file;
     self->length = GetFileSize(self->file_handle, 0);
 #else
-    struct stat sb;
     self->file_descriptor = open(path, O_RDONLY);
+    if (self->file_descriptor == -1) {
+        PyErr_Format(PyExc_OSError, "Couldn't open the file at '%s': %s", path, strerror(errno));
+        return -1;
+    }
+    // No permissions are required on the file itself to get it's properties from the existing descriptor.
+    // https://linux.die.net/man/2/fstat
+    struct stat sb;
     if (fstat(self->file_descriptor, &sb) != 0) {
         close(self->file_descriptor);
         self->file_descriptor = 0;
-        PyErr_SetString(PyExc_RuntimeError, "Can't retrieve file size!");
+        PyErr_Format(PyExc_OSError, "Can't retrieve file size at '%s': %s", path, strerror(errno));
+        return -1;
+    }
+    // Check if it's a regular file
+    if (!S_ISREG(sb.st_mode)) {
+        close(self->file_descriptor);
+        self->file_descriptor = 0;
+        PyErr_Format(PyExc_ValueError, "The provided path is not a normal file at '%s'", path);
         return -1;
     }
     size_t file_size = sb.st_size;
@@ -480,7 +503,7 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
     if (map == MAP_FAILED) {
         close(self->file_descriptor);
         self->file_descriptor = 0;
-        PyErr_SetString(PyExc_RuntimeError, "Couldn't map the file!");
+        PyErr_Format(PyExc_OSError, "Couldn't map the file at '%s': %s", path, strerror(errno));
         return -1;
     }
     self->start = map;
@@ -1160,6 +1183,48 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
     case Py_GE: return PyBool_FromLong(i == a_length);
     default: Py_RETURN_NOTIMPLEMENTED;
     }
+}
+
+static PyObject *Str_decode(PyObject *self, PyObject *args, PyObject *kwargs) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member || nargs > !is_member + 2) {
+        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *encoding_obj = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
+    PyObject *errors_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+
+    if (kwargs) {
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        while (PyDict_Next(kwargs, &pos, &key, &value))
+            if (PyUnicode_CompareWithASCIIString(key, "encoding") == 0) { encoding_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "errors") == 0) { errors_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+                return NULL;
+    }
+
+    // Convert `encoding` and `errors` to `NULL` if they are `None`
+    if (encoding_obj == Py_None) encoding_obj = NULL;
+    if (errors_obj == Py_None) errors_obj = NULL;
+
+    sz_string_view_t text, encoding, errors;
+    if ((!export_string_like(text_obj, &text.start, &text.length)) ||
+        (encoding_obj && !export_string_like(encoding_obj, &encoding.start, &encoding.length)) ||
+        (errors_obj && !export_string_like(errors_obj, &errors.start, &errors.length))) {
+        PyErr_Format(PyExc_TypeError, "text, encoding, and errors must be string-like");
+        return NULL;
+    }
+
+    if (encoding_obj == NULL) encoding = (sz_string_view_t) {"utf-8", 5};
+    if (errors_obj == NULL) errors = (sz_string_view_t) {"strict", 6};
+
+    // Python docs: https://docs.python.org/3/library/stdtypes.html#bytes.decode
+    // CPython docs: https://docs.python.org/3/c-api/unicode.html#c.PyUnicode_Decode
+    return PyUnicode_Decode(text.start, text.length, encoding.start, errors.start);
 }
 
 /**
@@ -2335,12 +2400,13 @@ static PyGetSetDef Str_getsetters[] = {
 #define SZ_METHOD_FLAGS METH_VARARGS | METH_KEYWORDS
 
 static PyMethodDef Str_methods[] = {
-    // Basic `str`-like functionality
+    // Basic `str`, `bytes`, and `bytearray`-like functionality
     {"contains", Str_contains, SZ_METHOD_FLAGS, "Check if a string contains a substring."},
     {"count", Str_count, SZ_METHOD_FLAGS, "Count the occurrences of a substring."},
     {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
     {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
+    {"decode", Str_decode, SZ_METHOD_FLAGS, "Decode the bytes into `str` with a given encoding"},
 
     // Bidirectional operations
     {"find", Str_find, SZ_METHOD_FLAGS, "Find the first occurrence of a substring."},
@@ -2888,12 +2954,13 @@ static void stringzilla_cleanup(PyObject *m) {
 }
 
 static PyMethodDef stringzilla_methods[] = {
-    // Basic `str`-like functionality
+    // Basic `str`, `bytes`, and `bytearray`-like functionality
     {"contains", Str_contains, SZ_METHOD_FLAGS, "Check if a string contains a substring."},
     {"count", Str_count, SZ_METHOD_FLAGS, "Count the occurrences of a substring."},
     {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
     {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
+    {"decode", Str_decode, SZ_METHOD_FLAGS, "Decode the bytes into `str` with a given encoding"},
 
     // Bidirectional operations
     {"find", Str_find, SZ_METHOD_FLAGS, "Find the first occurrence of a substring."},

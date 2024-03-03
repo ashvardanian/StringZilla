@@ -309,14 +309,14 @@ Consider contributing, if you need a feature that's not yet implemented.
 
 ### Basic Usage
 
-If you've ever used the Python `str` or `bytes` class, you'll know what to expect.
+If you've ever used the Python `str`, `bytes`, `bytearray`, `memoryview` class, you'll know what to expect.
 StringZilla's `Str` class is a hybrid of those two, providing `str`-like interface to byte-arrays.
 
 ```python
 from stringzilla import Str, File
 
-text_from_str = Str('some-string')
-text_from_file = Str(File('some-file.txt'))
+text_from_str = Str('some-string') # no copies, just a view
+text_from_file = Str(File('some-file.txt')) # memory-mapped file
 ```
 
 The `File` class memory-maps a file from persistent memory without loading its copy into RAM.
@@ -328,18 +328,23 @@ A standard dataset pre-processing use case would be to map a sizeable textual da
 - Length: `len(text) -> int`
 - Indexing: `text[42] -> str`
 - Slicing: `text[42:46] -> Str`
-- String conversion: `str(text) -> str`
 - Substring check: `'substring' in text -> bool`
 - Hashing: `hash(text) -> int`
+- String conversion: `str(text) -> str`
 
 ### Advanced Operations
 
-- `text.contains('substring', start=0, end=9223372036854775807) -> bool`
-- `text.find('substring', start=0, end=9223372036854775807) -> int`
-- `text.count('substring', start=0, end=9223372036854775807, allowoverlap=False) -> int`
-- `text.split(separator=' ', maxsplit=9223372036854775807, keepseparator=False) -> Strs`
-- `text.rsplit(separator=' ', maxsplit=9223372036854775807, keepseparator=False) -> Strs`
-- `text.splitlines(keeplinebreaks=False, maxsplit=9223372036854775807) -> Strs`
+```py
+import sys
+
+x: bool = text.contains('substring', start=0, end=sys.maxsize)
+x: int = text.find('substring', start=0, end=sys.maxsize)
+x: int = text.count('substring', start=0, end=sys.maxsize, allowoverlap=False)
+x: str = text.decode(encoding='utf-8', errors='strict')
+x: Strs = text.split(separator=' ', maxsplit=sys.maxsize, keepseparator=False)
+x: Strs = text.rsplit(separator=' ', maxsplit=sys.maxsize, keepseparator=False)
+x: Strs = text.splitlines(keeplinebreaks=False, maxsplit=sys.maxsize)
+```
 
 It's important to note, that the last function behavior is slightly different from Python's `str.splitlines`.
 The [native version][faq-splitlines] matches `\n`, `\r`, `\v` or `\x0b`, `\f` or `\x0c`, `\x1c`, `\x1d`, `\x1e`, `\x85`, `\r\n`, `\u2028`, `\u2029`, including 3x two-bytes-long runes.
@@ -353,15 +358,14 @@ Python strings don't natively support character set operations.
 This forces people to use regular expressions, which are slow and hard to read.
 To avoid the need for `re.finditer`, StringZilla provides the following interfaces:
 
-- `text.find_first_of('chars', start=0, end=9223372036854775807) -> int`
-- `text.find_last_of('chars', start=0, end=9223372036854775807) -> int`
-- `text.find_first_not_of('chars', start=0, end=9223372036854775807) -> int`
-- `text.find_last_not_of('chars', start=0, end=9223372036854775807) -> int`
-
-Similarly, for splitting operations:
-
-- `text.split_charset(separator='chars', maxsplit=9223372036854775807, keepseparator=False) -> Strs`
-- `text.rsplit_charset(separator='chars', maxsplit=9223372036854775807, keepseparator=False) -> Strs`
+```py
+x: int = text.find_first_of('chars', start=0, end=sys.maxsize)
+x: int = text.find_last_of('chars', start=0, end=sys.maxsize)
+x: int = text.find_first_not_of('chars', start=0, end=sys.maxsize)
+x: int = text.find_last_not_of('chars', start=0, end=sys.maxsize)
+x: Strs = text.split_charset(separator='chars', maxsplit=sys.maxsize, keepseparator=False)
+x: Strs = text.rsplit_charset(separator='chars', maxsplit=sys.maxsize, keepseparator=False)
+```
 
 ### Collection-Level Operations
 
@@ -420,9 +424,9 @@ Assuming StringZilla CPython bindings are implemented [without any intermediate 
 ```py
 import stringzilla as sz
 
-contains: bool = sz.contains("haystack", "needle", start=0, end=9223372036854775807)
-offset: int = sz.find("haystack", "needle", start=0, end=9223372036854775807)
-count: int = sz.count("haystack", "needle", start=0, end=9223372036854775807, allowoverlap=False)
+contains: bool = sz.contains("haystack", "needle", start=0, end=sys.maxsize)
+offset: int = sz.find("haystack", "needle", start=0, end=sys.maxsize)
+count: int = sz.count("haystack", "needle", start=0, end=sys.maxsize, allowoverlap=False)
 ```
 
 ### Edit Distances
@@ -515,6 +519,20 @@ next_doc_offset = next_doc.offset_within(web_archieve)
 web_archieve.write_to("next_doc.html")
 ```
 
+#### PyArrow
+
+A `Str` is easy to cast to [PyArrow](https://arrow.apache.org/docs/python/arrays.html#string-and-binary-types) buffers.
+
+```py
+from pyarrow as foreign_buffer
+from stringzilla import Str
+
+original = "hello"
+view = Str(native)
+arrow = foreign_buffer(view.address, view.nbytes, view)
+```
+
+That means you can convert `Str` to `pyarrow.Buffer` and `Strs` to `pyarrow.Array` without extra copies.
 
 ## Quick Start: C/C++ 🛠️
 
@@ -1369,13 +1387,16 @@ Another one is the [Fibonacci hash trick](https://probablydance.com/2018/06/16/f
 
 ### Unicode, UTF-8, and Wide Characters
 
-StringZilla does not __yet__ implement any Unicode-specific algorithms.
-The content is addressed at byte-level, and the string is assumed to be encoded in UTF-8 or extended ASCII.
-Refer to [simdutf](https://github.com/simdutf/simdutf) for fast conversions and [icu](https://github.com/unicode-org/icu) for character metadata.
+Most StringZilla operations are byte-level, so they work well with ASCII and UTF8 content out of the box.
+In some cases, like edit-distance computation, the result of byte-level evaluation and character-level evaluation may differ.
+So StringZilla provides following functions to work with Unicode:
 
-This may introduce frictions, when binding to some programming languages.
-Namely, Java, JavaScript, Python 2, C#, and Objective-C use wide characters (`wchar`) - two byte long codes.
+- `sz_edit_distance_utf8` - computes the Levenshtein distance between two UTF-8 strings.
+- `sz_hamming_distance_utf8` - computes the Hamming distance between two UTF-8 strings.
+
+Java, JavaScript, Python 2, C#, and Objective-C, however, use wide characters (`wchar`) - two byte long codes, instead of the more reasonable fixed-length UTF32 or variable-length UTF8.
 This leads [to all kinds of offset-counting issues][wide-char-offsets] when facing four-byte long Unicode characters.
+So consider transcoding with [simdutf](https://github.com/simdutf/simdutf), if you are coming from such environments.
 
 [wide-char-offsets]: https://josephg.com/blog/string-length-lies/
 
