@@ -265,7 +265,7 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build C/C++
-      - run: |
+        run: |
           cmake -GNinja -B build_artifacts ^
             -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
