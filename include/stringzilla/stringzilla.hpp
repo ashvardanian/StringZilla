@@ -458,8 +458,9 @@ class range_matches {
             return temp;
         }
 
-        bool operator!=(iterator const &other) const noexcept { return remaining_.begin() != other.remaining_.begin(); }
-        bool operator==(iterator const &other) const noexcept { return remaining_.begin() == other.remaining_.begin(); }
+        // Assumes both iterators point to the same underlying string.
+        bool operator!=(iterator const &other) const noexcept { return remaining_.data() != other.remaining_.data(); }
+        bool operator==(iterator const &other) const noexcept { return remaining_.data() == other.remaining_.data(); }
         bool operator!=(end_sentinel_type) const noexcept { return !remaining_.empty(); }
         bool operator==(end_sentinel_type) const noexcept { return remaining_.empty(); }
     };
@@ -550,8 +551,14 @@ class range_rmatches {
             return temp;
         }
 
-        bool operator!=(iterator const &other) const noexcept { return remaining_.end() != other.remaining_.end(); }
-        bool operator==(iterator const &other) const noexcept { return remaining_.end() == other.remaining_.end(); }
+        // Assumes both iterators point to the same underlying string.
+        // This has to be `.data() + .size()`, to be compatible with `std::string_view` on MSVC.
+        bool operator!=(iterator const &other) const noexcept {
+            return remaining_.data() + remaining_.size() != other.remaining_.data() + other.remaining_.size();
+        }
+        bool operator==(iterator const &other) const noexcept {
+            return remaining_.data() + remaining_.size() == other.remaining_.data() + other.remaining_.size();
+        }
         bool operator!=(end_sentinel_type) const noexcept { return !remaining_.empty(); }
         bool operator==(end_sentinel_type) const noexcept { return remaining_.empty(); }
     };
