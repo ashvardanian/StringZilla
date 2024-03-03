@@ -262,7 +262,43 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Build C/C++
+        shell: cmd
+        run: |
+          cmake -GNinja -B build_artifacts ^
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 ^
+            -DSTRINGZILLA_BUILD_TEST=1
+          
+          cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || (
+            echo "Compilation failed. Here are the logs:"
+            type build_artifacts\logs.txt
+            echo "The original compilation commands:"
+            type build_artifacts\compile_commands.json
+            echo:
+            echo "CPU Features:"
+            wmic cpu list /format:list
+            exit 1
+          )
+      - name: Test C++
+        run: .\build_artifacts\stringzilla_test_cpp20.exe
+      - name: Test on Real World Data
+        run: |
+          .\build_artifacts\stringzilla_bench_search.exe ${DATASET_PATH}     # for substring search
+          .\build_artifacts\stringzilla_bench_token.exe ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+          .\build_artifacts\stringzilla_bench_similarity.exe ${DATASET_PATH} # for edit distances and alignment scores
+          .\build_artifacts\stringzilla_bench_sort.exe ${DATASET_PATH}       # for sorting arrays of strings
+          .\build_artifacts\stringzilla_bench_container.exe ${DATASET_PATH}  # for STL containers with string keys
+        env:
+          DATASET_PATH: ./README.md
+        # Don't overload GitHub with our benchmarks.
+        # The results in such an unstable environment will be meaningless anyway.
+        if: 0
+        
+        # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
