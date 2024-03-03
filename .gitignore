@@ -2,6 +2,7 @@
 build/
 build_debug/
 build_release/
+build_artifacts/
 
 # Yes, everyone loves keeping this file in the history.
 # But with a very minimalistic binding and just a couple of dependencies 
@@ -27,6 +28,7 @@ CMakeFiles
 *.pyd
 .venv/*
 node_modules/
+.vs/
 
 # Recommended datasets
 leipzig1M.txt
