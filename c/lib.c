@@ -212,6 +212,55 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
 __attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
 
+// Override memmem
+void *memmem(const void *haystack, size_t haystack_len, const void *needle, size_t needle_len) {
+    return sz_find_byte(haystack, haystack_len, needle);
+}
+
+// Override memchr
+void *memchr(const void *s, int c, size_t n) {
+    return sz_find_byte(s, n, &c);
+}
+
+// Override memcpy
+void *memcpy(void *dest, const void *src, size_t n) {
+    sz_move(dest, src, n);
+    return dest;
+}
+
+// Override memmove
+void *memmove(void *dest, const void *src, size_t n) {
+    sz_move(dest, src, n);
+    return dest;
+}
+
+// Override memset
+void *memset(void *s, int c, size_t n) {
+    sz_fill(s, n, c);
+    return s;
+}
+
+// Override memrchr (GNU extension)
+void *memrchr(const void *s, int c, size_t n) {
+    return sz_rfind_byte(s, n, &c);
+}
+
+// Override memfrob (GNU extension)
+void memfrob(void *s, size_t n) {
+    sz_u8_t *p = (sz_u8_t *)s;
+    for (size_t i = 0; i < n; ++i) {
+        p[i] ^= 42;  // Arbitrary value for demonstration, replace with your own logic
+    }
+}
+
+// Override strlen for certain APIs and GNU extensions
+size_t strlen(const char *s) {
+    // Use StringZilla's implementation if available
+    sz_cptr_t sz_s = (sz_cptr_t)s;
+    sz_cptr_t end = sz_find_byte(sz_s, SIZE_MAX, "\0");
+    return (size_t)(end - sz_s);
+}
+
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_dispatch_table.equal(a, b, length);
 }
