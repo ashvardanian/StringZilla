@@ -295,25 +295,25 @@ int main(int argc, char const **argv) {
     bench_rfinds(dataset.text, {"\n"}, rfind_functions());
 
     std::printf("Benchmarking for an [\\n\\r] RegEx:\n");
-    bench_finds(dataset.text, {sz::newlines()}, find_charset_functions());
-    bench_rfinds(dataset.text, {sz::newlines()}, rfind_charset_functions());
+    bench_finds(dataset.text, {{sz::newlines(), sizeof(sz::newlines())}}, find_charset_functions());
+    bench_rfinds(dataset.text, {{sz::newlines(), sizeof(sz::newlines())}}, rfind_charset_functions());
 
     // Typical ASCII tokenization and validation benchmarks
     std::printf("Benchmarking for whitespaces:\n");
-    bench_finds(dataset.text, {sz::whitespaces()}, find_charset_functions());
-    bench_rfinds(dataset.text, {sz::whitespaces()}, rfind_charset_functions());
+    bench_finds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, find_charset_functions());
+    bench_rfinds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, rfind_charset_functions());
 
     std::printf("Benchmarking for HTML tag start/end:\n");
     bench_finds(dataset.text, {"<>"}, find_charset_functions());
     bench_rfinds(dataset.text, {"<>"}, rfind_charset_functions());
 
     std::printf("Benchmarking for punctuation marks:\n");
-    bench_finds(dataset.text, {sz::punctuation()}, find_charset_functions());
-    bench_rfinds(dataset.text, {sz::punctuation()}, rfind_charset_functions());
+    bench_finds(dataset.text, {{sz::punctuation(), sizeof(sz::punctuation())}}, find_charset_functions());
+    bench_rfinds(dataset.text, {{sz::punctuation(), sizeof(sz::punctuation())}}, rfind_charset_functions());
 
     std::printf("Benchmarking for non-printable characters:\n");
-    bench_finds(dataset.text, {sz::ascii_controls()}, find_charset_functions());
-    bench_rfinds(dataset.text, {sz::ascii_controls()}, rfind_charset_functions());
+    bench_finds(dataset.text, {{sz::ascii_controls(), sizeof(sz::ascii_controls())}}, find_charset_functions());
+    bench_rfinds(dataset.text, {{sz::ascii_controls(), sizeof(sz::ascii_controls())}}, rfind_charset_functions());
 
     // Baseline benchmarks for present tokens, coming in all lengths
     std::printf("Benchmarking on present lines:\n");
