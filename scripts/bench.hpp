@@ -86,14 +86,14 @@ struct tracked_function_gt {
         }
 
         // Now let's print in the format:
-        //  - name, up to 20 characters
+        //  - name, up to 32 characters
         //  - throughput in GB/s with up to 3 significant digits, 10 characters
         //  - call latency in ns with up to 1 significant digit, 10 characters
         //  - number of failed tests, 10 characters
         //  - first example of a failed test, up to 20 characters
         char const *format;
-        if (is_binary) { format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %-20s %-20s\n"; }
-        else { format = "- %-20s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %-20s\n"; }
+        if (is_binary) { format = "- %-32s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %-20s %-20s\n"; }
+        else { format = "- %-32s %15.4f GB/s %15.1f ns %10zu errors in %10zu iterations %-20s\n"; }
 
         std::printf(format, name.c_str(), results.bytes_passed / results.seconds / 1.e9,
                     results.seconds * 1e9 / results.iterations, failed_count, results.iterations,
