@@ -249,13 +249,12 @@ void *memrchr(const void *s, int c, size_t n) {
 void memfrob(void *s, size_t n) {
     sz_u8_t *p = (sz_u8_t *)s;
     for (size_t i = 0; i < n; ++i) {
-        p[i] ^= 42;  // Arbitrary value for demonstration, replace with your own logic
+        p[i] ^= 42;  
     }
 }
 
 // Override strlen for certain APIs and GNU extensions
 size_t strlen(const char *s) {
-    // Use StringZilla's implementation if available
     sz_cptr_t sz_s = (sz_cptr_t)s;
     sz_cptr_t end = sz_find_byte(sz_s, SIZE_MAX, "\0");
     return (size_t)(end - sz_s);
