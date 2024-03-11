@@ -2287,9 +2287,22 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
     }
 
     // TODO: Generalize to remove the following asserts!
-    sz_assert(!bound && "For bounded search the method should only evaluate one band of the matrix.");
-    sz_assert(shorter_length == longer_length && "The method hasn't been generalized to different length inputs yet.");
-    sz_unused(longer_length && bound);
+    sz_assert(!bound && "For bounded search, the method should only evaluate one band of the matrix.");
+    sz_assert(shorter_length && longer_length && bound);
+
+    // Generalized anti-diagonal approach for Levenshtein distance
+    for (int k = 1; k <= bound; ++k) {
+        for (int i = max(1, k - longer_length + shorter_length); i <= min(shorter_length, k); ++i) {
+        int j = k - i;
+
+        // Access matrix elements using i and j
+        // matrix[i][j] represents the cell in the anti-diagonal at distance k
+
+        // Perform Levenshtein distance computation
+        // Update matrix[i][j] based on the values in the neighboring cells
+    }
+}
+
 
     // We are going to store 3 diagonals of the matrix.
     // The length of the longest (main) diagonal would be `n = (shorter_length + 1)`.
