@@ -212,54 +212,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
 __attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
 
-// Override memmem
-void *memmem(const void *haystack, size_t haystack_len, const void *needle, size_t needle_len) {
-    return sz_find_byte(haystack, haystack_len, needle);
-}
-
-// Override memchr
-void *memchr(const void *s, int c, size_t n) {
-    return sz_find_byte(s, n, &c);
-}
-
-// Override memcpy
-void *memcpy(void *dest, const void *src, size_t n) {
-    sz_move(dest, src, n);
-    return dest;
-}
-
-// Override memmove
-void *memmove(void *dest, const void *src, size_t n) {
-    sz_move(dest, src, n);
-    return dest;
-}
-
-// Override memset
-void *memset(void *s, int c, size_t n) {
-    sz_fill(s, n, c);
-    return s;
-}
-
-// Override memrchr (GNU extension)
-void *memrchr(const void *s, int c, size_t n) {
-    return sz_rfind_byte(s, n, &c);
-}
-
-// Override memfrob (GNU extension)
-void memfrob(void *s, size_t n) {
-    sz_u8_t *p = (sz_u8_t *)s;
-    for (size_t i = 0; i < n; ++i) {
-        p[i] ^= 42;  
-    }
-}
-
-// Override strlen for certain APIs and GNU extensions
-size_t strlen(const char *s) {
-    sz_cptr_t sz_s = (sz_cptr_t)s;
-    sz_cptr_t end = sz_find_byte(sz_s, SIZE_MAX, "\0");
-    return (size_t)(end - sz_s);
-}
-
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_dispatch_table.equal(a, b, length);
 }
@@ -383,3 +335,41 @@ SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_
     if (!generator) generator = _sz_random_generator;
     sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }
+
+#if SZ_OVERRIDE_LIBC
+
+SZ_DYNAMIC void *memchr(void const *s, int c_wide, sz_size_t n) {
+    sz_u8_t c = (sz_u8_t)c_wide;
+    return sz_find_byte(s, n, &c);
+}
+
+SZ_DYNAMIC void *memcpy(void *dest, void const *src, sz_size_t n) {
+    sz_copy(dest, src, n);
+    return dest;
+}
+
+SZ_DYNAMIC void *memmove(void *dest, void const *src, sz_size_t n) {
+    sz_move(dest, src, n);
+    return dest;
+}
+
+SZ_DYNAMIC void *memset(void *s, int c, sz_size_t n) {
+    sz_fill(s, n, c);
+    return s;
+}
+
+SZ_DYNAMIC void *memmem(void const *h, sz_size_t h_len, void const *n, sz_size_t n_len) {
+    return sz_find(h, h_len, n, n_len);
+}
+
+SZ_DYNAMIC void *memrchr(void const *s, int c_wide, sz_size_t n) {
+    sz_u8_t c = (sz_u8_t)c_wide;
+    return sz_rfind_byte(s, n, &c);
+}
+
+SZ_DYNAMIC void memfrob(void *s, sz_size_t n) {
+    char const *base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    sz_generate(base64, 64, s, n, SZ_NULL, SZ_NULL);
+}
+
+#endif // SZ_OVERRIDE_LIBC
