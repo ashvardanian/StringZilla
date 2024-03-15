@@ -1,0 +1,36 @@
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+
+ENV user_name="runner"
+ARG TARGETPLATFORM
+ARG docker_ip
+ARG user_pass
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends cmake g++-12 gcc-12 libc++-dev libc++abi-dev build-essential openssh-client sshpass && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV CC=gcc-12
+ENV CXX=g++-12
+
+COPY . .
+
+RUN cmake -DCMAKE_BUILD_TYPE=Release -B ./build_release
+RUN cmake --build ./build_release --config Release
+
+RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+        export arch="amd"; \
+    elif [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
+        export arch="arm"; \
+    fi && \
+    version=$(cat VERSION) && \
+    mkdir -p stringzillite_linux_"$arch"_"$version"/DEBIAN && \
+    touch stringzillite_linux_"$arch"_"$version"/DEBIAN/control && \
+    mkdir -p stringzillite_linux_"$arch"_"$version"/usr/local/lib && \
+    mkdir stringzillite_linux_"$arch"_"$version"/usr/local/include && \
+    cp include/stringzilla/stringzilla.h stringzillite_linux_"$arch"_"$version"/usr/local/include/ && \
+    cp build_release/stringzillite.so stringzillite_linux_"$arch"_"$version"/usr/local/lib/ && \
+    echo "Package: stringzilla\nVersion: $version\nMaintainer: Ash Vardanian\nArchitecture: "$arch"\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > stringzillite_linux_"$arch"_"$version"/DEBIAN/control && \
+    dpkg-deb --build stringzillite_linux_"$arch"_"$version" && \
+    sshpass -p "$user_pass" scp -o StrictHostKeyChecking=no stringzillite_linux_"$arch"_"$version".deb "$user_name"@"$docker_ip":/home/$user_name/work/stringzilla/stringzilla/
