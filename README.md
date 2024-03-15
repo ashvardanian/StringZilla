@@ -118,18 +118,18 @@ __Who is this for?__
   </tr>
   <!-- Characters, normal order -->
   <tr>
-    <td colspan="4" align="center">find the first occurrence of any of 6 whitespaces <sup>2</sup></td>
+    <td colspan="4" align="center">split lines separated by <code>\n</code> or <code>\r</code> <sup>2</sup></td>
   </tr>
   <tr>
     <td align="center">
       <code>strcspn</code> <sup>1</sup><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.74</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.29</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>5.42</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2.19</b> GB/s
     </td>
     <td align="center">
       <code>.find_first_of</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.25</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>0.59</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>0.46</b> GB/s
     </td>
     <td align="center">
       <code>re.finditer</code><br/>
@@ -138,8 +138,8 @@ __Who is this for?__
     </td>
     <td align="center">
       <code>sz_find_charset</code><br/>
-      <span style="color:#ABABAB;">x86:</span> <b>0.43</b> &centerdot;
-      <span style="color:#ABABAB;">arm:</span> <b>0.23</b> GB/s
+      <span style="color:#ABABAB;">x86:</span> <b>4.08</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>3.22</b> GB/s
     </td>
   </tr>
   <!-- Characters, reverse order -->
@@ -270,7 +270,7 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
 > <sup>6</sup> Contrary to the popular opinion, Python's default `sorted` function works faster than the C and C++ standard libraries.
 > That holds for large lists or tuples of strings, but fails as soon as you need more complex logic, like sorting dictionaries by a string key, or producing the "sorted order" permutation.
 > The latter is very common in database engines and is most similar to `numpy.argsort`.
-> Despite being faster than the standard libraries, current StringZilla solution can be at least 4x faster without loss of generality.
+> Current StringZilla solution can be at least 4x faster without loss of generality.
 
 [faq-mersenne-twister]: https://en.wikipedia.org/wiki/Mersenne_Twister
 
@@ -398,10 +398,12 @@ Python's operations like `split()` and `readlines()` immediately materialize a `
 This can be very memory-inefficient for large datasets.
 StringZilla saves a lot of memory by viewing existing memory regions as substrings, but even more memory can be saved by using lazily evaluated iterators.
 
-- `text.split_iter(separator=' ', keepseparator=False) -> SplitIterator[Str]`
-- `text.rsplit_iter(separator=' ', keepseparator=False) -> SplitIterator[Str]`
-- `text.split_charset_iter(separator='chars', keepseparator=False) -> SplitIterator[Str]`
-- `text.rsplit_charset_iter(separator='chars', keepseparator=False) -> SplitIterator[Str]`
+```py
+x: SplitIterator[Str] = text.split_iter(separator=' ', keepseparator=False)
+x: SplitIterator[Str] = text.rsplit_iter(separator=' ', keepseparator=False)
+x: SplitIterator[Str] = text.split_charset_iter(separator='chars', keepseparator=False)
+x: SplitIterator[Str] = text.rsplit_charset_iter(separator='chars', keepseparator=False)
+```
 
 StringZilla can easily be 10x more memory efficient than native Python classes for tokenization.
 With lazy operations, it practically becomes free.
@@ -524,7 +526,7 @@ web_archieve.write_to("next_doc.html")
 A `Str` is easy to cast to [PyArrow](https://arrow.apache.org/docs/python/arrays.html#string-and-binary-types) buffers.
 
 ```py
-from pyarrow as foreign_buffer
+from pyarrow import foreign_buffer
 from stringzilla import Str
 
 original = "hello"
@@ -997,9 +999,20 @@ sz::randomize(sz::string_span(uuid, 36), "0123456789abcdef-"); // Overwrite any 
 
 ### Levenshtein Edit Distance and Alignment Scores
 
-```cpp
-sz::edit_distance(first, second[, upper_bound[, allocator]]) -> std::size_t;
+Levenshtein and Hamming edit distance are provided for both byte-strings and UTF-8 strings.
+The latter will output the distance in Unicode code points, not bytes.
+Needleman-Wunsch alignment scores are only defined for byte-strings.
 
+```cpp
+// Count number of substitutions in same length strings
+sz::hamming_distance(first, second[, upper_bound]) -> std::size_t;
+sz::hamming_distance_utf8(first, second[, upper_bound]) -> std::size_t;
+
+// Count number of insertions, deletions and substitutions
+sz::edit_distance(first, second[, upper_bound[, allocator]]) -> std::size_t;
+sz::edit_distance_utf8(first, second[, upper_bound[, allocator]]) -> std::size_t;
+
+// Substitution-parametrized Needleman-Wunsch global alignment score
 std::int8_t costs[256][256]; // Substitution costs matrix
 sz::alignment_score(first, second, costs[, gap_score[, allocator]) -> std::ptrdiff_t;
 ```
@@ -1092,15 +1105,20 @@ __`SZ_USE_MISALIGNED_LOADS`__:
 > Going from `char`-like types to `uint64_t`-like ones can significantly accelerate the serial (SWAR) backend.
 > So consider enabling it if you are building for some embedded device.
 
-__`SZ_AVOID_LIBC`__:
+__`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
 
 > When using the C header-only library one can disable the use of LibC.
 > This may affect the type resolution system on obscure hardware platforms. 
+> Moreover, one may let `stringzilla` override the common symbols like the `memcpy` and `memset` with its own implementations.
+> In that case you can use the [`LD_PRELOAD` trick][ld-preload-trick] to prioritize it's symbols over the ones from the LibC and accelerate existing string-heavy applications without recompiling them.
 
-__`SZ_AVOID_STL`__:
+[ld-preload-trick]: https://ashvardanian.com/posts/ld-preload-libsee
 
-> When using the C++ interface one can disable conversions from `std::string` to `sz::string` and back.
+__`SZ_AVOID_STL`__ and __`SZ_SAFETY_OVER_COMPATIBILITY`__:
+
+> When using the C++ interface one can disable implicit conversions from `std::string` to `sz::string` and back.
 > If not needed, the `<string>` and `<string_view>` headers will be excluded, reducing compilation time.
+> Moreover, if STL compatibility is a low priority, one can make the API safer by disabling the overloads, which are subjectively error prone.
 
 __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCHMARK`, `STRINGZILLA_TARGET_ARCH`__ for CMake users:
 

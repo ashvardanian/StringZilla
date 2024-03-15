@@ -9,6 +9,13 @@
 #include <windows.h> // `DllMain`
 #endif
 
+// When enabled, this library will override the symbols usually provided by the C standard library.
+// It's handy if you want to use the `LD_PRELOAD` trick for non-intrusive profiling and replacing
+// the C standard library implementation without recompiling.
+#if !defined(SZ_OVERRIDE_LIBC)
+#define SZ_OVERRIDE_LIBC 1
+#endif
+
 // Overwrite `SZ_DYNAMIC_DISPATCH` before including StringZilla.
 #ifdef SZ_DYNAMIC_DISPATCH
 #undef SZ_DYNAMIC_DISPATCH
@@ -70,17 +77,19 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
     // Check for GFNI (Function ID 1, ECX register)
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L171C30-L171C40
     unsigned supports_avx512vbmi = (info1.named.ecx & 0x00000002) != 0;
+    unsigned supports_avx512vbmi2 = (info1.named.ecx & 0x00000040) != 0;
     // Check for GFNI (Function ID 1, ECX register)
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L177C30-L177C40
     unsigned supports_gfni = (info1.named.ecx & 0x00000100) != 0;
 
-    return (sz_capability_t)(                             //
-        (sz_cap_x86_avx2_k * supports_avx2) |             //
-        (sz_cap_x86_avx512f_k * supports_avx512f) |       //
-        (sz_cap_x86_avx512vl_k * supports_avx512vl) |     //
-        (sz_cap_x86_avx512bw_k * supports_avx512bw) |     //
-        (sz_cap_x86_avx512vbmi_k * supports_avx512vbmi) | //
-        (sz_cap_x86_gfni_k * (supports_gfni)) |           //
+    return (sz_capability_t)(                               //
+        (sz_cap_x86_avx2_k * supports_avx2) |               //
+        (sz_cap_x86_avx512f_k * supports_avx512f) |         //
+        (sz_cap_x86_avx512vl_k * supports_avx512vl) |       //
+        (sz_cap_x86_avx512bw_k * supports_avx512bw) |       //
+        (sz_cap_x86_avx512vbmi_k * supports_avx512vbmi) |   //
+        (sz_cap_x86_avx512vbmi2_k * supports_avx512vbmi2) | //
+        (sz_cap_x86_gfni_k * (supports_gfni)) |             //
         (sz_cap_serial_k));
 
 #endif // SIMSIMD_TARGET_X86
@@ -160,6 +169,8 @@ static void sz_dispatch_table_init(void) {
         impl->rfind_byte = sz_rfind_byte_avx2;
         impl->find = sz_find_avx2;
         impl->rfind = sz_rfind_avx2;
+        impl->find_from_set = sz_find_charset_avx2;
+        impl->rfind_from_set = sz_rfind_charset_avx2;
     }
 #endif
 
@@ -179,7 +190,7 @@ static void sz_dispatch_table_init(void) {
         impl->edit_distance = sz_edit_distance_avx512;
     }
 
-    if ((caps & sz_cap_x86_avx512f_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_gfni_k) &&
+    if ((caps & sz_cap_x86_avx512f_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_avx512vbmi2_k) &&
         (caps & sz_cap_x86_avx512bw_k) && (caps & sz_cap_x86_avx512vbmi_k)) {
         impl->find_from_set = sz_find_charset_avx512;
         impl->rfind_from_set = sz_rfind_charset_avx512;
