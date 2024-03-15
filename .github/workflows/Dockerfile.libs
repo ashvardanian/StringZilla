@@ -16,8 +16,10 @@ ENV CXX=g++-12
 
 COPY . .
 
-RUN cmake -DCMAKE_BUILD_TYPE=Release -B ./build_release
-RUN cmake --build ./build_release --config Release
+# As we are building from inside the container, the "main project" resolution
+# may not work as expected, so override `STRINGZILLA_BUILD_SHARED=1`.
+RUN cmake -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_BUILD_SHARED=1 -B ./build_release
+RUN cmake --build ./build_release --config Release --target stringzillite
 
 RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
         export arch="amd"; \
@@ -30,7 +32,7 @@ RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
     mkdir -p stringzillite_linux_"$arch"_"$version"/usr/local/lib && \
     mkdir stringzillite_linux_"$arch"_"$version"/usr/local/include && \
     cp include/stringzilla/stringzilla.h stringzillite_linux_"$arch"_"$version"/usr/local/include/ && \
-    cp build_release/stringzillite.so stringzillite_linux_"$arch"_"$version"/usr/local/lib/ && \
+    cp ./build_release/libstringzillite.so stringzillite_linux_"$arch"_"$version"/usr/local/lib/ && \
     echo "Package: stringzilla\nVersion: $version\nMaintainer: Ash Vardanian\nArchitecture: "$arch"\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > stringzillite_linux_"$arch"_"$version"/DEBIAN/control && \
     dpkg-deb --build stringzillite_linux_"$arch"_"$version" && \
     sshpass -p "$user_pass" scp -o StrictHostKeyChecking=no stringzillite_linux_"$arch"_"$version".deb "$user_name"@"$docker_ip":/home/$user_name/work/stringzilla/stringzilla/
