@@ -349,36 +349,36 @@ SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_
 
 #if SZ_OVERRIDE_LIBC
 
-SZ_DYNAMIC void *memchr(void const *s, int c_wide, sz_size_t n) {
+SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
     sz_u8_t c = (sz_u8_t)c_wide;
-    return sz_find_byte(s, n, &c);
+    return (void *)sz_find_byte(s, n, (sz_cptr_t)&c);
 }
 
-SZ_DYNAMIC void *memcpy(void *dest, void const *src, sz_size_t n) {
+SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
     sz_copy(dest, src, n);
-    return dest;
+    return (void *)dest;
 }
 
-SZ_DYNAMIC void *memmove(void *dest, void const *src, sz_size_t n) {
+SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
     sz_move(dest, src, n);
-    return dest;
+    return (void *)dest;
 }
 
-SZ_DYNAMIC void *memset(void *s, int c, sz_size_t n) {
+SZ_DYNAMIC void *memset(void *s, int c, size_t n) {
     sz_fill(s, n, c);
-    return s;
+    return (void *)s;
 }
 
-SZ_DYNAMIC void *memmem(void const *h, sz_size_t h_len, void const *n, sz_size_t n_len) {
-    return sz_find(h, h_len, n, n_len);
+SZ_DYNAMIC void *memmem(void const *h, size_t h_len, void const *n, size_t n_len) {
+    return (void *)sz_find(h, h_len, n, n_len);
 }
 
-SZ_DYNAMIC void *memrchr(void const *s, int c_wide, sz_size_t n) {
+SZ_DYNAMIC void *memrchr(void const *s, int c_wide, size_t n) {
     sz_u8_t c = (sz_u8_t)c_wide;
-    return sz_rfind_byte(s, n, &c);
+    return (void *)sz_rfind_byte(s, n, (sz_cptr_t)&c);
 }
 
-SZ_DYNAMIC void memfrob(void *s, sz_size_t n) {
+SZ_DYNAMIC void memfrob(void *s, size_t n) {
     char const *base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     sz_generate(base64, 64, s, n, SZ_NULL, SZ_NULL);
 }
