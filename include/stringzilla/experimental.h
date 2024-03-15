@@ -364,6 +364,116 @@ sz_u512_vec_t sz_inclusive_min(sz_i32_t previous, sz_error_cost_t gap, sz_u512_v
     return new_vec;
 }
 
+SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
+
+    sz_size_t load_length;
+    __mmask32 load_mask, matches_mask;
+    // To store the set in the register we need just 256 bits, but the `VPERMB` instruction
+    // we are going to invoke is surprisingly cheaper on ZMM registers.
+    sz_u512_vec_t text_vec, filter_vec;
+    filter_vec.ymms[0] = _mm256_loadu_epi64(&filter->_u64s[0]);
+
+    // We are going to view the `filter` at 8-bit word granularity.
+    sz_u512_vec_t filter_slice_offsets_vec;
+    sz_u512_vec_t filter_slice_vec;
+    sz_u512_vec_t offset_within_slice_vec;
+    sz_u512_vec_t mask_in_filter_slice_vec;
+    sz_u512_vec_t matches_vec;
+
+    while (length) {
+        // For every byte:
+        // 1. Find corresponding word in a set.
+        // 2. Produce a bitmask to check against that word.
+        load_length = sz_min_of_two(length, 32);
+        load_mask = _sz_u64_mask_until(load_length);
+        text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text);
+
+        // To shift right every byte by 3 bits we can use the GF2 affine transformations.
+        // https://wunkolo.github.io/post/2020/11/gf2p8affineqb-int8-shifting/
+        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 32.
+        filter_slice_offsets_vec.ymms[0] =
+            _mm256_gf2p8affine_epi64_epi8(text_vec.ymms[0], _mm256_set1_epi64x(0x0102040810204080ull << (3 * 8)), 0);
+
+        // After next line, `filter_slice_vec` will contain the right word from the set,
+        // needed to filter the presence of the byte in the set.
+        filter_slice_vec.ymms[0] = _mm256_permutexvar_epi8(filter_slice_offsets_vec.ymms[0], filter_vec.ymms[0]);
+
+        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 8.
+        offset_within_slice_vec.ymms[0] = _mm256_and_si256(text_vec.ymms[0], _mm256_set1_epi64x(0x0707070707070707ull));
+
+        // Instead of performing one more Galois Field operation, we can upcast to 16-bit integers,
+        // and perform the fift and intersection there.
+        filter_slice_vec.zmm = _mm512_cvtepi8_epi16(filter_slice_vec.ymms[0]);
+        offset_within_slice_vec.zmm = _mm512_cvtepi8_epi16(offset_within_slice_vec.ymms[0]);
+        mask_in_filter_slice_vec.zmm = _mm512_sllv_epi16(_mm512_set1_epi16(1), offset_within_slice_vec.zmm);
+        matches_vec.zmm = _mm512_and_si512(filter_slice_vec.zmm, mask_in_filter_slice_vec.zmm);
+
+        matches_mask = _mm512_mask_cmpneq_epi16_mask(load_mask, matches_vec.zmm, _mm512_setzero_si512());
+        if (matches_mask) {
+            int offset = sz_u32_ctz(matches_mask);
+            return text + offset;
+        }
+        else { text += load_length, length -= load_length; }
+    }
+
+    return SZ_NULL_CHAR;
+}
+
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
+
+    sz_size_t load_length;
+    __mmask32 load_mask, matches_mask;
+    // To store the set in the register we need just 256 bits, but the `VPERMB` instruction
+    // we are going to invoke is surprisingly cheaper on ZMM registers.
+    sz_u512_vec_t text_vec, filter_vec;
+    filter_vec.ymms[0] = _mm256_loadu_epi64(&filter->_u64s[0]);
+
+    // We are going to view the `filter` at 8-bit word granularity.
+    sz_u512_vec_t filter_slice_offsets_vec;
+    sz_u512_vec_t filter_slice_vec;
+    sz_u512_vec_t offset_within_slice_vec;
+    sz_u512_vec_t mask_in_filter_slice_vec;
+    sz_u512_vec_t matches_vec;
+
+    while (length) {
+        // For every byte:
+        // 1. Find corresponding word in a set.
+        // 2. Produce a bitmask to check against that word.
+        load_length = sz_min_of_two(length, 32);
+        load_mask = _sz_u64_mask_until(load_length);
+        text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text + length - load_length);
+
+        // To shift right every byte by 3 bits we can use the GF2 affine transformations.
+        // https://wunkolo.github.io/post/2020/11/gf2p8affineqb-int8-shifting/
+        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 32.
+        filter_slice_offsets_vec.ymms[0] =
+            _mm256_gf2p8affine_epi64_epi8(text_vec.ymms[0], _mm256_set1_epi64x(0x0102040810204080ull << (3 * 8)), 0);
+
+        // After next line, `filter_slice_vec` will contain the right word from the set,
+        // needed to filter the presence of the byte in the set.
+        filter_slice_vec.ymms[0] = _mm256_permutexvar_epi8(filter_slice_offsets_vec.ymms[0], filter_vec.ymms[0]);
+
+        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 8.
+        offset_within_slice_vec.ymms[0] = _mm256_and_si256(text_vec.ymms[0], _mm256_set1_epi64x(0x0707070707070707ull));
+
+        // Instead of performing one more Galois Field operation, we can upcast to 16-bit integers,
+        // and perform the fift and intersection there.
+        filter_slice_vec.zmm = _mm512_cvtepi8_epi16(filter_slice_vec.ymms[0]);
+        offset_within_slice_vec.zmm = _mm512_cvtepi8_epi16(offset_within_slice_vec.ymms[0]);
+        mask_in_filter_slice_vec.zmm = _mm512_sllv_epi16(_mm512_set1_epi16(1), offset_within_slice_vec.zmm);
+        matches_vec.zmm = _mm512_and_si512(filter_slice_vec.zmm, mask_in_filter_slice_vec.zmm);
+
+        matches_mask = _mm512_mask_cmpneq_epi16_mask(load_mask, matches_vec.zmm, _mm512_setzero_si512());
+        if (matches_mask) {
+            int offset = sz_u32_clz(matches_mask);
+            return text + length - load_length + 32 - offset - 1;
+        }
+        else { length -= load_length; }
+    }
+
+    return SZ_NULL_CHAR;
+}
+
 #endif // SZ_USE_AVX512
 
 #if SZ_USE_ARM_NEON

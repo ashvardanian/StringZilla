@@ -138,6 +138,9 @@ tracked_binary_functions_t find_charset_functions() {
              return (match == std::string_view::npos ? h.size() : match);
          }},
         {"sz_find_charset_serial", wrap_sz(sz_find_charset_serial), true},
+#if SZ_USE_X86_AVX2
+        {"sz_find_charset_avx2", wrap_sz(sz_find_charset_avx2), true},
+#endif
 #if SZ_USE_X86_AVX512
         {"sz_find_charset_avx512", wrap_sz(sz_find_charset_avx512), true},
 #endif
