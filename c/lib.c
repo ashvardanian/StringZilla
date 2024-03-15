@@ -13,7 +13,7 @@
 // It's handy if you want to use the `LD_PRELOAD` trick for non-intrusive profiling and replacing
 // the C standard library implementation without recompiling.
 #if !defined(SZ_OVERRIDE_LIBC)
-#define SZ_OVERRIDE_LIBC 1
+#define SZ_OVERRIDE_LIBC SZ_AVOID_LIBC
 #endif
 
 // Overwrite `SZ_DYNAMIC_DISPATCH` before including StringZilla.
@@ -347,7 +347,9 @@ SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_
     sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }
 
-#if SZ_OVERRIDE_LIBC
+// It's much harder to override the C standard library on Windows and MSVC,
+// so we'll just provide the symbols for other Operating Systems.
+#if SZ_OVERRIDE_LIBC && !(defined(_WIN32) || defined(__CYGWIN__))
 
 SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
     sz_u8_t c = (sz_u8_t)c_wide;

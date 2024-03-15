@@ -169,14 +169,30 @@ typedef ptrdiff_t sz_ssize_t; // Signed version of `sz_size_t`, 32 or 64 bits
 
 #else // if SZ_AVOID_LIBC:
 
-typedef signed char sz_i8_t;          // Always 8 bits
-typedef unsigned char sz_u8_t;        // Always 8 bits
-typedef unsigned short sz_u16_t;      // Always 16 bits
-typedef int sz_i32_t;                 // Always 32 bits
-typedef unsigned int sz_u32_t;        // Always 32 bits
-typedef long long sz_i64_t;           // Always 64 bits
-typedef unsigned long long sz_u64_t;  // Always 64 bits
+typedef signed char sz_i8_t;         // Always 8 bits
+typedef unsigned char sz_u8_t;       // Always 8 bits
+typedef unsigned short sz_u16_t;     // Always 16 bits
+typedef int sz_i32_t;                // Always 32 bits
+typedef unsigned int sz_u32_t;       // Always 32 bits
+typedef long long sz_i64_t;          // Always 64 bits
+typedef unsigned long long sz_u64_t; // Always 64 bits
 
+// Now we need to redefine the `size_t`.
+// Microsoft Visual C++ (MSVC) typically follows LLP64 data model on 64-bit platforms,
+// where integers, pointers, and long types have different sizes:
+//
+//  > `int` is 32 bits
+//  > `long` is 32 bits
+//  > `long long` is 64 bits
+//  > pointer (thus, `size_t`) is 64 bits
+//
+// In contrast, GCC and Clang on 64-bit Unix-like systems typically follow the LP64 model, where:
+//
+//  > `int` is 32 bits
+//  > `long` and pointer (thus, `size_t`) are 64 bits
+//  > `long long` is also 64 bits
+//
+// Source: https://learn.microsoft.com/en-us/windows/win32/winprog64/abstract-data-models
 #if SZ_DETECT_64_BIT
 typedef unsigned long long sz_size_t; // 64-bit.
 typedef long long sz_ssize_t;         // 64-bit.
