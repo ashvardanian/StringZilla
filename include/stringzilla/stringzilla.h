@@ -177,6 +177,22 @@ typedef unsigned int sz_u32_t;       // Always 32 bits
 typedef long long sz_i64_t;          // Always 64 bits
 typedef unsigned long long sz_u64_t; // Always 64 bits
 
+// Now we need to redefine the `size_t`.
+// Microsoft Visual C++ (MSVC) typically follows LLP64 data model on 64-bit platforms,
+// where integers, pointers, and long types have different sizes:
+//
+//  > `int` is 32 bits
+//  > `long` is 32 bits
+//  > `long long` is 64 bits
+//  > pointer (thus, `size_t`) is 64 bits
+//
+// In contrast, GCC and Clang on 64-bit Unix-like systems typically follow the LP64 model, where:
+//
+//  > `int` is 32 bits
+//  > `long` and pointer (thus, `size_t`) are 64 bits
+//  > `long long` is also 64 bits
+//
+// Source: https://learn.microsoft.com/en-us/windows/win32/winprog64/abstract-data-models
 #if SZ_DETECT_64_BIT
 typedef unsigned long long sz_size_t; // 64-bit.
 typedef long long sz_ssize_t;         // 64-bit.
@@ -234,6 +250,8 @@ typedef enum sz_capability_t {
     sz_cap_x86_avx512vl_k = 1 << 23,   /// x86 AVX512 VL instruction capability
     sz_cap_x86_avx512vbmi_k = 1 << 24, /// x86 AVX512 VBMI instruction capability
     sz_cap_x86_gfni_k = 1 << 25,       /// x86 AVX512 GFNI instruction capability
+
+    sz_cap_x86_avx512vbmi2_k = 1 << 26, /// x86 AVX512 VBMI 2 instruction capability
 
 } sz_capability_t;
 
@@ -719,9 +737,15 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t h_length, sz_c
  *          Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
  *          May have identical implementation and performance to ::sz_rfind_charset.
  *
- *  @param text     String to be trimmed.
- *  @param accepted Set of accepted characters.
- *  @return         Number of bytes forming the prefix.
+ *  Useful for parsing, when we want to skip a set of characters. Examples:
+ *  * 6 whitespaces: " \t\n\r\v\f".
+ *  * 16 digits forming a float number: "0123456789,.eE+-".
+ *  * 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
+ *  * 2 JSON string special characters useful to locate the end of the string: "\"\\".
+ *
+ *  @param text     String to be scanned.
+ *  @param set      Set of relevant characters.
+ *  @return         Pointer to the first matching character from ::set.
  */
 SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 
@@ -739,9 +763,9 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_serial(sz_cptr_t text, sz_size_t length, sz_
  *  * 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
  *  * 2 JSON string special characters useful to locate the end of the string: "\"\\".
  *
- *  @param text     String to be trimmed.
- *  @param rejected Set of rejected characters.
- *  @return         Number of bytes forming the prefix.
+ *  @param text     String to be scanned.
+ *  @param set      Set of relevant characters.
+ *  @return         Pointer to the last matching character from ::set.
  */
 SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 
@@ -1123,7 +1147,7 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #include <arm_sve.h>
 #endif // SZ_USE_ARM_SVE
 
-#pragma region Hardware-Specific API
+#pragma region Hardware - Specific API
 
 #if SZ_USE_X86_AVX512
 
@@ -1265,7 +1289,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
         }                                                                                                   \
     } while (0)
 #else
-#define sz_assert(condition) ((void)0)
+#define sz_assert(condition) ((void)(condition))
 #endif
 
 /*  Intrinsics aliases for MSVC, GCC, Clang, and Clang-Cl.
@@ -3306,7 +3330,7 @@ SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) 
 
     // In case of long strings, skip unaligned bytes, and then fill the rest in 64-bit chunks.
     else {
-        sz_u64_t value64 = (sz_u64_t)(value) * 0x0101010101010101ull;
+        sz_u64_t value64 = (sz_u64_t)(value)*0x0101010101010101ull;
         while ((sz_size_t)target & 7ull) *(target++) = value;
         while (target + 8 <= end) *(sz_u64_t *)target = value64, target += 8;
         while (target != end) *(target++) = value;
@@ -3785,6 +3809,97 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
     return sz_rfind_serial(h, h_length, n, n_length);
 }
 
+SZ_PUBLIC sz_cptr_t sz_find_charset_avx2(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
+
+    // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
+    // That way when we invoke `_mm256_shuffle_epi8` we can use the same mask for both lanes.
+    sz_u256_vec_t filter_even_vec, filter_odd_vec;
+    for (sz_size_t i = 0; i != 16; ++i)
+        filter_even_vec.u8s[i] = filter->_u8s[i * 2], filter_odd_vec.u8s[i] = filter->_u8s[i * 2 + 1];
+    filter_even_vec.xmms[1] = filter_even_vec.xmms[0];
+    filter_odd_vec.xmms[1] = filter_odd_vec.xmms[0];
+
+    sz_u256_vec_t text_vec;
+    sz_u256_vec_t matches_vec;
+    sz_u256_vec_t lower_nibbles_vec, higher_nibbles_vec;
+    sz_u256_vec_t bitset_even_vec, bitset_odd_vec;
+    sz_u256_vec_t bitmask_vec, bitmask_lookup_vec;
+    bitmask_lookup_vec.ymm = _mm256_set_epi8(-128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+                                             -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
+
+    while (length >= 32) {
+        // The following algorithm is a transposed equivalent of the "SIMDized check which bytes are in a set"
+        // solutions by Wojciech Muła. We populate the bitmask differently and target newer CPUs, so
+        // StrinZilla uses a somewhat different approach.
+        // http://0x80.pl/articles/simd-byte-lookup.html#alternative-implementation-new
+        //
+        //      sz_u8_t input = *(sz_u8_t const *)text;
+        //      sz_u8_t lo_nibble = input & 0x0f;
+        //      sz_u8_t hi_nibble = input >> 4;
+        //      sz_u8_t bitset_even = filter_even_vec.u8s[hi_nibble];
+        //      sz_u8_t bitset_odd = filter_odd_vec.u8s[hi_nibble];
+        //      sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
+        //      sz_u8_t bitset = lo_nibble < 8 ? bitset_even : bitset_odd;
+        //      if ((bitset & bitmask) != 0) return text;
+        //      else { length--, text++; }
+        //
+        // The nice part about this, loading the strided data is vey easy with Arm NEON,
+        // while with x86 CPUs after AVX, shuffles within 256 bits shouldn't be an issue either.
+        text_vec.ymm = _mm256_lddqu_si256((__m256i const *)text);
+        lower_nibbles_vec.ymm = _mm256_and_si256(text_vec.ymm, _mm256_set1_epi8(0x0f));
+        bitmask_vec.ymm = _mm256_shuffle_epi8(bitmask_lookup_vec.ymm, lower_nibbles_vec.ymm);
+        //
+        // At this point we can validate the `bitmask_vec` contents like this:
+        //
+        //      for (sz_size_t i = 0; i != 32; ++i) {
+        //          sz_u8_t input = *(sz_u8_t const *)(text + i);
+        //          sz_u8_t lo_nibble = input & 0x0f;
+        //          sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
+        //          sz_assert(bitmask_vec.u8s[i] == bitmask);
+        //      }
+        //
+        // Shift right every byte by 4 bits.
+        // There is no `_mm256_srli_epi8` intrinsic, so we have to use `_mm256_srli_epi16`
+        // and combine it with a mask to clear the higher bits.
+        higher_nibbles_vec.ymm = _mm256_and_si256(_mm256_srli_epi16(text_vec.ymm, 4), _mm256_set1_epi8(0x0f));
+        bitset_even_vec.ymm = _mm256_shuffle_epi8(filter_even_vec.ymm, higher_nibbles_vec.ymm);
+        bitset_odd_vec.ymm = _mm256_shuffle_epi8(filter_odd_vec.ymm, higher_nibbles_vec.ymm);
+        //
+        // At this point we can validate the `bitset_even_vec` and `bitset_odd_vec` contents like this:
+        //
+        //      for (sz_size_t i = 0; i != 32; ++i) {
+        //          sz_u8_t input = *(sz_u8_t const *)(text + i);
+        //          sz_u8_t const *bitset_ptr = &filter->_u8s[0];
+        //          sz_u8_t hi_nibble = input >> 4;
+        //          sz_u8_t bitset_even = bitset_ptr[hi_nibble * 2];
+        //          sz_u8_t bitset_odd = bitset_ptr[hi_nibble * 2 + 1];
+        //          sz_assert(bitset_even_vec.u8s[i] == bitset_even);
+        //          sz_assert(bitset_odd_vec.u8s[i] == bitset_odd);
+        //      }
+        //
+        __m256i take_first = _mm256_cmpgt_epi8(_mm256_set1_epi8(8), lower_nibbles_vec.ymm);
+        bitset_even_vec.ymm = _mm256_blendv_epi8(bitset_odd_vec.ymm, bitset_even_vec.ymm, take_first);
+
+        // It would have been great to have an instruction that tests the bits and then broadcasts
+        // the matching bit into all bits in that byte. But we don't have that, so we have to
+        // `and`, `cmpeq`, `movemask`, and then invert at the end...
+        matches_vec.ymm = _mm256_and_si256(bitset_even_vec.ymm, bitmask_vec.ymm);
+        matches_vec.ymm = _mm256_cmpeq_epi8(matches_vec.ymm, _mm256_setzero_si256());
+        int matches_mask = ~_mm256_movemask_epi8(matches_vec.ymm);
+        if (matches_mask) {
+            int offset = sz_u32_ctz(matches_mask);
+            return text + offset;
+        }
+        else { text += 32, length -= 32; }
+    }
+
+    return sz_find_charset_serial(text, length, filter);
+}
+
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx2(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
+    return sz_rfind_charset_serial(text, length, filter);
+}
+
 /**
  *  @brief  There is no AVX2 instruction for fast multiplication of 64-bit integers.
  *          This implementation is coming from Agner Fog's Vector Class Library.
@@ -3935,7 +4050,7 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t windo
  *  * 2019 IceLake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES
  *  * 2020 TigerLake: VP2INTERSECT
  */
-#pragma region AVX-512 Implementation
+#pragma region AVX - 512 Implementation
 
 #if SZ_USE_X86_AVX512
 #pragma GCC push_options
@@ -4539,57 +4654,116 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t win
 #pragma GCC pop_options
 
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512vbmi", "bmi", "bmi2", "gfni")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512vbmi,bmi,bmi2,gfni"))), \
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
                              apply_to = function)
 
 SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
 
-    sz_size_t load_length;
-    __mmask32 load_mask, matches_mask;
-    // To store the set in the register we need just 256 bits, but the `VPERMB` instruction
-    // we are going to invoke is surprisingly cheaper on ZMM registers.
-    sz_u512_vec_t text_vec, filter_vec;
-    filter_vec.ymms[0] = _mm256_loadu_epi64(&filter->_u64s[0]);
-
-    // We are going to view the `filter` at 8-bit word granularity.
-    sz_u512_vec_t filter_slice_offsets_vec;
-    sz_u512_vec_t filter_slice_vec;
-    sz_u512_vec_t offset_within_slice_vec;
-    sz_u512_vec_t mask_in_filter_slice_vec;
-    sz_u512_vec_t matches_vec;
+    // Before initializing the AVX-512 vectors, we may want to run the sequential code for the first few bytes.
+    // In practice, that only hurts, even when we have matches every 5-ish bytes.
+    //
+    //      if (length < SZ_SWAR_THRESHOLD) return sz_find_charset_serial(text, length, filter);
+    //      sz_cptr_t early_result = sz_find_charset_serial(text, SZ_SWAR_THRESHOLD, filter);
+    //      if (early_result) return early_result;
+    //      text += SZ_SWAR_THRESHOLD;
+    //      length -= SZ_SWAR_THRESHOLD;
+    //
+    // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
+    // That way when we invoke `_mm512_shuffle_epi8` we can use the same mask for both lanes.
+    sz_u512_vec_t filter_even_vec, filter_odd_vec;
+    __m256i filter_ymm = _mm256_loadu_si256((__m256i const *)filter);
+    // There are a few way to initialize filters without having native strided loads.
+    // In the cronological order of experiments:
+    // - serial code initializing 128 bytes of odd and even mask
+    // - using several shuffles
+    // - using `_mm512_permutexvar_epi8`
+    // - using `_mm512_broadcast_i32x4(_mm256_castsi256_si128(_mm256_maskz_compress_epi8(0x55555555, filter_ymm)))`
+    //   and `_mm512_broadcast_i32x4(_mm256_castsi256_si128(_mm256_maskz_compress_epi8(0xaaaaaaaa, filter_ymm)))`
+    filter_even_vec.zmm = _mm512_broadcast_i32x4(_mm256_castsi256_si128( // broadcast __m128i to __m512i
+        _mm256_maskz_compress_epi8(0x55555555, filter_ymm)));
+    filter_odd_vec.zmm = _mm512_broadcast_i32x4(_mm256_castsi256_si128( // broadcast __m128i to __m512i
+        _mm256_maskz_compress_epi8(0xaaaaaaaa, filter_ymm)));
+    // After the unzipping operation, we can validate the contents of the vectors like this:
+    //
+    //      for (sz_size_t i = 0; i != 16; ++i) {
+    //          sz_assert(filter_even_vec.u8s[i] == filter->_u8s[i * 2]);
+    //          sz_assert(filter_odd_vec.u8s[i] == filter->_u8s[i * 2 + 1]);
+    //          sz_assert(filter_even_vec.u8s[i + 16] == filter->_u8s[i * 2]);
+    //          sz_assert(filter_odd_vec.u8s[i + 16] == filter->_u8s[i * 2 + 1]);
+    //          sz_assert(filter_even_vec.u8s[i + 32] == filter->_u8s[i * 2]);
+    //          sz_assert(filter_odd_vec.u8s[i + 32] == filter->_u8s[i * 2 + 1]);
+    //          sz_assert(filter_even_vec.u8s[i + 48] == filter->_u8s[i * 2]);
+    //          sz_assert(filter_odd_vec.u8s[i + 48] == filter->_u8s[i * 2 + 1]);
+    //      }
+    //
+    sz_u512_vec_t text_vec;
+    sz_u512_vec_t lower_nibbles_vec, higher_nibbles_vec;
+    sz_u512_vec_t bitset_even_vec, bitset_odd_vec;
+    sz_u512_vec_t bitmask_vec, bitmask_lookup_vec;
+    bitmask_lookup_vec.zmm = _mm512_set_epi8(-128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+                                             -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+                                             -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+                                             -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
 
     while (length) {
-        // For every byte:
-        // 1. Find corresponding word in a set.
-        // 2. Produce a bitmask to check against that word.
-        load_length = sz_min_of_two(length, 32);
-        load_mask = _sz_u64_mask_until(load_length);
-        text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text);
-
-        // To shift right every byte by 3 bits we can use the GF2 affine transformations.
-        // https://wunkolo.github.io/post/2020/11/gf2p8affineqb-int8-shifting/
-        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 32.
-        filter_slice_offsets_vec.ymms[0] =
-            _mm256_gf2p8affine_epi64_epi8(text_vec.ymms[0], _mm256_set1_epi64x(0x0102040810204080ull << (3 * 8)), 0);
-
-        // After next line, `filter_slice_vec` will contain the right word from the set,
-        // needed to filter the presence of the byte in the set.
-        filter_slice_vec.ymms[0] = _mm256_permutexvar_epi8(filter_slice_offsets_vec.ymms[0], filter_vec.ymms[0]);
-
-        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 8.
-        offset_within_slice_vec.ymms[0] = _mm256_and_si256(text_vec.ymms[0], _mm256_set1_epi64x(0x0707070707070707ull));
-
-        // Instead of performing one more Galois Field operation, we can upcast to 16-bit integers,
-        // and perform the fift and intersection there.
-        filter_slice_vec.zmm = _mm512_cvtepi8_epi16(filter_slice_vec.ymms[0]);
-        offset_within_slice_vec.zmm = _mm512_cvtepi8_epi16(offset_within_slice_vec.ymms[0]);
-        mask_in_filter_slice_vec.zmm = _mm512_sllv_epi16(_mm512_set1_epi16(1), offset_within_slice_vec.zmm);
-        matches_vec.zmm = _mm512_and_si512(filter_slice_vec.zmm, mask_in_filter_slice_vec.zmm);
-
-        matches_mask = _mm512_mask_cmpneq_epi16_mask(load_mask, matches_vec.zmm, _mm512_setzero_si512());
+        // The following algorithm is a transposed equivalent of the "SIMDized check which bytes are in a set"
+        // solutions by Wojciech Muła. We populate the bitmask differently and target newer CPUs, so
+        // StrinZilla uses a somewhat different approach.
+        // http://0x80.pl/articles/simd-byte-lookup.html#alternative-implementation-new
+        //
+        //      sz_u8_t input = *(sz_u8_t const *)text;
+        //      sz_u8_t lo_nibble = input & 0x0f;
+        //      sz_u8_t hi_nibble = input >> 4;
+        //      sz_u8_t bitset_even = filter_even_vec.u8s[hi_nibble];
+        //      sz_u8_t bitset_odd = filter_odd_vec.u8s[hi_nibble];
+        //      sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
+        //      sz_u8_t bitset = lo_nibble < 8 ? bitset_even : bitset_odd;
+        //      if ((bitset & bitmask) != 0) return text;
+        //      else { length--, text++; }
+        //
+        // The nice part about this, loading the strided data is vey easy with Arm NEON,
+        // while with x86 CPUs after AVX, shuffles within 256 bits shouldn't be an issue either.
+        sz_size_t load_length = sz_min_of_two(length, 64);
+        __mmask64 load_mask = _sz_u64_mask_until(load_length);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, text);
+        lower_nibbles_vec.zmm = _mm512_and_si512(text_vec.zmm, _mm512_set1_epi8(0x0f));
+        bitmask_vec.zmm = _mm512_shuffle_epi8(bitmask_lookup_vec.zmm, lower_nibbles_vec.zmm);
+        //
+        // At this point we can validate the `bitmask_vec` contents like this:
+        //
+        //      for (sz_size_t i = 0; i != load_length; ++i) {
+        //          sz_u8_t input = *(sz_u8_t const *)(text + i);
+        //          sz_u8_t lo_nibble = input & 0x0f;
+        //          sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
+        //          sz_assert(bitmask_vec.u8s[i] == bitmask);
+        //      }
+        //
+        // Shift right every byte by 4 bits.
+        // There is no `_mm512_srli_epi8` intrinsic, so we have to use `_mm512_srli_epi16`
+        // and combine it with a mask to clear the higher bits.
+        higher_nibbles_vec.zmm = _mm512_and_si512(_mm512_srli_epi16(text_vec.zmm, 4), _mm512_set1_epi8(0x0f));
+        bitset_even_vec.zmm = _mm512_shuffle_epi8(filter_even_vec.zmm, higher_nibbles_vec.zmm);
+        bitset_odd_vec.zmm = _mm512_shuffle_epi8(filter_odd_vec.zmm, higher_nibbles_vec.zmm);
+        //
+        // At this point we can validate the `bitset_even_vec` and `bitset_odd_vec` contents like this:
+        //
+        //      for (sz_size_t i = 0; i != load_length; ++i) {
+        //          sz_u8_t input = *(sz_u8_t const *)(text + i);
+        //          sz_u8_t const *bitset_ptr = &filter->_u8s[0];
+        //          sz_u8_t hi_nibble = input >> 4;
+        //          sz_u8_t bitset_even = bitset_ptr[hi_nibble * 2];
+        //          sz_u8_t bitset_odd = bitset_ptr[hi_nibble * 2 + 1];
+        //          sz_assert(bitset_even_vec.u8s[i] == bitset_even);
+        //          sz_assert(bitset_odd_vec.u8s[i] == bitset_odd);
+        //      }
+        //
+        // TODO: Is this a good place for ternary logic?
+        __mmask64 take_first = _mm512_cmplt_epi8_mask(lower_nibbles_vec.zmm, _mm512_set1_epi8(8));
+        bitset_even_vec.zmm = _mm512_mask_blend_epi8(take_first, bitset_odd_vec.zmm, bitset_even_vec.zmm);
+        __mmask64 matches_mask = _mm512_mask_test_epi8_mask(load_mask, bitset_even_vec.zmm, bitmask_vec.zmm);
         if (matches_mask) {
-            int offset = sz_u32_ctz(matches_mask);
+            int offset = sz_u64_ctz(matches_mask);
             return text + offset;
         }
         else { text += load_length, length -= load_length; }
@@ -4599,58 +4773,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
-
-    sz_size_t load_length;
-    __mmask32 load_mask, matches_mask;
-    // To store the set in the register we need just 256 bits, but the `VPERMB` instruction
-    // we are going to invoke is surprisingly cheaper on ZMM registers.
-    sz_u512_vec_t text_vec, filter_vec;
-    filter_vec.ymms[0] = _mm256_loadu_epi64(&filter->_u64s[0]);
-
-    // We are going to view the `filter` at 8-bit word granularity.
-    sz_u512_vec_t filter_slice_offsets_vec;
-    sz_u512_vec_t filter_slice_vec;
-    sz_u512_vec_t offset_within_slice_vec;
-    sz_u512_vec_t mask_in_filter_slice_vec;
-    sz_u512_vec_t matches_vec;
-
-    while (length) {
-        // For every byte:
-        // 1. Find corresponding word in a set.
-        // 2. Produce a bitmask to check against that word.
-        load_length = sz_min_of_two(length, 32);
-        load_mask = _sz_u64_mask_until(load_length);
-        text_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, text + length - load_length);
-
-        // To shift right every byte by 3 bits we can use the GF2 affine transformations.
-        // https://wunkolo.github.io/post/2020/11/gf2p8affineqb-int8-shifting/
-        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 32.
-        filter_slice_offsets_vec.ymms[0] =
-            _mm256_gf2p8affine_epi64_epi8(text_vec.ymms[0], _mm256_set1_epi64x(0x0102040810204080ull << (3 * 8)), 0);
-
-        // After next line, `filter_slice_vec` will contain the right word from the set,
-        // needed to filter the presence of the byte in the set.
-        filter_slice_vec.ymms[0] = _mm256_permutexvar_epi8(filter_slice_offsets_vec.ymms[0], filter_vec.ymms[0]);
-
-        // After next line, all 8-bit offsets in the `filter_slice_offsets_vec` should be under 8.
-        offset_within_slice_vec.ymms[0] = _mm256_and_si256(text_vec.ymms[0], _mm256_set1_epi64x(0x0707070707070707ull));
-
-        // Instead of performing one more Galois Field operation, we can upcast to 16-bit integers,
-        // and perform the fift and intersection there.
-        filter_slice_vec.zmm = _mm512_cvtepi8_epi16(filter_slice_vec.ymms[0]);
-        offset_within_slice_vec.zmm = _mm512_cvtepi8_epi16(offset_within_slice_vec.ymms[0]);
-        mask_in_filter_slice_vec.zmm = _mm512_sllv_epi16(_mm512_set1_epi16(1), offset_within_slice_vec.zmm);
-        matches_vec.zmm = _mm512_and_si512(filter_slice_vec.zmm, mask_in_filter_slice_vec.zmm);
-
-        matches_mask = _mm512_mask_cmpneq_epi16_mask(load_mask, matches_vec.zmm, _mm512_setzero_si512());
-        if (matches_mask) {
-            int offset = sz_u32_clz(matches_mask);
-            return text + length - load_length + 32 - offset - 1;
-        }
-        else { length -= load_length; }
-    }
-
-    return SZ_NULL_CHAR;
+    return sz_rfind_charset_serial(text, length, filter);
 }
 
 /**
@@ -5130,7 +5253,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_ch
 /*
  *  @brief  Pick the right implementation for the string search algorithms.
  */
-#pragma region Compile-Time Dispatching
+#pragma region Compile - Time Dispatching
 
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t ins, sz_size_t length) { return sz_hash_serial(ins, length); }
 SZ_PUBLIC void sz_tolower(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_tolower_serial(ins, length, outs); }
@@ -5254,6 +5377,8 @@ SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t 
 SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_find_charset_avx512(text, length, set);
+#elif SZ_USE_X86_AVX2
+    return sz_find_charset_avx2(text, length, set);
 #elif SZ_USE_ARM_NEON
     return sz_find_charset_neon(text, length, set);
 #else

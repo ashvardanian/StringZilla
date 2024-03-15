@@ -150,3 +150,146 @@ jobs:
   #     - uses: JS-DevTools/npm-publish@v2
   #       with:
   #         token: ${{ secrets.NPM_TOKEN }}
+
+  create_linux_deb_package:
+    name: Create Debian Package for ${{ matrix.arch }}
+    runs-on: ubuntu-22.04
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ["linux/amd64", "linux/arm64"]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+          ref: "main"
+      - run: git submodule update --init --recursive
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Setup Docker
+        uses: docker/setup-buildx-action@v2
+
+      - name: Get Docker daemon IP
+        id: dockerip
+        run: |
+          docker_ip=$(ip addr show docker0 | grep -Po 'inet \K[\d.]+') && \
+          echo "docker_ip=$docker_ip" >> "$GITHUB_OUTPUT"
+
+      - name: Set runner user password
+        id: userpass
+        run: |
+          user_pass="1122"
+          echo "runner:$user_pass" | sudo chpasswd
+          echo "user_pass=$user_pass" >> "$GITHUB_OUTPUT"
+
+      - name: Build library
+        run: |
+          docker buildx create --use
+          docker buildx build \
+          --platform ${{ matrix.arch }} \
+          --build-arg docker_ip=${{ steps.dockerip.outputs.docker_ip }} \
+          --build-arg user_pass=${{ steps.userpass.outputs.user_pass }} \
+          --file .github/workflows/Dockerfile.libs \
+          --tag unum/stringzillite-library:latest \
+          --load .
+      - name: Clear Docker buildx cache
+        run: docker buildx prune --all --force
+
+      - name: Upload archive
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "*.deb"
+          update_latest_release: true
+
+  create_windows_dll_library:
+    name: Create Dll Library for Windows ${{ matrix.arch }}
+    runs-on: windows-2022
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, x86]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+          ref: "main"
+      - run: git submodule update --init --recursive
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v1.13
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "^1.19.0"
+
+      - name: Setup MinGW
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: ${{ matrix.arch }}
+          version: 12.2.0
+
+      - name: Get version
+        id: set_version
+        shell: bash
+        run: |
+          version=$(cat VERSION)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Build library
+        run: |
+          cmake -DCMAKE_BUILD_TYPE=Release -B ./build_release
+          cmake --build ./build_release --config Release
+          tar -cvf stringzillite_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar .\build_release\libstringzillite.dll .\include\stringzilla\stringzilla.h
+
+      - name: Upload archive
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "stringzillite_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar"
+          update_latest_release: true
+
+  create_macos_library:
+    name: Create Library for MacOS ${{ matrix.arch }}
+    runs-on: macos-12
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+          ref: "main"
+      - run: git submodule update --init --recursive
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version: "^1.21.0"
+
+      - name: Get version
+        id: version
+        run: |
+          version=$(cat VERSION)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Build library
+        run: |
+          cmake -DCMAKE_BUILD_TYPE=Release -B ./build_release
+          cmake --build ./build_release --config Release        
+          zip -r stringzillite_macOS_${{ matrix.arch }}_${{ steps.version.outputs.version }}.zip build_release/libstringzillite.dylib include/stringzilla/stringzilla.h
+
+      - name: Upload archive
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "*.zip"
+          update_latest_release: true

@@ -3060,7 +3060,9 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         char const *avx512bw = (caps & sz_cap_x86_avx512bw_k) ? "avx512bw," : "";
         char const *avx512vbmi = (caps & sz_cap_x86_avx512vbmi_k) ? "avx512vbmi," : "";
         char const *gfni = (caps & sz_cap_x86_gfni_k) ? "gfni," : "";
-        sprintf(caps_str, "%s%s%s%s%s%s%s%s%s", serial, neon, sve, avx2, avx512f, avx512vl, avx512bw, avx512vbmi, gfni);
+        char const *avx512vbmi2 = (caps & sz_cap_x86_avx512vbmi2_k) ? "avx512vbmi2," : "";
+        sprintf(caps_str, "%s%s%s%s%s%s%s%s%s%s", serial, neon, sve, avx2, avx512f, avx512vl, avx512bw, avx512vbmi,
+                avx512vbmi2, gfni);
         PyModule_AddStringConstant(m, "__capabilities__", caps_str);
     }
 

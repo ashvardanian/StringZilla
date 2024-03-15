@@ -22,6 +22,12 @@ message(STATUS "C++ Compiler Version: ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER}")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  message(STATUS "Pointer size: 64-bit")
+else()
+  message(STATUS "Pointer size: 32-bit")
+endif()
+
 # Set a default build type to "Release" if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
@@ -273,4 +279,12 @@ if(${STRINGZILLA_BUILD_SHARED})
     SOVERSION 1
     POSITION_INDEPENDENT_CODE ON
     PUBLIC_HEADER include/stringzilla/stringzilla.h)
+
+  # Avoid built-ins on MSVC and other compilers, as that will cause compileration errors
+  target_compile_options(stringzillite PRIVATE
+    "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin>"
+    "$<$<CXX_COMPILER_ID:MSVC>:/Oi->")
+  target_compile_options(stringzilla_shared PRIVATE
+    "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin>"
+    "$<$<CXX_COMPILER_ID:MSVC>:/Oi->")
 endif()

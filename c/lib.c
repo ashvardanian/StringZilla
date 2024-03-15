@@ -9,6 +9,13 @@
 #include <windows.h> // `DllMain`
 #endif
 
+// When enabled, this library will override the symbols usually provided by the C standard library.
+// It's handy if you want to use the `LD_PRELOAD` trick for non-intrusive profiling and replacing
+// the C standard library implementation without recompiling.
+#if !defined(SZ_OVERRIDE_LIBC)
+#define SZ_OVERRIDE_LIBC SZ_AVOID_LIBC
+#endif
+
 // Overwrite `SZ_DYNAMIC_DISPATCH` before including StringZilla.
 #ifdef SZ_DYNAMIC_DISPATCH
 #undef SZ_DYNAMIC_DISPATCH
@@ -70,17 +77,19 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
     // Check for GFNI (Function ID 1, ECX register)
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L171C30-L171C40
     unsigned supports_avx512vbmi = (info1.named.ecx & 0x00000002) != 0;
+    unsigned supports_avx512vbmi2 = (info1.named.ecx & 0x00000040) != 0;
     // Check for GFNI (Function ID 1, ECX register)
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L177C30-L177C40
     unsigned supports_gfni = (info1.named.ecx & 0x00000100) != 0;
 
-    return (sz_capability_t)(                             //
-        (sz_cap_x86_avx2_k * supports_avx2) |             //
-        (sz_cap_x86_avx512f_k * supports_avx512f) |       //
-        (sz_cap_x86_avx512vl_k * supports_avx512vl) |     //
-        (sz_cap_x86_avx512bw_k * supports_avx512bw) |     //
-        (sz_cap_x86_avx512vbmi_k * supports_avx512vbmi) | //
-        (sz_cap_x86_gfni_k * (supports_gfni)) |           //
+    return (sz_capability_t)(                               //
+        (sz_cap_x86_avx2_k * supports_avx2) |               //
+        (sz_cap_x86_avx512f_k * supports_avx512f) |         //
+        (sz_cap_x86_avx512vl_k * supports_avx512vl) |       //
+        (sz_cap_x86_avx512bw_k * supports_avx512bw) |       //
+        (sz_cap_x86_avx512vbmi_k * supports_avx512vbmi) |   //
+        (sz_cap_x86_avx512vbmi2_k * supports_avx512vbmi2) | //
+        (sz_cap_x86_gfni_k * (supports_gfni)) |             //
         (sz_cap_serial_k));
 
 #endif // SIMSIMD_TARGET_X86
@@ -160,6 +169,8 @@ static void sz_dispatch_table_init(void) {
         impl->rfind_byte = sz_rfind_byte_avx2;
         impl->find = sz_find_avx2;
         impl->rfind = sz_rfind_avx2;
+        impl->find_from_set = sz_find_charset_avx2;
+        impl->rfind_from_set = sz_rfind_charset_avx2;
     }
 #endif
 
@@ -179,7 +190,7 @@ static void sz_dispatch_table_init(void) {
         impl->edit_distance = sz_edit_distance_avx512;
     }
 
-    if ((caps & sz_cap_x86_avx512f_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_gfni_k) &&
+    if ((caps & sz_cap_x86_avx512f_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_avx512vbmi2_k) &&
         (caps & sz_cap_x86_avx512bw_k) && (caps & sz_cap_x86_avx512vbmi_k)) {
         impl->find_from_set = sz_find_charset_avx512;
         impl->rfind_from_set = sz_rfind_charset_avx512;
@@ -335,3 +346,43 @@ SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_
     if (!generator) generator = _sz_random_generator;
     sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }
+
+// It's much harder to override the C standard library on Windows and MSVC,
+// so we'll just provide the symbols for other Operating Systems.
+#if SZ_OVERRIDE_LIBC && !(defined(_WIN32) || defined(__CYGWIN__))
+
+SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
+    sz_u8_t c = (sz_u8_t)c_wide;
+    return (void *)sz_find_byte(s, n, (sz_cptr_t)&c);
+}
+
+SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
+    sz_copy(dest, src, n);
+    return (void *)dest;
+}
+
+SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
+    sz_move(dest, src, n);
+    return (void *)dest;
+}
+
+SZ_DYNAMIC void *memset(void *s, int c, size_t n) {
+    sz_fill(s, n, c);
+    return (void *)s;
+}
+
+SZ_DYNAMIC void *memmem(void const *h, size_t h_len, void const *n, size_t n_len) {
+    return (void *)sz_find(h, h_len, n, n_len);
+}
+
+SZ_DYNAMIC void *memrchr(void const *s, int c_wide, size_t n) {
+    sz_u8_t c = (sz_u8_t)c_wide;
+    return (void *)sz_rfind_byte(s, n, (sz_cptr_t)&c);
+}
+
+SZ_DYNAMIC void memfrob(void *s, size_t n) {
+    char const *base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    sz_generate(base64, 64, s, n, SZ_NULL, SZ_NULL);
+}
+
+#endif // SZ_OVERRIDE_LIBC
