@@ -4114,7 +4114,7 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
         b_vec.zmm = _mm512_loadu_epi8(b);
         mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
         if (mask_not_equal != 0) {
-            unsigned __int64 first_diff = _tzcnt_u64(mask_not_equal);
+            sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
             char a_char = a[first_diff];
             char b_char = b[first_diff];
             return _sz_order_scalars(a_char, b_char);
@@ -4133,7 +4133,7 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
         // been cheaper, if we didn't have to apply `_mm256_movemask_epi8` afterwards.
         mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
         if (mask_not_equal != 0) {
-            unsigned __int64 first_diff = _tzcnt_u64(mask_not_equal);
+            sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
             char a_char = a[first_diff];
             char b_char = b[first_diff];
             return _sz_order_scalars(a_char, b_char);
