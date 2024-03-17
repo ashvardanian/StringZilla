@@ -155,47 +155,75 @@ jobs:
     name: Create Debian Package for ${{ matrix.arch }}
     runs-on: ubuntu-22.04
     needs: versioning
+    env:
+      CC: clang
+      CXX: clang++
+      AR: llvm-ar
+      NM: llvm-nm
+      RANLIB: llvm-ranlib
+
     strategy:
       fail-fast: false
       matrix:
-        arch: ["linux/amd64", "linux/arm64"]
+        include:
+          - arch: amd64
+            target: x86_64-linux-gnu
+          - arch: arm64
+            target: aarch64-linux-gnu
+
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           ref: "main"
-      - run: git submodule update --init --recursive
 
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Setup Docker
-        uses: docker/setup-buildx-action@v3
-      - name: Get Docker daemon IP
-        id: dockerip
+      - name: Get version
+        id: version
         run: |
-          docker_ip=$(ip addr show docker0 | grep -Po 'inet \K[\d.]+') && \
-          echo "docker_ip=$docker_ip" >> "$GITHUB_OUTPUT"
+          version=$(cat VERSION)
+          echo "version=$version" >> $GITHUB_OUTPUT
 
-      - name: Set runner user password
-        id: userpass
+      - name: Install dependencies
         run: |
-          user_pass="1122"
-          echo "runner:$user_pass" | sudo chpasswd
-          echo "user_pass=$user_pass" >> "$GITHUB_OUTPUT"
+          sudo apt-get update
+          sudo apt-get install -y clang lld make crossbuild-essential-arm64 crossbuild-essential-armhf
 
-      - name: Build library
+      - name: Build C/C++
         run: |
-          docker buildx create --use
-          docker buildx build \
-          --platform ${{ matrix.arch }} \
-          --build-arg docker_ip=${{ steps.dockerip.outputs.docker_ip }} \
-          --build-arg user_pass=${{ steps.userpass.outputs.user_pass }} \
-          --file .github/workflows/Dockerfile.libs \
-          --tag ashvardanian/stringzillite-library:latest \
-          --load .
-      - name: Clear Docker buildx cache
-        run: docker buildx prune --all --force
+          # Configure and build the project
+          cmake -B build_release \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+            -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
+            -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
+            -DSTRINGZILLA_BUILD_SHARED=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+            -DSTRINGZILLA_BUILD_TEST=1
+
+          cmake --build build_release --config Release
+
+          # Copy and package the library
+          echo "ARTIFACT_NAME=stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}" >> $GITHUB_ENV
+          cp build_release/libstringzillite.so "$ARTIFACT_NAME.so"
+
+          mkdir -p "$ARTIFACT_NAME/DEBIAN"
+          touch "$ARTIFACT_NAME/DEBIAN/control"
+          mkdir -p "$ARTIFACT_NAME/usr/local/lib"
+          mkdir "$ARTIFACT_NAME/usr/local/include"
+          cp include/stringzilla/stringzilla.h "$ARTIFACT_NAME/usr/local/include/"
+          cp build_release/libstringzillite.so "$ARTIFACT_NAME/usr/local/lib/"
+          echo "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > "$ARTIFACT_NAME/DEBIAN/control"
+          dpkg-deb --build "$ARTIFACT_NAME"
+
+      - name: Upload library
+        uses: xresloader/upload-to-github-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          file: "*.so"
+          update_latest_release: true
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
@@ -238,9 +266,9 @@ jobs:
 
       - name: Build library
         run: |
-          cmake -DCMAKE_BUILD_TYPE=Release -B ./build_release
-          cmake --build ./build_release --config Release
-          tar -cvf "stringzillite_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "./build_release/stringzillite.dll" "./include/stringzilla/stringzilla.h"
+          cmake -DCMAKE_BUILD_TYPE=Release -B build_release
+          cmake --build build_release --config Release
+          tar -cvf "stringzillite_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "build_release/stringzillite.dll" "./include/stringzilla/stringzilla.h"
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
@@ -273,8 +301,8 @@ jobs:
 
       - name: Build library
         run: |
-          cmake -DCMAKE_BUILD_TYPE=Release -B ./build_release
-          cmake --build ./build_release --config Release        
+          cmake -DCMAKE_BUILD_TYPE=Release -B build_release
+          cmake --build build_release --config Release        
           zip -r stringzillite_macos_${{ matrix.arch }}_${{ steps.version.outputs.version }}.zip build_release/libstringzillite.dylib include/stringzilla/stringzilla.h
 
       - name: Upload archive

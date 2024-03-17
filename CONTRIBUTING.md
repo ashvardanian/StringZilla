@@ -113,10 +113,10 @@ Using modern syntax, this is how you build and run the test suite:
 
 ```bash
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build ./build_debug --config Debug          # Which will produce the following targets:
-./build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
-./build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
-./build_debug/stringzilla_test_cpp20_arm_serial     # Arm variant compiled without Neon
+cmake --build build_debug --config Debug          # Which will produce the following targets:
+build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
+build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
+build_debug/stringzilla_test_cpp20_arm_serial     # Arm variant compiled without Neon
 ```
 
 To use CppCheck for static analysis make sure to export the compilation commands.
@@ -148,12 +148,12 @@ For benchmarks, you can use the following commands:
 
 ```bash
 cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build ./build_release --config Release      # Which will produce the following targets:
-./build_release/stringzilla_bench_search <path>     # for substring search
-./build_release/stringzilla_bench_token <path>      # for hashing, equality comparisons, etc.
-./build_release/stringzilla_bench_similarity <path> # for edit distances and alignment scores
-./build_release/stringzilla_bench_sort <path>       # for sorting arrays of strings
-./build_release/stringzilla_bench_container <path>  # for STL containers with string keys
+cmake --build build_release --config Release      # Which will produce the following targets:
+build_release/stringzilla_bench_search <path>     # for substring search
+build_release/stringzilla_bench_token <path>      # for hashing, equality comparisons, etc.
+build_release/stringzilla_bench_similarity <path> # for edit distances and alignment scores
+build_release/stringzilla_bench_sort <path>       # for sorting arrays of strings
+build_release/stringzilla_bench_container <path>  # for STL containers with string keys
 ```
 
 ### Benchmarking Hardware-Specific Optimizations
@@ -199,14 +199,14 @@ cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     -DSTRINGZILLA_BUILD_SHARED=1 \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -B build_profile
-cmake --build ./build_profile --config Release --target stringzilla_bench_token
+cmake --build build_profile --config Release --target stringzilla_bench_token
 
 # Check that the debugging symbols are there with your favorite tool
-readelf --sections ./build_profile/stringzilla_bench_token | grep debug
-objdump -h ./build_profile/stringzilla_bench_token | grep debug
+readelf --sections build_profile/stringzilla_bench_token | grep debug
+objdump -h build_profile/stringzilla_bench_token | grep debug
 
 # Profile
-sudo perf record -g ./build_profile/stringzilla_bench_token ./leipzig1M.txt
+sudo perf record -g build_profile/stringzilla_bench_token ./leipzig1M.txt
 sudo perf report
 ```
 
@@ -225,8 +225,8 @@ sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla alpine:latest /bin/a
 cd /workspace/StringZilla
 apk add --update make cmake g++ gcc
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build ./build_debug --config Debug
-./build_debug/stringzilla_test_cpp20
+cmake --build build_debug --config Debug
+build_debug/stringzilla_test_cpp20
 ```
 
 #### Intel Clear Linux
@@ -241,15 +241,15 @@ cd /workspace/StringZilla
 swupd update
 swupd bundle-add c-basic dev-utils
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build ./build_debug --config Debug
-./build_debug/stringzilla_test_cpp20
+cmake --build build_debug --config Debug
+build_debug/stringzilla_test_cpp20
 ```
 
 For benchmarks:
 
 ```bash
 cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build ./build_release --config Release
+cmake --build build_release --config Release
 ```
 
 #### Amazon Linux
@@ -261,7 +261,7 @@ sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2023 bas
 cd /workspace/StringZilla
 yum install -y make cmake3 gcc g++
 cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_debug
-cmake3 --build ./build_debug --config Debug --target stringzilla_test_cpp11
+cmake3 --build build_debug --config Debug --target stringzilla_test_cpp11
 build_debug/stringzilla_test_cpp11
 ```
 
@@ -273,7 +273,7 @@ sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2 bash
 cd /workspace/StringZilla
 yum install -y make cmake3 gcc10 gcc10-c++
 cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_debug
-cmake3 --build ./build_debug --config Debug --target stringzilla_test_cpp11
+cmake3 --build build_debug --config Debug --target stringzilla_test_cpp11
 build_debug/stringzilla_test_cpp11
 ```
 
@@ -288,6 +288,44 @@ Don't forget to clean up Docker afterwards.
 
 ```bash
 docker system prune -a --volumes
+```
+
+### Cross Compilation
+
+Unlike GCC, LLVM handles cross compilation very easily.
+You just need to pass the right `TARGET_ARCH` and `BUILD_ARCH` to CMake.
+The [list includes](https://packages.ubuntu.com/search?keywords=crossbuild-essential&searchon=names):
+
+- `crossbuild-essential-amd64` for 64-bit x86
+- `crossbuild-essential-arm64` for 64-bit Arm
+- `crossbuild-essential-armhf` for 32-bit ARM hard-float
+- `crossbuild-essential-armel` for 32-bit ARM soft-float (emulates `float`)
+- `crossbuild-essential-riscv64` for RISC-V
+- `crossbuild-essential-powerpc` for PowerPC
+- `crossbuild-essential-s390x` for IBM Z
+- `crossbuild-essential-mips` for MIPS
+- `crossbuild-essential-ppc64el` for PowerPC 64-bit little-endian
+
+Here is an example for cross-compiling for Arm64 on an x86_64 machine:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y clang lld make crossbuild-essential-arm64 crossbuild-essential-armhf
+export CC="clang"
+export CXX="clang++"
+export AR="llvm-ar"
+export NM="llvm-nm"
+export RANLIB="llvm-ranlib"
+export TARGET_ARCH="aarch64-linux-gnu" # Or "x86_64-linux-gnu"
+export BUILD_ARCH="arm64" # Or "amd64"
+
+cmake -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER_TARGET=${TARGET_ARCH} \
+    -DCMAKE_CXX_COMPILER_TARGET=${TARGET_ARCH} \
+    -DCMAKE_SYSTEM_NAME=Linux \
+    -DCMAKE_SYSTEM_PROCESSOR=${BUILD_ARCH} \
+    -B build_artifacts
+cmake --build build_artifacts --config Release
 ```
 
 ## Contributing in Python
