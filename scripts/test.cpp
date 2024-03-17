@@ -111,7 +111,8 @@ static void test_arithmetical_utilities() {
 
     for (sz_u16_t number = 0; number != 256; ++number)
         for (sz_u16_t divisor = 2; divisor != 256; ++divisor)
-            assert(sz_u8_divide(number, divisor) == (number / divisor));
+            assert(sz_u8_divide(static_cast<sz_u8_t>(number), static_cast<sz_u8_t>(divisor)) ==
+                   (static_cast<sz_u8_t>(number) / static_cast<sz_u8_t>(divisor)));
 }
 
 /**

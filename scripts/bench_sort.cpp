@@ -135,7 +135,7 @@ void bench_permute(char const *name, strings_t &strings, permute_t &permute, alg
 
     // Measure elapsed time
     stdcc::time_point t2 = stdcc::now();
-    double dif = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count();
+    double dif = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count() * 1.0;
     double milisecs = dif / (iterations * 1e6);
     std::printf("Elapsed time is %.2lf miliseconds/iteration for %s.\n", milisecs, name);
 }
