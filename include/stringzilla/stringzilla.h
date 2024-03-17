@@ -4423,7 +4423,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
     for (; next_skew_diagonal_index != n; ++next_skew_diagonal_index) {
         sz_size_t const next_skew_diagonal_length = next_skew_diagonal_index + 1;
         for (sz_size_t i = 0; i + 2 < next_skew_diagonal_length;) {
-            sz_u32_t remaining_length = (sz_u32_t)next_skew_diagonal_length - i - 2;
+            sz_u32_t remaining_length = (sz_u32_t)(next_skew_diagonal_length - i - 2);
             sz_u32_t register_length = remaining_length < 32 ? remaining_length : 32;
             sz_u32_t remaining_length_mask = _bzhi_u32(0xFFFFFFFFu, register_length);
             longer_vec.ymms[0] = _mm256_maskz_loadu_epi8(remaining_length_mask, longer + i);
@@ -4466,7 +4466,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
     for (; next_skew_diagonal_index != total_diagonals; ++next_skew_diagonal_index) {
         sz_size_t const next_skew_diagonal_length = total_diagonals - next_skew_diagonal_index;
         for (sz_size_t i = 0; i != next_skew_diagonal_length;) {
-            sz_u32_t remaining_length = (sz_u32_t)next_skew_diagonal_length - i;
+            sz_u32_t remaining_length = (sz_u32_t)(next_skew_diagonal_length - i);
             sz_u32_t register_length = remaining_length < 32 ? remaining_length : 32;
             sz_u32_t remaining_length_mask = _bzhi_u32(0xFFFFFFFFu, register_length);
             longer_vec.ymms[0] =
@@ -4939,7 +4939,8 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
             // Export the values from 16 to 31.
             if (register_length > 16) {
                 mask = _kshiftri_mask64(mask, 16);
-                cost_substitution_vec.zmm = _mm512_maskz_loadu_epi32((__mmask16)mask, previous_distances + idx_longer + 16);
+                cost_substitution_vec.zmm =
+                    _mm512_maskz_loadu_epi32((__mmask16)mask, previous_distances + idx_longer + 16);
                 cost_substitution_vec.zmm = _mm512_add_epi32(
                     cost_substitution_vec.zmm, _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64(current_0_31_vec, 1)));
                 cost_deletion_vec.zmm =
