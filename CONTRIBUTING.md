@@ -113,10 +113,10 @@ Using modern syntax, this is how you build and run the test suite:
 
 ```bash
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build ./build_debug --config Debug          # Which will produce the following targets:
-./build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
-./build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
-./build_debug/stringzilla_test_cpp20_arm_serial     # Arm variant compiled without Neon
+cmake --build build_debug --config Debug          # Which will produce the following targets:
+build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
+build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
+build_debug/stringzilla_test_cpp20_arm_serial     # Arm variant compiled without Neon
 ```
 
 To use CppCheck for static analysis make sure to export the compilation commands.
@@ -148,12 +148,12 @@ For benchmarks, you can use the following commands:
 
 ```bash
 cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build ./build_release --config Release      # Which will produce the following targets:
-./build_release/stringzilla_bench_search <path>     # for substring search
-./build_release/stringzilla_bench_token <path>      # for hashing, equality comparisons, etc.
-./build_release/stringzilla_bench_similarity <path> # for edit distances and alignment scores
-./build_release/stringzilla_bench_sort <path>       # for sorting arrays of strings
-./build_release/stringzilla_bench_container <path>  # for STL containers with string keys
+cmake --build build_release --config Release      # Which will produce the following targets:
+build_release/stringzilla_bench_search <path>     # for substring search
+build_release/stringzilla_bench_token <path>      # for hashing, equality comparisons, etc.
+build_release/stringzilla_bench_similarity <path> # for edit distances and alignment scores
+build_release/stringzilla_bench_sort <path>       # for sorting arrays of strings
+build_release/stringzilla_bench_container <path>  # for STL containers with string keys
 ```
 
 ### Benchmarking Hardware-Specific Optimizations
@@ -199,14 +199,14 @@ cmake -DSTRINGZILLA_BUILD_BENCHMARK=1 \
     -DSTRINGZILLA_BUILD_SHARED=1 \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -B build_profile
-cmake --build ./build_profile --config Release --target stringzilla_bench_token
+cmake --build build_profile --config Release --target stringzilla_bench_token
 
 # Check that the debugging symbols are there with your favorite tool
-readelf --sections ./build_profile/stringzilla_bench_token | grep debug
-objdump -h ./build_profile/stringzilla_bench_token | grep debug
+readelf --sections build_profile/stringzilla_bench_token | grep debug
+objdump -h build_profile/stringzilla_bench_token | grep debug
 
 # Profile
-sudo perf record -g ./build_profile/stringzilla_bench_token ./leipzig1M.txt
+sudo perf record -g build_profile/stringzilla_bench_token ./leipzig1M.txt
 sudo perf report
 ```
 
@@ -225,8 +225,8 @@ sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla alpine:latest /bin/a
 cd /workspace/StringZilla
 apk add --update make cmake g++ gcc
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build ./build_debug --config Debug
-./build_debug/stringzilla_test_cpp20
+cmake --build build_debug --config Debug
+build_debug/stringzilla_test_cpp20
 ```
 
 #### Intel Clear Linux
@@ -241,15 +241,15 @@ cd /workspace/StringZilla
 swupd update
 swupd bundle-add c-basic dev-utils
 cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build ./build_debug --config Debug
-./build_debug/stringzilla_test_cpp20
+cmake --build build_debug --config Debug
+build_debug/stringzilla_test_cpp20
 ```
 
 For benchmarks:
 
 ```bash
 cmake -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build ./build_release --config Release
+cmake --build build_release --config Release
 ```
 
 #### Amazon Linux
@@ -261,7 +261,7 @@ sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2023 bas
 cd /workspace/StringZilla
 yum install -y make cmake3 gcc g++
 cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_debug
-cmake3 --build ./build_debug --config Debug --target stringzilla_test_cpp11
+cmake3 --build build_debug --config Debug --target stringzilla_test_cpp11
 build_debug/stringzilla_test_cpp11
 ```
 
@@ -273,7 +273,7 @@ sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2 bash
 cd /workspace/StringZilla
 yum install -y make cmake3 gcc10 gcc10-c++
 cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_debug
-cmake3 --build ./build_debug --config Debug --target stringzilla_test_cpp11
+cmake3 --build build_debug --config Debug --target stringzilla_test_cpp11
 build_debug/stringzilla_test_cpp11
 ```
 

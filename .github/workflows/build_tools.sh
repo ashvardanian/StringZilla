@@ -27,11 +27,11 @@ esac
 # Set build type
 case "$BUILD_TYPE" in
     "Debug")
-        BUILD_DIR="./build_debug"
+        BUILD_DIR="build_debug"
         BUILD_FLAGS="-DCMAKE_BUILD_TYPE=Debug"
         ;;
     "Release")
-        BUILD_DIR="./build_release"
+        BUILD_DIR="build_release"
         BUILD_FLAGS="-DCMAKE_BUILD_TYPE=RelWithDebInfo"
         ;;
     *)

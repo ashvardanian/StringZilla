@@ -31,7 +31,7 @@ jobs:
         # C/C++
         # If the compilation fails, we want to log the compilation commands in addition to
         # the standard output.
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y cmake build-essential libjemalloc-dev libomp-dev gcc-12 g++-12
@@ -58,14 +58,14 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: ./build_artifacts/stringzilla_test_cpp20
+        run: build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data
         run: |
-          ./build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
-          ./build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          ./build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
-          ./build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
-          ./build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+          build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
+          build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+          build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
+          build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
+          build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -120,7 +120,7 @@ jobs:
 
         # C/C++
         # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y cmake build-essential libjemalloc-dev
@@ -150,14 +150,14 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: ./build_artifacts/stringzilla_test_cpp20
+        run: build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data
         run: |
-          ./build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
-          ./build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          ./build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
-          ./build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
-          ./build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+          build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
+          build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+          build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
+          build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
+          build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -230,7 +230,7 @@ jobs:
 
         # C/C++
         # We need to install the cross-compilation toolchain for ARM64 and ARMHF
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y clang lld make crossbuild-essential-arm64 crossbuild-essential-armhf
@@ -249,8 +249,13 @@ jobs:
             -DSTRINGZILLA_BUILD_TEST=1
 
           cmake --build build_artifacts --config RelWithDebInfo
-      - name: Test C++
-        run: ./build_artifacts/stringzilla_test_cpp20
+
+        # We can't run the produced builds, but we can make sure they exist
+      - name: Test artifacts presense
+        run: |
+          test -f build_artifacts/stringzilla_test_cpp20
+          test -f build_artifacts/libstringzilla.so
+          test -f build_artifacts/libstringzillite.so
 
   test_macos:
     name: MacOS
@@ -260,7 +265,7 @@ jobs:
       - uses: actions/checkout@v4
 
         # C/C++
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           brew update
           brew install cmake
@@ -273,14 +278,14 @@ jobs:
             -DSTRINGZILLA_BUILD_TEST=1
           cmake --build build_artifacts --config RelWithDebInfo
       - name: Test C++
-        run: ./build_artifacts/stringzilla_test_cpp17
+        run: build_artifacts/stringzilla_test_cpp17
       - name: Test on Real World Data
         run: |
-          ./build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
-          ./build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          ./build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
-          ./build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
-          ./build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+          build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
+          build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+          build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
+          build_artifacts/stringzilla_bench_sort ${DATASET_PATH}       # for sorting arrays of strings
+          build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -391,7 +396,7 @@ jobs:
             -DSTRINGZILLA_BUILD_TEST=1
           cmake --build build_artifacts --config RelWithDebInfo
       - name: Test C++
-        run: ./build_artifacts/stringzilla_test_cpp20
+        run: build_artifacts/stringzilla_test_cpp20
 
         # Python
       - name: Build Python
