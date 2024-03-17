@@ -43,4 +43,4 @@ RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
     cp ./build_release/libstringzillite.so stringzillite_linux_"$arch"_"$version"/usr/local/lib/ && \
     echo "Package: stringzilla\nVersion: $version\nMaintainer: Ash Vardanian\nArchitecture: "$arch"\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > stringzillite_linux_"$arch"_"$version"/DEBIAN/control && \
     dpkg-deb --build stringzillite_linux_"$arch"_"$version" && \
-    sshpass -p "$user_pass" scp -o StrictHostKeyChecking=no stringzillite_linux_"$arch"_"$version".deb "$user_name"@"$docker_ip":/home/$user_name/work/stringzilla/
+    sshpass -p "$user_pass" scp -o StrictHostKeyChecking=no stringzillite_linux_"$arch"_"$version".deb "$user_name"@"$docker_ip":/home/$user_name/work/stringzilla/stringzillite_linux_"$arch"_"$version".deb
