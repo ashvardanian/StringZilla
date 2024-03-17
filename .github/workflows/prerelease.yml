@@ -31,11 +31,13 @@ jobs:
         # C/C++
         # If the compilation fails, we want to log the compilation commands in addition to
         # the standard output.
-      - name: Build C/C++
+      - name: Install Dependencies
         run: |
           sudo apt update
           sudo apt install -y cmake build-essential libjemalloc-dev libomp-dev gcc-12 g++-12
 
+      - name: Build C/C++
+        run: |
           cmake -B build_artifacts \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
@@ -104,13 +106,21 @@ jobs:
     env:
       CC: clang-16
       CXX: clang++-16
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-linux-gnu
+          - arch: arm64
+            target: aarch64-linux-gnu
 
     steps:
       - uses: actions/checkout@v4
 
         # C/C++
         # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
-      - name: Build C/C++
+      - name: Install Dependencies
         run: |
           sudo apt update
           sudo apt install -y cmake build-essential libjemalloc-dev
@@ -118,6 +128,8 @@ jobs:
           chmod +x llvm.sh
           sudo ./llvm.sh 16
 
+      - name: Build C/C++
+        run: |
           cmake -B build_artifacts \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
@@ -186,13 +198,59 @@ jobs:
   # Temporary workaround to run Swift tests on Linux
   # Based on: https://github.com/swift-actions/setup-swift/issues/591#issuecomment-1685710678
   test_ubuntu_swift:
-    name: Ubuntu (Swift)
+    name: Swift on Linux
     runs-on: ubuntu-22.04
     container: swift:5.9
     steps:
       - uses: actions/checkout@v4
       - name: Test Swift
         run: swift test
+
+  test_ubuntu_cross_compilation:
+    name: Cross Compilation
+    runs-on: ubuntu-22.04
+    env:
+      CC: clang
+      CXX: clang++
+      AR: llvm-ar
+      NM: llvm-nm
+      RANLIB: llvm-ranlib
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-linux-gnu
+          - arch: arm64
+            target: aarch64-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+
+        # C/C++
+        # We need to install the cross-compilation toolchain for ARM64 and ARMHF
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld make crossbuild-essential-arm64 crossbuild-essential-armhf
+
+      - name: Build C/C++
+        run: |
+          cmake -B build_artifacts \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+            -DCMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
+            -DCMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }} \
+            -DSTRINGZILLA_BUILD_SHARED=1 \
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 \
+            -DSTRINGZILLA_BUILD_TEST=1
+
+          cmake --build build_artifacts --config RelWithDebInfo
+      - name: Test C++
+        run: ./build_artifacts/stringzilla_test_cpp20
 
   test_macos:
     name: MacOS
@@ -202,10 +260,12 @@ jobs:
       - uses: actions/checkout@v4
 
         # C/C++
-      - name: Build C/C++
+      - name: Install Dependencies
         run: |
           brew update
           brew install cmake
+      - name: Build C/C++
+        run: |
           cmake -B build_artifacts \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
@@ -272,7 +332,7 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
             -DSTRINGZILLA_BUILD_BENCHMARK=1 ^
             -DSTRINGZILLA_BUILD_TEST=1
-          
+
           cmake --build build_artifacts --config RelWithDebInfo > build_artifacts/logs.txt 2>&1 || (
             echo "Compilation failed. Here are the logs:"
             type build_artifacts\logs.txt
@@ -297,7 +357,7 @@ jobs:
         # Don't overload GitHub with our benchmarks.
         # The results in such an unstable environment will be meaningless anyway.
         if: 0
-        
+
         # Python
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
