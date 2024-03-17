@@ -348,7 +348,7 @@ x: Strs = text.splitlines(keeplinebreaks=False, maxsplit=sys.maxsize)
 
 It's important to note, that the last function behavior is slightly different from Python's `str.splitlines`.
 The [native version][faq-splitlines] matches `\n`, `\r`, `\v` or `\x0b`, `\f` or `\x0c`, `\x1c`, `\x1d`, `\x1e`, `\x85`, `\r\n`, `\u2028`, `\u2029`, including 3x two-bytes-long runes.
-The StringZilla version matches only `\n` and is practically a shortcut for `text.split('\n')`.
+The StringZilla version matches only `\n`, `\v`, `\f`, `\r`, `\x1c`, `\x1d`, `\x1e`, `\x85`, avoiding two-byte-long runes.
 
 [faq-splitlines]: https://docs.python.org/3/library/stdtypes.html#str.splitlines
 

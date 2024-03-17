@@ -297,9 +297,9 @@ int main(int argc, char const **argv) {
     bench_finds(dataset.text, {"\n"}, find_functions());
     bench_rfinds(dataset.text, {"\n"}, rfind_functions());
 
-    std::printf("Benchmarking for an [\\n\\r] RegEx:\n");
-    bench_finds(dataset.text, {{sz::newlines(), sizeof(sz::newlines())}}, find_charset_functions());
-    bench_rfinds(dataset.text, {{sz::newlines(), sizeof(sz::newlines())}}, rfind_charset_functions());
+    std::printf("Benchmarking for an [\\n\\r\\v\\f] RegEx:\n");
+    bench_finds(dataset.text, {"\n\r\v\f"}, find_charset_functions());
+    bench_rfinds(dataset.text, {"\n\r\v\f"}, rfind_charset_functions());
 
     // Typical ASCII tokenization and validation benchmarks
     std::printf("Benchmarking for whitespaces:\n");

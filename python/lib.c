@@ -2323,14 +2323,30 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
         }
     }
 
-    // TODO: Support arbitrary newline characters:
-    // https://docs.python.org/3/library/stdtypes.html#str.splitlines
-    // \n, \r, \r\n, \v or \x0b, \f or \x0c, \x1c, \x1d, \x1e, \x85, \u2028, \u2029
-    // https://github.com/ashvardanian/StringZilla/issues/29
+    // The Unicode standard defines a number of characters that conforming applications
+    // should recognize as line terminators:
+    //
+    //      LF:    Line Feed, U+000A                            - 1 byte (\n)
+    //      VT:    Vertical Tab, U+000B                         - 1 byte (\v)
+    //      FF:    Form Feed, U+000C                            - 1 byte (\f)
+    //      CR:    Carriage Return, U+000D                      - 1 byte (\r)
+    //      NEL:   Next Line, U+0085                            - 1 byte (\x85)
+    //      LS:    Line Separator, U+2028                       - 2 bytes
+    //      PS:    Paragraph Separator, U+2029                  - 2 bytes
+    //      CR+LF: CR (U+000D) followed by LF (U+000A)          - 2 bytes
+    //
+    // The Python standard is different, it also includes:
+    //
+    //     FS:    File Separator, U+001C                       - 1 byte (\x1C)
+    //     GS:    Group Separator, U+001D                      - 1 byte (\x1D)
+    //     RS:    Record Separator, U+001E                     - 1 byte (\x1E)
+    //
+    // We avoid all 2-byte sequences and only consider 1-byte delimiters.
+    // CPython docs: https://docs.python.org/3/library/stdtypes.html#str.splitlines
     sz_string_view_t separator;
-    separator.start = "\n";
-    separator.length = 1;
-    return Str_split_(text_object, text, separator, keeplinebreaks, maxsplit, &sz_find, 1);
+    separator.start = "\x0A\x0B\x0C\x0D\x85\x1C\x1D\x1E";
+    separator.length = 8;
+    return Str_split_(text_object, text, separator, keeplinebreaks, maxsplit, &sz_find_char_from, 1);
 }
 
 static PyObject *Str_concat(PyObject *self, PyObject *other) {
