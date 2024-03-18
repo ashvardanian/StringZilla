@@ -178,7 +178,7 @@ jobs:
           ref: "main"
 
       - name: Get version
-        id: version
+        id: set_version
         run: |
           version=$(cat VERSION)
           echo "version=$version" >> $GITHUB_OUTPUT
@@ -211,7 +211,7 @@ jobs:
           mkdir "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
           cp include/stringzilla/stringzilla.h "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
           cp build_release/libstringzillite.so "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
-          echo "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
           dpkg-deb --build "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
 
       - name: Upload library
@@ -291,7 +291,7 @@ jobs:
       - run: git submodule update --init --recursive
 
       - name: Get version
-        id: version
+        id: set_version
         run: |
           version=$(cat VERSION)
           echo "version=$version" >> $GITHUB_OUTPUT
