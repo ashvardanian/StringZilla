@@ -112,7 +112,7 @@ brew install libomp llvm # MacOS
 Using modern syntax, this is how you build and run the test suite:
 
 ```bash
-cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
+cmake -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug          # Which will produce the following targets:
 build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
 build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
@@ -224,7 +224,7 @@ The base image is only ~3 MB, and it's based on musl libc, which is different fr
 sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla alpine:latest /bin/ash
 cd /workspace/StringZilla
 apk add --update make cmake g++ gcc
-cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
+cmake -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug
 build_debug/stringzilla_test_cpp20
 ```
@@ -240,7 +240,7 @@ sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla clearlinux:latest /b
 cd /workspace/StringZilla
 swupd update
 swupd bundle-add c-basic dev-utils
-cmake -DSTRINGZILLA_BUILD_TEST=1 -B build_debug
+cmake -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug
 build_debug/stringzilla_test_cpp20
 ```
@@ -260,7 +260,9 @@ For CentOS-based __Amazon Linux 2023__:
 sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2023 bash
 cd /workspace/StringZilla
 yum install -y make cmake3 gcc g++
-cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_debug
+cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" \
+    -B build_debug
 cmake3 --build build_debug --config Debug --target stringzilla_test_cpp11
 build_debug/stringzilla_test_cpp11
 ```
@@ -272,7 +274,9 @@ Sadly, the newest GCC version it supports is 10, and it can't handle AVX-512 ins
 sudo docker run -it --rm -v "$(pwd)":/workspace/StringZilla amazonlinux:2 bash
 cd /workspace/StringZilla
 yum install -y make cmake3 gcc10 gcc10-c++
-cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" -B build_debug
+cmake3 -DSTRINGZILLA_BUILD_TEST=1 -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DSTRINGZILLA_TARGET_ARCH="ivybridge" \
+    -B build_debug
 cmake3 --build build_debug --config Debug --target stringzilla_test_cpp11
 build_debug/stringzilla_test_cpp11
 ```
