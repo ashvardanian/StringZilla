@@ -3256,7 +3256,7 @@ SZ_PUBLIC sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_alloca
 
     // We may already be space-optimal, and in that case we don't need to do anything.
     sz_size_t new_space = string_length + 1;
-    if (string_space == new_space || string_is_external) return string->external.start;
+    if (string_space == new_space || !string_is_external) return string->external.start;
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return SZ_NULL_CHAR;

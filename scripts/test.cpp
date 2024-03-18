@@ -431,6 +431,12 @@ static void test_api_mutable() {
     assert_scoped(str s = "obsolete", s.assign(s, 4), s == "lete");                   // Partial self-assignment
     assert_scoped(str s = "obsolete", s.assign(s, 4, 3), s == "let");                 // Partial self-assignment
 
+    // Self-assignment is a special case of assignment.
+    assert_scoped(str s = "obsolete", s = s, s == "obsolete");
+    assert_scoped(str s = "obsolete", s.assign(s), s == "obsolete");
+    assert_scoped(str s = "obsolete", s.assign(s.data(), 2), s == "ob");
+    assert_scoped(str s = "obsolete", s.assign(s.data(), s.size()), s == "obsolete");
+
     // Allocations, capacity and memory management.
     assert_scoped(str s, s.reserve(10), s.capacity() >= 10);
     assert_scoped(str s, s.resize(10), s.size() == 10);
@@ -438,6 +444,7 @@ static void test_api_mutable() {
     assert(str().max_size() > 0);
     assert(str().get_allocator() == std::allocator<char>());
     assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
+    assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
@@ -626,6 +633,28 @@ static void test_api_readonly_extensions() {
 
 void test_api_mutable_extensions() {
     using str = sz::string;
+
+    // Try methods.
+    assert(str("obsolete").try_assign("hello"));
+    assert(str().try_reserve(10));
+    assert(str().try_resize(10));
+    assert(str("__").try_insert(1, "test"));
+    assert(str("test").try_erase(1, 2));
+    assert(str("test").try_clear());
+    assert(str("test").try_replace(1, 2, "aaaa"));
+    assert(str("test").try_push_back('a'));
+    assert(str("test").try_shrink_to_fit());
+
+    // Self-referencing methods.
+    assert_scoped(str s = "test", s.try_assign(s.view()), s == "test");
+    assert_scoped(str s = "test", s.try_assign(s.view().sub(1, 2)), s == "e");
+    assert_scoped(str s = "test", s.try_append(s.view().sub(1, 2)), s == "teste");
+
+    // Try methods going beyond and beneath capacity threshold.
+    assert_scoped(str s = "0123456789012345678901234567890123456789012345678901234567890123", // 64 symbols at start
+                  s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_append(s) && s.try_clear() &&
+                      s.try_shrink_to_fit(),
+                  s.capacity() < sz::string::min_capacity);
 
     // Same length replacements.
     assert_scoped(str s = "hello", s.replace_all("xx", "xx"), s == "hello");

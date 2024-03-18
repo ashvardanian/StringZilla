@@ -1972,6 +1972,12 @@ class basic_string {
      */
     static constexpr size_type npos = SZ_SSIZE_MAX;
 
+    /**
+     *  @brief  The number of characters that can be stored in the internal buffer.
+     *          Depends on the size of the internal buffer for the "Small String Optimization".
+     */
+    static constexpr size_type min_capacity = SZ_STRING_INTERNAL_SPACE - 1;
+
 #pragma region Constructors and STL Utilities
 
     sz_constexpr_if_cpp20 basic_string() noexcept {
@@ -3362,10 +3368,19 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
     sz_size_t string_length;
     sz_string_range(&string_, &string_start, &string_length);
 
-    if (string_length >= other.length()) {
+    // One nasty special case is when the other string is a substring of this string.
+    // We need to handle that separately, as the `sz_string_expand` may invalidate the `other` pointer.
+    if (other.data() >= string_start && other.data() < string_start + string_length) {
+        auto offset_in_this = other.data() - string_start;
+        sz_string_erase(&string_, 0, offset_in_this);
+        sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
+    }
+    // In some of the other cases, when the assigned string is short, we don't need to re-allocate.
+    else if (string_length >= other.length()) {
         other.copy(string_start, other.length());
         sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
     }
+    // In the common case, however, we need to allocate.
     else {
         if (!_with_alloc([&](sz_alloc_type &alloc) {
                 string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
@@ -3392,10 +3407,21 @@ bool basic_string<char_type_, allocator_>::try_push_back(char_type c) noexcept {
 template <typename char_type_, typename allocator_>
 bool basic_string<char_type_, allocator_>::try_append(const_pointer str, size_type length) noexcept {
     return _with_alloc([&](sz_alloc_type &alloc) {
-        auto old_size = size();
+        // Sometimes we are inserting part of this string into itself.
+        // By the time `sz_string_expand` finished, the old `str` pointer may be invalidated,
+        // so we need to handle that special case separately.
+        auto this_span = span();
+        if (str >= this_span.begin() && str < this_span.end()) {
+            auto str_offset_in_this = str - data();
         sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
         if (!start) return false;
-        sz_copy(start + old_size, str, length);
+            sz_copy(start + this_span.size(), start + str_offset_in_this, length);
+        }
+        else {
+            sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
+            if (!start) return false;
+            sz_copy(start + this_span.size(), str, length);
+        }
         return true;
     });
 }
