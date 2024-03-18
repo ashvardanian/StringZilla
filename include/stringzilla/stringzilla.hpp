@@ -1972,6 +1972,12 @@ class basic_string {
      */
     static constexpr size_type npos = SZ_SSIZE_MAX;
 
+    /**
+     *  @brief  The number of characters that can be stored in the internal buffer.
+     *          Depends on the size of the internal buffer for the "Small String Optimization".
+     */
+    static constexpr size_type min_capacity = SZ_STRING_INTERNAL_SPACE - 1;
+
 #pragma region Constructors and STL Utilities
 
     sz_constexpr_if_cpp20 basic_string() noexcept {
@@ -2604,22 +2610,76 @@ class basic_string {
 #pragma region Modifiers
 #pragma region Non-STL API
 
+    /**
+     *  @brief  Resizes the string to a specified number of characters, padding with the specified character if needed.
+     *  @param  count The new size of the string.
+     *  @param  character The character to fill new elements with, if expanding. Defaults to null character.
+     *  @return `true` if the resizing was successful, `false` otherwise.
+     */
     bool try_resize(size_type count, value_type character = '\0') noexcept;
 
+    /**
+     *  @brief  Attempts to reduce memory usage by freeing unused memory.
+     *  @return `true` if the operation was successful and potentially reduced the memory footprint, `false` otherwise.
+     */
+    bool try_shrink_to_fit() noexcept {
+        return _with_alloc([&](sz_alloc_type &alloc) { return sz_string_shrink_to_fit(&string_, &alloc); });
+    }
+
+    /**
+     *  @brief  Attempts to reserve enough space for a specified number of characters.
+     *  @param  capacity The new capacity to reserve.
+     *  @return `true` if the reservation was successful, `false` otherwise.
+     */
     bool try_reserve(size_type capacity) noexcept {
         return _with_alloc([&](sz_alloc_type &alloc) { return sz_string_reserve(&string_, capacity, &alloc); });
     }
 
+    /**
+     *  @brief  Assigns a new value to the string, replacing its current contents.
+     *  @param  other The string view whose contents to assign.
+     *  @return `true` if the assignment was successful, `false` otherwise.
+     */
     bool try_assign(string_view other) noexcept;
 
+    /**
+     *  @brief  Assigns a concatenated sequence to the string, replacing its current contents.
+     *  @param  other The concatenation object representing the sequence to assign.
+     *  @return `true` if the assignment was successful, `false` otherwise.
+     */
     template <typename first_type, typename second_type>
     bool try_assign(concatenation<first_type, second_type> const &other) noexcept;
 
+    /**
+     *  @brief  Attempts to add a single character to the end of the string.
+     *  @param  c The character to add.
+     *  @return `true` if the character was successfully added, `false` otherwise.
+     */
     bool try_push_back(char_type c) noexcept;
 
+    /**
+     *  @brief  Attempts to append a given character array to the string.
+     *  @param  str The pointer to the array of characters to append.
+     *  @param  length The number of characters to append.
+     *  @return `true` if the append operation was successful, `false` otherwise.
+     */
     bool try_append(const_pointer str, size_type length) noexcept;
 
+    /**
+     *  @brief  Attempts to append a string view to the string.
+     *  @param  str The string view to append.
+     *  @return `true` if the append operation was successful, `false` otherwise.
+     */
     bool try_append(string_view str) noexcept { return try_append(str.data(), str.size()); }
+
+    /**
+     *  @brief  Clears the contents of the string and resets its length to 0.
+     *  @return Always returns `true` as this operation cannot fail under normal conditions.
+     */
+    bool try_clear() noexcept {
+        clear();
+        return true;
+    }
 
     /**
      *  @brief  Erases ( @b in-place ) a range of characters defined with signed offsets.
@@ -2658,7 +2718,7 @@ class basic_string {
 
         sz_size_t normalized_offset, normalized_length;
         sz_ssize_clamp_interval(size(), signed_start_offset, signed_end_offset, &normalized_offset, &normalized_length);
-        if (!try_preparing_replacement(normalized_offset, normalized_length, replacement)) return false;
+        if (!try_preparing_replacement(normalized_offset, normalized_length, replacement.size())) return false;
         sz_copy(data() + normalized_offset, replacement.data(), replacement.size());
         return true;
     }
@@ -2681,6 +2741,14 @@ class basic_string {
     void resize(size_type count, value_type character = '\0') noexcept(false) {
         if (count > max_size()) throw std::length_error("sz::basic_string::resize");
         if (!try_resize(count, character)) throw std::bad_alloc();
+    }
+
+    /**
+     *  @brief  Reclaims the unused memory, if any.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     */
+    void shrink_to_fit() noexcept(false) {
+        if (!try_shrink_to_fit()) throw std::bad_alloc();
     }
 
     /**
@@ -3300,10 +3368,19 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
     sz_size_t string_length;
     sz_string_range(&string_, &string_start, &string_length);
 
-    if (string_length >= other.length()) {
+    // One nasty special case is when the other string is a substring of this string.
+    // We need to handle that separately, as the `sz_string_expand` may invalidate the `other` pointer.
+    if (other.data() >= string_start && other.data() < string_start + string_length) {
+        auto offset_in_this = other.data() - string_start;
+        sz_string_erase(&string_, 0, offset_in_this);
+        sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
+    }
+    // In some of the other cases, when the assigned string is short, we don't need to re-allocate.
+    else if (string_length >= other.length()) {
         other.copy(string_start, other.length());
         sz_string_erase(&string_, other.length(), SZ_SIZE_MAX);
     }
+    // In the common case, however, we need to allocate.
     else {
         if (!_with_alloc([&](sz_alloc_type &alloc) {
                 string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
@@ -3330,10 +3407,21 @@ bool basic_string<char_type_, allocator_>::try_push_back(char_type c) noexcept {
 template <typename char_type_, typename allocator_>
 bool basic_string<char_type_, allocator_>::try_append(const_pointer str, size_type length) noexcept {
     return _with_alloc([&](sz_alloc_type &alloc) {
-        auto old_size = size();
+        // Sometimes we are inserting part of this string into itself.
+        // By the time `sz_string_expand` finished, the old `str` pointer may be invalidated,
+        // so we need to handle that special case separately.
+        auto this_span = span();
+        if (str >= this_span.begin() && str < this_span.end()) {
+            auto str_offset_in_this = str - data();
         sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
         if (!start) return false;
-        sz_copy(start + old_size, str, length);
+            sz_copy(start + this_span.size(), start + str_offset_in_this, length);
+        }
+        else {
+            sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
+            if (!start) return false;
+            sz_copy(start + this_span.size(), str, length);
+        }
         return true;
     });
 }

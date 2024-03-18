@@ -651,11 +651,12 @@ SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_si
 
 /**
  *  @brief  Shrinks the string to fit the current length, if it's allocated on the heap.
- *          Teh reverse operation of ::sz_string_reserve.
+ *          It's the reverse operation of ::sz_string_reserve.
  *
  *  @param string       String to shrink.
  *  @param allocator    Memory allocator to use for the allocation.
  *  @return             Whether the operation was successful. The only failures can come from the allocator.
+ *                      On failure, the string will remain unchanged.
  */
 SZ_PUBLIC sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator);
 
@@ -3217,7 +3218,7 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
 
 SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator) {
 
-    sz_assert(string && "String can't be SZ_NULL.");
+    sz_assert(string && allocator && "Strings and allocators can't be SZ_NULL.");
 
     sz_size_t new_space = new_capacity + 1;
     if (new_space <= SZ_STRING_INTERNAL_SPACE) return string->external.start;
@@ -3228,6 +3229,34 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
     sz_assert(new_space > string_space && "New space must be larger than current.");
+
+    sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
+    if (!new_start) return SZ_NULL_CHAR;
+
+    sz_copy(new_start, string_start, string_length);
+    string->external.start = new_start;
+    string->external.space = new_space;
+    string->external.padding = 0;
+    string->external.length = string_length;
+
+    // Deallocate the old string.
+    if (string_is_external) allocator->free(string_start, string_space, allocator->handle);
+    return string->external.start;
+}
+
+SZ_PUBLIC sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator) {
+
+    sz_assert(string && allocator && "Strings and allocators can't be SZ_NULL.");
+
+    sz_ptr_t string_start;
+    sz_size_t string_length;
+    sz_size_t string_space;
+    sz_bool_t string_is_external;
+    sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
+
+    // We may already be space-optimal, and in that case we don't need to do anything.
+    sz_size_t new_space = string_length + 1;
+    if (string_space == new_space || !string_is_external) return string->external.start;
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return SZ_NULL_CHAR;
@@ -3333,7 +3362,7 @@ SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) 
 
     // In case of long strings, skip unaligned bytes, and then fill the rest in 64-bit chunks.
     else {
-        sz_u64_t value64 = (sz_u64_t)(value) * 0x0101010101010101ull;
+        sz_u64_t value64 = (sz_u64_t)value * 0x0101010101010101ull;
         while ((sz_size_t)target & 7ull) *(target++) = value;
         while (target + 8 <= end) *(sz_u64_t *)target = value64, target += 8;
         while (target != end) *(target++) = value;
