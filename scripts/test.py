@@ -1,6 +1,8 @@
 from random import choice, randint
 from string import ascii_lowercase
 from typing import Optional
+import tempfile
+import os
 
 import pytest
 
@@ -102,6 +104,25 @@ def test_unit_buffer_protocol():
     assert arr.dtype == np.dtype("c")
     assert arr.shape == (len("hello"),)
     assert "".join([c.decode("utf-8") for c in arr.tolist()]) == "hello"
+
+
+def test_str_write_to():
+    native = "line1\nline2\nline3"
+    big = Str(native)
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+        temp_filename = tmpfile.name  # Store the name for later use
+
+    try:
+        big.write_to(temp_filename)
+        with open(temp_filename, "r") as file:
+            content = file.read()
+            assert (
+                content == native
+            ), "The content of the file does not match the expected output"
+    finally:
+        os.remove(temp_filename)
 
 
 def test_unit_split():

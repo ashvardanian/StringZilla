@@ -1271,16 +1271,23 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
         return NULL;
     }
     memcpy(path_buffer, path.start, path.length);
+    path_buffer[path.length] = '\0';
 
+    // Unlock the Global Interpreter Lock (GIL) to allow other threads to run
+    // while the current thread is waiting for the file to be written.
+    PyThreadState *gil_state = PyEval_SaveThread();
     FILE *file_pointer = fopen(path_buffer, "wb");
     if (file_pointer == NULL) {
+        PyEval_RestoreThread(gil_state);
         PyErr_SetFromErrnoWithFilename(PyExc_OSError, path_buffer);
         free(path_buffer);
+        PyEval_RestoreThread(gil_state);
         return NULL;
     }
 
     setbuf(file_pointer, NULL); // Set the stream to unbuffered
     int status = fwrite(text.start, 1, text.length, file_pointer);
+    PyEval_RestoreThread(gil_state);
     if (status != text.length) {
         PyErr_SetFromErrnoWithFilename(PyExc_OSError, path_buffer);
         free(path_buffer);
