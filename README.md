@@ -518,7 +518,7 @@ The `Str` class has `write_to` to write the string to a file, and `offset_within
 web_archieve = Str("<html>...</html><html>...</html>")
 _, end_tag, next_doc = web_archieve.partition("</html>") # or use `find`
 next_doc_offset = next_doc.offset_within(web_archieve)
-web_archieve.write_to("next_doc.html")
+web_archieve.write_to("next_doc.html") # no GIL, no copies, just a view
 ```
 
 #### PyArrow

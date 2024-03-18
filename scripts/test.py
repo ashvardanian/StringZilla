@@ -108,7 +108,7 @@ def test_unit_buffer_protocol():
 
 def test_str_write_to():
     native = "line1\nline2\nline3"
-    big = Str(native)  # Assuming Str is your custom class
+    big = Str(native)
 
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:

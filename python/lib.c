@@ -1271,6 +1271,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
         return NULL;
     }
     memcpy(path_buffer, path.start, path.length);
+    path_buffer[path.length] = '\0';
 
     // Unlock the Global Interpreter Lock (GIL) to allow other threads to run
     // while the current thread is waiting for the file to be written.
