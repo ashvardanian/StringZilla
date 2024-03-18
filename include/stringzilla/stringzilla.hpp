@@ -2604,22 +2604,76 @@ class basic_string {
 #pragma region Modifiers
 #pragma region Non-STL API
 
+    /**
+     *  @brief  Resizes the string to a specified number of characters, padding with the specified character if needed.
+     *  @param  count The new size of the string.
+     *  @param  character The character to fill new elements with, if expanding. Defaults to null character.
+     *  @return `true` if the resizing was successful, `false` otherwise.
+     */
     bool try_resize(size_type count, value_type character = '\0') noexcept;
 
+    /**
+     *  @brief  Attempts to reduce memory usage by freeing unused memory.
+     *  @return `true` if the operation was successful and potentially reduced the memory footprint, `false` otherwise.
+     */
+    bool try_shrink_to_fit() noexcept {
+        return _with_alloc([&](sz_alloc_type &alloc) { return sz_string_shrink_to_fit(&string_, &alloc); });
+    }
+
+    /**
+     *  @brief  Attempts to reserve enough space for a specified number of characters.
+     *  @param  capacity The new capacity to reserve.
+     *  @return `true` if the reservation was successful, `false` otherwise.
+     */
     bool try_reserve(size_type capacity) noexcept {
         return _with_alloc([&](sz_alloc_type &alloc) { return sz_string_reserve(&string_, capacity, &alloc); });
     }
 
+    /**
+     *  @brief  Assigns a new value to the string, replacing its current contents.
+     *  @param  other The string view whose contents to assign.
+     *  @return `true` if the assignment was successful, `false` otherwise.
+     */
     bool try_assign(string_view other) noexcept;
 
+    /**
+     *  @brief  Assigns a concatenated sequence to the string, replacing its current contents.
+     *  @param  other The concatenation object representing the sequence to assign.
+     *  @return `true` if the assignment was successful, `false` otherwise.
+     */
     template <typename first_type, typename second_type>
     bool try_assign(concatenation<first_type, second_type> const &other) noexcept;
 
+    /**
+     *  @brief  Attempts to add a single character to the end of the string.
+     *  @param  c The character to add.
+     *  @return `true` if the character was successfully added, `false` otherwise.
+     */
     bool try_push_back(char_type c) noexcept;
 
+    /**
+     *  @brief  Attempts to append a given character array to the string.
+     *  @param  str The pointer to the array of characters to append.
+     *  @param  length The number of characters to append.
+     *  @return `true` if the append operation was successful, `false` otherwise.
+     */
     bool try_append(const_pointer str, size_type length) noexcept;
 
+    /**
+     *  @brief  Attempts to append a string view to the string.
+     *  @param  str The string view to append.
+     *  @return `true` if the append operation was successful, `false` otherwise.
+     */
     bool try_append(string_view str) noexcept { return try_append(str.data(), str.size()); }
+
+    /**
+     *  @brief  Clears the contents of the string and resets its length to 0.
+     *  @return Always returns `true` as this operation cannot fail under normal conditions.
+     */
+    bool try_clear() noexcept {
+        clear();
+        return true;
+    }
 
     /**
      *  @brief  Erases ( @b in-place ) a range of characters defined with signed offsets.
@@ -2681,6 +2735,14 @@ class basic_string {
     void resize(size_type count, value_type character = '\0') noexcept(false) {
         if (count > max_size()) throw std::length_error("sz::basic_string::resize");
         if (!try_resize(count, character)) throw std::bad_alloc();
+    }
+
+    /**
+     *  @brief  Reclaims the unused memory, if any.
+     *  @throw  `std::bad_alloc` if the allocation fails.
+     */
+    void shrink_to_fit() noexcept(false) {
+        if (!try_shrink_to_fit()) throw std::bad_alloc();
     }
 
     /**
