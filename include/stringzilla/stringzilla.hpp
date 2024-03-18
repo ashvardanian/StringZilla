@@ -2712,7 +2712,7 @@ class basic_string {
 
         sz_size_t normalized_offset, normalized_length;
         sz_ssize_clamp_interval(size(), signed_start_offset, signed_end_offset, &normalized_offset, &normalized_length);
-        if (!try_preparing_replacement(normalized_offset, normalized_length, replacement)) return false;
+        if (!try_preparing_replacement(normalized_offset, normalized_length, replacement.size())) return false;
         sz_copy(data() + normalized_offset, replacement.data(), replacement.size());
         return true;
     }
