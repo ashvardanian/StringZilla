@@ -204,18 +204,15 @@ jobs:
 
           cmake --build build_release --config Release
 
-          # Copy and package the library
-          echo "ARTIFACT_NAME=stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}" >> $GITHUB_ENV
-          cp build_release/libstringzillite.so "$ARTIFACT_NAME.so"
-
-          mkdir -p "$ARTIFACT_NAME/DEBIAN"
-          touch "$ARTIFACT_NAME/DEBIAN/control"
-          mkdir -p "$ARTIFACT_NAME/usr/local/lib"
-          mkdir "$ARTIFACT_NAME/usr/local/include"
-          cp include/stringzilla/stringzilla.h "$ARTIFACT_NAME/usr/local/include/"
-          cp build_release/libstringzillite.so "$ARTIFACT_NAME/usr/local/lib/"
-          echo "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > "$ARTIFACT_NAME/DEBIAN/control"
-          dpkg-deb --build "$ARTIFACT_NAME"
+          cp build_release/libstringzillite.so "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
+          mkdir -p "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN"
+          touch "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          mkdir -p "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib"
+          mkdir "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
+          cp include/stringzilla/stringzilla.h "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
+          cp build_release/libstringzillite.so "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
+          echo "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          dpkg-deb --build "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
 
       - name: Upload library
         uses: xresloader/upload-to-github-release@v1
