@@ -44,17 +44,29 @@ class StringZillaTests: XCTestCase {
         XCTAssertEqual(testString[index...], "Hello, world! Welcome to StringZilla. 👋")
     }
 
-    // TODO: This fails!
-    // func testFindLastCharacterNotFromSet() {
-    //     let index = testString.findLast(characterNotFrom: "aeiou")!
-    //     XCTAssertEqual(testString.distance(from: testString.startIndex, to: index), 38)
-    //     XCTAssertEqual(testString[index...], "👋")
-    // }
+     func testFindLastCharacterNotFromSet() {
+        let index = testString.findLast(characterNotFrom: "aeiou")!
+        XCTAssertEqual(testString.distance(from: testString.startIndex, to: index), 38)
+        XCTAssertEqual(testString[index...], "👋")
+    }
     
     func testEditDistance() {
         let otherString = "Hello, world!"
         let distance = try? testString.editDistance(from: otherString) // Using try?
         XCTAssertNotNil(distance)
         XCTAssertEqual(distance, 29)
+    }
+    
+    func testFindLastCharacterNotFromSetWithEmoji() {
+        let index = testString.findLast(characterNotFrom: "aeiou👋")!
+        XCTAssertEqual(testString.distance(from: testString.startIndex, to: index), 37)
+        XCTAssertEqual(testString[index...], " ")
+    }
+    
+    // Additional test: Test finding the last character not from a set when the string only contains characters from the set
+    func testFindLastCharacterNotFromSetNoMatch() {
+        let testString = "aeiou"
+        let index = testString.findLast(characterNotFrom: "aeiou")
+        XCTAssertNil(index)
     }
 }
