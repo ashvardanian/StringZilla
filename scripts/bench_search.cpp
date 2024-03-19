@@ -292,19 +292,23 @@ void bench_search(std::string const &haystack, std::vector<std::string> const &s
 int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting search benchmarks.\n");
 
-    dataset_t dataset = make_dataset(argc, argv);
+    dataset_t dataset = prepare_benchmark_environment(argc, argv);
 
     // Splitting by new lines
     std::printf("Benchmarking for a newline symbol:\n");
     bench_finds(dataset.text, {"\n"}, find_functions());
     bench_rfinds(dataset.text, {"\n"}, rfind_functions());
 
+    std::printf("Benchmarking for one whitespace:\n");
+    bench_finds(dataset.text, {" "}, find_functions());
+    bench_rfinds(dataset.text, {" "}, rfind_functions());
+
     std::printf("Benchmarking for an [\\n\\r\\v\\f] RegEx:\n");
     bench_finds(dataset.text, {"\n\r\v\f"}, find_charset_functions());
     bench_rfinds(dataset.text, {"\n\r\v\f"}, rfind_charset_functions());
 
     // Typical ASCII tokenization and validation benchmarks
-    std::printf("Benchmarking for whitespaces:\n");
+    std::printf("Benchmarking for all whitespaces:\n");
     bench_finds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, find_charset_functions());
     bench_rfinds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, rfind_charset_functions());
 

@@ -107,7 +107,7 @@ void bench_similarity_on_bio_data() {
 
 void bench_similarity_on_input_data(int argc, char const **argv) {
 
-    dataset_t dataset = make_dataset(argc, argv);
+    dataset_t dataset = prepare_benchmark_environment(argc, argv);
 
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");

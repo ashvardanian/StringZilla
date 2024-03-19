@@ -142,7 +142,7 @@ void bench_permute(char const *name, strings_t &strings, permute_t &permute, alg
 
 int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting sorting benchmarks.\n");
-    dataset_t dataset = make_dataset(argc, argv);
+    dataset_t dataset = prepare_benchmark_environment(argc, argv);
     strings_t strings {dataset.tokens.begin(), dataset.tokens.end()};
 
     permute_t permute_base, permute_new;

@@ -72,7 +72,7 @@ void bench_tokens(strings_type const &strings) {
 int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting search benchmarks.\n");
 
-    dataset_t dataset = make_dataset(argc, argv);
+    dataset_t dataset = prepare_benchmark_environment(argc, argv);
 
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");
