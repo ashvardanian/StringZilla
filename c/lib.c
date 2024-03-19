@@ -30,12 +30,9 @@ typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stri
 #else
 typedef __SIZE_TYPE__ size_t; // For GCC/Clang
 #endif
-int rand(void) { return 0; }
-void free(void *start) { sz_unused(start); }
-void *malloc(size_t length) {
-    sz_unused(length);
-    return SZ_NULL;
-}
+extern int rand(void);
+extern void free(void *start);
+extern void *malloc(size_t length);
 #endif
 
 SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
@@ -211,8 +208,8 @@ static void sz_dispatch_table_init(void) {
 }
 
 #if defined(_MSC_VER)
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
-    switch (fdwReason) {
+BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
+    switch (forward_reason) {
     case DLL_PROCESS_ATTACH: sz_dispatch_table_init(); return TRUE;
     case DLL_THREAD_ATTACH: return TRUE;
     case DLL_THREAD_DETACH: return TRUE;
