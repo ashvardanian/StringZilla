@@ -333,14 +333,18 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_
     return sz_rfind_charset(h, h_length, &set);
 }
 
+#if !SZ_AVOID_LIBC
 sz_u64_t _sz_random_generator(void *empty_state) {
     sz_unused(empty_state);
     return (sz_u64_t)rand();
 }
+#endif
 
 SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
                             sz_random_generator_t generator, void *generator_user_data) {
+#if !SZ_AVOID_LIBC
     if (!generator) generator = _sz_random_generator;
+#endif
     sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }
 
