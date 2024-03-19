@@ -25,7 +25,7 @@ tracked_binary_functions_t find_functions() {
     tracked_binary_functions_t result = {
         {"std::string_view.find",
          [](std::string_view h, std::string_view n) {
-             auto match = h.find(n);
+             auto match = n.size() == 1 ? h.find(n.front()) : h.find(n);
              return (match == std::string_view::npos ? h.size() : match);
          }},
         {"sz_find_serial", wrap_sz(sz_find_serial), true},
@@ -38,15 +38,17 @@ tracked_binary_functions_t find_functions() {
 #if SZ_USE_ARM_NEON
         {"sz_find_neon", wrap_sz(sz_find_neon), true},
 #endif
-        {"strstr",
+        {"strstr/strchr",
          [](std::string_view h, std::string_view n) {
-             sz_cptr_t match = strstr(h.data(), n.data());
+             sz_cptr_t match = n.size() == 1 ? (sz_cptr_t)strchr(h.data(), n.front()) //
+                                             : (sz_cptr_t)strstr(h.data(), n.data());
              return (match ? match - h.data() : h.size());
          }},
 #ifdef _GNU_SOURCE
-        {"memmem", // Not supported on MSVC
+        {"memmem/memchr", // Not supported on MSVC
          [](std::string_view h, std::string_view n) {
-             sz_cptr_t match = (sz_cptr_t)memmem(h.data(), h.size(), n.data(), n.size());
+             sz_cptr_t match = n.size() == 1 ? (sz_cptr_t)memchr(h.data(), n.front(), h.size())
+                                             : (sz_cptr_t)memmem(h.data(), h.size(), n.data(), n.size());
              return (match ? match - h.data() : h.size());
          }},
 #endif
@@ -84,7 +86,7 @@ tracked_binary_functions_t rfind_functions() {
     tracked_binary_functions_t result = {
         {"std::string_view.rfind",
          [](std::string_view h, std::string_view n) {
-             auto match = h.rfind(n);
+             auto match = n.size() == 1 ? h.rfind(n.front()) : h.rfind(n);
              return (match == std::string_view::npos ? 0 : match);
          }},
         {"sz_rfind_serial", wrap_sz(sz_rfind_serial), true},
