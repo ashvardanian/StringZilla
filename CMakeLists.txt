@@ -265,16 +265,19 @@ endif()
 if(${STRINGZILLA_BUILD_SHARED})
   add_library(stringzilla_shared SHARED c/lib.c)
   set_compiler_flags(stringzilla_shared "" "${STRINGZILLA_TARGET_ARCH}")
+  target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
+  target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
   set_target_properties(stringzilla_shared PROPERTIES
-    VERSION ${PROJECT_VERSION}
-    SOVERSION 1
-    POSITION_INDEPENDENT_CODE ON
-    PUBLIC_HEADER include/stringzilla/stringzilla.h)
-
+  VERSION ${PROJECT_VERSION}
+  SOVERSION 1
+  POSITION_INDEPENDENT_CODE ON
+  PUBLIC_HEADER include/stringzilla/stringzilla.h)
+  
   # Try compiling a version without linking the LibC
   add_library(stringzillite SHARED c/lib.c)
   set_compiler_flags(stringzillite "" "${STRINGZILLA_TARGET_ARCH}")
   target_compile_definitions(stringzillite PRIVATE "SZ_AVOID_LIBC=1")
+  target_compile_definitions(stringzillite PRIVATE "SZ_OVERRIDE_LIBC=1")
   set_target_properties(stringzillite PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 1
@@ -283,9 +286,6 @@ if(${STRINGZILLA_BUILD_SHARED})
 
   # Avoid built-ins on MSVC and other compilers, as that will cause compileration errors
   target_compile_options(stringzillite PRIVATE
-    "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin>"
-    "$<$<CXX_COMPILER_ID:MSVC>:/Oi->")
-  target_compile_options(stringzilla_shared PRIVATE
-    "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin>"
+    "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>"
     "$<$<CXX_COMPILER_ID:MSVC>:/Oi->")
 endif()
