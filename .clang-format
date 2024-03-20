@@ -67,4 +67,3 @@ SpacesInSquareBrackets: false
 BinPackArguments: true
 BinPackParameters: true
 PenaltyBreakBeforeFirstCallParameter: 1
-PenaltyBreakArgument: 1
