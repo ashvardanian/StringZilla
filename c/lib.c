@@ -129,7 +129,8 @@ typedef struct sz_implementations_t {
     sz_hashes_t hashes;
 
 } sz_implementations_t;
-static sz_implementations_t sz_dispatch_table;
+
+__attribute__((aligned(64))) static sz_implementations_t sz_dispatch_table;
 
 /**
  *  @brief  Initializes a global static "virtual table" of supported backends
