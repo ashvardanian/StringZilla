@@ -27,12 +27,15 @@
 // If we don't have the LibC, the `malloc` definition in `stringzilla.h` will be illformed.
 #ifdef _MSC_VER
 typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
+extern __declspec(dllimport) int rand(void);
+extern __declspec(dllimport) void free(void *start);
+extern __declspec(dllimport) void *malloc(size_t length);
 #else
 typedef __SIZE_TYPE__ size_t; // For GCC/Clang
-#endif
 extern int rand(void);
 extern void free(void *start);
 extern void *malloc(size_t length);
+#endif
 #endif
 
 SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
