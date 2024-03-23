@@ -130,7 +130,11 @@ typedef struct sz_implementations_t {
 
 } sz_implementations_t;
 
+#if defined(_MSC_VER)
+__declspec(align(64)) static sz_implementations_t sz_dispatch_table;
+#else
 __attribute__((aligned(64))) static sz_implementations_t sz_dispatch_table;
+#endif
 
 /**
  *  @brief  Initializes a global static "virtual table" of supported backends
