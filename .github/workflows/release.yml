@@ -300,7 +300,7 @@ jobs:
         run: |
           cmake -DCMAKE_BUILD_TYPE=Release -B build_release
           cmake --build build_release --config Release        
-          zip -r stringzillite_macos_${{ matrix.arch }}_${{ steps.version.outputs.version }}.zip build_release/libstringzillite.dylib include/stringzilla/stringzilla.h
+          zip -r stringzillite_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzillite.dylib include/stringzilla/stringzilla.h
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1

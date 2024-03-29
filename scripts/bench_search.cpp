@@ -25,7 +25,7 @@ tracked_binary_functions_t find_functions() {
     tracked_binary_functions_t result = {
         {"std::string_view.find",
          [](std::string_view h, std::string_view n) {
-             auto match = h.find(n);
+             auto match = n.size() == 1 ? h.find(n.front()) : h.find(n);
              return (match == std::string_view::npos ? h.size() : match);
          }},
         {"sz_find_serial", wrap_sz(sz_find_serial), true},
@@ -38,15 +38,17 @@ tracked_binary_functions_t find_functions() {
 #if SZ_USE_ARM_NEON
         {"sz_find_neon", wrap_sz(sz_find_neon), true},
 #endif
-        {"strstr",
+        {"strstr/strchr",
          [](std::string_view h, std::string_view n) {
-             sz_cptr_t match = strstr(h.data(), n.data());
+             sz_cptr_t match = n.size() == 1 ? (sz_cptr_t)strchr(h.data(), n.front()) //
+                                             : (sz_cptr_t)strstr(h.data(), n.data());
              return (match ? match - h.data() : h.size());
          }},
 #ifdef _GNU_SOURCE
-        {"memmem", // Not supported on MSVC
+        {"memmem/memchr", // Not supported on MSVC
          [](std::string_view h, std::string_view n) {
-             sz_cptr_t match = (sz_cptr_t)memmem(h.data(), h.size(), n.data(), n.size());
+             sz_cptr_t match = n.size() == 1 ? (sz_cptr_t)memchr(h.data(), n.front(), h.size())
+                                             : (sz_cptr_t)memmem(h.data(), h.size(), n.data(), n.size());
              return (match ? match - h.data() : h.size());
          }},
 #endif
@@ -84,7 +86,7 @@ tracked_binary_functions_t rfind_functions() {
     tracked_binary_functions_t result = {
         {"std::string_view.rfind",
          [](std::string_view h, std::string_view n) {
-             auto match = h.rfind(n);
+             auto match = n.size() == 1 ? h.rfind(n.front()) : h.rfind(n);
              return (match == std::string_view::npos ? 0 : match);
          }},
         {"sz_rfind_serial", wrap_sz(sz_rfind_serial), true},
@@ -290,19 +292,23 @@ void bench_search(std::string const &haystack, std::vector<std::string> const &s
 int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting search benchmarks.\n");
 
-    dataset_t dataset = make_dataset(argc, argv);
+    dataset_t dataset = prepare_benchmark_environment(argc, argv);
 
     // Splitting by new lines
     std::printf("Benchmarking for a newline symbol:\n");
     bench_finds(dataset.text, {"\n"}, find_functions());
     bench_rfinds(dataset.text, {"\n"}, rfind_functions());
 
+    std::printf("Benchmarking for one whitespace:\n");
+    bench_finds(dataset.text, {" "}, find_functions());
+    bench_rfinds(dataset.text, {" "}, rfind_functions());
+
     std::printf("Benchmarking for an [\\n\\r\\v\\f] RegEx:\n");
     bench_finds(dataset.text, {"\n\r\v\f"}, find_charset_functions());
     bench_rfinds(dataset.text, {"\n\r\v\f"}, rfind_charset_functions());
 
     // Typical ASCII tokenization and validation benchmarks
-    std::printf("Benchmarking for whitespaces:\n");
+    std::printf("Benchmarking for all whitespaces:\n");
     bench_finds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, find_charset_functions());
     bench_rfinds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, rfind_charset_functions());
 

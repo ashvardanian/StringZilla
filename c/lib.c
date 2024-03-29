@@ -27,15 +27,15 @@
 // If we don't have the LibC, the `malloc` definition in `stringzilla.h` will be illformed.
 #ifdef _MSC_VER
 typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
+extern __declspec(dllimport) int rand(void);
+extern __declspec(dllimport) void free(void *start);
+extern __declspec(dllimport) void *malloc(size_t length);
 #else
 typedef __SIZE_TYPE__ size_t; // For GCC/Clang
+extern int rand(void);
+extern void free(void *start);
+extern void *malloc(size_t length);
 #endif
-int rand(void) { return 0; }
-void free(void *start) { sz_unused(start); }
-void *malloc(size_t length) {
-    sz_unused(length);
-    return SZ_NULL;
-}
 #endif
 
 SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
@@ -132,7 +132,12 @@ typedef struct sz_implementations_t {
     sz_hashes_t hashes;
 
 } sz_implementations_t;
-static sz_implementations_t sz_dispatch_table;
+
+#if defined(_MSC_VER)
+__declspec(align(64)) static sz_implementations_t sz_dispatch_table;
+#else
+__attribute__((aligned(64))) static sz_implementations_t sz_dispatch_table;
+#endif
 
 /**
  *  @brief  Initializes a global static "virtual table" of supported backends
@@ -211,8 +216,8 @@ static void sz_dispatch_table_init(void) {
 }
 
 #if defined(_MSC_VER)
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
-    switch (fdwReason) {
+BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
+    switch (forward_reason) {
     case DLL_PROCESS_ATTACH: sz_dispatch_table_init(); return TRUE;
     case DLL_THREAD_ATTACH: return TRUE;
     case DLL_THREAD_DETACH: return TRUE;
@@ -336,14 +341,18 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_
     return sz_rfind_charset(h, h_length, &set);
 }
 
+#if !SZ_AVOID_LIBC
 sz_u64_t _sz_random_generator(void *empty_state) {
     sz_unused(empty_state);
     return (sz_u64_t)rand();
 }
+#endif
 
 SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
                             sz_random_generator_t generator, void *generator_user_data) {
+#if !SZ_AVOID_LIBC
     if (!generator) generator = _sz_random_generator;
+#endif
     sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }
 

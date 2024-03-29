@@ -136,7 +136,7 @@ function(set_compiler_flags target cpp_standard target_arch)
   target_compile_options(
     ${target}
     PRIVATE
-    "$<$<CXX_COMPILER_ID:MSVC>:/Bt;/wd4068;/wd4146;/utf-8>" # For MSVC, /WX would have been sufficient
+    "$<$<CXX_COMPILER_ID:MSVC>:/Bt;/wd4068;/wd4146;/utf-8;/WX>"
     "$<$<CXX_COMPILER_ID:GNU>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function>"
     "$<$<CXX_COMPILER_ID:Clang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
     "$<$<CXX_COMPILER_ID:AppleClang>:-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas>"
@@ -265,16 +265,19 @@ endif()
 if(${STRINGZILLA_BUILD_SHARED})
   add_library(stringzilla_shared SHARED c/lib.c)
   set_compiler_flags(stringzilla_shared "" "${STRINGZILLA_TARGET_ARCH}")
+  target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
+  target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
   set_target_properties(stringzilla_shared PROPERTIES
-    VERSION ${PROJECT_VERSION}
-    SOVERSION 1
-    POSITION_INDEPENDENT_CODE ON
-    PUBLIC_HEADER include/stringzilla/stringzilla.h)
-
+  VERSION ${PROJECT_VERSION}
+  SOVERSION 1
+  POSITION_INDEPENDENT_CODE ON
+  PUBLIC_HEADER include/stringzilla/stringzilla.h)
+  
   # Try compiling a version without linking the LibC
   add_library(stringzillite SHARED c/lib.c)
   set_compiler_flags(stringzillite "" "${STRINGZILLA_TARGET_ARCH}")
   target_compile_definitions(stringzillite PRIVATE "SZ_AVOID_LIBC=1")
+  target_compile_definitions(stringzillite PRIVATE "SZ_OVERRIDE_LIBC=1")
   set_target_properties(stringzillite PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 1
@@ -283,9 +286,6 @@ if(${STRINGZILLA_BUILD_SHARED})
 
   # Avoid built-ins on MSVC and other compilers, as that will cause compileration errors
   target_compile_options(stringzillite PRIVATE
-    "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin>"
-    "$<$<CXX_COMPILER_ID:MSVC>:/Oi->")
-  target_compile_options(stringzilla_shared PRIVATE
-    "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin>"
+    "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>"
     "$<$<CXX_COMPILER_ID:MSVC>:/Oi->")
 endif()
