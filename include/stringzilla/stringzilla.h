@@ -4990,7 +4990,8 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
                     _mm512_maskz_loadu_epi32((__mmask16)mask, previous_distances + idx_longer + 32);
                 cost_substitution_vec.zmm = _mm512_add_epi32(
                     cost_substitution_vec.zmm, _mm512_cvtepi16_epi32(_mm512_extracti64x4_epi64(current_32_63_vec, 0)));
-                cost_deletion_vec.zmm = _mm512_maskz_loadu_epi32(mask, previous_distances + 1 + idx_longer + 32);
+                cost_deletion_vec.zmm =
+                    _mm512_maskz_loadu_epi32((__mmask16)mask, previous_distances + 1 + idx_longer + 32);
                 cost_deletion_vec.zmm = _mm512_add_epi32(cost_deletion_vec.zmm, gap_vec.zmm);
                 current_vec.zmm = _mm512_max_epi32(cost_substitution_vec.zmm, cost_deletion_vec.zmm);
 

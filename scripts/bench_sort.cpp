@@ -203,6 +203,7 @@ int main(int argc, char const **argv) {
             qsort_r(array.order, array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
         });
         expect_sorted(strings, permute_new);
+#elif defined(_MSC_VER)
 #else
         sz_unused(_get_qsort_order);
 #endif
