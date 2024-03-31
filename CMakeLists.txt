@@ -119,14 +119,11 @@ function(set_compiler_flags target cpp_standard target_arch)
 
   # Set the C++ standard
   if(NOT ${cpp_standard} STREQUAL "")
-    # Use the /Zc:__cplusplus flag to correctly define the __cplusplus macro in MSVC
-    set(CXX_STANDARD_MSVC "/std:c++${cpp_standard};/Zc:__cplusplus")
-    set(CXX_STANDARD_GNU "-std=c++${cpp_standard}")
-    target_compile_options(${target} PRIVATE
-      "$<$<CXX_COMPILER_ID:MSVC>:${CXX_STANDARD_MSVC}>"
-      "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:${CXX_STANDARD_GNU}>"
-    )
+    set_target_properties(${target} PROPERTIES CXX_STANDARD ${cpp_standard})
   endif()
+
+  # Use the /Zc:__cplusplus flag to correctly define the __cplusplus macro in MSVC
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/Zc:__cplusplus>")
 
   # Maximum warnings level & warnings as error.
   # MVC uses numeric values:
