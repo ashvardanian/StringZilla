@@ -165,18 +165,21 @@ function(set_compiler_flags target cpp_standard target_arch)
   target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memcpy>")
   target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memset>")
 
-  # Check for ${target_arch} and set it or use "march=native" if not defined
+  # Check for ${target_arch} and set it or use the current system if not defined
   if("${target_arch}" STREQUAL "")
-    # MSVC does not have a direct equivalent to -march=native
-    target_compile_options(
-      ${target} PRIVATE
-      "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<NOT:$<CXX_COMPILER_ID:AppleClang>>>:-march=native>"
-      "$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2>")
+    # Only use the current system if we are not cross compiling
+    if((NOT CMAKE_CROSSCOMPILING) OR (CMAKE_SYSTEM_PROCESSOR MATCHES CMAKE_HOST_SYSTEM_PROCESSOR))
+      # MSVC does not have a direct equivalent to -march=native
+      target_compile_options(
+        ${target} PRIVATE
+        "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-march=native>"
+        "$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2>")
+    endif()
   else()
     target_compile_options(
       ${target}
       PRIVATE
-      "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<NOT:$<CXX_COMPILER_ID:AppleClang>>>:-march=${target_arch}>"
+      "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-march=${target_arch}>"
       "$<$<CXX_COMPILER_ID:MSVC>:/arch:${target_arch}>")
   endif()
 
@@ -252,7 +255,7 @@ if(${STRINGZILLA_BUILD_TEST})
       define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
       define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
     endif()
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
     # ARM specific backends
     define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a")
     define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8-a+simd")
