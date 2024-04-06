@@ -46,6 +46,12 @@ def test_unit_construct():
     assert len(big) == len(native)
 
 
+def test_str_repr():
+    native = "abcdef"
+    big = Str(native)
+    assert repr(big) == f"sz.Str({repr(native)})"
+
+
 def test_unit_indexing():
     native = "abcdef"
     big = Str(native)
