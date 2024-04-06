@@ -158,12 +158,11 @@ function(set_compiler_flags target cpp_standard target_arch)
     target_link_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
   endif()
 
-  # Ask GCC to avoid `__builtin_memcpy` where we know what we are doing.
-  # https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html
-  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memcmp>")
-  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memchr>")
-  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memcpy>")
-  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memset>")
+  # Avoid builtin functions where we know what we are doing.
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memcmp>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memchr>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memcpy>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memset>")
 
   # Check for ${target_arch} and set it or use the current system if not defined
   if("${target_arch}" STREQUAL "")
