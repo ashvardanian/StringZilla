@@ -119,14 +119,11 @@ function(set_compiler_flags target cpp_standard target_arch)
 
   # Set the C++ standard
   if(NOT ${cpp_standard} STREQUAL "")
-    # Use the /Zc:__cplusplus flag to correctly define the __cplusplus macro in MSVC
-    set(CXX_STANDARD_MSVC "/std:c++${cpp_standard};/Zc:__cplusplus")
-    set(CXX_STANDARD_GNU "-std=c++${cpp_standard}")
-    target_compile_options(${target} PRIVATE
-      "$<$<CXX_COMPILER_ID:MSVC>:${CXX_STANDARD_MSVC}>"
-      "$<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>>:${CXX_STANDARD_GNU}>"
-    )
+    set_target_properties(${target} PROPERTIES CXX_STANDARD ${cpp_standard})
   endif()
+
+  # Use the /Zc:__cplusplus flag to correctly define the __cplusplus macro in MSVC
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/Zc:__cplusplus>")
 
   # Maximum warnings level & warnings as error.
   # MVC uses numeric values:
@@ -161,25 +158,32 @@ function(set_compiler_flags target cpp_standard target_arch)
     target_link_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
   endif()
 
-  # Ask GCC to avoid `__builtin_memcpy` where we know what we are doing.
-  # https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html
-  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memcmp>")
-  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memchr>")
-  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memcpy>")
-  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU>:-fno-builtin-memset>")
+  # Avoid builtin functions where we know what we are doing.
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memcmp>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memchr>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memcpy>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memset>")
 
-  # Check for ${target_arch} and set it or use "march=native" if not defined
+  # Check for ${target_arch} and set it or use the current system if not defined
   if("${target_arch}" STREQUAL "")
-    # MSVC does not have a direct equivalent to -march=native
-    target_compile_options(
-      ${target} PRIVATE
-      "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<NOT:$<CXX_COMPILER_ID:AppleClang>>>:-march=native>"
-      "$<$<CXX_COMPILER_ID:MSVC>:/arch:AVX2>")
+    # Only use the current system if we are not cross compiling
+    if((NOT CMAKE_CROSSCOMPILING) OR (CMAKE_SYSTEM_PROCESSOR MATCHES CMAKE_HOST_SYSTEM_PROCESSOR))
+      if (TRUE)
+        include(CheckCXXCompilerFlag)
+        check_cxx_compiler_flag("-march=native" supports_march_native)
+        if (supports_march_native)
+          target_compile_options(${target} PRIVATE "-march=native")
+        endif()
+      else()
+        # MSVC does not have a direct equivalent to -march=native
+        target_compile_options(${target} PRIVATE "/arch:AVX2")
+      endif()
+    endif()
   else()
     target_compile_options(
       ${target}
       PRIVATE
-      "$<$<AND:$<CXX_COMPILER_ID:GNU>,$<NOT:$<CXX_COMPILER_ID:AppleClang>>>:-march=${target_arch}>"
+      "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-march=${target_arch}>"
       "$<$<CXX_COMPILER_ID:MSVC>:/arch:${target_arch}>")
   endif()
 
@@ -255,7 +259,7 @@ if(${STRINGZILLA_BUILD_TEST})
       define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
       define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
     endif()
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
     # ARM specific backends
     define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a")
     define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8-a+simd")
