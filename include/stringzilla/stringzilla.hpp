@@ -3413,8 +3413,8 @@ bool basic_string<char_type_, allocator_>::try_append(const_pointer str, size_ty
         auto this_span = span();
         if (str >= this_span.begin() && str < this_span.end()) {
             auto str_offset_in_this = str - data();
-        sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
-        if (!start) return false;
+            sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
+            if (!start) return false;
             sz_copy(start + this_span.size(), start + str_offset_in_this, length);
         }
         else {
