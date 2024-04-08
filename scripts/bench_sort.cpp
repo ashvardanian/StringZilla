@@ -38,7 +38,11 @@ static sz_bool_t has_under_four_chars(sz_sequence_t const *array_c, sz_size_t i)
     return (sz_bool_t)(array[i].size() < 4);
 }
 
+#if defined(_MSC_VER)
+static int _get_qsort_order(void *arg, const void *a, const void *b) {
+#else
 static int _get_qsort_order(const void *a, const void *b, void *arg) {
+#endif
     sz_sequence_t *sequence = (sz_sequence_t *)arg;
     sz_size_t idx_a = *(sz_size_t *)a;
     sz_size_t idx_b = *(sz_size_t *)b;
@@ -142,7 +146,7 @@ void bench_permute(char const *name, strings_t &strings, permute_t &permute, alg
 
 int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting sorting benchmarks.\n");
-    dataset_t dataset = make_dataset(argc, argv);
+    dataset_t dataset = prepare_benchmark_environment(argc, argv);
     strings_t strings {dataset.tokens.begin(), dataset.tokens.end()};
 
     permute_t permute_base, permute_new;
@@ -201,6 +205,17 @@ int main(int argc, char const **argv) {
             array.get_start = get_start;
             array.get_length = get_length;
             qsort_r(array.order, array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
+        });
+        expect_sorted(strings, permute_new);
+#elif defined(_MSC_VER)
+        bench_permute("qsort_s", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+            sz_sequence_t array;
+            array.order = permute.data();
+            array.count = strings.size();
+            array.handle = &strings;
+            array.get_start = get_start;
+            array.get_length = get_length;
+            qsort_s(array.order, array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
         });
         expect_sorted(strings, permute_new);
 #else

@@ -161,7 +161,7 @@ void bench(strings_type &&strings) {
 }
 
 void bench_on_input_data(int argc, char const **argv) {
-    dataset_t dataset = make_dataset(argc, argv);
+    dataset_t dataset = prepare_benchmark_environment(argc, argv);
 
     std::printf("Benchmarking on the entire dataset:\n");
     bench_unary_functions(dataset.tokens, random_generation_functions(100));

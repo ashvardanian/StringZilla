@@ -19,12 +19,6 @@
 
 #include "test.hpp" // `read_file`
 
-#if SZ_DEBUG // Make debugging faster
-#define default_seconds_m 10
-#else
-#define default_seconds_m 30
-#endif
-
 namespace sz = ashvardanian::stringzilla;
 
 namespace ashvardanian {
@@ -162,6 +156,8 @@ inline std::vector<result_string_type> filter_by_length(std::vector<from_string_
     return result;
 }
 
+inline static std::size_t seconds_per_benchmark = 5;
+
 struct dataset_t {
     std::string text;
     std::vector<std::string_view> tokens;
@@ -206,9 +202,20 @@ inline dataset_t make_dataset_from_path(std::string path) {
 /**
  *  @brief  Loads a dataset, depending on the passed CLI arguments.
  */
-inline dataset_t make_dataset(int argc, char const *argv[]) {
-    if (argc != 2) { throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path>"); }
-    return make_dataset_from_path(argv[1]);
+inline dataset_t prepare_benchmark_environment(int argc, char const *argv[]) {
+    if (argc < 2 || argc > 3)
+        throw std::runtime_error("Usage: " + std::string(argv[0]) + " <path> [seconds_per_benchmark]");
+
+    dataset_t data = make_dataset_from_path(argv[1]);
+
+    // If the seconds_per_benchmark argument is provided, update the value in the dataset
+    if (argc == 3) {
+        seconds_per_benchmark = std::stoi(argv[2]);
+        if (seconds_per_benchmark == 0)
+            throw std::invalid_argument("The number of seconds per task must be greater than 0.");
+    }
+
+    return data;
 }
 
 inline sz_string_view_t to_c(std::string_view str) noexcept { return {str.data(), str.size()}; }
@@ -224,8 +231,7 @@ inline sz_string_view_t to_c(sz_string_view_t str) noexcept { return str; }
  *  @return Number of seconds per iteration.
  */
 template <typename strings_type, typename function_type>
-benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&function,
-                                   seconds_t max_time = default_seconds_m) {
+benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&function) {
 
     namespace stdc = std::chrono;
     using stdcc = stdc::high_resolution_clock;
@@ -245,7 +251,7 @@ benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&funct
 
         stdcc::time_point t2 = stdcc::now();
         result.seconds = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count() / 1.e9;
-        if (result.seconds > max_time) break;
+        if (result.seconds > seconds_per_benchmark) break;
     }
 
     return result;
@@ -259,8 +265,7 @@ benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&funct
  *  @return Number of seconds per iteration.
  */
 template <typename strings_type, typename function_type>
-benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&function,
-                                        seconds_t max_time = default_seconds_m) {
+benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&function) {
 
     namespace stdc = std::chrono;
     using stdcc = stdc::high_resolution_clock;
@@ -282,7 +287,7 @@ benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&
 
         stdcc::time_point t2 = stdcc::now();
         result.seconds = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count() / 1.e9;
-        if (result.seconds > max_time) break;
+        if (result.seconds > seconds_per_benchmark) break;
     }
 
     return result;
