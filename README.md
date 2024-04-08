@@ -1,6 +1,8 @@
 # StringZilla 🦖
 
-_The world wastes a minimum of $100M annually due to inefficient string operations.
+![StringZilla banner](https://github.com/ashvardanian/ashvardanian/blob/master/repositories/StringZilla.png?raw=true)
+
+The world wastes a minimum of $100M annually due to inefficient string operations.
 A typical codebase processes strings character by character, resulting in too many branches and data-dependencies, neglecting 90% of modern CPU's potential.
 LibC is different.
 It attempts to leverage SIMD instructions to boost some operations, and is often used by higher-level languages, runtimes, and databases.
@@ -9,7 +11,7 @@ But it isn't perfect.
 2️⃣ Second, SIMD coverage is inconsistent: acceleration in forward scans does not guarantee speed in the reverse-order search.
 3️⃣ At last, most high-level languages can't always use LibC, as the strings are often not NULL-terminated or may contain the Unicode "Zero" character in the middle of the string.
 That's why StringZilla was created.
-To provide predictably high performance, portable to any modern platform, operating system, and programming language._
+To provide predictably high performance, portable to any modern platform, operating system, and programming language.
 
 [![StringZilla Python installs](https://static.pepy.tech/personalized-badge/stringzilla?period=total&units=abbreviation&left_color=black&right_color=blue&left_text=StringZilla%20Python%20installs)](https://github.com/ashvardanian/stringzilla)
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
@@ -26,8 +28,8 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
 [faq-swar]: https://en.wikipedia.org/wiki/SWAR
 
-- __[C](#quick-start-cc-🛠️) :__ Upgrade LibC's `<string.h>` to `<stringzilla.h>`  in C 99
-- __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla.hpp>` in C++ 11
+- 🐂 __[C](#quick-start-cc-🛠️) :__ Upgrade LibC's `<string.h>` to `<stringzilla.h>`  in C 99
+- 🐉 __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla.hpp>` in C++ 11
 - 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
 - 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
 - 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
