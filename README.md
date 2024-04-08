@@ -55,8 +55,6 @@ __Who is this for?__
 
 ## Performance
 
-![StringZilla Cover](assets/cover-strinzilla.jpeg)
-
 <table style="width: 100%; text-align: center; table-layout: fixed;">
   <colgroup>
     <col style="width: 25%;">
