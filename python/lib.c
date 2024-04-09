@@ -642,11 +642,17 @@ static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->s
 static PyObject *Str_repr(Str *self) {
     // Interestingly, known-length string formatting only works in Python 3.12 and later.
     // https://docs.python.org/3/c-api/unicode.html#c.PyUnicode_FromFormat
+    // REVIEW(alexbowe): Is there a good reason to use PyUnicode_FromFormat when
+    // it is available? If one method works in all versions maybe it is best to use that.
     if (PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 12)
+        // TODO: Use self->tp_name instead of hardcoding `sz.Str`
+        // return PyUnicode_FromFormat("%s('%.*s')", Py_TYPE(self)->tp_name, (int)self->length, self->start);
         return PyUnicode_FromFormat("sz.Str('%.*s')", (int)self->length, self->start);
     else {
         // Use a simpler formatting rule for older versions
         PyObject *str_obj = PyUnicode_FromStringAndSize(self->start, self->length);
+        // TODO: Use self->tp_name instead of hardcoding `sz.Str`
+        // PyObject *result = PyUnicode_FromFormat("%s('%U')", Py_TYPE(self)->tp_name, str_obj);
         PyObject *result = PyUnicode_FromFormat("sz.Str('%U')", str_obj);
         Py_DECREF(str_obj);
         return result;
@@ -837,6 +843,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
     // Create a new `Strs` object
     Strs *result = (Strs *)StrsType.tp_alloc(&StrsType, 0);
+    // REVIEW(alexbowe): Does this raise the appropriate Error on the Python side?
     if (result == NULL && PyErr_NoMemory()) return NULL;
     if (result_count == 0) {
         result->type = STRS_REORDERED;
@@ -2912,13 +2919,80 @@ static PyObject *Strs_sample(Strs *self, PyObject *args, PyObject *kwargs) {
 static PyObject *Strs_str(Strs *self) {
     // This is just an example, adapt it to your needs
     // For instance, you could iterate over your Strs and concatenate them into a single string
+    // TODO(alexbowe): Implement this so it prints as a native list of strings would.
     return PyUnicode_FromFormat("<%s object at %p>", Py_TYPE(self)->tp_name, self);
 }
 
 static PyObject *Strs_repr(Strs *self) {
-    // This is just an example, adapt it to your needs
-    // For instance, you could iterate over your Strs and concatenate them into a single string
-    return PyUnicode_FromFormat("<%s object at %p>", Py_TYPE(self)->tp_name, self);
+    // Construct a string in the format: "[<item1>, <item2>, ... <itemN>]"
+    get_string_at_offset_t getter = str_at_offset_getter(self);
+    if (!getter) {
+        PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
+        return NULL;
+    }
+
+    size_t count = Strs_len(self);
+    size_t buffer_size = 2; // [...]
+    PyObject *parent_string;
+    for (size_t i = 0; i < count; i++) {
+        char const *cstr_start = NULL;
+        size_t cstr_length = 0;
+        getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
+        PyObject *item = PyUnicode_FromStringAndSize(cstr_start, cstr_length);
+        if (!item) {
+            PyErr_SetString(PyExc_TypeError, "Failed to convert item to string");
+            return NULL;
+        }
+
+        // TODO(alexbowe): Escape quotes within in the strings.
+        size_t item_length = PyUnicode_GET_LENGTH(item);
+        buffer_size += item_length + 4; // Quotes, commas, spaces
+        Py_DECREF(item);
+    }
+    buffer_size -= 2; // Remove the last comma and space
+
+    char *buffer = malloc(buffer_size);
+    if (!buffer) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for the formatted string");
+        return NULL;
+    }
+
+    // Format the string
+    size_t offset = 0;
+    buffer[offset++] = '[';
+    for (size_t i = 0; i < count; i++) {
+        char const *cstr_start = NULL;
+        size_t cstr_length = 0;
+        getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
+        PyObject *item = PyUnicode_FromStringAndSize(cstr_start, cstr_length);
+        if (!item) {
+            PyErr_SetString(PyExc_TypeError, "Failed to convert item to string");
+            return NULL;
+        }
+
+        size_t item_length = PyUnicode_GET_LENGTH(item);
+        const char *item_cstr = PyUnicode_AsUTF8(item);
+        buffer[offset++] = '\'';
+        memcpy(buffer + offset, item_cstr, item_length);
+        offset += item_length;
+        buffer[offset++] = '\'';
+
+        if (i < (count - 1)) {
+            buffer[offset++] = ',';
+            buffer[offset++] = ' ';
+        }
+
+        Py_DECREF(item);
+    }
+    buffer[offset] = ']'; // Replace the last comma and space with ']'
+
+    PyObject *str_obj = PyUnicode_FromStringAndSize(buffer, buffer_size);
+    free(buffer);
+
+    PyObject *result = PyUnicode_FromFormat("sz.Strs(%U)", str_obj);
+    Py_DECREF(str_obj);
+
+    return result;
 }
 
 static PySequenceMethods Strs_as_sequence = {

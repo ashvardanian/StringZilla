@@ -31,7 +31,7 @@ try:
 
     pyarrow_available = True
 except:
-    # NumPy is not installed, most tests will be skipped
+    # PyArrow is not installed, most tests will be skipped
     pyarrow_available = False
 
 
@@ -50,6 +50,7 @@ def test_str_repr():
     native = "abcdef"
     big = Str(native)
     assert repr(big) == f"sz.Str({repr(native)})"
+    assert str(big) == native
 
 
 def test_unit_indexing():
@@ -263,6 +264,9 @@ def test_unit_strs_sequence():
     assert [2, 1, 0] == list(lines.order())
     assert "p3" in lines
     assert "p4" not in lines
+
+    assert repr(lines) == f"sz.Strs(['p3', 'p2', 'p1'])"
+    # assert str(lines) == str(native.splitlines())
 
     lines.sort()
     assert [0, 1, 2] == list(lines.order())
