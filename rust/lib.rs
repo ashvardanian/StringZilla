@@ -696,18 +696,137 @@ pub mod sz {
     }
 }
 
-/// The [StringZilla] trait provides a collection of string searching and manipulation functionalities.
+/// Provides extensions for string searching and manipulation functionalities
+/// on types that can reference byte slices ([u8]). This trait extends the capability
+/// of any type implementing `AsRef<[u8]>`, allowing easy integration of SIMD-accelerated
+/// string processing functions.
+///
+/// # Examples
+///
+/// Basic usage on a `Vec<u8>`:
+///
+/// ```
+/// use stringzilla::StringZilla;
+///
+/// let haystack: &[u8] = &[b'a', b'b', b'c', b'd', b'e'];
+/// let needle: &[u8] = &[b'c', b'd'];
+///
+/// assert_eq!(haystack.sz_find(needle.as_ref()), Some(2));
+/// ```
+///
+/// Searching in a string slice:
+///
+/// ```
+/// use stringzilla::StringZilla;
+///
+/// let haystack = "abcdef";
+/// let needle = "cd";
+///
+/// assert_eq!(haystack.sz_find(needle.as_bytes()), Some(2));
+/// ```
 pub trait StringZilla<N>
 where
     N: AsRef<[u8]>,
 {
+    /// Searches for the first occurrence of `needle` in `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = "Hello, world!";
+    /// assert_eq!(haystack.sz_find("world".as_bytes()), Some(7));
+    /// ```
     fn sz_find(&self, needle: N) -> Option<usize>;
+
+    /// Searches for the last occurrence of `needle` in `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = "Hello, world, world!";
+    /// assert_eq!(haystack.sz_rfind("world".as_bytes()), Some(14));
+    /// ```
     fn sz_rfind(&self, needle: N) -> Option<usize>;
+
+    /// Finds the index of the first character in `self` that is also present in `needles`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = "Hello, world!";
+    /// assert_eq!(haystack.sz_find_char_from("aeiou".as_bytes()), Some(1));
+    /// ```
     fn sz_find_char_from(&self, needles: N) -> Option<usize>;
+
+    /// Finds the index of the last character in `self` that is also present in `needles`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = "Hello, world!";
+    /// assert_eq!(haystack.sz_rfind_char_from("aeiou".as_bytes()), Some(8));
+    /// ```
     fn sz_rfind_char_from(&self, needles: N) -> Option<usize>;
+
+    /// Finds the index of the first character in `self` that is not present in `needles`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = "Hello, world!";
+    /// assert_eq!(haystack.sz_find_char_not_from("aeiou".as_bytes()), Some(0));
+    /// ```
     fn sz_find_char_not_from(&self, needles: N) -> Option<usize>;
+
+    /// Finds the index of the last character in `self` that is not present in `needles`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = "Hello, world!";
+    /// assert_eq!(haystack.sz_rfind_char_not_from("aeiou".as_bytes()), Some(12));
+    /// ```
     fn sz_rfind_char_not_from(&self, needles: N) -> Option<usize>;
+
+    /// Computes the Levenshtein edit distance between `self` and `other`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let first = "kitten";
+    /// let second = "sitting";
+    /// assert_eq!(first.sz_edit_distance(second.as_bytes()), 3);
+    /// ```
     fn sz_edit_distance(&self, other: N) -> usize;
+
+    /// Computes the alignment score between `self` and `other` using the specified
+    /// substitution matrix and gap penalty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::{sz, StringZilla};
+    ///
+    /// let first = "kitten";
+    /// let second = "sitting";
+    /// let matrix = sz::unary_substitution_costs();
+    /// let gap_penalty = -1;
+    /// assert_eq!(first.sz_alignment_score(second.as_bytes(), matrix, gap_penalty), -3);
+    /// ```
     fn sz_alignment_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> isize;
 }
 
@@ -749,13 +868,40 @@ where
     }
 }
 
-/// The [MutableStringZilla] trait provides tools for updating strings.
-trait MutableStringZilla<A>
+/// Provides a tool for mutating a byte slice by filling it with random data from a specified alphabet.
+/// This trait is especially useful for types that need to be mutable and can reference or be converted to byte slices.
+///
+/// # Examples
+///
+/// Filling a mutable byte buffer with random ASCII letters:
+///
+/// ```
+/// use stringzilla::MutableStringZilla;
+///
+/// let mut buffer = vec![0u8; 10]; // A buffer to randomize
+/// let alphabet = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"; // Alphabet to use
+/// buffer.sz_randomize(alphabet);
+///
+/// println!("Random buffer: {:?}", buffer);
+/// // The buffer will now contain random ASCII letters.
+/// ```
+pub trait MutableStringZilla<A>
 where
     A: AsRef<[u8]>,
 {
-    /// Generates a random string for a given alphabet.
-    /// Replaces the buffer with a random string of the same length.
+    /// Fills the implementing byte slice with random bytes from the specified `alphabet`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::MutableStringZilla;
+    ///
+    /// let mut text = vec![0; 1000]; // A buffer to randomize
+    /// let alphabet = b"AGTC"; // Using a DNA alphabet
+    /// text.sz_randomize(alphabet);
+    ///
+    /// // `text` is now filled with random 'A', 'G', 'T', or 'C' values.
+    /// ```
     fn sz_randomize(&mut self, alphabet: A);
 }
 

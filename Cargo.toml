@@ -17,6 +17,7 @@ categories = [
     "wasm",
     "external-ffi-bindings",
 ]
+include = ["/rust/**", "/c/**", "/include/**", "/build.rs"]
 
 [lib]
 name = "stringzilla"

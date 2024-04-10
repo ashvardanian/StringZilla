@@ -1128,7 +1128,7 @@ __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH
 
 ## Quick Start: Rust 🦀
 
-StringZilla is available as a Rust crate.
+StringZilla is available as a Rust crate, with documentation available on [docs.rs/stringzilla](https://docs.rs/stringzilla).
 Some of the interfaces will look familiar to the users of the `memchr` crate.
 
 ```rust

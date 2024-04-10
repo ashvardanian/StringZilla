@@ -445,6 +445,14 @@ sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:5.9 /bin/bash -cl 
 cargo test
 ```
 
+If you are updating the package contents, you can validate the list of included files using the following command:
+
+```bash
+cargo package --list --allow-dirty
+```
+
+If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/memchr_vs_stringzilla`](https://github.com/ashvardanian/memchr_vs_stringzilla/) repository.
+
 ## General Performance Observations
 
 ### Unaligned Loads
