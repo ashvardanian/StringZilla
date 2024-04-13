@@ -1282,7 +1282,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
  *          to check the invariants of the library. It's a no-op in the SZ_RELEASE mode.
  *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
-#if SZ_DEBUG
+#if SZ_DEBUG && !SZ_AVOID_LIBC && !defined(SZ_PIC)
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `EXIT_FAILURE`
 #define sz_assert(condition)                                                                                \
@@ -1341,7 +1341,11 @@ SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
 #endif
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
+// Force the byteswap functions to be intrinsics, because when /Oi- is given, these will turn into CRT function calls,
+// which breaks when SZ_AVOID_LIBC is given
+#pragma intrinsic(_byteswap_uint64)
 SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
+#pragma intrinsic(_byteswap_ulong)
 SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
 #else
 SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
@@ -3352,6 +3356,11 @@ SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *alloca
     sz_string_init(string);
 }
 
+// When overriding libc, disable optimisations for this function beacuse MSVC will optimize the loops into a memset.
+// Which then causes a stack overflow due to infinite recursion (memset -> sz_fill_serial -> memset).
+#if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
+#pragma optimize("", off)
+#endif
 SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_ptr_t end = target + length;
     // Dealing with short strings, a single sequential pass would be faster.
@@ -3368,6 +3377,9 @@ SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) 
         while (target != end) *(target++) = value;
     }
 }
+#if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
+#pragma optimize("", on)
+#endif
 
 SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_MISALIGNED_LOADS
