@@ -318,7 +318,7 @@ if(${STRINGZILLA_BUILD_SHARED})
         "SZ_USE_ARM_NEON=0"
         "SZ_USE_ARM_SVE=0")
     elseif(SZ_PLATFORM_ARM)
-      set_compiler_flags(${target} "" "arm64")
+      set_compiler_flags(${target} "" "armv8-a")
 
       target_compile_definitions(${target} PRIVATE
         "SZ_USE_X86_AVX512=0"
