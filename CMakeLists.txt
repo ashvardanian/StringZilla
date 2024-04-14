@@ -168,7 +168,7 @@ function(set_compiler_flags target cpp_standard target_arch)
   if("${target_arch}" STREQUAL "")
     # Only use the current system if we are not cross compiling
     if((NOT CMAKE_CROSSCOMPILING) OR (CMAKE_SYSTEM_PROCESSOR MATCHES CMAKE_HOST_SYSTEM_PROCESSOR))
-      if (TRUE)
+      if (NOT MSVC)
         include(CheckCXXCompilerFlag)
         check_cxx_compiler_flag("-march=native" supports_march_native)
         if (supports_march_native)
