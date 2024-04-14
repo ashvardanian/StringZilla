@@ -1190,7 +1190,7 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t text, sz_size_t length, sz_size_t wind
 #endif
 
 #if SZ_USE_X86_AVX2
-/** @copydoc sz_equal */
+/** @copydoc sz_copy */
 SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
 SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
