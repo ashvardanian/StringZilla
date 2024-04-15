@@ -438,7 +438,7 @@ static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObjec
 }
 
 static int File_init(File *self, PyObject *positional_args, PyObject *named_args) {
-    const char *path;
+    char const *path;
     if (!PyArg_ParseTuple(positional_args, "s", &path)) return -1;
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
@@ -642,17 +642,11 @@ static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->s
 static PyObject *Str_repr(Str *self) {
     // Interestingly, known-length string formatting only works in Python 3.12 and later.
     // https://docs.python.org/3/c-api/unicode.html#c.PyUnicode_FromFormat
-    // REVIEW(alexbowe): Is there a good reason to use PyUnicode_FromFormat when
-    // it is available? If one method works in all versions maybe it is best to use that.
     if (PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 12)
-        // TODO: Use self->tp_name instead of hardcoding `sz.Str`
-        // return PyUnicode_FromFormat("%s('%.*s')", Py_TYPE(self)->tp_name, (int)self->length, self->start);
         return PyUnicode_FromFormat("sz.Str('%.*s')", (int)self->length, self->start);
     else {
         // Use a simpler formatting rule for older versions
         PyObject *str_obj = PyUnicode_FromStringAndSize(self->start, self->length);
-        // TODO: Use self->tp_name instead of hardcoding `sz.Str`
-        // PyObject *result = PyUnicode_FromFormat("%s('%U')", Py_TYPE(self)->tp_name, str_obj);
         PyObject *result = PyUnicode_FromFormat("sz.Str('%U')", str_obj);
         Py_DECREF(str_obj);
         return result;
@@ -911,7 +905,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         size_t element_length;
         str_at_offset_consecutive_32bit(self, start, count, &to->parent_string, &to->start, &element_length);
         to->end_offsets[0] = element_length;
-        for (size_t i = 1; i < result_count; ++i) {
+        for (Py_ssize_t i = 1; i < result_count; ++i) {
             to->end_offsets[i - 1] += from->separator_length;
             PyObject *element_parent = NULL;
             char const *element_start = NULL;
@@ -940,7 +934,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         size_t element_length;
         str_at_offset_consecutive_64bit(self, start, count, &to->parent_string, &to->start, &element_length);
         to->end_offsets[0] = element_length;
-        for (size_t i = 1; i < result_count; ++i) {
+        for (Py_ssize_t i = 1; i < result_count; ++i) {
             to->end_offsets[i - 1] += from->separator_length;
             PyObject *element_parent = NULL;
             char const *element_start = NULL;
@@ -1295,7 +1289,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
     setbuf(file_pointer, NULL); // Set the stream to unbuffered
     int status = fwrite(text.start, 1, text.length, file_pointer);
     PyEval_RestoreThread(gil_state);
-    if (status != text.length) {
+    if (status != (Py_ssize_t)text.length) {
         PyErr_SetFromErrnoWithFilename(PyExc_OSError, path_buffer);
         free(path_buffer);
         fclose(file_pointer);
@@ -2914,85 +2908,165 @@ static PyObject *Strs_sample(Strs *self, PyObject *args, PyObject *kwargs) {
 }
 
 /**
- *  @brief  Array to string conversion method, that concatenates all the strings in the array.
+ *  @brief Exports a string to a UTF-8 buffer, escaping single quotes.
+ *  @param[out] did_fit Populated with 1 if the string is fully exported, 0 if it didn't fit.
  */
-static PyObject *Strs_str(Strs *self) {
-    // This is just an example, adapt it to your needs
-    // For instance, you could iterate over your Strs and concatenate them into a single string
-    // TODO(alexbowe): Implement this so it prints as a native list of strings would.
-    return PyUnicode_FromFormat("<%s object at %p>", Py_TYPE(self)->tp_name, self);
+char const *export_escaped_unquoted_to_utf8_buffer(char const *cstr, size_t cstr_length, //
+                                                   char *buffer, size_t buffer_length,   //
+                                                   int *did_fit) {
+    char const *const cstr_end = cstr + cstr_length;
+    char *const buffer_end = buffer + buffer_length;
+    *did_fit = 1;
+
+    while (cstr < cstr_end) {
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        _sz_extract_utf8_rune(cstr, &rune, &rune_length);
+        if (rune_length == 1 && buffer + 2 < buffer_end) {
+            if (*cstr == '\'') {
+                *(buffer++) = '\\';
+                *(buffer++) = '\'';
+                cstr++;
+            }
+            else if (*cstr == '\'') {
+                *(buffer++) = '\\';
+                *(buffer++) = '\'';
+                cstr++;
+            }
+            else { *(buffer++) = *(cstr++); }
+        }
+        else if (buffer + rune_length < buffer_end) {
+            memcpy(buffer, cstr, rune_length);
+            buffer += rune_length;
+            cstr += rune_length;
+        }
+        else {
+            *did_fit = 0;
+            break;
+        }
+    }
+
+    return buffer;
 }
 
+/**
+ *  @brief  Formats an array of strings, similar to the `repr` method of Python lists.
+ *          Will output an object that looks like `sz.Str(['item1', 'item2... ])`, potentially
+ *          dropping the last few entries.
+ */
 static PyObject *Strs_repr(Strs *self) {
-    // Construct a string in the format: "[<item1>, <item2>, ... <itemN>]"
     get_string_at_offset_t getter = str_at_offset_getter(self);
     if (!getter) {
         PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
         return NULL;
     }
 
+    char repr_buffer[1024];
+    char *repr_buffer_ptr = &repr_buffer[0];
+    char const *const repr_buffer_end = repr_buffer_ptr + 1024;
+
+    // Start of the array
+    memcpy(repr_buffer_ptr, "sz.Strs([", 9);
+    repr_buffer_ptr += 9;
+
     size_t count = Strs_len(self);
-    size_t buffer_size = 2; // [...]
     PyObject *parent_string;
-    for (size_t i = 0; i < count; i++) {
+
+    // In the worst case, we must have enough space for `...', ...])`
+    // That's extra 11 bytes of content.
+    char const *non_fitting_array_tail = "... ])";
+    int const non_fitting_array_tail_length = 6;
+
+    // If the whole string doesn't fit, even before the `non_fitting_array_tail` tail,
+    // we need to add `, '` separator of 3 bytes.
+    for (size_t i = 0; i < count && repr_buffer_ptr + (non_fitting_array_tail_length + 3) < repr_buffer_end; i++) {
         char const *cstr_start = NULL;
         size_t cstr_length = 0;
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
-        PyObject *item = PyUnicode_FromStringAndSize(cstr_start, cstr_length);
-        if (!item) {
-            PyErr_SetString(PyExc_TypeError, "Failed to convert item to string");
-            return NULL;
+
+        if (i > 0) { *(repr_buffer_ptr++) = ',', *(repr_buffer_ptr++) = ' '; }
+        *(repr_buffer_ptr++) = '\'';
+
+        int did_fit;
+        repr_buffer_ptr = export_escaped_unquoted_to_utf8_buffer(
+            cstr_start, cstr_length, repr_buffer_ptr, repr_buffer_end - repr_buffer_ptr - non_fitting_array_tail_length,
+            &did_fit);
+        // If it didn't fit, let's put an ellipsis
+        if (!did_fit) {
+            memcpy(repr_buffer_ptr, non_fitting_array_tail, non_fitting_array_tail_length);
+            repr_buffer_ptr += non_fitting_array_tail_length;
+            return PyUnicode_FromStringAndSize(repr_buffer, repr_buffer_ptr - repr_buffer);
         }
-
-        // TODO(alexbowe): Escape quotes within in the strings.
-        size_t item_length = PyUnicode_GET_LENGTH(item);
-        buffer_size += item_length + 4; // Quotes, commas, spaces
-        Py_DECREF(item);
+        else
+            *(repr_buffer_ptr++) = '\''; // Close the string
     }
-    buffer_size -= 2; // Remove the last comma and space
 
-    char *buffer = malloc(buffer_size);
-    if (!buffer) {
-        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for the formatted string");
+    // Close the array
+    *(repr_buffer_ptr++) = ']', *(repr_buffer_ptr++) = ')';
+    return PyUnicode_FromStringAndSize(repr_buffer, repr_buffer_ptr - repr_buffer);
+}
+
+/**
+ *  @brief  Array to string conversion method, that concatenates all the strings in the array.
+ *          Will output an object that looks like `['item1', 'item2', 'item3']`, containing all
+ *          the strings.
+ */
+static PyObject *Strs_str(Strs *self) {
+    get_string_at_offset_t getter = str_at_offset_getter(self);
+    if (!getter) {
+        PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
         return NULL;
     }
 
-    // Format the string
-    size_t offset = 0;
-    buffer[offset++] = '[';
+    // Aggregate the total length of all the slices and count the number of bytes we need to allocate:
+    size_t count = Strs_len(self);
+    PyObject *parent_string;
+    size_t total_bytes = 2; // opening and closing square brackets
     for (size_t i = 0; i < count; i++) {
         char const *cstr_start = NULL;
         size_t cstr_length = 0;
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
-        PyObject *item = PyUnicode_FromStringAndSize(cstr_start, cstr_length);
-        if (!item) {
-            PyErr_SetString(PyExc_TypeError, "Failed to convert item to string");
-            return NULL;
+        total_bytes += cstr_length;
+        total_bytes += 2;             // For the single quotes
+        if (i != 0) total_bytes += 2; // For the preceding comma and space
+
+        // Count the number of single quotes in the string
+        while (cstr_length) {
+            char quote = '\'';
+            sz_cptr_t next_quote = sz_find_byte(cstr_start, cstr_length, &quote);
+            if (next_quote == NULL) break;
+            total_bytes++;
+            cstr_length -= next_quote - cstr_start;
+            cstr_start = next_quote + 1;
         }
-
-        size_t item_length = PyUnicode_GET_LENGTH(item);
-        const char *item_cstr = PyUnicode_AsUTF8(item);
-        buffer[offset++] = '\'';
-        memcpy(buffer + offset, item_cstr, item_length);
-        offset += item_length;
-        buffer[offset++] = '\'';
-
-        if (i < (count - 1)) {
-            buffer[offset++] = ',';
-            buffer[offset++] = ' ';
-        }
-
-        Py_DECREF(item);
     }
-    buffer[offset] = ']'; // Replace the last comma and space with ']'
 
-    PyObject *str_obj = PyUnicode_FromStringAndSize(buffer, buffer_size);
-    free(buffer);
+    // Now allocate the memory for the concatenated string
+    char *const result_buffer = malloc(total_bytes);
+    if (!result_buffer) {
+        PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for the concatenated string");
+        return NULL;
+    }
 
-    PyObject *result = PyUnicode_FromFormat("sz.Strs(%U)", str_obj);
-    Py_DECREF(str_obj);
+    // Copy the strings into the result buffer
+    char *result_ptr = result_buffer;
+    *result_ptr++ = '[';
+    for (size_t i = 0; i < count; i++) {
+        if (i != 0) {
+            *result_ptr++ = ',';
+            *result_ptr++ = ' ';
+        }
+        char const *cstr_start = NULL;
+        size_t cstr_length = 0;
+        getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
+        *result_ptr++ = '\'';
+        int did_fit;
+        result_ptr = export_escaped_unquoted_to_utf8_buffer(cstr_start, cstr_length, result_ptr, total_bytes, &did_fit);
+        *result_ptr++ = '\'';
+    }
 
-    return result;
+    *result_ptr++ = ']';
+    return PyUnicode_FromStringAndSize(result_buffer, total_bytes);
 }
 
 static PySequenceMethods Strs_as_sequence = {
@@ -3023,7 +3097,8 @@ static PyMethodDef Strs_methods[] = {
     {"sort", Strs_sort, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},          //
     {"order", Strs_order, SZ_METHOD_FLAGS, "Provides the indexes to achieve sorted order."},           //
     {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},             //
-    // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
+    // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."},
+    // //
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrsType = {
@@ -3073,11 +3148,13 @@ static PyMethodDef stringzilla_methods[] = {
     {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS,
      "Hamming distance between two strings, as the number of replaced bytes, and difference in length."},
     {"hamming_distance_unicode", Str_hamming_distance_unicode, SZ_METHOD_FLAGS,
-     "Hamming distance between two strings, as the number of replaced unicode characters, and difference in length."},
+     "Hamming distance between two strings, as the number of replaced unicode characters, and difference in "
+     "length."},
     {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS,
      "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced bytes."},
     {"edit_distance_unicode", Str_edit_distance_unicode, SZ_METHOD_FLAGS,
-     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced unicode characters."},
+     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced unicode "
+     "characters."},
     {"alignment_score", Str_alignment_score, SZ_METHOD_FLAGS,
      "Needleman-Wunsch alignment score given a substitution cost matrix."},
 

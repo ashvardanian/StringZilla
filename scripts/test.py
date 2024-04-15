@@ -265,8 +265,12 @@ def test_unit_strs_sequence():
     assert "p3" in lines
     assert "p4" not in lines
 
-    assert repr(lines) == f"sz.Strs(['p3', 'p2', 'p1'])"
-    # assert str(lines) == str(native.splitlines())
+    assert repr(lines) == "sz.Strs(['p3', 'p2', 'p1'])"
+    assert repr(Str("a" * 1_000_000).split()).endswith("... ])")
+
+    assert str(lines) == "['p3', 'p2', 'p1']"
+    assert str(Str("a" * 1_000_000).split()).startswith("['aaa")
+    assert str(Str("a" * 1_000_000).split()).endswith("aaa']")
 
     lines.sort()
     assert [0, 1, 2] == list(lines.order())
@@ -739,3 +743,9 @@ def test_pyarrow_str_conversion():
 
     arrow_buffer = pa.foreign_buffer(big.address, big.nbytes, big)
     assert arrow_buffer.to_pybytes() == native.encode("utf-8")
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(pytest.main(["-x", "-s", __file__]))
