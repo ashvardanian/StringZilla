@@ -1085,7 +1085,7 @@ struct concatenation {
 
 #pragma endregion
 
-#pragma region String Views/Spans
+#pragma region String Views and Spans
 
 /**
  *  @brief  A string slice (view/span) class implementing a superset of C++23 functionality
@@ -1686,7 +1686,7 @@ class basic_string_slice {
     }
 
 #pragma endregion
-#pragma region C-Style Arguments
+#pragma region C Style Arguments
 
     /**
      *  @brief  Find the first occurrence of a character from a set.
@@ -2538,7 +2538,7 @@ class basic_string {
     }
 
 #pragma endregion
-#pragma region C-Style Arguments
+#pragma region C Style Arguments
 
     /**
      *  @brief  Find the first occurrence of a character from a set.
@@ -2607,7 +2607,7 @@ class basic_string {
 #pragma endregion
 
 #pragma region Modifiers
-#pragma region Non-STL API
+#pragma region Non STL API
 
     /**
      *  @brief  Resizes the string to a specified number of characters, padding with the specified character if needed.
