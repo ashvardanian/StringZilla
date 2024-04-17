@@ -1910,8 +1910,6 @@ class basic_string {
         return ashvardanian::stringzilla::_with_alloc<allocator_type_>(callback);
     }
 
-    bool is_internal() const noexcept { return sz_string_is_on_stack(&string_); }
-
     void init(std::size_t length, char_type value) noexcept(false) {
         sz_ptr_t start;
         if (!_with_alloc(
@@ -2460,6 +2458,7 @@ class basic_string {
     bool is_space() const noexcept { return !empty() && contains_only(whitespaces_set()); }
     bool is_upper() const noexcept { return !empty() && contains_only(ascii_uppercase_set()); }
     bool is_printable() const noexcept { return empty() || contains_only(ascii_printables_set()); }
+    bool is_internal() const noexcept { return sz_string_is_on_stack(&string_); }
 
 #pragma region Character Set Arguments
 
@@ -3343,8 +3342,9 @@ bool basic_string<char_type_, allocator_>::try_resize(size_type count, value_typ
 
     // Allocate more space if needed.
     if (count >= string_space) {
-        if (!_with_alloc(
-                [&](sz_alloc_type &alloc) { return sz_string_expand(&string_, SZ_SIZE_MAX, count, &alloc) != NULL; }))
+        if (!_with_alloc([&](sz_alloc_type &alloc) {
+                return sz_string_expand(&string_, SZ_SIZE_MAX, count - string_length, &alloc) != NULL;
+            }))
             return false;
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
     }
@@ -3383,7 +3383,7 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
     // In the common case, however, we need to allocate.
     else {
         if (!_with_alloc([&](sz_alloc_type &alloc) {
-                string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
+                string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length() - string_length, &alloc);
                 if (!string_start) return false;
                 other.copy(string_start, other.length());
                 return true;
