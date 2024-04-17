@@ -304,8 +304,14 @@ Consider contributing, if you need a feature that's not yet implemented.
 
 ## Quick Start: Python 🐍
 
-1. Install via pip: `pip install stringzilla`  
-2. Import the classes you need: `from stringzilla import Str, Strs, File`  
+Python bindings are available on PyPI, and can be installed with `pip`.
+You can immediately check the installed version and the used hardware capabilities with following commands:
+
+```bash
+pip install stringzilla
+python -c "import stringzilla; print(stringzilla.__version__)"
+python -c "import stringzilla; print(stringzilla.__capabilities__)"
+```
 
 ### Basic Usage
 
@@ -1129,7 +1135,22 @@ __`STRINGZILLA_BUILD_SHARED`, `STRINGZILLA_BUILD_TEST`, `STRINGZILLA_BUILD_BENCH
 ## Quick Start: Rust 🦀
 
 StringZilla is available as a Rust crate, with documentation available on [docs.rs/stringzilla](https://docs.rs/stringzilla).
-Some of the interfaces will look familiar to the users of the `memchr` crate.
+To use the latest crate release in your project, add the following to your `Cargo.toml`:
+
+```toml
+[dependencies]
+stringzilla = ">=3"
+```
+
+Or if you want to use the latest pre-release version from the repository:
+
+```toml
+[dependencies]
+stringzilla = { git = "https://github.com/ashvardanian/stringzilla", branch = "main-dev" }
+```
+
+Once installed, all of the functionality is available through the `stringzilla` namespace.
+Many interfaces will look familiar to the users of the `memchr` crate.
 
 ```rust
 use stringzilla::sz;
@@ -1186,8 +1207,16 @@ sz::edit_distance_utf8("façade", "facade") // 1
 
 ## Quick Start: Swift 🍏
 
-StringZilla is available as a Swift package.
-It currently covers only the most basic functionality, but is planned to be extended to cover the full C++ API.
+StringZilla can be added as a dependency in the Swift Package Manager.
+In your `Package.swift` file, add the following:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/ashvardanian/stringzilla")
+]
+```
+
+The package currently covers only the most basic functionality, but is planned to be extended to cover the full C++ API.
 
 ```swift
 var s = "Hello, world! Welcome to StringZilla. 👋"
