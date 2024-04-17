@@ -3287,7 +3287,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_si
     offset = sz_min_of_two(offset, string_length);
 
     // If we are lucky, no memory allocations will be needed.
-    if (offset + string_length + added_length < string_space) {
+    if (string_length + added_length < string_space) {
         sz_move(string_start + offset + added_length, string_start + offset, string_length - offset);
         string_start[string_length + added_length] = 0;
         // Even if the string is on the stack, the `+=` won't affect the tail of the string.

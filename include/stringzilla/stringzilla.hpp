@@ -3342,8 +3342,9 @@ bool basic_string<char_type_, allocator_>::try_resize(size_type count, value_typ
 
     // Allocate more space if needed.
     if (count >= string_space) {
-        if (!_with_alloc(
-                [&](sz_alloc_type &alloc) { return sz_string_expand(&string_, SZ_SIZE_MAX, count, &alloc) != NULL; }))
+        if (!_with_alloc([&](sz_alloc_type &alloc) {
+                return sz_string_expand(&string_, SZ_SIZE_MAX, count - string_length, &alloc) != NULL;
+            }))
             return false;
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
     }
@@ -3382,7 +3383,7 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
     // In the common case, however, we need to allocate.
     else {
         if (!_with_alloc([&](sz_alloc_type &alloc) {
-                string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
+                string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length() - string_length, &alloc);
                 if (!string_start) return false;
                 other.copy(string_start, other.length());
                 return true;
