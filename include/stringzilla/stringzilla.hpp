@@ -1910,8 +1910,6 @@ class basic_string {
         return ashvardanian::stringzilla::_with_alloc<allocator_type_>(callback);
     }
 
-    bool is_internal() const noexcept { return sz_string_is_on_stack(&string_); }
-
     void init(std::size_t length, char_type value) noexcept(false) {
         sz_ptr_t start;
         if (!_with_alloc(
@@ -2460,6 +2458,7 @@ class basic_string {
     bool is_space() const noexcept { return !empty() && contains_only(whitespaces_set()); }
     bool is_upper() const noexcept { return !empty() && contains_only(ascii_uppercase_set()); }
     bool is_printable() const noexcept { return empty() || contains_only(ascii_printables_set()); }
+    bool is_internal() const noexcept { return sz_string_is_on_stack(&string_); }
 
 #pragma region Character Set Arguments
 
