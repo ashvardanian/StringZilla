@@ -1109,7 +1109,7 @@ class basic_string_slice {
 
   public:
     // STL compatibility
-    using traits_type = std::char_traits<char_type_>;
+    using traits_type = std::char_traits<mutable_char_type>;
     using value_type = mutable_char_type;
     using pointer = char_type *;
     using const_pointer = immutable_char_type *;
