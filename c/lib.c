@@ -76,11 +76,11 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
     unsigned supports_avx512vl = (info7.named.ebx & 0x80000000) != 0;
     // Check for GFNI (Function ID 1, ECX register)
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L171C30-L171C40
-    unsigned supports_avx512vbmi = (info1.named.ecx & 0x00000002) != 0;
-    unsigned supports_avx512vbmi2 = (info1.named.ecx & 0x00000040) != 0;
+    unsigned supports_avx512vbmi = (info7.named.ecx & 0x00000002) != 0;
+    unsigned supports_avx512vbmi2 = (info7.named.ecx & 0x00000040) != 0;
     // Check for GFNI (Function ID 1, ECX register)
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L177C30-L177C40
-    unsigned supports_gfni = (info1.named.ecx & 0x00000100) != 0;
+    unsigned supports_gfni = (info7.named.ecx & 0x00000100) != 0;
 
     return (sz_capability_t)(                               //
         (sz_cap_x86_avx2_k * supports_avx2) |               //
