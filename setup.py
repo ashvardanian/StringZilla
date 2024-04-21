@@ -54,9 +54,6 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
 
-    if is_64bit_arm():
-        compile_args.append("-march=armv8-a+simd")
-
     return compile_args, link_args, macros_args
 
 
