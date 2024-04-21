@@ -372,6 +372,7 @@ SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_
 // for now they will be manually exported using linker flags
 
 #if defined(_MSC_VER)
+#pragma comment(linker, "/export:memchr")
 void *__cdecl memchr(void const *s, int c_wide, size_t n) {
 #else
 SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
@@ -381,6 +382,7 @@ SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
 }
 
 #if defined(_MSC_VER)
+#pragma comment(linker, "/export:memcpy")
 void *__cdecl memcpy(void *dest, void const *src, size_t n) {
 #else
 SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
@@ -390,6 +392,7 @@ SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
 }
 
 #if defined(_MSC_VER)
+#pragma comment(linker, "/export:memmove")
 void *__cdecl memmove(void *dest, void const *src, size_t n) {
 #else
 SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
@@ -399,6 +402,7 @@ SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
 }
 
 #if defined(_MSC_VER)
+#pragma comment(linker, "/export:memset")
 void *__cdecl memset(void *s, int c, size_t n) {
 #else
 SZ_DYNAMIC void *memset(void *s, int c, size_t n) {
