@@ -1282,7 +1282,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
  *          to check the invariants of the library. It's a no-op in the SZ_RELEASE mode.
  *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
-#if SZ_DEBUG && !SZ_AVOID_LIBC && !defined(SZ_PIC)
+#if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC)
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `EXIT_FAILURE`
 #define sz_assert(condition)                                                                                \
