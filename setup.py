@@ -98,14 +98,14 @@ def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         "/O2",  # maximum optimization level
     ]
 
-    # Detect supported architectures for MSVC.
-    macros_args = []
-    if "AVX512" in platform.processor():
-        macros_args.append(("SZ_USE_X86_AVX512", "1"))
-        compile_args.append("/arch:AVX512")
-    if "AVX2" in platform.processor():
-        macros_args.append(("SZ_USE_X86_AVX2", "1"))
-        compile_args.append("/arch:AVX2")
+    # When packaging the library, even if the current machine doesn't support AVX-512 or SVE, still precompile those.
+    macros_args = [
+        ("SZ_USE_X86_AVX512", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_ARM_SVE", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
+        ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
+    ]
 
     link_args = []
     return compile_args, link_args, macros_args
