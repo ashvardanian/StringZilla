@@ -16,12 +16,12 @@ def get_compiler() -> str:
 
 def is_64bit_x86() -> bool:
     arch = platform.machine()
-    return arch == "x86_64" or arch == "i386"
+    return arch in ["x86_64", "x64", "AMD64"]
 
 
 def is_64bit_arm() -> bool:
     arch = platform.machine()
-    return arch.startswith("arm")
+    return arch in ["arm64", "aarch64", "ARM64"]
 
 
 def is_big_endian() -> bool:
