@@ -38,6 +38,14 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     "MinSizeRel" "RelWithDebInfo")
 endif()
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+  SET(SZ_PLATFORM_X86 TRUE)
+  message(STATUS "Platform: x86")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
+  SET(SZ_PLATFORM_ARM TRUE)
+  message(STATUS "Platform: ARM")
+endif()
+
 # Determine if StringZilla is built as a subproject (using `add_subdirectory`)
 # or if it is the main project
 set(STRINGZILLA_IS_MAIN_PROJECT OFF)
@@ -99,8 +107,17 @@ if(${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER 3.13)
   enable_testing()
 endif()
 
+if (MSVC)
+  # Remove /RTC* from MSVC debug flags by default (it will be added back in the set_compiler_flags function)
+  # Beacuse /RTC* cannot be used without the crt so it needs to be disabled for that specifc target
+  string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+  string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
+endif()
+
 # Function to set compiler-specific flags
 function(set_compiler_flags target cpp_standard target_arch)
+  get_target_property(target_type ${target} TYPE)
+
   target_include_directories(${target} PRIVATE scripts)
   target_link_libraries(${target} PRIVATE ${STRINGZILLA_TARGET_NAME})
 
@@ -152,10 +169,18 @@ function(set_compiler_flags target cpp_standard target_arch)
     "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:/Zi>"
   )
 
+  if(NOT target_type STREQUAL "SHARED_LIBRARY")
+    if(MSVC)
+      target_compile_options(${target} PRIVATE "$<$<CONFIG:Debug>:/RTC1>")
+    endif()
+  endif()
+
   # If available, enable Position Independent Code
-  if(CMAKE_POSITION_INDEPENDENT_CODE)
+  get_target_property(target_pic ${target} POSITION_INDEPENDENT_CODE)
+  if(target_pic)
     target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
     target_link_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fPIC>")
+    target_compile_definitions(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:SZ_PIC>")
   endif()
 
   # Avoid builtin functions where we know what we are doing.
@@ -163,6 +188,7 @@ function(set_compiler_flags target cpp_standard target_arch)
   target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memchr>")
   target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memcpy>")
   target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-fno-builtin-memset>")
+  target_compile_options(${target} PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/Oi->")
 
   # Check for ${target_arch} and set it or use the current system if not defined
   if("${target_arch}" STREQUAL "")
@@ -202,17 +228,19 @@ function(set_compiler_flags target cpp_standard target_arch)
 
   # Sanitizer options for Debug mode
   if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(
-      ${target}
-      PRIVATE
-      "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=leak>"
-      "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
+    if(NOT target_type STREQUAL "SHARED_LIBRARY")
+      target_compile_options(
+        ${target}
+        PRIVATE
+        "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=leak>"
+        "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
 
-    target_link_options(
-      ${target}
-      PRIVATE
-      "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=leak>"
-      "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
+      target_link_options(
+        ${target}
+        PRIVATE
+        "$<$<CXX_COMPILER_ID:GNU,Clang>:-fsanitize=address;-fsanitize=leak>"
+        "$<$<CXX_COMPILER_ID:MSVC>:/fsanitize=address>")
+    endif()
 
     # Define SZ_DEBUG macro based on build configuration
     target_compile_definitions(
@@ -248,7 +276,7 @@ if(${STRINGZILLA_BUILD_TEST})
 
   # Check system architecture to avoid complex cross-compilation workflows, but
   # compile multiple backends: disabling all SIMD, enabling only AVX2, only AVX-512, only Arm Neon.
-  if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+  if(SZ_PLATFORM_X86)
     # x86 specific backends
     if (MSVC)
       define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "AVX")
@@ -259,7 +287,7 @@ if(${STRINGZILLA_BUILD_TEST})
       define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
       define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
     endif()
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
+  elseif(SZ_PLATFORM_ARM)
     # ARM specific backends
     define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a")
     define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8-a+simd")
@@ -267,29 +295,52 @@ if(${STRINGZILLA_BUILD_TEST})
 endif()
 
 if(${STRINGZILLA_BUILD_SHARED})
-  add_library(stringzilla_shared SHARED c/lib.c)
-  set_compiler_flags(stringzilla_shared "" "${STRINGZILLA_TARGET_ARCH}")
+
+  function(define_shared target)
+    add_library(${target} SHARED c/lib.c)
+
+    set_target_properties(${target} PROPERTIES
+      VERSION ${PROJECT_VERSION}
+      SOVERSION 1
+      POSITION_INDEPENDENT_CODE ON
+      PUBLIC_HEADER include/stringzilla/stringzilla.h)
+
+    if (SZ_PLATFORM_X86)
+      if (MSVC)
+        set_compiler_flags(${target} "" "SSE2")
+      else()
+        set_compiler_flags(${target} "" "ivybridge")
+      endif()
+
+      target_compile_definitions(${target} PRIVATE
+        "SZ_USE_X86_AVX512=1"
+        "SZ_USE_X86_AVX2=1"
+        "SZ_USE_ARM_NEON=0"
+        "SZ_USE_ARM_SVE=0")
+    elseif(SZ_PLATFORM_ARM)
+      set_compiler_flags(${target} "" "armv8-a")
+
+      target_compile_definitions(${target} PRIVATE
+        "SZ_USE_X86_AVX512=0"
+        "SZ_USE_X86_AVX2=0"
+        "SZ_USE_ARM_NEON=1"
+        "SZ_USE_ARM_SVE=1")
+    endif()
+  endfunction()
+
+  define_shared(stringzilla_shared)
   target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
   target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
-  set_target_properties(stringzilla_shared PROPERTIES
-  VERSION ${PROJECT_VERSION}
-  SOVERSION 1
-  POSITION_INDEPENDENT_CODE ON
-  PUBLIC_HEADER include/stringzilla/stringzilla.h)
-  
+
   # Try compiling a version without linking the LibC
-  add_library(stringzillite SHARED c/lib.c)
-  set_compiler_flags(stringzillite "" "${STRINGZILLA_TARGET_ARCH}")
+  define_shared(stringzillite)
   target_compile_definitions(stringzillite PRIVATE "SZ_AVOID_LIBC=1")
   target_compile_definitions(stringzillite PRIVATE "SZ_OVERRIDE_LIBC=1")
-  set_target_properties(stringzillite PROPERTIES
-    VERSION ${PROJECT_VERSION}
-    SOVERSION 1
-    POSITION_INDEPENDENT_CODE ON
-    PUBLIC_HEADER include/stringzilla/stringzilla.h)
 
   # Avoid built-ins on MSVC and other compilers, as that will cause compileration errors
   target_compile_options(stringzillite PRIVATE
     "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>"
-    "$<$<CXX_COMPILER_ID:MSVC>:/Oi->")
+    "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
+  target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
+  target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
 endif()
