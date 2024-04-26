@@ -15,13 +15,15 @@ def get_compiler() -> str:
 
 
 def is_64bit_x86() -> bool:
-    arch = platform.machine()
-    return arch in ["x86_64", "x64", "AMD64"]
+    return "SZ_X86_64" in os.environ
+    #arch = platform.machine()
+    #return is_64bit() and arch in ["x86_64", "x64", "AMD64"]
 
 
 def is_64bit_arm() -> bool:
-    arch = platform.machine()
-    return arch in ["arm64", "aarch64", "ARM64"]
+    return "SZ_ARM64" in os.environ
+    #arch = platform.machine()
+    #return is_64bit() and arch in ["arm64", "aarch64", "ARM64"]
 
 
 def is_big_endian() -> bool:
