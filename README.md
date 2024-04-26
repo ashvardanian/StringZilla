@@ -28,7 +28,7 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
 [faq-swar]: https://en.wikipedia.org/wiki/SWAR
 
-- 🐂 __[C](#quick-start-cc-🛠️) :__ Upgrade LibC's `<string.h>` to `<stringzilla.h>`  in C 99
+- 🐂 __[C](#Basic-Usage-with-C-99-and-Newer) :__ Upgrade LibC's `<string.h>` to `<stringzilla.h>`  in C 99
 - 🐉 __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla.hpp>` in C++ 11
 - 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
 - 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
@@ -36,7 +36,7 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 - 🐚 __[Shell][faq-shell]__: Accelerate common CLI tools with `sz_` prefix
 - 📚 Researcher? Jump to [Algorithms & Design Decisions](#algorithms--design-decisions-📚)
 - 💡 Thinking to contribute? Look for ["good first issues"][first-issues]
-- 🤝 And check the [guide](CONTRIBUTING.md) to setup the environment
+- 🤝 And check the [guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) to setup the environment
 - Want more bindings or features? Let [me](https://github.com/ashvardanian) know!
 
 [faq-shell]: https://github.com/ashvardanian/StringZilla/blob/main/cli/README.md
@@ -1449,7 +1449,7 @@ So consider transcoding with [simdutf](https://github.com/simdutf/simdutf), if y
 
 ## Contributing 👾
 
-Please check out the [contributing guide](CONTRIBUTING.md) for more details on how to setup the development environment and contribute to this project.
+Please check out the [contributing guide](https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md) for more details on how to setup the development environment and contribute to this project.
 If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall], [UForm][uform], and [SimSIMD][simsimd]. 🤗
 
 [usearch]: https://github.com/unum-cloud/usearch
