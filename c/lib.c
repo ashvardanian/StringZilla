@@ -224,6 +224,14 @@ BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
     case DLL_PROCESS_DETACH: return TRUE;
     }
 }
+
+#if SZ_AVOID_LIBC
+BOOL WINAPI _DllMainCRTStartup(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
+    DllMain(hints, forward_reason, lp);
+    return TRUE;
+}
+#endif
+
 #else
 __attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
@@ -356,30 +364,54 @@ SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_
     sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
 }
 
-// It's much harder to override the C standard library on Windows and MSVC,
-// so we'll just provide the symbols for other Operating Systems.
-#if SZ_OVERRIDE_LIBC && !(defined(_WIN32) || defined(__CYGWIN__))
+// Provide overrides for the libc mem* functions
+#if SZ_OVERRIDE_LIBC && !(defined(__CYGWIN__))
 
+// SZ_DYNAMIC can't be use here for MSVC, because MSVC complains about different linkage (C2375), probably due to to the
+// CRT headers specifying the function as __declspec(dllimport), there might be a combination of defines that works. But
+// for now they will be manually exported using linker flags
+
+#if defined(_MSC_VER)
+#pragma comment(linker, "/export:memchr")
+void *__cdecl memchr(void const *s, int c_wide, size_t n) {
+#else
 SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
+#endif
     sz_u8_t c = (sz_u8_t)c_wide;
     return (void *)sz_find_byte(s, n, (sz_cptr_t)&c);
 }
 
+#if defined(_MSC_VER)
+#pragma comment(linker, "/export:memcpy")
+void *__cdecl memcpy(void *dest, void const *src, size_t n) {
+#else
 SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
+#endif
     sz_copy(dest, src, n);
     return (void *)dest;
 }
 
+#if defined(_MSC_VER)
+#pragma comment(linker, "/export:memmove")
+void *__cdecl memmove(void *dest, void const *src, size_t n) {
+#else
 SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
+#endif
     sz_move(dest, src, n);
     return (void *)dest;
 }
 
+#if defined(_MSC_VER)
+#pragma comment(linker, "/export:memset")
+void *__cdecl memset(void *s, int c, size_t n) {
+#else
 SZ_DYNAMIC void *memset(void *s, int c, size_t n) {
+#endif
     sz_fill(s, n, c);
     return (void *)s;
 }
 
+#if !defined(_MSC_VER)
 SZ_DYNAMIC void *memmem(void const *h, size_t h_len, void const *n, size_t n_len) {
     return (void *)sz_find(h, h_len, n, n_len);
 }
@@ -393,5 +425,5 @@ SZ_DYNAMIC void memfrob(void *s, size_t n) {
     char const *base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     sz_generate(base64, 64, s, n, SZ_NULL, SZ_NULL);
 }
-
+#endif
 #endif // SZ_OVERRIDE_LIBC

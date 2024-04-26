@@ -1144,11 +1144,15 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #include <immintrin.h>
 #endif // SZ_USE_X86...
 #if SZ_USE_ARM_NEON
+#if !defined(_MSC_VER)
 #include <arm_acle.h>
+#endif
 #include <arm_neon.h>
 #endif // SZ_USE_ARM_NEON
 #if SZ_USE_ARM_SVE
+#if !defined(_MSC_VER)
 #include <arm_sve.h>
+#endif
 #endif // SZ_USE_ARM_SVE
 
 #pragma region Hardware - Specific API
@@ -1282,7 +1286,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
  *          to check the invariants of the library. It's a no-op in the SZ_RELEASE mode.
  *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
-#if SZ_DEBUG
+#if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC)
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `EXIT_FAILURE`
 #define sz_assert(condition)                                                                                \
@@ -1341,7 +1345,11 @@ SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
 #endif
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
+// Force the byteswap functions to be intrinsics, because when /Oi- is given, these will turn into CRT function calls,
+// which breaks when SZ_AVOID_LIBC is given
+#pragma intrinsic(_byteswap_uint64)
 SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
+#pragma intrinsic(_byteswap_ulong)
 SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return _byteswap_ulong(val); }
 #else
 SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return __builtin_popcountll(x); }
@@ -3352,6 +3360,11 @@ SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *alloca
     sz_string_init(string);
 }
 
+// When overriding libc, disable optimisations for this function beacuse MSVC will optimize the loops into a memset.
+// Which then causes a stack overflow due to infinite recursion (memset -> sz_fill_serial -> memset).
+#if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
+#pragma optimize("", off)
+#endif
 SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_ptr_t end = target + length;
     // Dealing with short strings, a single sequential pass would be faster.
@@ -3368,6 +3381,9 @@ SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) 
         while (target != end) *(target++) = value;
     }
 }
+#if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
+#pragma optimize("", on)
+#endif
 
 SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_MISALIGNED_LOADS
@@ -4139,8 +4155,8 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
 
     // The rare case, when both string are very long.
     while ((a_length >= 64) & (b_length >= 64)) {
-        a_vec.zmm = _mm512_loadu_epi8(a);
-        b_vec.zmm = _mm512_loadu_epi8(b);
+        a_vec.zmm = _mm512_loadu_si512(a);
+        b_vec.zmm = _mm512_loadu_si512(b);
         mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
         if (mask_not_equal != 0) {
             sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
@@ -4181,8 +4197,8 @@ SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
     sz_u512_vec_t a_vec, b_vec;
 
     while (length >= 64) {
-        a_vec.zmm = _mm512_loadu_epi8(a);
-        b_vec.zmm = _mm512_loadu_epi8(b);
+        a_vec.zmm = _mm512_loadu_si512(a);
+        b_vec.zmm = _mm512_loadu_si512(b);
         mask = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
         if (mask != 0) return sz_false_k;
         a += 64, b += 64, length -= 64;
@@ -4201,14 +4217,14 @@ SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
 }
 
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    for (; length >= 64; target += 64, length -= 64) _mm512_storeu_epi8(target, _mm512_set1_epi8(value));
+    for (; length >= 64; target += 64, length -= 64) _mm512_storeu_si512(target, _mm512_set1_epi8(value));
     // At this point the length is guaranteed to be under 64.
     _mm512_mask_storeu_epi8(target, _sz_u64_mask_until(length), _mm512_set1_epi8(value));
 }
 
 SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     for (; length >= 64; target += 64, source += 64, length -= 64)
-        _mm512_storeu_epi8(target, _mm512_loadu_epi8(source));
+        _mm512_storeu_si512(target, _mm512_loadu_si512(source));
     // At this point the length is guaranteed to be under 64.
     __mmask64 mask = _sz_u64_mask_until(length);
     _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
@@ -4217,7 +4233,7 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target < source || target >= source + length) {
         for (; length >= 64; target += 64, source += 64, length -= 64)
-            _mm512_storeu_epi8(target, _mm512_loadu_epi8(source));
+            _mm512_storeu_si512(target, _mm512_loadu_si512(source));
         // At this point the length is guaranteed to be under 64.
         __mmask64 mask = _sz_u64_mask_until(length);
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
@@ -4225,7 +4241,7 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     else {
         // Jump to the end and walk backwards.
         for (target += length, source += length; length >= 64; length -= 64)
-            _mm512_storeu_epi8(target -= 64, _mm512_loadu_epi8(source -= 64));
+            _mm512_storeu_si512(target -= 64, _mm512_loadu_si512(source -= 64));
         // At this point the length is guaranteed to be under 64.
         __mmask64 mask = _sz_u64_mask_until(length);
         _mm512_mask_storeu_epi8(target - length, mask, _mm512_maskz_loadu_epi8(mask, source - length));
@@ -4238,7 +4254,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
     n_vec.zmm = _mm512_set1_epi8(n[0]);
 
     while (h_length >= 64) {
-        h_vec.zmm = _mm512_loadu_epi8(h);
+        h_vec.zmm = _mm512_loadu_si512(h);
         mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
         if (mask) return h + sz_u64_ctz(mask);
         h += 64, h_length -= 64;
@@ -4275,9 +4291,9 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
 
     // Scan through the string.
     for (; h_length >= n_length + 64; h += 64, h_length -= 64) {
-        h_first_vec.zmm = _mm512_loadu_epi8(h + offset_first);
-        h_mid_vec.zmm = _mm512_loadu_epi8(h + offset_mid);
-        h_last_vec.zmm = _mm512_loadu_epi8(h + offset_last);
+        h_first_vec.zmm = _mm512_loadu_si512(h + offset_first);
+        h_mid_vec.zmm = _mm512_loadu_si512(h + offset_mid);
+        h_last_vec.zmm = _mm512_loadu_si512(h + offset_last);
         matches = _kand_mask64(_kand_mask64( // Intersect the masks
                                    _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
                                    _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
@@ -4317,7 +4333,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cpt
     n_vec.zmm = _mm512_set1_epi8(n[0]);
 
     while (h_length >= 64) {
-        h_vec.zmm = _mm512_loadu_epi8(h + h_length - 64);
+        h_vec.zmm = _mm512_loadu_si512(h + h_length - 64);
         mask = _mm512_cmpeq_epi8_mask(h_vec.zmm, n_vec.zmm);
         if (mask) return h + h_length - 1 - sz_u64_clz(mask);
         h_length -= 64;
@@ -4356,9 +4372,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
     sz_cptr_t h_reversed;
     for (; h_length >= n_length + 64; h_length -= 64) {
         h_reversed = h + h_length - n_length - 64 + 1;
-        h_first_vec.zmm = _mm512_loadu_epi8(h_reversed + offset_first);
-        h_mid_vec.zmm = _mm512_loadu_epi8(h_reversed + offset_mid);
-        h_last_vec.zmm = _mm512_loadu_epi8(h_reversed + offset_last);
+        h_first_vec.zmm = _mm512_loadu_si512(h_reversed + offset_first);
+        h_mid_vec.zmm = _mm512_loadu_si512(h_reversed + offset_mid);
+        h_last_vec.zmm = _mm512_loadu_si512(h_reversed + offset_last);
         matches = _kand_mask64(_kand_mask64( // Intersect the masks
                                    _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
                                    _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
@@ -4880,10 +4896,10 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_avx512( //
 
         // Load one row of the substitution matrix into four ZMM registers.
         sz_error_cost_t const *row_subs = subs + shorter_unsigned[idx_shorter] * 256u;
-        row_first_subs_vec.zmm = _mm512_loadu_epi8(row_subs + 64 * 0);
-        row_second_subs_vec.zmm = _mm512_loadu_epi8(row_subs + 64 * 1);
-        row_third_subs_vec.zmm = _mm512_loadu_epi8(row_subs + 64 * 2);
-        row_fourth_subs_vec.zmm = _mm512_loadu_epi8(row_subs + 64 * 3);
+        row_first_subs_vec.zmm = _mm512_loadu_si512(row_subs + 64 * 0);
+        row_second_subs_vec.zmm = _mm512_loadu_si512(row_subs + 64 * 1);
+        row_third_subs_vec.zmm = _mm512_loadu_si512(row_subs + 64 * 2);
+        row_fourth_subs_vec.zmm = _mm512_loadu_si512(row_subs + 64 * 3);
 
         // In the serial version we have one forward pass, that computes the deletion,
         // insertion, and substitution costs at once.

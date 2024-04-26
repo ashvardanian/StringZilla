@@ -8,7 +8,7 @@
 #   = meaning 16 platforms * 7 Python versions = 112 builds.
 #   = meaning over 500,000 tests.
 [build-system]
-requires = ["setuptools>=42", "wheel", "cmake>=3.22"]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
@@ -74,3 +74,45 @@ repair-wheel-command = "delocate-wheel --require-archs {delocate_archs} -w {dest
 
 [tool.cibuildwheel.windows]
 before-build = ["rd /s /q {project}\\build || echo Done"]
+
+# Detect x86 64-bit builds
+[[tool.cibuildwheel.overrides]]
+select = "*-win_amd64"
+inherit.environment = "append"
+environment.SZ_X86_64="1"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-manylinux*_x86_64"
+inherit.environment = "append"
+environment.SZ_X86_64="1"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-musllinux*_x86_64"
+inherit.environment = "append"
+environment.SZ_X86_64="1"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-macos*_x86_64"
+inherit.environment = "append"
+environment.SZ_X86_64="1"
+
+# Detect ARM 64-bit builds
+[[tool.cibuildwheel.overrides]]
+select = "*-win_arm64"
+inherit.environment = "append"
+environment.SZ_ARM64="1"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-manylinux*_aarch64"
+inherit.environment = "append"
+environment.SZ_ARM64="1"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-musllinux*_aarch64"
+inherit.environment = "append"
+environment.SZ_ARM64="1"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-macos*_arm64"
+inherit.environment = "append"
+environment.SZ_ARM64="1"
