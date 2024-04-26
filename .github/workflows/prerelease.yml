@@ -204,9 +204,9 @@ jobs:
     env:
       CC: clang-16
       CXX: clang++-16
-      AR: llvm-ar-16
-      NM: llvm-nm-16
-      RANLIB: llvm-ranlib-16
+      AR: llvm-ar
+      NM: llvm-nm
+      RANLIB: llvm-ranlib
 
     strategy:
       fail-fast: false
