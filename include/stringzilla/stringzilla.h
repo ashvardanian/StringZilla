@@ -1144,11 +1144,15 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #include <immintrin.h>
 #endif // SZ_USE_X86...
 #if SZ_USE_ARM_NEON
+#if !defined(_MSC_VER)
 #include <arm_acle.h>
+#endif
 #include <arm_neon.h>
 #endif // SZ_USE_ARM_NEON
 #if SZ_USE_ARM_SVE
+#if !defined(_MSC_VER)
 #include <arm_sve.h>
+#endif
 #endif // SZ_USE_ARM_SVE
 
 #pragma region Hardware - Specific API
