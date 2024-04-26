@@ -14,16 +14,21 @@ def get_compiler() -> str:
     return ""
 
 
+using_cibuildwheels = os.environ.get("CIBUILDWHEEL", "0") == "1"
+
+
 def is_64bit_x86() -> bool:
-    return "SZ_X86_64" in os.environ
-    #arch = platform.machine()
-    #return is_64bit() and arch in ["x86_64", "x64", "AMD64"]
+    if using_cibuildwheels:
+        return "SZ_X86_64" in os.environ
+    arch = platform.machine()
+    return arch in ["x86_64", "x64", "AMD64"]
 
 
 def is_64bit_arm() -> bool:
-    return "SZ_ARM64" in os.environ
-    #arch = platform.machine()
-    #return is_64bit() and arch in ["arm64", "aarch64", "ARM64"]
+    if using_cibuildwheels:
+        return "SZ_ARM64" in os.environ
+    arch = platform.machine()
+    return  arch in ["arm64", "aarch64", "ARM64"]
 
 
 def is_big_endian() -> bool:
