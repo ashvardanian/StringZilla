@@ -202,11 +202,11 @@ jobs:
     name: Cross Compilation
     runs-on: ubuntu-22.04
     env:
-      CC: clang
-      CXX: clang++
-      AR: llvm-ar
-      NM: llvm-nm
-      RANLIB: llvm-ranlib
+      CC: clang-16
+      CXX: clang++-16
+      AR: llvm-ar-16
+      NM: llvm-nm-16
+      RANLIB: llvm-ranlib-16
 
     strategy:
       fail-fast: false
@@ -222,11 +222,15 @@ jobs:
 
         # C/C++
         # We need to install the cross-compilation toolchain for ARM64 and ARMHF
+        # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld make crossbuild-essential-arm64 crossbuild-essential-armhf
-
+          sudo apt-get install -y make build-essential crossbuild-essential-arm64 crossbuild-essential-armhf  libjemalloc-dev
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
+        
       - name: Build C/C++
         run: |
           cmake -B build_artifacts \
