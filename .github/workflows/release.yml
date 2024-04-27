@@ -161,8 +161,8 @@ jobs:
     runs-on: ubuntu-22.04
     needs: versioning
     env:
-      CC: clang
-      CXX: clang++
+      CC: clang-16
+      CXX: clang++-16
       AR: llvm-ar
       NM: llvm-nm
       RANLIB: llvm-ranlib
@@ -191,7 +191,10 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang lld make crossbuild-essential-arm64 crossbuild-essential-armhf
+          sudo apt-get install -y make build-essential crossbuild-essential-arm64 crossbuild-essential-armhf  libjemalloc-dev
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 16
 
       - name: Build C/C++
         run: |
