@@ -460,6 +460,7 @@ If you want to run benchmarks against third-party implementations, check out the
 ## Contributing in Go
 
 ```bash
+export GO111MODULE="off"
 go run scripts/test.go
 go run scripts/bench.go
 ```
@@ -467,7 +468,7 @@ go run scripts/bench.go
 To run locally import with a relative path 
 
 ```bash
-   "../StringZilla/go/sz"
+   sz "../StringZilla/go/stringzilla"
 ```
 
 And turn off GO111MODULE
