@@ -48,5 +48,12 @@ func main() {
     assertEqual( sz.IndexAny( "west east", "ta" ), 3)
 	fmt.Println("successful")
 
+	fmt.Print("Count ... ")
+    //assertEqual( strings.Count( str, pat ), int(sz.Count( str,pat,false )) )
+    assertEqual( sz.Count( "aaaaa", "a", false ),  5 )
+    assertEqual( sz.Count( "aaaaa", "aa", false ), 2 )
+    assertEqual( sz.Count( "aaaaa", "aa", true ),  4 )
+	fmt.Println("successful")
+
 
 }

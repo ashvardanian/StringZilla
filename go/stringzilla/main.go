@@ -59,7 +59,7 @@ func Find( str string, pat string ) int64 {
     return int64(uintptr(ret)-uintptr(unsafe.Pointer(cstr)))
 }
 
-func RFind( str string, pat string ) int64 {
+func LastIndex( str string, pat string ) int64 {
     cstr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
     cpat := (*C.char)(unsafe.Pointer(unsafe.StringData(pat)))
     strlen := len(str)
@@ -69,6 +69,9 @@ func RFind( str string, pat string ) int64 {
 		return -1
 	}
     return int64(uintptr(ret)-uintptr(unsafe.Pointer(cstr)))
+}
+func RFind( str string, pat string ) int64 {
+    return LastIndex(str,pat)
 }
 
 func IndexAny( str string, charset string ) int64 {
@@ -84,6 +87,43 @@ func IndexAny( str string, charset string ) int64 {
 }
 func FindCharFrom( str string, charset string ) int64 {
 	return IndexAny( str, charset )
+}
+
+func Count( str string, pat string, overlap bool ) int64 {
+    cstr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
+    cpat := (*C.char)(unsafe.Pointer(unsafe.StringData(pat)))
+    strlen := int64(len(str))
+    patlen := int64(len(pat))
+
+    if strlen == 0 || patlen == 0 || strlen < patlen {
+        return 0
+    }
+
+    count := int64(0);
+    if overlap == true {
+        for strlen > 0 {
+            ret := unsafe.Pointer(C.sz_find( cstr, C.ulong(strlen), cpat, C.ulong(patlen) ))
+            if ret == nil {
+                break
+            }
+            count += 1
+            strlen -= ( 1 + int64(uintptr(ret)-uintptr(unsafe.Pointer(cstr))) )
+            cstr = (*C.char)(unsafe.Add(ret,1))
+        }
+    } else {
+        for strlen > 0 {
+            ret := unsafe.Pointer(C.sz_find( cstr, C.ulong(strlen), cpat, C.ulong(patlen) ))
+            if ret == nil {
+                break
+            }
+            count += 1
+            strlen -= (patlen+int64(uintptr(ret)-uintptr(unsafe.Pointer(cstr))))
+            cstr = (*C.char)(unsafe.Add(ret,patlen))
+        }
+    }
+
+    return count
+
 }
 
 
