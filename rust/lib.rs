@@ -696,6 +696,213 @@ pub mod sz {
     }
 }
 
+pub trait Matcher<'a> {
+    fn find(&self, haystack: &'a [u8]) -> Option<usize>;
+    fn needle_length(&self) -> usize;
+    fn skip_length(&self, include_overlaps: bool, is_reverse: bool) -> usize;
+}
+
+pub enum MatcherType<'a> {
+    Find(&'a [u8]),
+    RFind(&'a [u8]),
+    FindFirstOf(&'a [u8]),
+    FindLastOf(&'a [u8]),
+    FindFirstNotOf(&'a [u8]),
+    FindLastNotOf(&'a [u8]),
+}
+
+impl<'a> Matcher<'a> for MatcherType<'a> {
+    fn find(&self, haystack: &'a [u8]) -> Option<usize> {
+        match self {
+            MatcherType::Find(needle) => sz::find(haystack, needle),
+            MatcherType::RFind(needle) => sz::rfind(haystack, needle),
+            MatcherType::FindFirstOf(needles) => sz::find_char_from(haystack, needles),
+            MatcherType::FindLastOf(needles) => sz::rfind_char_from(haystack, needles),
+            MatcherType::FindFirstNotOf(needles) => sz::find_char_not_from(haystack, needles),
+            MatcherType::FindLastNotOf(needles) => sz::rfind_char_not_from(haystack, needles),
+        }
+    }
+
+    fn needle_length(&self) -> usize {
+        match self {
+            MatcherType::Find(needle) | MatcherType::RFind(needle) => needle.len(),
+            _ => 1,
+        }
+    }
+
+    fn skip_length(&self, include_overlaps: bool, is_reverse: bool) -> usize {
+        match (include_overlaps, is_reverse) {
+            (true, true) => self.needle_length().saturating_sub(1),
+            (true, false) => 1,
+            (false, true) => 0,
+            (false, false) => self.needle_length(),
+        }
+    }
+}
+
+pub struct RangeMatches<'a> {
+    haystack: &'a [u8],
+    matcher: MatcherType<'a>,
+    position: usize,
+    include_overlaps: bool,
+}
+
+impl<'a> RangeMatches<'a> {
+    pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>, include_overlaps: bool) -> Self {
+        Self {
+            haystack,
+            matcher,
+            position: 0,
+            include_overlaps,
+        }
+    }
+}
+
+impl<'a> Iterator for RangeMatches<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position >= self.haystack.len() {
+            return None;
+        }
+
+        if let Some(index) = self.matcher.find(&self.haystack[self.position..]) {
+            let start = self.position + index;
+            let end = start + self.matcher.needle_length();
+            self.position = start + self.matcher.skip_length(self.include_overlaps, false);
+            Some(&self.haystack[start..end])
+        } else {
+            self.position = self.haystack.len();
+            None
+        }
+    }
+}
+
+pub struct RangeSplits<'a> {
+    haystack: &'a [u8],
+    matcher: MatcherType<'a>,
+    position: usize,
+    last_match: Option<usize>,
+}
+
+impl<'a> RangeSplits<'a> {
+    pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
+        Self {
+            haystack,
+            matcher,
+            position: 0,
+            last_match: None,
+        }
+    }
+}
+
+impl<'a> Iterator for RangeSplits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position > self.haystack.len() {
+            return None;
+        }
+
+        if let Some(index) = self.matcher.find(&self.haystack[self.position..]) {
+            let start = self.position;
+            let end = self.position + index;
+            self.position = end + self.matcher.needle_length();
+            self.last_match = Some(end);
+            Some(&self.haystack[start..end])
+        } else if self.position < self.haystack.len() || self.last_match.is_some() {
+            let start = self.position;
+            self.position = self.haystack.len() + 1;
+            Some(&self.haystack[start..])
+        } else {
+            None
+        }
+    }
+}
+
+pub struct RangeRMatches<'a> {
+    haystack: &'a [u8],
+    matcher: MatcherType<'a>,
+    position: usize,
+    include_overlaps: bool,
+}
+
+impl<'a> RangeRMatches<'a> {
+    pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>, include_overlaps: bool) -> Self {
+        Self {
+            haystack,
+            matcher,
+            position: haystack.len(),
+            include_overlaps,
+        }
+    }
+}
+
+impl<'a> Iterator for RangeRMatches<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position == 0 {
+            return None;
+        }
+
+        let search_area = &self.haystack[..self.position];
+        if let Some(index) = self.matcher.find(search_area) {
+            let start = index;
+            let end = start + self.matcher.needle_length();
+            let result = Some(&self.haystack[start..end]);
+
+            let skip = self.matcher.skip_length(self.include_overlaps, true);
+            self.position = start + skip;
+
+            result
+        } else {
+            None
+        }
+    }
+}
+
+pub struct RangeRSplits<'a> {
+    haystack: &'a [u8],
+    matcher: MatcherType<'a>,
+    position: usize,
+}
+
+impl<'a> RangeRSplits<'a> {
+    pub fn new(haystack: &'a [u8], matcher: MatcherType<'a>) -> Self {
+        Self {
+            haystack,
+            matcher,
+            position: haystack.len(),
+        }
+    }
+}
+
+impl<'a> Iterator for RangeRSplits<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position == 0 {
+            return None;
+        }
+
+        let search_area = &self.haystack[..self.position];
+        if let Some(index) = self.matcher.find(search_area) {
+            let end = self.position;
+            let start = index + self.matcher.needle_length();
+            let result = Some(&self.haystack[start..end]);
+
+            self.position = index;
+
+            result
+        } else {
+            let result = Some(&self.haystack[..self.position]);
+            self.position = 0;
+            result
+        }
+    }
+}
+
 /// Provides extensions for string searching and manipulation functionalities
 /// on types that can reference byte slices ([u8]). This trait extends the capability
 /// of any type implementing `AsRef<[u8]>`, allowing easy integration of SIMD-accelerated
@@ -724,9 +931,9 @@ pub mod sz {
 ///
 /// assert_eq!(haystack.sz_find(needle.as_bytes()), Some(2));
 /// ```
-pub trait StringZilla<N>
+pub trait StringZilla<'a, N>
 where
-    N: AsRef<[u8]>,
+    N: AsRef<[u8]> + 'a,
 {
     /// Searches for the first occurrence of `needle` in `self`.
     ///
@@ -828,12 +1035,21 @@ where
     /// assert_eq!(first.sz_alignment_score(second.as_bytes(), matrix, gap_penalty), -3);
     /// ```
     fn sz_alignment_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> isize;
+
+    fn sz_matches(&'a self, needle: &'a N) -> RangeMatches<'a>;
+    fn sz_rmatches(&'a self, needle: &'a N) -> RangeRMatches<'a>;
+    fn sz_splits(&'a self, needle: &'a N) -> RangeSplits<'a>;
+    fn sz_rsplits(&'a self, needle: &'a N) -> RangeRSplits<'a>;
+    fn sz_find_first_of(&'a self, needles: &'a N) -> RangeMatches<'a>;
+    fn sz_find_last_of(&'a self, needles: &'a N) -> RangeRMatches<'a>;
+    fn sz_find_first_not_of(&'a self, needles: &'a N) -> RangeMatches<'a>;
+    fn sz_find_last_not_of(&'a self, needles: &'a N) -> RangeRMatches<'a>;
 }
 
-impl<T, N> StringZilla<N> for T
+impl<'a, T, N> StringZilla<'a, N> for T
 where
-    T: AsRef<[u8]>,
-    N: AsRef<[u8]>,
+    T: AsRef<[u8]> + ?Sized,
+    N: AsRef<[u8]> + 'a,
 {
     fn sz_find(&self, needle: N) -> Option<usize> {
         sz::find(self, needle)
@@ -865,6 +1081,54 @@ where
 
     fn sz_alignment_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> isize {
         sz::alignment_score(self, other, matrix, gap)
+    }
+
+    fn sz_matches(&'a self, needle: &'a N) -> RangeMatches<'a> {
+        RangeMatches::new(self.as_ref(), MatcherType::Find(needle.as_ref()), true)
+    }
+
+    fn sz_rmatches(&'a self, needle: &'a N) -> RangeRMatches<'a> {
+        RangeRMatches::new(self.as_ref(), MatcherType::RFind(needle.as_ref()), true)
+    }
+
+    fn sz_splits(&'a self, needle: &'a N) -> RangeSplits<'a> {
+        RangeSplits::new(self.as_ref(), MatcherType::Find(needle.as_ref()))
+    }
+
+    fn sz_rsplits(&'a self, needle: &'a N) -> RangeRSplits<'a> {
+        RangeRSplits::new(self.as_ref(), MatcherType::RFind(needle.as_ref()))
+    }
+
+    fn sz_find_first_of(&'a self, needles: &'a N) -> RangeMatches<'a> {
+        RangeMatches::new(
+            self.as_ref(),
+            MatcherType::FindFirstOf(needles.as_ref()),
+            true,
+        )
+    }
+
+    fn sz_find_last_of(&'a self, needles: &'a N) -> RangeRMatches<'a> {
+        RangeRMatches::new(
+            self.as_ref(),
+            MatcherType::FindLastOf(needles.as_ref()),
+            true,
+        )
+    }
+
+    fn sz_find_first_not_of(&'a self, needles: &'a N) -> RangeMatches<'a> {
+        RangeMatches::new(
+            self.as_ref(),
+            MatcherType::FindFirstNotOf(needles.as_ref()),
+            true,
+        )
+    }
+
+    fn sz_find_last_not_of(&'a self, needles: &'a N) -> RangeRMatches<'a> {
+        RangeRMatches::new(
+            self.as_ref(),
+            MatcherType::FindLastNotOf(needles.as_ref()),
+            true,
+        )
     }
 }
 
@@ -1015,5 +1279,165 @@ mod tests {
         assert!(text
             .iter()
             .all(|&b| b == b'd' || b == b'c' || b == b'b' || b == b'a'));
+    }
+
+    mod search_split_iterators {
+        use super::*;
+        use crate::{MatcherType, RangeMatches, RangeRMatches};
+
+        #[test]
+        fn test_matches() {
+            let haystack = b"hello world hello universe";
+            let needle = b"hello";
+            let matches: Vec<_> = haystack.sz_matches(needle).collect();
+            assert_eq!(matches, vec![b"hello", b"hello"]);
+        }
+
+        #[test]
+        fn test_rmatches() {
+            let haystack = b"hello world hello universe";
+            let needle = b"hello";
+            let matches: Vec<_> = haystack.sz_rmatches(needle).collect();
+            assert_eq!(matches, vec![b"hello", b"hello"]);
+        }
+
+        #[test]
+        fn test_splits() {
+            let haystack = b"alpha,beta;gamma";
+            let needle = b",";
+            let splits: Vec<_> = haystack.sz_splits(needle).collect();
+            assert_eq!(splits, vec![&b"alpha"[..], &b"beta;gamma"[..]]);
+        }
+
+        #[test]
+        fn test_rsplits() {
+            let haystack = b"alpha,beta;gamma";
+            let needle = b";";
+            let splits: Vec<_> = haystack.sz_rsplits(needle).collect();
+            assert_eq!(splits, vec![&b"gamma"[..], &b"alpha,beta"[..]]);
+        }
+
+        #[test]
+        fn test_splits_with_empty_parts() {
+            let haystack = b"a,,b,";
+            let needle = b",";
+            let splits: Vec<_> = haystack.sz_splits(needle).collect();
+            assert_eq!(splits, vec![b"a", &b""[..], b"b", &b""[..]]);
+        }
+
+        #[test]
+        fn test_matches_with_overlaps() {
+            let haystack = b"aaaa";
+            let needle = b"aa";
+            let matches: Vec<_> = haystack.sz_matches(needle).collect();
+            assert_eq!(matches, vec![b"aa", b"aa", b"aa"]);
+        }
+
+        #[test]
+        fn test_splits_with_utf8() {
+            let haystack = "こんにちは,世界".as_bytes();
+            let needle = b",";
+            let splits: Vec<_> = haystack.sz_splits(needle).collect();
+            assert_eq!(splits, vec!["こんにちは".as_bytes(), "世界".as_bytes()]);
+        }
+
+        #[test]
+        fn test_find_first_of() {
+            let haystack = b"hello world";
+            let needles = b"or";
+            let matches: Vec<_> = haystack.sz_find_first_of(needles).collect();
+            assert_eq!(matches, vec![b"o", b"o", b"r"]);
+        }
+
+        #[test]
+        fn test_find_last_of() {
+            let haystack = b"hello world";
+            let needles = b"or";
+            let matches: Vec<_> = haystack.sz_find_last_of(needles).collect();
+            assert_eq!(matches, vec![b"r", b"o", b"o"]);
+        }
+
+        #[test]
+        fn test_find_first_not_of() {
+            let haystack = b"aabbbcccd";
+            let needles = b"ab";
+            let matches: Vec<_> = haystack.sz_find_first_not_of(needles).collect();
+            assert_eq!(matches, vec![b"c", b"c", b"c", b"d"]);
+        }
+
+        #[test]
+        fn test_find_last_not_of() {
+            let haystack = b"aabbbcccd";
+            let needles = b"cd";
+            let matches: Vec<_> = haystack.sz_find_last_not_of(needles).collect();
+            assert_eq!(matches, vec![b"b", b"b", b"b", b"a", b"a"]);
+        }
+
+        #[test]
+        fn test_find_first_of_empty_needles() {
+            let haystack = b"hello world";
+            let needles = b"";
+            let matches: Vec<_> = haystack.sz_find_first_of(needles).collect();
+            assert_eq!(matches, Vec::<&[u8]>::new());
+        }
+
+        #[test]
+        fn test_find_last_of_empty_haystack() {
+            let haystack = b"";
+            let needles = b"abc";
+            let matches: Vec<_> = haystack.sz_find_last_of(needles).collect();
+            assert_eq!(matches, Vec::<&[u8]>::new());
+        }
+
+        #[test]
+        fn test_find_first_not_of_all_matching() {
+            let haystack = b"aaabbbccc";
+            let needles = b"abc";
+            let matches: Vec<_> = haystack.sz_find_first_not_of(needles).collect();
+            assert_eq!(matches, Vec::<&[u8]>::new());
+        }
+
+        #[test]
+        fn test_find_last_not_of_all_not_matching() {
+            let haystack = b"hello world";
+            let needles = b"xyz";
+            let matches: Vec<_> = haystack.sz_find_last_not_of(needles).collect();
+            assert_eq!(
+                matches,
+                vec![b"d", b"l", b"r", b"o", b"w", b" ", b"o", b"l", b"l", b"e", b"h"]
+            );
+        }
+
+        #[test]
+        fn test_range_matches_overlapping() {
+            let haystack = b"aaaa";
+            let matcher = MatcherType::Find(b"aa");
+            let matches: Vec<_> = RangeMatches::new(haystack, matcher, true).collect();
+            assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
+        }
+
+        #[test]
+        fn test_range_matches_non_overlapping() {
+            let haystack = b"aaaa";
+            let matcher = MatcherType::Find(b"aa");
+            let matches: Vec<_> = RangeMatches::new(haystack, matcher, false).collect();
+            assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
+        }
+
+        #[test]
+        fn test_range_rmatches_overlapping() {
+            let haystack = b"aaaa";
+            let matcher = MatcherType::RFind(b"aa");
+            let matches: Vec<_> = RangeRMatches::new(haystack, matcher, true).collect();
+            assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..], &b"aa"[..]]);
+        }
+
+        #[test]
+        fn test_range_rmatches_non_overlapping() {
+            let haystack = b"aaaa";
+            let matcher = MatcherType::RFind(b"aa");
+            let matches: Vec<_> = RangeRMatches::new(haystack, matcher, false).collect();
+            assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
+        }
     }
 }
