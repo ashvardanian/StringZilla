@@ -1348,9 +1348,7 @@ class basic_string_slice {
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
      *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
      */
-    int compare(string_view other) const noexcept {
-        return (int)sz_order(start_, length_, other.start_, other.length_);
-    }
+    int compare(string_view other) const noexcept { return (int)sz_order(data(), size(), other.data(), other.size()); }
 
     /**
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
@@ -1443,7 +1441,7 @@ class basic_string_slice {
 
     /**  @brief  Checks if the string starts with the other string. */
     bool starts_with(string_view other) const noexcept {
-        return length_ >= other.length_ && sz_equal(start_, other.start_, other.length_) == sz_true_k;
+        return length_ >= other.size() && sz_equal(start_, other.data(), other.size()) == sz_true_k;
     }
 
     /**  @brief  Checks if the string starts with the other string. */
@@ -1457,8 +1455,8 @@ class basic_string_slice {
 
     /**  @brief  Checks if the string ends with the other string. */
     bool ends_with(string_view other) const noexcept {
-        return length_ >= other.length_ &&
-               sz_equal(start_ + length_ - other.length_, other.start_, other.length_) == sz_true_k;
+        return length_ >= other.size() &&
+               sz_equal(start_ + length_ - other.size(), other.data(), other.size()) == sz_true_k;
     }
 
     /**  @brief  Checks if the string ends with the other string. */
@@ -1472,12 +1470,12 @@ class basic_string_slice {
 
     /**  @brief  Python-like convenience function, dropping the matching prefix. */
     string_slice remove_prefix(string_view other) const noexcept {
-        return starts_with(other) ? string_slice {start_ + other.length_, length_ - other.length_} : *this;
+        return starts_with(other) ? string_slice {start_ + other.size(), length_ - other.size()} : *this;
     }
 
     /**  @brief  Python-like convenience function, dropping the matching suffix. */
     string_slice remove_suffix(string_view other) const noexcept {
-        return ends_with(other) ? string_slice {start_, length_ - other.length_} : *this;
+        return ends_with(other) ? string_slice {start_, length_ - other.size()} : *this;
     }
 
 #pragma endregion
@@ -1497,7 +1495,7 @@ class basic_string_slice {
      *  @return The offset of the first character of the match, or `npos` if not found.
      */
     size_type find(string_view other, size_type skip = 0) const noexcept {
-        auto ptr = sz_find(start_ + skip, length_ - skip, other.start_, other.length_);
+        auto ptr = sz_find(start_ + skip, length_ - skip, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1525,7 +1523,7 @@ class basic_string_slice {
      *  @return The offset of the first character of the match, or `npos` if not found.
      */
     size_type rfind(string_view other) const noexcept {
-        auto ptr = sz_rfind(start_, length_, other.start_, other.length_);
+        auto ptr = sz_rfind(start_, length_, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1731,7 +1729,7 @@ class basic_string_slice {
      */
     string_slice lstrip(char_set set) const noexcept {
         set = set.inverted();
-        auto new_start = sz_find_charset(start_, length_, &set.raw());
+        auto new_start = (pointer)sz_find_charset(start_, length_, &set.raw());
         return new_start ? string_slice {new_start, length_ - static_cast<size_type>(new_start - start_)}
                          : string_slice();
     }
@@ -1742,7 +1740,7 @@ class basic_string_slice {
      */
     string_slice rstrip(char_set set) const noexcept {
         set = set.inverted();
-        auto new_end = sz_rfind_charset(start_, length_, &set.raw());
+        auto new_end = (pointer)sz_rfind_charset(start_, length_, &set.raw());
         return new_end ? string_slice {start_, static_cast<size_type>(new_end - start_ + 1)} : string_slice();
     }
 
@@ -1752,7 +1750,7 @@ class basic_string_slice {
      */
     string_slice strip(char_set set) const noexcept {
         set = set.inverted();
-        auto new_start = sz_find_charset(start_, length_, &set.raw());
+        auto new_start = (pointer)sz_find_charset(start_, length_, &set.raw());
         return new_start ? string_slice {new_start,
                                          static_cast<size_type>(
                                              sz_rfind_charset(new_start, length_ - (new_start - start_), &set.raw()) -
@@ -1811,7 +1809,7 @@ class basic_string_slice {
     rsplit_chars_type rsplit(char_set set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Split around the occurrences of all newline characters. */
-    split_chars_type splitlines() const noexcept { return split(newlines_set); }
+    split_chars_type splitlines() const noexcept { return split(newlines_set()); }
 
 #pragma endregion
 
@@ -1826,9 +1824,9 @@ class basic_string_slice {
     }
 
   private:
-    sz_constexpr_if_cpp20 string_view &assign(string_view const &other) noexcept {
-        start_ = other.start_;
-        length_ = other.length_;
+    sz_constexpr_if_cpp20 string_slice &assign(string_view const &other) noexcept {
+        start_ = (pointer)other.data();
+        length_ = other.size();
         return *this;
     }
 
@@ -1841,17 +1839,17 @@ class basic_string_slice {
     template <typename pattern_>
     partition_type partition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = find(pattern);
-        if (pos == npos) return {*this, string_view(), string_view()};
-        return {string_view(start_, pos), string_view(start_ + pos, pattern_length),
-                string_view(start_ + pos + pattern_length, length_ - pos - pattern_length)};
+        if (pos == npos) return {string_slice(*this), string_slice(), string_slice()};
+        return {string_slice(start_, pos), string_slice(start_ + pos, pattern_length),
+                string_slice(start_ + pos + pattern_length, length_ - pos - pattern_length)};
     }
 
     template <typename pattern_>
     partition_type rpartition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = rfind(pattern);
-        if (pos == npos) return {*this, string_view(), string_view()};
-        return {string_view(start_, pos), string_view(start_ + pos, pattern_length),
-                string_view(start_ + pos + pattern_length, length_ - pos - pattern_length)};
+        if (pos == npos) return {string_slice(*this), string_slice(), string_slice()};
+        return {string_slice(start_, pos), string_slice(start_ + pos, pattern_length),
+                string_slice(start_ + pos + pattern_length, length_ - pos - pattern_length)};
     }
 };
 
@@ -3191,7 +3189,7 @@ class basic_string {
         return basic_string {concatenation<string_view, string_view> {view(), other}};
     }
     basic_string operator+(std::initializer_list<char_type> other) const noexcept(false) {
-        return basic_string {concatenation<string_view, string_view> {view(), other}};
+        return basic_string {concatenation<string_view, string_view> {view(), string_view(other)}};
     }
 
 #pragma endregion

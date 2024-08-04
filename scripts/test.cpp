@@ -46,6 +46,17 @@ namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
 using sz::literals::operator""_sz;
 
+/*
+ *  Instantiate all the templates to make the symbols visible and also check
+ *  for weird compilation errors on uncommon paths.
+ */
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+template class std::basic_string_view<char>;
+#endif
+template class sz::basic_string_slice<char>;
+template class std::basic_string<char>;
+template class sz::basic_string<char>;
+
 /**
  *  @brief  Several string processing operations rely on computing integer logarithms.
  *          Failures in such operations will result in wrong `resize` outcomes and heap corruption.
