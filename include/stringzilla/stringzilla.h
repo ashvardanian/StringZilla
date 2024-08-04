@@ -2193,7 +2193,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_with_prefix(sz_cptr_t h, sz_size_t h_length, sz_c
         if (!found) return SZ_NULL_CHAR;
 
         // Verify the remaining part of the needle
-        sz_size_t remaining = h_length - (found - h);
+        sz_size_t remaining = h_length - (found - h) - prefix_length;
         if (remaining < suffix_length) return SZ_NULL_CHAR;
         if (sz_equal(found + prefix_length, n + prefix_length, suffix_length)) return found;
 

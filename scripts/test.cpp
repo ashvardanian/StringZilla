@@ -241,6 +241,7 @@ static void test_api_readonly() {
     // More complex queries.
     assert(str("abbabbaaaaaa").find("aa") == 6);
     assert(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
+    assert(str("hello, world!").substr(0, 11).find("world") == str::npos);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);
