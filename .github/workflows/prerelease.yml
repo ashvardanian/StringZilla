@@ -19,8 +19,8 @@ permissions:
 
 jobs:
   versioning:
-    runs-on: ubuntu-latest
     name: Update Version
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
