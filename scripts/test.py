@@ -386,6 +386,13 @@ def test_unit_globals():
     assert sz.find("", "abcdef") == "".find("abcdef")
     assert sz.rfind("", "abcdef") == "".rfind("abcdef")
 
+    assert sz.find("Hello, world!", "world", 0, 11) == "Hello, world!".find(
+        "world", 0, 11
+    )
+    assert sz.rfind("Hello, world!", "world", 0, 11) == "Hello, world!".rfind(
+        "world", 0, 11
+    )
+
     # Compare partitioning functions
     assert sz.partition("abcdef", "c") == ("ab", "c", "def")
     assert sz.rpartition("abcdef", "c") == ("ab", "c", "def")

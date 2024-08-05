@@ -1,4 +1,4 @@
-#undef NDEBUG      // Enable all assertions
+#undef NDEBUG // Enable all assertions
 
 // Enable assertions for iterators
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
@@ -45,6 +45,17 @@
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
 using sz::literals::operator""_sz;
+
+/*
+ *  Instantiate all the templates to make the symbols visible and also check
+ *  for weird compilation errors on uncommon paths.
+ */
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+template class std::basic_string_view<char>;
+#endif
+template class sz::basic_string_slice<char>;
+template class std::basic_string<char>;
+template class sz::basic_string<char>;
 
 /**
  *  @brief  Several string processing operations rely on computing integer logarithms.
@@ -230,6 +241,7 @@ static void test_api_readonly() {
     // More complex queries.
     assert(str("abbabbaaaaaa").find("aa") == 6);
     assert(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
+    assert(str("hello, world!").substr(0, 11).find("world") == str::npos);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);
@@ -277,7 +289,7 @@ static void test_api_readonly() {
     assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_last_of("\xC0\xC1") == 54);  // sets
     // clang-format on
 
-    // Boundary consitions.
+    // Boundary conditions.
     assert(str("hello").find_first_of("ox", 4) == 4);
     assert(str("hello").find_first_of("ox", 5) == str::npos);
     assert(str("hello").find_last_of("ox", 4) == 4);
@@ -952,11 +964,20 @@ static void test_search() {
     assert(rfinds.size() == 3);
     assert(rfinds[0] == "c");
 
-    auto splits = ".a..c."_sz.split(sz::char_set(".")).template to<std::vector<std::string>>();
-    assert(splits.size() == 5);
-    assert(splits[0] == "");
-    assert(splits[1] == "a");
-    assert(splits[4] == "");
+    {
+        auto splits = ".a..c."_sz.split(sz::char_set(".")).template to<std::vector<std::string>>();
+        assert(splits.size() == 5);
+        assert(splits[0] == "");
+        assert(splits[1] == "a");
+        assert(splits[4] == "");
+    }
+
+    {
+        auto splits = "line1\nline2\nline3"_sz.split("line3").template to<std::vector<std::string>>();
+        assert(splits.size() == 2);
+        assert(splits[0] == "line1\nline2\n");
+        assert(splits[1] == "");
+    }
 
     assert(""_sz.split(".").size() == 1);
     assert(""_sz.rsplit(".").size() == 1);
