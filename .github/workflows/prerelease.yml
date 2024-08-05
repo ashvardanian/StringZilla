@@ -28,18 +28,20 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Run TinySemVer
-        uses: ashvardanian/tinysemver@v1.4.1
+        uses: ashvardanian/tinysemver@v2.0.1
         with:
           verbose: "true"
           version-file: "VERSION"
-          update-version-in: 'pyproject.toml,^version = "(\d+\.\d+\.\d+)"'
-          update-version-in: 'Cargo.toml,^version = "(\d+\.\d+\.\d+)"'
-          update-version-in: 'package.json,"version": "(\d+\.\d+\.\d+)"'
-          update-version-in: 'CITATION.cff,^version: (\d+\.\d+\.\d+)'
-          update-version-in: 'CMakeLists.txt,VERSION (\d+\.\d+\.\d+)'
-          update-major-version-in: 'include/stringzilla/stringzilla.h,^#define STRINGZILLA_VERSION_MAJOR (\d+)'
-          update-minor-version-in: 'include/stringzilla/stringzilla.h,^#define STRINGZILLA_VERSION_MINOR (\d+)'
-          update-patch-version-in: 'include/stringzilla/stringzilla.h,^#define STRINGZILLA_VERSION_PATCH (\d+)'
+          update-version-in: |
+            Cargo.toml:^version = "(\d+\.\d+\.\d+)"
+            package.json:"version": "(\d+\.\d+\.\d+)"
+            CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
+          update-major-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_VERSION_MAJOR (\d+)
+          update-minor-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_VERSION_MINOR (\d+)
+          update-patch-version-in: |
+            include/stringzilla/stringzilla.h:^#define STRINGZILLA_VERSION_PATCH (\d+)
           dry-run: "true"
 
   test_ubuntu_gcc:
