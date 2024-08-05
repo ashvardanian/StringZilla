@@ -1,4 +1,4 @@
-#undef NDEBUG      // Enable all assertions
+#undef NDEBUG // Enable all assertions
 
 // Enable assertions for iterators
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
@@ -289,7 +289,7 @@ static void test_api_readonly() {
     assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_last_of("\xC0\xC1") == 54);  // sets
     // clang-format on
 
-    // Boundary consitions.
+    // Boundary conditions.
     assert(str("hello").find_first_of("ox", 4) == 4);
     assert(str("hello").find_first_of("ox", 5) == str::npos);
     assert(str("hello").find_last_of("ox", 4) == 4);

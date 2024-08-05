@@ -2246,7 +2246,6 @@ SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_over_256bytes_serial(sz_cptr_t h, sz_si
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
 
@@ -2620,11 +2619,9 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     // Skip the matching prefixes and suffixes, they won't affect the distance.
     for (sz_cptr_t a_end = longer + longer_length, b_end = shorter + shorter_length;
          longer != a_end && shorter != b_end && *longer == *shorter;
-         ++longer, ++shorter, --longer_length, --shorter_length)
-        ;
+         ++longer, ++shorter, --longer_length, --shorter_length);
     for (; longer_length && shorter_length && longer[longer_length - 1] == shorter[shorter_length - 1];
-         --longer_length, --shorter_length)
-        ;
+         --longer_length, --shorter_length);
 
     // Bounded computations may exit early.
     if (bound) {

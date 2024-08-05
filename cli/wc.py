@@ -31,12 +31,12 @@ def parse_arguments():
         "-w", "--words", action="store_true", help="print the word counts"
     )
     parser.add_argument(
-        "--files0-from", metavar="filename",
-        help="Read input from the files specified by NUL-terminated names in file F;" 
-                              " If F is - then read names from standard input" 
+        "--files0-from",
+        metavar="filename",
+        help="Read input from the files specified by NUL-terminated names in file F;"
+        " If F is - then read names from standard input",
     )
 
-    
     parser.add_argument("--version", action="version", version=stringzilla.__version__)
     return parser.parse_args()
 
@@ -52,7 +52,7 @@ def wc(file_path, args):
         except RuntimeError:  # File gives a RuntimeError if the file does not exist
             return f"No such file: {file_path}", False
 
-    counts = {}    
+    counts = {}
     if args.lines:
         counts["line_count"] = mapped_bytes.count("\n")
     if args.words:
@@ -88,11 +88,13 @@ def format_output(counts, args, just):
 
     return " ".join(str(count).rjust(just) for count in selected_counts)
 
+
 def get_files_from(fn):
     f = open(fn, "r")
     s = f.read()
     f.close()
     return [x for x in s.split("\0") if os.path.isfile(x)]
+
 
 def main():
     args = parse_arguments()
@@ -108,15 +110,15 @@ def main():
         args.words = 1
         args.bytes = 1
 
-    # wc uses the file size to determine column width when printing 
+    # wc uses the file size to determine column width when printing
     if args.files0_from:
-        if args.files[0] == '-':
+        if args.files[0] == "-":
             args.files = get_files_from(args.files0_from)
             if len(args.files) == 0:
-                #print("  No filenames found in ", args.files0_from)
+                # print("  No filenames found in ", args.files0_from)
                 exit(0)
 
-    just = max( len(str(os.stat(fn).st_size)) for fn in args.files)
+    just = max(len(str(os.stat(fn).st_size)) for fn in args.files)
 
     for file_path in args.files:
         counts, success = wc(file_path, args)

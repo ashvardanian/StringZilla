@@ -740,6 +740,19 @@ impl<'a> Matcher<'a> for MatcherType<'a> {
     }
 }
 
+/// An iterator over non-overlapping matches of a pattern in a string slice.
+/// This iterator yields the matched substrings in the order they are found.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::{sz, MatcherType, RangeMatches};
+///
+/// let haystack = b"abababa";
+/// let matcher = MatcherType::Find(b"aba");
+/// let matches: Vec<&[u8]> = RangeMatches::new(haystack, matcher, false).collect();
+/// assert_eq!(matches, vec![b"aba", b"aba"]);
+/// ```
 pub struct RangeMatches<'a> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
@@ -778,6 +791,19 @@ impl<'a> Iterator for RangeMatches<'a> {
     }
 }
 
+/// An iterator over non-overlapping splits of a string slice by a pattern.
+/// This iterator yields the substrings between the matches of the pattern.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::{sz, MatcherType, RangeSplits};
+///
+/// let haystack = b"a,b,c,d";
+/// let matcher = MatcherType::Find(b",");
+/// let splits: Vec<&[u8]> = RangeSplits::new(haystack, matcher).collect();
+/// assert_eq!(splits, vec![b"a", b"b", b"c", b"d"]);
+/// ```
 pub struct RangeSplits<'a> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
@@ -820,6 +846,19 @@ impl<'a> Iterator for RangeSplits<'a> {
     }
 }
 
+/// An iterator over non-overlapping matches of a pattern in a string slice, searching from the end.
+/// This iterator yields the matched substrings in reverse order.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::{sz, MatcherType, RangeRMatches};
+///
+/// let haystack = b"abababa";
+/// let matcher = MatcherType::RFind(b"aba");
+/// let matches: Vec<&[u8]> = RangeRMatches::new(haystack, matcher, false).collect();
+/// assert_eq!(matches, vec![b"aba", b"aba"]);
+/// ```
 pub struct RangeRMatches<'a> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
@@ -862,6 +901,19 @@ impl<'a> Iterator for RangeRMatches<'a> {
     }
 }
 
+/// An iterator over non-overlapping splits of a string slice by a pattern, searching from the end.
+/// This iterator yields the substrings between the matches of the pattern in reverse order.
+///
+/// # Examples
+///
+/// ```
+/// use stringzilla::{sz, MatcherType, RangeRSplits};
+///
+/// let haystack = b"a,b,c,d";
+/// let matcher = MatcherType::RFind(b",");
+/// let splits: Vec<&[u8]> = RangeRSplits::new(haystack, matcher).collect();
+/// assert_eq!(splits, vec![b"d", b"c", b"b", b"a"]);
+/// ```
 pub struct RangeRSplits<'a> {
     haystack: &'a [u8],
     matcher: MatcherType<'a>,
@@ -1036,14 +1088,150 @@ where
     /// ```
     fn sz_alignment_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> isize;
 
+    /// Returns an iterator over all non-overlapping matches of the given `needle` in `self`.
+    ///
+    /// # Arguments
+    ///
+    /// * `needle`: The byte slice to search for within `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = b"abababa";
+    /// let needle = b"aba";
+    /// let matches: Vec<&[u8]> = haystack.sz_matches(needle).collect();
+    /// assert_eq!(matches, vec![b"aba", b"aba"]);
+    /// ```
     fn sz_matches(&'a self, needle: &'a N) -> RangeMatches<'a>;
+
+    /// Returns an iterator over all non-overlapping matches of the given `needle` in `self`, searching from the end.
+    ///
+    /// # Arguments
+    ///
+    /// * `needle`: The byte slice to search for within `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = b"abababa";
+    /// let needle = b"aba";
+    /// let matches: Vec<&[u8]> = haystack.sz_rmatches(needle).collect();
+    /// assert_eq!(matches, vec![b"aba", b"aba"]);
+    /// ```
     fn sz_rmatches(&'a self, needle: &'a N) -> RangeRMatches<'a>;
+
+    /// Returns an iterator over the substrings of `self` that are separated by the given `needle`.
+    ///
+    /// # Arguments
+    ///
+    /// * `needle`: The byte slice to split `self` by.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = b"a,b,c,d";
+    /// let needle = b",";
+    /// let splits: Vec<&[u8]> = haystack.sz_splits(needle).collect();
+    /// assert_eq!(splits, vec![b"a", b"b", b"c", b"d"]);
+    /// ```
     fn sz_splits(&'a self, needle: &'a N) -> RangeSplits<'a>;
+
+    /// Returns an iterator over the substrings of `self` that are separated by the given `needle`, searching from the end.
+    ///
+    /// # Arguments
+    ///
+    /// * `needle`: The byte slice to split `self` by.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = b"a,b,c,d";
+    /// let needle = b",";
+    /// let splits: Vec<&[u8]> = haystack.sz_rsplits(needle).collect();
+    /// assert_eq!(splits, vec![b"d", b"c", b"b", b"a"]);
+    /// ```
     fn sz_rsplits(&'a self, needle: &'a N) -> RangeRSplits<'a>;
+
+    /// Returns an iterator over all non-overlapping matches of any of the bytes in `needles` within `self`.
+    ///
+    /// # Arguments
+    ///
+    /// * `needles`: The set of bytes to search for within `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = b"Hello, world!";
+    /// let needles = b"aeiou";
+    /// let matches: Vec<&[u8]> = haystack.sz_find_first_of(needles).collect();
+    /// assert_eq!(matches, vec![b"e", b"o", b"o"]);
+    /// ```
     fn sz_find_first_of(&'a self, needles: &'a N) -> RangeMatches<'a>;
+
+    /// Returns an iterator over all non-overlapping matches of any of the bytes in `needles` within `self`, searching from the end.
+    ///
+    /// # Arguments
+    ///
+    /// * `needles`: The set of bytes to search for within `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = b"Hello, world!";
+    /// let needles = b"aeiou";
+    /// let matches: Vec<&[u8]> = haystack.sz_find_last_of(needles).collect();
+    /// assert_eq!(matches, vec![b"o", b"o", b"e"]);
+    /// ```
     fn sz_find_last_of(&'a self, needles: &'a N) -> RangeRMatches<'a>;
+
+    /// Returns an iterator over all non-overlapping matches of any byte not in `needles` within `self`.
+    ///
+    /// # Arguments
+    ///
+    /// * `needles`: The set of bytes that should not be matched within `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = b"Hello, world!";
+    /// let needles = b"aeiou";
+    /// let matches: Vec<&[u8]> = haystack.sz_find_first_not_of(needles).collect();
+    /// assert_eq!(matches, vec![b"H", b"l", b"l", b",", b" ", b"w", b"r", b"l", b"d", b"!"]);
+    /// ```
     fn sz_find_first_not_of(&'a self, needles: &'a N) -> RangeMatches<'a>;
+
+    /// Returns an iterator over all non-overlapping matches of any byte not in `needles` within `self`, searching from the end.
+    ///
+    /// # Arguments
+    ///
+    /// * `needles`: The set of bytes that should not be matched within `self`.
+    ///q
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let haystack = b"Hello, world!";
+    /// let needles = b"aeiou";
+    /// let matches: Vec<&[u8]> = haystack.sz_find_last_not_of(needles).collect();
+    /// assert_eq!(matches, vec![b"!", b"d", b"l", b"r", b"w", b" ", b",", b"l", b"l", b"H"]);
+    /// ```
     fn sz_find_last_not_of(&'a self, needles: &'a N) -> RangeRMatches<'a>;
+
 }
 
 impl<'a, T, N> StringZilla<'a, N> for T
