@@ -18,6 +18,30 @@ permissions:
   contents: read
 
 jobs:
+  versioning:
+    runs-on: ubuntu-latest
+    name: Update Version
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run TinySemVer
+        uses: ashvardanian/tinysemver@v1.4.1
+        with:
+          verbose: "true"
+          version-file: "VERSION"
+          update-version-in: 'pyproject.toml,^version = "(\d+\.\d+\.\d+)"'
+          update-version-in: 'Cargo.toml,^version = "(\d+\.\d+\.\d+)"'
+          update-version-in: 'package.json,"version": "(\d+\.\d+\.\d+)"'
+          update-version-in: 'CITATION.cff,^version: (\d+\.\d+\.\d+)'
+          update-version-in: 'CMakeLists.txt,VERSION (\d+\.\d+\.\d+)'
+          update-major-version-in: 'include/stringzilla/stringzilla.h,^#define STRINGZILLA_VERSION_MAJOR (\d+)'
+          update-minor-version-in: 'include/stringzilla/stringzilla.h,^#define STRINGZILLA_VERSION_MINOR (\d+)'
+          update-patch-version-in: 'include/stringzilla/stringzilla.h,^#define STRINGZILLA_VERSION_PATCH (\d+)'
+          dry-run: "true"
+
   test_ubuntu_gcc:
     name: Ubuntu (GCC 12)
     runs-on: ubuntu-22.04
@@ -230,7 +254,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 16
-        
+
       - name: Build C/C++
         run: |
           cmake -B build_artifacts \
