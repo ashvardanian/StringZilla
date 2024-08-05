@@ -964,11 +964,20 @@ static void test_search() {
     assert(rfinds.size() == 3);
     assert(rfinds[0] == "c");
 
-    auto splits = ".a..c."_sz.split(sz::char_set(".")).template to<std::vector<std::string>>();
-    assert(splits.size() == 5);
-    assert(splits[0] == "");
-    assert(splits[1] == "a");
-    assert(splits[4] == "");
+    {
+        auto splits = ".a..c."_sz.split(sz::char_set(".")).template to<std::vector<std::string>>();
+        assert(splits.size() == 5);
+        assert(splits[0] == "");
+        assert(splits[1] == "a");
+        assert(splits[4] == "");
+    }
+
+    {
+        auto splits = "line1\nline2\nline3"_sz.split("line3").template to<std::vector<std::string>>();
+        assert(splits.size() == 2);
+        assert(splits[0] == "line1\nline2\n");
+        assert(splits[1] == "");
+    }
 
     assert(""_sz.split(".").size() == 1);
     assert(""_sz.rsplit(".").size() == 1);

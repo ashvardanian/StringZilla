@@ -1102,7 +1102,7 @@ where
     /// let haystack = b"abababa";
     /// let needle = b"aba";
     /// let matches: Vec<&[u8]> = haystack.sz_matches(needle).collect();
-    /// assert_eq!(matches, vec![b"aba", b"aba"]);
+    /// assert_eq!(matches, vec![b"aba", b"aba", b"aba"]);
     /// ```
     fn sz_matches(&'a self, needle: &'a N) -> RangeMatches<'a>;
 
@@ -1120,7 +1120,7 @@ where
     /// let haystack = b"abababa";
     /// let needle = b"aba";
     /// let matches: Vec<&[u8]> = haystack.sz_rmatches(needle).collect();
-    /// assert_eq!(matches, vec![b"aba", b"aba"]);
+    /// assert_eq!(matches, vec![b"aba", b"aba", b"aba"]);
     /// ```
     fn sz_rmatches(&'a self, needle: &'a N) -> RangeRMatches<'a>;
 
