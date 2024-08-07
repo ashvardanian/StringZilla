@@ -7,7 +7,7 @@
 #include <bench.hpp>
 #include <test.hpp> // `random_string`
 
-#include <stringzilla/experimental.h> // `sz_hashes_neon`
+#include <stringzilla/drafts.h> // `sz_hashes_neon`
 
 using namespace ashvardanian::stringzilla::scripts;
 
