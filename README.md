@@ -254,7 +254,7 @@ StringZilla has a lot of functionality, most of which is covered by benchmarks a
 You can find those in the `./scripts` directory, with usage notes listed in the [`CONTRIBUTING.md`](CONTRIBUTING.md) file.
 Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are faster than either standard library.
 
-> Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
+> Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 6 characters.
 > The code was compiled with GCC 12, using `glibc` v2.35.
 > The benchmarks performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
 > Most modern Arm-based 64-bit CPUs will have similar relative speedups.
