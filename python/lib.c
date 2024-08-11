@@ -65,8 +65,7 @@ typedef struct {
 #else
     int file_descriptor;
 #endif
-    sz_cptr_t start;
-    sz_size_t length;
+    sz_string_view_t memory;
 } File;
 
 /**
@@ -85,8 +84,7 @@ typedef struct {
     PyObject ob_base;
 
     PyObject *parent;
-    sz_cptr_t start;
-    sz_size_t length;
+    sz_string_view_t memory;
 } Str;
 
 /**
@@ -180,7 +178,7 @@ typedef struct {
 
         /**
          *  Once you sort, shuffle, or reorganize slices making up a larger string, this structure
-         *  cn be used for space-efficient lookups.
+         *  can be used for space-efficient lookups.
          */
         struct reordered_slices_t {
             size_t count;
@@ -274,14 +272,14 @@ sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *len
     }
     else if (PyObject_TypeCheck(object, &StrType)) {
         Str *str = (Str *)object;
-        *start = str->start;
-        *length = str->length;
+        *start = str->memory.start;
+        *length = str->memory.length;
         return 1;
     }
     else if (PyObject_TypeCheck(object, &FileType)) {
         File *file = (File *)object;
-        *start = file->start;
-        *length = file->length;
+        *start = file->memory.start;
+        *length = file->memory.length;
         return 1;
     }
     return 0;
@@ -392,9 +390,9 @@ sz_bool_t prepare_strings_for_extension(Strs *strs, size_t new_parents, size_t n
 
 static void File_dealloc(File *self) {
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
-    if (self->start) {
-        UnmapViewOfFile(self->start);
-        self->start = NULL;
+    if (self->memory.start) {
+        UnmapViewOfFile(self->memory.start);
+        self->memory.start = NULL;
     }
     if (self->mapping_handle) {
         CloseHandle(self->mapping_handle);
@@ -405,10 +403,10 @@ static void File_dealloc(File *self) {
         self->file_handle = NULL;
     }
 #else
-    if (self->start) {
-        munmap(self->start, self->length);
-        self->start = NULL;
-        self->length = 0;
+    if (self->memory.start) {
+        munmap(self->memory.start, self->memory.length);
+        self->memory.start = NULL;
+        self->memory.length = 0;
     }
     if (self->file_descriptor != 0) {
         close(self->file_descriptor);
@@ -432,8 +430,8 @@ static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObjec
 #else
     self->file_descriptor = 0;
 #endif
-    self->start = NULL;
-    self->length = 0;
+    self->memory.start = NULL;
+    self->memory.length = 0;
     return (PyObject *)self;
 }
 
@@ -474,8 +472,8 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
         PyErr_SetString(PyExc_OSError, "Couldn't map the file!");
         return -1;
     }
-    self->start = file;
-    self->length = GetFileSize(self->file_handle, 0);
+    self->memory.start = file;
+    self->memory.length = GetFileSize(self->file_handle, 0);
 #else
     self->file_descriptor = open(path, O_RDONLY);
     if (self->file_descriptor == -1) {
@@ -506,8 +504,8 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
         PyErr_Format(PyExc_OSError, "Couldn't map the file at '%s': %s", path, strerror(errno));
         return -1;
     }
-    self->start = map;
-    self->length = file_size;
+    self->memory.start = map;
+    self->memory.length = file_size;
 #endif
 
     return 0;
@@ -595,11 +593,11 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
 
     // Handle empty string
     if (parent_obj == NULL) {
-        self->start = NULL;
-        self->length = 0;
+        self->memory.start = NULL;
+        self->memory.length = 0;
     }
     // Increment the reference count of the parent
-    else if (export_string_like(parent_obj, &self->start, &self->length)) {
+    else if (export_string_like(parent_obj, &self->memory.start, &self->memory.length)) {
         self->parent = parent_obj;
         Py_INCREF(parent_obj);
     }
@@ -610,9 +608,9 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
 
     // Apply slicing
     size_t normalized_offset, normalized_length;
-    sz_ssize_clamp_interval(self->length, from, to, &normalized_offset, &normalized_length);
-    self->start = ((char *)self->start) + normalized_offset;
-    self->length = normalized_length;
+    sz_ssize_clamp_interval(self->memory.length, from, to, &normalized_offset, &normalized_length);
+    self->memory.start = ((char *)self->memory.start) + normalized_offset;
+    self->memory.length = normalized_length;
     return 0;
 }
 
@@ -625,35 +623,35 @@ static PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     }
 
     self->parent = NULL;
-    self->start = NULL;
-    self->length = 0;
+    self->memory.start = NULL;
+    self->memory.length = 0;
     return (PyObject *)self;
 }
 
 static void Str_dealloc(Str *self) {
     if (self->parent) { Py_XDECREF(self->parent); }
-    else if (self->start) { free(self->start); }
+    else if (self->memory.start) { free(self->memory.start); }
     self->parent = NULL;
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->start, self->length); }
+static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->memory.start, self->memory.length); }
 
 static PyObject *Str_repr(Str *self) {
     // Interestingly, known-length string formatting only works in Python 3.12 and later.
     // https://docs.python.org/3/c-api/unicode.html#c.PyUnicode_FromFormat
     if (PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 12)
-        return PyUnicode_FromFormat("sz.Str('%.*s')", (int)self->length, self->start);
+        return PyUnicode_FromFormat("sz.Str('%.*s')", (int)self->memory.length, self->memory.start);
     else {
         // Use a simpler formatting rule for older versions
-        PyObject *str_obj = PyUnicode_FromStringAndSize(self->start, self->length);
+        PyObject *str_obj = PyUnicode_FromStringAndSize(self->memory.start, self->memory.length);
         PyObject *result = PyUnicode_FromFormat("sz.Str('%U')", str_obj);
         Py_DECREF(str_obj);
         return result;
     }
 }
 
-static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->start, self->length); }
+static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->memory.start, self->memory.length); }
 
 static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs) {
     // Check minimum arguments
@@ -677,23 +675,23 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs)
     return PyLong_FromSize_t((size_t)result);
 }
 
-static PyObject *Str_get_address(Str *self, void *closure) { return PyLong_FromSize_t((sz_size_t)self->start); }
-static PyObject *Str_get_nbytes(Str *self, void *closure) { return PyLong_FromSize_t(self->length); }
+static PyObject *Str_get_address(Str *self, void *closure) { return PyLong_FromSize_t((sz_size_t)self->memory.start); }
+static PyObject *Str_get_nbytes(Str *self, void *closure) { return PyLong_FromSize_t(self->memory.length); }
 
-static Py_ssize_t Str_len(Str *self) { return self->length; }
+static Py_ssize_t Str_len(Str *self) { return self->memory.length; }
 
 static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
 
     // Negative indexing
-    if (i < 0) i += self->length;
+    if (i < 0) i += self->memory.length;
 
-    if (i < 0 || (size_t)i >= self->length) {
+    if (i < 0 || (size_t)i >= self->memory.length) {
         PyErr_SetString(PyExc_IndexError, "Index out of range");
         return NULL;
     }
 
     // Assuming the underlying data is UTF-8 encoded
-    return PyUnicode_FromStringAndSize(self->start + i, 1);
+    return PyUnicode_FromStringAndSize(self->memory.start + i, 1);
 }
 
 static PyObject *Str_subscript(Str *self, PyObject *key) {
@@ -701,7 +699,7 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
         // Sanity checks
         Py_ssize_t start, stop, step;
         if (PySlice_Unpack(key, &start, &stop, &step) < 0) return NULL;
-        if (PySlice_AdjustIndices(self->length, &start, &stop, step) < 0) return NULL;
+        if (PySlice_AdjustIndices(self->memory.length, &start, &stop, step) < 0) return NULL;
         if (step != 1) {
             PyErr_SetString(PyExc_IndexError, "Efficient step is not supported");
             return NULL;
@@ -712,8 +710,8 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
         if (self_slice == NULL && PyErr_NoMemory()) return NULL;
 
         // Set its properties based on the slice
-        self_slice->start = self->start + start;
-        self_slice->length = stop - start;
+        self_slice->memory.start = self->memory.start + start;
+        self_slice->memory.length = stop - start;
         self_slice->parent = (PyObject *)self; // Set parent to keep it alive
 
         // Increment the reference count of the parent
@@ -735,14 +733,14 @@ static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
 
     static Py_ssize_t itemsize[1] = {1};
     view->obj = (PyObject *)self;
-    view->buf = self->start;
-    view->len = self->length;
+    view->buf = self->memory.start;
+    view->len = self->memory.length;
     view->readonly = 1;
     view->itemsize = sizeof(char);
     view->format = "c"; // https://docs.python.org/3/library/struct.html#format-characters
     view->ndim = 1;
-    view->shape = (Py_ssize_t *)&self->length; // 1-D array, so shape is just a pointer to the length
-    view->strides = itemsize;                  // strides in a 1-D array is just the item size
+    view->shape = (Py_ssize_t *)&self->memory.length; // 1-D array, so shape is just a pointer to the length
+    view->strides = itemsize;                         // strides in a 1-D array is just the item size
     view->suboffsets = NULL;
     view->internal = NULL;
 
@@ -769,7 +767,7 @@ static int Str_in(Str *self, PyObject *needle_obj) {
         return -1;
     }
 
-    return sz_find(self->start, self->length, needle.start, needle.length) != NULL;
+    return sz_find(self->memory.start, self->memory.length, needle.start, needle.length) != NULL;
 }
 
 static PyObject *Strs_get_tape(Str *self, void *closure) { return NULL; }
@@ -812,8 +810,8 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
     Str *view_copy = (Str *)StrType.tp_alloc(&StrType, 0);
     if (view_copy == NULL && PyErr_NoMemory()) return NULL;
 
-    view_copy->start = start;
-    view_copy->length = length;
+    view_copy->memory.start = start;
+    view_copy->memory.length = length;
     view_copy->parent = parent;
     Py_INCREF(parent);
     return view_copy;
@@ -1520,10 +1518,11 @@ static PyObject *_Str_partition_implementation(PyObject *self, PyObject *args, P
     Str *middle = Str_new(&StrType, NULL, NULL);
     Str *after = Str_new(&StrType, NULL, NULL);
 
-    before->parent = self, before->start = text.start, before->length = separator_index;
-    middle->parent = self, middle->start = text.start + separator_index, middle->length = separator.length;
-    after->parent = self, after->start = text.start + separator_index + separator.length,
-    after->length = text.length - separator_index - separator.length;
+    before->parent = self, before->memory.start = text.start, before->memory.length = separator_index;
+    middle->parent = self, middle->memory.start = text.start + separator_index,
+    middle->memory.length = separator.length;
+    after->parent = self, after->memory.start = text.start + separator_index + separator.length,
+    after->memory.length = text.length - separator_index - separator.length;
 
     // All parts reference the same parent
     Py_INCREF(self);
@@ -2378,18 +2377,18 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
 
     // Calculate the total length of the new string
     result_str->parent = NULL;
-    result_str->length = self_str.length + other_str.length;
+    result_str->memory.length = self_str.length + other_str.length;
 
     // Allocate memory for the new string
-    result_str->start = malloc(result_str->length);
-    if (result_str->start == NULL) {
+    result_str->memory.start = malloc(result_str->memory.length);
+    if (result_str->memory.start == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for string concatenation");
         return NULL;
     }
 
     // Perform the string concatenation
-    memcpy(result_str->start, self_str.start, self_str.length);
-    memcpy(result_str->start + self_str.length, other_str.start, other_str.length);
+    memcpy(result_str->memory.start, self_str.start, self_str.length);
+    memcpy(result_str->memory.start + self_str.length, other_str.start, other_str.length);
 
     return (PyObject *)result_str;
 }
@@ -2515,8 +2514,7 @@ static PyObject *SplitIteratorType_next(SplitIterator *self) {
     Str *result_obj = (Str *)StrType.tp_alloc(&StrType, 0);
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
-    sz_cptr_t result_start;
-    sz_size_t result_length;
+    sz_string_view_t result_memory;
 
     // Find the next needle
     sz_cptr_t found =
@@ -2526,31 +2524,30 @@ static PyObject *SplitIteratorType_next(SplitIterator *self) {
 
     // We've reached the end of the string
     if (found == NULL) {
-        result_start = self->text.start;
-        result_length = self->text.length;
+        result_memory.start = self->text.start;
+        result_memory.length = self->text.length;
         self->text.length = 0;
         self->reached_tail = 1;
         self->max_parts = 0;
     }
     else {
         if (self->is_reverse) {
-            result_start = found + self->match_length * !self->include_match;
-            result_length = self->text.start + self->text.length - result_start;
+            result_memory.start = found + self->match_length * !self->include_match;
+            result_memory.length = self->text.start + self->text.length - result_memory.start;
             self->text.length = found - self->text.start;
         }
         else {
-            result_start = self->text.start;
-            result_length = found - self->text.start;
+            result_memory.start = self->text.start;
+            result_memory.length = found - self->text.start;
             self->text.start = found + self->match_length;
-            self->text.length -= result_length + self->match_length;
-            result_length += self->match_length * self->include_match;
+            self->text.length -= result_memory.length + self->match_length;
+            result_memory.length += self->match_length * self->include_match;
         }
         self->max_parts--;
     }
 
     // Set its properties based on the slice
-    result_obj->start = result_start;
-    result_obj->length = result_length;
+    result_obj->memory = result_memory;
     result_obj->parent = self->text_object;
 
     // Increment the reference count of the parent
