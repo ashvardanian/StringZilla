@@ -27,13 +27,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Run TinySemVer
-        uses: ashvardanian/tinysemver@v2.0.1
+        uses: ashvardanian/tinysemver@v2.0.7
         with:
           verbose: "true"
           version-file: "VERSION"
           update-version-in: |
             Cargo.toml:^version = "(\d+\.\d+\.\d+)"
-            Cargo.lock:^version = "(\d+\.\d+\.\d+)"
+            Cargo.lock:name = "stringzilla"\nversion = "(\d+\.\d+\.\d+)"
             package.json:"version": "(\d+\.\d+\.\d+)"
             CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
           update-major-version-in: |
