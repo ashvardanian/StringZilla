@@ -28,7 +28,7 @@ def is_64bit_arm() -> bool:
     if using_cibuildwheels:
         return "SZ_ARM64" in os.environ
     arch = platform.machine()
-    return  arch in ["arm64", "aarch64", "ARM64"]
+    return arch in ["arm64", "aarch64", "ARM64"]
 
 
 def is_big_endian() -> bool:
@@ -150,8 +150,10 @@ with open(os.path.join(this_directory, "README.md"), "r", encoding="utf-8") as f
 setup(
     name=__lib_name__,
     version=__version__,
-    author="Ash Vardanian",
     description="SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
+    author="Ash Vardanian",
+    author_email="1983160+ashvardanian@users.noreply.github.com",
+    url="https://github.com/ashvardanian/stringzilla",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="Apache-2.0",

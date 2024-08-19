@@ -7,7 +7,7 @@ A typical codebase processes strings character by character, resulting in too ma
 LibC is different.
 It attempts to leverage SIMD instructions to boost some operations, and is often used by higher-level languages, runtimes, and databases.
 But it isn't perfect.
-1️⃣ First, even on common hardware, including over a billion 64-bit ARM CPUs, common functions like `strstr` and `memmem` only achieve 1/3 of the CPU's thoughput.
+1️⃣ First, even on common hardware, including over a billion 64-bit ARM CPUs, common functions like `strstr` and `memmem` only achieve 1/3 of the CPU's throughput.
 2️⃣ Second, SIMD coverage is inconsistent: acceleration in forward scans does not guarantee speed in the reverse-order search.
 3️⃣ At last, most high-level languages can't always use LibC, as the strings are often not NULL-terminated or may contain the Unicode "Zero" character in the middle of the string.
 That's why StringZilla was created.
@@ -254,7 +254,7 @@ StringZilla has a lot of functionality, most of which is covered by benchmarks a
 You can find those in the `./scripts` directory, with usage notes listed in the [`CONTRIBUTING.md`](CONTRIBUTING.md) file.
 Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are faster than either standard library.
 
-> Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
+> Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 6 characters.
 > The code was compiled with GCC 12, using `glibc` v2.35.
 > The benchmarks performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
 > Most modern Arm-based 64-bit CPUs will have similar relative speedups.
@@ -521,10 +521,10 @@ Similar to how `File` can be used to read a large file, other interfaces can be 
 The `Str` class has `write_to` to write the string to a file, and `offset_within` to obtain integer offsets of substring view in larger string for navigation.
 
 ```py
-web_archieve = Str("<html>...</html><html>...</html>")
-_, end_tag, next_doc = web_archieve.partition("</html>") # or use `find`
-next_doc_offset = next_doc.offset_within(web_archieve)
-web_archieve.write_to("next_doc.html") # no GIL, no copies, just a view
+web_archive = Str("<html>...</html><html>...</html>")
+_, end_tag, next_doc = web_archive.partition("</html>") # or use `find`
+next_doc_offset = next_doc.offset_within(web_archive)
+web_archive.write_to("next_doc.html") # no GIL, no copies, just a view
 ```
 
 #### PyArrow
@@ -980,8 +980,8 @@ The STL provides `std::generate` and `std::random_device`, that can be used with
 ```cpp
 sz::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
     sz::string result(length, '\0');
-    static std::random_device seed_source; // Too expensive to construct every time
-    std::mt19937 generator(seed_source());
+    static std::random_device seed_source; // Expensive to construct - due to system calls
+    static std::mt19937 generator(seed_source()); // Also expensive - due to the state size
     std::uniform_int_distribution<std::size_t> distribution(0, cardinality);
     std::generate(result.begin(), result.end(), [&]() { return alphabet[distribution(generator)]; });
     return result;
@@ -1463,6 +1463,11 @@ If you like strings and value efficiency, you may also enjoy the following proje
 - [hyperscan](https://github.com/intel/hyperscan) - regular expressions with SIMD acceleration.
 - [pyahocorasick](https://github.com/WojciechMula/pyahocorasick) - Aho-Corasick algorithm in Python.
 - [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) - fast string matching in C++ and Python.
+
+If you are looking for more reading materials on this topic, consider the following:
+
+- [5x faster strings with SIMD & SWAR](https://ashvardanian.com/posts/stringzilla/).
+- [The Painful Pitfalls of C++ STL Strings](https://ashvardanian.com/posts/painful-strings/).
 
 ## License 📜
 
