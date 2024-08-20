@@ -1024,18 +1024,18 @@ class reversed_iterator_for {
         return *this;
     }
 
-    reversed_iterator_for operator++(int) const noexcept {
+    reversed_iterator_for operator++(int) noexcept {
         reversed_iterator_for temp = *this;
         --ptr_;
         return temp;
     }
 
-    reversed_iterator_for &operator--() const noexcept {
+    reversed_iterator_for &operator--() noexcept {
         ++ptr_;
         return *this;
     }
 
-    reversed_iterator_for operator--(int) const noexcept {
+    reversed_iterator_for operator--(int) noexcept {
         reversed_iterator_for temp = *this;
         ++ptr_;
         return temp;
