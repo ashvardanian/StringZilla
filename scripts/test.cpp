@@ -190,11 +190,23 @@ static void test_api_readonly() {
     assert(str("hello", 4) == "hell"); // Construct from substring
 
     // Element access.
-    assert(str("test")[0] == 't');
-    assert(str("test").at(1) == 'e');
-    assert(str("front").front() == 'f');
-    assert(str("back").back() == 'k');
+    assert(str("rest")[0] == 'r');
+    assert(str("rest").at(1) == 'e');
+    assert(str("rest").sat(1) == 'e');
+    assert(str("rest").sat(-1) == 't');
+    assert(str("rest").sat(-4) == 'r');
     assert(*str("data").data() == 'd');
+
+    assert(str("front").front() == 'f');
+    assert(str("front").front(1) == "f");
+    assert(str("front").front(2) == "fr");
+    assert(str("front").front(2) == "fr");
+    assert(str("front").front(-2) == "fro");
+
+    assert(str("back").back() == 'k');
+    assert(str("back").back(1) == "ack");
+    assert(str("back").back(-1) == "k");
+    assert(str("back").back(-2) == "ck");
 
     // Iterators.
     assert(*str("begin").begin() == 'b' && *str("cbegin").cbegin() == 'c');
@@ -567,7 +579,7 @@ template <typename string_type>
 static void test_api_readonly_extensions() {
     using str = string_type;
 
-    // Signed offset lokups and slices.
+    // Signed offset lookups and slices.
     assert(str("hello").sat(0) == 'h');
     assert(str("hello").sat(-1) == 'o');
     assert(str("hello").sub(1) == "ello");
@@ -1022,7 +1034,7 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
                                              std::size_t misalignment) {
     constexpr std::size_t max_repeats = 128;
 
-    // Allocate a buffer to store the haystack with enough padding to misalign it.
+    // Allocate a buffer to store the haystack with enough padding to mis-align it.
     std::size_t haystack_buffer_length = max_repeats * haystack_pattern.size() + 2 * SZ_CACHE_LINE_WIDTH;
     std::vector<char> haystack_buffer(haystack_buffer_length, 'x');
     char *haystack = haystack_buffer.data();

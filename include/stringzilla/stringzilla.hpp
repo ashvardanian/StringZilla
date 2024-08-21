@@ -1251,7 +1251,7 @@ class basic_string_slice {
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_slice front(size_type n) const noexcept {
+    string_slice front(difference_type n) const noexcept {
         assert(n <= size() && "string_slice::front(n) out of bounds");
         return {start_, n};
     }
@@ -1260,7 +1260,7 @@ class basic_string_slice {
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_slice back(size_type n) const noexcept {
+    string_slice back(difference_type n) const noexcept {
         assert(n <= size() && "string_slice::back(n) out of bounds");
         return {start_ + length_ - n, n};
     }
@@ -2186,15 +2186,15 @@ class basic_string {
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_view front(size_type n) const noexcept { return view().front(n); }
-    string_span front(size_type n) noexcept { return span().front(n); }
+    string_view front(difference_type n) const noexcept { return view().front(n); }
+    string_span front(difference_type n) noexcept { return span().front(n); }
 
     /**
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_view back(size_type n) const noexcept { return view().back(n); }
-    string_span back(size_type n) noexcept { return span().back(n); }
+    string_view back(difference_type n) const noexcept { return view().back(n); }
+    string_span back(difference_type n) noexcept { return span().back(n); }
 
     /**
      *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
