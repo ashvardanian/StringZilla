@@ -192,21 +192,9 @@ static void test_api_readonly() {
     // Element access.
     assert(str("rest")[0] == 'r');
     assert(str("rest").at(1) == 'e');
-    assert(str("rest").sat(1) == 'e');
-    assert(str("rest").sat(-1) == 't');
-    assert(str("rest").sat(-4) == 'r');
-    assert(*str("data").data() == 'd');
-
+    assert(*str("rest").data() == 'r');
     assert(str("front").front() == 'f');
-    assert(str("front").front(1) == "f");
-    assert(str("front").front(2) == "fr");
-    assert(str("front").front(2) == "fr");
-    assert(str("front").front(-2) == "fro");
-
     assert(str("back").back() == 'k');
-    assert(str("back").back(1) == "ack");
-    assert(str("back").back(-1) == "k");
-    assert(str("back").back(-2) == "ck");
 
     // Iterators.
     assert(*str("begin").begin() == 'b' && *str("cbegin").cbegin() == 'c');
@@ -582,6 +570,27 @@ static void test_api_readonly_extensions() {
     // Signed offset lookups and slices.
     assert(str("hello").sat(0) == 'h');
     assert(str("hello").sat(-1) == 'o');
+    assert(str("rest").sat(1) == 'e');
+    assert(str("rest").sat(-1) == 't');
+    assert(str("rest").sat(-4) == 'r');
+
+    assert(str("front").front() == 'f');
+    assert(str("front").front(1) == "f");
+    assert(str("front").front(2) == "fr");
+    assert(str("front").front(2) == "fr");
+    assert(str("front").front(-2) == "fro");
+    assert(str("front").front(0) == "");
+    assert(str("front").front(5) == "front");
+    assert(str("front").front(-5) == "");
+
+    assert(str("back").back() == 'k');
+    assert(str("back").back(1) == "ack");
+    assert(str("back").back(2) == "ck");
+    assert(str("back").back(-1) == "k");
+    assert(str("back").back(-2) == "ck");
+    assert(str("back").back(-4) == "back");
+    assert(str("back").back(4) == "");
+
     assert(str("hello").sub(1) == "ello");
     assert(str("hello").sub(-1) == "o");
     assert(str("hello").sub(1, 2) == "e");

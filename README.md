@@ -816,7 +816,9 @@ When it's enabled, the _~~subjectively~~_ risky overloads from the Standard will
 using str = sz::string;
 
 str("a:b").front(1) == "a"; // no checks, unlike `substr`
+str("a:b").front(2) == "2"; // take first 2 characters
 str("a:b").back(-1) == "b"; // accepting negative indices
+str("a:b").back(-2) == ":b"; // similar to Python's `"a:b"[-2:]`
 str("a:b").sub(1, -1) == ":"; // similar to Python's `"a:b"[1:-1]`
 str("a:b").sub(-2, -1) == ":"; // similar to Python's `"a:b"[-2:-1]`
 str("a:b").sub(-2, 1) == ""; // similar to Python's `"a:b"[-2:1]`
