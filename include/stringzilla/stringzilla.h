@@ -25,7 +25,7 @@
 
 #define STRINGZILLA_VERSION_MAJOR 3
 #define STRINGZILLA_VERSION_MINOR 9
-#define STRINGZILLA_VERSION_PATCH 2
+#define STRINGZILLA_VERSION_PATCH 3
 
 /**
  *  @brief  When set to 1, the library will include the following LibC headers: <stddef.h> and <stdint.h>.
