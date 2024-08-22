@@ -1242,27 +1242,31 @@ class basic_string_slice {
      *  @warning The behavior is @b undefined if the position is beyond bounds.
      */
     reference sat(difference_type signed_offset) const noexcept {
-        size_type pos = (signed_offset < 0) ? size() + signed_offset : signed_offset;
+        size_type pos = static_cast<size_type>(signed_offset < 0 ? size() + signed_offset : signed_offset);
         assert(pos < size() && "string_slice::sat(i) out of bounds");
         return start_[pos];
     }
 
     /**
-     *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
-     *  @warning The behavior is @b undefined if `n > size()`.
+     *  @brief  The slice that would be dropped by `remove_prefix`, that accepts signed arguments
+     *          and does no bounds checking. Equivalent to Python's `"abc"[:2]` and `"abc"[:-1]`.
+     *  @warning The behavior is @b undefined if `n > size() || n < -size() || n == -0`.
      */
-    string_slice front(size_type n) const noexcept {
-        assert(n <= size() && "string_slice::front(n) out of bounds");
-        return {start_, n};
+    string_slice front(difference_type signed_offset) const noexcept {
+        size_type pos = static_cast<size_type>(signed_offset < 0 ? size() + signed_offset : signed_offset);
+        assert(pos <= size() && "string_slice::front(signed_offset) out of bounds");
+        return {start_, pos};
     }
 
     /**
-     *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
-     *  @warning The behavior is @b undefined if `n > size()`.
+     *  @brief  The slice that would be dropped by `remove_suffix`, that accepts signed arguments
+     *          and does no bounds checking. Equivalent to Python's `"abc"[2:]` and `"abc"[-1:]`.
+     *  @warning The behavior is @b undefined if `n > size() || n < -size() || n == -0`.
      */
-    string_slice back(size_type n) const noexcept {
-        assert(n <= size() && "string_slice::back(n) out of bounds");
-        return {start_ + length_ - n, n};
+    string_slice back(difference_type signed_offset) const noexcept {
+        size_type pos = static_cast<size_type>(signed_offset < 0 ? size() + signed_offset : signed_offset);
+        assert(pos <= size() && "string_slice::back(signed_offset) out of bounds");
+        return {start_ + pos, length_ - pos};
     }
 
     /**
@@ -2186,15 +2190,15 @@ class basic_string {
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_view front(size_type n) const noexcept { return view().front(n); }
-    string_span front(size_type n) noexcept { return span().front(n); }
+    string_view front(difference_type n) const noexcept { return view().front(n); }
+    string_span front(difference_type n) noexcept { return span().front(n); }
 
     /**
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_view back(size_type n) const noexcept { return view().back(n); }
-    string_span back(size_type n) noexcept { return span().back(n); }
+    string_view back(difference_type n) const noexcept { return view().back(n); }
+    string_span back(difference_type n) noexcept { return span().back(n); }
 
     /**
      *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.

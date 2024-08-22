@@ -124,6 +124,7 @@
     "tparam",
     "TPFLAGS",
     "unigram",
+    "unpoison",
     "usecases",
     "Vardanian",
     "vectorcallfunc",
