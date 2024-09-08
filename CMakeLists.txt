@@ -38,7 +38,24 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     "MinSizeRel" "RelWithDebInfo")
 endif()
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+# When cross compiling on MSVC the CMAKE variables are not set properly, so we check vcvarsall.bat, to find the target.
+if (MSVC)
+  if (($ENV{VSCMD_ARG_HOST_ARCH} MATCHES "^x" AND $ENV{VSCMD_ARG_TGT_ARCH} MATCHES "^arm") OR
+    ($ENV{VSCMD_ARG_HOST_ARCH} MATCHES "^arm" AND $ENV{VSCMD_ARG_TGT_ARCH} MATCHES "^x"))
+    set(CMAKE_CROSSCOMPILING TRUE)
+    if ($ENV{VSCMD_ARG_TGT_ARCH} MATCHES "arm64|arm64ec")
+      set(CMAKE_SYSTEM_PROCESSOR "ARM64")
+    elseif($ENV{VSCMD_ARG_TGT_ARCH} MATCHES "x64")
+      set(CMAKE_SYSTEM_PROCESSOR "AMD64")
+    elseif($ENV{VSCMD_ARG_TGT_ARCH} MATCHES "x86")
+      set(CMAKE_SYSTEM_PROCESSOR "X86")
+    else()
+      message(FATAL_ERROR "Unknown Target: $ENV{VSCMD_ARG_TGT_ARCH}")
+    endif()
+  endif()
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86|X86|x86_64|AMD64|amd64")
   SET(SZ_PLATFORM_X86 TRUE)
   message(STATUS "Platform: x86")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
@@ -289,8 +306,15 @@ if(${STRINGZILLA_BUILD_TEST})
     endif()
   elseif(SZ_PLATFORM_ARM)
     # ARM specific backends
-    define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a")
-    define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8-a+simd")
+    if (MSVC)
+      define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8.0")
+      target_compile_definitions(stringzilla_test_cpp20_arm_serial PRIVATE "SZ_USE_ARM_NEON=0")
+      target_compile_definitions(stringzilla_test_cpp20_arm_serial PRIVATE "SZ_USE_ARM_SVE=0")
+      define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8.0")
+    else()
+      define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a+nosimd")
+      define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8-a+simd")
+    endif()
   endif()
 endif()
 
@@ -318,8 +342,12 @@ if(${STRINGZILLA_BUILD_SHARED})
         "SZ_USE_ARM_NEON=0"
         "SZ_USE_ARM_SVE=0")
     elseif(SZ_PLATFORM_ARM)
-      set_compiler_flags(${target} "" "armv8-a")
-
+      if (MSVC)
+        set_compiler_flags(${target} "" "armv8.0")
+      else()
+        set_compiler_flags(${target} "" "armv8-a")
+      endif()
+      
       target_compile_definitions(${target} PRIVATE
         "SZ_USE_X86_AVX512=0"
         "SZ_USE_X86_AVX2=0"
