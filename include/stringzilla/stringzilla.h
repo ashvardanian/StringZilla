@@ -1308,7 +1308,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
 
 // Sadly, when building Win32 images, we can't use the `_tzcnt_u64`, `_lzcnt_u64`,
 // `_BitScanForward64`, or `_BitScanReverse64` intrinsics. For now it's a simple `for`-loop.
-// In the future we can switch to a more efficient De Bruijn's algorithm.
+// TODO: In the future we can switch to a more efficient De Bruijn's algorithm.
 // https://www.chessprogramming.org/BitScan
 // https://www.chessprogramming.org/De_Bruijn_Sequence
 // https://gist.github.com/resilar/e722d4600dbec9752771ab4c9d47044f
@@ -1324,13 +1324,25 @@ SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) {
 SZ_INTERNAL int sz_u64_clz(sz_u64_t x) {
     sz_assert(x != 0);
     int n = 0;
-    while ((x & 0x8000000000000000ULL) == 0) { n++, x <<= 1; }
+    while ((x & 0x8000000000000000ull) == 0) { n++, x <<= 1; }
     return n;
 }
 SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) {
-    x = x - ((x >> 1) & 0x5555555555555555);
-    x = (x & 0x3333333333333333) + ((x >> 2) & 0x3333333333333333);
-    return (((x + (x >> 4)) & 0x0F0F0F0F0F0F0F0F) * 0x0101010101010101) >> 56;
+    x = x - ((x >> 1) & 0x5555555555555555ull);
+    x = (x & 0x3333333333333333ull) + ((x >> 2) & 0x3333333333333333ull);
+    return (((x + (x >> 4)) & 0x0F0F0F0F0F0F0F0Full) * 0x0101010101010101ull) >> 56;
+}
+SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) {
+    sz_assert(x != 0);
+    int n = 0;
+    while ((x & 1) == 0) { n++, x >>= 1; }
+    return n;
+}
+SZ_INTERNAL int sz_u32_clz(sz_u32_t x) {
+    sz_assert(x != 0);
+    int n = 0;
+    while ((x & 0x80000000u) == 0) { n++, x <<= 1; }
+    return n;
 }
 SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) {
     x = x - ((x >> 1) & 0x55555555);
@@ -1341,12 +1353,12 @@ SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) {
 SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return (int)_tzcnt_u64(x); }
 SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return (int)_lzcnt_u64(x); }
 SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return (int)__popcnt64(x); }
-SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
-#endif
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
+SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
+#endif
 // Force the byteswap functions to be intrinsics, because when /Oi- is given, these will turn into CRT function calls,
-// which breaks when SZ_AVOID_LIBC is given
+// which breaks when `SZ_AVOID_LIBC` is given
 #pragma intrinsic(_byteswap_uint64)
 SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
 #pragma intrinsic(_byteswap_ulong)
