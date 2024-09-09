@@ -515,7 +515,8 @@ static PyMethodDef File_methods[] = { //
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject FileType = {
-    PyObject_HEAD_INIT(NULL).tp_name = "stringzilla.File",
+    PyVarObject_HEAD_INIT(NULL, 0) //
+        .tp_name = "stringzilla.File",
     .tp_doc = "Memory mapped file class, that exposes the memory range for low-level access",
     .tp_basicsize = sizeof(File),
     .tp_flags = Py_TPFLAGS_DEFAULT,
@@ -2483,7 +2484,8 @@ static PyMethodDef Str_methods[] = {
     {NULL, NULL, 0, NULL}};
 
 static PyTypeObject StrType = {
-    PyObject_HEAD_INIT(NULL).tp_name = "stringzilla.Str",
+    PyVarObject_HEAD_INIT(NULL, 0) //
+        .tp_name = "stringzilla.Str",
     .tp_doc = "Immutable string/slice class with SIMD and SWAR-accelerated operations",
     .tp_basicsize = sizeof(Str),
     .tp_flags = Py_TPFLAGS_DEFAULT,
