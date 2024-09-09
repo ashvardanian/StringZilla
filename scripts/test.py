@@ -40,8 +40,11 @@ def test_library_properties():
     assert "serial" in sz.__capabilities__.split(","), "Serial backend must be present"
 
 
-def test_unit_construct():
+@pytest.mark.parametrize("native_type", [str, bytes, bytearray])
+def test_unit_construct(native_type):
     native = "aaaaa"
+    if native_type is bytes or native_type is bytearray:
+        native = native_type(native, "utf-8")
     big = Str(native)
     assert len(big) == len(native)
 

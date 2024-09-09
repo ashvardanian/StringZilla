@@ -254,20 +254,28 @@ void apply_order(sz_string_view_t *array, sz_sorted_idx_t *order, size_t length)
 
 sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
-        // Handle Python str
+        // Handle Python `str` object
         Py_ssize_t signed_length;
         *start = PyUnicode_AsUTF8AndSize(object, &signed_length);
         *length = (size_t)signed_length;
         return 1;
     }
     else if (PyBytes_Check(object)) {
-        // Handle Python str
+        // Handle Python `bytes` object
+        // https://docs.python.org/3/c-api/bytes.html
         Py_ssize_t signed_length;
         if (PyBytes_AsStringAndSize(object, (char **)start, &signed_length) == -1) {
             PyErr_SetString(PyExc_TypeError, "Mapping bytes failed");
             return 0;
         }
         *length = (size_t)signed_length;
+        return 1;
+    }
+    else if (PyByteArray_Check(object)) {
+        // Handle Python mutable `bytearray` object
+        // https://docs.python.org/3/c-api/bytearray.html
+        *start = PyByteArray_AS_STRING(object);
+        *length = PyByteArray_GET_SIZE(object);
         return 1;
     }
     else if (PyObject_TypeCheck(object, &StrType)) {
