@@ -297,12 +297,12 @@ jobs:
 
   create_macos_library:
     name: Create Library for MacOS ${{ matrix.arch }}
-    runs-on: macos-12
+    runs-on: macos-latest
     needs: versioning
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, x86_64]
+        arch: [arm64] # Only Apple Silicon for now
     steps:
       - uses: actions/checkout@v4
         with:
