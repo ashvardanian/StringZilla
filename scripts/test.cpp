@@ -456,7 +456,10 @@ static void test_api_mutable() {
     assert(str().max_size() > 0);
     assert(str().get_allocator() == std::allocator<char>());
     assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
-    assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
+
+    // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
+    // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
+    if (SZ_DETECT_64_BIT) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
