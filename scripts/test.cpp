@@ -63,6 +63,15 @@ template class sz::basic_string<char>;
  */
 static void test_arithmetical_utilities() {
 
+    assert(sz_u32_clz(0x0000000000000001u) == 31);
+    assert(sz_u32_clz(0x00000002u) == 30);
+    assert(sz_u32_clz(0x00000003u) == 30);
+    assert(sz_u32_clz(0x00000004u) == 29);
+    assert(sz_u32_clz(0x00000007u) == 29);
+    assert(sz_u32_clz(0x80000001u) == 0);
+    assert(sz_u32_clz(0xffffffffu) == 0);
+    assert(sz_u32_clz(0x40000000u) == 1);
+
     assert(sz_u64_clz(0x0000000000000001ull) == 63);
     assert(sz_u64_clz(0x0000000000000002ull) == 62);
     assert(sz_u64_clz(0x0000000000000003ull) == 62);
