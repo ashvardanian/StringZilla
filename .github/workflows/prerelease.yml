@@ -225,7 +225,7 @@ jobs:
         run: swift test
 
   test_ubuntu_cross_compilation:
-    name: Cross Compilation
+    name: Clang Cross Compilation
     runs-on: ubuntu-22.04
     env:
       CC: clang-16
@@ -398,6 +398,46 @@ jobs:
       - name: Test Python
         run: pytest scripts/test.py -s -x
 
+  test_windows_cross_compilation:
+    name: Windows Cross Compilation ${{ matrix.target }}
+    runs-on: windows-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x64
+          - arch: x86
+            target: x86
+          - arch: amd64_arm64
+            target: ARM64
+            
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      
+      - name: Build C/C++
+        shell: cmd
+        run: |
+          cmake -GNinja -B build_artifacts ^
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
+            -DSTRINGZILLA_BUILD_SHARED=1 ^
+            -DSTRINGZILLA_BUILD_BENCHMARK=1 ^
+            -DSTRINGZILLA_BUILD_TEST=1
+
+          cmake --build build_artifacts --config RelWithDebInfo
+        
+        # We can't run the produced builds, but we can make sure they exist
+      - name: Test artifacts presense
+        run: |
+          type build_artifacts/stringzillite.dll >NUL
+          type build_artifacts/stringzilla_shared.dll >NUL
+          type build_artifacts/stringzilla_test_cpp20.exe >NUL
+  
   test_alpine:
     name: Alpine Linux
     runs-on: ubuntu-latest
