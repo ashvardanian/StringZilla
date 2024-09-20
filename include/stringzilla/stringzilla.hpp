@@ -3766,7 +3766,7 @@ void randomize(basic_string_slice<char_type_> string, generator_type_ &generator
  */
 template <typename char_type_>
 void randomize(basic_string_slice<char_type_> string, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
-    randomize(string, &std::rand, alphabet);
+    randomize(string, std::rand, alphabet);
 }
 
 using sorted_idx_t = sz_sorted_idx_t;
