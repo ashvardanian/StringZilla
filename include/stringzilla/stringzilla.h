@@ -1108,30 +1108,24 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #ifndef SZ_USE_X86_AVX512
 #ifdef __AVX512BW__
 #define SZ_USE_X86_AVX512 1
-#pragma message("SZ_USE_X86_AVX512")
 #else
 #define SZ_USE_X86_AVX512 0
-#pragma message("NOT SZ_USE_X86_AVX512")
 #endif
 #endif
 
 #ifndef SZ_USE_X86_AVX2
 #ifdef __AVX2__
 #define SZ_USE_X86_AVX2 1
-#pragma message("SZ_USE_X86_AVX2")
 #else
 #define SZ_USE_X86_AVX2 0
-#pragma message("NOT SZ_USE_X86_AVX2")
 #endif
 #endif
 
 #ifndef SZ_USE_ARM_NEON
 #if defined(__ARM_NEON) || defined(_M_ARM64)
 #define SZ_USE_ARM_NEON 1
-#pragma message("SZ_USE_ARM_NEON")
 #else
 #define SZ_USE_ARM_NEON 0
-#pragma message("NOT SZ_USE_ARM_NEON")
 #endif
 #endif
 
@@ -1140,7 +1134,6 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #define SZ_USE_ARM_SVE 1
 #else
 #define SZ_USE_ARM_SVE 0
-#pragma message("NOT SZ_USE_ARM_SVE")
 #endif
 #endif
 
@@ -1152,9 +1145,6 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #define SZ_USE_X86_AVX2 0
 #undef SZ_USE_X86_AVX512
 #define SZ_USE_X86_AVX512 0
-#pragma message("NOT SZ_TARGET_X86")
-#else
-#pragma message("SZ_TARGET_X86")
 #endif
 #endif
 
@@ -1164,9 +1154,6 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #define SZ_USE_ARM_NEON 0
 #undef SZ_USE_ARM_SVE
 #define SZ_USE_ARM_SVE 0
-#pragma message("NOT SZ_TARGET_ARM")
-#else
-#pragma message("SZ_TARGET_ARM")
 #endif
 #endif
 
