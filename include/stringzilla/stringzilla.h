@@ -1108,24 +1108,30 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #ifndef SZ_USE_X86_AVX512
 #ifdef __AVX512BW__
 #define SZ_USE_X86_AVX512 1
+#pragma message("SZ_USE_X86_AVX512")
 #else
 #define SZ_USE_X86_AVX512 0
+#pragma message("NOT SZ_USE_X86_AVX512")
 #endif
 #endif
 
 #ifndef SZ_USE_X86_AVX2
 #ifdef __AVX2__
 #define SZ_USE_X86_AVX2 1
+#pragma message("SZ_USE_X86_AVX2")
 #else
 #define SZ_USE_X86_AVX2 0
+#pragma message("NOT SZ_USE_X86_AVX2")
 #endif
 #endif
 
 #ifndef SZ_USE_ARM_NEON
 #if defined(__ARM_NEON) || defined(_M_ARM64)
 #define SZ_USE_ARM_NEON 1
+#pragma message("SZ_USE_ARM_NEON")
 #else
 #define SZ_USE_ARM_NEON 0
+#pragma message("NOT SZ_USE_ARM_NEON")
 #endif
 #endif
 
@@ -1134,6 +1140,33 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #define SZ_USE_ARM_SVE 1
 #else
 #define SZ_USE_ARM_SVE 0
+#pragma message("NOT SZ_USE_ARM_SVE")
+#endif
+#endif
+
+// Undef the hardware features if the build target never supports them, mainly used when building MacOS universal2 because
+// then both x86 & arm feature flags can be set
+#ifndef SZ_TARGET_X86
+#if !(defined(__i386__) || defined(__amd64__) || defined(_M_IX86) || defined(_M_AMD64))
+#undef SZ_USE_X86_AVX2
+#define SZ_USE_X86_AVX2 0
+#undef SZ_USE_X86_AVX512
+#define SZ_USE_X86_AVX512 0
+#pragma message("NOT SZ_TARGET_X86")
+#else
+#pragma message("SZ_TARGET_X86")
+#endif
+#endif
+
+#ifndef SZ_TARGET_ARM
+#if !(defined(__arm__) || defined(__aarch64__) || defined(_M_ARM) || defined(_M_ARM64))
+#undef SZ_USE_ARM_NEON
+#define SZ_USE_ARM_NEON 0
+#undef SZ_USE_ARM_SVE
+#define SZ_USE_ARM_SVE 0
+#pragma message("NOT SZ_TARGET_ARM")
+#else
+#pragma message("SZ_TARGET_ARM")
 #endif
 #endif
 
