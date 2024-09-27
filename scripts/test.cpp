@@ -56,6 +56,7 @@ template class std::basic_string_view<char>;
 template class sz::basic_string_slice<char>;
 template class std::basic_string<char>;
 template class sz::basic_string<char>;
+template class sz::basic_charset<char>;
 
 /**
  *  @brief  Several string processing operations rely on computing integer logarithms.
@@ -955,6 +956,7 @@ static void test_search() {
     assert("abbccc"_sz.partition("bb").before == "a");
     assert("abbccc"_sz.partition("bb").match == "bb");
     assert("abbccc"_sz.partition("bb").after == "ccc");
+    assert("abb ccc"_sz.partition(sz::whitespaces_set()).after == "ccc");
 
     // Check ranges of search matches
     assert("hello"_sz.find_all("l").size() == 2);

@@ -868,9 +868,9 @@ StringZilla provides a convenient `partition` function, which returns a tuple of
 ```cpp
 auto parts = haystack.partition(':'); // Matching a character
 auto [before, match, after] = haystack.partition(':'); // Structure unpacking
-auto [before, match, after] = haystack.partition(char_set(":;")); // Character-set argument
+auto [before, match, after] = haystack.partition(sz::char_set(":;")); // Character-set argument
 auto [before, match, after] = haystack.partition(" : "); // String argument
-auto [before, match, after] = haystack.rpartition(sz::whitespaces); // Split around the last whitespace
+auto [before, match, after] = haystack.rpartition(sz::whitespaces_set()); // Split around the last whitespace
 ```
 
 Combining those with the `split` function, one can easily parse a CSV file or HTTP headers.
@@ -896,8 +896,8 @@ Here is a sneak peek of the most useful ones.
 ```cpp
 text.hash(); // -> 64 bit unsigned integer 
 text.ssize(); // -> 64 bit signed length to avoid `static_cast<std::ssize_t>(text.size())`
-text.contains_only(" \w\t"); // == text.find_first_not_of(char_set(" \w\t")) == npos;
-text.contains(sz::whitespaces); // == text.find(char_set(sz::whitespaces)) != npos;
+text.contains_only(" \w\t"); // == text.find_first_not_of(sz::char_set(" \w\t")) == npos;
+text.contains(sz::whitespaces_set()); // == text.find(sz::char_set(sz::whitespaces_set())) != npos;
 
 // Simpler slicing than `substr`
 text.front(10); // -> sz::string_view
@@ -909,9 +909,9 @@ text.front(10, cap) == text.front(std::min(10, text.size()));
 text.back(10, cap) == text.back(std::min(10, text.size()));
 
 // Character set filtering
-text.lstrip(sz::whitespaces).rstrip(sz::newlines); // like Python
-text.front(sz::whitespaces); // all leading whitespaces
-text.back(sz::digits); // all numerical symbols forming the suffix
+text.lstrip(sz::whitespaces_set()).rstrip(sz::newlines_set()); // like Python
+text.front(sz::whitespaces_set()); // all leading whitespaces
+text.back(sz::digits_set()); // all numerical symbols forming the suffix
 
 // Incremental construction
 using sz::string::unchecked;
@@ -942,7 +942,7 @@ To avoid those, StringZilla provides lazily-evaluated ranges, compatible with th
 
 ```cpp
 for (auto line : haystack.split("\r\n"))
-    for (auto word : line.split(char_set(" \w\t.,;:!?")))
+    for (auto word : line.split(sz::char_set(" \w\t.,;:!?")))
         std::cout << word << std::endl;
 ```
 
@@ -951,9 +951,9 @@ It also allows interleaving matches, if you want both inclusions of `xx` in `xxx
 Debugging pointer offsets is not a pleasant exercise, so keep the following functions in mind.
 
 - `haystack.[r]find_all(needle, interleaving)`
-- `haystack.[r]find_all(char_set(""))`
+- `haystack.[r]find_all(sz::char_set(""))`
 - `haystack.[r]split(needle)`
-- `haystack.[r]split(char_set(""))`
+- `haystack.[r]split(sz::char_set(""))`
 
 For $N$ matches the split functions will report $N+1$ matches, potentially including empty strings.
 Ranges have a few convenience methods as well:
@@ -1387,11 +1387,8 @@ For lexicographic sorting of strings, StringZilla uses a "hybrid-hybrid" approac
    1. IntroSort begins with a QuickSort.
    2. If the recursion depth exceeds a certain threshold, it switches to a HeapSort.
 
-Next design goals:
-
-- [ ] Generalize to arrays with over 4 billion entries.
-- [ ] Algorithmic improvements may yield another 3x performance gain.
-- [ ] SIMD-acceleration for the Radix slice.
+A better algorithm is in development.
+Check #173 for design goals and progress updates.
 
 ### Hashing
 
