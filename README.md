@@ -766,6 +766,25 @@ To safely print those, pass the `string_length` to `printf` as well.
 printf("%.*s\n", (int)string_length, string_start);
 ```
 
+### What's Wrong with the C Standard Library?
+
+StringZilla is not a drop-in replacement for the C Standard Library.
+It's designed to be a safer and more modern alternative.
+Conceptually:
+
+1. LibC strings are expected to be null-terminated, so to use the efficient LibC implementations on slices of larger strings, you'd have to copy them, which is more expensive than the original string operation.
+2. LibC functionality is asymmetric - you can find the first and the last occurrence of a character within a string, but you can't find the last occurrence of a substring.
+3. LibC function names are typically very short and cryptic.
+4. LibC lacks crucial functionality like hashing and doesn't provide primitives for less critical but relevant operations like fuzzy matching.
+
+Something has to be said about its support for UTF8.
+Aside from a single-byte `char` type, LibC provides `wchar_t`:
+
+- The size of `wchar_t` is not consistent across platforms. On Windows, it's typically 16 bits (suitable for UTF-16), while on Unix-like systems, it's usually 32 bits (suitable for UTF-32). This inconsistency can lead to portability issues when writing cross-platform code.
+- `wchar_t` is designed to represent wide characters in a fixed-width format (UTF-16 or UTF-32). In contrast, UTF-8 is a variable-length encoding, where each character can take from 1 to 4 bytes. This fundamental difference means that `wchar_t` and UTF-8 are incompatible.
+
+StringZilla [partially addresses those issues](#unicode-utf-8-and-wide-characters).
+
 ### What's Wrong with the C++ Standard Library?
 
 | C++ Code                             | Evaluation Result | Invoked Signature              |
