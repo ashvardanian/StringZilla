@@ -5457,6 +5457,8 @@ SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charse
 SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
 #if SZ_USE_X86_AVX512
     return sz_rfind_charset_avx512(text, length, set);
+#elif SZ_USE_X86_AVX2
+    return sz_rfind_charset_avx2(text, length, set);
 #elif SZ_USE_ARM_NEON
     return sz_rfind_charset_neon(text, length, set);
 #else
