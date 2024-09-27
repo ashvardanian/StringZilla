@@ -1577,10 +1577,16 @@ class basic_string_slice {
     partition_type partition(string_view pattern) const noexcept { return partition_(pattern, pattern.length()); }
 
     /**  @brief  Split the string into three parts, before the match, the match itself, and after it. */
+    partition_type partition(value_type pattern) const noexcept { return partition_(&pattern, 1); }
+
+    /**  @brief  Split the string into three parts, before the match, the match itself, and after it. */
     partition_type partition(char_set pattern) const noexcept { return partition_(pattern, 1); }
 
     /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
     partition_type rpartition(string_view pattern) const noexcept { return rpartition_(pattern, pattern.length()); }
+
+    /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
+    partition_type rpartition(value_type pattern) const noexcept { return rpartition_(&pattern, 1); }
 
     /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
     partition_type rpartition(char_set pattern) const noexcept { return rpartition_(pattern, 1); }

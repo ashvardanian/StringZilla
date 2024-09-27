@@ -948,6 +948,7 @@ static void test_search() {
     assert("aabaa"_sz.strip(sz::char_set {"a"}) == "b");
 
     // Check more advanced composite operations
+    assert("abbccc"_sz.partition('b').before.size() == 1);
     assert("abbccc"_sz.partition("bb").before.size() == 1);
     assert("abbccc"_sz.partition("bb").match.size() == 2);
     assert("abbccc"_sz.partition("bb").after.size() == 3);
