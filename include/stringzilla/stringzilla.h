@@ -5079,6 +5079,9 @@ SZ_INTERNAL sz_ssize_t sz_alignment_score_avx512( //
 #pragma region ARM NEON
 
 #if SZ_USE_ARM_NEON
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+simd")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
 
 /**
  *  @brief  Helper structure to simplify work with 64-bit words.
@@ -5309,6 +5312,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_ch
     return sz_rfind_charset_serial(h, h_length, set);
 }
 
+#pragma clang attribute pop
+#pragma GCC pop_options
 #endif // Arm Neon
 
 #pragma endregion
