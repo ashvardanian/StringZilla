@@ -105,11 +105,22 @@ For Python code:
 The primary C implementation and the C++ wrapper are built with CMake.
 Assuming the extensive use of new SIMD intrinsics and recent C++ language features, using a recent compiler is recommended.
 We prefer GCC 12, which is available from default Ubuntu repositories with Ubuntu 22.04 LTS onwards.
-If this is your first experience with CMake, use the following commands to get started:
+If this is your first experience with CMake, use the following commands to get started on Ubuntu:
 
 ```bash
-sudo apt-get update && sudo apt-get install cmake build-essential libjemalloc-dev g++-12 gcc-12 # Ubuntu
-brew install libomp llvm # MacOS
+sudo apt-get update && sudo apt-get install cmake build-essential libjemalloc-dev g++-12 gcc-12
+```
+
+On MacOS it's recommended to use Homebrew and install Clang, as opposed to "Apple Clang".
+Replacing the default compiler is not recommended, as it may break the system, but you can pass it as an environment variable:
+
+```bash
+brew install llvm
+cmake -D CMAKE_BUILD_TYPE=Release -D SIMSIMD_BUILD_TESTS=1 \
+    -D CMAKE_C_COMPILER="$(brew --prefix llvm)/bin/clang" \
+    -D CMAKE_CXX_COMPILER="$(brew --prefix llvm)/bin/clang++" \
+    -B build_release
+cmake --build build_release --config Release
 ```
 
 ### Testing
