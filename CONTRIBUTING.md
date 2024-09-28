@@ -45,7 +45,7 @@ You can download them using the following commands:
 ```sh
 # English Leipzig Corpora Collection
 # 124 MB, 1'000'000 lines of ASCII, 8'388'608 tokens of mean length 5
-wget --no-clobber -O leipzig1M.txt https://introcs.cs.princeton.edu/python/42sort/leipzig1m.txt 
+wget --no-clobber -O leipzig1M.txt https://introcs.cs.princeton.edu/python/42sort/leipzig1m.txt
 
 # Hutter Prize "enwik9" dataset for compression
 # 1 GB (0.3 GB compressed), 13'147'025 lines of ASCII, 67'108'864 tokens of mean length 6
@@ -164,12 +164,13 @@ For benchmarks, you can use the following commands:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release      # Which will produce the following targets:
-build_release/stringzilla_bench_search <path>     # for substring search
-build_release/stringzilla_bench_token <path>      # for hashing, equality comparisons, etc.
-build_release/stringzilla_bench_similarity <path> # for edit distances and alignment scores
-build_release/stringzilla_bench_sort <path>       # for sorting arrays of strings
-build_release/stringzilla_bench_container <path>  # for STL containers with string keys
+cmake --build build_release --config Release      # Produces the following targets:
+build_release/stringzilla_bench_memory <path>     # - for string copies and fills
+build_release/stringzilla_bench_search <path>     # - for substring search
+build_release/stringzilla_bench_token <path>      # - for hashing, equality comparisons, etc.
+build_release/stringzilla_bench_similarity <path> # - for edit distances and alignment scores
+build_release/stringzilla_bench_sort <path>       # - for sorting arrays of strings
+build_release/stringzilla_bench_container <path>  # - for STL containers with string keys
 ```
 
 ### Benchmarking Hardware-Specific Optimizations

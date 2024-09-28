@@ -27,6 +27,11 @@ namespace scripts {
 
 using seconds_t = double;
 
+template <std::size_t multiple>
+std::size_t divide_round_up(std::size_t n) {
+    return ((n + multiple - 1) / multiple) * multiple;
+}
+
 struct benchmark_result_t {
     std::size_t iterations = 0;
     std::size_t bytes_passed = 0;

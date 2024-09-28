@@ -4226,17 +4226,110 @@ SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
 }
 
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    for (; length >= 64; target += 64, length -= 64) _mm512_storeu_si512(target, _mm512_set1_epi8(value));
-    // At this point the length is guaranteed to be under 64.
-    _mm512_mask_storeu_epi8(target, _sz_u64_mask_until(length), _mm512_set1_epi8(value));
+    __m512i value_vec = _mm512_set1_epi8(value);
+    // The naive implementation of this function is very simple.
+    // It assumes the CPU is great at handling unaligned "stores".
+    //
+    //    for (; length >= 64; target += 64, length -= 64) _mm512_storeu_si512(target, value_vec);
+    //    _mm512_mask_storeu_epi8(target, _sz_u64_mask_until(length), value_vec);
+    //
+    // When the buffer is small, there isn't much to innovate.
+    if (length <= 64) {
+        __mmask64 mask = _sz_u64_mask_until(length);
+        _mm512_mask_storeu_epi8(target, mask, value_vec);
+    }
+    // When the buffer is over 64 bytes, it's guaranteed to touch at least two cache lines - the head and tail,
+    // and may include more cache-lines in-between. Knowing this, we can avoid expensive unaligned stores
+    // by computing 2 masks - for the head and tail, using masked stores for the head and tail, and unmasked
+    // for the body.
+    else {
+        sz_size_t head_length = 64 - ((sz_size_t)target % 64);
+        sz_size_t tail_length = (sz_size_t)(target + length) % 64;
+        sz_size_t body_length = length - head_length - tail_length;
+        __mmask64 head_mask = _sz_u64_mask_until(head_length);
+        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+        _mm512_mask_storeu_epi8(target, head_mask, value_vec);
+        for (target += head_length; body_length >= 64; target += 64, body_length -= 64)
+            _mm512_store_si512(target, value_vec);
+        _mm512_mask_storeu_epi8(target, tail_mask, value_vec);
+    }
 }
 
 SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    for (; length >= 64; target += 64, source += 64, length -= 64)
-        _mm512_storeu_si512(target, _mm512_loadu_si512(source));
-    // At this point the length is guaranteed to be under 64.
-    __mmask64 mask = _sz_u64_mask_until(length);
-    _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
+    // The naive implementation of this function is very simple.
+    // It assumes the CPU is great at handling unaligned "stores" and "loads".
+    //
+    //    for (; length >= 64; target += 64, source += 64, length -= 64)
+    //        _mm512_storeu_si512(target, _mm512_loadu_si512(source));
+    //    __mmask64 mask = _sz_u64_mask_until(length);
+    //    _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
+    //
+    // A typical AWS Sapphire Rapids instance can have 48 KB x 2 blocks of L1 data cache per core,
+    // 2 MB x 2 blocks of L2 cache per core, and one shared 60 MB buffer of L3 cache.
+    // For now, let's avoid the cases beyond the L2 size.
+    int is_huge = length > 2ull * 1024ull * 1024ull;
+    // When the buffer is small, there isn't much to innovate.
+    if (length <= 64) {
+        __mmask64 mask = _sz_u64_mask_until(length);
+        _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
+    }
+    // When dealing wirh larger arrays, the optimization is not as simple as with the `sz_fill_avx512` function,
+    // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
+    // we can use aligned loads and stores, and the performance will be great.
+    else if ((sz_size_t)target % 64 == 0 && (sz_size_t)source % 64 == 0 && !is_huge) {
+        for (; length >= 64; target += 64, source += 64, length -= 64)
+            _mm512_store_si512(target, _mm512_load_si512(source));
+        // At this point the length is guaranteed to be under 64.
+        __mmask64 mask = _sz_u64_mask_until(length);
+        // Aligned load and stores would work too, but it's not defined.
+        _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
+    }
+    // The trickiest case is when both `source` and `target` are not aligned.
+    // In such and simpler cases we can copy enough bytes into `target` to reach its cacheline boundary,
+    // and then combine unaligned loads with aligned stores.
+    else if (!is_huge) {
+        sz_size_t head_length = 64 - ((sz_size_t)target % 64);
+        sz_size_t tail_length = (sz_size_t)(target + length) % 64;
+        sz_size_t body_length = length - head_length - tail_length;
+        __mmask64 head_mask = _sz_u64_mask_until(head_length);
+        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+        _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
+        for (target += head_length, source += head_length; body_length >= 64;
+             target += 64, source += 64, body_length -= 64)
+            _mm512_store_si512(target, _mm512_loadu_si512(source)); // Unaligned load, but aligned store!
+        _mm512_mask_storeu_epi8(target, tail_mask, _mm512_maskz_loadu_epi8(tail_mask, source));
+    }
+    // For gigantic buffers, exceeding typical L1 cache sizes, there are other tricks we can use.
+    //
+    //      1. Moving in both directions to maximize the throughput, when fetching from multiple
+    //         memory pages. Also helps with cache set-associativity issues, as we won't always
+    //         be fetching the same entries in the lookup table.
+    //      2. Using non-temporal stores to avoid polluting the cache.
+    //      3. Prefetching the next cache line, to avoid stalling the CPU. This generally useless
+    //         for predictable patterns, so disregard this advice.
+    //
+    // Bidirectional traversal adds about 10%, accelerating from 11 GB/s to 12 GB/s.
+    // Using "streaming stores" boosts us from 12 GB/s to 19 GB/s.
+    else {
+        sz_size_t head_length = 64 - ((sz_size_t)target % 64);
+        sz_size_t tail_length = (sz_size_t)(target + length) % 64;
+        sz_size_t body_length = length - head_length - tail_length;
+        __mmask64 head_mask = _sz_u64_mask_until(head_length);
+        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+        _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
+        _mm512_mask_storeu_epi8(target + head_length + body_length, tail_mask,
+                                _mm512_maskz_loadu_epi8(tail_mask, source));
+
+        // Now in the main loop, we can use non-temporal loads and stores,
+        // performing the operation in both directions.
+        for (target += head_length, source += head_length; //
+             body_length >= 128;                           //
+             target += 64, source += 64, body_length -= 128) {
+            _mm512_stream_si512((__m512i *)(target), _mm512_loadu_si512(source));
+            _mm512_stream_si512((__m512i *)(target + body_length - 64), _mm512_loadu_si512(source + body_length - 64));
+        }
+        if (body_length >= 64) _mm512_stream_si512((__m512i *)target, _mm512_loadu_si512(source));
+    }
 }
 
 SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
@@ -4299,22 +4392,63 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     n_last_vec.zmm = _mm512_set1_epi8(n[offset_last]);
 
     // Scan through the string.
-    for (; h_length >= n_length + 64; h += 64, h_length -= 64) {
-        h_first_vec.zmm = _mm512_loadu_si512(h + offset_first);
-        h_mid_vec.zmm = _mm512_loadu_si512(h + offset_mid);
-        h_last_vec.zmm = _mm512_loadu_si512(h + offset_last);
-        matches = _kand_mask64(_kand_mask64( // Intersect the masks
-                                   _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
-                                   _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
-                               _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
-        while (matches) {
-            int potential_offset = sz_u64_ctz(matches);
-            if (n_length <= 3 || sz_equal_avx512(h + potential_offset, n, n_length)) return h + potential_offset;
-            matches &= matches - 1;
-        }
+    // We have several optimized versions of the lagorithm for shorter strings,
+    // but they all mimic the default case for unbounded length needles
+    if (n_length >= 64) {
+        for (; h_length >= n_length + 64; h += 64, h_length -= 64) {
+            h_first_vec.zmm = _mm512_loadu_si512(h + offset_first);
+            h_mid_vec.zmm = _mm512_loadu_si512(h + offset_mid);
+            h_last_vec.zmm = _mm512_loadu_si512(h + offset_last);
+            matches = _kand_mask64(_kand_mask64( // Intersect the masks
+                                       _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
+                                       _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
+                                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
+            while (matches) {
+                int potential_offset = sz_u64_ctz(matches);
+                if (sz_equal_avx512(h + potential_offset, n, n_length)) return h + potential_offset;
+                matches &= matches - 1;
+            }
 
-        // TODO: If the last character contains a bad byte, we can reposition the start of the next iteration.
-        // This will be very helpful for very long needles.
+            // TODO: If the last character contains a bad byte, we can reposition the start of the next iteration.
+            // This will be very helpful for very long needles.
+        }
+    }
+    // If there are only 2 or 3 characters in the needle, we don't even need the nested loop.
+    else if (n_length <= 3) {
+        for (; h_length >= n_length + 64; h += 64, h_length -= 64) {
+            h_first_vec.zmm = _mm512_loadu_si512(h + offset_first);
+            h_mid_vec.zmm = _mm512_loadu_si512(h + offset_mid);
+            h_last_vec.zmm = _mm512_loadu_si512(h + offset_last);
+            matches = _kand_mask64(_kand_mask64( // Intersect the masks
+                                       _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
+                                       _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
+                                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
+            if (matches) return h + sz_u64_ctz(matches);
+        }
+    }
+    // If the needle is smaller than the size of the ZMM register, we can use masked comparisons
+    // to avoid the the inner-most nested loop and compare the entire needle against a haystack
+    // slice in 3 CPU cycles.
+    else {
+        __mmask64 n_mask = _sz_u64_mask_until(n_length);
+        sz_u512_vec_t n_full_vec, h_full_vec;
+        n_full_vec.zmm = _mm512_maskz_loadu_epi8(n_mask, n);
+        for (; h_length >= n_length + 64; h += 64, h_length -= 64) {
+            h_first_vec.zmm = _mm512_loadu_si512(h + offset_first);
+            h_mid_vec.zmm = _mm512_loadu_si512(h + offset_mid);
+            h_last_vec.zmm = _mm512_loadu_si512(h + offset_last);
+            matches = _kand_mask64(_kand_mask64( // Intersect the masks
+                                       _mm512_cmpeq_epi8_mask(h_first_vec.zmm, n_first_vec.zmm),
+                                       _mm512_cmpeq_epi8_mask(h_mid_vec.zmm, n_mid_vec.zmm)),
+                                   _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
+            while (matches) {
+                int potential_offset = sz_u64_ctz(matches);
+                h_full_vec.zmm = _mm512_maskz_loadu_epi8(n_mask, h + potential_offset);
+                if (_mm512_mask_cmpneq_epi8_mask(n_mask, h_full_vec.zmm, n_full_vec.zmm) == 0)
+                    return h + potential_offset;
+                matches &= matches - 1;
+            }
+        }
     }
 
     // The "tail" of the function uses masked loads to process the remaining bytes.
