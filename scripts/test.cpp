@@ -11,8 +11,8 @@
 // Those parameters must never be explicitly set during releases,
 // but they come handy during development, if you want to validate
 // different ISA-specific implementations.
-// #define SZ_USE_X86_AVX2 0
-// #define SZ_USE_X86_AVX512 0
+#define SZ_USE_X86_AVX2 0
+#define SZ_USE_X86_AVX512 1
 // #define SZ_USE_ARM_NEON 0
 // #define SZ_USE_ARM_SVE 0
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
@@ -132,25 +132,33 @@ static void test_arithmetical_utilities() {
  *          comparing them to `std::memmove` and `std::memcpy`.
  */
 static void test_memory_utilities() {
-    constexpr std::size_t size = 1024;
+    constexpr std::size_t size = 4096;
     char body_stl[size];
     char body_sz[size];
 
     auto &gen = global_random_generator();
-    uniform_uint8_distribution_t distribution;
-    std::generate(body_stl, body_stl + size, [&]() { return distribution(gen); });
-    std::copy(body_stl, body_stl + size, body_sz);
 
     // Move the contents of both strings around, validating overall
     // equivalency after every random iteration.
-    for (std::size_t i = 0; i < size; i++) {
+    for (std::size_t i = 0; i < 1024 * 1024; i++) {
+        uniform_uint8_distribution_t distribution('a', 'z');
+        std::generate(body_stl, body_stl + size, [&]() { return distribution(gen); });
+        std::copy(body_stl, body_stl + size, body_sz);
+
         std::size_t offset = gen() % size;
         std::size_t length = gen() % (size - offset);
         std::size_t destination = gen() % (size - length);
 
         std::memmove(body_stl + destination, body_stl + offset, length);
         sz_move(body_sz + destination, body_sz + offset, length);
-        assert(std::memcmp(body_stl, body_sz, size) == 0);
+        if (std::memcmp(body_stl, body_sz, size) != 0) {
+            std::size_t mismatch_position = 0;
+            for (; mismatch_position < size; ++mismatch_position)
+                if (body_stl[mismatch_position] != body_sz[mismatch_position]) break;
+            std::fprintf(stderr, "Mismatch at position %zu: %c != %c\n", mismatch_position, body_stl[mismatch_position],
+                         body_sz[mismatch_position]);
+            assert(false);
+        }
     }
 }
 
@@ -297,6 +305,17 @@ static void test_api_readonly() {
     assert(str("hello").find_last_of("ox", 5) == 4);
     assert(str("hello").find_first_of("hx", 0) == 0);
     assert(str("hello").find_last_of("hx", 0) == 0);
+
+    // More complex relative patterns
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") <=
+           str("0123456789012345678901234567890123456789012345678901234567890123"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") <=
+           str("0223456789012345678901234567890123456789012345678901234567890123"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") <=
+           str("0213456789012345678901234567890123456789012345678901234567890123"));
+    assert(str("12341234") <= str("12341234"));
+    assert(str("12341234") > str("12241224"));
+    assert(str("12341234") < str("13241324"));
 
     // Comparisons.
     assert(str("a") != str("b"));
@@ -876,27 +895,29 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
 }
 
 /**
- *  @brief  Tests the correctness of the string class update methods, such as `append` and `erase`.
+ *  @brief  Tests the correctness of the string class update methods, such as `push_back` and `erase`.
  */
-static void test_updates() {
+static void test_updates(std::size_t repetitions = 1024) {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
-    std::string stl_string;
-    sz::string sz_string;
-    for (std::size_t length = 1; length != 200; ++length) {
-        char c = alphabet_chars[std::rand() % 26];
-        stl_string.push_back(c);
-        sz_string.push_back(c);
-        assert(sz::string_view(stl_string) == sz::string_view(sz_string));
-    }
+    for (std::size_t repetition = 0; repetition != repetitions; ++repetition) {
+        std::string stl_string;
+        sz::string sz_string;
+        for (std::size_t length = 1; length != 200; ++length) {
+            char c = alphabet_chars[std::rand() % 26];
+            stl_string.push_back(c);
+            sz_string.push_back(c);
+            assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+        }
 
-    // Compare STL and StringZilla strings erase functionality.
-    while (stl_string.length()) {
-        std::size_t offset_to_erase = std::rand() % stl_string.length();
-        std::size_t chars_to_erase = std::rand() % (stl_string.length() - offset_to_erase) + 1;
-        stl_string.erase(offset_to_erase, chars_to_erase);
-        sz_string.erase(offset_to_erase, chars_to_erase);
-        assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+        // Compare STL and StringZilla strings erase functionality.
+        while (stl_string.length()) {
+            std::size_t offset_to_erase = std::rand() % stl_string.length();
+            std::size_t chars_to_erase = std::rand() % (stl_string.length() - offset_to_erase) + 1;
+            stl_string.erase(offset_to_erase, chars_to_erase);
+            sz_string.erase(offset_to_erase, chars_to_erase);
+            assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+        }
     }
 }
 
