@@ -1289,12 +1289,13 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_c
 #if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC)
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `EXIT_FAILURE`
-#define sz_assert(condition)                                                                                \
-    do {                                                                                                    \
-        if (!(condition)) {                                                                                 \
-            fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", #condition, __FILE__, __LINE__); \
-            exit(EXIT_FAILURE);                                                                             \
-        }                                                                                                   \
+SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int line) {
+    fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
+    exit(EXIT_FAILURE);
+}
+#define sz_assert(condition)                                                      \
+    do {                                                                          \
+        if (!(condition)) { _sz_assert_failure(#condition, __FILE__, __LINE__); } \
     } while (0)
 #else
 #define sz_assert(condition) ((void)(condition))

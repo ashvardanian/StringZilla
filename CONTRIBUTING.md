@@ -156,7 +156,8 @@ I'd recommend putting the following breakpoints:
 
 - `__asan::ReportGenericError` - to detect illegal memory accesses.
 - `__GI_exit` - to stop at exit points - the end of running any executable.
-- `__builtin_unreachable` - to catch all the places where the code is expected to be unreachable.
+- `__builtin_unreachable` - to catch unexpected code paths.
+- `_sz_assert_failure` - to catch StringZilla logic assertions.
 
 ### Benchmarking
 
@@ -472,11 +473,20 @@ If you want to run benchmarks against third-party implementations, check out the
 
 ## General Performance Observations
 
+## Operations Not Worth Optimizing
+
+One of the hardest things to learn in HPC is when to stop optimizing, and where not to start.
+
+It doesn't make sense to optimize `sz_order`, because almost always, the relative order of two strings depends on the first bytes.
+Fetching more bytes is not worth it.
+In `sz_equal`, however, in rare cases, SIMD can help, if the user is comparing two mostly similar strings with identical hashes or checksums.
+
 ### Unaligned Loads
 
 One common surface of attack for performance optimizations is minimizing unaligned loads.
 Such solutions are beautiful from the algorithmic perspective, but often lead to worse performance.
 It's often cheaper to issue two interleaving wide-register loads, than try minimizing those loads at the cost of juggling registers.
+Unaligned stores are a different story, especially on x86, where multiple reads can be issued in parallel, but only one write can be issued at a time.
 
 ### Register Pressure
 
