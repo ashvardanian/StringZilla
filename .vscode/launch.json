@@ -8,6 +8,7 @@
       "name": "Debug C++ Unit Tests",
       "type": "cppdbg",
       "request": "launch",
+      "preLaunchTask": "Build Test: Debug",
       "program": "${workspaceFolder}/build_debug/stringzilla_test_cpp20",
       "cwd": "${workspaceFolder}",
       "environment": [
@@ -18,16 +19,13 @@
       ],
       "stopAtEntry": false,
       "linux": {
-        "preLaunchTask": "Build with GCC: Debug",
         "MIMode": "gdb"
       },
       "osx": {
-        "preLaunchTask": "Build with LLVM: Debug",
         "MIMode": "lldb"
       },
       "windows": {
         "program": "${workspaceFolder}\\build_debug\\stringzilla_test_cpp20.exe",
-        "preLaunchTask": "Build with MSVC: Debug",
         "MIMode": "gdb",
         "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
       }
@@ -48,17 +46,15 @@
         }
       ],
       "stopAtEntry": false,
+      "preLaunchTask": "Build Benchmarks: Debug",
       "linux": {
-        "preLaunchTask": "Build with GCC: Debug",
         "MIMode": "gdb"
       },
       "osx": {
-        "preLaunchTask": "Build with LLVM: Debug",
         "MIMode": "lldb"
       },
       "windows": {
         "program": "${workspaceFolder}\\build_debug\\stringzilla_${fileBasenameNoExtension}.exe",
-        "preLaunchTask": "Build with MSVC: Debug",
         "MIMode": "gdb",
         "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
       }
