@@ -471,9 +471,9 @@ cargo package --list --allow-dirty
 
 If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/memchr_vs_stringzilla`](https://github.com/ashvardanian/memchr_vs_stringzilla/) repository.
 
-## General Performance Observations
+## General Recommendations
 
-## Operations Not Worth Optimizing
+### Operations Not Worth Optimizing
 
 One of the hardest things to learn in HPC is when to stop optimizing, and where not to start.
 
@@ -512,19 +512,19 @@ if (matches0 | matches1 | matches2 | matches3)
 A simpler solution would be to compare byte-by-byte, but in that case we would need to populate multiple registers, broadcasting different letters of the needle into them.
 That may not be noticeable on a micro-benchmark, but it would be noticeable on real-world workloads, where the CPU will speculatively interleave those search operations with something else happening in that context.
 
-## Working on Alternative Hardware Backends
+### Working on Alternative Hardware Backends
 
 It's important to keep compiler support in mind when extending to new instruction sets.
 Check the most recent CI pipeline configurations in `prerelease.yml` and `release.yml` to see which compilers are used.
 When implementing dynamic dispatch, avoid compiler intrinsics and OS-specific APIs, as they may not be available on all platforms.
 Instead, use inline assembly to check feature flags and dispatch them to the proper implementation.
 
-## Working on Faster Edit Distances
+### Working on Faster Edit Distances
 
 When dealing with non-trivial algorithms, like edit distances, it's advisory to provide pseudo-code or a reference implementation in addition to the optimized one.
 Ideally, include it in `scripts/` as a Python Jupyter Notebook with explanations and visualizations.
 
-## Working on Sequence Processing and Sorting
+### Working on Sequence Processing and Sorting
 
 Sorting algorithms for strings are a deeply studied area.
 In general, string sorting algorithms discourage the use of comparisons, as they are expensive for variable-length data and also require pointer-chasing for most array layouts.

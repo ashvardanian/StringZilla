@@ -3739,15 +3739,135 @@ typedef union sz_u256_vec_t {
     sz_u8_t u8s[32];
 } sz_u256_vec_t;
 
+SZ_PUBLIC sz_ordering_t sz_order_avx2(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+    // Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
+    // https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
+    return sz_order_serial(a, a_length, b, b_length);
+}
+
+SZ_PUBLIC sz_bool_t sz_equal_avx2(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+    sz_u256_vec_t a_vec, b_vec;
+
+    while (length >= 32) {
+        a_vec.ymm = _mm256_lddqu_si256((__m256i const *)a);
+        b_vec.ymm = _mm256_lddqu_si256((__m256i const *)b);
+        // One approach can be to use "movemasks", but we could also use a bitwise matching like `_mm256_testnzc_si256`.
+        int difference_mask = ~_mm256_movemask_epi8(_mm256_cmpeq_epi8(a_vec.ymm, b_vec.ymm));
+        if (difference_mask == 0) { a += 32, b += 32, length -= 32; }
+        else { return sz_false_k; }
+    }
+
+    if (length) return sz_equal_serial(a, b, length);
+    return sz_true_k;
+}
+
 SZ_PUBLIC void sz_fill_avx2(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    for (; length >= 32; target += 32, length -= 32) _mm256_storeu_si256((__m256i *)target, _mm256_set1_epi8(value));
-    sz_fill_serial(target, length, value);
+    char value_char = *(char *)&value;
+    __m256i value_vec = _mm256_set1_epi8(value_char);
+    // The naive implementation of this function is very simple.
+    // It assumes the CPU is great at handling unaligned "stores".
+    //
+    //    for (; length >= 32; target += 32, length -= 32) _mm256_storeu_si256(target, value_vec);
+    //    sz_fill_serial(target, length, value);
+    //
+    // When the buffer is small, there isn't much to innovate.
+    if (length <= 32) sz_fill_serial(target, length, value);
+    // When the buffer is aligned, we can avoid any split-stores.
+    else {
+        sz_size_t head_length = (32 - ((sz_size_t)target % 32)) % 32; // 31 or less.
+        sz_size_t tail_length = (sz_size_t)(target + length) % 32;    // 31 or less.
+        sz_size_t body_length = length - head_length - tail_length;   // Multiple of 32.
+        sz_u16_t value16 = (sz_u16_t)value * 0x0101u;
+        sz_u32_t value32 = (sz_u32_t)value16 * 0x00010001u;
+        sz_u64_t value64 = (sz_u64_t)value32 * 0x0000000100000001ull;
+
+        // Fill the head of the buffer. This part is much cleaner with AVX-512.
+        if (head_length & 1) *(sz_u8_t *)target = value, target++, head_length--;
+        if (head_length & 2) *(sz_u16_t *)target = value16, target += 2, head_length -= 2;
+        if (head_length & 4) *(sz_u32_t *)target = value32, target += 4, head_length -= 4;
+        if (head_length & 8) *(sz_u64_t *)target = value64, target += 8, head_length -= 8;
+        if (head_length & 16)
+            _mm_store_si128((__m128i *)target, _mm_set1_epi8(value_char)), target += 16, head_length -= 16;
+        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+
+        // Fill the aligned body of the buffer.
+        for (; body_length >= 32; target += 32, body_length -= 32) _mm256_store_si256((__m256i *)target, value_vec);
+
+        // Fill the tail of the buffer. This part is much cleaner with AVX-512.
+        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        if (tail_length & 16)
+            _mm_store_si128((__m128i *)target, _mm_set1_epi8(value_char)), target += 16, tail_length -= 16;
+        if (tail_length & 8) *(sz_u64_t *)target = value64, target += 8, tail_length -= 8;
+        if (tail_length & 4) *(sz_u32_t *)target = value32, target += 4, tail_length -= 4;
+        if (tail_length & 2) *(sz_u16_t *)target = value16, target += 2, tail_length -= 2;
+        if (tail_length & 1) *(sz_u8_t *)target = value, target++, tail_length--;
+    }
 }
 
 SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    for (; length >= 32; target += 32, source += 32, length -= 32)
-        _mm256_storeu_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
-    sz_copy_serial(target, source, length);
+    // The naive implementation of this function is very simple.
+    // It assumes the CPU is great at handling unaligned "stores" and "loads".
+    //
+    //    for (; length >= 32; target += 32, source += 32, length -= 32)
+    //        _mm256_storeu_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+    //    sz_copy_serial(target, source, length);
+    //
+    // A typical AWS Skylake instance can have 32 KB x 2 blocks of L1 data cache per core,
+    // 1 MB x 2 blocks of L2 cache per core, and one shared L3 cache buffer.
+    // For now, let's avoid the cases beyond the L2 size.
+    int is_huge = length > 1ull * 1024ull * 1024ull;
+    if (length <= 32) { sz_copy_serial(target, source, length); }
+    // When dealing wirh larger arrays, the optimization is not as simple as with the `sz_fill_avx2` function,
+    // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
+    // we can use aligned loads and stores, and the performance will be great.
+    else if ((sz_size_t)target % 32 == 0 && (sz_size_t)source % 32 == 0 && !is_huge) {
+        for (; length >= 32; target += 32, source += 32, length -= 32)
+            _mm256_store_si256((__m256i *)target, _mm256_load_si256((__m256i const *)source));
+        if (length) sz_copy_serial(target, source, length);
+    }
+    // The trickiest case is when both `source` and `target` are not aligned.
+    // In such and simpler cases we can copy enough bytes into `target` to reach its cacheline boundary,
+    // and then combine unaligned loads with aligned stores.
+    else {
+        sz_size_t head_length = (32 - ((sz_size_t)target % 32)) % 32; // 31 or less.
+        sz_size_t tail_length = (sz_size_t)(target + length) % 32;    // 31 or less.
+        sz_size_t body_length = length - head_length - tail_length;   // Multiple of 32.
+
+        // Fill the head of the buffer. This part is much cleaner with AVX-512.
+        if (head_length & 1) *(sz_u8_t *)target = *(sz_u8_t *)source, target++, source++, head_length--;
+        if (head_length & 2) *(sz_u16_t *)target = *(sz_u16_t *)source, target += 2, source += 2, head_length -= 2;
+        if (head_length & 4) *(sz_u32_t *)target = *(sz_u32_t *)source, target += 4, source += 4, head_length -= 4;
+        if (head_length & 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, head_length -= 8;
+        if (head_length & 16)
+            _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
+                head_length -= 16;
+        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+
+        // Fill the aligned body of the buffer.
+        if (!is_huge) {
+            for (; body_length >= 32; target += 32, source += 32, body_length -= 32)
+                _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+        }
+        // When the biffer is huge, we can traverse it in 2 directions.
+        else {
+            for (; body_length >= 64; target += 32, source += 32, body_length -= 64) {
+                _mm256_store_si256((__m256i *)(target), _mm256_lddqu_si256((__m256i const *)(source)));
+                _mm256_store_si256((__m256i *)(target + body_length - 32),
+                                   _mm256_lddqu_si256((__m256i const *)(source + body_length - 32)));
+            }
+            if (body_length) _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+        }
+
+        // Fill the tail of the buffer. This part is much cleaner with AVX-512.
+        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        if (tail_length & 16)
+            _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
+                tail_length -= 16;
+        if (tail_length & 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, tail_length -= 8;
+        if (tail_length & 4) *(sz_u32_t *)target = *(sz_u32_t *)source, target += 4, source += 4, tail_length -= 4;
+        if (tail_length & 2) *(sz_u16_t *)target = *(sz_u16_t *)source, target += 2, source += 2, tail_length -= 2;
+        if (tail_length & 1) *(sz_u8_t *)target = *(sz_u8_t *)source, target++, source++, tail_length--;
+    }
 }
 
 SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
@@ -5486,6 +5606,8 @@ SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #if SZ_USE_X86_AVX512
     return sz_equal_avx512(a, b, length);
+#elif SZ_USE_X86_AVX2
+    return sz_equal_avx2(a, b, length);
 #else
     return sz_equal_serial(a, b, length);
 #endif
@@ -5494,6 +5616,8 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
 #if SZ_USE_X86_AVX512
     return sz_order_avx512(a, a_length, b, b_length);
+#elif SZ_USE_X86_AVX2
+    return sz_order_avx2(a, a_length, b, b_length);
 #else
     return sz_order_serial(a, a_length, b, b_length);
 #endif
