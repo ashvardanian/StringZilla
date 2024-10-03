@@ -264,6 +264,7 @@ if(${STRINGZILLA_BUILD_BENCHMARK})
   define_launcher(stringzilla_bench_sort scripts/bench_sort.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
   define_launcher(stringzilla_bench_token scripts/bench_token.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
   define_launcher(stringzilla_bench_container scripts/bench_container.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+  define_launcher(stringzilla_bench_memory scripts/bench_memory.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
 endif()
 
 if(${STRINGZILLA_BUILD_TEST})

@@ -167,9 +167,13 @@ static void sz_dispatch_table_init(void) {
 
 #if SZ_USE_X86_AVX2
     if (caps & sz_cap_x86_avx2_k) {
+        impl->equal = sz_equal_avx2;
+        impl->order = sz_order_avx2;
+
         impl->copy = sz_copy_avx2;
         impl->move = sz_move_avx2;
         impl->fill = sz_fill_avx2;
+
         impl->find_byte = sz_find_byte_avx2;
         impl->rfind_byte = sz_rfind_byte_avx2;
         impl->find = sz_find_avx2;
@@ -183,6 +187,7 @@ static void sz_dispatch_table_init(void) {
     if (caps & sz_cap_x86_avx512f_k) {
         impl->equal = sz_equal_avx512;
         impl->order = sz_order_avx512;
+
         impl->copy = sz_copy_avx512;
         impl->move = sz_move_avx512;
         impl->fill = sz_fill_avx512;

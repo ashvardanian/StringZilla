@@ -34,3 +34,7 @@ node_modules/
 leipzig1M.txt
 enwik9.txt
 xlsum.csv
+human_protein_1200row_800len.txt
+
+# StringZilla-specific log files
+/failed_sz_*
