@@ -79,6 +79,40 @@ using string_view = basic_string_slice<char const>;
 template <std::size_t count_characters>
 using carray = char[count_characters];
 
+#pragma region Memory Operations
+
+/**
+ *  @brief  Analog to @b `std::memset`, but with a more efficient implementation.
+ *  @param  target The pointer to the target memory region.
+ *  @param  value The byte value to set.
+ *  @param  n The number of bytes to copy.
+ */
+inline void memset(void *target, char value, std::size_t n) noexcept {
+    return sz_fill(reinterpret_cast<sz_ptr_t>(target), n, value);
+}
+
+/**
+ *  @brief  Analog to @b `std::memmove`, but with a more efficient implementation.
+ *  @param  target The pointer to the target memory region.
+ *  @param  source The pointer to the source memory region.
+ *  @param  n The number of bytes to copy.
+ */
+inline void memmove(void *target, void const *source, std::size_t n) noexcept {
+    return sz_move(reinterpret_cast<sz_ptr_t>(target), reinterpret_cast<sz_cptr_t>(source), n);
+}
+
+/**
+ *  @brief  Analog to @b `std::memcpy`, but with a more efficient implementation.
+ *  @param  target The pointer to the target memory region.
+ *  @param  source The pointer to the source memory region.
+ *  @param  n The number of bytes to copy.
+ */
+inline void memcpy(void *target, void const *source, std::size_t n) noexcept {
+    return sz_copy(reinterpret_cast<sz_ptr_t>(target), reinterpret_cast<sz_cptr_t>(source), n);
+}
+
+#pragma endregion
+
 #pragma region Character Sets
 
 /**

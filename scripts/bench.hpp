@@ -28,8 +28,8 @@ namespace scripts {
 using seconds_t = double;
 
 template <std::size_t multiple>
-std::size_t divide_round_up(std::size_t n) {
-    return ((n + multiple - 1) / multiple) * multiple;
+std::size_t round_up_to_multiple(std::size_t n) {
+    return n == 0 ? multiple : ((n + multiple - 1) / multiple) * multiple;
 }
 
 struct benchmark_result_t {
@@ -161,7 +161,7 @@ inline std::vector<result_string_type> filter_by_length(std::vector<from_string_
     return result;
 }
 
-inline static std::size_t seconds_per_benchmark = 5;
+inline static std::size_t seconds_per_benchmark = SZ_DEBUG ? 1 : 5;
 
 struct dataset_t {
     std::string text;

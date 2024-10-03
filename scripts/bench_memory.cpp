@@ -14,15 +14,28 @@
 #include <bench.hpp>
 
 using namespace ashvardanian::stringzilla::scripts;
+constexpr std::size_t max_shift_length = 299;
 
+/**
+ *  @brief  Benchmarks `memcpy`-like operations in 2 modes: aligned @b output buffer and unaligned.
+ *
+ *  In the aligned case we copy a random part of the input string into the start of a matching cache line in the output.
+ *  In the unaligned case we also locate a matching cache line in the output, but shift by one to guarantee unaligned
+ *  writes.
+ *
+ *  Multiple calls to the provided functions even with the same arguments won't change the input or output.
+ *  So the kernels can be compared against the baseline `memcpy` function.
+ *
+ *  @param  output_buffer_ptr Aligned output buffer.
+ */
 template <bool aligned_output>
-tracked_unary_functions_t copy_functions(sz_cptr_t input_start_ptr, sz_ptr_t output_buffer_ptr) {
+tracked_unary_functions_t copy_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t output_buffer_ptr) {
     std::string suffix = aligned_output ? "<aligned>" : "<unaligned>";
-    auto wrap_sz = [input_start_ptr, output_buffer_ptr](auto function) -> unary_function_t {
-        return unary_function_t([function, input_start_ptr, output_buffer_ptr](std::string_view slice) {
-            std::size_t output_offset = slice.data() - input_start_ptr;
-            // Round down to the nearest multiple of 64 for aligned writes
-            output_offset = divide_round_up<64>(output_offset) - 64;
+    auto wrap_sz = [dataset_start_ptr, output_buffer_ptr](auto function) -> unary_function_t {
+        return unary_function_t([function, dataset_start_ptr, output_buffer_ptr](std::string_view slice) {
+            std::size_t output_offset = slice.data() - dataset_start_ptr;
+            // Round down to the nearest multiple of a cache line width for aligned writes
+            output_offset = round_up_to_multiple<SZ_CACHE_LINE_WIDTH>(output_offset) - SZ_CACHE_LINE_WIDTH;
             // Ensure unaligned exports if needed
             if constexpr (!aligned_output) output_offset += 1;
             function(output_buffer_ptr + output_offset, slice.data(), slice.size());
@@ -31,56 +44,100 @@ tracked_unary_functions_t copy_functions(sz_cptr_t input_start_ptr, sz_ptr_t out
     };
     tracked_unary_functions_t result = {
         {"memcpy" + suffix, wrap_sz(memcpy)},
-        {"sz_copy_serial" + suffix, wrap_sz(sz_copy_serial), true},
+        {"sz_copy_serial" + suffix, wrap_sz(sz_copy_serial)},
 #if SZ_USE_X86_AVX512
-        {"sz_copy_avx512" + suffix, wrap_sz(sz_copy_avx512), true},
+        {"sz_copy_avx512" + suffix, wrap_sz(sz_copy_avx512)},
 #endif
 #if SZ_USE_X86_AVX2
-        {"sz_copy_avx2" + suffix, wrap_sz(sz_copy_avx2), true},
+        {"sz_copy_avx2" + suffix, wrap_sz(sz_copy_avx2)},
 #endif
 #if SZ_USE_ARM_SVE
         {"sz_copy_sve" + suffix, wrap_sz(sz_copy_sve), true},
 #endif
 #if SZ_USE_ARM_NEON
-        {"sz_copy_neon" + suffix, wrap_sz(sz_copy_neon), true},
+        {"sz_copy_neon" + suffix, wrap_sz(sz_copy_neon)},
 #endif
     };
     return result;
 }
 
-tracked_unary_functions_t fill_functions(sz_cptr_t input_start_ptr, sz_ptr_t output_buffer_ptr) {
-    auto wrap_sz = [input_start_ptr, output_buffer_ptr](auto function) -> unary_function_t {
-        return unary_function_t([function, input_start_ptr, output_buffer_ptr](std::string_view slice) {
-            std::size_t output_offset = (std::size_t)(slice.data() - input_start_ptr);
+/**
+ *  @brief  Benchmarks `memset`-like operations overwriting regions of output memory filling
+ *          them with the first byte of the input regions.
+ *
+ *  Multiple calls to the provided functions even with the same arguments won't change the input or output.
+ *  So the kernels can be compared against the baseline `memset` function.
+ *
+ *  @param  output_buffer_ptr Aligned output buffer.
+ */
+tracked_unary_functions_t fill_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t output_buffer_ptr) {
+    auto wrap_sz = [dataset_start_ptr, output_buffer_ptr](auto function) -> unary_function_t {
+        return unary_function_t([function, dataset_start_ptr, output_buffer_ptr](std::string_view slice) {
+            std::size_t output_offset = (std::size_t)(slice.data() - dataset_start_ptr);
             function(output_buffer_ptr + output_offset, slice.size(), slice.front());
             return slice.size();
         });
     };
     tracked_unary_functions_t result = {
-        {"memset", unary_function_t([input_start_ptr, output_buffer_ptr](std::string_view slice) {
-             std::size_t output_offset = (std::size_t)(slice.data() - input_start_ptr);
+        {"memset", unary_function_t([dataset_start_ptr, output_buffer_ptr](std::string_view slice) {
+             std::size_t output_offset = (std::size_t)(slice.data() - dataset_start_ptr);
              memset(output_buffer_ptr + output_offset, slice.front(), slice.size());
              return slice.size();
          })},
-        {"sz_fill_serial", wrap_sz(sz_fill_serial), true},
+        {"sz_fill_serial", wrap_sz(sz_fill_serial)},
 #if SZ_USE_X86_AVX512
-        {"sz_fill_avx512", wrap_sz(sz_fill_avx512), true},
+        {"sz_fill_avx512", wrap_sz(sz_fill_avx512)},
 #endif
 #if SZ_USE_X86_AVX2
-        {"sz_fill_avx2", wrap_sz(sz_fill_avx2), true},
+        {"sz_fill_avx2", wrap_sz(sz_fill_avx2)},
 #endif
 #if SZ_USE_ARM_SVE
         {"sz_fill_sve", wrap_sz(sz_fill_sve), true},
 #endif
 #if SZ_USE_ARM_NEON
-        {"sz_fill_neon", wrap_sz(sz_fill_neon), true},
+        {"sz_fill_neon", wrap_sz(sz_fill_neon)},
 #endif
     };
     return result;
 }
+
 /**
- *  @brief  Evaluation for search string operations: find.
+ *  @brief  Benchmarks `memmove`-like operations shuffling back and forth the regions of output memory.
+ *
+ *  Multiple calls to the provided functions even with the same arguments won't change the input or output.
+ *  This is achieved by performing a combination of a forward and a backward move.
+ *  So the kernels can be compared against the baseline `memmove` function.
+ *
+ *  @param  output_buffer_ptr Aligned output buffer, that ahs at least `shift` bytes of space at the end.
  */
+tracked_unary_functions_t move_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t output_buffer_ptr, std::size_t shift) {
+    std::string suffix = "<shift" + std::to_string(shift) + ">";
+    auto wrap_sz = [dataset_start_ptr, output_buffer_ptr, shift](auto function) -> unary_function_t {
+        return unary_function_t([function, dataset_start_ptr, output_buffer_ptr, shift](std::string_view slice) {
+            std::size_t output_offset = slice.data() - dataset_start_ptr;
+            // Shift forward
+            function(output_buffer_ptr + output_offset + shift, output_buffer_ptr + output_offset, slice.size());
+            // Shift backward to revert the changes
+            function(output_buffer_ptr + output_offset, output_buffer_ptr + output_offset + shift, slice.size());
+            return slice.size() * 2;
+        });
+    };
+    tracked_unary_functions_t result = {
+        {"memmove" + suffix, wrap_sz(memmove)},
+        {"sz_move_serial" + suffix, wrap_sz(sz_move_serial)},
+#if SZ_USE_X86_AVX512
+        {"sz_move_avx512" + suffix, wrap_sz(sz_move_avx512)},
+#endif
+#if SZ_USE_X86_AVX2
+        {"sz_move_avx2" + suffix, wrap_sz(sz_move_avx2)},
+#endif
+#if SZ_USE_ARM_NEON
+        {"sz_move_neon" + suffix, wrap_sz(sz_move_neon)},
+#endif
+    };
+    return result;
+}
+
 void bench_memory(std::vector<std::string_view> const &slices, tracked_unary_functions_t &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
@@ -88,36 +145,38 @@ void bench_memory(std::vector<std::string_view> const &slices, tracked_unary_fun
 
         // Tests
         if (variant.function && variant.needs_testing) {
-            bench_on_tokens(slices, [&](std::string_view slice) {
-                // TODO: Obfurscate the output with random contents, and later check if the contents
-                // of the output are identical for the baseline and the variant.
-                return slice.size();
-            });
+            std::fprintf(stderr, "Testing is not currently implemented.\n");
+            exit(1);
         }
 
         // Benchmarks
         if (variant.function) variant.results = bench_on_tokens(slices, variant.function);
-
         variant.print();
     }
 }
 
-void bench_memory(std::vector<std::string_view> const &slices, sz_cptr_t input_start_ptr, sz_ptr_t output_buffer_ptr) {
+void bench_memory(std::vector<std::string_view> const &slices, sz_cptr_t dataset_start_ptr,
+                  sz_ptr_t output_buffer_ptr) {
+
     if (slices.size() == 0) return;
 
-    bench_memory(slices, copy_functions<true>(input_start_ptr, output_buffer_ptr));
-    bench_memory(slices, copy_functions<false>(input_start_ptr, output_buffer_ptr));
-    bench_memory(slices, fill_functions(input_start_ptr, output_buffer_ptr));
+    bench_memory(slices, copy_functions<true>(dataset_start_ptr, output_buffer_ptr));
+    bench_memory(slices, copy_functions<false>(dataset_start_ptr, output_buffer_ptr));
+    bench_memory(slices, fill_functions(dataset_start_ptr, output_buffer_ptr));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
 }
 
 int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting memory benchmarks.\n");
 
     dataset_t dataset = prepare_benchmark_environment(argc, argv);
-    sz_cptr_t const input_start_ptr = dataset.text.data();
+    sz_cptr_t const dataset_start_ptr = dataset.text.data();
 
     // These benchmarks should be heavier than substring search and other less critical operations.
-    seconds_per_benchmark *= 5;
+    if (!SZ_DEBUG) seconds_per_benchmark *= 5;
 
     // Create an aligned buffer for the output
     struct aligned_free_t {
@@ -125,21 +184,26 @@ int main(int argc, char const **argv) {
     };
     std::unique_ptr<char, aligned_free_t> output_buffer;
     // Add space for at least one cache line to simplify unaligned exports
-    std::size_t const output_length = divide_round_up<4096>(dataset.text.size() + 64);
+    std::size_t const output_length = round_up_to_multiple<4096>(dataset.text.size() + max_shift_length);
     output_buffer.reset(reinterpret_cast<char *>(std::aligned_alloc(4096, output_length)));
+    if (!output_buffer) {
+        std::fprintf(stderr, "Failed to allocate an output buffer of %zu bytes.\n", output_length);
+        return 1;
+    }
+    std::memcpy(output_buffer.get(), dataset.text.data(), dataset.text.size());
 
     // Baseline benchmarks for present tokens, coming in all lengths
     std::printf("Benchmarking on lines:\n");
-    bench_memory({dataset.lines.begin(), dataset.lines.end()}, input_start_ptr, output_buffer.get());
+    bench_memory(dataset.lines, dataset_start_ptr, output_buffer.get());
     std::printf("Benchmarking on tokens:\n");
-    bench_memory({dataset.tokens.begin(), dataset.tokens.end()}, input_start_ptr, output_buffer.get());
+    bench_memory(dataset.tokens, dataset_start_ptr, output_buffer.get());
     std::printf("Benchmarking on entire dataset:\n");
-    bench_memory({dataset.text}, input_start_ptr, output_buffer.get());
+    bench_memory({dataset.text}, dataset_start_ptr, output_buffer.get());
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
         std::printf("Benchmarking on tokens of length %zu:\n", token_length);
-        bench_memory(filter_by_length<std::string_view>(dataset.tokens, token_length), input_start_ptr,
+        bench_memory(filter_by_length<std::string_view>(dataset.tokens, token_length), dataset_start_ptr,
                      output_buffer.get());
     }
     std::printf("All benchmarks passed.\n");

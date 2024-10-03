@@ -1320,12 +1320,13 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_sve(sz_cptr_t text, sz_size_t length, sz_ch
 #if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC)
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `EXIT_FAILURE`
-#define sz_assert(condition)                                                                                \
-    do {                                                                                                    \
-        if (!(condition)) {                                                                                 \
-            fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", #condition, __FILE__, __LINE__); \
-            exit(EXIT_FAILURE);                                                                             \
-        }                                                                                                   \
+SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int line) {
+    fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
+    exit(EXIT_FAILURE);
+}
+#define sz_assert(condition)                                                      \
+    do {                                                                          \
+        if (!(condition)) { _sz_assert_failure(#condition, __FILE__, __LINE__); } \
     } while (0)
 #else
 #define sz_assert(condition) ((void)(condition))
@@ -3769,15 +3770,135 @@ typedef union sz_u256_vec_t {
     sz_u8_t u8s[32];
 } sz_u256_vec_t;
 
+SZ_PUBLIC sz_ordering_t sz_order_avx2(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+    // Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
+    // https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
+    return sz_order_serial(a, a_length, b, b_length);
+}
+
+SZ_PUBLIC sz_bool_t sz_equal_avx2(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+    sz_u256_vec_t a_vec, b_vec;
+
+    while (length >= 32) {
+        a_vec.ymm = _mm256_lddqu_si256((__m256i const *)a);
+        b_vec.ymm = _mm256_lddqu_si256((__m256i const *)b);
+        // One approach can be to use "movemasks", but we could also use a bitwise matching like `_mm256_testnzc_si256`.
+        int difference_mask = ~_mm256_movemask_epi8(_mm256_cmpeq_epi8(a_vec.ymm, b_vec.ymm));
+        if (difference_mask == 0) { a += 32, b += 32, length -= 32; }
+        else { return sz_false_k; }
+    }
+
+    if (length) return sz_equal_serial(a, b, length);
+    return sz_true_k;
+}
+
 SZ_PUBLIC void sz_fill_avx2(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    for (; length >= 32; target += 32, length -= 32) _mm256_storeu_si256((__m256i *)target, _mm256_set1_epi8(value));
-    sz_fill_serial(target, length, value);
+    char value_char = *(char *)&value;
+    __m256i value_vec = _mm256_set1_epi8(value_char);
+    // The naive implementation of this function is very simple.
+    // It assumes the CPU is great at handling unaligned "stores".
+    //
+    //    for (; length >= 32; target += 32, length -= 32) _mm256_storeu_si256(target, value_vec);
+    //    sz_fill_serial(target, length, value);
+    //
+    // When the buffer is small, there isn't much to innovate.
+    if (length <= 32) sz_fill_serial(target, length, value);
+    // When the buffer is aligned, we can avoid any split-stores.
+    else {
+        sz_size_t head_length = (32 - ((sz_size_t)target % 32)) % 32; // 31 or less.
+        sz_size_t tail_length = (sz_size_t)(target + length) % 32;    // 31 or less.
+        sz_size_t body_length = length - head_length - tail_length;   // Multiple of 32.
+        sz_u16_t value16 = (sz_u16_t)value * 0x0101u;
+        sz_u32_t value32 = (sz_u32_t)value16 * 0x00010001u;
+        sz_u64_t value64 = (sz_u64_t)value32 * 0x0000000100000001ull;
+
+        // Fill the head of the buffer. This part is much cleaner with AVX-512.
+        if (head_length & 1) *(sz_u8_t *)target = value, target++, head_length--;
+        if (head_length & 2) *(sz_u16_t *)target = value16, target += 2, head_length -= 2;
+        if (head_length & 4) *(sz_u32_t *)target = value32, target += 4, head_length -= 4;
+        if (head_length & 8) *(sz_u64_t *)target = value64, target += 8, head_length -= 8;
+        if (head_length & 16)
+            _mm_store_si128((__m128i *)target, _mm_set1_epi8(value_char)), target += 16, head_length -= 16;
+        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+
+        // Fill the aligned body of the buffer.
+        for (; body_length >= 32; target += 32, body_length -= 32) _mm256_store_si256((__m256i *)target, value_vec);
+
+        // Fill the tail of the buffer. This part is much cleaner with AVX-512.
+        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        if (tail_length & 16)
+            _mm_store_si128((__m128i *)target, _mm_set1_epi8(value_char)), target += 16, tail_length -= 16;
+        if (tail_length & 8) *(sz_u64_t *)target = value64, target += 8, tail_length -= 8;
+        if (tail_length & 4) *(sz_u32_t *)target = value32, target += 4, tail_length -= 4;
+        if (tail_length & 2) *(sz_u16_t *)target = value16, target += 2, tail_length -= 2;
+        if (tail_length & 1) *(sz_u8_t *)target = value, target++, tail_length--;
+    }
 }
 
 SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    for (; length >= 32; target += 32, source += 32, length -= 32)
-        _mm256_storeu_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
-    sz_copy_serial(target, source, length);
+    // The naive implementation of this function is very simple.
+    // It assumes the CPU is great at handling unaligned "stores" and "loads".
+    //
+    //    for (; length >= 32; target += 32, source += 32, length -= 32)
+    //        _mm256_storeu_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+    //    sz_copy_serial(target, source, length);
+    //
+    // A typical AWS Skylake instance can have 32 KB x 2 blocks of L1 data cache per core,
+    // 1 MB x 2 blocks of L2 cache per core, and one shared L3 cache buffer.
+    // For now, let's avoid the cases beyond the L2 size.
+    int is_huge = length > 1ull * 1024ull * 1024ull;
+    if (length <= 32) { sz_copy_serial(target, source, length); }
+    // When dealing wirh larger arrays, the optimization is not as simple as with the `sz_fill_avx2` function,
+    // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
+    // we can use aligned loads and stores, and the performance will be great.
+    else if ((sz_size_t)target % 32 == 0 && (sz_size_t)source % 32 == 0 && !is_huge) {
+        for (; length >= 32; target += 32, source += 32, length -= 32)
+            _mm256_store_si256((__m256i *)target, _mm256_load_si256((__m256i const *)source));
+        if (length) sz_copy_serial(target, source, length);
+    }
+    // The trickiest case is when both `source` and `target` are not aligned.
+    // In such and simpler cases we can copy enough bytes into `target` to reach its cacheline boundary,
+    // and then combine unaligned loads with aligned stores.
+    else {
+        sz_size_t head_length = (32 - ((sz_size_t)target % 32)) % 32; // 31 or less.
+        sz_size_t tail_length = (sz_size_t)(target + length) % 32;    // 31 or less.
+        sz_size_t body_length = length - head_length - tail_length;   // Multiple of 32.
+
+        // Fill the head of the buffer. This part is much cleaner with AVX-512.
+        if (head_length & 1) *(sz_u8_t *)target = *(sz_u8_t *)source, target++, source++, head_length--;
+        if (head_length & 2) *(sz_u16_t *)target = *(sz_u16_t *)source, target += 2, source += 2, head_length -= 2;
+        if (head_length & 4) *(sz_u32_t *)target = *(sz_u32_t *)source, target += 4, source += 4, head_length -= 4;
+        if (head_length & 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, head_length -= 8;
+        if (head_length & 16)
+            _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
+                head_length -= 16;
+        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+
+        // Fill the aligned body of the buffer.
+        if (!is_huge) {
+            for (; body_length >= 32; target += 32, source += 32, body_length -= 32)
+                _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+        }
+        // When the biffer is huge, we can traverse it in 2 directions.
+        else {
+            for (; body_length >= 64; target += 32, source += 32, body_length -= 64) {
+                _mm256_store_si256((__m256i *)(target), _mm256_lddqu_si256((__m256i const *)(source)));
+                _mm256_store_si256((__m256i *)(target + body_length - 32),
+                                   _mm256_lddqu_si256((__m256i const *)(source + body_length - 32)));
+            }
+            if (body_length) _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+        }
+
+        // Fill the tail of the buffer. This part is much cleaner with AVX-512.
+        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        if (tail_length & 16)
+            _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
+                tail_length -= 16;
+        if (tail_length & 8) *(sz_u64_t *)target = *(sz_u64_t *)source, target += 8, source += 8, tail_length -= 8;
+        if (tail_length & 4) *(sz_u32_t *)target = *(sz_u32_t *)source, target += 4, source += 4, tail_length -= 4;
+        if (tail_length & 2) *(sz_u16_t *)target = *(sz_u16_t *)source, target += 2, source += 2, tail_length -= 2;
+        if (tail_length & 1) *(sz_u8_t *)target = *(sz_u8_t *)source, target++, source++, tail_length--;
+    }
 }
 
 SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
@@ -4191,17 +4312,38 @@ SZ_INTERNAL __mmask64 _sz_u64_mask_until(sz_size_t n) {
 
 SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_u512_vec_t a_vec, b_vec;
-    __mmask64 a_mask, b_mask, mask_not_equal;
+
+    // Pointer arithmetic is cheap, fetching memory is not!
+    // So we can use the masked loads to fetch at most one cache-line for each string,
+    // compare the prefixes, and only then move forward.
+    sz_size_t a_head_length = 64 - ((sz_size_t)a % 64); // 63 or less.
+    sz_size_t b_head_length = 64 - ((sz_size_t)b % 64); // 63 or less.
+    a_head_length = a_head_length < a_length ? a_head_length : a_length;
+    b_head_length = b_head_length < b_length ? b_head_length : b_length;
+    sz_size_t head_length = a_head_length < b_head_length ? a_head_length : b_head_length;
+    __mmask64 head_mask = _sz_u64_mask_until(head_length);
+    a_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, a);
+    b_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, b);
+    __mmask64 mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
+    if (mask_not_equal != 0) {
+        sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
+        char a_char = a_vec.u8s[first_diff];
+        char b_char = b_vec.u8s[first_diff];
+        return _sz_order_scalars(a_char, b_char);
+    }
+    else if (head_length == a_length && head_length == b_length) { return sz_equal_k; }
+    else { a += head_length, b += head_length, a_length -= head_length, b_length -= head_length; }
 
     // The rare case, when both string are very long.
+    __mmask64 a_mask, b_mask;
     while ((a_length >= 64) & (b_length >= 64)) {
         a_vec.zmm = _mm512_loadu_si512(a);
         b_vec.zmm = _mm512_loadu_si512(b);
         mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
         if (mask_not_equal != 0) {
             sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
-            char a_char = a[first_diff];
-            char b_char = b[first_diff];
+            char a_char = a_vec.u8s[first_diff];
+            char b_char = b_vec.u8s[first_diff];
             return _sz_order_scalars(a_char, b_char);
         }
         a += 64, b += 64, a_length -= 64, b_length -= 64;
@@ -4219,17 +4361,16 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
         mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
         if (mask_not_equal != 0) {
             sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
-            char a_char = a[first_diff];
-            char b_char = b[first_diff];
+            char a_char = a_vec.u8s[first_diff];
+            char b_char = b_vec.u8s[first_diff];
             return _sz_order_scalars(a_char, b_char);
         }
-        else
-            // From logic perspective, the hardest cases are "abc\0" and "abc".
-            // The result must be `sz_greater_k`, as the latter is shorter.
-            return _sz_order_scalars(a_length, b_length);
+        // From logic perspective, the hardest cases are "abc\0" and "abc".
+        // The result must be `sz_greater_k`, as the latter is shorter.
+        else { return _sz_order_scalars(a_length, b_length); }
     }
-    else
-        return sz_equal_k;
+
+    return sz_equal_k;
 }
 
 SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
@@ -4252,8 +4393,8 @@ SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) 
         mask = _mm512_mask_cmpneq_epi8_mask(mask, a_vec.zmm, b_vec.zmm);
         return (sz_bool_t)(mask == 0);
     }
-    else
-        return sz_true_k;
+
+    return sz_true_k;
 }
 
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
@@ -4274,9 +4415,9 @@ SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value) 
     // by computing 2 masks - for the head and tail, using masked stores for the head and tail, and unmasked
     // for the body.
     else {
-        sz_size_t head_length = 64 - ((sz_size_t)target % 64);
-        sz_size_t tail_length = (sz_size_t)(target + length) % 64;
-        sz_size_t body_length = length - head_length - tail_length;
+        sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
+        sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
+        sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
         __mmask64 head_mask = _sz_u64_mask_until(head_length);
         __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
         _mm512_mask_storeu_epi8(target, head_mask, value_vec);
@@ -4298,7 +4439,7 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     // A typical AWS Sapphire Rapids instance can have 48 KB x 2 blocks of L1 data cache per core,
     // 2 MB x 2 blocks of L2 cache per core, and one shared 60 MB buffer of L3 cache.
     // With two strings, we may consider the overal workload huge, if each exceeds 1 MB in length.
-    int is_huge = length >= 1ull * 1024ull * 1024ull;
+    int const is_huge = length >= 1ull * 1024ull * 1024ull;
 
     // When the buffer is small, there isn't much to innovate.
     if (length <= 64) {
@@ -4320,9 +4461,9 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     // In such and simpler cases we can copy enough bytes into `target` to reach its cacheline boundary,
     // and then combine unaligned loads with aligned stores.
     else if (!is_huge) {
-        sz_size_t head_length = 64 - ((sz_size_t)target % 64);
-        sz_size_t tail_length = (sz_size_t)(target + length) % 64;
-        sz_size_t body_length = length - head_length - tail_length;
+        sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
+        sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
+        sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
         __mmask64 head_mask = _sz_u64_mask_until(head_length);
         __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
         _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
@@ -4343,7 +4484,7 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     // Bidirectional traversal adds about 10%, accelerating from 11 GB/s to 12 GB/s.
     // Using "streaming stores" boosts us from 12 GB/s to 19 GB/s.
     else {
-        sz_size_t head_length = 64 - ((sz_size_t)target % 64);
+        sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64;
         sz_size_t tail_length = (sz_size_t)(target + length) % 64;
         sz_size_t body_length = length - head_length - tail_length;
         __mmask64 head_mask = _sz_u64_mask_until(head_length);
@@ -4365,20 +4506,104 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 }
 
 SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    if (target < source || target >= source + length) {
-        for (; length >= 64; target += 64, source += 64, length -= 64)
-            _mm512_storeu_si512(target, _mm512_loadu_si512(source));
-        // At this point the length is guaranteed to be under 64.
+    if (target == source) return; // Don't be silly, don't move the data if it's already there.
+
+    // On very short buffers, that are one cache line in width or less, we don't need any loops.
+    // We can also avoid any data-dependencies between iterations, assuming we have 32 registers
+    // to pre-load the data, before writing it back.
+    if (length <= 64) {
         __mmask64 mask = _sz_u64_mask_until(length);
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     }
+    else if (length <= 128) {
+        __mmask64 mask = _sz_u64_mask_until(length % 64);
+        __m512i source0 = _mm512_loadu_epi8(source);
+        __m512i source1 = _mm512_maskz_loadu_epi8(mask, source + 64);
+        _mm512_storeu_epi8(target, source0);
+        _mm512_mask_storeu_epi8(target + 64, mask, source1);
+    }
+    else if (length <= 192) {
+        __mmask64 mask = _sz_u64_mask_until(length % 64);
+        __m512i source0 = _mm512_loadu_epi8(source);
+        __m512i source1 = _mm512_loadu_epi8(source + 64);
+        __m512i source2 = _mm512_maskz_loadu_epi8(mask, source + 128);
+        _mm512_storeu_epi8(target, source0);
+        _mm512_storeu_epi8(target + 64, source1);
+        _mm512_mask_storeu_epi8(target + 128, mask, source2);
+    }
+    else if (length <= 256) {
+        __mmask64 mask = _sz_u64_mask_until(length % 64);
+        __m512i source0 = _mm512_loadu_epi8(source);
+        __m512i source1 = _mm512_loadu_epi8(source + 64);
+        __m512i source2 = _mm512_loadu_epi8(source + 128);
+        __m512i source3 = _mm512_maskz_loadu_epi8(mask, source + 192);
+        _mm512_storeu_epi8(target, source0);
+        _mm512_storeu_epi8(target + 64, source1);
+        _mm512_storeu_epi8(target + 128, source2);
+        _mm512_mask_storeu_epi8(target + 192, mask, source3);
+    }
+
+    // If the regions don't overlap at all, just use "copy" and save some brain cells thinking about corner cases.
+    else if (target + length < source || target >= source + length) { sz_copy_avx512(target, source, length); }
+
+    // When the buffer is over 64 bytes, it's guaranteed to touch at least two cache lines - the head and tail,
+    // and may include more cache-lines in-between. Knowing this, we can avoid expensive unaligned stores
+    // by computing 2 masks - for the head and tail, using masked stores for the head and tail, and unmasked
+    // for the body.
     else {
-        // Jump to the end and walk backwards.
-        for (target += length, source += length; length >= 64; length -= 64)
-            _mm512_storeu_si512(target -= 64, _mm512_loadu_si512(source -= 64));
-        // At this point the length is guaranteed to be under 64.
-        __mmask64 mask = _sz_u64_mask_until(length);
-        _mm512_mask_storeu_epi8(target - length, mask, _mm512_maskz_loadu_epi8(mask, source - length));
+        sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
+        sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
+        sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
+        __mmask64 head_mask = _sz_u64_mask_until(head_length);
+        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+
+        // The absolute most common case of using "moves" is shifting the data within a continuous buffer
+        // when adding a removing some values in it. In such cases, a typical shift is by 1, 2, 4, 8, 16,
+        // or 32 bytes, rarely larger. For small shifts, under the size of the ZMM register, we can use shuffles.
+        //
+        // Remember:
+        //      - if we are shifting data left, that we are traversing to the right.
+        //      - if we are shifting data right, that we are traversing to the left.
+        int const left_to_right_traversal = source > target;
+
+        // Now we guarantee, that the relative shift within registers is from 1 to 63 bytes and the output is aligned.
+        // Hopefully, we need to shift more than two ZMM registers, so we could consider `valignr` instruction.
+        // Sadly, using `_mm512_alignr_epi8` doesn't make sense, as it operates at a 128-bit granularity.
+        //
+        //      - `_mm256_alignr_epi8` shifts entire 256-bit register, but we need many of them.
+        //      - `_mm512_alignr_epi32` shifts 512-bit chunks, but only if the `shift` is a multiple of 4 bytes.
+        //      - `_mm512_alignr_epi64` shifts 512-bit chunks by 8 bytes.
+        //
+        // All of those have a latency of 1 cycle, and the shift amount must be an immediate value!
+        // For 1-byte-shift granularity, the `_mm512_permutex2var_epi8` has a latency of 6 and needs VBMI!
+        // The most efficient and broadly compatible alternative could be to use a combination of align and shuffle.
+        // A similar approach was outlined in "Byte-wise alignr in AVX512F" by Wojciech Muła.
+        // http://0x80.pl/notesen/2016-10-16-avx512-byte-alignr.html
+        //
+        // That solution, is extremely mouthful, assuming we need compile time constants for the shift amount.
+        // A cleaner one, with a latency of 3 cycles, is to use `_mm512_permutexvar_epi8` or
+        // `_mm512_mask_permutexvar_epi8`, which can be seen as combination of a cross-register shuffle and blend,
+        // and is available with VBMI. That solution is still noticeably slower than AVX2.
+        //
+        // The GLibC implementation also uses non-temporal stores for larger buffers, we don't.
+        // https://codebrowser.dev/glibc/glibc/sysdeps/x86_64/multiarch/memmove-avx512-no-vzeroupper.S.html
+        if (left_to_right_traversal) {
+            // Head, body, and tail.
+            _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
+            for (target += head_length, source += head_length; body_length >= 64;
+                 target += 64, source += 64, body_length -= 64)
+                _mm512_store_si512(target, _mm512_loadu_si512(source));
+            _mm512_mask_storeu_epi8(target, tail_mask, _mm512_maskz_loadu_epi8(tail_mask, source));
+        }
+        else {
+            // Tail, body, and head.
+            _mm512_mask_storeu_epi8(target + head_length + body_length, tail_mask,
+                                    _mm512_maskz_loadu_epi8(tail_mask, source + head_length + body_length));
+            for (; body_length >= 64; body_length -= 64)
+                _mm512_store_si512(target + head_length + body_length - 64,
+                                   _mm512_loadu_si512(source + head_length + body_length - 64));
+            _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
+        }
     }
 }
 
@@ -5648,6 +5873,8 @@ SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #if SZ_USE_X86_AVX512
     return sz_equal_avx512(a, b, length);
+#elif SZ_USE_X86_AVX2
+    return sz_equal_avx2(a, b, length);
 #else
     return sz_equal_serial(a, b, length);
 #endif
@@ -5656,6 +5883,8 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
 #if SZ_USE_X86_AVX512
     return sz_order_avx512(a, a_length, b, b_length);
+#elif SZ_USE_X86_AVX2
+    return sz_order_avx2(a, a_length, b, b_length);
 #else
     return sz_order_serial(a, a_length, b, b_length);
 #endif
