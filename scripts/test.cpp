@@ -213,6 +213,7 @@ static void test_memory_utilities(std::size_t experiments = 1024ull * 1024ull,
         copy_stl[new_offset] = '-';
         copy_sz[new_offset] = '-';
         dashed_length += fill_length + 1;
+        reverse_offset += fill_length;
     }
 
     sz_unused(experiments);
