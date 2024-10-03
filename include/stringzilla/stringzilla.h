@@ -1159,15 +1159,15 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 
 #if SZ_USE_X86_AVX512
 
-/** @copydoc sz_equal_serial */
+/** @copydoc sz_equal */
 SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
-/** @copydoc sz_order_serial */
+/** @copydoc sz_order */
 SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
-/** @copydoc sz_copy_serial */
+/** @copydoc sz_copy */
 SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-/** @copydoc sz_move_serial */
+/** @copydoc sz_move */
 SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-/** @copydoc sz_fill_serial */
+/** @copydoc sz_fill */
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
@@ -1216,6 +1216,12 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t text, sz_size_t length, sz_size_t window
 #if SZ_USE_ARM_NEON
 /** @copydoc sz_equal */
 SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_copy */
+SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move */
+SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill */
+SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
@@ -1228,6 +1234,31 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
 SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 /** @copydoc sz_rfind_charset */
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
+#endif
+
+#if SZ_USE_ARM_SVE
+/** @copydoc sz_equal */
+SZ_PUBLIC sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order */
+SZ_PUBLIC sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
+/** @copydoc sz_copy */
+SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move */
+SZ_PUBLIC void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_fill */
+SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_find_byte */
+SZ_PUBLIC sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_rfind_byte */
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+/** @copydoc sz_find */
+SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_rfind */
+SZ_PUBLIC sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+/** @copydoc sz_find_charset */
+SZ_PUBLIC sz_cptr_t sz_find_charset_sve(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
+/** @copydoc sz_rfind_charset */
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_sve(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 #endif
 
 #pragma endregion
@@ -4266,8 +4297,9 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     //
     // A typical AWS Sapphire Rapids instance can have 48 KB x 2 blocks of L1 data cache per core,
     // 2 MB x 2 blocks of L2 cache per core, and one shared 60 MB buffer of L3 cache.
-    // For now, let's avoid the cases beyond the L2 size.
-    int is_huge = length > 2ull * 1024ull * 1024ull;
+    // With two strings, we may consider the overal workload huge, if each exceeds 1 MB in length.
+    int is_huge = length >= 1ull * 1024ull * 1024ull;
+
     // When the buffer is small, there isn't much to innovate.
     if (length <= 64) {
         __mmask64 mask = _sz_u64_mask_until(length);
@@ -5231,11 +5263,19 @@ typedef union sz_u128_vec_t {
     sz_u8_t u8s[16];
 } sz_u128_vec_t;
 
-SZ_INTERNAL sz_u64_t vreinterpretq_u8_u4(uint8x16_t vec) {
+SZ_INTERNAL sz_u64_t _sz_vreinterpretq_u8_u4(uint8x16_t vec) {
     // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
     // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
 }
+
+SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) { return sz_false_k; }
+
+SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {}
+
+SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {}
+
+SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {}
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     sz_u64_t matches;
@@ -5248,7 +5288,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
         // In Arm NEON we don't have a `movemask` to combine it with `ctz` and get the offset of the match.
         // But assuming the `vmaxvq` is cheap, we can use it to find the first match, by blending (bitwise selecting)
         // the vector with a relative offsets array.
-        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        matches = _sz_vreinterpretq_u8_u4(matches_vec.u8x16);
         if (matches) return h + sz_u64_ctz(matches) / 4;
 
         h += 16, h_length -= 16;
@@ -5265,7 +5305,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_
     while (h_length >= 16) {
         h_vec.u8x16 = vld1q_u8((sz_u8_t const *)h + h_length - 16);
         matches_vec.u8x16 = vceqq_u8(h_vec.u8x16, n_vec.u8x16);
-        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        matches = _sz_vreinterpretq_u8_u4(matches_vec.u8x16);
         if (matches) return h + h_length - 1 - sz_u64_clz(matches) / 4;
         h_length -= 16;
     }
@@ -5290,7 +5330,7 @@ SZ_PUBLIC sz_u64_t _sz_find_charset_neon_register(sz_u128_vec_t h_vec, uint8x16_
     uint8x16_t matches_vec = vorrq_u8(matches_top_vec, matches_bottom_vec);
     // Istead of pure `vandq_u8`, we can immediately broadcast a match presence across each 8-bit word.
     matches_vec = vtstq_u8(matches_vec, byte_mask_vec);
-    return vreinterpretq_u8_u4(matches_vec);
+    return _sz_vreinterpretq_u8_u4(matches_vec);
 }
 
 SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
@@ -5315,7 +5355,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
             h_last_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h + 1));
             matches_vec.u8x16 =
                 vandq_u8(vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            matches = _sz_vreinterpretq_u8_u4(matches_vec.u8x16);
             if (matches) return h + sz_u64_ctz(matches) / 4;
         }
     }
@@ -5337,7 +5377,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
                     vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                     vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
                 vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            matches = _sz_vreinterpretq_u8_u4(matches_vec.u8x16);
             if (matches) return h + sz_u64_ctz(matches) / 4;
         }
     }
@@ -5361,7 +5401,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
                     vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                     vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
                 vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-            matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+            matches = _sz_vreinterpretq_u8_u4(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_ctz(matches) / 4;
                 if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
@@ -5401,7 +5441,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
                 vceqq_u8(h_first_vec.u8x16, n_first_vec.u8x16), //
                 vceqq_u8(h_mid_vec.u8x16, n_mid_vec.u8x16)),
             vceqq_u8(h_last_vec.u8x16, n_last_vec.u8x16));
-        matches = vreinterpretq_u8_u4(matches_vec.u8x16);
+        matches = _sz_vreinterpretq_u8_u4(matches_vec.u8x16);
         while (matches) {
             int potential_offset = sz_u64_clz(matches) / 4;
             if (sz_equal(h + h_length - n_length - potential_offset, n, n_length))
@@ -5449,6 +5489,129 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_ch
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif // Arm Neon
+
+#pragma endregion
+
+/*  @brief  Implementation of the string search algorithms using the Arm SVE variable-length registers, available
+ *          in Arm v9 processors.
+ *
+ *  Implements:
+ *      - memory: {copy, move, fill}
+ *      - comparisons: {equal, order}
+ *      - search: {substring, character, character set} x {forward, reverse}.
+ */
+#pragma region ARM SVE
+
+#if SZ_USE_ARM_SVE
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+sve")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+
+SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+    svuint8_t value_vec = svdup_u8(value);
+    sz_size_t vec_len = svcntb(); // Vector length in bytes (scalable)
+
+    if (length <= vec_len) {
+        // Small buffer case: use mask to handle small writes
+        svbool_t mask = svwhilelt_b8(0ul, length);
+        svst1_u8(mask, (unsigned char *)target, value_vec);
+    }
+    else {
+        // Calculate head, body, and tail sizes
+        sz_size_t head_length = vec_len - ((sz_size_t)target % vec_len);
+        sz_size_t tail_length = (sz_size_t)(target + length) % vec_len;
+        sz_size_t body_length = length - head_length - tail_length;
+
+        // Handle unaligned head
+        svbool_t head_mask = svwhilelt_b8(0ul, head_length);
+        svst1_u8(head_mask, (unsigned char *)target, value_vec);
+        target += head_length;
+
+        // Aligned body loop
+        for (; body_length >= vec_len; target += vec_len, body_length -= vec_len) {
+            svst1_u8(svptrue_b8(), (unsigned char *)target, value_vec);
+        }
+
+        // Handle unaligned tail
+        svbool_t tail_mask = svwhilelt_b8(0ul, tail_length);
+        svst1_u8(tail_mask, (unsigned char *)target, value_vec);
+    }
+}
+
+SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_size_t vec_len = svcntb(); // Vector length in bytes
+
+    // Arm Neoverse V2 cores in Graviton 4, for example, come with 256 KB of L1 data cache per core,
+    // and 8 MB of L2 cache per core. Moreover, the L1 cache is fully associative.
+    // With two strings, we may consider the overal workload huge, if each exceeds 1 MB in length.
+    //
+    //      int is_huge = length >= 4ull * 1024ull * 1024ull;
+    //
+    // When the buffer is small, there isn't much to innovate.
+    if (length <= vec_len) {
+        // Small buffer case: use mask to handle small writes
+        svbool_t mask = svwhilelt_b8(0ul, length);
+        svuint8_t data = svld1_u8(mask, (unsigned char *)source);
+        svst1_u8(mask, (unsigned char *)target, data);
+    }
+    // When dealing with larger buffers, similar to AVX-512, we want minimize unaligned operations
+    // and handle the head, body, and tail separately. We can also traverse the buffer in both directions
+    // as Arm generally supports more simultaneous stores than x86 CPUs.
+    //
+    // For gigantic datasets, similar to AVX-512, non-temporal "loads" and "stores" can be used.
+    // Sadly, if the register size (16 byte or larger) is smaller than a cache-line (64 bytes)
+    // we will pay a huge penalty on loads, fetching the same content many times.
+    // It may be better to allow caching (and subsequent eviction), in favor of using four-element
+    // tuples, wich will be guaranteed to be a multiple of a cache line.
+    //
+    // Another approach is to use the `LD4B` instructions, which will populate four registers at once.
+    // This however, further decreases the performance from LibC-like 29 GB/s to 20 GB/s.
+    else {
+        // Calculating head, body, and tail sizes depends on the `vec_len`,
+        // but it's runtime constant, and the modulo operation is expensive!
+        // Instead we use the fact, that it's always a multiple of 128 bits or 16 bytes.
+        sz_size_t head_length = 16 - ((sz_size_t)target % 16);
+        sz_size_t tail_length = (sz_size_t)(target + length) % 16;
+        sz_size_t body_length = length - head_length - tail_length;
+
+        // Handle unaligned parts
+        svbool_t head_mask = svwhilelt_b8(0ul, head_length);
+        svuint8_t head_data = svld1_u8(head_mask, (unsigned char *)source);
+        svst1_u8(head_mask, (unsigned char *)target, head_data);
+        svbool_t tail_mask = svwhilelt_b8(0ul, tail_length);
+        svuint8_t tail_data = svld1_u8(tail_mask, (unsigned char *)source + head_length + body_length);
+        svst1_u8(tail_mask, (unsigned char *)target + head_length + body_length, tail_data);
+        target += head_length;
+        source += head_length;
+
+        // Aligned body loop, walking in two directions
+        for (; body_length >= vec_len * 2; target += vec_len, source += vec_len, body_length -= vec_len * 2) {
+            svuint8_t forward_data = svld1_u8(svptrue_b8(), (unsigned char *)source);
+            svuint8_t backward_data = svld1_u8(svptrue_b8(), (unsigned char *)source + body_length - vec_len);
+            svst1_u8(svptrue_b8(), (unsigned char *)target, forward_data);
+            svst1_u8(svptrue_b8(), (unsigned char *)target + body_length - vec_len, backward_data);
+        }
+        // Up to (vec_len * 2 - 1) bytes of data may be left in the body,
+        // so we can unroll the last two optional loop iterations.
+        if (body_length > vec_len) {
+            svbool_t mask = svwhilelt_b8(0ul, body_length);
+            svuint8_t data = svld1_u8(mask, (unsigned char *)source);
+            svst1_u8(mask, (unsigned char *)target, data);
+            body_length -= vec_len;
+            source += body_length;
+            target += body_length;
+        }
+        if (body_length) {
+            svbool_t mask = svwhilelt_b8(0ul, body_length);
+            svuint8_t data = svld1_u8(mask, (unsigned char *)source);
+            svst1_u8(mask, (unsigned char *)target, data);
+        }
+    }
+}
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+#endif // Arm SVE
 
 #pragma endregion
 

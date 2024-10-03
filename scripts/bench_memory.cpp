@@ -38,6 +38,9 @@ tracked_unary_functions_t copy_functions(sz_cptr_t input_start_ptr, sz_ptr_t out
 #if SZ_USE_X86_AVX2
         {"sz_copy_avx2" + suffix, wrap_sz(sz_copy_avx2), true},
 #endif
+#if SZ_USE_ARM_SVE
+        {"sz_copy_sve" + suffix, wrap_sz(sz_copy_sve), true},
+#endif
 #if SZ_USE_ARM_NEON
         {"sz_copy_neon" + suffix, wrap_sz(sz_copy_neon), true},
 #endif
@@ -65,6 +68,9 @@ tracked_unary_functions_t fill_functions(sz_cptr_t input_start_ptr, sz_ptr_t out
 #endif
 #if SZ_USE_X86_AVX2
         {"sz_fill_avx2", wrap_sz(sz_fill_avx2), true},
+#endif
+#if SZ_USE_ARM_SVE
+        {"sz_fill_sve", wrap_sz(sz_fill_sve), true},
 #endif
 #if SZ_USE_ARM_NEON
         {"sz_fill_neon", wrap_sz(sz_fill_neon), true},
