@@ -14,6 +14,7 @@
 #include <bench.hpp>
 
 using namespace ashvardanian::stringzilla::scripts;
+constexpr std::size_t max_shift_length = 299;
 
 /**
  *  @brief  Benchmarks `memcpy`-like operations in 2 modes: aligned @b output buffer and unaligned.
@@ -43,15 +44,15 @@ tracked_unary_functions_t copy_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
     };
     tracked_unary_functions_t result = {
         {"memcpy" + suffix, wrap_sz(memcpy)},
-        {"sz_copy_serial" + suffix, wrap_sz(sz_copy_serial), true},
+        {"sz_copy_serial" + suffix, wrap_sz(sz_copy_serial)},
 #if SZ_USE_X86_AVX512
-        {"sz_copy_avx512" + suffix, wrap_sz(sz_copy_avx512), true},
+        {"sz_copy_avx512" + suffix, wrap_sz(sz_copy_avx512)},
 #endif
 #if SZ_USE_X86_AVX2
-        {"sz_copy_avx2" + suffix, wrap_sz(sz_copy_avx2), true},
+        {"sz_copy_avx2" + suffix, wrap_sz(sz_copy_avx2)},
 #endif
 #if SZ_USE_ARM_NEON
-        {"sz_copy_neon" + suffix, wrap_sz(sz_copy_neon), true},
+        {"sz_copy_neon" + suffix, wrap_sz(sz_copy_neon)},
 #endif
     };
     return result;
@@ -80,15 +81,15 @@ tracked_unary_functions_t fill_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
              memset(output_buffer_ptr + output_offset, slice.front(), slice.size());
              return slice.size();
          })},
-        {"sz_fill_serial", wrap_sz(sz_fill_serial), true},
+        {"sz_fill_serial", wrap_sz(sz_fill_serial)},
 #if SZ_USE_X86_AVX512
-        {"sz_fill_avx512", wrap_sz(sz_fill_avx512), true},
+        {"sz_fill_avx512", wrap_sz(sz_fill_avx512)},
 #endif
 #if SZ_USE_X86_AVX2
-        {"sz_fill_avx2", wrap_sz(sz_fill_avx2), true},
+        {"sz_fill_avx2", wrap_sz(sz_fill_avx2)},
 #endif
 #if SZ_USE_ARM_NEON
-        {"sz_fill_neon", wrap_sz(sz_fill_neon), true},
+        {"sz_fill_neon", wrap_sz(sz_fill_neon)},
 #endif
     };
     return result;
@@ -117,15 +118,15 @@ tracked_unary_functions_t move_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
     };
     tracked_unary_functions_t result = {
         {"memmove" + suffix, wrap_sz(memmove)},
-        {"sz_move_serial" + suffix, wrap_sz(sz_move_serial), true},
-#if SZ_USE_X86_AVX512 && 0
-        {"sz_move_avx512" + suffix, wrap_sz(sz_move_avx512), true},
+        {"sz_move_serial" + suffix, wrap_sz(sz_move_serial)},
+#if SZ_USE_X86_AVX512
+        {"sz_move_avx512" + suffix, wrap_sz(sz_move_avx512)},
 #endif
 #if SZ_USE_X86_AVX2
-        {"sz_move_avx2" + suffix, wrap_sz(sz_move_avx2), true},
+        {"sz_move_avx2" + suffix, wrap_sz(sz_move_avx2)},
 #endif
 #if SZ_USE_ARM_NEON
-        {"sz_move_neon" + suffix, wrap_sz(sz_move_neon), true},
+        {"sz_move_neon" + suffix, wrap_sz(sz_move_neon)},
 #endif
     };
     return result;
@@ -159,7 +160,7 @@ void bench_memory(std::vector<std::string_view> const &slices, sz_cptr_t dataset
     bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
     bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
     bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
-    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 99));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
 }
 
 int main(int argc, char const **argv) {
@@ -177,7 +178,7 @@ int main(int argc, char const **argv) {
     };
     std::unique_ptr<char, aligned_free_t> output_buffer;
     // Add space for at least one cache line to simplify unaligned exports
-    std::size_t const output_length = round_up_to_multiple<4096>(dataset.text.size() + SZ_CACHE_LINE_WIDTH);
+    std::size_t const output_length = round_up_to_multiple<4096>(dataset.text.size() + max_shift_length);
     output_buffer.reset(reinterpret_cast<char *>(std::aligned_alloc(4096, output_length)));
     if (!output_buffer) {
         std::fprintf(stderr, "Failed to allocate an output buffer of %zu bytes.\n", output_length);
