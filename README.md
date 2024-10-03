@@ -1367,6 +1367,23 @@ With that solved, the SIMD implementation will become 5x faster than the serial 
 [faq-dipeptide]: https://en.wikipedia.org/wiki/Dipeptide
 [faq-titin]: https://en.wikipedia.org/wiki/Titin
 
+### Memory Copying, Fills, and Moves
+
+A lot has been written about the time computers spend copying memory and how that operation is implemented in LibC.
+Interestingly, the operation can still be improved, as most Assembly implementations use outdated instructions.
+Even performance-oriented STL replacements, like Meta's [Folly v2024.09.23 focus on AVX2](https://github.com/facebook/folly/blob/main/folly/memset.S), and don't take advantage of the new masked instructions in AVX-512 or SVE.
+
+In AVX-512, StringZilla uses non-temporal stores to avoid cache pollution, when dealing with very large strings.
+Moreover, it handles the unaligned head and the tails of the `target` buffer separately, ensuring that writes in big copies are always aligned to cache-line boundaries.
+That's true for both AVX2 and AVX-512 backends.
+
+StringZilla also contains "drafts" of smarter, but less efficient algorithms, that minimize the number of unaligned loads, perfoming shuffles and permutations.
+That's a topic for future research, as the performance gains are not yet satisfactory.
+
+> § Reading materials.
+> [`memset` benchmarks](https://github.com/nadavrot/memset_benchmark?tab=readme-ov-file) by Nadav Rotem.
+> [Cache Associativity](https://en.algorithmica.org/hpc/cpu-cache/associativity/) by Sergey Slotin.
+
 ### Random Generation
 
 Generating random strings from different alphabets is a very common operation.
