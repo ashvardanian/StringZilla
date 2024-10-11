@@ -1396,9 +1396,12 @@ SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x 
  *
  *  Similar to `_mm_blend_epi16` intrinsic on x86.
  *  Described in the "Bit Twiddling Hacks" by Sean Eron Anderson.
- *  https://graphics.stanford.edu/~seander/bithacks.html#ConditionalSetOrClearBitsWithoutBranching
+ *  https://graphics.stanford.edu/~seander/bithacks.html#MaskedMerge
  */
 SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { return a ^ ((a ^ b) & mask); }
+
+/** @copydoc sz_u64_blend */
+SZ_INTERNAL sz_size_t sz_size_blend(sz_size_t a, sz_size_t b, sz_size_t mask) { return a ^ ((a ^ b) & mask); }
 
 /*
  *  Efficiently computing the minimum and maximum of two or three values can be tricky.
@@ -3174,7 +3177,7 @@ SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_s
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
     *length = string->external.length & (0x00000000000000FFull | is_big_mask);
     // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
-    *space = sz_u64_blend(SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
+    *space = sz_size_blend(SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
     *is_external = (sz_bool_t)!is_small;
 }
 
