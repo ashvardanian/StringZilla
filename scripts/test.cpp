@@ -127,6 +127,16 @@ static void test_arithmetical_utilities() {
                    (static_cast<sz_u8_t>(number) / static_cast<sz_u8_t>(divisor)));
 }
 
+inline void expect_equality(char const *a, char const *b, std::size_t size) {
+    if (std::memcmp(a, b, size) == 0) return;
+    std::size_t mismatch_position = 0;
+    for (; mismatch_position < size; ++mismatch_position)
+        if (a[mismatch_position] != b[mismatch_position]) break;
+    std::fprintf(stderr, "Mismatch at position %zu: %c != %c\n", mismatch_position, a[mismatch_position],
+                 b[mismatch_position]);
+    assert(false);
+}
+
 /**
  *  @brief  Validates that `sz::memcpy`, `sz::memset`, and `sz::memmove` work similar to their `std::` counterparts.
  *
@@ -136,20 +146,10 @@ static void test_arithmetical_utilities() {
 static void test_memory_utilities(std::size_t experiments = 1024ull * 1024ull,
                                   std::size_t max_l2_size = 1024ull * 1024ull * 32ull) {
 
-    auto check_equality = [](char const *a, char const *b, std::size_t size) {
-        if (std::memcmp(a, b, size) == 0) return;
-        std::size_t mismatch_position = 0;
-        for (; mismatch_position < size; ++mismatch_position)
-            if (a[mismatch_position] != b[mismatch_position]) break;
-        std::fprintf(stderr, "Mismatch at position %zu: %c != %c\n", mismatch_position, a[mismatch_position],
-                     b[mismatch_position]);
-        assert(false);
-    };
-
     // We will be mirroring the operations on both standard and StringZilla strings.
     std::string text_stl(max_l2_size, '-');
     std::string text_sz(max_l2_size, '-');
-    check_equality(text_stl.data(), text_sz.data(), max_l2_size);
+    expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
 
     // First start with simple deterministic tests.
     // Let's use `memset` to fill the strings with a pattern like "122333444455555...00000000000011111111111..."
@@ -160,7 +160,7 @@ static void test_memory_utilities(std::size_t experiments = 1024ull * 1024ull,
         fill_length = offset + fill_length > max_l2_size ? max_l2_size - offset : fill_length;
         std::memset((void *)(text_stl.data() + offset), fill_value, fill_length);
         sz::memset((void *)(text_sz.data() + offset), fill_value, fill_length);
-        check_equality(text_stl.data(), text_sz.data(), max_l2_size);
+        expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
     }
 
     // Let's copy those chunks to an empty buffer one by one, validating the overall equivalency after every copy.
@@ -170,10 +170,10 @@ static void test_memory_utilities(std::size_t experiments = 1024ull * 1024ull,
         fill_length = offset + fill_length > max_l2_size ? max_l2_size - offset : fill_length;
         std::memcpy((void *)(copy_stl.data() + offset), (void *)(text_stl.data() + offset), fill_length);
         sz::memcpy((void *)(copy_sz.data() + offset), (void *)(text_sz.data() + offset), fill_length);
-        check_equality(copy_stl.data(), copy_sz.data(), max_l2_size);
+        expect_equality(copy_stl.data(), copy_sz.data(), max_l2_size);
     }
-    check_equality(text_stl.data(), copy_stl.data(), max_l2_size);
-    check_equality(text_sz.data(), copy_sz.data(), max_l2_size);
+    expect_equality(text_stl.data(), copy_stl.data(), max_l2_size);
+    expect_equality(text_sz.data(), copy_sz.data(), max_l2_size);
 
     // Let's simulate a realistic `memmove` workloads, compacting parts of this buffer, removing all odd values,
     // so the buffer will look like "224444666666..."
@@ -188,7 +188,7 @@ static void test_memory_utilities(std::size_t experiments = 1024ull * 1024ull,
 
         std::memmove((void *)(text_stl.data() + offset), (void *)(text_stl.data() + next_offset), next_fill_length);
         sz::memmove((void *)(text_sz.data() + offset), (void *)(text_sz.data() + next_offset), next_fill_length);
-        check_equality(text_stl.data(), text_sz.data(), max_l2_size);
+        expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
     }
 
     // Now the opposite workload, expanding the buffer, inserting a dash "-" before every group of equal characters.
@@ -207,7 +207,7 @@ static void test_memory_utilities(std::size_t experiments = 1024ull * 1024ull,
         std::size_t new_offset = dashed_capacity - dashed_length - fill_length;
         std::memmove((void *)(copy_stl.data() + new_offset), (void *)(copy_stl.data() + offset), fill_length);
         sz::memmove((void *)(copy_sz.data() + new_offset), (void *)(copy_sz.data() + offset), fill_length);
-        check_equality(copy_stl.data(), copy_sz.data(), max_l2_size);
+        expect_equality(copy_stl.data(), copy_sz.data(), max_l2_size);
 
         // Put the delimiter
         copy_stl[new_offset] = '-';
@@ -819,6 +819,14 @@ void test_non_stl_extensions_for_updates() {
     assert_scoped(str s = "hello", s.replace_all(sz::char_set("x"), "xx"), s == "hello");
     assert_scoped(str s = "hello", s.replace_all(sz::char_set("lo"), "lo"), s == "helololo");
 
+    // Directly mapping bytes using a Look-Up Table.
+    sz::look_up_table invert_case = sz::look_up_table::identity();
+    for (char c = 'a'; c <= 'z'; c++) invert_case[c] = c - 'a' + 'A';
+    for (char c = 'A'; c <= 'Z'; c++) invert_case[c] = c - 'A' + 'a';
+    assert_scoped(str s = "hello", s.transform(invert_case), s == "HELLO");
+    assert_scoped(str s = "HeLLo", s.transform(invert_case), s == "hEllO");
+    assert_scoped(str s = "H-lL0", s.transform(invert_case), s == "h-Ll0");
+
     // Concatenation.
     assert(str(str("a") | str("b")) == "ab");
     assert(str(str("a") | str("b") | str("ab")) == "abab");
@@ -1425,6 +1433,36 @@ static void test_levenshtein_distances() {
 }
 
 /**
+ *  Evaluates the correctness of look-up table transforms using random lookup tables.
+ *
+ *  @param misalignment The number of bytes to misalign the haystack within the cacheline.
+ */
+void test_replacements(std::size_t lookup_tables_to_try = 128, std::size_t slices_per_table = 256) {
+
+    std::string body, transformed;
+    body.resize(1024 * 1024); // 1MB
+    transformed.resize(1024 * 1024);
+    std::generate(body.begin(), body.end(), []() { return (char)(std::rand() % 256); });
+
+    for (std::size_t lookup_table_variation = 0; lookup_table_variation != lookup_tables_to_try;
+         ++lookup_table_variation) {
+        sz::look_up_table lut;
+        for (std::size_t i = 0; i < 256; i++) lut[i] = (char)(std::rand() % 256);
+
+        for (std::size_t slice_idx = 0; slice_idx != slices_per_table; ++slice_idx) {
+            std::size_t slice_offset = std::rand() % body.length();
+            std::size_t slice_length = std::rand() % (body.length() - slice_offset);
+
+            sz::transform<char>(sz::string_view(body.data() + slice_offset, slice_length), lut,
+                                transformed.data() + slice_offset);
+            for (std::size_t i = 0; i != slice_length; ++i) {
+                assert(transformed[slice_offset + i] == lut[(unsigned char)body[slice_offset + i]]);
+            }
+        }
+    }
+}
+
+/**
  *  @brief  Tests sorting functionality.
  */
 static void test_sequence_algorithms() {
@@ -1463,6 +1501,7 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
+    test_replacements();
     test_memory_utilities();
 
 // Compatibility with STL

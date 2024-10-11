@@ -340,6 +340,55 @@ inline char_set whitespaces_set() { return char_set {whitespaces()}; }
 inline char_set newlines_set() { return char_set {newlines()}; }
 inline char_set base64_set() { return char_set {base64()}; }
 
+/**
+ *  @brief  A look-up table for character replacement operations.
+ *          Exactly 256 bytes for byte-to-byte replacement.
+ *          ! For larger character types should be allocated on the heap.
+ */
+template <typename char_type_ = char>
+class basic_look_up_table {
+    static_assert(sizeof(char_type_) == 1 || sizeof(char_type_) == 2 || sizeof(char_type_) == 4,
+                  "Character type must be 1, 2, or 4 bytes long");
+    static constexpr std::size_t size_k = sizeof(char_type_) == 1   ? 256ul
+                                          : sizeof(char_type_) == 2 ? 65536ul
+                                                                    : 4294967296ul;
+    static constexpr std::size_t bytes_k = size_k * sizeof(char_type_);
+    using usnigned_type_ = typename std::make_unsigned<char_type_>::type;
+
+    char_type_ lut_[size_k];
+
+  public:
+    using char_type = char_type_;
+
+    basic_look_up_table() noexcept { memset(&lut_[0], 0, bytes_k); }
+    explicit basic_look_up_table(char_type const (&chars)[size_k]) noexcept { memcpy(&lut_[0], chars, bytes_k); }
+    basic_look_up_table(std::array<char_type, size_k> const &chars) noexcept {
+        memcpy(&lut_[0], chars.data(), bytes_k);
+    }
+
+    basic_look_up_table(basic_look_up_table const &other) noexcept { memcpy(&lut_[0], other.lut_, bytes_k); }
+    basic_look_up_table &operator=(basic_look_up_table const &other) noexcept {
+        memcpy(&lut_[0], other.lut_, bytes_k);
+        return *this;
+    }
+
+    /**
+     *  @brief  Creates a look-up table with a one-to-one mapping of characters to themselves.
+     *  Similar to `std::iota` filling, but properly handles signed integer casts.
+     */
+    static basic_look_up_table identity() noexcept {
+        basic_look_up_table result;
+        for (std::size_t i = 0; i < size_k; ++i) { result.lut_[i] = static_cast<usnigned_type_>(i); }
+        return result;
+    }
+
+    inline sz_cptr_t raw() const noexcept { return reinterpret_cast<sz_cptr_t>(&lut_[0]); }
+    inline char_type &operator[](char_type c) noexcept { return lut_[sz_bitcast(usnigned_type_, c)]; }
+    inline char_type const &operator[](char_type c) const noexcept { return lut_[sz_bitcast(usnigned_type_, c)]; }
+};
+
+using look_up_table = basic_look_up_table<char>;
+
 #pragma endregion
 
 #pragma region Ranges of Search Matches
@@ -3355,6 +3404,24 @@ class basic_string {
         return try_replace_all_<char_set>(pattern, replacement);
     }
 
+    /**
+     *  @brief  Replaces ( @b in-place ) all characters in the string using the provided lookup table.
+     */
+    basic_string &transform(look_up_table const &table) noexcept {
+        transform(table, data());
+        return *this;
+    }
+
+    /**
+     *  @brief  Maps all chatacters in the current string into another buffer using the provided lookup table.
+     */
+    void transform(look_up_table const &table, pointer output) const noexcept {
+        sz_ptr_t start;
+        sz_size_t length;
+        sz_string_range(&string_, &start, &length);
+        sz_look_up_transform((sz_cptr_t)start, (sz_size_t)length, (sz_cptr_t)table.raw(), (sz_ptr_t)output);
+    }
+
   private:
     template <typename pattern_type>
     bool try_replace_all_(pattern_type pattern, string_view replacement) noexcept;
@@ -3795,6 +3862,26 @@ void randomize(basic_string_slice<char_type_> string, generator_type_ &generator
     static_assert(!std::is_const<char_type_>::value, "The string must be mutable.");
     sz_random_generator_t generator_callback = &_call_random_generator<generator_type_>;
     sz_generate(alphabet.data(), alphabet.size(), string.data(), string.size(), generator_callback, &generator);
+}
+
+/**
+ *  @brief  Replaces ( @b in-place ) all characters in the string using the provided lookup table.
+ */
+template <typename char_type_>
+void transform(basic_string_slice<char_type_> string, basic_look_up_table<char_type_> const &table) noexcept {
+    static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
+    sz_look_up_transform((sz_cptr_t)string.data(), (sz_size_t)string.size(), (sz_cptr_t)table.raw(),
+                         (sz_ptr_t)string.data());
+}
+
+/**
+ *  @brief  Maps all chatacters in the current string into another buffer using the provided lookup table.
+ */
+template <typename char_type_>
+void transform(basic_string_slice<char_type_ const> source, basic_look_up_table<char_type_> const &table,
+               char_type_ *target) noexcept {
+    static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
+    sz_look_up_transform((sz_cptr_t)source.data(), (sz_size_t)source.size(), (sz_cptr_t)table.raw(), (sz_ptr_t)target);
 }
 
 /**

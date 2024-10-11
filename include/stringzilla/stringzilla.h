@@ -454,6 +454,25 @@ SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, 
 SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
 /**
+ *  @brief  Look Up Table @b (LUT) transformation of a string. Equivalent to `for (char & c : text) c = lut[c]`.
+ *
+ *  Can be used to implement some form of string normalization, partially masking punctuation marks,
+ *  or converting between different character sets, like uppercase or lowercase. Surprisingly, also has
+ *  broad implications in image processing, where image channel transformations are often done using LUTs.
+ *
+ *  @param text     String to be normalized.
+ *  @param length   Number of bytes in the string.
+ *  @param lut      Look Up Table to apply. Must be exactly @b 256 bytes long.
+ *  @param result   Output string, can point to the same address as ::text.
+ */
+SZ_DYNAMIC void sz_look_up_transform(sz_cptr_t text, sz_size_t length, sz_cptr_t lut, sz_ptr_t result);
+
+typedef void (*sz_look_up_transform_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_ptr_t);
+
+/** @copydoc sz_look_up_transform */
+SZ_PUBLIC void sz_look_up_transform_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t lut, sz_ptr_t result);
+
+/**
  *  @brief  Equivalent to `for (char & c : text) c = tolower(c)`.
  *
  *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
@@ -1169,6 +1188,8 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_fill */
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_look_up_tranform */
+SZ_PUBLIC void sz_look_up_tranform_avx512(sz_cptr_t source, sz_size_t length, sz_cptr_t table, sz_ptr_t target);
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
@@ -3093,6 +3114,14 @@ SZ_INTERNAL sz_u8_t sz_u8_divide(sz_u8_t number, sz_u8_t divisor) {
     sz_u16_t q = (sz_u16_t)((multiplier * number) >> 16);
     sz_u16_t t = ((number - q) >> 1) + q;
     return (sz_u8_t)(t >> shift);
+}
+
+SZ_PUBLIC void sz_look_up_transform_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t lut, sz_ptr_t result) {
+    sz_u8_t const *unsigned_lut = (sz_u8_t const *)lut;
+    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
+    sz_u8_t *unsigned_result = (sz_u8_t *)result;
+    sz_u8_t const *end = unsigned_text + length;
+    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = unsigned_lut[*unsigned_text];
 }
 
 SZ_PUBLIC void sz_tolower_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
@@ -5106,6 +5135,108 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t win
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
                              apply_to = function)
 
+SZ_PUBLIC void sz_look_up_transform_avx512(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+
+    // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
+    // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
+    // But if at least 3 cache lines are touched, the AVX-512 implementation should be faster.
+    if (length <= 128) {
+        sz_look_up_transform_serial(source, length, lut, target);
+        return;
+    }
+
+    // When the buffer is over 64 bytes, it's guaranteed to touch at least two cache lines - the head and tail,
+    // and may include more cache-lines in-between. Knowing this, we can avoid expensive unaligned stores
+    // by computing 2 masks - for the head and tail, using masked stores for the head and tail, and unmasked
+    // for the body.
+    sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
+    sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
+    __mmask64 head_mask = _sz_u64_mask_until(head_length);
+    __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+
+    // We need to pull the lookup table into 4x ZMM registers.
+    // We can use `vpermi2b` instruction to perform the look in two ZMM registers with `_mm512_permutex2var_epi8`
+    // intrinsics, but it has a 6-cycle latency on Sapphire Rapids and requires AVX512-VBMI. Assuming we need to
+    // operate on 4 registers, it might be cleaner to use 2x separate `_mm512_permutexvar_epi8` calls.
+    // Combining the results with 2x `_mm512_test_epi8_mask` and 3x blends afterwards.
+    //
+    //  - `_mm512_mask_blend_epi8` - 1 cycle latency, and generally 2x can run in parallel.
+    //  - `_mm512_test_epi8_mask` - 3 cycles latency, same as most comparison functions in AVX-512.
+    sz_u512_vec_t lut_0_to_63_vec, lut_64_to_127_vec, lut_128_to_191_vec, lut_192_to_255_vec;
+    lut_0_to_63_vec.zmm = _mm512_loadu_si512((lut));
+    lut_64_to_127_vec.zmm = _mm512_loadu_si512((lut + 64));
+    lut_128_to_191_vec.zmm = _mm512_loadu_si512((lut + 128));
+    lut_192_to_255_vec.zmm = _mm512_loadu_si512((lut + 192));
+
+    sz_u512_vec_t first_bit_vec, second_bit_vec;
+    first_bit_vec.zmm = _mm512_set1_epi8((char)0x80);
+    second_bit_vec.zmm = _mm512_set1_epi8((char)0x40);
+
+    __mmask64 first_bit_mask, second_bit_mask;
+    sz_u512_vec_t source_vec;
+    // If the top bit is set in each word of `source_vec`, than we use `lookup_128_to_191_vec` or
+    // `lookup_192_to_255_vec`. If the second bit is set, we use `lookup_64_to_127_vec` or `lookup_192_to_255_vec`.
+    sz_u512_vec_t lookup_0_to_63_vec, lookup_64_to_127_vec, lookup_128_to_191_vec, lookup_192_to_255_vec;
+    sz_u512_vec_t blended_0_to_127_vec, blended_128_to_255_vec, blended_0_to_255_vec;
+
+    // Handling the head.
+    if (head_length) {
+        source_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, source);
+        lookup_0_to_63_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_0_to_63_vec.zmm);
+        lookup_64_to_127_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_64_to_127_vec.zmm);
+        lookup_128_to_191_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_128_to_191_vec.zmm);
+        lookup_192_to_255_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_192_to_255_vec.zmm);
+        first_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, first_bit_vec.zmm);
+        second_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, second_bit_vec.zmm);
+        blended_0_to_127_vec.zmm =
+            _mm512_mask_blend_epi8(second_bit_mask, lookup_0_to_63_vec.zmm, lookup_64_to_127_vec.zmm);
+        blended_128_to_255_vec.zmm =
+            _mm512_mask_blend_epi8(second_bit_mask, lookup_128_to_191_vec.zmm, lookup_192_to_255_vec.zmm);
+        blended_0_to_255_vec.zmm =
+            _mm512_mask_blend_epi8(first_bit_mask, blended_0_to_127_vec.zmm, blended_128_to_255_vec.zmm);
+        _mm512_mask_storeu_epi8(target, head_mask, blended_0_to_255_vec.zmm);
+        source += head_length, target += head_length, length -= head_length;
+    }
+
+    // Handling the body in 64-byte chunks aligned to cache-line boundaries with respect to `target`.
+    while (length >= 64) {
+        source_vec.zmm = _mm512_loadu_si512(source);
+        lookup_0_to_63_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_0_to_63_vec.zmm);
+        lookup_64_to_127_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_64_to_127_vec.zmm);
+        lookup_128_to_191_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_128_to_191_vec.zmm);
+        lookup_192_to_255_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_192_to_255_vec.zmm);
+        first_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, first_bit_vec.zmm);
+        second_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, second_bit_vec.zmm);
+        blended_0_to_127_vec.zmm =
+            _mm512_mask_blend_epi8(second_bit_mask, lookup_0_to_63_vec.zmm, lookup_64_to_127_vec.zmm);
+        blended_128_to_255_vec.zmm =
+            _mm512_mask_blend_epi8(second_bit_mask, lookup_128_to_191_vec.zmm, lookup_192_to_255_vec.zmm);
+        blended_0_to_255_vec.zmm =
+            _mm512_mask_blend_epi8(first_bit_mask, blended_0_to_127_vec.zmm, blended_128_to_255_vec.zmm);
+        _mm512_store_si512(target, blended_0_to_255_vec.zmm); //! Aligned store, our main weapon!
+        source += 64, target += 64, length -= 64;
+    }
+
+    // Handling the tail.
+    if (tail_length) {
+        source_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, source);
+        lookup_0_to_63_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_0_to_63_vec.zmm);
+        lookup_64_to_127_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_64_to_127_vec.zmm);
+        lookup_128_to_191_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_128_to_191_vec.zmm);
+        lookup_192_to_255_vec.zmm = _mm512_permutexvar_epi8(source_vec.zmm, lut_192_to_255_vec.zmm);
+        first_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, first_bit_vec.zmm);
+        second_bit_mask = _mm512_test_epi8_mask(source_vec.zmm, second_bit_vec.zmm);
+        blended_0_to_127_vec.zmm =
+            _mm512_mask_blend_epi8(second_bit_mask, lookup_0_to_63_vec.zmm, lookup_64_to_127_vec.zmm);
+        blended_128_to_255_vec.zmm =
+            _mm512_mask_blend_epi8(second_bit_mask, lookup_128_to_191_vec.zmm, lookup_192_to_255_vec.zmm);
+        blended_0_to_255_vec.zmm =
+            _mm512_mask_blend_epi8(first_bit_mask, blended_0_to_127_vec.zmm, blended_128_to_255_vec.zmm);
+        _mm512_mask_storeu_epi8(target, tail_mask, blended_0_to_255_vec.zmm);
+        source += tail_length, target += tail_length, length -= tail_length;
+    }
+}
+
 SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
 
     // Before initializing the AVX-512 vectors, we may want to run the sequential code for the first few bytes.
@@ -5917,6 +6048,14 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_fill_avx2(target, length, value);
 #else
     sz_fill_serial(target, length, value);
+#endif
+}
+
+SZ_DYNAMIC void sz_look_up_transform(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+#if SZ_USE_X86_AVX512
+    sz_look_up_transform_avx512(source, length, lut, target);
+#else
+    sz_look_up_transform_serial(source, length, lut, target);
 #endif
 }
 

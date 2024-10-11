@@ -138,6 +138,43 @@ tracked_unary_functions_t move_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
     return result;
 }
 
+/**
+ *  @brief  Benchmarks look-up transformations on the provided slices, updating them inplace.
+ *
+ *  Performs a simple cyclical rotation of the alphabet, to test the performance of the different
+ * "look-up table"-based transformations.
+ */
+tracked_unary_functions_t transform_functions() {
+    static unsigned char look_up_table[256];
+    std::iota(std::begin(look_up_table), std::end(look_up_table), 0);
+    std::rotate(std::begin(look_up_table), std::begin(look_up_table) + 1, std::end(look_up_table));
+
+    auto wrap_sz = [](auto function) -> unary_function_t {
+        return unary_function_t([function](std::string_view slice) {
+            char *output = const_cast<char *>(slice.data());
+            function((sz_cptr_t)output, (sz_size_t)slice.size(), (sz_cptr_t)look_up_table, (sz_ptr_t)output);
+            return slice.size();
+        });
+    };
+    tracked_unary_functions_t result = {
+        {"str::transform<lookup>", unary_function_t([](std::string_view slice) {
+             char *output = const_cast<char *>(slice.data());
+             std::transform(slice.begin(), slice.end(), output, [](char c) { return look_up_table[(unsigned char)c]; });
+             return slice.size();
+         })},
+        {"str::transform<increment>", unary_function_t([](std::string_view slice) {
+             char *output = const_cast<char *>(slice.data());
+             std::transform(slice.begin(), slice.end(), output, [](char c) { return c + 1; });
+             return slice.size();
+         })},
+        {"sz_look_up_transform_serial", wrap_sz(sz_look_up_transform_serial)},
+#if SZ_USE_X86_AVX512
+        {"sz_look_up_transform_avx512", wrap_sz(sz_look_up_transform_avx512)},
+#endif
+    };
+    return result;
+}
+
 void bench_memory(std::vector<std::string_view> const &slices, tracked_unary_functions_t &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
@@ -159,14 +196,17 @@ void bench_memory(std::vector<std::string_view> const &slices, sz_cptr_t dataset
                   sz_ptr_t output_buffer_ptr) {
 
     if (slices.size() == 0) return;
+    (void)dataset_start_ptr;
+    (void)output_buffer_ptr;
 
-    bench_memory(slices, copy_functions<true>(dataset_start_ptr, output_buffer_ptr));
-    bench_memory(slices, copy_functions<false>(dataset_start_ptr, output_buffer_ptr));
-    bench_memory(slices, fill_functions(dataset_start_ptr, output_buffer_ptr));
-    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
-    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
-    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
-    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
+    bench_memory(slices, transform_functions());
+    // bench_memory(slices, copy_functions<true>(dataset_start_ptr, output_buffer_ptr));
+    // bench_memory(slices, copy_functions<false>(dataset_start_ptr, output_buffer_ptr));
+    // bench_memory(slices, fill_functions(dataset_start_ptr, output_buffer_ptr));
+    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
+    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
+    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
+    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
 }
 
 int main(int argc, char const **argv) {
@@ -193,12 +233,12 @@ int main(int argc, char const **argv) {
     std::memcpy(output_buffer.get(), dataset.text.data(), dataset.text.size());
 
     // Baseline benchmarks for present tokens, coming in all lengths
+    std::printf("Benchmarking on entire dataset:\n");
+    bench_memory({dataset.text}, dataset_start_ptr, output_buffer.get());
     std::printf("Benchmarking on lines:\n");
     bench_memory(dataset.lines, dataset_start_ptr, output_buffer.get());
     std::printf("Benchmarking on tokens:\n");
     bench_memory(dataset.tokens, dataset_start_ptr, output_buffer.get());
-    std::printf("Benchmarking on entire dataset:\n");
-    bench_memory({dataset.text}, dataset_start_ptr, output_buffer.get());
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {

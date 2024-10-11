@@ -119,6 +119,7 @@ typedef struct sz_implementations_t {
     sz_move_t copy;
     sz_move_t move;
     sz_fill_t fill;
+    sz_look_up_transform_t look_up_transform;
 
     sz_find_byte_t find_byte;
     sz_find_byte_t rfind_byte;
@@ -153,6 +154,7 @@ static void sz_dispatch_table_init(void) {
     impl->copy = sz_copy_serial;
     impl->move = sz_move_serial;
     impl->fill = sz_fill_serial;
+    impl->look_up_transform = sz_look_up_transform_serial;
 
     impl->find = sz_find_serial;
     impl->rfind = sz_rfind_serial;
@@ -205,6 +207,7 @@ static void sz_dispatch_table_init(void) {
         impl->find_from_set = sz_find_charset_avx512;
         impl->rfind_from_set = sz_rfind_charset_avx512;
         impl->alignment_score = sz_alignment_score_avx512;
+        impl->look_up_transform = sz_look_up_transform_avx512;
     }
 #endif
 
@@ -259,6 +262,10 @@ SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 
 SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_dispatch_table.fill(target, length, value);
+}
+
+SZ_DYNAMIC void sz_look_up_transform(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+    sz_dispatch_table.look_up_transform(source, length, lut, target);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
