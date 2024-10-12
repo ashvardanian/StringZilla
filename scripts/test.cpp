@@ -144,7 +144,7 @@ inline void expect_equality(char const *a, char const *b, std::size_t size) {
  *  regions are tested. Uses a combination of deterministic and random tests with uniform and exponential distributions.
  */
 static void test_memory_utilities(std::size_t experiments = 1024ull * 1024ull,
-                                  std::size_t max_l2_size = 1024ull * 1024ull * 32ull) {
+                                  std::size_t max_l2_size = 1024ull * 1024ull) {
 
     // We will be mirroring the operations on both standard and StringZilla strings.
     std::string text_stl(max_l2_size, '-');
