@@ -214,6 +214,12 @@ static void sz_dispatch_table_init(void) {
 
 #if SZ_USE_ARM_NEON
     if (caps & sz_cap_arm_neon_k) {
+        impl->equal = sz_equal_neon;
+
+        impl->copy = sz_copy_neon;
+        impl->move = sz_move_neon;
+        impl->fill = sz_fill_neon;
+
         impl->find = sz_find_neon;
         impl->rfind = sz_rfind_neon;
         impl->find_byte = sz_find_byte_neon;

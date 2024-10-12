@@ -1215,6 +1215,10 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t text, sz_size_t length, sz_size_t wind
 #endif
 
 #if SZ_USE_X86_AVX2
+/** @copydoc sz_equal */
+SZ_PUBLIC sz_bool_t sz_equal_avx2(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order */
+SZ_PUBLIC sz_ordering_t sz_order_avx2(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 /** @copydoc sz_copy */
 SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
@@ -1239,6 +1243,8 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t text, sz_size_t length, sz_size_t window
 #if SZ_USE_ARM_NEON
 /** @copydoc sz_equal */
 SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+/** @copydoc sz_order */
+SZ_PUBLIC sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 /** @copydoc sz_copy */
 SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
@@ -3802,8 +3808,8 @@ typedef union sz_u256_vec_t {
 } sz_u256_vec_t;
 
 SZ_PUBLIC sz_ordering_t sz_order_avx2(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
-    // Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
-    // https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
+    //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
+    //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
     return sz_order_serial(a, a_length, b, b_length);
 }
 
@@ -3961,8 +3967,8 @@ SZ_PUBLIC void sz_look_up_transform_avx2(sz_cptr_t source, sz_size_t length, sz_
     // it only has 128-bit "within-lane" shuffle. Still, it's wiser to use full YMM registers, instead of XMM,
     // so that we can at least compensate high latency with twice larger window and one more level of lookup.
     sz_u256_vec_t lut_0_to_15_vec, lut_16_to_31_vec, lut_32_to_47_vec, lut_48_to_63_vec, //
-        lut_64_to_79_vec, lut_80_to_95_vec, lut_96_to_111_vec, lut_112_to_127_vec, //
-        lut_128_to_143_vec, lut_144_to_159_vec, lut_160_to_175_vec, lut_176_to_191_vec, //
+        lut_64_to_79_vec, lut_80_to_95_vec, lut_96_to_111_vec, lut_112_to_127_vec,       //
+        lut_128_to_143_vec, lut_144_to_159_vec, lut_160_to_175_vec, lut_176_to_191_vec,  //
         lut_192_to_207_vec, lut_208_to_223_vec, lut_224_to_239_vec, lut_240_to_255_vec;
 
     lut_0_to_15_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut)));
@@ -3999,9 +4005,9 @@ SZ_PUBLIC void sz_look_up_transform_avx2(sz_cptr_t source, sz_size_t length, sz_
         // In the first round, we select using the 4th bit.
         not_fourth_bit_vec.ymm = _mm256_cmpeq_epi8( //
             _mm256_and_si256(_mm256_set1_epi8((char)0x10), source_vec.ymm), _mm256_setzero_si256());
-        blended_0_to_31_vec.ymm = _mm256_blendv_epi8(                     //
+        blended_0_to_31_vec.ymm = _mm256_blendv_epi8(                      //
             _mm256_shuffle_epi8(lut_16_to_31_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_0_to_15_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_0_to_15_vec.ymm, source_bot_vec.ymm),  //
             not_fourth_bit_vec.ymm);
         blended_32_to_63_vec.ymm = _mm256_blendv_epi8(                     //
             _mm256_shuffle_epi8(lut_48_to_63_vec.ymm, source_bot_vec.ymm), //
@@ -4011,9 +4017,9 @@ SZ_PUBLIC void sz_look_up_transform_avx2(sz_cptr_t source, sz_size_t length, sz_
             _mm256_shuffle_epi8(lut_80_to_95_vec.ymm, source_bot_vec.ymm), //
             _mm256_shuffle_epi8(lut_64_to_79_vec.ymm, source_bot_vec.ymm), //
             not_fourth_bit_vec.ymm);
-        blended_96_to_127_vec.ymm = _mm256_blendv_epi8(                     //
+        blended_96_to_127_vec.ymm = _mm256_blendv_epi8(                      //
             _mm256_shuffle_epi8(lut_112_to_127_vec.ymm, source_bot_vec.ymm), //
-            _mm256_shuffle_epi8(lut_96_to_111_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_96_to_111_vec.ymm, source_bot_vec.ymm),  //
             not_fourth_bit_vec.ymm);
         blended_128_to_159_vec.ymm = _mm256_blendv_epi8(                     //
             _mm256_shuffle_epi8(lut_144_to_159_vec.ymm, source_bot_vec.ymm), //
@@ -4683,14 +4689,16 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     }
     else if (length <= 128) {
-        __mmask64 mask = _sz_u64_mask_until(length % 64);
+        sz_size_t last_length = length - 64;
+        __mmask64 mask = _sz_u64_mask_until(last_length);
         __m512i source0 = _mm512_loadu_epi8(source);
         __m512i source1 = _mm512_maskz_loadu_epi8(mask, source + 64);
         _mm512_storeu_epi8(target, source0);
         _mm512_mask_storeu_epi8(target + 64, mask, source1);
     }
     else if (length <= 192) {
-        __mmask64 mask = _sz_u64_mask_until(length % 64);
+        sz_size_t last_length = length - 128;
+        __mmask64 mask = _sz_u64_mask_until(last_length);
         __m512i source0 = _mm512_loadu_epi8(source);
         __m512i source1 = _mm512_loadu_epi8(source + 64);
         __m512i source2 = _mm512_maskz_loadu_epi8(mask, source + 128);
@@ -4699,7 +4707,8 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         _mm512_mask_storeu_epi8(target + 128, mask, source2);
     }
     else if (length <= 256) {
-        __mmask64 mask = _sz_u64_mask_until(length % 64);
+        sz_size_t last_length = length - 192;
+        __mmask64 mask = _sz_u64_mask_until(last_length);
         __m512i source0 = _mm512_loadu_epi8(source);
         __m512i source1 = _mm512_loadu_epi8(source + 64);
         __m512i source2 = _mm512_loadu_epi8(source + 128);
@@ -5763,13 +5772,77 @@ SZ_INTERNAL sz_u64_t _sz_vreinterpretq_u8_u4(uint8x16_t vec) {
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
 }
 
-SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) { return sz_false_k; }
+SZ_PUBLIC sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+    //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
+    //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
+    return sz_order_serial(a, a_length, b, b_length);
+}
 
-SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {}
+SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+    sz_u128_vec_t a_vec, b_vec;
 
-SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {}
+    while (length >= 16) {
+        a_vec.u8x16 = vld1q_u8((sz_u8_t const *)a);
+        b_vec.u8x16 = vld1q_u8((sz_u8_t const *)b);
+        uint8x16_t cmp = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
+        if (vmaxvq_u8(cmp) != 255) { return sz_false_k; } // Check if all bytes match
+        a += 16, b += 16, length -= 16;
+    }
 
-SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {}
+    // Handle remaining bytes
+    if (length) return sz_equal_serial(a, b, length);
+    return sz_true_k;
+}
+
+SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_u128_vec_t src_vec;
+
+    while (length >= 16) {
+        src_vec.u8x16 = vld1q_u8((sz_u8_t const *)source);
+        vst1q_u8((sz_u8_t *)target, src_vec.u8x16);
+        target += 16, source += 16, length -= 16;
+    }
+
+    // Handle remaining bytes
+    if (length) sz_copy_serial(target, source, length);
+}
+
+SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    if (target < source || target >= source + length) {
+        // Non-overlapping, proceed forward
+        sz_copy_neon(target, source, length);
+    }
+    else {
+        // Overlapping, proceed backward
+        target += length;
+        source += length;
+
+        while (length >= 16) {
+            target -= 16, source -= 16, length -= 16;
+            sz_u128_vec_t src_vec = vld1q_u8((sz_u8_t const *)source);
+            vst1q_u8((sz_u8_t *)target, src_vec.u8x16);
+        }
+
+        if (length) {
+            target -= length;
+            source -= length;
+            sz_copy_serial(target, source, length);
+        }
+    }
+}
+
+SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+    uint8x16_t fill_vec = vdupq_n_u8(value); // Broadcast the value across the register
+
+    while (length >= 16) {
+        vst1q_u8((sz_u8_t *)target, fill_vec);
+        target += 16;
+        length -= 16;
+    }
+
+    // Handle remaining bytes
+    if (length) sz_fill_serial(target, length, value);
+}
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     sz_u64_t matches;
@@ -6144,6 +6217,8 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_equal_avx512(a, b, length);
 #elif SZ_USE_X86_AVX2
     return sz_equal_avx2(a, b, length);
+#elif SZ_USE_ARM_NEON
+    return sz_equal_neon(a, b, length);
 #else
     return sz_equal_serial(a, b, length);
 #endif
@@ -6154,6 +6229,8 @@ SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, 
     return sz_order_avx512(a, a_length, b, b_length);
 #elif SZ_USE_X86_AVX2
     return sz_order_avx2(a, a_length, b, b_length);
+#elif SZ_USE_ARM_NEON
+    return sz_order_neon(a, a_length, b, b_length);
 #else
     return sz_order_serial(a, a_length, b, b_length);
 #endif
@@ -6164,6 +6241,8 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_copy_avx512(target, source, length);
 #elif SZ_USE_X86_AVX2
     sz_copy_avx2(target, source, length);
+#elif SZ_USE_ARM_NEON
+    sz_copy_neon(target, source, length);
 #else
     sz_copy_serial(target, source, length);
 #endif
@@ -6174,6 +6253,8 @@ SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_move_avx512(target, source, length);
 #elif SZ_USE_X86_AVX2
     sz_move_avx2(target, source, length);
+#elif SZ_USE_ARM_NEON
+    sz_move_neon(target, source, length);
 #else
     sz_move_serial(target, source, length);
 #endif
@@ -6184,6 +6265,8 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_fill_avx512(target, length, value);
 #elif SZ_USE_X86_AVX2
     sz_fill_avx2(target, length, value);
+#elif SZ_USE_ARM_NEON
+    sz_fill_neon(target, length, value);
 #else
     sz_fill_serial(target, length, value);
 #endif
