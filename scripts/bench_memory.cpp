@@ -5,10 +5,16 @@
  *  This file is the sibling of `bench_sort.cpp`, `bench_token.cpp` and `bench_similarity.cpp`.
  *  It accepts a file with a list of words, and benchmarks the memory operations on them.
  */
-#include <cstdlib> // `std::aligned_alloc`
 #include <cstring> // `memmem`
 #include <memory>  // `std::unique_ptr`
+#include <numeric> // `std::iota`
 #include <string>  // `std::string`
+
+#ifdef _WIN32
+#include <malloc.h> // `_aligned_malloc`
+#else
+#include <cstdlib> // `std::aligned_alloc`
+#endif
 
 #define SZ_USE_MISALIGNED_LOADS (1)
 #include <bench.hpp>
@@ -199,17 +205,15 @@ void bench_memory(std::vector<std::string_view> const &slices, sz_cptr_t dataset
                   sz_ptr_t output_buffer_ptr) {
 
     if (slices.size() == 0) return;
-    (void)dataset_start_ptr;
-    (void)output_buffer_ptr;
 
+    bench_memory(slices, copy_functions<true>(dataset_start_ptr, output_buffer_ptr));
+    bench_memory(slices, copy_functions<false>(dataset_start_ptr, output_buffer_ptr));
+    bench_memory(slices, fill_functions(dataset_start_ptr, output_buffer_ptr));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
     bench_memory(slices, transform_functions());
-    // bench_memory(slices, copy_functions<true>(dataset_start_ptr, output_buffer_ptr));
-    // bench_memory(slices, copy_functions<false>(dataset_start_ptr, output_buffer_ptr));
-    // bench_memory(slices, fill_functions(dataset_start_ptr, output_buffer_ptr));
-    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
-    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
-    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
-    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
 }
 
 int main(int argc, char const **argv) {
@@ -228,7 +232,11 @@ int main(int argc, char const **argv) {
     std::unique_ptr<char, aligned_free_t> output_buffer;
     // Add space for at least one cache line to simplify unaligned exports
     std::size_t const output_length = round_up_to_multiple<4096>(dataset.text.size() + max_shift_length);
+#ifdef _WIN32
+    output_buffer.reset(reinterpret_cast<char *>(_aligned_malloc(output_length, 4096)));
+#else
     output_buffer.reset(reinterpret_cast<char *>(std::aligned_alloc(4096, output_length)));
+#endif
     if (!output_buffer) {
         std::fprintf(stderr, "Failed to allocate an output buffer of %zu bytes.\n", output_length);
         return 1;
