@@ -1221,6 +1221,8 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
 SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_fill */
 SZ_PUBLIC void sz_fill_avx2(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_look_up_transform */
+SZ_PUBLIC void sz_look_up_transform_avx2(sz_cptr_t source, sz_size_t length, sz_cptr_t table, sz_ptr_t target);
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
@@ -3944,6 +3946,142 @@ SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     }
 }
 
+SZ_PUBLIC void sz_look_up_transform_avx2(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+
+    // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
+    // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
+    // But if at least 3 cache lines are touched, the AVX-2 implementation should be faster.
+    if (length <= 128) {
+        sz_look_up_transform_serial(source, length, lut, target);
+        return;
+    }
+
+    // We need to pull the lookup table into 8x YMM registers.
+    // The biggest issue is reorganizing the data in the lookup table, as AVX2 doesn't have 256-bit shuffle,
+    // it only has 128-bit "within-lane" shuffle. Still, it's wiser to use full YMM registers, instead of XMM,
+    // so that we can at least compensate high latency with twice larger window and one more level of lookup.
+    sz_u256_vec_t lut_0_to_15_vec, lut_16_to_31_vec, lut_32_to_47_vec, lut_48_to_63_vec, //
+        lut_64_to_79_vec, lut_80_to_95_vec, lut_96_to_111_vec, lut_112_to_127_vec, //
+        lut_128_to_143_vec, lut_144_to_159_vec, lut_160_to_175_vec, lut_176_to_191_vec, //
+        lut_192_to_207_vec, lut_208_to_223_vec, lut_224_to_239_vec, lut_240_to_255_vec;
+
+    lut_0_to_15_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut)));
+    lut_16_to_31_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 16)));
+    lut_32_to_47_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 32)));
+    lut_48_to_63_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 48)));
+    lut_64_to_79_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 64)));
+    lut_80_to_95_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 80)));
+    lut_96_to_111_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 96)));
+    lut_112_to_127_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 112)));
+    lut_128_to_143_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 128)));
+    lut_144_to_159_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 144)));
+    lut_160_to_175_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 160)));
+    lut_176_to_191_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 176)));
+    lut_192_to_207_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 192)));
+    lut_208_to_223_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 208)));
+    lut_224_to_239_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 224)));
+    lut_240_to_255_vec.ymm = _mm256_broadcastsi128_si256(_mm_lddqu_si128((__m128i const *)(lut + 240)));
+
+    // Assuming each lookup is performed within 16 elements of 256, we need to reduce the scope by 16x = 2^4.
+    sz_u256_vec_t not_first_bit_vec, not_second_bit_vec, not_third_bit_vec, not_fourth_bit_vec;
+
+    /// Top and bottom nibbles of the source are used separately.
+    sz_u256_vec_t source_vec, source_bot_vec;
+    sz_u256_vec_t blended_0_to_31_vec, blended_32_to_63_vec, blended_64_to_95_vec, blended_96_to_127_vec,
+        blended_128_to_159_vec, blended_160_to_191_vec, blended_192_to_223_vec, blended_224_to_255_vec;
+
+    // Handling the head.
+    while (length >= 32) {
+        // Load and separate the nibbles of each byte in the source.
+        source_vec.ymm = _mm256_lddqu_si256((__m256i const *)source);
+        source_bot_vec.ymm = _mm256_and_si256(source_vec.ymm, _mm256_set1_epi8((char)0x0F));
+
+        // In the first round, we select using the 4th bit.
+        not_fourth_bit_vec.ymm = _mm256_cmpeq_epi8( //
+            _mm256_and_si256(_mm256_set1_epi8((char)0x10), source_vec.ymm), _mm256_setzero_si256());
+        blended_0_to_31_vec.ymm = _mm256_blendv_epi8(                     //
+            _mm256_shuffle_epi8(lut_16_to_31_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_0_to_15_vec.ymm, source_bot_vec.ymm), //
+            not_fourth_bit_vec.ymm);
+        blended_32_to_63_vec.ymm = _mm256_blendv_epi8(                     //
+            _mm256_shuffle_epi8(lut_48_to_63_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_32_to_47_vec.ymm, source_bot_vec.ymm), //
+            not_fourth_bit_vec.ymm);
+        blended_64_to_95_vec.ymm = _mm256_blendv_epi8(                     //
+            _mm256_shuffle_epi8(lut_80_to_95_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_64_to_79_vec.ymm, source_bot_vec.ymm), //
+            not_fourth_bit_vec.ymm);
+        blended_96_to_127_vec.ymm = _mm256_blendv_epi8(                     //
+            _mm256_shuffle_epi8(lut_112_to_127_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_96_to_111_vec.ymm, source_bot_vec.ymm), //
+            not_fourth_bit_vec.ymm);
+        blended_128_to_159_vec.ymm = _mm256_blendv_epi8(                     //
+            _mm256_shuffle_epi8(lut_144_to_159_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_128_to_143_vec.ymm, source_bot_vec.ymm), //
+            not_fourth_bit_vec.ymm);
+        blended_160_to_191_vec.ymm = _mm256_blendv_epi8(                     //
+            _mm256_shuffle_epi8(lut_176_to_191_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_160_to_175_vec.ymm, source_bot_vec.ymm), //
+            not_fourth_bit_vec.ymm);
+        blended_192_to_223_vec.ymm = _mm256_blendv_epi8(                     //
+            _mm256_shuffle_epi8(lut_208_to_223_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_192_to_207_vec.ymm, source_bot_vec.ymm), //
+            not_fourth_bit_vec.ymm);
+        blended_224_to_255_vec.ymm = _mm256_blendv_epi8(                     //
+            _mm256_shuffle_epi8(lut_240_to_255_vec.ymm, source_bot_vec.ymm), //
+            _mm256_shuffle_epi8(lut_224_to_239_vec.ymm, source_bot_vec.ymm), //
+            not_fourth_bit_vec.ymm);
+
+        // Perform a tree-like reduction of the 8x "blended" YMM registers, depending on the "source" content.
+        // The first round selects using the 3rd bit.
+        not_third_bit_vec.ymm = _mm256_cmpeq_epi8( //
+            _mm256_and_si256(_mm256_set1_epi8((char)0x20), source_vec.ymm), _mm256_setzero_si256());
+        blended_0_to_31_vec.ymm = _mm256_blendv_epi8( //
+            blended_32_to_63_vec.ymm,                 //
+            blended_0_to_31_vec.ymm,                  //
+            not_third_bit_vec.ymm);
+        blended_64_to_95_vec.ymm = _mm256_blendv_epi8( //
+            blended_96_to_127_vec.ymm,                 //
+            blended_64_to_95_vec.ymm,                  //
+            not_third_bit_vec.ymm);
+        blended_128_to_159_vec.ymm = _mm256_blendv_epi8( //
+            blended_160_to_191_vec.ymm,                  //
+            blended_128_to_159_vec.ymm,                  //
+            not_third_bit_vec.ymm);
+        blended_192_to_223_vec.ymm = _mm256_blendv_epi8( //
+            blended_224_to_255_vec.ymm,                  //
+            blended_192_to_223_vec.ymm,                  //
+            not_third_bit_vec.ymm);
+
+        // The second round selects using the 2nd bit.
+        not_second_bit_vec.ymm = _mm256_cmpeq_epi8( //
+            _mm256_and_si256(_mm256_set1_epi8((char)0x40), source_vec.ymm), _mm256_setzero_si256());
+        blended_0_to_31_vec.ymm = _mm256_blendv_epi8( //
+            blended_64_to_95_vec.ymm,                 //
+            blended_0_to_31_vec.ymm,                  //
+            not_second_bit_vec.ymm);
+        blended_128_to_159_vec.ymm = _mm256_blendv_epi8( //
+            blended_192_to_223_vec.ymm,                  //
+            blended_128_to_159_vec.ymm,                  //
+            not_second_bit_vec.ymm);
+
+        // The third round selects using the 1st bit.
+        not_first_bit_vec.ymm = _mm256_cmpeq_epi8( //
+            _mm256_and_si256(_mm256_set1_epi8((char)0x80), source_vec.ymm), _mm256_setzero_si256());
+        blended_0_to_31_vec.ymm = _mm256_blendv_epi8( //
+            blended_128_to_159_vec.ymm,               //
+            blended_0_to_31_vec.ymm,                  //
+            not_first_bit_vec.ymm);
+
+        // And dump the result into the target.
+        _mm256_storeu_si256((__m256i *)target, blended_0_to_31_vec.ymm);
+        source += 32, target += 32, length -= 32;
+    }
+
+    // Handle the tail.
+    if (length) sz_look_up_transform_serial(source, length, lut, target);
+}
+
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx2(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     int mask;
     sz_u256_vec_t h_vec, n_vec;
@@ -5251,7 +5389,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm512_shuffle_epi8` we can use the same mask for both lanes.
     sz_u512_vec_t filter_even_vec, filter_odd_vec;
-    __m256i filter_ymm = _mm256_loadu_si256((__m256i const *)filter);
+    __m256i filter_ymm = _mm256_lddqu_si256((__m256i const *)filter);
     // There are a few way to initialize filters without having native strided loads.
     // In the cronological order of experiments:
     // - serial code initializing 128 bytes of odd and even mask
@@ -6054,6 +6192,8 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 SZ_DYNAMIC void sz_look_up_transform(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
 #if SZ_USE_X86_AVX512
     sz_look_up_transform_avx512(source, length, lut, target);
+#elif SZ_USE_X86_AVX2
+    sz_look_up_transform_avx2(source, length, lut, target);
 #else
     sz_look_up_transform_serial(source, length, lut, target);
 #endif

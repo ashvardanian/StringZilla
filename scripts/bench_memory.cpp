@@ -171,6 +171,9 @@ tracked_unary_functions_t transform_functions() {
 #if SZ_USE_X86_AVX512
         {"sz_look_up_transform_avx512", wrap_sz(sz_look_up_transform_avx512)},
 #endif
+#if SZ_USE_X86_AVX2
+        {"sz_look_up_transform_avx2", wrap_sz(sz_look_up_transform_avx2)},
+#endif
     };
     return result;
 }

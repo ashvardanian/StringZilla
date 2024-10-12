@@ -175,6 +175,7 @@ static void sz_dispatch_table_init(void) {
         impl->copy = sz_copy_avx2;
         impl->move = sz_move_avx2;
         impl->fill = sz_fill_avx2;
+        impl->look_up_transform = sz_look_up_transform_avx2;
 
         impl->find_byte = sz_find_byte_avx2;
         impl->rfind_byte = sz_rfind_byte_avx2;
