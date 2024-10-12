@@ -76,7 +76,7 @@ tracked_unary_functions_t copy_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
         {"sz_copy_avx2" + suffix, wrap_sz(sz_copy_avx2)},
 #endif
 #if SZ_USE_ARM_SVE
-        {"sz_copy_sve" + suffix, wrap_sz(sz_copy_sve), true},
+        {"sz_copy_sve" + suffix, wrap_sz(sz_copy_sve)},
 #endif
 #if SZ_USE_ARM_NEON
         {"sz_copy_neon" + suffix, wrap_sz(sz_copy_neon)},
@@ -116,7 +116,7 @@ tracked_unary_functions_t fill_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
         {"sz_fill_avx2", wrap_sz(sz_fill_avx2)},
 #endif
 #if SZ_USE_ARM_SVE
-        {"sz_fill_sve", wrap_sz(sz_fill_sve), true},
+        {"sz_fill_sve", wrap_sz(sz_fill_sve)},
 #endif
 #if SZ_USE_ARM_NEON
         {"sz_fill_neon", wrap_sz(sz_fill_neon)},
@@ -198,6 +198,9 @@ tracked_unary_functions_t transform_functions() {
 #if SZ_USE_X86_AVX2
         {"sz_look_up_transform_avx2", wrap_sz(sz_look_up_transform_avx2)},
 #endif
+#if SZ_USE_ARM_NEON
+        {"sz_look_up_transform_neon", wrap_sz(sz_look_up_transform_neon)},
+#endif
     };
     return result;
 }
@@ -223,15 +226,17 @@ void bench_memory(std::vector<std::string_view> const &slices, sz_cptr_t dataset
                   sz_ptr_t output_buffer_ptr) {
 
     if (slices.size() == 0) return;
+    (void)dataset_start_ptr;
+    (void)output_buffer_ptr;
 
     bench_memory(slices, copy_functions<true>(dataset_start_ptr, output_buffer_ptr));
     bench_memory(slices, copy_functions<false>(dataset_start_ptr, output_buffer_ptr));
     bench_memory(slices, fill_functions(dataset_start_ptr, output_buffer_ptr));
-    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
-    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
-    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
-    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
-    bench_memory(slices, transform_functions());
+    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
+    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
+    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
+    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
+    // bench_memory(slices, transform_functions());
 }
 
 int main(int argc, char const **argv) {

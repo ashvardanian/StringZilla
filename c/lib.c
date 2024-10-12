@@ -219,6 +219,7 @@ static void sz_dispatch_table_init(void) {
         impl->copy = sz_copy_neon;
         impl->move = sz_move_neon;
         impl->fill = sz_fill_neon;
+        impl->look_up_transform = sz_look_up_transform_neon;
 
         impl->find = sz_find_neon;
         impl->rfind = sz_rfind_neon;
