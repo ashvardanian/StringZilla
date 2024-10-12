@@ -5817,9 +5817,10 @@ SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
         target += length;
         source += length;
 
+        sz_u128_vec_t src_vec;
         while (length >= 16) {
             target -= 16, source -= 16, length -= 16;
-            sz_u128_vec_t src_vec = vld1q_u8((sz_u8_t const *)source);
+            src_vec.u8x16 = vld1q_u8((sz_u8_t const *)source);
             vst1q_u8((sz_u8_t *)target, src_vec.u8x16);
         }
 
