@@ -1501,8 +1501,8 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
-    test_replacements();
     test_memory_utilities();
+    test_replacements();
 
 // Compatibility with STL
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
