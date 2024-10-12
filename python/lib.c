@@ -1927,6 +1927,53 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
     else { Py_RETURN_FALSE; }
 }
 
+static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
+        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
+        return NULL;
+    }
+
+    PyObject *str_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *look_up_table_obj = PyTuple_GET_ITEM(args, !is_member);
+    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+
+    // Optional start and end arguments
+    Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
+
+    if (start_obj && ((start = PyLong_AsSsize_t(start_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "start must be an integer");
+        return NULL;
+    }
+
+    if (end_obj && ((end = PyLong_AsSsize_t(end_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "end must be an integer");
+        return NULL;
+    }
+
+    sz_string_view_t str, look_up_table;
+    if (!export_string_like(str_obj, &str.start, &str.length) ||
+        !export_string_like(look_up_table_obj, &look_up_table.start, &look_up_table.length)) {
+        PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
+        return NULL;
+    }
+
+    // Apply start and end arguments
+    str.start += start;
+    str.length -= start;
+    if (end != PY_SSIZE_T_MAX && end - start < str.length) { str.length = end - start; }
+
+    if (look_up_table.length != 256) {
+        PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
+        return NULL;
+    }
+
+    sz_look_up_transform(str.start, str.length, look_up_table.start, str.start);
+    return Py_None;
+}
+
 static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
@@ -2438,6 +2485,7 @@ static PyMethodDef Str_methods[] = {
     {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
     {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
+    {"translate", Str_translate, SZ_METHOD_FLAGS, "Look-Up Table in-place transformation of a byte-string."},
     {"decode", Str_decode, SZ_METHOD_FLAGS, "Decode the bytes into `str` with a given encoding"},
 
     // Bidirectional operations
@@ -3139,6 +3187,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
     {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
     {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
+    {"translate", Str_translate, SZ_METHOD_FLAGS, "Look-Up Table in-place transformation of a byte-string."},
     {"decode", Str_decode, SZ_METHOD_FLAGS, "Decode the bytes into `str` with a given encoding"},
 
     // Bidirectional operations

@@ -36,13 +36,15 @@ inline std::mt19937 &global_random_generator() {
  *          The alphabet size is the number of distinct characters in the distribution.
  *
  *  We can't use `std::uniform_int_distribution<char>` because `char` overload is not supported by some platforms.
- *  MSVC, for example, requires one of short, int, long, long long, unsigned short, unsigned int, unsigned long,
- *  or unsigned long long
+ *  MSVC, for example, requires one of `short`, `int`, `long`, `long long`, `unsigned short`, `unsigned int`,
+ *  `unsigned long`, or `unsigned long long`.
  */
 struct uniform_uint8_distribution_t {
     std::uniform_int_distribution<std::uint32_t> distribution;
     inline uniform_uint8_distribution_t(std::size_t alphabet_size = 255)
         : distribution(1, static_cast<std::uint32_t>(alphabet_size)) {}
+    inline uniform_uint8_distribution_t(char from, char to)
+        : distribution(static_cast<std::uint32_t>(from), static_cast<std::uint32_t>(to)) {}
     template <typename generator_type>
     std::uint8_t operator()(generator_type &&generator) {
         return static_cast<std::uint8_t>(distribution(generator));
