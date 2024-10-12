@@ -1447,16 +1447,16 @@ void test_replacements(std::size_t lookup_tables_to_try = 128, std::size_t slice
     for (std::size_t lookup_table_variation = 0; lookup_table_variation != lookup_tables_to_try;
          ++lookup_table_variation) {
         sz::look_up_table lut;
-        for (std::size_t i = 0; i < 256; i++) lut[i] = (char)(std::rand() % 256);
+        for (std::size_t i = 0; i < 256; i++) lut[(char)i] = (char)(std::rand() % 256);
 
         for (std::size_t slice_idx = 0; slice_idx != slices_per_table; ++slice_idx) {
-            std::size_t slice_offset = std::rand() % body.length();
+            std::size_t slice_offset = std::rand() % (body.length());
             std::size_t slice_length = std::rand() % (body.length() - slice_offset);
 
             sz::transform<char>(sz::string_view(body.data() + slice_offset, slice_length), lut,
                                 const_cast<char *>(transformed.data()) + slice_offset);
             for (std::size_t i = 0; i != slice_length; ++i) {
-                assert(transformed[slice_offset + i] == lut[(unsigned char)body[slice_offset + i]]);
+                assert(transformed[slice_offset + i] == lut[body[slice_offset + i]]);
             }
         }
     }

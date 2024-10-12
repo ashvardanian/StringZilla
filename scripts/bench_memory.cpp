@@ -23,6 +23,24 @@ using namespace ashvardanian::stringzilla::scripts;
 constexpr std::size_t max_shift_length = 299;
 
 /**
+ *  @brief  Wraps platform-specific @b aligned memory allocation and deallocation functions.
+ *          Compatible with `std::unique_ptr` as the second template argument, to free the memory.
+ */
+struct page_alloc_and_free_t {
+#ifdef _WIN32
+    inline char *operator()(std::size_t alignment, std::size_t size) const noexcept {
+        return reinterpret_cast<char *>(_aligned_malloc(size, alignment));
+    }
+    inline void operator()(char *ptr) const noexcept { _aligned_free(ptr); }
+#else
+    inline char *operator()(std::size_t alignment, std::size_t size) const noexcept {
+        return reinterpret_cast<char *>(std::aligned_alloc(alignment, size));
+    }
+    inline void operator()(char *ptr) const noexcept { std::free(ptr); }
+#endif
+};
+
+/**
  *  @brief  Benchmarks `memcpy`-like operations in 2 modes: aligned @b output buffer and unaligned.
  *
  *  In the aligned case we copy a random part of the input string into the start of a matching cache line in the output.
@@ -226,17 +244,10 @@ int main(int argc, char const **argv) {
     if (!SZ_DEBUG) seconds_per_benchmark *= 5;
 
     // Create an aligned buffer for the output
-    struct aligned_free_t {
-        inline void operator()(char *ptr) const noexcept { std::free(ptr); }
-    };
-    std::unique_ptr<char, aligned_free_t> output_buffer;
+    std::unique_ptr<char, page_alloc_and_free_t> output_buffer;
     // Add space for at least one cache line to simplify unaligned exports
     std::size_t const output_length = round_up_to_multiple<4096>(dataset.text.size() + max_shift_length);
-#ifdef _WIN32
-    output_buffer.reset(reinterpret_cast<char *>(_aligned_malloc(output_length, 4096)));
-#else
-    output_buffer.reset(reinterpret_cast<char *>(std::aligned_alloc(4096, output_length)));
-#endif
+    output_buffer.reset(page_alloc_and_free_t {}(4096, output_length));
     if (!output_buffer) {
         std::fprintf(stderr, "Failed to allocate an output buffer of %zu bytes.\n", output_length);
         return 1;

@@ -6081,7 +6081,7 @@ SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 
     if (length <= vec_len) {
         // Small buffer case: use mask to handle small writes
-        svbool_t mask = svwhilelt_b8(0ul, length);
+        svbool_t mask = svwhilelt_b8(0ull, length);
         svst1_u8(mask, (unsigned char *)target, value_vec);
     }
     else {
@@ -6091,7 +6091,7 @@ SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
         sz_size_t body_length = length - head_length - tail_length;
 
         // Handle unaligned head
-        svbool_t head_mask = svwhilelt_b8(0ul, head_length);
+        svbool_t head_mask = svwhilelt_b8(0ull, head_length);
         svst1_u8(head_mask, (unsigned char *)target, value_vec);
         target += head_length;
 
@@ -6101,7 +6101,7 @@ SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
         }
 
         // Handle unaligned tail
-        svbool_t tail_mask = svwhilelt_b8(0ul, tail_length);
+        svbool_t tail_mask = svwhilelt_b8(0ull, tail_length);
         svst1_u8(tail_mask, (unsigned char *)target, value_vec);
     }
 }
@@ -6118,7 +6118,7 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
     // When the buffer is small, there isn't much to innovate.
     if (length <= vec_len) {
         // Small buffer case: use mask to handle small writes
-        svbool_t mask = svwhilelt_b8(0ul, length);
+        svbool_t mask = svwhilelt_b8(0ull, length);
         svuint8_t data = svld1_u8(mask, (unsigned char *)source);
         svst1_u8(mask, (unsigned char *)target, data);
     }
@@ -6143,10 +6143,10 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
         sz_size_t body_length = length - head_length - tail_length;
 
         // Handle unaligned parts
-        svbool_t head_mask = svwhilelt_b8(0ul, head_length);
+        svbool_t head_mask = svwhilelt_b8(0ull, head_length);
         svuint8_t head_data = svld1_u8(head_mask, (unsigned char *)source);
         svst1_u8(head_mask, (unsigned char *)target, head_data);
-        svbool_t tail_mask = svwhilelt_b8(0ul, tail_length);
+        svbool_t tail_mask = svwhilelt_b8(0ull, tail_length);
         svuint8_t tail_data = svld1_u8(tail_mask, (unsigned char *)source + head_length + body_length);
         svst1_u8(tail_mask, (unsigned char *)target + head_length + body_length, tail_data);
         target += head_length;
@@ -6162,7 +6162,7 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
         // Up to (vec_len * 2 - 1) bytes of data may be left in the body,
         // so we can unroll the last two optional loop iterations.
         if (body_length > vec_len) {
-            svbool_t mask = svwhilelt_b8(0ul, body_length);
+            svbool_t mask = svwhilelt_b8(0ull, body_length);
             svuint8_t data = svld1_u8(mask, (unsigned char *)source);
             svst1_u8(mask, (unsigned char *)target, data);
             body_length -= vec_len;
@@ -6170,7 +6170,7 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
             target += body_length;
         }
         if (body_length) {
-            svbool_t mask = svwhilelt_b8(0ul, body_length);
+            svbool_t mask = svwhilelt_b8(0ull, body_length);
             svuint8_t data = svld1_u8(mask, (unsigned char *)source);
             svst1_u8(mask, (unsigned char *)target, data);
         }
