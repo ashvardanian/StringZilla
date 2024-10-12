@@ -324,6 +324,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
       - name: Test Python
         run: pytest scripts/test.py -s -x
 
