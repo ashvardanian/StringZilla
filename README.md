@@ -665,10 +665,10 @@ sz::string haystack = "some string";
 sz::string_view needle = sz::string_view(haystack).substr(0, 4);
 
 auto substring_position = haystack.find(needle); // Or `rfind`
-auto hash = std::hash<sz::string_view>(haystack); // Compatible with STL's `std::hash`
+auto hash = std::hash<sz::string_view>{}(haystack); // Compatible with STL's `std::hash`
 
 haystack.end() - haystack.begin() == haystack.size(); // Or `rbegin`, `rend`
-haystack.find_first_of(" \w\t") == 4; // Or `find_last_of`, `find_first_not_of`, `find_last_not_of`
+haystack.find_first_of(" \v\t") == 4; // Or `find_last_of`, `find_first_not_of`, `find_last_not_of`
 haystack.starts_with(needle) == true; // Or `ends_with`
 haystack.remove_prefix(needle.size()); // Why is this operation in-place?!
 haystack.contains(needle) == true; // STL has this only from C++ 23 onwards
@@ -766,6 +766,25 @@ To safely print those, pass the `string_length` to `printf` as well.
 printf("%.*s\n", (int)string_length, string_start);
 ```
 
+### What's Wrong with the C Standard Library?
+
+StringZilla is not a drop-in replacement for the C Standard Library.
+It's designed to be a safer and more modern alternative.
+Conceptually:
+
+1. LibC strings are expected to be null-terminated, so to use the efficient LibC implementations on slices of larger strings, you'd have to copy them, which is more expensive than the original string operation.
+2. LibC functionality is asymmetric - you can find the first and the last occurrence of a character within a string, but you can't find the last occurrence of a substring.
+3. LibC function names are typically very short and cryptic.
+4. LibC lacks crucial functionality like hashing and doesn't provide primitives for less critical but relevant operations like fuzzy matching.
+
+Something has to be said about its support for UTF8.
+Aside from a single-byte `char` type, LibC provides `wchar_t`:
+
+- The size of `wchar_t` is not consistent across platforms. On Windows, it's typically 16 bits (suitable for UTF-16), while on Unix-like systems, it's usually 32 bits (suitable for UTF-32). This inconsistency can lead to portability issues when writing cross-platform code.
+- `wchar_t` is designed to represent wide characters in a fixed-width format (UTF-16 or UTF-32). In contrast, UTF-8 is a variable-length encoding, where each character can take from 1 to 4 bytes. This fundamental difference means that `wchar_t` and UTF-8 are incompatible.
+
+StringZilla [partially addresses those issues](#unicode-utf-8-and-wide-characters).
+
 ### What's Wrong with the C++ Standard Library?
 
 | C++ Code                             | Evaluation Result | Invoked Signature              |
@@ -849,9 +868,9 @@ StringZilla provides a convenient `partition` function, which returns a tuple of
 ```cpp
 auto parts = haystack.partition(':'); // Matching a character
 auto [before, match, after] = haystack.partition(':'); // Structure unpacking
-auto [before, match, after] = haystack.partition(char_set(":;")); // Character-set argument
+auto [before, match, after] = haystack.partition(sz::char_set(":;")); // Character-set argument
 auto [before, match, after] = haystack.partition(" : "); // String argument
-auto [before, match, after] = haystack.rpartition(sz::whitespaces); // Split around the last whitespace
+auto [before, match, after] = haystack.rpartition(sz::whitespaces_set()); // Split around the last whitespace
 ```
 
 Combining those with the `split` function, one can easily parse a CSV file or HTTP headers.
@@ -877,8 +896,8 @@ Here is a sneak peek of the most useful ones.
 ```cpp
 text.hash(); // -> 64 bit unsigned integer 
 text.ssize(); // -> 64 bit signed length to avoid `static_cast<std::ssize_t>(text.size())`
-text.contains_only(" \w\t"); // == text.find_first_not_of(char_set(" \w\t")) == npos;
-text.contains(sz::whitespaces); // == text.find(char_set(sz::whitespaces)) != npos;
+text.contains_only(" \w\t"); // == text.find_first_not_of(sz::char_set(" \w\t")) == npos;
+text.contains(sz::whitespaces_set()); // == text.find(sz::char_set(sz::whitespaces_set())) != npos;
 
 // Simpler slicing than `substr`
 text.front(10); // -> sz::string_view
@@ -890,9 +909,9 @@ text.front(10, cap) == text.front(std::min(10, text.size()));
 text.back(10, cap) == text.back(std::min(10, text.size()));
 
 // Character set filtering
-text.lstrip(sz::whitespaces).rstrip(sz::newlines); // like Python
-text.front(sz::whitespaces); // all leading whitespaces
-text.back(sz::digits); // all numerical symbols forming the suffix
+text.lstrip(sz::whitespaces_set()).rstrip(sz::newlines_set()); // like Python
+text.front(sz::whitespaces_set()); // all leading whitespaces
+text.back(sz::digits_set()); // all numerical symbols forming the suffix
 
 // Incremental construction
 using sz::string::unchecked;
@@ -923,7 +942,7 @@ To avoid those, StringZilla provides lazily-evaluated ranges, compatible with th
 
 ```cpp
 for (auto line : haystack.split("\r\n"))
-    for (auto word : line.split(char_set(" \w\t.,;:!?")))
+    for (auto word : line.split(sz::char_set(" \w\t.,;:!?")))
         std::cout << word << std::endl;
 ```
 
@@ -932,9 +951,9 @@ It also allows interleaving matches, if you want both inclusions of `xx` in `xxx
 Debugging pointer offsets is not a pleasant exercise, so keep the following functions in mind.
 
 - `haystack.[r]find_all(needle, interleaving)`
-- `haystack.[r]find_all(char_set(""))`
+- `haystack.[r]find_all(sz::char_set(""))`
 - `haystack.[r]split(needle)`
-- `haystack.[r]split(char_set(""))`
+- `haystack.[r]split(sz::char_set(""))`
 
 For $N$ matches the split functions will report $N+1$ matches, potentially including empty strings.
 Ranges have a few convenience methods as well:
@@ -1348,6 +1367,23 @@ With that solved, the SIMD implementation will become 5x faster than the serial 
 [faq-dipeptide]: https://en.wikipedia.org/wiki/Dipeptide
 [faq-titin]: https://en.wikipedia.org/wiki/Titin
 
+### Memory Copying, Fills, and Moves
+
+A lot has been written about the time computers spend copying memory and how that operation is implemented in LibC.
+Interestingly, the operation can still be improved, as most Assembly implementations use outdated instructions.
+Even performance-oriented STL replacements, like Meta's [Folly v2024.09.23 focus on AVX2](https://github.com/facebook/folly/blob/main/folly/memset.S), and don't take advantage of the new masked instructions in AVX-512 or SVE.
+
+In AVX-512, StringZilla uses non-temporal stores to avoid cache pollution, when dealing with very large strings.
+Moreover, it handles the unaligned head and the tails of the `target` buffer separately, ensuring that writes in big copies are always aligned to cache-line boundaries.
+That's true for both AVX2 and AVX-512 backends.
+
+StringZilla also contains "drafts" of smarter, but less efficient algorithms, that minimize the number of unaligned loads, perfoming shuffles and permutations.
+That's a topic for future research, as the performance gains are not yet satisfactory.
+
+> § Reading materials.
+> [`memset` benchmarks](https://github.com/nadavrot/memset_benchmark?tab=readme-ov-file) by Nadav Rotem.
+> [Cache Associativity](https://en.algorithmica.org/hpc/cpu-cache/associativity/) by Sergey Slotin.
+
 ### Random Generation
 
 Generating random strings from different alphabets is a very common operation.
@@ -1368,11 +1404,8 @@ For lexicographic sorting of strings, StringZilla uses a "hybrid-hybrid" approac
    1. IntroSort begins with a QuickSort.
    2. If the recursion depth exceeds a certain threshold, it switches to a HeapSort.
 
-Next design goals:
-
-- [ ] Generalize to arrays with over 4 billion entries.
-- [ ] Algorithmic improvements may yield another 3x performance gain.
-- [ ] SIMD-acceleration for the Radix slice.
+A better algorithm is in development.
+Check #173 for design goals and progress updates.
 
 ### Hashing
 
