@@ -5823,11 +5823,9 @@ SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
             src_vec.u8x16 = vld1q_u8((sz_u8_t const *)source);
             vst1q_u8((sz_u8_t *)target, src_vec.u8x16);
         }
-
-        if (length) {
-            target -= length;
-            source -= length;
-            sz_copy_serial(target, source, length);
+        while (length) {
+            target -= 1, source -= 1, length -= 1;
+            *target = *source;
         }
     }
 }
