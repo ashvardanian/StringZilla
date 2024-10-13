@@ -186,6 +186,28 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>25.8</b> MB/s
     </td>
   </tr>
+  <!-- Mapping Characters with Look-Up Table Transforms -->
+  <tr>
+    <td colspan="4" align="center">Mapping Characters with Look-Up Table Transforms</td>
+  </tr>
+  <tr>
+    <td align="center">⚪</td>
+    <td align="center">
+      <code>transform</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>3.81</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2.65</b> GB/s
+    </td>
+    <td align="center">
+      <code>str.translate</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>260.0</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>140.0</b> MB/s
+    </td>
+    <td align="center">
+      <code>sz_look_up_transform</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>21.2</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>8.5</b> GB/s
+    </td>
+  </tr>
   <!-- Sorting -->
   <tr>
     <td colspan="4" align="center">Get sorted order, ≅ 8 million English words <sup>6</sup></td>
