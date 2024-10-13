@@ -1930,7 +1930,7 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
 static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
+    if (nargs < !is_member + 1 || nargs > !is_member + 4) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
@@ -1939,6 +1939,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
     PyObject *look_up_table_obj = PyTuple_GET_ITEM(args, !is_member);
     PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
     PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+    PyObject *inplace_obj = nargs > !is_member + 3 ? PyTuple_GET_ITEM(args, !is_member + 3) : NULL;
 
     // Optional start and end arguments
     Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
@@ -1953,25 +1954,92 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
-    sz_string_view_t str, look_up_table;
-    if (!export_string_like(str_obj, &str.start, &str.length) ||
-        !export_string_like(look_up_table_obj, &look_up_table.start, &look_up_table.length)) {
-        PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
+    sz_string_view_t str;
+    if (!export_string_like(str_obj, &str.start, &str.length)) {
+        PyErr_SetString(PyExc_TypeError, "First argument must be string-like");
+        return NULL;
+    }
+
+    sz_string_view_t look_up_table_str;
+    SZ_ALIGN64 char look_up_table[256];
+    if (export_string_like(look_up_table_obj, &look_up_table_str.start, &look_up_table_str.length)) {
+        // Export
+        if (look_up_table_str.length != 256) {
+            PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
+            return NULL;
+        }
+        memcpy(&look_up_table[0], look_up_table_str.start, look_up_table_str.length);
+    }
+    else if (PyDict_Check(look_up_table_obj)) {
+
+        // If any character is not defined, it will be replaced with itself:
+        for (int i = 0; i < 256; i++) { look_up_table[i] = (char)i; }
+
+        // Process the dictionary into the look-up table
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(look_up_table_obj, &pos, &key, &value)) {
+            if (!PyUnicode_Check(key) || PyUnicode_GetLength(key) != 1 || !PyUnicode_Check(value) ||
+                PyUnicode_GetLength(value) != 1) {
+                PyErr_SetString(PyExc_TypeError, "Keys and values must be single characters");
+                return NULL;
+            }
+
+            char key_char = PyUnicode_AsUTF8(key)[0];
+            char value_char = PyUnicode_AsUTF8(value)[0];
+            look_up_table[(unsigned char)key_char] = value_char;
+        }
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Second argument must be string-like or a dictionary");
+        return NULL;
+    }
+
+    int is_inplace = inplace_obj ? PyObject_IsTrue(inplace_obj) : 0;
+    if (is_inplace == -1) {
+        PyErr_SetString(PyExc_TypeError, "The inplace argument must be a boolean");
         return NULL;
     }
 
     // Apply start and end arguments
     str.start += start;
     str.length -= start;
-    if (end != PY_SSIZE_T_MAX && end - start < str.length) { str.length = end - start; }
+    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < str.length) { str.length = (sz_size_t)(end - start); }
 
-    if (look_up_table.length != 256) {
-        PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
-        return NULL;
+    // Perform the translation using the look-up table
+    if (is_inplace) {
+        sz_look_up_transform(str.start, str.length, look_up_table, str.start);
+        Py_RETURN_NONE;
     }
+    // Allocate a string of the same size, get it's raw pointer and transform the data into it
+    else {
 
-    sz_look_up_transform(str.start, str.length, look_up_table.start, str.start);
-    return Py_None;
+        // For binary inputs return bytes, for unicode return str
+        if (PyUnicode_Check(str_obj)) {
+            // Create a new Unicode object
+            PyObject *new_unicode_obj = PyUnicode_New(str.length, PyUnicode_MAX_CHAR_VALUE(str_obj));
+            if (!new_unicode_obj) {
+                PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for new Unicode string");
+                return NULL;
+            }
+
+            sz_ptr_t new_buffer = (sz_ptr_t)PyUnicode_DATA(new_unicode_obj);
+            sz_look_up_transform(str.start, str.length, look_up_table, new_buffer);
+            return new_unicode_obj;
+        }
+        else {
+            PyObject *new_bytes_obj = PyBytes_FromStringAndSize(NULL, str.length);
+            if (!new_bytes_obj) {
+                PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for new string");
+                return NULL;
+            }
+
+            // Get the buffer and perform the transformation
+            sz_ptr_t new_buffer = (sz_ptr_t)PyBytes_AS_STRING(new_bytes_obj);
+            sz_look_up_transform(str.start, str.length, look_up_table, new_buffer);
+            return new_bytes_obj;
+        }
+    }
 }
 
 static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwargs) {

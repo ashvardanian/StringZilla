@@ -149,6 +149,17 @@
 #endif // SZ_DYNAMIC_DISPATCH
 #endif // SZ_DYNAMIC
 
+/**
+ *  @brief  Alignment macro for 64-byte alignment.
+ */
+#if defined(_MSC_VER)
+#define SZ_ALIGN64 __declspec(align(64))
+#elif defined(__GNUC__) || defined(__clang__)
+#define SZ_ALIGN64 __attribute__((aligned(64)))
+#else
+#define SZ_ALIGN64
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -172,6 +183,9 @@ typedef ptrdiff_t sz_ssize_t; // Signed version of `sz_size_t`, 32 or 64 bits
 
 #else // if SZ_AVOID_LIBC:
 
+// ! The C standard doesn't specify the signedness of char.
+// ! On x86 char is signed by default while on Arm it is unsigned by default.
+// ! That's why we don't define `sz_char_t` and generally use explicit `sz_i8_t` and `sz_u8_t`.
 typedef signed char sz_i8_t;         // Always 8 bits
 typedef unsigned char sz_u8_t;       // Always 8 bits
 typedef unsigned short sz_u16_t;     // Always 16 bits
