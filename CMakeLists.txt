@@ -298,12 +298,16 @@ if(${STRINGZILLA_BUILD_TEST})
     # x86 specific backends
     if (MSVC)
       define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "AVX")
-      define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "AVX2")
-      define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "AVX512")
+      if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+        define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "AVX2")
+        define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "AVX512")
+      endif()
     else()
       define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "ivybridge")
-      define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
-      define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
+      if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+        define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
+        define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
+      endif()
     endif()
   elseif(SZ_PLATFORM_ARM)
     # ARM specific backends
@@ -340,8 +344,8 @@ if(${STRINGZILLA_BUILD_SHARED})
       endif()
 
       target_compile_definitions(${target} PRIVATE
-        "SZ_USE_X86_AVX512=1"
-        "SZ_USE_X86_AVX2=1"
+        "SZ_USE_X86_AVX512=$<IF:$<STREQUAL:CMAKE_SIZEOF_VOID_P,8>,1,0>"
+        "SZ_USE_X86_AVX2=$<IF:$<STREQUAL:CMAKE_SIZEOF_VOID_P,8>,1,0>"
         "SZ_USE_ARM_NEON=0"
         "SZ_USE_ARM_SVE=0")
     elseif(SZ_PLATFORM_ARM)
@@ -368,7 +372,7 @@ if(${STRINGZILLA_BUILD_SHARED})
   target_compile_definitions(stringzillite PRIVATE "SZ_AVOID_LIBC=1")
   target_compile_definitions(stringzillite PRIVATE "SZ_OVERRIDE_LIBC=1")
 
-  # Avoid built-ins on MSVC and other compilers, as that will cause compileration errors
+  # Avoid built-ins on MSVC and other compilers, as that will cause compilation errors
   target_compile_options(stringzillite PRIVATE
     "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>"
     "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
