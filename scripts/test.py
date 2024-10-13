@@ -422,6 +422,11 @@ def test_unit_globals():
     assert sz.edit_distance("abababab", "aaaaaaaa", 2) == 2
     assert sz.edit_distance("abababab", "aaaaaaaa", bound=2) == 2
 
+    assert sz.translate("ABC", {"A": "X", "B": "Y", "C": "Z"}) == "XYZ"
+    assert sz.translate("ABC", {"A": "X", "B": "Y"}) == "XYC"
+    assert sz.translate("ABC", {"A": "X", "B": "Y"}, 1, -1) == "YC"
+    assert sz.translate("ABC", bytes(range(256))) == "ABC"
+
 
 def test_string_lengths():
     assert 4 == len(sz.Str("abcd"))

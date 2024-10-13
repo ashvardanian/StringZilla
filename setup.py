@@ -109,7 +109,7 @@ def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     macros_args = [
         ("SZ_USE_X86_AVX512", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ARM_SVE", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_ARM_SVE", "0"),
         ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]

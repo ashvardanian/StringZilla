@@ -662,6 +662,17 @@ static PyObject *Str_repr(Str *self) {
 
 static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->memory.start, self->memory.length); }
 
+static char const doc_like_hash[] = //
+    "Compute the hash value of the string.\n\n"
+    "This function can be called as a method on a Str object or as a standalone function.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object (if called as a method).\n"
+    "  text (str): The string to hash (if called as a function).\n\n"
+    "Returns:\n"
+    "  int: The hash value of the string.\n\n"
+    "Raises:\n"
+    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
+
 static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -1193,6 +1204,17 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
     }
 }
 
+static char const doc_decode[] = //
+    "Decode the bytes into a Unicode string with a given encoding.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  encoding (str, optional): The encoding to use (default is 'utf-8').\n"
+    "  errors (str, optional): Error handling scheme (default is 'strict').\n\n"
+    "Returns:\n"
+    "  str: The decoded Unicode string.\n\n"
+    "Raises:\n"
+    "  UnicodeDecodeError: If decoding fails.";
+
 static PyObject *Str_decode(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -1235,9 +1257,14 @@ static PyObject *Str_decode(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyUnicode_Decode(text.start, text.length, encoding.start, errors.start);
 }
 
-/**
- *  @brief  Saves a StringZilla string to disk.
- */
+static char const doc_write_to[] = //
+    "Write the string to a file.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  filename (str): The file path to write to.\n\n"
+    "Returns:\n"
+    "  None.";
+
 static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) {
 
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -1308,11 +1335,14 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
     Py_RETURN_NONE;
 }
 
-/**
- *  @brief  Given a native StringZilla string, suggests it's offset within another native StringZilla string.
- *          Very practical when dealing with large files.
- *  @return Unsigned integer on success.
- */
+static char const doc_offset_within[] = //
+    "Return the raw byte offset of this StringZilla string within a larger StringZilla string.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The substring.\n"
+    "  larger (Str): The larger string to search within.\n\n"
+    "Returns:\n"
+    "  int: The byte offset where 'self' is found within 'larger', or -1 if not found.";
+
 static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwargs) {
 
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -1438,6 +1468,16 @@ static int _Str_find_implementation_( //
     return 1;
 }
 
+static char const doc_contains[] = //
+    "Check if a string contains a substring.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  substring (str): The substring to search for.\n"
+    "  start (int, optional): The starting index (default is 0).\n"
+    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  bool: True if the substring is found, False otherwise.";
+
 static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
@@ -1448,6 +1488,16 @@ static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) 
     else { Py_RETURN_TRUE; }
 }
 
+static char const doc_find[] = //
+    "Find the first occurrence of a substring.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  substring (str): The substring to find.\n"
+    "  start (int, optional): The starting index (default is 0).\n"
+    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  int: The index of the first occurrence, or -1 if not found.";
+
 static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
@@ -1456,6 +1506,18 @@ static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
+
+static char const doc_index[] = //
+    "Find the first occurrence of a substring or raise an error if not found.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  substring (str): The substring to find.\n"
+    "  start (int, optional): The starting index (default is 0).\n"
+    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  int: The index of the first occurrence.\n\n"
+    "Raises:\n"
+    "  ValueError: If the substring is not found.";
 
 static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
@@ -1470,6 +1532,16 @@ static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSsize_t(signed_offset);
 }
 
+static char const doc_rfind[] = //
+    "Find the last occurrence of a substring.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  substring (str): The substring to find.\n"
+    "  start (int, optional): The starting index (default is 0).\n"
+    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  int: The index of the last occurrence, or -1 if not found.";
+
 static PyObject *Str_rfind(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
@@ -1478,6 +1550,18 @@ static PyObject *Str_rfind(PyObject *self, PyObject *args, PyObject *kwargs) {
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
+
+static char const doc_rindex[] = //
+    "Find the last occurrence of a substring or raise an error if not found.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  substring (str): The substring to find.\n"
+    "  start (int, optional): The starting index (default is 0).\n"
+    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  int: The index of the last occurrence.\n\n"
+    "Raises:\n"
+    "  ValueError: If the substring is not found.";
 
 static PyObject *Str_rindex(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
@@ -1547,13 +1631,40 @@ static PyObject *_Str_partition_implementation(PyObject *self, PyObject *args, P
     return result_tuple;
 }
 
+static char const doc_partition[] = //
+    "Split the string into a 3-tuple around the first occurrence of a separator.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separator (str): The separator to partition by.\n\n"
+    "Returns:\n"
+    "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns (self, '', '').";
+
 static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs) {
     return _Str_partition_implementation(self, args, kwargs, &sz_find, sz_false_k);
 }
 
+static char const doc_rpartition[] = //
+    "Split the string into a 3-tuple around the last occurrence of a separator.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separator (str): The separator to partition by.\n\n"
+    "Returns:\n"
+    "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns ('', '', self).";
+
 static PyObject *Str_rpartition(PyObject *self, PyObject *args, PyObject *kwargs) {
     return _Str_partition_implementation(self, args, kwargs, &sz_rfind, sz_true_k);
 }
+
+static char const doc_count[] = //
+    "Count the occurrences of a substring.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  substring (str): The substring to count.\n"
+    "  start (int, optional): The starting index (default is 0).\n"
+    "  end (int, optional): The ending index (default is the string length).\n"
+    "  allowoverlap (bool, optional): Count overlapping occurrences (default is False).\n\n"
+    "Returns:\n"
+    "  int: The number of occurrences of the substring.";
 
 static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -1603,7 +1714,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
         while (haystack.length) {
             sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
-            sz_size_t offset = found ? ptr - haystack.start : haystack.length;
+            sz_size_t offset = found ? (sz_size_t)(ptr - haystack.start) : haystack.length;
             count += found;
             haystack.start += offset + found;
             haystack.length -= offset + found;
@@ -1613,7 +1724,7 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
         while (haystack.length) {
             sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
             sz_bool_t found = ptr != NULL;
-            sz_size_t offset = found ? ptr - haystack.start : haystack.length;
+            sz_size_t offset = found ? (sz_size_t)(ptr - haystack.start) : haystack.length;
             count += found;
             haystack.start += offset + needle.length;
             haystack.length -= offset + needle.length * found;
@@ -1679,9 +1790,27 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
     return PyLong_FromSize_t(distance);
 }
 
+static char const doc_edit_distance[] = //
+    "Compute the Levenshtein edit distance between two strings.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The first string.\n"
+    "  other (str): The second string to compare.\n"
+    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n\n"
+    "Returns:\n"
+    "  int: The edit distance (number of insertions, deletions, substitutions).";
+
 static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
     return _Str_edit_distance(self, args, kwargs, &sz_edit_distance);
 }
+
+static char const doc_edit_distance_unicode[] = //
+    "Compute the Levenshtein edit distance between two Unicode strings.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The first string.\n"
+    "  other (str): The second string to compare.\n"
+    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n\n"
+    "Returns:\n"
+    "  int: The edit distance in Unicode characters.";
 
 static PyObject *Str_edit_distance_unicode(PyObject *self, PyObject *args, PyObject *kwargs) {
     return _Str_edit_distance(self, args, kwargs, &sz_edit_distance_utf8);
@@ -1737,13 +1866,42 @@ static PyObject *_Str_hamming_distance(PyObject *self, PyObject *args, PyObject 
     return PyLong_FromSize_t(distance);
 }
 
+static char const doc_hamming_distance[] = //
+    "Compute the Hamming distance between two strings.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The first string.\n"
+    "  other (str): The second string to compare.\n"
+    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n\n"
+    "Returns:\n"
+    "  int: The Hamming distance, including differing bytes and length difference.";
+
 static PyObject *Str_hamming_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
     return _Str_hamming_distance(self, args, kwargs, &sz_hamming_distance);
 }
 
+static char const doc_hamming_distance_unicode[] = //
+    "Compute the Hamming distance between two Unicode strings.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The first string.\n"
+    "  other (str): The second string to compare.\n"
+    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n\n"
+    "Returns:\n"
+    "  int: The Hamming distance, including differing Unicode characters and length difference.";
+
 static PyObject *Str_hamming_distance_unicode(PyObject *self, PyObject *args, PyObject *kwargs) {
     return _Str_hamming_distance(self, args, kwargs, &sz_hamming_distance_utf8);
 }
+
+static char const doc_alignment_score[] = //
+    "Compute the Needleman-Wunsch alignment score between two strings.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The first string.\n"
+    "  other (str): The second string to align.\n"
+    "  substitution_matrix (numpy.ndarray): A 256x256 substitution cost matrix.\n"
+    "  gap_score (int): The score for introducing a gap.\n"
+    "  bound (int, optional): Optional maximum score to compute (default is no bound).\n\n"
+    "Returns:\n"
+    "  int: The alignment score.";
 
 static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -1841,6 +1999,16 @@ static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *k
     return PyLong_FromSsize_t(score);
 }
 
+static char const doc_startswith[] = //
+    "Check if a string starts with a given prefix.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  prefix (str): The prefix to check.\n"
+    "  start (int, optional): The starting index (default is 0).\n"
+    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  bool: True if the string starts with the prefix, False otherwise.";
+
 static PyObject *Str_startswith(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -1877,12 +2045,22 @@ static PyObject *Str_startswith(PyObject *self, PyObject *args, PyObject *kwargs
     // Apply start and end arguments
     str.start += start;
     str.length -= start;
-    if (end != PY_SSIZE_T_MAX && end - start < str.length) { str.length = end - start; }
+    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < str.length) { str.length = (sz_size_t)(end - start); }
 
     if (str.length < prefix.length) { Py_RETURN_FALSE; }
     else if (strncmp(str.start, prefix.start, prefix.length) == 0) { Py_RETURN_TRUE; }
     else { Py_RETURN_FALSE; }
 }
+
+static char const doc_endswith[] = //
+    "Check if a string ends with a given suffix.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  suffix (str): The suffix to check.\n"
+    "  start (int, optional): The starting index (default is 0).\n"
+    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  bool: True if the string ends with the suffix, False otherwise.";
 
 static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
@@ -1920,17 +2098,31 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
     // Apply start and end arguments
     str.start += start;
     str.length -= start;
-    if (end != PY_SSIZE_T_MAX && end - start < str.length) { str.length = end - start; }
+    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < str.length) { str.length = (sz_size_t)(end - start); }
 
     if (str.length < suffix.length) { Py_RETURN_FALSE; }
     else if (strncmp(str.start + (str.length - suffix.length), suffix.start, suffix.length) == 0) { Py_RETURN_TRUE; }
     else { Py_RETURN_FALSE; }
 }
 
+static char const doc_translate[] = //
+    "Perform transformation of a string using a look-up table.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  table (str or dict): A 256-character string or a dictionary mapping bytes to bytes.\n"
+    "  start (int, optional): The starting index for translation (default is 0).\n"
+    "  end (int, optional): The ending index for translation (default is the string length).\n\n"
+    "  inplace (bool, optional): If True, the string is modified in place (default is False).\n\n"
+    "Returns:\n"
+    "  Union[None, str, bytes]: If inplace is False, a new string is returned, otherwise None.\n\n"
+    "Raises:\n"
+    "  ValueError: If the table is not 256 bytes long.\n"
+    "  TypeError: If the table is not a string or dictionary.";
+
 static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
+    if (nargs < !is_member + 1 || nargs > !is_member + 4) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
@@ -1939,6 +2131,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
     PyObject *look_up_table_obj = PyTuple_GET_ITEM(args, !is_member);
     PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
     PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+    PyObject *inplace_obj = nargs > !is_member + 3 ? PyTuple_GET_ITEM(args, !is_member + 3) : NULL;
 
     // Optional start and end arguments
     Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
@@ -1953,26 +2146,103 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
-    sz_string_view_t str, look_up_table;
-    if (!export_string_like(str_obj, &str.start, &str.length) ||
-        !export_string_like(look_up_table_obj, &look_up_table.start, &look_up_table.length)) {
-        PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
+    sz_string_view_t str;
+    if (!export_string_like(str_obj, &str.start, &str.length)) {
+        PyErr_SetString(PyExc_TypeError, "First argument must be string-like");
+        return NULL;
+    }
+
+    sz_string_view_t look_up_table_str;
+    SZ_ALIGN64 char look_up_table[256];
+    if (export_string_like(look_up_table_obj, &look_up_table_str.start, &look_up_table_str.length)) {
+        // Export
+        if (look_up_table_str.length != 256) {
+            PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
+            return NULL;
+        }
+        memcpy(&look_up_table[0], look_up_table_str.start, look_up_table_str.length);
+    }
+    else if (PyDict_Check(look_up_table_obj)) {
+
+        // If any character is not defined, it will be replaced with itself:
+        for (int i = 0; i < 256; i++) { look_up_table[i] = (char)i; }
+
+        // Process the dictionary into the look-up table
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(look_up_table_obj, &pos, &key, &value)) {
+            if (!PyUnicode_Check(key) || PyUnicode_GetLength(key) != 1 || !PyUnicode_Check(value) ||
+                PyUnicode_GetLength(value) != 1) {
+                PyErr_SetString(PyExc_TypeError, "Keys and values must be single characters");
+                return NULL;
+            }
+
+            char key_char = PyUnicode_AsUTF8(key)[0];
+            char value_char = PyUnicode_AsUTF8(value)[0];
+            look_up_table[(unsigned char)key_char] = value_char;
+        }
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Second argument must be string-like or a dictionary");
+        return NULL;
+    }
+
+    int is_inplace = inplace_obj ? PyObject_IsTrue(inplace_obj) : 0;
+    if (is_inplace == -1) {
+        PyErr_SetString(PyExc_TypeError, "The inplace argument must be a boolean");
         return NULL;
     }
 
     // Apply start and end arguments
     str.start += start;
     str.length -= start;
-    if (end != PY_SSIZE_T_MAX && end - start < str.length) { str.length = end - start; }
+    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < str.length) { str.length = (sz_size_t)(end - start); }
 
-    if (look_up_table.length != 256) {
-        PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
-        return NULL;
+    // Perform the translation using the look-up table
+    if (is_inplace) {
+        sz_look_up_transform(str.start, str.length, look_up_table, str.start);
+        Py_RETURN_NONE;
     }
+    // Allocate a string of the same size, get it's raw pointer and transform the data into it
+    else {
 
-    sz_look_up_transform(str.start, str.length, look_up_table.start, str.start);
-    return Py_None;
+        // For binary inputs return bytes, for unicode return str
+        if (PyUnicode_Check(str_obj)) {
+            // Create a new Unicode object
+            PyObject *new_unicode_obj = PyUnicode_New(str.length, PyUnicode_MAX_CHAR_VALUE(str_obj));
+            if (!new_unicode_obj) {
+                PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for new Unicode string");
+                return NULL;
+            }
+
+            sz_ptr_t new_buffer = (sz_ptr_t)PyUnicode_DATA(new_unicode_obj);
+            sz_look_up_transform(str.start, str.length, look_up_table, new_buffer);
+            return new_unicode_obj;
+        }
+        else {
+            PyObject *new_bytes_obj = PyBytes_FromStringAndSize(NULL, str.length);
+            if (!new_bytes_obj) {
+                PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for new string");
+                return NULL;
+            }
+
+            // Get the buffer and perform the transformation
+            sz_ptr_t new_buffer = (sz_ptr_t)PyBytes_AS_STRING(new_bytes_obj);
+            sz_look_up_transform(str.start, str.length, look_up_table, new_buffer);
+            return new_bytes_obj;
+        }
+    }
 }
+
+static char const doc_find_first_of[] = //
+    "Find the index of the first occurrence of any character from another string.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  chars (str): A string containing characters to search for.\n"
+    "  start (int, optional): Starting index (default is 0).\n"
+    "  end (int, optional): Ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  int: Index of the first matching character, or -1 if none found.";
 
 static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
@@ -1984,6 +2254,16 @@ static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwa
     return PyLong_FromSsize_t(signed_offset);
 }
 
+static char const doc_find_first_not_of[] = //
+    "Find the index of the first character not in another string.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  chars (str): A string containing characters to exclude.\n"
+    "  start (int, optional): Starting index (default is 0).\n"
+    "  end (int, optional): Ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  int: Index of the first non-matching character, or -1 if all match.";
+
 static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
@@ -1994,6 +2274,16 @@ static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject 
     return PyLong_FromSsize_t(signed_offset);
 }
 
+static char const doc_find_last_of[] = //
+    "Find the index of the last occurrence of any character from another string.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  chars (str): A string containing characters to search for.\n"
+    "  start (int, optional): Starting index (default is 0).\n"
+    "  end (int, optional): Ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  int: Index of the last matching character, or -1 if none found.";
+
 static PyObject *Str_find_last_of(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
@@ -2003,6 +2293,16 @@ static PyObject *Str_find_last_of(PyObject *self, PyObject *args, PyObject *kwar
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
+
+static char const doc_find_last_not_of[] = //
+    "Find the index of the last character not in another string.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  chars (str): A string containing characters to exclude.\n"
+    "  start (int, optional): Starting index (default is 0).\n"
+    "  end (int, optional): Ending index (default is the string length).\n\n"
+    "Returns:\n"
+    "  int: Index of the last non-matching character, or -1 if all match.";
 
 static PyObject *Str_find_last_not_of(PyObject *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t signed_offset;
@@ -2302,37 +2602,130 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, P
                            : Str_rsplit_(text_object, text, separator, keepseparator, maxsplit, finder, match_length);
 }
 
+static char const doc_split[] = //
+    "Split a string by a separator.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separator (str): The separator to split by (cannot be empty).\n"
+    "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"
+    "  keepseparator (bool, optional): Include the separator in results (default is False).\n\n"
+    "Returns:\n"
+    "  Strs: A list of strings split by the separator.\n\n"
+    "Raises:\n"
+    "  ValueError: If the separator is an empty string.";
+
 static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_find, 0, sz_false_k, sz_false_k);
 }
+
+static char const doc_rsplit[] = //
+    "Split a string by a separator starting from the end.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separator (str): The separator to split by (cannot be empty).\n"
+    "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"
+    "  keepseparator (bool, optional): Include the separator in results (default is False).\n\n"
+    "Returns:\n"
+    "  Strs: A list of strings split by the separator.\n\n"
+    "Raises:\n"
+    "  ValueError: If the separator is an empty string.";
 
 static PyObject *Str_rsplit(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_false_k);
 }
 
+static char const doc_split_charset[] = //
+    "Split a string by a set of character separators.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separators (str): A string containing separator characters.\n"
+    "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"
+    "  keepseparator (bool, optional): Include separators in results (default is False).\n\n"
+    "Returns:\n"
+    "  Strs: A list of strings split by the character set.";
+
 static PyObject *Str_split_charset(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_find_char_from, 1, sz_false_k, sz_false_k);
 }
+
+static char const doc_rsplit_charset[] = //
+    "Split a string by a set of character separators in reverse order.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separators (str): A string containing separator characters.\n"
+    "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"
+    "  keepseparator (bool, optional): Include separators in results (default is False).\n\n"
+    "Returns:\n"
+    "  Strs: A list of strings split by the character set.";
 
 static PyObject *Str_rsplit_charset(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_char_from, 1, sz_true_k, sz_false_k);
 }
 
+static char const doc_split_iter[] = //
+    "Create an iterator for splitting a string by a separator.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separator (str): The separator to split by (cannot be empty).\n"
+    "  keepseparator (bool, optional): Include separator in results (default is False).\n\n"
+    "Returns:\n"
+    "  iterator: An iterator yielding split substrings.\n\n"
+    "Raises:\n"
+    "  ValueError: If the separator is an empty string.";
+
 static PyObject *Str_split_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_find, 0, sz_false_k, sz_true_k);
 }
+
+static char const doc_rsplit_iter[] = //
+    "Create an iterator for splitting a string by a separator in reverse order.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separator (str): The separator to split by (cannot be empty).\n"
+    "  keepseparator (bool, optional): Include separator in results (default is False).\n\n"
+    "Returns:\n"
+    "  iterator: An iterator yielding split substrings in reverse.\n\n"
+    "Raises:\n"
+    "  ValueError: If the separator is an empty string.";
 
 static PyObject *Str_rsplit_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_true_k);
 }
 
+static char const doc_split_charset_iter[] = //
+    "Create an iterator for splitting a string by a set of character separators.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separators (str): A string containing separator characters.\n"
+    "  keepseparator (bool, optional): Include separators in results (default is False).\n\n"
+    "Returns:\n"
+    "  iterator: An iterator yielding split substrings.";
+
 static PyObject *Str_split_charset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_find_char_from, 1, sz_false_k, sz_true_k);
 }
 
+static char const doc_rsplit_charset_iter[] = //
+    "Create an iterator for splitting a string by a set of character separators in reverse order.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  separators (str): A string containing separator characters.\n"
+    "  keepseparator (bool, optional): Include separators in results (default is False).\n\n"
+    "Returns:\n"
+    "  iterator: An iterator yielding split substrings in reverse.";
+
 static PyObject *Str_rsplit_charset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_char_from, 1, sz_true_k, sz_true_k);
 }
+
+static char const doc_splitlines[] = //
+    "Split a string by line breaks.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object.\n"
+    "  keeplinebreaks (bool, optional): Include line breaks in the results (default is False).\n"
+    "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n\n"
+    "Returns:\n"
+    "  Strs: A list of strings split by line breaks.";
 
 static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs) {
     // Check minimum arguments
@@ -2479,65 +2872,52 @@ static PyGetSetDef Str_getsetters[] = {
 #define SZ_METHOD_FLAGS METH_VARARGS | METH_KEYWORDS
 
 static PyMethodDef Str_methods[] = {
-    // Basic `str`, `bytes`, and `bytearray`-like functionality
-    {"contains", Str_contains, SZ_METHOD_FLAGS, "Check if a string contains a substring."},
-    {"count", Str_count, SZ_METHOD_FLAGS, "Count the occurrences of a substring."},
-    {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
-    {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
-    {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
-    {"translate", Str_translate, SZ_METHOD_FLAGS, "Look-Up Table in-place transformation of a byte-string."},
-    {"decode", Str_decode, SZ_METHOD_FLAGS, "Decode the bytes into `str` with a given encoding"},
+    {"contains", (PyCFunction)Str_contains, SZ_METHOD_FLAGS, doc_contains},
+    {"count", (PyCFunction)Str_count, SZ_METHOD_FLAGS, doc_count},
+    {"splitlines", (PyCFunction)Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
+    {"startswith", (PyCFunction)Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
+    {"endswith", (PyCFunction)Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
+    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"decode", (PyCFunction)Str_decode, SZ_METHOD_FLAGS, doc_decode},
 
     // Bidirectional operations
-    {"find", Str_find, SZ_METHOD_FLAGS, "Find the first occurrence of a substring."},
-    {"index", Str_index, SZ_METHOD_FLAGS, "Find the first occurrence of a substring or raise error if missing."},
-    {"partition", Str_partition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, first match, after."},
-    {"split", Str_split, SZ_METHOD_FLAGS, "Split a string by a separator."},
-    {"rfind", Str_rfind, SZ_METHOD_FLAGS, "Find the last occurrence of a substring."},
-    {"rindex", Str_rindex, SZ_METHOD_FLAGS, "Find the last occurrence of a substring or raise error if missing."},
-    {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
-    {"rsplit", Str_rsplit, SZ_METHOD_FLAGS, "Split a string by a separator in reverse order."},
+    {"find", (PyCFunction)Str_find, SZ_METHOD_FLAGS, doc_find},
+    {"index", (PyCFunction)Str_index, SZ_METHOD_FLAGS, doc_index},
+    {"partition", (PyCFunction)Str_partition, SZ_METHOD_FLAGS, doc_partition},
+    {"split", (PyCFunction)Str_split, SZ_METHOD_FLAGS, doc_split},
+    {"rfind", (PyCFunction)Str_rfind, SZ_METHOD_FLAGS, doc_rfind},
+    {"rindex", (PyCFunction)Str_rindex, SZ_METHOD_FLAGS, doc_rindex},
+    {"rpartition", (PyCFunction)Str_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
+    {"rsplit", (PyCFunction)Str_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
 
     // Edit distance extensions
-    {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS,
-     "Hamming distance between two strings, as the number of replaced bytes, and difference in length."},
-    {"hamming_distance_unicode", Str_hamming_distance_unicode, SZ_METHOD_FLAGS,
-     "Hamming distance between two strings, as the number of replaced unicode characters, and difference in length."},
-    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS,
-     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced bytes."},
-    {"edit_distance_unicode", Str_edit_distance_unicode, SZ_METHOD_FLAGS,
-     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced unicode characters."},
-    {"alignment_score", Str_alignment_score, SZ_METHOD_FLAGS,
-     "Needleman-Wunsch alignment score given a substitution cost matrix."},
+    {"hamming_distance", (PyCFunction)Str_hamming_distance, SZ_METHOD_FLAGS, doc_hamming_distance},
+    {"hamming_distance_unicode", (PyCFunction)Str_hamming_distance_unicode, SZ_METHOD_FLAGS,
+     doc_hamming_distance_unicode},
+    {"edit_distance", (PyCFunction)Str_edit_distance, SZ_METHOD_FLAGS, doc_edit_distance},
+    {"edit_distance_unicode", (PyCFunction)Str_edit_distance_unicode, SZ_METHOD_FLAGS, doc_edit_distance_unicode},
+    {"alignment_score", (PyCFunction)Str_alignment_score, SZ_METHOD_FLAGS, doc_alignment_score},
 
     // Character search extensions
-    {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS,
-     "Finds the first occurrence of a character from another string."},
-    {"find_last_of", Str_find_last_of, SZ_METHOD_FLAGS,
-     "Finds the last occurrence of a character from another string."},
-    {"find_first_not_of", Str_find_first_not_of, SZ_METHOD_FLAGS,
-     "Finds the first occurrence of a character not present in another string."},
-    {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS,
-     "Finds the last occurrence of a character not present in another string."},
-    {"split_charset", Str_split_charset, SZ_METHOD_FLAGS, "Split a string by a set of character separators."},
-    {"rsplit_charset", Str_rsplit_charset, SZ_METHOD_FLAGS,
-     "Split a string by a set of character separators in reverse order."},
+    {"find_first_of", (PyCFunction)Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
+    {"find_last_of", (PyCFunction)Str_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
+    {"find_first_not_of", (PyCFunction)Str_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
+    {"find_last_not_of", (PyCFunction)Str_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
+    {"split_charset", (PyCFunction)Str_split_charset, SZ_METHOD_FLAGS, doc_split_charset},
+    {"rsplit_charset", (PyCFunction)Str_rsplit_charset, SZ_METHOD_FLAGS, doc_rsplit_charset},
 
     // Lazily evaluated iterators
-    {"split_iter", Str_split_iter, SZ_METHOD_FLAGS, "Create an iterator for splitting a string by a separator."},
-    {"rsplit_iter", Str_rsplit_iter, SZ_METHOD_FLAGS,
-     "Create an iterator for splitting a string by a separator in reverse order."},
-    {"split_charset_iter", Str_split_charset_iter, SZ_METHOD_FLAGS,
-     "Create an iterator for splitting a string by a set of character separators."},
-    {"rsplit_charset_iter", Str_rsplit_charset_iter, SZ_METHOD_FLAGS,
-     "Create an iterator for splitting a string by a set of character separators in reverse order."},
+    {"split_iter", (PyCFunction)Str_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
+    {"rsplit_iter", (PyCFunction)Str_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
+    {"split_charset_iter", (PyCFunction)Str_split_charset_iter, SZ_METHOD_FLAGS, doc_split_charset_iter},
+    {"rsplit_charset_iter", (PyCFunction)Str_rsplit_charset_iter, SZ_METHOD_FLAGS, doc_rsplit_charset_iter},
 
     // Dealing with larger-than-memory datasets
-    {"offset_within", Str_offset_within, SZ_METHOD_FLAGS,
-     "Return the raw byte offset of one binary string within another."},
-    {"write_to", Str_write_to, SZ_METHOD_FLAGS, "Return the raw byte offset of one binary string within another."},
+    {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
+    {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
 
-    {NULL, NULL, 0, NULL}};
+    {NULL, NULL, 0, NULL} // Sentinel
+};
 
 static PyTypeObject StrType = {
     PyVarObject_HEAD_INIT(NULL, 0) //
@@ -3182,67 +3562,51 @@ static void stringzilla_cleanup(PyObject *m) {
 
 static PyMethodDef stringzilla_methods[] = {
     // Basic `str`, `bytes`, and `bytearray`-like functionality
-    {"contains", Str_contains, SZ_METHOD_FLAGS, "Check if a string contains a substring."},
-    {"count", Str_count, SZ_METHOD_FLAGS, "Count the occurrences of a substring."},
-    {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, "Split a string by line breaks."},
-    {"startswith", Str_startswith, SZ_METHOD_FLAGS, "Check if a string starts with a given prefix."},
-    {"endswith", Str_endswith, SZ_METHOD_FLAGS, "Check if a string ends with a given suffix."},
-    {"translate", Str_translate, SZ_METHOD_FLAGS, "Look-Up Table in-place transformation of a byte-string."},
-    {"decode", Str_decode, SZ_METHOD_FLAGS, "Decode the bytes into `str` with a given encoding"},
+    {"contains", Str_contains, SZ_METHOD_FLAGS, doc_contains},
+    {"count", Str_count, SZ_METHOD_FLAGS, doc_count},
+    {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
+    {"startswith", Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
+    {"endswith", Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
+    {"translate", Str_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"decode", Str_decode, SZ_METHOD_FLAGS, doc_decode},
 
     // Bidirectional operations
-    {"find", Str_find, SZ_METHOD_FLAGS, "Find the first occurrence of a substring."},
-    {"index", Str_index, SZ_METHOD_FLAGS, "Find the first occurrence of a substring or raise error if missing."},
-    {"partition", Str_partition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, first match, after."},
-    {"split", Str_split, SZ_METHOD_FLAGS, "Split a string by a separator."},
-    {"rfind", Str_rfind, SZ_METHOD_FLAGS, "Find the last occurrence of a substring."},
-    {"rindex", Str_rindex, SZ_METHOD_FLAGS, "Find the last occurrence of a substring or raise error if missing."},
-    {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, "Splits string into 3-tuple: before, last match, after."},
-    {"rsplit", Str_rsplit, SZ_METHOD_FLAGS, "Split a string by a separator in reverse order."},
+    {"find", Str_find, SZ_METHOD_FLAGS, doc_find},
+    {"index", Str_index, SZ_METHOD_FLAGS, doc_index},
+    {"partition", Str_partition, SZ_METHOD_FLAGS, doc_partition},
+    {"split", Str_split, SZ_METHOD_FLAGS, doc_split},
+    {"rfind", Str_rfind, SZ_METHOD_FLAGS, doc_rfind},
+    {"rindex", Str_rindex, SZ_METHOD_FLAGS, doc_rindex},
+    {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
+    {"rsplit", Str_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
 
     // Edit distance extensions
-    {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS,
-     "Hamming distance between two strings, as the number of replaced bytes, and difference in length."},
-    {"hamming_distance_unicode", Str_hamming_distance_unicode, SZ_METHOD_FLAGS,
-     "Hamming distance between two strings, as the number of replaced unicode characters, and difference in "
-     "length."},
-    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS,
-     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced bytes."},
-    {"edit_distance_unicode", Str_edit_distance_unicode, SZ_METHOD_FLAGS,
-     "Levenshtein distance between two strings, as the number of inserted, deleted, and replaced unicode "
-     "characters."},
-    {"alignment_score", Str_alignment_score, SZ_METHOD_FLAGS,
-     "Needleman-Wunsch alignment score given a substitution cost matrix."},
+    {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS, doc_hamming_distance},
+    {"hamming_distance_unicode", Str_hamming_distance_unicode, SZ_METHOD_FLAGS, doc_hamming_distance_unicode},
+    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS, doc_edit_distance},
+    {"edit_distance_unicode", Str_edit_distance_unicode, SZ_METHOD_FLAGS, doc_edit_distance_unicode},
+    {"alignment_score", Str_alignment_score, SZ_METHOD_FLAGS, doc_alignment_score},
 
     // Character search extensions
-    {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS,
-     "Finds the first occurrence of a character from another string."},
-    {"find_last_of", Str_find_last_of, SZ_METHOD_FLAGS,
-     "Finds the last occurrence of a character from another string."},
-    {"find_first_not_of", Str_find_first_not_of, SZ_METHOD_FLAGS,
-     "Finds the first occurrence of a character not present in another string."},
-    {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS,
-     "Finds the last occurrence of a character not present in another string."},
-    {"split_charset", Str_split_charset, SZ_METHOD_FLAGS, "Split a string by a set of character separators."},
-    {"rsplit_charset", Str_rsplit_charset, SZ_METHOD_FLAGS,
-     "Split a string by a set of character separators in reverse order."},
+    {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
+    {"find_last_of", Str_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
+    {"find_first_not_of", Str_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
+    {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
+    {"split_charset", Str_split_charset, SZ_METHOD_FLAGS, doc_split_charset},
+    {"rsplit_charset", Str_rsplit_charset, SZ_METHOD_FLAGS, doc_rsplit_charset},
 
     // Lazily evaluated iterators
-    {"split_iter", Str_split_iter, SZ_METHOD_FLAGS, "Create an iterator for splitting a string by a separator."},
-    {"rsplit_iter", Str_rsplit_iter, SZ_METHOD_FLAGS,
-     "Create an iterator for splitting a string by a separator in reverse order."},
-    {"split_charset_iter", Str_split_charset_iter, SZ_METHOD_FLAGS,
-     "Create an iterator for splitting a string by a set of character separators."},
-    {"rsplit_charset_iter", Str_rsplit_charset_iter, SZ_METHOD_FLAGS,
-     "Create an iterator for splitting a string by a set of character separators in reverse order."},
+    {"split_iter", Str_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
+    {"rsplit_iter", Str_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
+    {"split_charset_iter", Str_split_charset_iter, SZ_METHOD_FLAGS, doc_split_charset_iter},
+    {"rsplit_charset_iter", Str_rsplit_charset_iter, SZ_METHOD_FLAGS, doc_rsplit_charset_iter},
 
     // Dealing with larger-than-memory datasets
-    {"offset_within", Str_offset_within, SZ_METHOD_FLAGS,
-     "Return the raw byte offset of one binary string within another."},
-    {"write_to", Str_write_to, SZ_METHOD_FLAGS, "Return the raw byte offset of one binary string within another."},
+    {"offset_within", Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
+    {"write_to", Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
 
     // Global unary extensions
-    {"hash", Str_like_hash, SZ_METHOD_FLAGS, "Hash a string or a byte-array."},
+    {"hash", Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
 
     {NULL, NULL, 0, NULL}};
 
