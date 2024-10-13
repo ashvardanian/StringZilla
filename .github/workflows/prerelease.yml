@@ -281,7 +281,7 @@ jobs:
 
   test_macos:
     name: MacOS
-    runs-on: macos-13
+    runs-on: macos-14
 
     steps:
       - uses: actions/checkout@v4
@@ -491,7 +491,7 @@ jobs:
       ]
     strategy:
       matrix:
-        os: [ubuntu-24.04, macos-13, windows-2022]
+        os: [ubuntu-24.04, macos-14, windows-2022]
         python-version: ["36", "37", "38", "39", "310", "311", "312"]
     steps:
       - uses: actions/checkout@v4
