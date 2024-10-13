@@ -1962,6 +1962,7 @@ class basic_string_slice {
  *      * `try_` exception-free "try" operations that returning non-zero values on success,
  *      * `replace_all` and `erase_all` similar to Boost,
  *      * `edit_distance` - Levenshtein distance computation reusing the allocator,
+ *      * `translate` - character mapping,
  *      * `randomize`, `random` - for fast random string generation.
  *
  *  Functions defined for `basic_string_slice`, but not present in `basic_string`:
