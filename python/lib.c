@@ -662,7 +662,7 @@ static PyObject *Str_repr(Str *self) {
 
 static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->memory.start, self->memory.length); }
 
-static char const *const doc_like_hash = //
+static char const doc_like_hash[] = //
     "Compute the hash value of the string.\n\n"
     "This function can be called as a method on a Str object or as a standalone function.\n\n"
     "Args:\n"
@@ -1204,7 +1204,7 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
     }
 }
 
-static char const *const doc_decode = //
+static char const doc_decode[] = //
     "Decode the bytes into a Unicode string with a given encoding.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1257,7 +1257,7 @@ static PyObject *Str_decode(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyUnicode_Decode(text.start, text.length, encoding.start, errors.start);
 }
 
-static char const *const doc_write_to = //
+static char const doc_write_to[] = //
     "Write the string to a file.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1335,7 +1335,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
     Py_RETURN_NONE;
 }
 
-static char const *const doc_offset_within = //
+static char const doc_offset_within[] = //
     "Return the raw byte offset of this StringZilla string within a larger StringZilla string.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The substring.\n"
@@ -1468,7 +1468,7 @@ static int _Str_find_implementation_( //
     return 1;
 }
 
-static char const *const doc_contains = //
+static char const doc_contains[] = //
     "Check if a string contains a substring.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1488,7 +1488,7 @@ static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) 
     else { Py_RETURN_TRUE; }
 }
 
-static char const *const doc_find = //
+static char const doc_find[] = //
     "Find the first occurrence of a substring.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1507,7 +1507,7 @@ static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static char const *const doc_index = //
+static char const doc_index[] = //
     "Find the first occurrence of a substring or raise an error if not found.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1532,7 +1532,7 @@ static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static char const *const doc_rfind = //
+static char const doc_rfind[] = //
     "Find the last occurrence of a substring.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1551,7 +1551,7 @@ static PyObject *Str_rfind(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static char const *const doc_rindex = //
+static char const doc_rindex[] = //
     "Find the last occurrence of a substring or raise an error if not found.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1631,7 +1631,7 @@ static PyObject *_Str_partition_implementation(PyObject *self, PyObject *args, P
     return result_tuple;
 }
 
-static char const *const doc_partition = //
+static char const doc_partition[] = //
     "Split the string into a 3-tuple around the first occurrence of a separator.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1643,7 +1643,7 @@ static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs)
     return _Str_partition_implementation(self, args, kwargs, &sz_find, sz_false_k);
 }
 
-static char const *const doc_rpartition = //
+static char const doc_rpartition[] = //
     "Split the string into a 3-tuple around the last occurrence of a separator.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1655,7 +1655,7 @@ static PyObject *Str_rpartition(PyObject *self, PyObject *args, PyObject *kwargs
     return _Str_partition_implementation(self, args, kwargs, &sz_rfind, sz_true_k);
 }
 
-static char const *const doc_count = //
+static char const doc_count[] = //
     "Count the occurrences of a substring.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -1790,7 +1790,7 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
     return PyLong_FromSize_t(distance);
 }
 
-static char const *const doc_edit_distance = //
+static char const doc_edit_distance[] = //
     "Compute the Levenshtein edit distance between two strings.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The first string.\n"
@@ -1803,7 +1803,7 @@ static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwa
     return _Str_edit_distance(self, args, kwargs, &sz_edit_distance);
 }
 
-static char const *const doc_edit_distance_unicode = //
+static char const doc_edit_distance_unicode[] = //
     "Compute the Levenshtein edit distance between two Unicode strings.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The first string.\n"
@@ -1866,7 +1866,7 @@ static PyObject *_Str_hamming_distance(PyObject *self, PyObject *args, PyObject 
     return PyLong_FromSize_t(distance);
 }
 
-static char const *const doc_hamming_distance = //
+static char const doc_hamming_distance[] = //
     "Compute the Hamming distance between two strings.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The first string.\n"
@@ -1879,7 +1879,7 @@ static PyObject *Str_hamming_distance(PyObject *self, PyObject *args, PyObject *
     return _Str_hamming_distance(self, args, kwargs, &sz_hamming_distance);
 }
 
-static char const *const doc_hamming_distance_unicode = //
+static char const doc_hamming_distance_unicode[] = //
     "Compute the Hamming distance between two Unicode strings.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The first string.\n"
@@ -1892,7 +1892,7 @@ static PyObject *Str_hamming_distance_unicode(PyObject *self, PyObject *args, Py
     return _Str_hamming_distance(self, args, kwargs, &sz_hamming_distance_utf8);
 }
 
-static char const *const doc_alignment_score = //
+static char const doc_alignment_score[] = //
     "Compute the Needleman-Wunsch alignment score between two strings.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The first string.\n"
@@ -1999,7 +1999,7 @@ static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *k
     return PyLong_FromSsize_t(score);
 }
 
-static char const *const doc_startswith = //
+static char const doc_startswith[] = //
     "Check if a string starts with a given prefix.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2052,7 +2052,7 @@ static PyObject *Str_startswith(PyObject *self, PyObject *args, PyObject *kwargs
     else { Py_RETURN_FALSE; }
 }
 
-static char const *const doc_endswith = //
+static char const doc_endswith[] = //
     "Check if a string ends with a given suffix.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2105,7 +2105,7 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
     else { Py_RETURN_FALSE; }
 }
 
-static char const *const doc_translate = //
+static char const doc_translate[] = //
     "Perform transformation of a string using a look-up table.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2234,7 +2234,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
     }
 }
 
-static char const *const doc_find_first_of = //
+static char const doc_find_first_of[] = //
     "Find the index of the first occurrence of any character from another string.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2254,7 +2254,7 @@ static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwa
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static char const *const doc_find_first_not_of = //
+static char const doc_find_first_not_of[] = //
     "Find the index of the first character not in another string.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2274,7 +2274,7 @@ static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject 
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static char const *const doc_find_last_of = //
+static char const doc_find_last_of[] = //
     "Find the index of the last occurrence of any character from another string.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2294,7 +2294,7 @@ static PyObject *Str_find_last_of(PyObject *self, PyObject *args, PyObject *kwar
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static char const *const doc_find_last_not_of = //
+static char const doc_find_last_not_of[] = //
     "Find the index of the last character not in another string.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2602,7 +2602,7 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, P
                            : Str_rsplit_(text_object, text, separator, keepseparator, maxsplit, finder, match_length);
 }
 
-static char const *const doc_split = //
+static char const doc_split[] = //
     "Split a string by a separator.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2618,7 +2618,7 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_find, 0, sz_false_k, sz_false_k);
 }
 
-static char const *const doc_rsplit = //
+static char const doc_rsplit[] = //
     "Split a string by a separator starting from the end.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2634,7 +2634,7 @@ static PyObject *Str_rsplit(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_false_k);
 }
 
-static char const *const doc_split_charset = //
+static char const doc_split_charset[] = //
     "Split a string by a set of character separators.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2648,7 +2648,7 @@ static PyObject *Str_split_charset(PyObject *self, PyObject *args, PyObject *kwa
     return Str_split_with_known_callback(self, args, kwargs, &sz_find_char_from, 1, sz_false_k, sz_false_k);
 }
 
-static char const *const doc_rsplit_charset = //
+static char const doc_rsplit_charset[] = //
     "Split a string by a set of character separators in reverse order.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2662,7 +2662,7 @@ static PyObject *Str_rsplit_charset(PyObject *self, PyObject *args, PyObject *kw
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_char_from, 1, sz_true_k, sz_false_k);
 }
 
-static char const *const doc_split_iter = //
+static char const doc_split_iter[] = //
     "Create an iterator for splitting a string by a separator.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2677,7 +2677,7 @@ static PyObject *Str_split_iter(PyObject *self, PyObject *args, PyObject *kwargs
     return Str_split_with_known_callback(self, args, kwargs, &sz_find, 0, sz_false_k, sz_true_k);
 }
 
-static char const *const doc_rsplit_iter = //
+static char const doc_rsplit_iter[] = //
     "Create an iterator for splitting a string by a separator in reverse order.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2692,7 +2692,7 @@ static PyObject *Str_rsplit_iter(PyObject *self, PyObject *args, PyObject *kwarg
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_true_k);
 }
 
-static char const *const doc_split_charset_iter = //
+static char const doc_split_charset_iter[] = //
     "Create an iterator for splitting a string by a set of character separators.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2705,7 +2705,7 @@ static PyObject *Str_split_charset_iter(PyObject *self, PyObject *args, PyObject
     return Str_split_with_known_callback(self, args, kwargs, &sz_find_char_from, 1, sz_false_k, sz_true_k);
 }
 
-static char const *const doc_rsplit_charset_iter = //
+static char const doc_rsplit_charset_iter[] = //
     "Create an iterator for splitting a string by a set of character separators in reverse order.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
@@ -2718,7 +2718,7 @@ static PyObject *Str_rsplit_charset_iter(PyObject *self, PyObject *args, PyObjec
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_char_from, 1, sz_true_k, sz_true_k);
 }
 
-static char const *const doc_splitlines = //
+static char const doc_splitlines[] = //
     "Split a string by line breaks.\n\n"
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
