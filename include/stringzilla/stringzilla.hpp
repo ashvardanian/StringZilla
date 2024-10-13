@@ -3413,7 +3413,8 @@ class basic_string {
     }
 
     /**
-     *  @brief  Maps all chatacters in the current string into another buffer using the provided lookup table.
+     *  @brief  Maps all characters in the current string into another buffer using the provided lookup table.
+     *  @param  output  The buffer to write the transformed string into.
      */
     void transform(look_up_table const &table, pointer output) const noexcept {
         sz_ptr_t start;
@@ -3875,7 +3876,7 @@ void transform(basic_string_slice<char_type_> string, basic_look_up_table<char_t
 }
 
 /**
- *  @brief  Maps all chatacters in the current string into another buffer using the provided lookup table.
+ *  @brief  Maps all characters in the current string into another buffer using the provided lookup table.
  */
 template <typename char_type_>
 void transform(basic_string_slice<char_type_ const> source, basic_look_up_table<char_type_> const &table,

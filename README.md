@@ -373,6 +373,25 @@ x: Strs = text.split_charset(separator='chars', maxsplit=sys.maxsize, keepsepara
 x: Strs = text.rsplit_charset(separator='chars', maxsplit=sys.maxsize, keepseparator=False)
 ```
 
+You can also transform the string using Look-Up Tables (LUTs), mapping it to a different character set.
+This would result in a copy - `str` for `str` inputs and `bytes` for other types.
+
+```py
+x: str = text.translate('chars', {}, start=0, end=sys.maxsize, inplace=False)
+x: bytes = text.translate(b'chars', {}, start=0, end=sys.maxsize, inplace=False)
+```
+
+For efficiency reasons, pass the LUT as a string or bytes object, not as a dictionary.
+This can be useful in high-throughput applications dealing with binary data, including bioinformatics and image processing.
+Here is an example:
+
+```py
+import stringzilla as sz
+look_up_table = bytes(range(256)) # Identity LUT
+image = open("/image/path.jpeg", "rb").read()
+sz.translate(image, look_up_table, inplace=True)
+```
+
 ### Collection-Level Operations
 
 Once split into a `Strs` object, you can sort, shuffle, and reorganize the slices, with minimum memory footprint.
@@ -1023,6 +1042,18 @@ dna.randomize(&std::rand, "ACGT"); // pass any generator, like `std::mt19937`
 char uuid[36];
 sz::randomize(sz::string_span(uuid, 36), "0123456789abcdef-"); // Overwrite any buffer
 ```
+
+### Bulk Replacements
+
+In text processing, it's often necessary to replace all occurrences of a specific substring or set of characters within a string.
+Standard library functions may not offer the most efficient or convenient methods for performing bulk replacements, especially when dealing with large strings or performance-critical applications.
+
+- `haystack.replace_all(needle_string, replacement_string)`
+- `haystack.replace_all(sz::char_set(""), replacement_string)`
+- `haystack.try_replace_all(needle_string, replacement_string)`
+- `haystack.try_replace_all(sz::char_set(""), replacement_string)`
+- `haystack.transform(sz::look_up_table::identity())`
+- `haystack.transform(sz::look_up_table::identity(), haystack.data())`
 
 ### Levenshtein Edit Distance and Alignment Scores
 
