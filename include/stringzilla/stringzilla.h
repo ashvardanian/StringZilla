@@ -2129,7 +2129,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
     sz_u64_vec_t matches0_vec, matches1_vec, matches2_vec, matches3_vec, matches4_vec;
     sz_u64_vec_t n_vec;
     n_vec.u64 = 0;
-    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1], n_vec.u8s[2] = n[2], n_vec.u8s[3] = n[3];
+    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1], n_vec.u8s[2] = n[2];
     n_vec.u64 *= 0x0000000001000001ull; // broadcast
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time using three 64-bit words.
