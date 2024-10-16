@@ -109,11 +109,34 @@ def test_unit_str_rich_comparisons():
 
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_unit_buffer_protocol():
-    my_str = Str("hello")
-    arr = np.array(my_str)
-    assert arr.dtype == np.dtype("c")
-    assert arr.shape == (len("hello"),)
-    assert "".join([c.decode("utf-8") for c in arr.tolist()]) == "hello"
+    """Tests weather conversion to and from the buffer protocol works as expected."""
+
+    # Convert from StringZilla string to NumPy array through buffer protocol
+    sz_str = Str("hello")
+    np_array = np.array(sz_str)
+    assert np_array.dtype == np.dtype("c")
+    assert np_array.shape == (len("hello"),)
+    assert "".join([c.decode("utf-8") for c in np_array.tolist()]) == "hello"
+
+    # Convert from NumPy array to StringZilla string through buffer protocol
+    np_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)
+    sz_str = sz.Str(memoryview(np_array))
+    assert len(np_array) == len(sz_str)
+
+    # Make sure multi-dimensional contiguous arrays are supported for image processing
+    np_array = np.arange(ord("a"), ord("a") + 8, dtype=np.uint8).reshape((2, 2, 2))
+    sz_str = sz.Str(memoryview(np_array))
+    assert np_array.size == len(sz_str)
+
+    # Expect errors if the data is not contiguous
+    np_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)[::2]
+    with pytest.raises(ValueError):
+        sz.Str(memoryview(np_array))
+
+    with pytest.raises(TypeError):
+        sz.Str(np.array())
+    with pytest.raises(TypeError):
+        sz.Str(dict())
 
 
 def test_str_write_to():

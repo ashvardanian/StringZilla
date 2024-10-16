@@ -252,6 +252,10 @@ void apply_order(sz_string_view_t *array, sz_sorted_idx_t *order, size_t length)
     }
 }
 
+/**
+ *  @brief  Helper function to export a Python string-like object into a `sz_string_view_t`.
+ *          On failure, sets a Python exception and returns 0.
+ */
 sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python `str` object
@@ -265,7 +269,7 @@ sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *len
         // https://docs.python.org/3/c-api/bytes.html
         Py_ssize_t signed_length;
         if (PyBytes_AsStringAndSize(object, (char **)start, &signed_length) == -1) {
-            PyErr_SetString(PyExc_TypeError, "Mapping bytes failed");
+            PyErr_SetString(PyExc_ValueError, "Couldn't access `bytes` buffer internals");
             return 0;
         }
         *length = (size_t)signed_length;
@@ -289,6 +293,35 @@ sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *len
         *start = file->memory.start;
         *length = file->memory.length;
         return 1;
+    }
+    else if (PyMemoryView_Check(object)) {
+        // Handle Python `memoryview` object
+        // https://docs.python.org/3/c-api/memoryview.html
+        // https://docs.python.org/3/c-api/buffer.html#c.Py_buffer
+        Py_buffer *view = PyMemoryView_GET_BUFFER(object);
+        // Make sure we are dealing with single-byte integral representations
+        if (view->itemsize != 1) {
+            PyErr_SetString(PyExc_ValueError, "Only single-byte integral types are supported");
+            return 0;
+        }
+        // Let's make sure the data is contiguous.
+        // This can be a bit trickier for high-dimensional arrays, but CPython has a built-in function for that.
+        // The flag 'C' stands for C-style-contiguous, which means that the last dimension is contiguous.
+        // The flag 'F' stands for Fortran-style-contiguous, which means that the first dimension is contiguous.
+        // The flag 'A' stands for any-contiguous, which only means there are no gaps between elements.
+        // For byte-level processing that's all we need.
+        if (!PyBuffer_IsContiguous(view, 'A')) {
+            PyErr_SetString(PyExc_ValueError, "The array must be contiguous");
+            return 0;
+        }
+
+        *start = (sz_cptr_t)view->buf;
+        *length = (sz_size_t)view->len;
+        return 1;
+    }
+    else {
+        PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
+        return 0;
     }
     return 0;
 }
@@ -2155,7 +2188,6 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
     sz_string_view_t look_up_table_str;
     SZ_ALIGN64 char look_up_table[256];
     if (export_string_like(look_up_table_obj, &look_up_table_str.start, &look_up_table_str.length)) {
-        // Export
         if (look_up_table_str.length != 256) {
             PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
             return NULL;

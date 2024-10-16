@@ -344,7 +344,12 @@ StringZilla's `Str` class is a hybrid of those two, providing `str`-like interfa
 from stringzilla import Str, File
 
 text_from_str = Str('some-string') # no copies, just a view
+text_from_bytes = Str(b'some-array') # no copies, just a view
 text_from_file = Str(File('some-file.txt')) # memory-mapped file
+
+import numpy as np
+alphabet_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)
+text_from_array = Str(memoryview(alphabet_array))
 ```
 
 The `File` class memory-maps a file from persistent memory without loading its copy into RAM.
