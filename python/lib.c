@@ -323,7 +323,18 @@ sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *len
         PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
         return 0;
     }
-    return 0;
+}
+
+/**
+ *  @brief  Helper function to wrap the current exception with a custom prefix message.
+ *          A example is augmenting the argument parsing error with the name of the variable
+ *          that didn't pass the validation.
+ */
+void wrap_current_exception(sz_cptr_t comment) {
+    // ? Prior to Python 3.12 we need to fetch and restore the exception state using
+    // ? `PyErr_Fetch` and `PyErr_Restore` to avoid overwriting the current exception.
+    // ? After Python 3.12 we can use `PyErr_GetRaisedException` and `PyErr_SetRaisedException`.
+    sz_unused(comment);
 }
 
 typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject **, char const **, size_t *);
@@ -644,7 +655,7 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
         Py_INCREF(parent_obj);
     }
     else {
-        PyErr_SetString(PyExc_TypeError, "Unsupported parent type");
+        wrap_current_exception("Unsupported parent type");
         return -1;
     }
 
@@ -720,7 +731,7 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs)
 
     // Validate and convert `text`
     if (!export_string_like(text_object, &text.start, &text.length)) {
-        PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
+        wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
 
@@ -802,9 +813,9 @@ static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
 }
 
 static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
-    // This function MUST NOT decrement view->obj, since that is done automatically
-    // in PyBuffer_Release() (this scheme is useful for breaking reference cycles).
-    // https://docs.python.org/3/c-api/typeobj.html#c.PyBufferProcs.bf_releasebuffer
+    //! This function MUST NOT decrement view->obj, since that is done automatically
+    //! in PyBuffer_Release() (this scheme is useful for breaking reference cycles).
+    //! https://docs.python.org/3/c-api/typeobj.html#c.PyBufferProcs.bf_releasebuffer
 }
 
 /**
@@ -816,7 +827,7 @@ static int Str_in(Str *self, PyObject *needle_obj) {
 
     sz_string_view_t needle;
     if (!export_string_like(needle_obj, &needle.start, &needle.length)) {
-        PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
+        wrap_current_exception("Unsupported needle type");
         return -1;
     }
 
@@ -1030,7 +1041,7 @@ static int Strs_in(Str *self, PyObject *needle_obj) {
     // Validate and convert `needle`
     sz_string_view_t needle;
     if (!export_string_like(needle_obj, &needle.start, &needle.length)) {
-        PyErr_SetString(PyExc_TypeError, "The needle argument must be string-like");
+        wrap_current_exception("The needle argument must be string-like");
         return -1;
     }
 
@@ -1178,7 +1189,7 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
         if (!export_string_like(other_item, &bi.start, &bi.length)) {
             Py_DECREF(other_item);
             Py_DECREF(other_iter);
-            PyErr_SetString(PyExc_TypeError, "The second container must contain string-like objects");
+            wrap_current_exception("The second container must contain string-like objects");
             return NULL;
         }
 
@@ -1278,7 +1289,7 @@ static PyObject *Str_decode(PyObject *self, PyObject *args, PyObject *kwargs) {
     if ((!export_string_like(text_obj, &text.start, &text.length)) ||
         (encoding_obj && !export_string_like(encoding_obj, &encoding.start, &encoding.length)) ||
         (errors_obj && !export_string_like(errors_obj, &errors.start, &errors.length))) {
-        PyErr_Format(PyExc_TypeError, "text, encoding, and errors must be string-like");
+        wrap_current_exception("text, encoding, and errors must be string-like");
         return NULL;
     }
 
@@ -1322,7 +1333,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
     // Validate and convert `text` and `path`
     if (!export_string_like(text_object, &text.start, &text.length) ||
         !export_string_like(path_obj, &path.start, &path.length)) {
-        PyErr_SetString(PyExc_TypeError, "Text and path must be string-like");
+        wrap_current_exception("Text and path must be string-like");
         return NULL;
     }
 
@@ -1400,7 +1411,7 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwa
     // Validate and convert `text` and `slice`
     if (!export_string_like(text_object, &text.start, &text.length) ||
         !export_string_like(slice_obj, &slice.start, &slice.length)) {
-        PyErr_SetString(PyExc_TypeError, "Text and slice must be string-like");
+        wrap_current_exception("Text and slice must be string-like");
         return NULL;
     }
 
@@ -1453,7 +1464,7 @@ static int _Str_find_implementation_( //
     // Validate and convert `haystack` and `needle`
     if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
         !export_string_like(needle_obj, &needle.start, &needle.length)) {
-        PyErr_SetString(PyExc_TypeError, "Haystack and needle must be string-like");
+        wrap_current_exception("Haystack and needle must be string-like");
         return 0;
     }
 
@@ -1731,8 +1742,10 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
 
     if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
-        !export_string_like(needle_obj, &needle.start, &needle.length))
-        return PyErr_Format(PyExc_TypeError, "Haystack and needle must be string-like"), NULL;
+        !export_string_like(needle_obj, &needle.start, &needle.length)) {
+        wrap_current_exception("Haystack and needle must be string-like");
+        return NULL;
+    }
 
     if ((start == -1 || end == -1 || allowoverlap == -1) && PyErr_Occurred()) return NULL;
 
@@ -1801,7 +1814,7 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
     sz_string_view_t str1, str2;
     if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
         !export_string_like(str2_obj, &str2.start, &str2.length)) {
-        PyErr_Format(PyExc_TypeError, "Both arguments must be string-like");
+        wrap_current_exception("Both arguments must be string-like");
         return NULL;
     }
 
@@ -1884,7 +1897,7 @@ static PyObject *_Str_hamming_distance(PyObject *self, PyObject *args, PyObject 
     sz_string_view_t str1, str2;
     if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
         !export_string_like(str2_obj, &str2.start, &str2.length)) {
-        PyErr_Format(PyExc_TypeError, "Both arguments must be string-like");
+        wrap_current_exception("Both arguments must be string-like");
         return NULL;
     }
 
@@ -2004,7 +2017,7 @@ static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *k
     sz_string_view_t str1, str2;
     if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
         !export_string_like(str2_obj, &str2.start, &str2.length)) {
-        PyErr_Format(PyExc_TypeError, "Both arguments must be string-like");
+        wrap_current_exception("Both arguments must be string-like");
         return NULL;
     }
 
@@ -2071,7 +2084,7 @@ static PyObject *Str_startswith(PyObject *self, PyObject *args, PyObject *kwargs
     sz_string_view_t str, prefix;
     if (!export_string_like(str_obj, &str.start, &str.length) ||
         !export_string_like(prefix_obj, &prefix.start, &prefix.length)) {
-        PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
+        wrap_current_exception("Both arguments must be string-like");
         return NULL;
     }
 
@@ -2124,7 +2137,7 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
     sz_string_view_t str, suffix;
     if (!export_string_like(str_obj, &str.start, &str.length) ||
         !export_string_like(suffix_obj, &suffix.start, &suffix.length)) {
-        PyErr_SetString(PyExc_TypeError, "Both arguments must be string-like");
+        wrap_current_exception("Both arguments must be string-like");
         return NULL;
     }
 
@@ -2181,20 +2194,13 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
 
     sz_string_view_t str;
     if (!export_string_like(str_obj, &str.start, &str.length)) {
-        PyErr_SetString(PyExc_TypeError, "First argument must be string-like");
+        wrap_current_exception("First argument must be string-like");
         return NULL;
     }
 
     sz_string_view_t look_up_table_str;
     SZ_ALIGN64 char look_up_table[256];
-    if (export_string_like(look_up_table_obj, &look_up_table_str.start, &look_up_table_str.length)) {
-        if (look_up_table_str.length != 256) {
-            PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
-            return NULL;
-        }
-        memcpy(&look_up_table[0], look_up_table_str.start, look_up_table_str.length);
-    }
-    else if (PyDict_Check(look_up_table_obj)) {
+    if (PyDict_Check(look_up_table_obj)) {
 
         // If any character is not defined, it will be replaced with itself:
         for (int i = 0; i < 256; i++) { look_up_table[i] = (char)i; }
@@ -2214,8 +2220,15 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
             look_up_table[(unsigned char)key_char] = value_char;
         }
     }
+    else if (export_string_like(look_up_table_obj, &look_up_table_str.start, &look_up_table_str.length)) {
+        if (look_up_table_str.length != 256) {
+            PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
+            return NULL;
+        }
+        memcpy(&look_up_table[0], look_up_table_str.start, look_up_table_str.length);
+    }
     else {
-        PyErr_SetString(PyExc_TypeError, "Second argument must be string-like or a dictionary");
+        wrap_current_exception("The look-up table must be string-like or a dictionary");
         return NULL;
     }
 
@@ -2583,14 +2596,14 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, P
 
     // Validate and convert `text`
     if (!export_string_like(text_object, &text.start, &text.length)) {
-        PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
+        wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
 
     // Validate and convert `separator`
     if (separator_object) {
         if (!export_string_like(separator_object, &separator.start, &separator.length)) {
-            PyErr_SetString(PyExc_TypeError, "The separator argument must be string-like");
+            wrap_current_exception("The separator argument must be string-like");
             return NULL;
         }
         // Raise a `ValueError` if it's length is zero, like the native `str.split`
@@ -2788,7 +2801,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
 
     // Validate and convert `text`
     if (!export_string_like(text_object, &text.start, &text.length)) {
-        PyErr_SetString(PyExc_TypeError, "The text argument must be string-like");
+        wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
 
@@ -2796,7 +2809,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
     if (keeplinebreaks_obj) {
         keeplinebreaks = PyObject_IsTrue(keeplinebreaks_obj);
         if (keeplinebreaks == -1) {
-            PyErr_SetString(PyExc_TypeError, "The keeplinebreaks argument must be a boolean");
+            wrap_current_exception("The keeplinebreaks argument must be a boolean");
             return NULL;
         }
     }
@@ -2840,15 +2853,10 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
 static PyObject *Str_concat(PyObject *self, PyObject *other) {
     struct sz_string_view_t self_str, other_str;
 
-    // Validate and convert `self`
-    if (!export_string_like(self, &self_str.start, &self_str.length)) {
-        PyErr_SetString(PyExc_TypeError, "The self object must be string-like");
-        return NULL;
-    }
-
-    // Validate and convert `other`
-    if (!export_string_like(other, &other_str.start, &other_str.length)) {
-        PyErr_SetString(PyExc_TypeError, "The other object must be string-like");
+    // Validate and convert `self` and `other`
+    if (!export_string_like(self, &self_str.start, &self_str.length) ||
+        !export_string_like(other, &other_str.start, &other_str.length)) {
+        wrap_current_exception("Both operands must be string-like");
         return NULL;
     }
 

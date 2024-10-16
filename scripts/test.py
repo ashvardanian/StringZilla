@@ -133,8 +133,10 @@ def test_unit_buffer_protocol():
     with pytest.raises(ValueError):
         sz.Str(memoryview(np_array))
 
+    # Expect errors if the data is not passed through a `memoryview`
     with pytest.raises(TypeError):
         sz.Str(np.array())
+    # Expect errors if the data is not string-like
     with pytest.raises(TypeError):
         sz.Str(dict())
 
