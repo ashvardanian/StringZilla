@@ -106,24 +106,52 @@ jobs:
           path: ./wheelhouse/*.whl
           overwrite: true
 
+  build_sdist:
+    name: Build Python Source Distribution
+    runs-on: ubuntu-24.04
+    needs: versioning
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "main"
+      - name: Set up Python
+        uses: actions/setup-python@v5.2.0
+        with:
+          python-version: 3.x
+      - name: Build source distribution
+        run: pip install build &&
+          python -m build --sdist
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          retention-days: 1
+
   publish_python:
     name: Publish Python
-    needs: build_wheels
-    runs-on: ubuntu-20.04
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-24.04
     environment:
       name: pypi
-      url: https://pypi.org/p/stringzilla
+      url: https://pypi.org/p/simsimd
     permissions:
       id-token: write
 
     steps:
-      - name: Download artifacts
+      - name: Download wheels
         uses: actions/download-artifact@v4
         with:
           # unpacks all CIBW artifacts into dist/
           pattern: cibw-*
           path: dist
           merge-multiple: true
+
+      - name: Download source distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
 
       - name: Publish to PyPi
         uses: pypa/gh-action-pypi-publish@release/v1

@@ -29,6 +29,7 @@ CMakeFiles
 .venv/*
 node_modules/
 .vs/
+*.tar.gz
 
 # Recommended datasets
 leipzig1M.txt
