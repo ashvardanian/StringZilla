@@ -5,9 +5,6 @@
  *  @date       January 16, 2024
  *  @copyright  Copyright (c) 2024
  */
-#if defined(_WIN32) || defined(__CYGWIN__)
-#include <windows.h> // `DllMain`
-#endif
 
 // When enabled, this library will override the symbols usually provided by the C standard library.
 // It's handy if you want to use the `LD_PRELOAD` trick for non-intrusive profiling and replacing
@@ -232,22 +229,8 @@ static void sz_dispatch_table_init(void) {
 }
 
 #if defined(_MSC_VER)
-BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
-    switch (forward_reason) {
-    case DLL_PROCESS_ATTACH: sz_dispatch_table_init(); return TRUE;
-    case DLL_THREAD_ATTACH: return TRUE;
-    case DLL_THREAD_DETACH: return TRUE;
-    case DLL_PROCESS_DETACH: return TRUE;
-    }
-}
-
-#if SZ_AVOID_LIBC
-BOOL WINAPI _DllMainCRTStartup(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
-    DllMain(hints, forward_reason, lp);
-    return TRUE;
-}
-#endif
-
+#pragma section(".CRT$XCU", read)
+__declspec(allocate(".CRT$XCU")) void (*_sz_dispatch_table_init)() = sz_dispatch_table_init;
 #else
 __attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
