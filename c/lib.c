@@ -232,22 +232,20 @@ static void sz_dispatch_table_init(void) {
 }
 
 #if defined(_MSC_VER)
+#pragma section(".CRT$XCU", read)
+__declspec(allocate(".CRT$XCU")) void (*_sz_dispatch_table_init)() = sz_dispatch_table_init;
+
 BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
     switch (forward_reason) {
-    case DLL_PROCESS_ATTACH: sz_dispatch_table_init(); return TRUE;
+    case DLL_PROCESS_ATTACH:
+        sz_dispatch_table_init(); // Ensure initialization
+        return TRUE;
     case DLL_THREAD_ATTACH: return TRUE;
     case DLL_THREAD_DETACH: return TRUE;
     case DLL_PROCESS_DETACH: return TRUE;
     }
-}
-
-#if SZ_AVOID_LIBC
-BOOL WINAPI _DllMainCRTStartup(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
-    DllMain(hints, forward_reason, lp);
     return TRUE;
 }
-#endif
-
 #else
 __attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
