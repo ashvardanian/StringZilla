@@ -5,9 +5,6 @@
  *  @date       January 16, 2024
  *  @copyright  Copyright (c) 2024
  */
-#if defined(_WIN32) || defined(__CYGWIN__)
-#include <windows.h> // `DllMain`
-#endif
 
 // When enabled, this library will override the symbols usually provided by the C standard library.
 // It's handy if you want to use the `LD_PRELOAD` trick for non-intrusive profiling and replacing
