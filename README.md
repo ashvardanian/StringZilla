@@ -171,7 +171,7 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>9.4</b> MB/s
     </td>
     <td align="center">
-      <code>uniform_int_distribution</code><br/>
+      <code>std::uniform_int_distribution</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>47.2</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>20.4</b> MB/s
     </td>
@@ -193,7 +193,7 @@ __Who is this for?__
   <tr>
     <td align="center">⚪</td>
     <td align="center">
-      <code>transform</code><br/>
+      <code>std::transform</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>3.81</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>2.65</b> GB/s
     </td>
