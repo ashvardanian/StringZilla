@@ -449,7 +449,7 @@ def test_unit_globals():
 
     assert sz.translate("ABC", {"A": "X", "B": "Y", "C": "Z"}) == "XYZ"
     assert sz.translate("ABC", {"A": "X", "B": "Y"}) == "XYC"
-    assert sz.translate("ABC", {"A": "X", "B": "Y"}, 1, -1) == "YC"
+    assert sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1) == "YC"
     assert sz.translate("ABC", bytes(range(256))) == "ABC"
 
 
@@ -754,16 +754,16 @@ def test_translations(length: int):
         view_threshold
     )
 
-    # Check in-place translations
-    body_after_identity = str(body)
-    sz.translate(body, view_identity, inplace=True)
-    assert body == body_after_identity.translate(dict_identity)
-    body_after_invert = str(body)
-    sz.translate(body, view_invert, inplace=True)
-    assert body == body_after_invert.translate(dict_invert)
-    body_after_threshold = str(body)
-    sz.translate(body, view_threshold, inplace=True)
-    assert body == body_after_threshold.translate(dict_threshold)
+    # Check in-place translations - all of them return nothing
+    after_identity = memoryview(body_bytes)
+    assert sz.translate(after_identity, view_identity, inplace=True) == None
+    assert sz.equal(after_identity, body.translate(dict_identity))
+    after_invert = memoryview(body_bytes)
+    assert sz.translate(after_invert, view_invert, inplace=True) == None
+    assert sz.equal(after_invert, body.translate(dict_invert))
+    after_threshold = memoryview(body_bytes)
+    assert sz.translate(after_threshold, view_threshold, inplace=True) == None
+    assert sz.equal(after_threshold, body.translate(dict_threshold))
 
 
 @pytest.mark.repeat(3)
