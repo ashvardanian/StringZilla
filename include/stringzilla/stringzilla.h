@@ -1155,7 +1155,7 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #endif
 
 #ifndef SZ_USE_ARM_NEON
-#ifdef __ARM_NEON
+#if defined(__ARM_NEON) || defined(_M_ARM64)
 #define SZ_USE_ARM_NEON 1
 #else
 #define SZ_USE_ARM_NEON 0
@@ -1163,9 +1163,29 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #endif
 
 #ifndef SZ_USE_ARM_SVE
-#ifdef __ARM_FEATURE_SVE
+#if defined(__ARM_FEATURE_SVE)
 #define SZ_USE_ARM_SVE 1
 #else
+#define SZ_USE_ARM_SVE 0
+#endif
+#endif
+
+// Undef the hardware features if the build target never supports them, mainly used when building MacOS universal2 because
+// then both x86 & arm feature flags can be set
+#ifndef SZ_TARGET_X86
+#if !(defined(__i386__) || defined(__amd64__) || defined(_M_IX86) || defined(_M_AMD64))
+#undef SZ_USE_X86_AVX2
+#define SZ_USE_X86_AVX2 0
+#undef SZ_USE_X86_AVX512
+#define SZ_USE_X86_AVX512 0
+#endif
+#endif
+
+#ifndef SZ_TARGET_ARM
+#if !(defined(__arm__) || defined(__aarch64__) || defined(_M_ARM) || defined(_M_ARM64))
+#undef SZ_USE_ARM_NEON
+#define SZ_USE_ARM_NEON 0
+#undef SZ_USE_ARM_SVE
 #define SZ_USE_ARM_SVE 0
 #endif
 #endif
@@ -1383,6 +1403,14 @@ SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int l
 #if defined(_MSC_VER) && !defined(__clang__) // On Clang-CL
 #include <intrin.h>
 
+#if defined(_M_ARM) || defined(_M_ARM64) || defined(_M_ARM64EC)
+SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return (int)_CountTrailingZeros64(x); }
+SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return (int)_CountLeadingZeros64(x); }
+SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return (int)_CountOneBits64(x); }
+SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return (int)_CountOneBits(x); }
+SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return (int)_CountTrailingZeros(x); }
+SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return (int)_CountLeadingZeros(x); }
+#else
 // Sadly, when building Win32 images, we can't use the `_tzcnt_u64`, `_lzcnt_u64`,
 // `_BitScanForward64`, or `_BitScanReverse64` intrinsics. For now it's a simple `for`-loop.
 // TODO: In the future we can switch to a more efficient De Bruijn's algorithm.
@@ -1390,8 +1418,8 @@ SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int l
 // https://www.chessprogramming.org/De_Bruijn_Sequence
 // https://gist.github.com/resilar/e722d4600dbec9752771ab4c9d47044f
 //
-// Use the serial version on 32-bit x86 and on Arm.
-#if (defined(_WIN32) && !defined(_WIN64)) || defined(_M_ARM) || defined(_M_ARM64)
+// Use the serial version on 32-bit x86 and on 32-bit Arm.
+#if (defined(_WIN32) && !defined(_WIN64))
 SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) {
     sz_assert(x != 0);
     int n = 0;
@@ -1409,31 +1437,18 @@ SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) {
     x = (x & 0x3333333333333333ull) + ((x >> 2) & 0x3333333333333333ull);
     return (((x + (x >> 4)) & 0x0F0F0F0F0F0F0F0Full) * 0x0101010101010101ull) >> 56;
 }
-SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) {
-    sz_assert(x != 0);
-    int n = 0;
-    while ((x & 1) == 0) { n++, x >>= 1; }
-    return n;
-}
-SZ_INTERNAL int sz_u32_clz(sz_u32_t x) {
-    sz_assert(x != 0);
-    int n = 0;
-    while ((x & 0x80000000u) == 0) { n++, x <<= 1; }
-    return n;
-}
-SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) {
-    x = x - ((x >> 1) & 0x55555555);
-    x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
-    return (((x + (x >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
-}
 #else
 SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) { return (int)_tzcnt_u64(x); }
 SZ_INTERNAL int sz_u64_clz(sz_u64_t x) { return (int)_lzcnt_u64(x); }
 SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) { return (int)__popcnt64(x); }
+#endif
+
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
+
 #endif
+
 // Force the byteswap functions to be intrinsics, because when /Oi- is given, these will turn into CRT function calls,
 // which breaks when `SZ_AVOID_LIBC` is given
 #pragma intrinsic(_byteswap_uint64)
@@ -1458,9 +1473,12 @@ SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x 
  *
  *  Similar to `_mm_blend_epi16` intrinsic on x86.
  *  Described in the "Bit Twiddling Hacks" by Sean Eron Anderson.
- *  https://graphics.stanford.edu/~seander/bithacks.html#ConditionalSetOrClearBitsWithoutBranching
+ *  https://graphics.stanford.edu/~seander/bithacks.html#MaskedMerge
  */
 SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { return a ^ ((a ^ b) & mask); }
+
+/** @copydoc sz_u64_blend */
+SZ_INTERNAL sz_size_t sz_size_blend(sz_size_t a, sz_size_t b, sz_size_t mask) { return a ^ ((a ^ b) & mask); }
 
 /*
  *  Efficiently computing the minimum and maximum of two or three values can be tricky.
@@ -3244,7 +3262,7 @@ SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_s
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
     *length = string->external.length & (0x00000000000000FFull | is_big_mask);
     // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
-    *space = sz_u64_blend(SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
+    *space = sz_size_blend(SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
     *is_external = (sz_bool_t)!is_small;
 }
 

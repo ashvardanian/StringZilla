@@ -390,9 +390,15 @@ SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_
 // SZ_DYNAMIC can't be use here for MSVC, because MSVC complains about different linkage (C2375), probably due to to the
 // CRT headers specifying the function as __declspec(dllimport), there might be a combination of defines that works. But
 // for now they will be manually exported using linker flags
+// Also when building for 32-bit we must add an underscore to the exported function name (becuase thats how __cdecl
+// functions are decorated in MSVC, see https://stackoverflow.com/questions/62753691)
 
 #if defined(_MSC_VER)
+#if SZ_DETECT_64_BIT
 #pragma comment(linker, "/export:memchr")
+#else
+#pragma comment(linker, "/export:_memchr")
+#endif
 void *__cdecl memchr(void const *s, int c_wide, size_t n) {
 #else
 SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
@@ -402,7 +408,11 @@ SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
 }
 
 #if defined(_MSC_VER)
+#if SZ_DETECT_64_BIT
 #pragma comment(linker, "/export:memcpy")
+#else
+#pragma comment(linker, "/export:_memcpy")
+#endif
 void *__cdecl memcpy(void *dest, void const *src, size_t n) {
 #else
 SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
@@ -412,7 +422,11 @@ SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
 }
 
 #if defined(_MSC_VER)
+#if SZ_DETECT_64_BIT
 #pragma comment(linker, "/export:memmove")
+#else
+#pragma comment(linker, "/export:_memmove")
+#endif
 void *__cdecl memmove(void *dest, void const *src, size_t n) {
 #else
 SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
@@ -422,7 +436,11 @@ SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
 }
 
 #if defined(_MSC_VER)
+#if SZ_DETECT_64_BIT
 #pragma comment(linker, "/export:memset")
+#else
+#pragma comment(linker, "/export:_memset")
+#endif
 void *__cdecl memset(void *s, int c, size_t n) {
 #else
 SZ_DYNAMIC void *memset(void *s, int c, size_t n) {
