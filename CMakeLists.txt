@@ -327,6 +327,16 @@ if(${STRINGZILLA_BUILD_SHARED})
         "SZ_USE_ARM_NEON=1"
         "SZ_USE_ARM_SVE=1")
     endif()
+
+    if (MSVC)
+      # Add dependencies for necessary runtime libraries in case of static linking
+      # This ensures that basic runtime functions are available:
+      # msvcrt.lib: Microsoft Visual C Runtime, required for basic C runtime functions on Windows.
+      # vcruntime.lib: Microsoft Visual C++ Runtime library for basic runtime functions.
+      # ucrt.lib: Universal C Runtime, necessary for linking basic C functions like I/O.
+      target_link_libraries(${target} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
+    endif()
+
   endfunction()
 
   define_shared(stringzilla_shared)
@@ -344,4 +354,6 @@ if(${STRINGZILLA_BUILD_SHARED})
     "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
   target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
   target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
+
+
 endif()
