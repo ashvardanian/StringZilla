@@ -232,11 +232,11 @@ void bench_memory(std::vector<std::string_view> const &slices, sz_cptr_t dataset
     bench_memory(slices, copy_functions<true>(dataset_start_ptr, output_buffer_ptr));
     bench_memory(slices, copy_functions<false>(dataset_start_ptr, output_buffer_ptr));
     bench_memory(slices, fill_functions(dataset_start_ptr, output_buffer_ptr));
-    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
-    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
-    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
-    // bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
-    // bench_memory(slices, transform_functions());
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 1));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, 8));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, SZ_CACHE_LINE_WIDTH));
+    bench_memory(slices, move_functions(dataset_start_ptr, output_buffer_ptr, max_shift_length));
+    bench_memory(slices, transform_functions());
 }
 
 int main(int argc, char const **argv) {

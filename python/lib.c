@@ -96,8 +96,8 @@ typedef struct {
 typedef struct {
     PyObject ob_base;
 
-    PyObject *text_object;      //< For reference counting
-    PyObject *separator_object; //< For reference counting
+    PyObject *text_obj;      //< For reference counting
+    PyObject *separator_obj; //< For reference counting
 
     sz_string_view_t text;
     sz_string_view_t separator;
@@ -596,35 +596,14 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
 
     // Parse keyword arguments, if provided, and ensure no duplicates
     if (kwargs) {
-        PyObject *key, *value;
         Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "parent") == 0) {
-                if (parent_obj) {
-                    PyErr_SetString(PyExc_TypeError, "Received `parent` both as positional and keyword argument");
-                    return -1;
-                }
-                parent_obj = value;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "from") == 0) {
-                if (from_obj) {
-                    PyErr_SetString(PyExc_TypeError, "Received `from` both as positional and keyword argument");
-                    return -1;
-                }
-                from_obj = value;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "to") == 0) {
-                if (to_obj) {
-                    PyErr_SetString(PyExc_TypeError, "Received `to` both as positional and keyword argument");
-                    return -1;
-                }
-                to_obj = value;
-            }
-            else {
-                PyErr_SetString(PyExc_TypeError, "Invalid keyword argument");
+        PyObject *key, *value;
+        while (PyDict_Next(kwargs, &pos, &key, &value))
+            if (PyUnicode_CompareWithASCIIString(key, "parent") == 0 && !parent_obj) { parent_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "from") == 0 && !from_obj) { from_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "to") == 0 && !to_obj) { to_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
                 return -1;
-            }
-        }
     }
 
     // Now, type-check and cast each argument
@@ -726,17 +705,54 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
-    PyObject *text_object = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
     sz_string_view_t text;
 
     // Validate and convert `text`
-    if (!export_string_like(text_object, &text.start, &text.length)) {
+    if (!export_string_like(text_obj, &text.start, &text.length)) {
         wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
 
     sz_u64_t result = sz_hash(text.start, text.length);
     return PyLong_FromSize_t((size_t)result);
+}
+
+static char const doc_like_equal[] = //
+    "Compute the equals value of the string.\n\n"
+    "This function can be called as a method on a Str object or as a standalone function.\n\n"
+    "Args:\n"
+    "  self (Str or str or bytes): The string object (if called as a method).\n"
+    "  text (str): The string to equals (if called as a function).\n\n"
+    "Returns:\n"
+    "  int: The equals value of the string.\n\n"
+    "Raises:\n"
+    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
+
+static PyObject *Str_like_equal(PyObject *self, PyObject *args, PyObject *kwargs) {
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member || nargs > !is_member + 1 || kwargs) {
+        PyErr_SetString(PyExc_TypeError, "equals() expects exactly two positional arguments");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *other_obj = PyTuple_GET_ITEM(args, is_member);
+    sz_string_view_t text, other;
+
+    // Validate and convert tje texts
+    if (!export_string_like(text_obj, &text.start, &text.length) || //
+        !export_string_like(other_obj, &other.start, &other.length)) {
+        wrap_current_exception("The arguments must be string-like");
+        return NULL;
+    }
+
+    if (text.length != other.length) { Py_RETURN_FALSE; }
+    sz_bool_t result = sz_equal(text.start, other.start, text.length);
+    if (result != sz_true_k) { Py_RETURN_FALSE; }
+    Py_RETURN_TRUE;
 }
 
 static PyObject *Str_get_address(Str *self, void *closure) { return PyLong_FromSize_t((sz_size_t)self->memory.start); }
@@ -1275,8 +1291,8 @@ static PyObject *Str_decode(PyObject *self, PyObject *args, PyObject *kwargs) {
         Py_ssize_t pos = 0;
         PyObject *key, *value;
         while (PyDict_Next(kwargs, &pos, &key, &value))
-            if (PyUnicode_CompareWithASCIIString(key, "encoding") == 0) { encoding_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "errors") == 0) { errors_obj = value; }
+            if (PyUnicode_CompareWithASCIIString(key, "encoding") == 0 && !encoding_obj) { encoding_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "errors") == 0 && !errors_obj) { errors_obj = value; }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
                 return NULL;
     }
@@ -1318,7 +1334,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
         return NULL;
     }
 
-    PyObject *text_object = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
     PyObject *path_obj = PyTuple_GET_ITEM(args, !is_member + 0);
 
     // Parse keyword arguments
@@ -1331,7 +1347,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
     sz_string_view_t path;
 
     // Validate and convert `text` and `path`
-    if (!export_string_like(text_object, &text.start, &text.length) ||
+    if (!export_string_like(text_obj, &text.start, &text.length) ||
         !export_string_like(path_obj, &path.start, &path.length)) {
         wrap_current_exception("Text and path must be string-like");
         return NULL;
@@ -1397,7 +1413,7 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwa
     }
 
     PyObject *slice_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *text_object = PyTuple_GET_ITEM(args, !is_member + 0);
+    PyObject *text_obj = PyTuple_GET_ITEM(args, !is_member + 0);
 
     // Parse keyword arguments
     if (kwargs) {
@@ -1409,7 +1425,7 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwa
     sz_string_view_t slice;
 
     // Validate and convert `text` and `slice`
-    if (!export_string_like(text_object, &text.start, &text.length) ||
+    if (!export_string_like(text_obj, &text.start, &text.length) ||
         !export_string_like(slice_obj, &slice.start, &slice.length)) {
         wrap_current_exception("Text and slice must be string-like");
         return NULL;
@@ -1447,14 +1463,11 @@ static int _Str_find_implementation_( //
     if (kwargs) {
         Py_ssize_t pos = 0;
         PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "start") == 0) { start_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) { end_obj = value; }
-            else {
-                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+        while (PyDict_Next(kwargs, &pos, &key, &value))
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0 && !start_obj) { start_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0 && !end_obj) { end_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
                 return 0;
-            }
-        }
     }
 
     sz_string_view_t haystack;
@@ -1793,16 +1806,12 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
     PyObject *bound_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
 
     if (kwargs) {
-        PyObject *key, *value;
         Py_ssize_t pos = 0;
+        PyObject *key, *value;
         while (PyDict_Next(kwargs, &pos, &key, &value))
-            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0) {
-                if (bound_obj) {
-                    PyErr_Format(PyExc_TypeError, "Received bound both as positional and keyword argument");
-                    return NULL;
-                }
-                bound_obj = value;
-            }
+            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0 && !bound_obj) { bound_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+                return NULL;
     }
 
     Py_ssize_t bound = 0; // Default value for bound
@@ -1876,16 +1885,12 @@ static PyObject *_Str_hamming_distance(PyObject *self, PyObject *args, PyObject 
     PyObject *bound_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
 
     if (kwargs) {
-        PyObject *key, *value;
         Py_ssize_t pos = 0;
+        PyObject *key, *value;
         while (PyDict_Next(kwargs, &pos, &key, &value))
-            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0) {
-                if (bound_obj) {
-                    PyErr_Format(PyExc_TypeError, "Received bound both as positional and keyword argument");
-                    return NULL;
-                }
-                bound_obj = value;
-            }
+            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0 && !bound_obj) { bound_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+                return NULL;
     }
 
     Py_ssize_t bound = 0; // Default value for bound
@@ -1959,49 +1964,40 @@ static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *k
 
     PyObject *str1_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
     PyObject *str2_obj = PyTuple_GET_ITEM(args, !is_member + 0);
-    PyObject *substitutions_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *gap_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+    PyObject *substitution_matrix_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *gap_score_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
 
     if (kwargs) {
-        PyObject *key, *value;
         Py_ssize_t pos = 0;
+        PyObject *key, *value;
         while (PyDict_Next(kwargs, &pos, &key, &value))
-            if (PyUnicode_CompareWithASCIIString(key, "gap_score") == 0) {
-                if (gap_obj) {
-                    PyErr_Format(PyExc_TypeError, "Received the `gap_score` both as positional and keyword argument");
-                    return NULL;
-                }
-                gap_obj = value;
+            if (PyUnicode_CompareWithASCIIString(key, "gap_score") == 0 && !gap_score_obj) { gap_score_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "substitution_matrix") == 0 && !substitution_matrix_obj) {
+                substitution_matrix_obj = value;
             }
-            else if (PyUnicode_CompareWithASCIIString(key, "substitution_matrix") == 0) {
-                if (substitutions_obj) {
-                    PyErr_Format(PyExc_TypeError,
-                                 "Received the `substitution_matrix` both as positional and keyword argument");
-                    return NULL;
-                }
-                substitutions_obj = value;
-            }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+                return NULL;
     }
 
     Py_ssize_t gap = 1; // Default value for gap costs
-    if (gap_obj && (gap = PyLong_AsSsize_t(gap_obj)) && (gap >= 128 || gap <= -128)) {
+    if (gap_score_obj && (gap = PyLong_AsSsize_t(gap_score_obj)) && (gap >= 128 || gap <= -128)) {
         PyErr_Format(PyExc_ValueError, "The `gap_score` must fit into an 8-bit signed integer");
         return NULL;
     }
 
-    // Now extract the substitution matrix from the `substitutions_obj`.
+    // Now extract the substitution matrix from the `substitution_matrix_obj`.
     // It must conform to the buffer protocol, and contain a continuous 256x256 matrix of 8-bit signed integers.
     sz_error_cost_t const *substitutions;
 
     // Ensure the substitution matrix object is provided
-    if (!substitutions_obj) {
+    if (!substitution_matrix_obj) {
         PyErr_Format(PyExc_TypeError, "No substitution matrix provided");
         return NULL;
     }
 
     // Request a buffer view
     Py_buffer substitutions_view;
-    if (PyObject_GetBuffer(substitutions_obj, &substitutions_view, PyBUF_FULL)) {
+    if (PyObject_GetBuffer(substitution_matrix_obj, &substitutions_view, PyBUF_FULL)) {
         PyErr_Format(PyExc_TypeError, "Failed to get buffer from substitution matrix");
         return NULL;
     }
@@ -2156,9 +2152,9 @@ static char const doc_translate[] = //
     "Args:\n"
     "  self (Str or str or bytes): The string object.\n"
     "  table (str or dict): A 256-character string or a dictionary mapping bytes to bytes.\n"
+    "  inplace (bool, optional): If True, the string is modified in place (default is False).\n\n"
     "  start (int, optional): The starting index for translation (default is 0).\n"
     "  end (int, optional): The ending index for translation (default is the string length).\n\n"
-    "  inplace (bool, optional): If True, the string is modified in place (default is False).\n\n"
     "Returns:\n"
     "  Union[None, str, bytes]: If inplace is False, a new string is returned, otherwise None.\n\n"
     "Raises:\n"
@@ -2175,9 +2171,21 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
 
     PyObject *str_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
     PyObject *look_up_table_obj = PyTuple_GET_ITEM(args, !is_member);
-    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
-    PyObject *inplace_obj = nargs > !is_member + 3 ? PyTuple_GET_ITEM(args, !is_member + 3) : NULL;
+    PyObject *inplace_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *start_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+    PyObject *end_obj = nargs > !is_member + 3 ? PyTuple_GET_ITEM(args, !is_member + 3) : NULL;
+
+    // Optional keyword arguments
+    if (kwargs) {
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        while (PyDict_Next(kwargs, &pos, &key, &value))
+            if (PyUnicode_CompareWithASCIIString(key, "inplace") == 0 && !inplace_obj) { inplace_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "start") == 0 && !start_obj) { start_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0 && !end_obj) { end_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+                return NULL;
+    }
 
     // Optional start and end arguments
     Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
@@ -2362,7 +2370,7 @@ static PyObject *Str_find_last_not_of(PyObject *self, PyObject *args, PyObject *
 /**
  *  @brief  Given parsed split settings, constructs an iterator that would produce that split.
  */
-static SplitIterator *Str_split_iter_(PyObject *text_object, PyObject *separator_object,             //
+static SplitIterator *Str_split_iter_(PyObject *text_obj, PyObject *separator_obj,                   //
                                       sz_string_view_t const text, sz_string_view_t const separator, //
                                       int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length,
                                       sz_bool_t is_reverse) {
@@ -2372,8 +2380,8 @@ static SplitIterator *Str_split_iter_(PyObject *text_object, PyObject *separator
     if (result_obj == NULL && PyErr_NoMemory()) return NULL;
 
     // Set its properties based on the slice
-    result_obj->text_object = text_object;
-    result_obj->separator_object = separator_object;
+    result_obj->text_obj = text_obj;
+    result_obj->separator_obj = separator_obj;
     result_obj->text = text;
     result_obj->separator = separator;
     result_obj->finder = finder;
@@ -2385,8 +2393,8 @@ static SplitIterator *Str_split_iter_(PyObject *text_object, PyObject *separator
     result_obj->reached_tail = 0;
 
     // Increment the reference count of the parent
-    Py_INCREF(result_obj->text_object);
-    Py_XINCREF(result_obj->separator_object);
+    Py_INCREF(result_obj->text_obj);
+    Py_XINCREF(result_obj->separator_obj);
     return result_obj;
 }
 
@@ -2572,8 +2580,8 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, P
         return NULL;
     }
 
-    PyObject *text_object = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *separator_object = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *separator_obj = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
     PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
     PyObject *keepseparator_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
 
@@ -2581,9 +2589,11 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, P
         PyObject *key, *value;
         Py_ssize_t pos = 0;
         while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "separator") == 0) { separator_object = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0) { maxsplit_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0) { keepseparator_obj = value; }
+            if (PyUnicode_CompareWithASCIIString(key, "separator") == 0 && !separator_obj) { separator_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0 && !maxsplit_obj) { maxsplit_obj = value; }
+            else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0 && !keepseparator_obj) {
+                keepseparator_obj = value;
+            }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
                 return NULL;
         }
@@ -2595,14 +2605,14 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, P
     Py_ssize_t maxsplit;
 
     // Validate and convert `text`
-    if (!export_string_like(text_object, &text.start, &text.length)) {
+    if (!export_string_like(text_obj, &text.start, &text.length)) {
         wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
 
     // Validate and convert `separator`
-    if (separator_object) {
-        if (!export_string_like(separator_object, &separator.start, &separator.length)) {
+    if (separator_obj) {
+        if (!export_string_like(separator_obj, &separator.start, &separator.length)) {
             wrap_current_exception("The separator argument must be string-like");
             return NULL;
         }
@@ -2640,11 +2650,11 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, P
 
     // Dispatch the right backend
     if (is_lazy_iterator)
-        return Str_split_iter_(text_object, separator_object, text, separator, //
+        return Str_split_iter_(text_obj, separator_obj, text, separator, //
                                keepseparator, maxsplit, finder, match_length, is_reverse);
     else
-        return !is_reverse ? Str_split_(text_object, text, separator, keepseparator, maxsplit, finder, match_length)
-                           : Str_rsplit_(text_object, text, separator, keepseparator, maxsplit, finder, match_length);
+        return !is_reverse ? Str_split_(text_obj, text, separator, keepseparator, maxsplit, finder, match_length)
+                           : Str_rsplit_(text_obj, text, separator, keepseparator, maxsplit, finder, match_length);
 }
 
 static char const doc_split[] = //
@@ -2781,7 +2791,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
         return NULL;
     }
 
-    PyObject *text_object = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
     PyObject *keeplinebreaks_obj = nargs > !is_member ? PyTuple_GET_ITEM(args, !is_member) : NULL;
     PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
 
@@ -2789,8 +2799,10 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
         PyObject *key, *value;
         Py_ssize_t pos = 0;
         while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "keeplinebreaks") == 0) { keeplinebreaks_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0) { maxsplit_obj = value; }
+            if (PyUnicode_CompareWithASCIIString(key, "keeplinebreaks") == 0 && !keeplinebreaks_obj) {
+                keeplinebreaks_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0 && !maxsplit_obj) { maxsplit_obj = value; }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
     }
@@ -2800,7 +2812,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
     Py_ssize_t maxsplit = PY_SSIZE_T_MAX; // Default value for maxsplit
 
     // Validate and convert `text`
-    if (!export_string_like(text_object, &text.start, &text.length)) {
+    if (!export_string_like(text_obj, &text.start, &text.length)) {
         wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
@@ -2847,7 +2859,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
     sz_string_view_t separator;
     separator.start = "\x0A\x0B\x0C\x0D\x85\x1C\x1D\x1E";
     separator.length = 8;
-    return Str_split_(text_object, text, separator, keeplinebreaks, maxsplit, &sz_find_char_from, 1);
+    return Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit, &sz_find_char_from, 1);
 }
 
 static PyObject *Str_concat(PyObject *self, PyObject *other) {
@@ -3026,16 +3038,16 @@ static PyObject *SplitIteratorType_next(SplitIterator *self) {
 
     // Set its properties based on the slice
     result_obj->memory = result_memory;
-    result_obj->parent = self->text_object;
+    result_obj->parent = self->text_obj;
 
     // Increment the reference count of the parent
-    Py_INCREF(self->text_object);
+    Py_INCREF(self->text_obj);
     return (PyObject *)result_obj;
 }
 
 static void SplitIteratorType_dealloc(SplitIterator *self) {
-    Py_XDECREF(self->text_object);
-    Py_XDECREF(self->separator_object);
+    Py_XDECREF(self->text_obj);
+    Py_XDECREF(self->separator_obj);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -3060,21 +3072,13 @@ static PyTypeObject SplitIteratorType = {
 #pragma region Strs
 
 static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
-    unsigned int seed = time(NULL); // Default seed
 
     // Check for positional arguments
     Py_ssize_t nargs = PyTuple_Size(args);
+    PyObject *seed_obj = nargs == 1 ? PyTuple_GET_ITEM(args, 0) : NULL;
     if (nargs > 1) {
         PyErr_SetString(PyExc_TypeError, "shuffle() takes at most 1 positional argument");
         return NULL;
-    }
-    else if (nargs == 1) {
-        PyObject *seed_obj = PyTuple_GET_ITEM(args, 0);
-        if (!PyLong_Check(seed_obj)) {
-            PyErr_SetString(PyExc_TypeError, "The seed must be an integer");
-            return NULL;
-        }
-        seed = PyLong_AsUnsignedLong(seed_obj);
     }
 
     // Check for keyword arguments
@@ -3082,21 +3086,8 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
         PyObject *key, *value;
         Py_ssize_t pos = 0;
         while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "seed") == 0) {
-                if (nargs == 1) {
-                    PyErr_SetString(PyExc_TypeError, "Received seed both as positional and keyword argument");
-                    return NULL;
-                }
-                if (!PyLong_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "The seed must be an integer");
-                    return NULL;
-                }
-                seed = PyLong_AsUnsignedLong(value);
-            }
-            else {
-                PyErr_Format(PyExc_TypeError, "Received an unexpected keyword argument '%U'", key);
-                return NULL;
-            }
+            if (PyUnicode_CompareWithASCIIString(key, "seed") == 0 && !seed_obj) { seed_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
     }
 
@@ -3112,6 +3103,7 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
     size_t count = reordered->count;
 
     // Fisher-Yates Shuffle Algorithm
+    unsigned int seed = seed_obj ? PyLong_AsUnsignedLong(seed_obj) : time(NULL);
     srand(seed);
     for (size_t i = count - 1; i > 0; --i) {
         size_t j = rand() % (i + 1);
@@ -3182,17 +3174,8 @@ static PyObject *Strs_sort(Strs *self, PyObject *args, PyObject *kwargs) {
         PyObject *key, *value;
         Py_ssize_t pos = 0;
         while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) {
-                if (reverse_obj) {
-                    PyErr_SetString(PyExc_TypeError, "Received reverse both as positional and keyword argument");
-                    return NULL;
-                }
-                reverse_obj = value;
-            }
-            else {
-                PyErr_Format(PyExc_TypeError, "Received an unexpected keyword argument '%U'", key);
-                return NULL;
-            }
+            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0 && !reverse_obj) { reverse_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
     }
 
@@ -3235,17 +3218,8 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
         PyObject *key, *value;
         Py_ssize_t pos = 0;
         while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0) {
-                if (reverse_obj) {
-                    PyErr_SetString(PyExc_TypeError, "Received reverse both as positional and keyword argument");
-                    return NULL;
-                }
-                reverse_obj = value;
-            }
-            else {
-                PyErr_Format(PyExc_TypeError, "Received an unexpected keyword argument '%U'", key);
-                return NULL;
-            }
+            if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0 && !reverse_obj) { reverse_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
     }
 
@@ -3299,8 +3273,8 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
 }
 
 static PyObject *Strs_sample(Strs *self, PyObject *args, PyObject *kwargs) {
-    PyObject *seed_obj = NULL;
     PyObject *sample_size_obj = NULL;
+    PyObject *seed_obj = NULL;
 
     // Check for positional arguments
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -3312,14 +3286,11 @@ static PyObject *Strs_sample(Strs *self, PyObject *args, PyObject *kwargs) {
 
     // Parse keyword arguments
     if (kwargs) {
-        Py_ssize_t pos = 0;
         PyObject *key, *value;
+        Py_ssize_t pos = 0;
         while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "seed") == 0) { seed_obj = value; }
-            else {
-                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
-                return 0;
-            }
+            if (PyUnicode_CompareWithASCIIString(key, "seed") == 0 && !seed_obj) { seed_obj = value; }
+            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
     }
 
@@ -3647,6 +3618,7 @@ static PyMethodDef stringzilla_methods[] = {
 
     // Global unary extensions
     {"hash", Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
+    {"equal", Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
 
     {NULL, NULL, 0, NULL}};
 

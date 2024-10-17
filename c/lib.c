@@ -5,9 +5,6 @@
  *  @date       January 16, 2024
  *  @copyright  Copyright (c) 2024
  */
-#if defined(_WIN32) || defined(__CYGWIN__)
-#include <windows.h> // `DllMain`
-#endif
 
 // When enabled, this library will override the symbols usually provided by the C standard library.
 // It's handy if you want to use the `LD_PRELOAD` trick for non-intrusive profiling and replacing
@@ -235,6 +232,7 @@ static void sz_dispatch_table_init(void) {
 #pragma section(".CRT$XCU", read)
 __declspec(allocate(".CRT$XCU")) void (*_sz_dispatch_table_init)() = sz_dispatch_table_init;
 
+#if 0 //? Implementing DLL symbol resolution on Windows is a bit tricky, so it's disabled for now
 BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
     switch (forward_reason) {
     case DLL_PROCESS_ATTACH:
@@ -246,6 +244,8 @@ BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
     }
     return TRUE;
 }
+#endif
+
 #else
 __attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
