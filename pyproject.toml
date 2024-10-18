@@ -117,5 +117,12 @@ select = "*-macos*_arm64"
 inherit.environment = "append"
 environment.SZ_ARM64 = "1"
 
+# Detect MacOS Universal2 builds
+[[tool.cibuildwheel.overrides]]
+select = "*-macos*_universal2"
+inherit.environment = "append"
+environment.SZ_X86_64 = "1"
+environment.SZ_ARM64 = "1"
+
 [tool.cibuildwheel.macos.environment]
 MACOSX_DEPLOYMENT_TARGET = "10.11"

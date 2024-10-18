@@ -34,7 +34,7 @@ std::size_t round_up_to_multiple(std::size_t n) {
 
 struct benchmark_result_t {
     std::size_t iterations = 0;
-    std::size_t bytes_passed = 0;
+    std::uint64_t bytes_passed = 0;
     seconds_t seconds = 0;
 };
 
