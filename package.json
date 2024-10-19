@@ -1,6 +1,6 @@
 {
   "name": "stringzilla",
-  "version": "3.10.4",
+  "version": "3.10.5",
   "description": "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
   "author": "Ash Vardanian",
   "license": "Apache 2.0",
