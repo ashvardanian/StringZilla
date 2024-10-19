@@ -38,7 +38,6 @@ typedef SSIZE_T ssize_t;
 #include <errno.h>  // `errno`
 #include <stdio.h>  // `fopen`
 #include <stdlib.h> // `rand`, `srand`
-#include <string.h> // `memset`, `memcpy`
 #include <time.h>   // `time`
 
 #include <stringzilla/stringzilla.h>
@@ -1034,7 +1033,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
             Py_XDECREF(result);
             return NULL;
         }
-        memcpy(to->parts, from->parts + start, sizeof(sz_string_view_t) * to->count);
+        sz_copy(to->parts, from->parts + start, sizeof(sz_string_view_t) * to->count);
         Py_INCREF(to->parent_string);
         break;
     }
@@ -1365,7 +1364,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for the path");
         return NULL;
     }
-    memcpy(path_buffer, path.start, path.length);
+    sz_copy(path_buffer, path.start, path.length);
     path_buffer[path.length] = '\0';
 
     // Unlock the Global Interpreter Lock (GIL) to allow other threads to run
@@ -2233,7 +2232,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
             PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
             return NULL;
         }
-        memcpy(&look_up_table[0], look_up_table_str.start, look_up_table_str.length);
+        sz_copy(&look_up_table[0], look_up_table_str.start, look_up_table_str.length);
     }
     else {
         wrap_current_exception("The look-up table must be string-like or a dictionary");
@@ -2888,8 +2887,8 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
     }
 
     // Perform the string concatenation
-    memcpy(result_str->memory.start, self_str.start, self_str.length);
-    memcpy(result_str->memory.start + self_str.length, other_str.start, other_str.length);
+    sz_copy(result_str->memory.start, self_str.start, self_str.length);
+    sz_copy(result_str->memory.start + self_str.length, other_str.start, other_str.length);
 
     return (PyObject *)result_str;
 }
@@ -3142,7 +3141,7 @@ static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_sort
 
     // Call our sorting algorithm
     sz_sequence_t sequence;
-    memset(&sequence, 0, sizeof(sequence));
+    sz_fill(&sequence, sizeof(sequence), 0);
     sequence.order = (sz_sorted_idx_t *)temporary_memory.start;
     sequence.count = count;
     sequence.handle = parts;
@@ -3250,7 +3249,7 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
     //          return NULL;
     //      }
     //      sz_sorted_idx_t *numpy_data_ptr = (sz_sorted_idx_t *)PyArray_DATA((PyArrayObject *)array);
-    //      memcpy(numpy_data_ptr, order, count * sizeof(sz_sorted_idx_t));
+    //      sz_copy(numpy_data_ptr, order, count * sizeof(sz_sorted_idx_t));
     //
     // There are compilation issues with NumPy.
     // Here is an example for `cp312-musllinux_s390x`: https://x.com/ashvardanian/status/1757880762278531447?s=20
@@ -3382,7 +3381,7 @@ char const *export_escaped_unquoted_to_utf8_buffer(char const *cstr, size_t cstr
             else { *(buffer++) = *(cstr++); }
         }
         else if (buffer + rune_length < buffer_end) {
-            memcpy(buffer, cstr, rune_length);
+            sz_copy(buffer, cstr, rune_length);
             buffer += rune_length;
             cstr += rune_length;
         }
@@ -3412,7 +3411,7 @@ static PyObject *Strs_repr(Strs *self) {
     char const *const repr_buffer_end = repr_buffer_ptr + 1024;
 
     // Start of the array
-    memcpy(repr_buffer_ptr, "sz.Strs([", 9);
+    sz_copy(repr_buffer_ptr, "sz.Strs([", 9);
     repr_buffer_ptr += 9;
 
     size_t count = Strs_len(self);
@@ -3439,7 +3438,7 @@ static PyObject *Strs_repr(Strs *self) {
             &did_fit);
         // If it didn't fit, let's put an ellipsis
         if (!did_fit) {
-            memcpy(repr_buffer_ptr, non_fitting_array_tail, non_fitting_array_tail_length);
+            sz_copy(repr_buffer_ptr, non_fitting_array_tail, non_fitting_array_tail_length);
             repr_buffer_ptr += non_fitting_array_tail_length;
             return PyUnicode_FromStringAndSize(repr_buffer, repr_buffer_ptr - repr_buffer);
         }
