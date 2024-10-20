@@ -359,7 +359,7 @@ if(${STRINGZILLA_BUILD_SHARED})
         "SZ_USE_X86_AVX512=0"
         "SZ_USE_X86_AVX2=0"
         "SZ_USE_ARM_NEON=1"
-        "SZ_USE_ARM_SVE=1")
+        "SZ_USE_ARM_SVE=$<IF:$<CXX_COMPILER_ID:MSVC>,0,1>")
     endif()
 
     if (MSVC)
