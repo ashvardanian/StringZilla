@@ -25,7 +25,7 @@
 
 #define STRINGZILLA_VERSION_MAJOR 3
 #define STRINGZILLA_VERSION_MINOR 10
-#define STRINGZILLA_VERSION_PATCH 0
+#define STRINGZILLA_VERSION_PATCH 5
 
 /**
  *  @brief  When set to 1, the library will include the following LibC headers: <stddef.h> and <stdint.h>.
@@ -2198,7 +2198,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
     sz_u64_vec_t matches0_vec, matches1_vec, matches2_vec, matches3_vec, matches4_vec;
     sz_u64_vec_t n_vec;
     n_vec.u64 = 0;
-    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1], n_vec.u8s[2] = n[2], n_vec.u8s[3] = n[3];
+    n_vec.u8s[0] = n[0], n_vec.u8s[1] = n[1], n_vec.u8s[2] = n[2];
     n_vec.u64 *= 0x0000000001000001ull; // broadcast
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time using three 64-bit words.
@@ -5419,8 +5419,16 @@ SZ_PUBLIC void sz_look_up_transform_avx512(sz_cptr_t source, sz_size_t length, s
     // operate on 4 registers, it might be cleaner to use 2x separate `_mm512_permutexvar_epi8` calls.
     // Combining the results with 2x `_mm512_test_epi8_mask` and 3x blends afterwards.
     //
-    //  - `_mm512_mask_blend_epi8` - 1 cycle latency, and generally 2x can run in parallel.
-    //  - `_mm512_test_epi8_mask` - 3 cycles latency, same as most comparison functions in AVX-512.
+    //  - 4x `_mm512_permutexvar_epi8` maps to "VPERMB (ZMM, ZMM, ZMM)":
+    //      - On Ice Lake: 3 cycles latency, ports: 1*p5
+    //      - On Genoa: 6 cycles latency, ports: 1*FP12
+    //  - 3x `_mm512_mask_blend_epi8` maps to "VPBLENDMB_Z (ZMM, K, ZMM, ZMM)":
+    //      - On Ice Lake: 3 cycles latency, ports: 1*p05
+    //      - On Genoa: 1 cycle latency, ports: 1*FP0123
+    //  - 2x `_mm512_test_epi8_mask` maps to "VPTESTMB (K, ZMM, ZMM)":
+    //      - On Ice Lake: 3 cycles latency, ports: 1*p5
+    //      - On Genoa: 4 cycles latency, ports: 1*FP01
+    //
     sz_u512_vec_t lut_0_to_63_vec, lut_64_to_127_vec, lut_128_to_191_vec, lut_192_to_255_vec;
     lut_0_to_63_vec.zmm = _mm512_loadu_si512((lut));
     lut_64_to_127_vec.zmm = _mm512_loadu_si512((lut + 64));

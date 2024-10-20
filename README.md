@@ -171,7 +171,7 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>9.4</b> MB/s
     </td>
     <td align="center">
-      <code>uniform_int_distribution</code><br/>
+      <code>std::uniform_int_distribution</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>47.2</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>20.4</b> MB/s
     </td>
@@ -193,7 +193,7 @@ __Who is this for?__
   <tr>
     <td align="center">⚪</td>
     <td align="center">
-      <code>transform</code><br/>
+      <code>std::transform</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>3.81</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>2.65</b> GB/s
     </td>
@@ -344,7 +344,12 @@ StringZilla's `Str` class is a hybrid of those two, providing `str`-like interfa
 from stringzilla import Str, File
 
 text_from_str = Str('some-string') # no copies, just a view
+text_from_bytes = Str(b'some-array') # no copies, just a view
 text_from_file = Str(File('some-file.txt')) # memory-mapped file
+
+import numpy as np
+alphabet_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)
+text_from_array = Str(memoryview(alphabet_array))
 ```
 
 The `File` class memory-maps a file from persistent memory without loading its copy into RAM.

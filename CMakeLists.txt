@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.1)
 project(
   stringzilla
-  VERSION 3.10.0
+  VERSION 3.10.5
   LANGUAGES C CXX
   DESCRIPTION "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances"
   HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla")
@@ -361,6 +361,16 @@ if(${STRINGZILLA_BUILD_SHARED})
         "SZ_USE_ARM_NEON=1"
         "SZ_USE_ARM_SVE=1")
     endif()
+
+    if (MSVC)
+      # Add dependencies for necessary runtime libraries in case of static linking
+      # This ensures that basic runtime functions are available:
+      # msvcrt.lib: Microsoft Visual C Runtime, required for basic C runtime functions on Windows.
+      # vcruntime.lib: Microsoft Visual C++ Runtime library for basic runtime functions.
+      # ucrt.lib: Universal C Runtime, necessary for linking basic C functions like I/O.
+      target_link_libraries(${target} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
+    endif()
+
   endfunction()
 
   define_shared(stringzilla_shared)
@@ -378,6 +388,7 @@ if(${STRINGZILLA_BUILD_SHARED})
     "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
   target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
   target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
+
   if (MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     target_sources(stringzillite PRIVATE c/64-bit-math-emulation.c)
   endif()

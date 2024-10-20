@@ -1,6 +1,6 @@
 from random import choice, randint
 from string import ascii_lowercase
-from typing import Optional
+from typing import Optional, Sequence, Dict
 import tempfile
 import os
 
@@ -109,11 +109,36 @@ def test_unit_str_rich_comparisons():
 
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_unit_buffer_protocol():
-    my_str = Str("hello")
-    arr = np.array(my_str)
-    assert arr.dtype == np.dtype("c")
-    assert arr.shape == (len("hello"),)
-    assert "".join([c.decode("utf-8") for c in arr.tolist()]) == "hello"
+    """Tests weather conversion to and from the buffer protocol works as expected."""
+
+    # Convert from StringZilla string to NumPy array through buffer protocol
+    sz_str = Str("hello")
+    np_array = np.array(sz_str)
+    assert np_array.dtype == np.dtype("c")
+    assert np_array.shape == (len("hello"),)
+    assert "".join([c.decode("utf-8") for c in np_array.tolist()]) == "hello"
+
+    # Convert from NumPy array to StringZilla string through buffer protocol
+    np_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)
+    sz_str = sz.Str(memoryview(np_array))
+    assert len(np_array) == len(sz_str)
+
+    # Make sure multi-dimensional contiguous arrays are supported for image processing
+    np_array = np.arange(ord("a"), ord("a") + 8, dtype=np.uint8).reshape((2, 2, 2))
+    sz_str = sz.Str(memoryview(np_array))
+    assert np_array.size == len(sz_str)
+
+    # Expect errors if the data is not contiguous
+    np_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)[::2]
+    with pytest.raises(ValueError):
+        sz.Str(memoryview(np_array))
+
+    # Expect errors if the data is not passed through a `memoryview`
+    with pytest.raises(TypeError):
+        sz.Str(np.array())
+    # Expect errors if the data is not string-like
+    with pytest.raises(TypeError):
+        sz.Str(dict())
 
 
 def test_str_write_to():
@@ -424,7 +449,7 @@ def test_unit_globals():
 
     assert sz.translate("ABC", {"A": "X", "B": "Y", "C": "Z"}) == "XYZ"
     assert sz.translate("ABC", {"A": "X", "B": "Y"}) == "XYC"
-    assert sz.translate("ABC", {"A": "X", "B": "Y"}, 1, -1) == "YC"
+    assert sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1) == "YC"
     assert sz.translate("ABC", bytes(range(256))) == "ABC"
 
 
@@ -691,6 +716,63 @@ def test_alignment_score_random(first_length: int, second_length: int):
         substitution_matrix=character_substitutions,
         gap_score=-1,
     ) == -baseline_edit_distance(a, b)
+
+
+def baseline_translate(body: str, lut: Sequence) -> str:
+    return "".join([chr(lut[ord(c)]) for c in body])
+
+
+def translation_table_to_dict(lut: Sequence) -> Dict[str, str]:
+    return {chr(i): chr(lut[i]) for i in range(256)}
+
+
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
+@pytest.mark.parametrize("length", range(1, 300))
+def test_translations(length: int):
+
+    map_identity = np.arange(256, dtype=np.uint8)
+    map_invert = np.arange(255, -1, -1, dtype=np.uint8)
+    map_threshold = np.where(np.arange(256) > 127, 255, 0).astype(np.uint8)
+    dict_identity = translation_table_to_dict(map_identity)
+    dict_invert = translation_table_to_dict(map_invert)
+    dict_threshold = translation_table_to_dict(map_threshold)
+    view_identity = memoryview(map_identity)
+    view_invert = memoryview(map_invert)
+    view_threshold = memoryview(map_threshold)
+
+    body = get_random_string(length=length)
+    body_bytes = body.encode("utf-8")
+
+    # Check mapping strings and byte-strings into new strings
+    assert sz.translate(body, view_identity) == body
+    assert sz.translate(body_bytes, view_identity) == body_bytes
+    assert sz.translate(body_bytes, view_identity) == body_bytes.translate(
+        view_identity
+    )
+    assert sz.translate(body_bytes, view_invert) == body_bytes.translate(view_invert)
+    assert sz.translate(body_bytes, view_threshold) == body_bytes.translate(
+        view_threshold
+    )
+
+    # Check in-place translations - all of them return nothing
+    after_identity = memoryview(body_bytes)
+    assert sz.translate(after_identity, view_identity, inplace=True) == None
+    assert sz.equal(after_identity, body.translate(dict_identity))
+    after_invert = memoryview(body_bytes)
+    assert sz.translate(after_invert, view_invert, inplace=True) == None
+    assert sz.equal(after_invert, body.translate(dict_invert))
+    after_threshold = memoryview(body_bytes)
+    assert sz.translate(after_threshold, view_threshold, inplace=True) == None
+    assert sz.equal(after_threshold, body.translate(dict_threshold))
+
+
+@pytest.mark.repeat(3)
+@pytest.mark.parametrize("length", range(1, 300))
+@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
+def test_translations_random(length: int):
+    body = get_random_string(length=length)
+    lut = np.random.randint(0, 256, size=256, dtype=np.uint8)
+    assert sz.translate(body, memoryview(lut)) == baseline_translate(body, lut)
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
