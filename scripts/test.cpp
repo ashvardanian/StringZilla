@@ -1493,7 +1493,9 @@ static void test_sequence_algorithms() {
         for (std::size_t experiment_idx = 0; experiment_idx != 10; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
             auto order = sz::sorted_order(dataset);
-            for (std::size_t i = 1; i != dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
+            for (std::size_t i = 1; i != dataset_size; ++i) {
+                assert(dataset[(sz_size_t)order[i - 1]] <= dataset[(sz_size_t)order[i]]);
+            }
         }
     }
 }

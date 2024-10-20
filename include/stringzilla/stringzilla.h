@@ -3618,10 +3618,10 @@ SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 SZ_PUBLIC sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate) {
 
     sz_size_t matches = 0;
-    while (matches != sequence->count && predicate(sequence, sequence->order[matches])) ++matches;
+    while (matches != sequence->count && predicate(sequence, (sz_size_t)sequence->order[matches])) ++matches;
 
     for (sz_size_t i = matches + 1; i < sequence->count; ++i)
-        if (predicate(sequence, sequence->order[i]))
+        if (predicate(sequence, (sz_size_t)sequence->order[i]))
             sz_u64_swap(sequence->order + i, sequence->order + matches), ++matches;
 
     return matches;
@@ -3632,15 +3632,15 @@ SZ_PUBLIC void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequenc
     sz_size_t start_b = partition + 1;
 
     // If the direct merge is already sorted
-    if (!less(sequence, sequence->order[start_b], sequence->order[partition])) return;
+    if (!less(sequence, (sz_size_t)sequence->order[start_b], (sz_size_t)sequence->order[partition])) return;
 
     sz_size_t start_a = 0;
     while (start_a <= partition && start_b <= sequence->count) {
 
         // If element 1 is in right place
-        if (!less(sequence, sequence->order[start_b], sequence->order[start_a])) { start_a++; }
+        if (!less(sequence, (sz_size_t)sequence->order[start_b], (sz_size_t)sequence->order[start_a])) { start_a++; }
         else {
-            sz_size_t value = sequence->order[start_b];
+            sz_size_t value = (sz_size_t)sequence->order[start_b];
             sz_size_t index = start_b;
 
             // Shift all the elements between element 1
@@ -3662,7 +3662,7 @@ SZ_PUBLIC void sz_sort_insertion(sz_sequence_t *sequence, sz_sequence_comparator
     for (sz_size_t i = 1; i < keys_count; i++) {
         sz_u64_t i_key = keys[i];
         sz_size_t j = i;
-        for (; j > 0 && less(sequence, i_key, keys[j - 1]); --j) keys[j] = keys[j - 1];
+        for (; j > 0 && less(sequence, (sz_size_t)i_key, (sz_size_t)keys[j - 1]); --j) keys[j] = keys[j - 1];
         keys[j] = i_key;
     }
 }
@@ -3672,8 +3672,8 @@ SZ_INTERNAL void _sz_sift_down(sz_sequence_t *sequence, sz_sequence_comparator_t
     sz_size_t root = start;
     while (2 * root + 1 <= end) {
         sz_size_t child = 2 * root + 1;
-        if (child + 1 <= end && less(sequence, order[child], order[child + 1])) { child++; }
-        if (!less(sequence, order[root], order[child])) { return; }
+        if (child + 1 <= end && less(sequence, (sz_size_t)order[child], (sz_size_t)order[child + 1])) { child++; }
+        if (!less(sequence, (sz_size_t)order[root], (sz_size_t)order[child])) { return; }
         sz_u64_swap(order + root, order + child);
         root = child;
     }
@@ -3708,16 +3708,16 @@ SZ_PUBLIC void sz_sort_introsort_recursion(sz_sequence_t *sequence, sz_sequence_
     case 0:
     case 1: return;
     case 2:
-        if (less(sequence, sequence->order[first + 1], sequence->order[first]))
+        if (less(sequence, (sz_size_t)sequence->order[first + 1], (sz_size_t)sequence->order[first]))
             sz_u64_swap(&sequence->order[first], &sequence->order[first + 1]);
         return;
     case 3: {
         sz_u64_t a = sequence->order[first];
         sz_u64_t b = sequence->order[first + 1];
         sz_u64_t c = sequence->order[first + 2];
-        if (less(sequence, b, a)) sz_u64_swap(&a, &b);
-        if (less(sequence, c, b)) sz_u64_swap(&c, &b);
-        if (less(sequence, b, a)) sz_u64_swap(&a, &b);
+        if (less(sequence, (sz_size_t)b, (sz_size_t)a)) sz_u64_swap(&a, &b);
+        if (less(sequence, (sz_size_t)c, (sz_size_t)b)) sz_u64_swap(&c, &b);
+        if (less(sequence, (sz_size_t)b, (sz_size_t)a)) sz_u64_swap(&a, &b);
         sequence->order[first] = a;
         sequence->order[first + 1] = b;
         sequence->order[first + 2] = c;
@@ -3743,11 +3743,11 @@ SZ_PUBLIC void sz_sort_introsort_recursion(sz_sequence_t *sequence, sz_sequence_
 
     // Median-of-three logic to choose pivot
     sz_size_t median = first + length / 2;
-    if (less(sequence, sequence->order[median], sequence->order[first]))
+    if (less(sequence, (sz_size_t)sequence->order[median], (sz_size_t)sequence->order[first]))
         sz_u64_swap(&sequence->order[first], &sequence->order[median]);
-    if (less(sequence, sequence->order[last - 1], sequence->order[first]))
+    if (less(sequence, (sz_size_t)sequence->order[last - 1], (sz_size_t)sequence->order[first]))
         sz_u64_swap(&sequence->order[first], &sequence->order[last - 1]);
-    if (less(sequence, sequence->order[median], sequence->order[last - 1]))
+    if (less(sequence, (sz_size_t)sequence->order[median], (sz_size_t)sequence->order[last - 1]))
         sz_u64_swap(&sequence->order[median], &sequence->order[last - 1]);
 
     // Partition using the median-of-three as the pivot
@@ -3755,8 +3755,8 @@ SZ_PUBLIC void sz_sort_introsort_recursion(sz_sequence_t *sequence, sz_sequence_
     sz_size_t left = first;
     sz_size_t right = last - 1;
     while (1) {
-        while (less(sequence, sequence->order[left], pivot)) left++;
-        while (less(sequence, pivot, sequence->order[right])) right--;
+        while (less(sequence, (sz_size_t)sequence->order[left], (sz_size_t)pivot)) left++;
+        while (less(sequence, (sz_size_t)pivot, (sz_size_t)sequence->order[right])) right--;
         if (left >= right) break;
         sz_u64_swap(&sequence->order[left], &sequence->order[right]);
         left++;
@@ -3873,8 +3873,8 @@ SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_
 
     // Export up to 4 bytes into the `sequence` bits themselves
     for (sz_size_t i = 0; i != sequence->count; ++i) {
-        sz_cptr_t begin = sequence->get_start(sequence, sequence->order[i]);
-        sz_size_t length = sequence->get_length(sequence, sequence->order[i]);
+        sz_cptr_t begin = sequence->get_start(sequence, (sz_size_t)sequence->order[i]);
+        sz_size_t length = sequence->get_length(sequence, (sz_size_t)sequence->order[i]);
         length = length > 4u ? 4u : length;
         sz_ptr_t prefix = (sz_ptr_t)&sequence->order[i];
         for (sz_size_t j = 0; j != length; ++j) prefix[7 - j] = begin[j];

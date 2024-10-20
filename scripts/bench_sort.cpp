@@ -72,8 +72,8 @@ static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     // What if we take up-to 4 first characters and the index
     for (size_t i = 0; i != strings.size(); ++i)
-        std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
-                    std::min<std::size_t>(strings[order[i]].size(), 4ul));
+        std::memcpy((char *)&order[i] + offset_in_word, strings[(sz_size_t)order[i]].c_str(),
+                    std::min<std::size_t>(strings[(sz_size_t)order[i]].size(), 4ul));
 
     std::sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
         char *i_bytes = (char *)&i;
@@ -83,7 +83,8 @@ static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
 
-    std::sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) { return strings[i] < strings[j]; });
+    std::sort(order, order + strings.size(),
+              [&](sz_u64_t i, sz_u64_t j) { return strings[(sz_size_t)i] < strings[(sz_size_t)j]; });
 
     return strings.size();
 }
@@ -92,8 +93,8 @@ static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     // What if we take up-to 4 first characters and the index
     for (size_t i = 0; i != strings.size(); ++i)
-        std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
-                    std::min<std::size_t>(strings[order[i]].size(), 4ull));
+        std::memcpy((char *)&order[i] + offset_in_word, strings[(sz_size_t)order[i]].c_str(),
+                    std::min<std::size_t>(strings[(sz_size_t)order[i]].size(), 4ull));
 
     std::stable_sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
         char *i_bytes = (char *)&i;
@@ -103,19 +104,21 @@ static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
 
-    std::stable_sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) { return strings[i] < strings[j]; });
+    std::stable_sort(order, order + strings.size(),
+                     [&](sz_u64_t i, sz_u64_t j) { return strings[(sz_size_t)i] < strings[(sz_size_t)j]; });
 
     return strings.size();
 }
 
 void expect_partitioned_by_length(strings_t const &strings, permute_t const &permute) {
-    if (!std::is_partitioned(permute.begin(), permute.end(), [&](size_t i) { return strings[i].size() < 4; }))
+    if (!std::is_partitioned(permute.begin(), permute.end(),
+                             [&](sz_u64_t i) { return strings[(sz_size_t)i].size() < 4; }))
         throw std::runtime_error("Partitioning failed!");
 }
 
 void expect_sorted(strings_t const &strings, permute_t const &permute) {
     if (!std::is_sorted(permute.begin(), permute.end(),
-                        [&](std::size_t i, std::size_t j) { return strings[i] < strings[j]; }))
+                        [&](sz_u64_t i, sz_u64_t j) { return strings[(sz_size_t)i] < strings[(sz_size_t)j]; }))
         throw std::runtime_error("Sorting failed!");
 }
 
@@ -157,12 +160,14 @@ int main(int argc, char const **argv) {
     {
         std::printf("---- Partitioning:\n");
         bench_permute("std::partition", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::partition(permute.begin(), permute.end(), [&](size_t i) { return strings[i].size() < 4; });
+            std::partition(permute.begin(), permute.end(),
+                           [&](sz_u64_t i) { return strings[(sz_size_t)i].size() < 4; });
         });
         expect_partitioned_by_length(strings, permute_base);
 
         bench_permute("std::stable_partition", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::stable_partition(permute.begin(), permute.end(), [&](size_t i) { return strings[i].size() < 4; });
+            std::stable_partition(permute.begin(), permute.end(),
+                                  [&](sz_u64_t i) { return strings[(sz_size_t)i].size() < 4; });
         });
         expect_partitioned_by_length(strings, permute_base);
 
@@ -181,7 +186,8 @@ int main(int argc, char const **argv) {
     {
         std::printf("---- Sorting:\n");
         bench_permute("std::sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
+            std::sort(permute.begin(), permute.end(),
+                      [&](sz_u64_t i, sz_u64_t j) { return strings[(sz_size_t)i] < strings[(sz_size_t)j]; });
         });
         expect_sorted(strings, permute_base);
 
@@ -193,6 +199,18 @@ int main(int argc, char const **argv) {
             array.get_start = get_start;
             array.get_length = get_length;
             sz_sort(&array);
+        });
+        expect_sorted(strings, permute_new);
+
+        bench_permute("_sz_heapsort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+            sz_sequence_t array;
+            array.order = permute.data();
+            array.count = strings.size();
+            array.handle = &strings;
+            array.get_start = get_start;
+            array.get_length = get_length;
+            // sz_sort(&array);
+            _sz_heapsort(&array, (sz_sequence_comparator_t)_sz_sort_is_less, 0, array.count);
         });
         expect_sorted(strings, permute_new);
 
@@ -228,7 +246,8 @@ int main(int argc, char const **argv) {
 
         std::printf("---- Stable Sorting:\n");
         bench_permute("std::stable_sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::stable_sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
+            std::stable_sort(permute.begin(), permute.end(),
+                             [&](sz_u64_t i, sz_u64_t j) { return strings[(sz_size_t)i] < strings[(sz_size_t)j]; });
         });
         expect_sorted(strings, permute_base);
 

@@ -11,7 +11,7 @@ using namespace ashvardanian::stringzilla::scripts;
 
 tracked_unary_functions_t hashing_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
+        return unary_function_t([function](std::string_view s) { return (sz_size_t)function(s.data(), s.size()); });
     };
     tracked_unary_functions_t result = {
         {"sz_hash_serial", wrap_sz(sz_hash_serial)},
