@@ -311,7 +311,7 @@ jobs:
         run: |
           cmake -DCMAKE_BUILD_TYPE=Release -B build_release
           cmake --build build_release --config Release
-          tar -cvf "stringzillite_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar" "build_release\stringzillite.dll" ".\include\stringzilla\stringzilla.h"
+          tar -cvf "stringzillite_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar" "build_release\stringzillite.dll" "build_release\stringzillite.lib" ".\include\stringzilla\stringzilla.h"
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
