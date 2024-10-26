@@ -85,6 +85,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzillite is built correctly
+        run: test -z "$(ldd build_artifacts/libstringzillite.so | grep '.so')"
       - name: Test on Real World Data
         run: |
           build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
@@ -169,6 +171,8 @@ jobs:
           }
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzillite is built correctly
+        run: test -z "$(ldd build_artifacts/libstringzillite.so | grep '.so')"
       - name: Test on Real World Data
         run: |
           build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
@@ -278,6 +282,9 @@ jobs:
           test -e build_artifacts/libstringzillite.so
           test -e build_artifacts/libstringzilla_shared.so
           test -e build_artifacts/stringzilla_test_cpp20
+      
+      - name: Check stringzillite is built correctly
+        run: test -z "$(ldd build_artifacts/libstringzillite.so | grep '.so')"
 
   test_macos:
     name: MacOS
@@ -301,6 +308,8 @@ jobs:
           cmake --build build_artifacts --config RelWithDebInfo
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp17
+      - name: Check stringzillite is built correctly
+        run: test -z "$(ldd build_artifacts/libstringzillite.so | grep '.so')"
       - name: Test on Real World Data
         run: |
           build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
@@ -374,6 +383,9 @@ jobs:
           )
       - name: Test C++
         run: .\build_artifacts\stringzilla_test_cpp20.exe
+      - name: Check stringzillite is built correctly
+        shell: cmd
+        run: dumpbin /nologo /dependents .\build_artifacts\stringzillite.dll | findstr /r "^[^a-z].*\.dll" && exit /b 1 || exit /b 0
       - name: Test on Real World Data
         run: |
           .\build_artifacts\stringzilla_bench_search.exe ${DATASET_PATH}     # for substring search
@@ -435,10 +447,15 @@ jobs:
         
         # We can't run the produced builds, but we can make sure they exist
       - name: Test artifacts presense
+        shell: cmd
         run: |
           type build_artifacts\stringzillite.dll >NUL
           type build_artifacts\stringzilla_shared.dll >NUL
           type build_artifacts\stringzilla_test_cpp20.exe >NUL
+      
+      - name: Check stringzillite is built correctly
+        shell: cmd
+        run: dumpbin /nologo /dependents .\build_artifacts\stringzillite.dll | findstr /r "^[^a-z].*\.dll" && exit /b 1 || exit /b 0
   
   test_alpine:
     name: Alpine Linux
@@ -461,6 +478,8 @@ jobs:
           cmake --build build_artifacts --config RelWithDebInfo
       - name: Test C++
         run: build_artifacts/stringzilla_test_cpp20
+      - name: Check stringzillite is built correctly
+        run: test -z "$(ldd build_artifacts/libstringzillite.so | grep '.so')"
 
         # Python
       - name: Build Python
