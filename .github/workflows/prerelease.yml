@@ -413,7 +413,7 @@ jobs:
           - arch: x86
             target: x86
           - arch: amd64_arm64
-            target: ARM64
+            target: arm64
             
     steps:
       - uses: actions/checkout@v4
@@ -436,9 +436,9 @@ jobs:
         # We can't run the produced builds, but we can make sure they exist
       - name: Test artifacts presense
         run: |
-          type build_artifacts/stringzillite.dll >NUL
-          type build_artifacts/stringzilla_shared.dll >NUL
-          type build_artifacts/stringzilla_test_cpp20.exe >NUL
+          type build_artifacts\stringzillite.dll >NUL
+          type build_artifacts\stringzilla_shared.dll >NUL
+          type build_artifacts\stringzilla_test_cpp20.exe >NUL
   
   test_alpine:
     name: Alpine Linux
