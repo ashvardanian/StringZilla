@@ -1,2 +1,2 @@
 include include/stringzilla/stringzilla.h
-VERSION
+include VERSION
