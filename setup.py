@@ -127,6 +127,9 @@ elif sys.platform == "darwin":
 elif sys.platform == "win32":
     compile_args, link_args, macros_args = windows_settings()
 
+# TODO: It would be great to infer available compilation flags on FreeBSD. They are likely similar to Linux
+else:
+    compile_args, link_args, macros_args = [], [], []
 
 ext_modules = [
     Extension(
