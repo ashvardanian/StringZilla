@@ -83,14 +83,12 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         "-fPIC",  # to enable dynamic dispatch
     ]
 
-    print("system", sysconfig.get_platform())
-
     # Apple Clang doesn't support the `-march=native` argument,
     # so we must pre-set the CPU generation. Technically the last Intel-based Apple
     # product was the 2021 MacBook Pro, which had the "Coffee Lake" architecture.
     # During Universal builds, however, even AVX header cause compilation errors.
-    is_building_x86 = is_64bit_x86() and "universal" in sysconfig.get_platform()
-    is_building_arm = is_64bit_arm() and "universal" in sysconfig.get_platform()
+    is_building_x86 = is_64bit_x86() or "universal" in sysconfig.get_platform()
+    is_building_arm = is_64bit_arm() or "universal" in sysconfig.get_platform()
     macros_args = [
         ("SZ_USE_X86_AVX512", "0"),
         ("SZ_USE_X86_AVX2", "1" if is_building_x86 else "0"),
