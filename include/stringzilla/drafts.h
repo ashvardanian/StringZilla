@@ -867,10 +867,10 @@ SZ_PUBLIC void sz_hashes_neon_readahead(sz_cptr_t start, sz_size_t length, sz_si
             chars_readahead_vec[3].u8x16 = vld1q_u8(text + window_length * 3 + i);
 
             for (; i != window_length; ++i) {
-                chars_incoming_low_vec.u32s[0] = chars_readahead_vec[0].u16s[i];
-                chars_incoming_low_vec.u32s[1] = chars_readahead_vec[1].u16s[i];
-                chars_incoming_low_vec.u32s[2] = chars_readahead_vec[2].u16s[i];
-                chars_incoming_low_vec.u32s[3] = chars_readahead_vec[3].u16s[i];
+                chars_incoming_low_vec.u32s[0] = chars_readahead_vec[0].u8s[i];
+                chars_incoming_low_vec.u32s[1] = chars_readahead_vec[1].u8s[i];
+                chars_incoming_low_vec.u32s[2] = chars_readahead_vec[2].u8s[i];
+                chars_incoming_low_vec.u32s[3] = chars_readahead_vec[3].u8s[i];
                 chars_incoming_high_vec.u8x16 = vaddq_u8(chars_incoming_low_vec.u8x16, vld1q_dup_u8(&high_shift));
 
                 // Append new data.
@@ -906,11 +906,11 @@ SZ_PUBLIC void sz_hashes_neon_readahead(sz_cptr_t start, sz_size_t length, sz_si
 
             for (; i + 1 < window_length; ++i) {
                 // Transpose
-                chars_outgoing_low_vec.u32s[0] = chars_readahead_vec[0].u16s[i];
-                chars_outgoing_low_vec.u32s[1] = chars_incoming_low_vec.u32s[0] = chars_readahead_vec[1].u16s[i];
-                chars_outgoing_low_vec.u32s[2] = chars_incoming_low_vec.u32s[1] = chars_readahead_vec[2].u16s[i];
-                chars_outgoing_low_vec.u32s[3] = chars_incoming_low_vec.u32s[2] = chars_readahead_vec[3].u16s[i];
-                chars_incoming_low_vec.u32s[3] = chars_readahead_vec[4].u16s[i];
+                chars_outgoing_low_vec.u32s[0] = chars_readahead_vec[0].u8s[i];
+                chars_outgoing_low_vec.u32s[1] = chars_incoming_low_vec.u32s[0] = chars_readahead_vec[1].u8s[i];
+                chars_outgoing_low_vec.u32s[2] = chars_incoming_low_vec.u32s[1] = chars_readahead_vec[2].u8s[i];
+                chars_outgoing_low_vec.u32s[3] = chars_incoming_low_vec.u32s[2] = chars_readahead_vec[3].u8s[i];
+                chars_incoming_low_vec.u32s[3] = chars_readahead_vec[4].u8s[i];
 
                 chars_outgoing_high_vec.u8x16 = vaddq_u8(chars_outgoing_low_vec.u8x16, vld1q_dup_u8(&high_shift));
                 chars_incoming_high_vec.u8x16 = vaddq_u8(chars_incoming_low_vec.u8x16, vld1q_dup_u8(&high_shift));
