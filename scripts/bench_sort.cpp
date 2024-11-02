@@ -202,18 +202,6 @@ int main(int argc, char const **argv) {
         });
         expect_sorted(strings, permute_new);
 
-        bench_permute("_sz_heapsort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            sz_sequence_t array;
-            array.order = permute.data();
-            array.count = strings.size();
-            array.handle = &strings;
-            array.get_start = get_start;
-            array.get_length = get_length;
-            // sz_sort(&array);
-            _sz_heapsort(&array, (sz_sequence_comparator_t)_sz_sort_is_less, 0, array.count);
-        });
-        expect_sorted(strings, permute_new);
-
 #if __linux__ && defined(_GNU_SOURCE)
         bench_permute("qsort_r", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
             sz_sequence_t array;
