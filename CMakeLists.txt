@@ -351,7 +351,7 @@ if(STRINGZILLA_INSTALL)
   install(
     TARGETS stringzilla_shared
     ARCHIVE
-    BUNDLE CXX_MODULES_BMI
+    BUNDLE
     FRAMEWORK
     LIBRARY
     OBJECTS
@@ -362,7 +362,7 @@ if(STRINGZILLA_INSTALL)
   install(
     TARGETS stringzillite
     ARCHIVE
-    BUNDLE CXX_MODULES_BMI
+    BUNDLE
     FRAMEWORK
     LIBRARY
     OBJECTS
