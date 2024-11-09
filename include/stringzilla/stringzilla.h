@@ -1805,12 +1805,22 @@ SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, 
 #if !SZ_AVOID_LIBC
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
+
+SZ_PUBLIC void *_sz_memory_allocate_default(sz_size_t length, void *handle) {
+    sz_unused(handle);
+    return malloc(length);
+}
+SZ_PUBLIC void _sz_memory_free_default(sz_ptr_t start, sz_size_t length, void *handle) {
+    sz_unused(handle && length);
+    free(start);
+}
+
 #endif
 
 SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc) {
 #if !SZ_AVOID_LIBC
-    alloc->allocate = (sz_memory_allocate_t)malloc;
-    alloc->free = (sz_memory_free_t)free;
+    alloc->allocate = (sz_memory_allocate_t)_sz_memory_allocate_default;
+    alloc->free = (sz_memory_free_t)_sz_memory_free_default;
 #else
     alloc->allocate = (sz_memory_allocate_t)SZ_NULL;
     alloc->free = (sz_memory_free_t)SZ_NULL;
