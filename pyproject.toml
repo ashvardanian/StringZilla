@@ -3,9 +3,9 @@
 #   - `manylinux` and `musllinux` wheels for Linux on x86_64, aarch64, i686, ppc64le, s390x;
 #   - `macos` wheels for x86_64, arm64, and universal2;
 #   - `windows` wheels for AMD64, x86, and ARM64.
-#   * for Python versions from 3.6 to 3.12.
+#   * for Python versions from 3.6 to 3.13.
 #   * running over 5,000 tests on each wheel.
-#   = meaning 16 platforms * 7 Python versions = 112 builds.
+#   = meaning 16 platforms * 8 Python versions = 128 builds.
 #   = meaning over 500,000 tests.
 [build-system]
 requires = ["setuptools>=42", "wheel"]
