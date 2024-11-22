@@ -38,6 +38,109 @@ extern void *malloc(size_t length);
 #endif
 #endif
 
+// On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
+#if defined(__APPLE__) && defined(__MACH__)
+#define SZ_APPLE 1
+#include <sys/sysctl.h>
+#endif
+
+#if defined(__linux__)
+#define SZ_LINUX 1
+#endif
+
+SZ_INTERNAL sz_capability_t sz_capabilities_arm(void) {
+#if defined(SZ_APPLE)
+
+    // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
+    uint32_t supports_neon = 0, supports_fp16 = 0, supports_bf16 = 0, supports_i8mm = 0;
+    size_t size = sizeof(supports_neon);
+    if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 0;
+    if (sysctlbyname("hw.optional.arm.FEAT_FP16", &supports_fp16, &size, NULL, 0) != 0) supports_fp16 = 0;
+    if (sysctlbyname("hw.optional.arm.FEAT_BF16", &supports_bf16, &size, NULL, 0) != 0) supports_bf16 = 0;
+    if (sysctlbyname("hw.optional.arm.FEAT_I8MM", &supports_i8mm, &size, NULL, 0) != 0) supports_i8mm = 0;
+
+    return (sz_capability_t)(                                     //
+        (sz_cap_arm_neon_k * (supports_neon)) |                   //
+        (sz_cap_neon_f16_k * (supports_neon && supports_fp16)) |  //
+        (sz_cap_neon_bf16_k * (supports_neon && supports_bf16)) | //
+        (sz_cap_neon_i8_k * (supports_neon && supports_i8mm)) |   //
+        (sz_cap_serial_k));
+
+#elif defined(SZ_LINUX)
+    // This is how the `arm-cpusysregs` library does it:
+    //
+    //    int ID_AA64ISAR1_EL1_BF16() const { return (int)(_aa64isar1 >> 44) & 0x0F; }
+    //    int ID_AA64ZFR0_EL1_BF16() const { return (int)(_aa64zfr0 >> 20) & 0x0F; }
+    //    int ID_AA64PFR0_EL1_FP() const { return (int)(_aa64pfr0 >> 16) & 0x0F; }
+    //    int ID_AA64ISAR0_EL1_DP() const { return (int)(_aa64isar0 >> 44) & 0x0F; }
+    //    int ID_AA64PFR0_EL1_SVE() const { return (int)(_aa64pfr0 >> 32) & 0x0F; }
+    //    int ID_AA64ZFR0_EL1_SVEver() const { return (int)(_aa64zfr0) & 0x0F; }
+    //    bool FEAT_BF16() const { return ID_AA64ISAR1_EL1_BF16() >= 1 || ID_AA64ZFR0_EL1_BF16() >= 1; }
+    //    bool FEAT_FP16() const { return ID_AA64PFR0_EL1_FP() >= 1 && ID_AA64PFR0_EL1_FP() < 15; }
+    //    bool FEAT_DotProd() const { return ID_AA64ISAR0_EL1_DP() >= 1; }
+    //    bool FEAT_SVE() const { return ID_AA64PFR0_EL1_SVE() >= 1; }
+    //    bool FEAT_SVE2() const { return ID_AA64ZFR0_EL1_SVEver() >= 1; }
+    //    bool FEAT_I8MM() const { return ID_AA64ZFR0_EL1_I8MM() >= 1; }
+    //
+    // https://github.com/lelegard/arm-cpusysregs/tree/4837c62e619a5e5f12bf41b16a1ee1e71d62c76d
+
+    // Read CPUID registers directly
+    unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
+
+    // Now let's unpack the status flags from ID_AA64ISAR0_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
+    __asm__ __volatile__("mrs %0, ID_AA64ISAR0_EL1" : "=r"(id_aa64isar0_el1));
+    // DP, bits [47:44] of ID_AA64ISAR0_EL1
+    unsigned supports_integer_dot_products = ((id_aa64isar0_el1 >> 44) & 0xF) >= 1;
+    // Now let's unpack the status flags from ID_AA64ISAR1_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR1-EL1--AArch64-Instruction-Set-Attribute-Register-1?lang=en
+    __asm__ __volatile__("mrs %0, ID_AA64ISAR1_EL1" : "=r"(id_aa64isar1_el1));
+    // I8MM, bits [55:52] of ID_AA64ISAR1_EL1
+    unsigned supports_i8mm = ((id_aa64isar1_el1 >> 52) & 0xF) >= 1;
+    // BF16, bits [47:44] of ID_AA64ISAR1_EL1
+    unsigned supports_bf16 = ((id_aa64isar1_el1 >> 44) & 0xF) >= 1;
+
+    // Now let's unpack the status flags from ID_AA64PFR0_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64PFR0-EL1--AArch64-Processor-Feature-Register-0?lang=en
+    __asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(id_aa64pfr0_el1));
+    // SVE, bits [35:32] of ID_AA64PFR0_EL1
+    unsigned supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
+    // AdvSIMD, bits [23:20] of ID_AA64PFR0_EL1 can be used to check for `fp16` support
+    //  - 0b0000: integers, single, double precision arithmetic
+    //  - 0b0001: includes support for half-precision floating-point arithmetic
+    unsigned supports_fp16 = ((id_aa64pfr0_el1 >> 20) & 0xF) == 1;
+
+    // Now let's unpack the status flags from ID_AA64ZFR0_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ZFR0-EL1--SVE-Feature-ID-Register-0?lang=en
+    if (supports_sve) __asm__ __volatile__("mrs %0, ID_AA64ZFR0_EL1" : "=r"(id_aa64zfr0_el1));
+    // I8MM, bits [47:44] of ID_AA64ZFR0_EL1
+    unsigned supports_sve_i8mm = ((id_aa64zfr0_el1 >> 44) & 0xF) >= 1;
+    // BF16, bits [23:20] of ID_AA64ZFR0_EL1
+    unsigned supports_sve_bf16 = ((id_aa64zfr0_el1 >> 20) & 0xF) >= 1;
+    // SVEver, bits [3:0] can be used to check for capability levels:
+    //  - 0b0000: SVE is implemented
+    //  - 0b0001: SVE2 is implemented
+    //  - 0b0010: SVE2.1 is implemented
+    // This value must match the existing indicator obtained from ID_AA64PFR0_EL1:
+    //    unsigned supports_sve = ((id_aa64zfr0_el1) & 0xF) >= 1;
+    //    unsigned supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 2;
+    unsigned supports_neon = 1; // NEON is always supported
+
+    return (sz_capability_t)(                                                                    //
+        (sz_cap_neon_k * (supports_neon)) |                                                      //
+        (sz_cap_neon_f16_k * (supports_neon && supports_fp16)) |                                 //
+        (sz_cap_neon_bf16_k * (supports_neon && supports_bf16)) |                                //
+        (sz_cap_neon_i8_k * (supports_neon && supports_i8mm && supports_integer_dot_products)) | //
+        (sz_cap_sve_k * (supports_sve)) |                                                        //
+        (sz_cap_sve_f16_k * (supports_sve && supports_fp16)) |                                   //
+        (sz_cap_sve_bf16_k * (supports_sve && supports_sve_bf16)) |                              //
+        (sz_cap_sve_i8_k * (supports_sve && supports_sve_i8mm)) |                                //
+        (sz_cap_serial_k));
+#else // SIMSIMD_DEFINED_LINUX
+    return sz_cap_serial_k;
+#endif
+}
+
 SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
 
 #if SZ_USE_X86_AVX512 || SZ_USE_X86_AVX2
@@ -96,22 +199,12 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
 
 #if SZ_USE_ARM_NEON || SZ_USE_ARM_SVE
 
-    // Every 64-bit Arm CPU supports NEON
-    unsigned supports_neon = 1;
-    unsigned supports_sve = 0;
-    unsigned supports_sve2 = 0;
-    sz_unused(supports_sve);
-    sz_unused(supports_sve2);
-
-    return (sz_capability_t)(                 //
-        (sz_cap_arm_neon_k * supports_neon) | //
-        (sz_cap_serial_k));
+    return sz_capabilities_arm();
 
 #endif // SIMSIMD_TARGET_ARM
 
     return sz_cap_serial_k;
 }
-
 typedef struct sz_implementations_t {
     sz_equal_t equal;
     sz_order_t order;

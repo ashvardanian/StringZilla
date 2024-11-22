@@ -258,17 +258,25 @@ typedef enum sz_capability_t {
     sz_cap_serial_k = 1,       /// Serial (non-SIMD) capability
     sz_cap_any_k = 0x7FFFFFFF, /// Mask representing any capability
 
-    sz_cap_arm_neon_k = 1 << 10, /// ARM NEON capability
-    sz_cap_arm_sve_k = 1 << 11,  /// ARM SVE capability TODO: Not yet supported or used
+    sz_cap_arm_neon_k = 1 << 10,  /// ARM NEON capability
+    sz_cap_neon_f16_k = 1 << 11,  ///< ARM NEON `f16` capability
+    sz_cap_neon_bf16_k = 1 << 12, ///< ARM NEON `bf16` capability
+    sz_cap_neon_i8_k = 1 << 13,   ///< ARM NEON `i8` capability
+    sz_cap_sve_k = 1 << 14,       ///< ARM SVE capability TODO: Not yet supported or used
+    sz_cap_sve_f16_k = 1 << 15,   ///< ARM SVE `f16` capability
+    sz_cap_sve_bf16_k = 1 << 16,  ///< ARM SVE `bf16` capability
+    sz_cap_sve_i8_k = 1 << 17,    ///< ARM SVE `i8` capability
+    sz_cap_sve2_k = 1 << 18,      ///< ARM SVE2 capability
+    sz_cap_sve2p1_k = 1 << 19,    ///< ARM SVE2p1 capability
 
-    sz_cap_x86_avx2_k = 1 << 20,       /// x86 AVX2 capability
-    sz_cap_x86_avx512f_k = 1 << 21,    /// x86 AVX512 F capability
-    sz_cap_x86_avx512bw_k = 1 << 22,   /// x86 AVX512 BW instruction capability
-    sz_cap_x86_avx512vl_k = 1 << 23,   /// x86 AVX512 VL instruction capability
-    sz_cap_x86_avx512vbmi_k = 1 << 24, /// x86 AVX512 VBMI instruction capability
-    sz_cap_x86_gfni_k = 1 << 25,       /// x86 AVX512 GFNI instruction capability
+    sz_cap_x86_avx2_k = 1 << 21,       /// x86 AVX2 capability
+    sz_cap_x86_avx512f_k = 1 << 22,    /// x86 AVX512 F capability
+    sz_cap_x86_avx512bw_k = 1 << 23,   /// x86 AVX512 BW instruction capability
+    sz_cap_x86_avx512vl_k = 1 << 24,   /// x86 AVX512 VL instruction capability
+    sz_cap_x86_avx512vbmi_k = 1 << 25, /// x86 AVX512 VBMI instruction capability
+    sz_cap_x86_gfni_k = 1 << 26,       /// x86 AVX512 GFNI instruction capability
 
-    sz_cap_x86_avx512vbmi2_k = 1 << 26, /// x86 AVX512 VBMI 2 instruction capability
+    sz_cap_x86_avx512vbmi2_k = 1 << 28, /// x86 AVX512 VBMI 2 instruction capability
 
 } sz_capability_t;
 
