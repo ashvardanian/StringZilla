@@ -1202,8 +1202,8 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_fill */
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-/** @copydoc sz_look_up_tranform */
-SZ_PUBLIC void sz_look_up_tranform_avx512(sz_cptr_t source, sz_size_t length, sz_cptr_t table, sz_ptr_t target);
+/** @copydoc sz_look_up_transform */
+SZ_PUBLIC void sz_look_up_transform_avx512(sz_cptr_t source, sz_size_t length, sz_cptr_t table, sz_ptr_t target);
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
