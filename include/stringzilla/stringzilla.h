@@ -1188,7 +1188,7 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
 #endif
 #endif // SZ_USE_ARM_SVE
 
-#pragma region Hardware - Specific API
+#pragma region Hardware Specific API
 
 #if SZ_USE_X86_AVX512
 
@@ -4458,7 +4458,7 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t windo
  *  * 2019 IceLake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES
  *  * 2020 TigerLake: VP2INTERSECT
  */
-#pragma region AVX - 512 Implementation
+#pragma region AVX512 Implementation
 
 #if SZ_USE_X86_AVX512
 #pragma GCC push_options
@@ -6274,7 +6274,7 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
 /*
  *  @brief  Pick the right implementation for the string search algorithms.
  */
-#pragma region Compile - Time Dispatching
+#pragma region Compile Time Dispatching
 
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t ins, sz_size_t length) { return sz_hash_serial(ins, length); }
 SZ_PUBLIC void sz_tolower(sz_cptr_t ins, sz_size_t length, sz_ptr_t outs) { sz_tolower_serial(ins, length, outs); }

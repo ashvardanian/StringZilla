@@ -21,7 +21,7 @@ using strings_t = std::vector<std::string>;
 using idx_t = sz_size_t;
 using permute_t = std::vector<sz_u64_t>;
 
-#pragma region - C callbacks
+#pragma region C callbacks
 
 static char const *get_start(sz_sequence_t const *array_c, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(array_c->handle);
