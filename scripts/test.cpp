@@ -14,7 +14,7 @@
 // #define SZ_USE_X86_AVX2 0
 // #define SZ_USE_X86_AVX512 0
 // #define SZ_USE_ARM_NEON 0
-#define SZ_USE_ARM_SVE 0
+// #define SZ_USE_ARM_SVE 0
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
 // Put this at the top to make sure it pulls all the right dependencies
@@ -24,14 +24,16 @@
 #include <sanitizer/asan_interface.h> // ASAN
 #endif
 
-#include <algorithm> // `std::transform`
-#include <cstdio>    // `std::printf`
-#include <cstring>   // `std::memcpy`
-#include <iterator>  // `std::distance`
-#include <memory>    // `std::allocator`
-#include <random>    // `std::random_device`
-#include <sstream>   // `std::ostringstream`
-#include <vector>    // `std::vector`
+#include <algorithm>     // `std::transform`
+#include <cstdio>        // `std::printf`
+#include <cstring>       // `std::memcpy`
+#include <iterator>      // `std::distance`
+#include <map>           // `std::map`
+#include <memory>        // `std::allocator`
+#include <random>        // `std::random_device`
+#include <sstream>       // `std::ostringstream`
+#include <unordered_map> // `std::unordered_map`
+#include <vector>        // `std::vector`
 
 #include <string>      // Baseline
 #include <string_view> // Baseline
@@ -57,6 +59,14 @@ template class sz::basic_string_slice<char>;
 template class std::basic_string<char>;
 template class sz::basic_string<char>;
 template class sz::basic_charset<char>;
+
+template class std::vector<sz::string>;
+template class std::map<sz::string, int>;
+template class std::unordered_map<sz::string, int>;
+
+template class std::vector<sz::string_view>;
+template class std::map<sz::string_view, int>;
+template class std::unordered_map<sz::string_view, int>;
 
 /**
  *  @brief  Several string processing operations rely on computing integer logarithms.
@@ -1493,6 +1503,21 @@ static void test_sequence_algorithms() {
     }
 }
 
+/**
+ *  @brief  Tests constructing STL containers with StringZilla strings.
+ */
+static void test_stl_containers() {
+    std::map<sz::string, int> sorted_words_sz;
+    std::unordered_map<sz::string, int> words_sz;
+    assert(sorted_words_sz.empty());
+    assert(words_sz.empty());
+
+    std::map<std::string, int, sz::string_view_less> sorted_words_stl;
+    std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to> words_stl;
+    assert(sorted_words_stl.empty());
+    assert(words_stl.empty());
+}
+
 int main(int argc, char const **argv) {
 
     // Let's greet the user nicely
@@ -1505,8 +1530,8 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
-    // test_memory_utilities();
-    // test_replacements();
+    test_memory_utilities();
+    test_replacements();
 
 // Compatibility with STL
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
@@ -1543,6 +1568,7 @@ int main(int argc, char const **argv) {
 
     // Sequences of strings
     test_sequence_algorithms();
+    test_stl_containers();
 
     std::printf("All tests passed... Unbelievable!\n");
     return 0;

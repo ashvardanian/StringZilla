@@ -3681,6 +3681,41 @@ bool basic_string<char_type_, allocator_>::try_preparing_replacement(size_type o
     }
 }
 
+/**
+ *  @brief  Helper function-like object to order string-view convertible objects with StringZilla.
+ *  @see    Similar to `std::less<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/less
+ *
+ *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
+ *  Can be used to combine STL classes with StringZilla logic, like: `std::map<std::string, int, sz::string_view_less>`.
+ */
+struct string_view_less {
+    bool operator()(string_view a, string_view b) const noexcept { return a < b; }
+};
+
+/**
+ *  @brief  Helper function-like object to check equality between string-view convertible objects with StringZilla.
+ *  @see    Similar to `std::equal_to<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/equal_to
+ *
+ *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
+ *  Can be used to combine STL classes with StringZilla logic, like:
+ *      `std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to>`.
+ */
+struct string_view_equal_to {
+    bool operator()(string_view a, string_view b) const noexcept { return a == b; }
+};
+
+/**
+ *  @brief  Helper function-like object to hash string-view convertible objects with StringZilla.
+ *  @see    Similar to `std::hash<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/hash
+ *
+ *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
+ *  Can be used to combine STL classes with StringZilla logic, like:
+ *      `std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to>`.
+ */
+struct string_view_hash {
+    std::size_t operator()(string_view str) const noexcept { return str.hash(); }
+};
+
 /**  @brief  SFINAE-type used to infer the resulting type of concatenating multiple string together. */
 template <typename... args_types>
 struct concatenation_result {};
