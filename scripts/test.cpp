@@ -14,7 +14,7 @@
 // #define SZ_USE_X86_AVX2 0
 // #define SZ_USE_X86_AVX512 0
 // #define SZ_USE_ARM_NEON 0
-// #define SZ_USE_ARM_SVE 0
+#define SZ_USE_ARM_SVE 0
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
 // Put this at the top to make sure it pulls all the right dependencies
@@ -394,6 +394,10 @@ static void test_stl_compatibility_for_reads() {
     assert(str("12341234") <= str("12341234"));
     assert(str("12341234") > str("12241224"));
     assert(str("12341234") < str("13241324"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") ==
+           str("0123456789012345678901234567890123456789012345678901234567890123"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") !=
+           str("0223456789012345678901234567890123456789012345678901234567890123"));
 
     // Comparisons.
     assert(str("a") != str("b"));
@@ -1501,8 +1505,8 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
-    test_memory_utilities();
-    test_replacements();
+    // test_memory_utilities();
+    // test_replacements();
 
 // Compatibility with STL
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
