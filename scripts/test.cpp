@@ -24,14 +24,16 @@
 #include <sanitizer/asan_interface.h> // ASAN
 #endif
 
-#include <algorithm> // `std::transform`
-#include <cstdio>    // `std::printf`
-#include <cstring>   // `std::memcpy`
-#include <iterator>  // `std::distance`
-#include <memory>    // `std::allocator`
-#include <random>    // `std::random_device`
-#include <sstream>   // `std::ostringstream`
-#include <vector>    // `std::vector`
+#include <algorithm>     // `std::transform`
+#include <cstdio>        // `std::printf`
+#include <cstring>       // `std::memcpy`
+#include <iterator>      // `std::distance`
+#include <map>           // `std::map`
+#include <memory>        // `std::allocator`
+#include <random>        // `std::random_device`
+#include <sstream>       // `std::ostringstream`
+#include <unordered_map> // `std::unordered_map`
+#include <vector>        // `std::vector`
 
 #include <string>      // Baseline
 #include <string_view> // Baseline
@@ -57,6 +59,14 @@ template class sz::basic_string_slice<char>;
 template class std::basic_string<char>;
 template class sz::basic_string<char>;
 template class sz::basic_charset<char>;
+
+template class std::vector<sz::string>;
+template class std::map<sz::string, int>;
+template class std::unordered_map<sz::string, int>;
+
+template class std::vector<sz::string_view>;
+template class std::map<sz::string_view, int>;
+template class std::unordered_map<sz::string_view, int>;
 
 /**
  *  @brief  Several string processing operations rely on computing integer logarithms.
@@ -394,6 +404,10 @@ static void test_stl_compatibility_for_reads() {
     assert(str("12341234") <= str("12341234"));
     assert(str("12341234") > str("12241224"));
     assert(str("12341234") < str("13241324"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") ==
+           str("0123456789012345678901234567890123456789012345678901234567890123"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") !=
+           str("0223456789012345678901234567890123456789012345678901234567890123"));
 
     // Comparisons.
     assert(str("a") != str("b"));
@@ -1489,6 +1503,21 @@ static void test_sequence_algorithms() {
     }
 }
 
+/**
+ *  @brief  Tests constructing STL containers with StringZilla strings.
+ */
+static void test_stl_containers() {
+    std::map<sz::string, int> sorted_words_sz;
+    std::unordered_map<sz::string, int> words_sz;
+    assert(sorted_words_sz.empty());
+    assert(words_sz.empty());
+
+    std::map<std::string, int, sz::string_view_less> sorted_words_stl;
+    std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to> words_stl;
+    assert(sorted_words_stl.empty());
+    assert(words_stl.empty());
+}
+
 int main(int argc, char const **argv) {
 
     // Let's greet the user nicely
@@ -1539,6 +1568,7 @@ int main(int argc, char const **argv) {
 
     // Sequences of strings
     test_sequence_algorithms();
+    test_stl_containers();
 
     std::printf("All tests passed... Unbelievable!\n");
     return 0;

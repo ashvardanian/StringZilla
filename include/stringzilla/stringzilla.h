@@ -5818,7 +5818,7 @@ SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
         a_vec.u8x16 = vld1q_u8((sz_u8_t const *)a);
         b_vec.u8x16 = vld1q_u8((sz_u8_t const *)b);
         uint8x16_t cmp = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
-        if (vmaxvq_u8(cmp) != 255) { return sz_false_k; } // Check if all bytes match
+        if (vminvq_u8(cmp) != 255) { return sz_false_k; } // Check if all bytes match
     }
 
     // Handle remaining bytes
