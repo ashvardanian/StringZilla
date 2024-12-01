@@ -714,7 +714,40 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs)
     }
 
     sz_u64_t result = sz_hash(text.start, text.length);
-    return PyLong_FromSize_t((size_t)result);
+    return PyLong_FromUnsignedLongLong((unsigned long long)result);
+}
+
+static char const doc_like_checksum[] = //
+    "Compute the checksum of individual byte values in a string.\n"
+    "\n"
+    "This function can be called as a method on a Str object or as a standalone function.\n"
+    "Args:\n"
+    "  text (Str or str or bytes): The string to hash.\n"
+    "Returns:\n"
+    "  int: The checksum of individual byte values in a string.\n"
+    "Raises:\n"
+    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
+
+static PyObject *Str_like_checksum(PyObject *self, PyObject *args, PyObject *kwargs) {
+    // Check minimum arguments
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs < !is_member || nargs > !is_member + 1 || kwargs) {
+        PyErr_SetString(PyExc_TypeError, "checksum() expects exactly one positional argument");
+        return NULL;
+    }
+
+    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    sz_string_view_t text;
+
+    // Validate and convert `text`
+    if (!export_string_like(text_obj, &text.start, &text.length)) {
+        wrap_current_exception("The text argument must be string-like");
+        return NULL;
+    }
+
+    sz_u64_t result = sz_checksum(text.start, text.length);
+    return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
 static char const doc_like_equal[] = //
