@@ -677,6 +677,17 @@ static void test_stl_conversions() {
 #endif
 }
 
+inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size_t step = 1) {
+    std::size_t n = (last >= first) ? ((last - first) / step + 1) : 0;
+    // Return 0 if there are no terms
+    if (n == 0) return 0;
+    // Compute the sum using the arithmetic sequence formula
+    std::size_t sum = n / 2 * (2 * first + (n - 1) * step);
+    // If n is odd, handle the remaining term separately to avoid overflow
+    if (n % 2 == 1) sum += (2 * first + (n - 1) * step) / 2;
+    return sum;
+}
+
 /**
  *  @brief  Invokes different C++ member methods of immutable strings to cover
  *          extensions beyond the STL API.
@@ -766,9 +777,16 @@ static void test_non_stl_extensions_for_reads() {
     assert(sz::alignment_score(str("hello"), str("hello"), costs, -1) == 0);
     assert(sz::alignment_score(str("hello"), str("hell"), costs, -1) == -1);
 
-    assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
+    // Checksums
+    assert(str("a").checksum() == (std::size_t)'a');
+    assert(str("0").checksum() == (std::size_t)'0');
+    assert(str("0123456789").checksum() == arithmetic_sum('0', '9'));
+    assert(str("abcdefghijklmnopqrstuvwxyz").checksum() == arithmetic_sum('a', 'z'));
+    assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").checksum() ==
+           arithmetic_sum('a', 'z') * 3);
 
     // Computing rolling fingerprints.
+    assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
     assert(sz::hashes_fingerprint<512>(str("hello"), 4).count() == 2);
     assert(sz::hashes_fingerprint<512>(str("hello"), 3).count() == 3);
 

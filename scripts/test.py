@@ -767,12 +767,22 @@ def test_translations(length: int):
 
 
 @pytest.mark.repeat(3)
-@pytest.mark.parametrize("length", range(1, 300))
+@pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_translations_random(length: int):
     body = get_random_string(length=length)
     lut = np.random.randint(0, 256, size=256, dtype=np.uint8)
     assert sz.translate(body, memoryview(lut)) == baseline_translate(body, lut)
+
+
+@pytest.mark.repeat(3)
+@pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
+def test_checksums_random(length: int):
+    def sum_bytes(body: str) -> int:
+        return sum([ord(c) for c in body])
+
+    body = get_random_string(length=length)
+    assert sum_bytes(body) == sz.checksum(body)
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])

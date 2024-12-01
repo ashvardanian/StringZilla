@@ -120,6 +120,7 @@ typedef struct sz_implementations_t {
     sz_move_t move;
     sz_fill_t fill;
     sz_look_up_transform_t look_up_transform;
+    sz_checksum_t checksum;
 
     sz_find_byte_t find_byte;
     sz_find_byte_t rfind_byte;
@@ -155,6 +156,7 @@ static void sz_dispatch_table_init(void) {
     impl->move = sz_move_serial;
     impl->fill = sz_fill_serial;
     impl->look_up_transform = sz_look_up_transform_serial;
+    impl->checksum = sz_checksum_serial;
 
     impl->find = sz_find_serial;
     impl->rfind = sz_rfind_serial;
@@ -176,6 +178,7 @@ static void sz_dispatch_table_init(void) {
         impl->move = sz_move_avx2;
         impl->fill = sz_fill_avx2;
         impl->look_up_transform = sz_look_up_transform_avx2;
+        impl->checksum = sz_checksum_avx2;
 
         impl->find_byte = sz_find_byte_avx2;
         impl->rfind_byte = sz_rfind_byte_avx2;
@@ -209,6 +212,7 @@ static void sz_dispatch_table_init(void) {
         impl->rfind_from_set = sz_rfind_charset_avx512;
         impl->alignment_score = sz_alignment_score_avx512;
         impl->look_up_transform = sz_look_up_transform_avx512;
+        impl->checksum = sz_checksum_avx512;
     }
 #endif
 
@@ -220,6 +224,7 @@ static void sz_dispatch_table_init(void) {
         impl->move = sz_move_neon;
         impl->fill = sz_fill_neon;
         impl->look_up_transform = sz_look_up_transform_neon;
+        impl->checksum = sz_checksum_neon;
 
         impl->find = sz_find_neon;
         impl->rfind = sz_rfind_neon;
@@ -250,6 +255,8 @@ BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
 #else
 __attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
+
+SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length) { return sz_dispatch_table.checksum(text, length); }
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_dispatch_table.equal(a, b, length);

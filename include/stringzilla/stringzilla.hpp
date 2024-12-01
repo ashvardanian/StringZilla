@@ -1909,6 +1909,9 @@ class basic_string_slice {
     /**  @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }
 
+    /**  @brief  Aggregates the values of individual bytes of a string. */
+    size_type checksum() const noexcept { return static_cast<size_type>(sz_checksum(start_, length_)); }
+
     /**  @brief  Populate a character set with characters present in this string. */
     char_set as_set() const noexcept {
         char_set set;
@@ -3302,6 +3305,9 @@ class basic_string {
 
     /**  @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     size_type hash() const noexcept { return view().hash(); }
+
+    /**  @brief  Aggregates the values of individual bytes of a string. */
+    size_type checksum() const noexcept { return view().checksum(); }
 
     /**
      *  @brief  Overwrites the string with random characters from the given alphabet using the random generator.
