@@ -685,13 +685,13 @@ static PyObject *Str_repr(Str *self) {
 static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->memory.start, self->memory.length); }
 
 static char const doc_like_hash[] = //
-    "Compute the hash value of the string.\n\n"
-    "This function can be called as a method on a Str object or as a standalone function.\n\n"
+    "Compute the hash value of the string.\n"
+    "\n"
+    "This function can be called as a method on a Str object or as a standalone function.\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object (if called as a method).\n"
-    "  text (str): The string to hash (if called as a function).\n\n"
+    "  text (Str or str or bytes): The string to hash.\n"
     "Returns:\n"
-    "  int: The hash value of the string.\n\n"
+    "  int: The hash value of the string.\n"
     "Raises:\n"
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
 
@@ -751,13 +751,14 @@ static PyObject *Str_like_checksum(PyObject *self, PyObject *args, PyObject *kwa
 }
 
 static char const doc_like_equal[] = //
-    "Compute the equals value of the string.\n\n"
-    "This function can be called as a method on a Str object or as a standalone function.\n\n"
+    "Check if two strings are equal.\n"
+    "\n"
+    "This function can be called as a method on a Str object or as a standalone function.\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object (if called as a method).\n"
-    "  text (str): The string to equals (if called as a function).\n\n"
+    "  first (Str or str or bytes): The first string object.\n"
+    "  second (Str or str or bytes): The second string object.\n"
     "Returns:\n"
-    "  int: The equals value of the string.\n\n"
+    "  bool: True if the strings are equal, False otherwise.\n"
     "Raises:\n"
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
 
@@ -1297,13 +1298,14 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
 }
 
 static char const doc_decode[] = //
-    "Decode the bytes into a Unicode string with a given encoding.\n\n"
+    "Decode the bytes into a Unicode string with a given encoding.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  encoding (str, optional): The encoding to use (default is 'utf-8').\n"
-    "  errors (str, optional): Error handling scheme (default is 'strict').\n\n"
+    "  errors (str, optional): Error handling scheme (default is 'strict').\n"
     "Returns:\n"
-    "  str: The decoded Unicode string.\n\n"
+    "  str: The decoded Unicode string.\n"
     "Raises:\n"
     "  UnicodeDecodeError: If decoding fails.";
 
@@ -1350,10 +1352,11 @@ static PyObject *Str_decode(PyObject *self, PyObject *args, PyObject *kwargs) {
 }
 
 static char const doc_write_to[] = //
-    "Write the string to a file.\n\n"
+    "Write the string to a file.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
-    "  filename (str): The file path to write to.\n\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "  filename (str): The file path to write to.\n"
     "Returns:\n"
     "  None.";
 
@@ -1428,10 +1431,11 @@ static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) 
 }
 
 static char const doc_offset_within[] = //
-    "Return the raw byte offset of this StringZilla string within a larger StringZilla string.\n\n"
+    "Return the raw byte offset of this StringZilla string within a larger StringZilla string.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The substring.\n"
-    "  larger (Str): The larger string to search within.\n\n"
+    "  text (Str or str or bytes): The substring.\n"
+    "  larger (Str): The larger string to search within.\n"
     "Returns:\n"
     "  int: The byte offset where 'self' is found within 'larger', or -1 if not found.";
 
@@ -1558,12 +1562,13 @@ static int _Str_find_implementation_( //
 }
 
 static char const doc_contains[] = //
-    "Check if a string contains a substring.\n\n"
+    "Check if a string contains a substring.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  substring (str): The substring to search for.\n"
     "  start (int, optional): The starting index (default is 0).\n"
-    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "  end (int, optional): The ending index (default is the string length).\n"
     "Returns:\n"
     "  bool: True if the substring is found, False otherwise.";
 
@@ -1578,12 +1583,13 @@ static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) 
 }
 
 static char const doc_find[] = //
-    "Find the first occurrence of a substring.\n\n"
+    "Find the first occurrence of a substring.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  substring (str): The substring to find.\n"
     "  start (int, optional): The starting index (default is 0).\n"
-    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "  end (int, optional): The ending index (default is the string length).\n"
     "Returns:\n"
     "  int: The index of the first occurrence, or -1 if not found.";
 
@@ -1597,14 +1603,15 @@ static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
 }
 
 static char const doc_index[] = //
-    "Find the first occurrence of a substring or raise an error if not found.\n\n"
+    "Find the first occurrence of a substring or raise an error if not found.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  substring (str): The substring to find.\n"
     "  start (int, optional): The starting index (default is 0).\n"
-    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "  end (int, optional): The ending index (default is the string length).\n"
     "Returns:\n"
-    "  int: The index of the first occurrence.\n\n"
+    "  int: The index of the first occurrence.\n"
     "Raises:\n"
     "  ValueError: If the substring is not found.";
 
@@ -1622,12 +1629,13 @@ static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
 }
 
 static char const doc_rfind[] = //
-    "Find the last occurrence of a substring.\n\n"
+    "Find the last occurrence of a substring.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  substring (str): The substring to find.\n"
     "  start (int, optional): The starting index (default is 0).\n"
-    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "  end (int, optional): The ending index (default is the string length).\n"
     "Returns:\n"
     "  int: The index of the last occurrence, or -1 if not found.";
 
@@ -1641,14 +1649,15 @@ static PyObject *Str_rfind(PyObject *self, PyObject *args, PyObject *kwargs) {
 }
 
 static char const doc_rindex[] = //
-    "Find the last occurrence of a substring or raise an error if not found.\n\n"
+    "Find the last occurrence of a substring or raise an error if not found.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  substring (str): The substring to find.\n"
     "  start (int, optional): The starting index (default is 0).\n"
-    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "  end (int, optional): The ending index (default is the string length).\n"
     "Returns:\n"
-    "  int: The index of the last occurrence.\n\n"
+    "  int: The index of the last occurrence.\n"
     "Raises:\n"
     "  ValueError: If the substring is not found.";
 
@@ -1721,10 +1730,11 @@ static PyObject *_Str_partition_implementation(PyObject *self, PyObject *args, P
 }
 
 static char const doc_partition[] = //
-    "Split the string into a 3-tuple around the first occurrence of a separator.\n\n"
+    "Split the string into a 3-tuple around the first occurrence of a separator.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
-    "  separator (str): The separator to partition by.\n\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "  separator (str): The separator to partition by.\n"
     "Returns:\n"
     "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns (self, '', '').";
 
@@ -1733,10 +1743,11 @@ static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs)
 }
 
 static char const doc_rpartition[] = //
-    "Split the string into a 3-tuple around the last occurrence of a separator.\n\n"
+    "Split the string into a 3-tuple around the last occurrence of a separator.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
-    "  separator (str): The separator to partition by.\n\n"
+    "  text (Str or str or bytes): The string object.\n"
+    "  separator (str): The separator to partition by.\n"
     "Returns:\n"
     "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns ('', '', self).";
 
@@ -1745,13 +1756,14 @@ static PyObject *Str_rpartition(PyObject *self, PyObject *args, PyObject *kwargs
 }
 
 static char const doc_count[] = //
-    "Count the occurrences of a substring.\n\n"
+    "Count the occurrences of a substring.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  substring (str): The substring to count.\n"
     "  start (int, optional): The starting index (default is 0).\n"
     "  end (int, optional): The ending index (default is the string length).\n"
-    "  allowoverlap (bool, optional): Count overlapping occurrences (default is False).\n\n"
+    "  allowoverlap (bool, optional): Count overlapping occurrences (default is False).\n"
     "Returns:\n"
     "  int: The number of occurrences of the substring.";
 
@@ -1878,11 +1890,12 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
 }
 
 static char const doc_edit_distance[] = //
-    "Compute the Levenshtein edit distance between two strings.\n\n"
+    "Compute the Levenshtein edit distance between two strings.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The first string.\n"
+    "  text (Str or str or bytes): The first string.\n"
     "  other (str): The second string to compare.\n"
-    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n\n"
+    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n"
     "Returns:\n"
     "  int: The edit distance (number of insertions, deletions, substitutions).";
 
@@ -1891,11 +1904,12 @@ static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwa
 }
 
 static char const doc_edit_distance_unicode[] = //
-    "Compute the Levenshtein edit distance between two Unicode strings.\n\n"
+    "Compute the Levenshtein edit distance between two Unicode strings.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The first string.\n"
+    "  text (Str or str or bytes): The first string.\n"
     "  other (str): The second string to compare.\n"
-    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n\n"
+    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n"
     "Returns:\n"
     "  int: The edit distance in Unicode characters.";
 
@@ -1950,11 +1964,12 @@ static PyObject *_Str_hamming_distance(PyObject *self, PyObject *args, PyObject 
 }
 
 static char const doc_hamming_distance[] = //
-    "Compute the Hamming distance between two strings.\n\n"
+    "Compute the Hamming distance between two strings.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The first string.\n"
+    "  text (Str or str or bytes): The first string.\n"
     "  other (str): The second string to compare.\n"
-    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n\n"
+    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n"
     "Returns:\n"
     "  int: The Hamming distance, including differing bytes and length difference.";
 
@@ -1963,11 +1978,12 @@ static PyObject *Str_hamming_distance(PyObject *self, PyObject *args, PyObject *
 }
 
 static char const doc_hamming_distance_unicode[] = //
-    "Compute the Hamming distance between two Unicode strings.\n\n"
+    "Compute the Hamming distance between two Unicode strings.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The first string.\n"
+    "  text (Str or str or bytes): The first string.\n"
     "  other (str): The second string to compare.\n"
-    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n\n"
+    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n"
     "Returns:\n"
     "  int: The Hamming distance, including differing Unicode characters and length difference.";
 
@@ -1976,13 +1992,14 @@ static PyObject *Str_hamming_distance_unicode(PyObject *self, PyObject *args, Py
 }
 
 static char const doc_alignment_score[] = //
-    "Compute the Needleman-Wunsch alignment score between two strings.\n\n"
+    "Compute the Needleman-Wunsch alignment score between two strings.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The first string.\n"
+    "  text (Str or str or bytes): The first string.\n"
     "  other (str): The second string to align.\n"
     "  substitution_matrix (numpy.ndarray): A 256x256 substitution cost matrix.\n"
     "  gap_score (int): The score for introducing a gap.\n"
-    "  bound (int, optional): Optional maximum score to compute (default is no bound).\n\n"
+    "  bound (int, optional): Optional maximum score to compute (default is no bound).\n"
     "Returns:\n"
     "  int: The alignment score.";
 
@@ -2074,12 +2091,13 @@ static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *k
 }
 
 static char const doc_startswith[] = //
-    "Check if a string starts with a given prefix.\n\n"
+    "Check if a string starts with a given prefix.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  prefix (str): The prefix to check.\n"
     "  start (int, optional): The starting index (default is 0).\n"
-    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "  end (int, optional): The ending index (default is the string length).\n"
     "Returns:\n"
     "  bool: True if the string starts with the prefix, False otherwise.";
 
@@ -2127,12 +2145,13 @@ static PyObject *Str_startswith(PyObject *self, PyObject *args, PyObject *kwargs
 }
 
 static char const doc_endswith[] = //
-    "Check if a string ends with a given suffix.\n\n"
+    "Check if a string ends with a given suffix.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  suffix (str): The suffix to check.\n"
     "  start (int, optional): The starting index (default is 0).\n"
-    "  end (int, optional): The ending index (default is the string length).\n\n"
+    "  end (int, optional): The ending index (default is the string length).\n"
     "Returns:\n"
     "  bool: True if the string ends with the suffix, False otherwise.";
 
@@ -2180,15 +2199,17 @@ static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) 
 }
 
 static char const doc_translate[] = //
-    "Perform transformation of a string using a look-up table.\n\n"
+    "Perform transformation of a string using a look-up table.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  table (str or dict): A 256-character string or a dictionary mapping bytes to bytes.\n"
-    "  inplace (bool, optional): If True, the string is modified in place (default is False).\n\n"
+    "  inplace (bool, optional): If True, the string is modified in place (default is False).\n"
+    "\n"
     "  start (int, optional): The starting index for translation (default is 0).\n"
-    "  end (int, optional): The ending index for translation (default is the string length).\n\n"
+    "  end (int, optional): The ending index for translation (default is the string length).\n"
     "Returns:\n"
-    "  Union[None, str, bytes]: If inplace is False, a new string is returned, otherwise None.\n\n"
+    "  Union[None, str, bytes]: If inplace is False, a new string is returned, otherwise None.\n"
     "Raises:\n"
     "  ValueError: If the table is not 256 bytes long.\n"
     "  TypeError: If the table is not a string or dictionary.";
@@ -2320,12 +2341,13 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
 }
 
 static char const doc_find_first_of[] = //
-    "Find the index of the first occurrence of any character from another string.\n\n"
+    "Find the index of the first occurrence of any character from another string.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  chars (str): A string containing characters to search for.\n"
     "  start (int, optional): Starting index (default is 0).\n"
-    "  end (int, optional): Ending index (default is the string length).\n\n"
+    "  end (int, optional): Ending index (default is the string length).\n"
     "Returns:\n"
     "  int: Index of the first matching character, or -1 if none found.";
 
@@ -2340,12 +2362,13 @@ static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwa
 }
 
 static char const doc_find_first_not_of[] = //
-    "Find the index of the first character not in another string.\n\n"
+    "Find the index of the first character not in another string.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  chars (str): A string containing characters to exclude.\n"
     "  start (int, optional): Starting index (default is 0).\n"
-    "  end (int, optional): Ending index (default is the string length).\n\n"
+    "  end (int, optional): Ending index (default is the string length).\n"
     "Returns:\n"
     "  int: Index of the first non-matching character, or -1 if all match.";
 
@@ -2360,12 +2383,13 @@ static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject 
 }
 
 static char const doc_find_last_of[] = //
-    "Find the index of the last occurrence of any character from another string.\n\n"
+    "Find the index of the last occurrence of any character from another string.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  chars (str): A string containing characters to search for.\n"
     "  start (int, optional): Starting index (default is 0).\n"
-    "  end (int, optional): Ending index (default is the string length).\n\n"
+    "  end (int, optional): Ending index (default is the string length).\n"
     "Returns:\n"
     "  int: Index of the last matching character, or -1 if none found.";
 
@@ -2380,12 +2404,13 @@ static PyObject *Str_find_last_of(PyObject *self, PyObject *args, PyObject *kwar
 }
 
 static char const doc_find_last_not_of[] = //
-    "Find the index of the last character not in another string.\n\n"
+    "Find the index of the last character not in another string.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  chars (str): A string containing characters to exclude.\n"
     "  start (int, optional): Starting index (default is 0).\n"
-    "  end (int, optional): Ending index (default is the string length).\n\n"
+    "  end (int, optional): Ending index (default is the string length).\n"
     "Returns:\n"
     "  int: Index of the last non-matching character, or -1 if all match.";
 
@@ -2690,14 +2715,15 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, P
 }
 
 static char const doc_split[] = //
-    "Split a string by a separator.\n\n"
+    "Split a string by a separator.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  separator (str): The separator to split by (cannot be empty).\n"
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"
-    "  keepseparator (bool, optional): Include the separator in results (default is False).\n\n"
+    "  keepseparator (bool, optional): Include the separator in results (default is False).\n"
     "Returns:\n"
-    "  Strs: A list of strings split by the separator.\n\n"
+    "  Strs: A list of strings split by the separator.\n"
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
@@ -2706,14 +2732,15 @@ static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
 }
 
 static char const doc_rsplit[] = //
-    "Split a string by a separator starting from the end.\n\n"
+    "Split a string by a separator starting from the end.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  separator (str): The separator to split by (cannot be empty).\n"
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"
-    "  keepseparator (bool, optional): Include the separator in results (default is False).\n\n"
+    "  keepseparator (bool, optional): Include the separator in results (default is False).\n"
     "Returns:\n"
-    "  Strs: A list of strings split by the separator.\n\n"
+    "  Strs: A list of strings split by the separator.\n"
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
@@ -2722,12 +2749,13 @@ static PyObject *Str_rsplit(PyObject *self, PyObject *args, PyObject *kwargs) {
 }
 
 static char const doc_split_charset[] = //
-    "Split a string by a set of character separators.\n\n"
+    "Split a string by a set of character separators.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  separators (str): A string containing separator characters.\n"
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"
-    "  keepseparator (bool, optional): Include separators in results (default is False).\n\n"
+    "  keepseparator (bool, optional): Include separators in results (default is False).\n"
     "Returns:\n"
     "  Strs: A list of strings split by the character set.";
 
@@ -2736,12 +2764,13 @@ static PyObject *Str_split_charset(PyObject *self, PyObject *args, PyObject *kwa
 }
 
 static char const doc_rsplit_charset[] = //
-    "Split a string by a set of character separators in reverse order.\n\n"
+    "Split a string by a set of character separators in reverse order.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  separators (str): A string containing separator characters.\n"
     "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"
-    "  keepseparator (bool, optional): Include separators in results (default is False).\n\n"
+    "  keepseparator (bool, optional): Include separators in results (default is False).\n"
     "Returns:\n"
     "  Strs: A list of strings split by the character set.";
 
@@ -2750,13 +2779,14 @@ static PyObject *Str_rsplit_charset(PyObject *self, PyObject *args, PyObject *kw
 }
 
 static char const doc_split_iter[] = //
-    "Create an iterator for splitting a string by a separator.\n\n"
+    "Create an iterator for splitting a string by a separator.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  separator (str): The separator to split by (cannot be empty).\n"
-    "  keepseparator (bool, optional): Include separator in results (default is False).\n\n"
+    "  keepseparator (bool, optional): Include separator in results (default is False).\n"
     "Returns:\n"
-    "  iterator: An iterator yielding split substrings.\n\n"
+    "  iterator: An iterator yielding split substrings.\n"
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
@@ -2765,13 +2795,14 @@ static PyObject *Str_split_iter(PyObject *self, PyObject *args, PyObject *kwargs
 }
 
 static char const doc_rsplit_iter[] = //
-    "Create an iterator for splitting a string by a separator in reverse order.\n\n"
+    "Create an iterator for splitting a string by a separator in reverse order.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  separator (str): The separator to split by (cannot be empty).\n"
-    "  keepseparator (bool, optional): Include separator in results (default is False).\n\n"
+    "  keepseparator (bool, optional): Include separator in results (default is False).\n"
     "Returns:\n"
-    "  iterator: An iterator yielding split substrings in reverse.\n\n"
+    "  iterator: An iterator yielding split substrings in reverse.\n"
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
@@ -2780,11 +2811,12 @@ static PyObject *Str_rsplit_iter(PyObject *self, PyObject *args, PyObject *kwarg
 }
 
 static char const doc_split_charset_iter[] = //
-    "Create an iterator for splitting a string by a set of character separators.\n\n"
+    "Create an iterator for splitting a string by a set of character separators.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  separators (str): A string containing separator characters.\n"
-    "  keepseparator (bool, optional): Include separators in results (default is False).\n\n"
+    "  keepseparator (bool, optional): Include separators in results (default is False).\n"
     "Returns:\n"
     "  iterator: An iterator yielding split substrings.";
 
@@ -2793,11 +2825,12 @@ static PyObject *Str_split_charset_iter(PyObject *self, PyObject *args, PyObject
 }
 
 static char const doc_rsplit_charset_iter[] = //
-    "Create an iterator for splitting a string by a set of character separators in reverse order.\n\n"
+    "Create an iterator for splitting a string by a set of character separators in reverse order.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  separators (str): A string containing separator characters.\n"
-    "  keepseparator (bool, optional): Include separators in results (default is False).\n\n"
+    "  keepseparator (bool, optional): Include separators in results (default is False).\n"
     "Returns:\n"
     "  iterator: An iterator yielding split substrings in reverse.";
 
@@ -2806,11 +2839,12 @@ static PyObject *Str_rsplit_charset_iter(PyObject *self, PyObject *args, PyObjec
 }
 
 static char const doc_splitlines[] = //
-    "Split a string by line breaks.\n\n"
+    "Split a string by line breaks.\n"
+    "\n"
     "Args:\n"
-    "  self (Str or str or bytes): The string object.\n"
+    "  text (Str or str or bytes): The string object.\n"
     "  keeplinebreaks (bool, optional): Include line breaks in the results (default is False).\n"
-    "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n\n"
+    "  maxsplit (int, optional): Maximum number of splits (default is no limit).\n"
     "Returns:\n"
     "  Strs: A list of strings split by line breaks.";
 
@@ -3612,6 +3646,7 @@ static PyMethodDef stringzilla_methods[] = {
     {"endswith", Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
     {"translate", Str_translate, SZ_METHOD_FLAGS, doc_translate},
     {"decode", Str_decode, SZ_METHOD_FLAGS, doc_decode},
+    {"equal", Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
 
     // Bidirectional operations
     {"find", Str_find, SZ_METHOD_FLAGS, doc_find},
@@ -3650,7 +3685,7 @@ static PyMethodDef stringzilla_methods[] = {
 
     // Global unary extensions
     {"hash", Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
-    {"equal", Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
+    {"checksum", Str_like_checksum, SZ_METHOD_FLAGS, doc_like_checksum},
 
     {NULL, NULL, 0, NULL}};
 
