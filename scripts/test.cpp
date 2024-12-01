@@ -1546,12 +1546,10 @@ int main(int argc, char const **argv) {
     std::printf("- Uses NEON: %s \n", SZ_USE_ARM_NEON ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_ARM_SVE ? "yes" : "no");
 
-#if 0
     // Basic utilities
     test_arithmetical_utilities();
     test_memory_utilities();
     test_replacements();
-#endif
 
 // Compatibility with STL
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view

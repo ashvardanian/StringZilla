@@ -4,6 +4,8 @@
  *
  *  This file is the sibling of `bench_sort.cpp`, `bench_search.cpp` and `bench_similarity.cpp`.
  */
+#include <numeric> // `std::accumulate`
+
 #include <bench.hpp>
 #include <test.hpp> // `random_string`
 
@@ -189,7 +191,7 @@ void bench(strings_type &&strings) {
 
 void bench_on_input_data(int argc, char const **argv) {
     dataset_t dataset = prepare_benchmark_environment(argc, argv);
-
+#if 0
     std::printf("Benchmarking on the entire dataset:\n");
     bench_unary_functions(dataset.tokens, random_generation_functions(100));
     bench_unary_functions(dataset.tokens, random_generation_functions(20));
@@ -211,14 +213,14 @@ void bench_on_input_data(int argc, char const **argv) {
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions(128, 4 * 1024));
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions(128, 64 * 1024));
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions(128, 1024 * 1024));
-
+#endif
     // Baseline benchmarks for real words, coming in all lengths
-    std::printf("Benchmarking on entire dataset:\n");
-    bench<std::vector<std::string_view>>({dataset.text});
-    std::printf("Benchmarking on real lines:\n");
-    bench(dataset.lines);
     std::printf("Benchmarking on real words:\n");
     bench(dataset.tokens);
+    std::printf("Benchmarking on real lines:\n");
+    bench(dataset.lines);
+    std::printf("Benchmarking on entire dataset:\n");
+    bench<std::vector<std::string_view>>({dataset.text});
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {

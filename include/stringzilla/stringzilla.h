@@ -4022,7 +4022,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_avx2(sz_cptr_t text, sz_size_t length) {
         __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
         __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
         __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
-        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64x(sums_xmm);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
         sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
         sz_u64_t result = low + high;
         if (length) result += sz_checksum_serial(text, length);
@@ -4073,7 +4073,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_avx2(sz_cptr_t text, sz_size_t length) {
         __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
         __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
         __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
-        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64x(sums_xmm);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
         sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
         result += low + high;
         return result;
@@ -5306,7 +5306,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_avx512(sz_cptr_t text, sz_size_t length) {
         __mmask16 mask = _sz_u16_mask_until(length);
         text_vec.xmms[0] = _mm_maskz_loadu_epi8(mask, text);
         sums_vec.xmms[0] = _mm_sad_epu8(text_vec.xmms[0], _mm_setzero_si128());
-        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64x(sums_vec.xmms[0]);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_vec.xmms[0]);
         sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_vec.xmms[0], 1);
         return low + high;
     }
@@ -5318,7 +5318,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_avx512(sz_cptr_t text, sz_size_t length) {
         __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymms[0]);
         __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymms[0], 1);
         __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
-        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64x(sums_xmm);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
         sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
         return low + high;
     }
@@ -6092,7 +6092,7 @@ SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_true_k;
 }
 
-SZ_PUBLIC sz_u64_t sz_checksum_neon(sz_cptr_t const *text, size_t length) {
+SZ_PUBLIC sz_u64_t sz_checksum_neon(sz_cptr_t text, sz_size_t length) {
     uint64x2_t sum_vec = vdupq_n_u64(0);
 
     // Process 16 bytes (128 bits) at a time
