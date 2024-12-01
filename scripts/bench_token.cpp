@@ -9,6 +9,30 @@
 
 using namespace ashvardanian::stringzilla::scripts;
 
+tracked_unary_functions_t checksum_functions() {
+    auto wrap_sz = [](auto function) -> unary_function_t {
+        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
+    };
+    tracked_unary_functions_t result = {
+        {"std::accumulate",
+         [](std::string_view s) {
+             return std::accumulate(s.begin(), s.end(), (std::size_t)0,
+                                    [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
+         }},
+        {"sz_checksum_serial", wrap_sz(sz_checksum_serial), true},
+#if SZ_USE_X86_AVX2
+        {"sz_checksum_avx2", wrap_sz(sz_checksum_avx2), true},
+#endif
+#if SZ_USE_X86_AVX512
+        {"sz_checksum_avx512", wrap_sz(sz_checksum_avx512), true},
+#endif
+#if SZ_USE_ARM_NEON
+        {"sz_checksum_neon", wrap_sz(sz_checksum_neon), true},
+#endif
+    };
+    return result;
+}
+
 tracked_unary_functions_t hashing_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
         return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
@@ -148,6 +172,7 @@ void bench(strings_type &&strings) {
     if (strings.size() == 0) return;
 
     // Benchmark logical operations
+    bench_unary_functions(strings, checksum_functions());
     bench_unary_functions(strings, hashing_functions());
     bench_unary_functions(strings, sliding_hashing_functions(8, 1));
     bench_unary_functions(strings, fingerprinting_functions());
