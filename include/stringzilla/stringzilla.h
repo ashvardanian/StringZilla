@@ -427,7 +427,7 @@ typedef void (*sz_to_converter_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
  *  @param length   Number of bytes in the text.
  *  @return         64-bit unsigned value.
  */
-SZ_PUBLIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length);
+SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_checksum */
 SZ_PUBLIC sz_u64_t sz_checksum_serial(sz_cptr_t text, sz_size_t length);
