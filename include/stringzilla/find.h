@@ -22,6 +22,8 @@
 
 #include "types.h"
 
+#include "compare.h" // `sz_equal`
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -193,26 +195,6 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t haystack, sz_size_t h_length
 #pragma endregion // Core API
 
 #pragma region Serial Implementation
-
-/**
- *  @brief  Byte-level equality comparison between two strings.
- *          If unaligned loads are allowed, uses a switch-table to avoid loops on short strings.
- */
-SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    sz_cptr_t const a_end = a + length;
-#if SZ_USE_MISALIGNED_LOADS
-    if (length >= SZ_SWAR_THRESHOLD) {
-        sz_u64_vec_t a_vec, b_vec;
-        for (; a + 8 <= a_end; a += 8, b += 8) {
-            a_vec = sz_u64_load(a);
-            b_vec = sz_u64_load(b);
-            if (a_vec.u64 != b_vec.u64) return sz_false_k;
-        }
-    }
-#endif
-    while (a != a_end && *a == *b) a++, b++;
-    return (sz_bool_t)(a_end == a);
-}
 
 /**
  *  @brief  Chooses the offsets of the most interesting characters in a search needle.
@@ -804,24 +786,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
 #pragma region Haswell Implementation
 #if SZ_USE_HASWELL
 #pragma GCC push_options
-#pragma GCC target("haswell")
-#pragma clang attribute push(__attribute__((target("haswell"))), apply_to = function)
-
-SZ_PUBLIC sz_bool_t sz_equal_haswell(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    sz_u256_vec_t a_vec, b_vec;
-
-    while (length >= 32) {
-        a_vec.ymm = _mm256_lddqu_si256((__m256i const *)a);
-        b_vec.ymm = _mm256_lddqu_si256((__m256i const *)b);
-        // One approach can be to use "movemasks", but we could also use a bitwise matching like `_mm256_testnzc_si256`.
-        int difference_mask = ~_mm256_movemask_epi8(_mm256_cmpeq_epi8(a_vec.ymm, b_vec.ymm));
-        if (difference_mask == 0) { a += 32, b += 32, length -= 32; }
-        else { return sz_false_k; }
-    }
-
-    if (length) return sz_equal_serial(a, b, length);
-    return sz_true_k;
-}
+#pragma GCC target("avx2")
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_haswell(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     int mask;
@@ -1035,30 +1001,6 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_haswell(sz_cptr_t text, sz_size_t length, s
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
-
-SZ_PUBLIC sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    __mmask64 mask;
-    sz_u512_vec_t a_vec, b_vec;
-
-    while (length >= 64) {
-        a_vec.zmm = _mm512_loadu_si512(a);
-        b_vec.zmm = _mm512_loadu_si512(b);
-        mask = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
-        if (mask != 0) return sz_false_k;
-        a += 64, b += 64, length -= 64;
-    }
-
-    if (length) {
-        mask = _sz_u64_mask_until(length);
-        a_vec.zmm = _mm512_maskz_loadu_epi8(mask, a);
-        b_vec.zmm = _mm512_maskz_loadu_epi8(mask, b);
-        // Reuse the same `mask` variable to find the bit that doesn't match
-        mask = _mm512_mask_cmpneq_epi8_mask(mask, a_vec.zmm, b_vec.zmm);
-        return (sz_bool_t)(mask == 0);
-    }
-
-    return sz_true_k;
-}
 
 SZ_PUBLIC sz_cptr_t sz_find_byte_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     __mmask64 mask;
@@ -1428,20 +1370,6 @@ SZ_INTERNAL sz_u64_t _sz_vreinterpretq_u8_u4(uint8x16_t vec) {
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec), 4)), 0) & 0x8888888888888888ull;
 }
 
-SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    sz_u128_vec_t a_vec, b_vec;
-    for (; length >= 16; a += 16, b += 16, length -= 16) {
-        a_vec.u8x16 = vld1q_u8((sz_u8_t const *)a);
-        b_vec.u8x16 = vld1q_u8((sz_u8_t const *)b);
-        uint8x16_t cmp = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
-        if (vminvq_u8(cmp) != 255) { return sz_false_k; } // Check if all bytes match
-    }
-
-    // Handle remaining bytes
-    if (length) return sz_equal_serial(a, b, length);
-    return sz_true_k;
-}
-
 SZ_PUBLIC sz_cptr_t sz_find_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     sz_u64_t matches;
     sz_u128_vec_t h_vec, n_vec, matches_vec;
@@ -1676,7 +1604,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_ch
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
-#pragma region Core Funcitonality
+#pragma region Core Functionality
 
 SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
 #if SZ_USE_SKYLAKE
