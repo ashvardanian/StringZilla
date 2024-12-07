@@ -1394,6 +1394,20 @@ static void test_levenshtein_distances() {
         {"abc", "adc", 1},                  // one substitution
         {"abc", "abc", 0},                  // same string
         {"ggbuzgjux{}l", "gbuzgjux{}l", 1}, // one insertion (prepended)
+        {"apple", "aple", 1},
+        // Unicode:
+        {"αβγδ", "αγδ", 2},                      // Each Greek symbol is 2 bytes in size
+        {"مرحبا بالعالم", "مرحبا يا عالم", 3},   // "Hello World" vs "Welcome to the World" ?
+        {"école", "école", 3},                   // letter "é" as a single character vs "e" + "´"
+        {"Schön", "Scho\u0308n", 3},             // "ö" represented as "o" + "¨"
+        {"💖", "💗", 1},                         // 4-byte emojis: Different hearts
+        {"𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓", 3},          // Ancient Chinese characters, no spaces vs spaces
+        {"München", "Muenchen", 2},              // German name with umlaut vs. its transcription
+        {"façade", "facade", 2},                 // "ç" represented as "c" with cedilla vs. plain "c"
+        {"こんにちは世界", "こんばんは世界", 3}, // Japanese: "Good morning world" vs "Good evening world"
+        {"👩‍👩‍👧‍👦", "👨‍👩‍👧‍👦", 1}, // Family emojis with different compositions
+        {"Data科学123", "Data科學321", 3},
+        {"🙂🌍🚀", "🙂🌎✨", 5},
     };
 
     using matrix_t = std::int8_t[256][256];
@@ -1435,6 +1449,7 @@ static void test_levenshtein_distances() {
         std::size_t iterations;
     } fuzzy_cases[] = {
         {10, 1000},
+        {64, 128},
         {100, 100},
         {1000, 10},
     };
