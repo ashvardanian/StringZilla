@@ -137,6 +137,49 @@ static void test_arithmetical_utilities() {
                    (static_cast<sz_u8_t>(number) / static_cast<sz_u8_t>(divisor)));
 }
 
+/**
+ * @brief Tests various ASCII-based methods (e.g., is_alpha, is_digit)
+ *        provided by `sz::string` and `sz::string_view`.
+ */
+template <typename string_type>
+static void test_ascii_utilities() {
+
+    using str = string_type;
+
+    assert(!str("").is_alpha());
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").is_alpha());
+    assert(!str("abc9").is_alpha());
+
+    assert(!str("").is_alnum());
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").is_alnum());
+    assert(!str("abc!").is_alnum());
+
+    assert(!str("").is_ascii());
+    assert(str("\x00x7F").is_ascii());
+    assert(!str("abc123🔥").is_ascii());
+
+    assert(!str("").is_digit());
+    assert(str("0123456789").is_digit());
+    assert(!str("012a").is_digit());
+
+    assert(!str("").is_lower());
+    assert(str("abcdefghijklmnopqrstuvwxyz").is_lower());
+    assert(!str("abcA").is_lower());
+    assert(!str("abc\n").is_lower());
+
+    assert(!str("").is_space());
+    assert(str(" \t\n\r\f\v").is_space());
+    assert(!str(" \t\r\na").is_space());
+
+    assert(!str("").is_upper());
+    assert(str("ABCDEFGHIJKLMNOPQRSTUVWXYZ").is_upper());
+    assert(!str("ABCa").is_upper());
+
+    assert(!str("").is_printable());
+    assert(str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+").is_printable());
+    assert(!str("012\n").is_printable());
+}
+
 inline void expect_equality(char const *a, char const *b, std::size_t size) {
     if (std::memcmp(a, b, size) == 0) return;
     std::size_t mismatch_position = 0;
@@ -1583,6 +1626,8 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
+    test_ascii_utilities<sz::string>();
+    test_ascii_utilities<sz::string_view>();
     test_memory_utilities();
     test_replacements();
 
