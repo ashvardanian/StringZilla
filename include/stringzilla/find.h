@@ -305,20 +305,6 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
 #pragma GCC diagnostic pop
 }
 
-/**
- *  @brief  Byte-level equality comparison between two 64-bit integers.
- *  @return 64-bit integer, where every top bit in each byte signifies a match.
- */
-SZ_INTERNAL sz_u64_vec_t _sz_u64_each_byte_equal(sz_u64_vec_t a, sz_u64_vec_t b) {
-    sz_u64_vec_t vec;
-    vec.u64 = ~(a.u64 ^ b.u64);
-    // The match is valid, if every bit within each byte is set.
-    // For that take the bottom 7 bits of each byte, add one to them,
-    // and if this sets the top bit to one, then all the 7 bits are ones as well.
-    vec.u64 = ((vec.u64 & 0x7F7F7F7F7F7F7F7Full) + 0x0101010101010101ull) & ((vec.u64 & 0x8080808080808080ull));
-    return vec;
-}
-
 /*  Find the first occurrence of a @b single-character needle in an arbitrary length haystack.
  *  This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  *  Identical to `memchr(haystack, needle[0], haystack_length)`.
@@ -895,7 +881,7 @@ SZ_PUBLIC sz_cptr_t sz_find_haswell(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches) {
             int potential_offset = sz_u32_ctz(matches);
-            if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
+            if (sz_equal_haswell(h + potential_offset, n, n_length)) return h + potential_offset;
             matches &= matches - 1;
         }
     }
@@ -933,7 +919,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_haswell(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches) {
             int potential_offset = sz_u32_clz(matches);
-            if (sz_equal(h + h_length - n_length - potential_offset, n, n_length))
+            if (sz_equal_haswell(h + h_length - n_length - potential_offset, n, n_length))
                 return h + h_length - n_length - potential_offset;
             matches &= ~(1 << (31 - potential_offset));
         }
@@ -1074,7 +1060,7 @@ SZ_PUBLIC sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length)
     return sz_true_k;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_PUBLIC sz_cptr_t sz_find_byte_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     __mmask64 mask;
     sz_u512_vec_t h_vec, n_vec;
     n_vec.zmm = _mm512_set1_epi8(n[0]);
@@ -1101,7 +1087,7 @@ SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
 
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
-    if (n_length == 1) return sz_find_byte_avx512(h, h_length, n);
+    if (n_length == 1) return sz_find_byte_skylake(h, h_length, n);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
@@ -1198,7 +1184,7 @@ SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     __mmask64 mask;
     sz_u512_vec_t h_vec, n_vec;
     n_vec.zmm = _mm512_set1_epi8(n[0]);
@@ -1225,7 +1211,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
 
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
-    if (n_length == 1) return sz_rfind_byte_avx512(h, h_length, n);
+    if (n_length == 1) return sz_rfind_byte_skylake(h, h_length, n);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
@@ -1583,7 +1569,7 @@ SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, s
             matches = _sz_vreinterpretq_u8_u4(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_ctz(matches) / 4;
-                if (sz_equal(h + potential_offset, n, n_length)) return h + potential_offset;
+                if (sz_equal_neon(h + potential_offset, n, n_length)) return h + potential_offset;
                 matches &= matches - 1;
             }
         }
@@ -1623,7 +1609,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
         matches = _sz_vreinterpretq_u8_u4(matches_vec.u8x16);
         while (matches) {
             int potential_offset = sz_u64_clz(matches) / 4;
-            if (sz_equal(h + h_length - n_length - potential_offset, n, n_length))
+            if (sz_equal_neon(h + h_length - n_length - potential_offset, n, n_length))
                 return h + h_length - n_length - potential_offset;
             sz_assert((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
                       "The bit must be set before we squash it");
@@ -1678,6 +1664,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_ch
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.2-a+sve")
 #pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif            // SZ_USE_SVE
@@ -1692,8 +1679,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_ch
 #pragma region Core Funcitonality
 
 SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
-#if SZ_USE_ICE
-    return sz_find_byte_avx512(haystack, h_length, needle);
+#if SZ_USE_SKYLAKE
+    return sz_find_byte_skylake(haystack, h_length, needle);
 #elif SZ_USE_HASWELL
     return sz_find_byte_haswell(haystack, h_length, needle);
 #elif SZ_USE_NEON
@@ -1704,8 +1691,8 @@ SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
 }
 
 SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
-#if SZ_USE_ICE
-    return sz_rfind_byte_avx512(haystack, h_length, needle);
+#if SZ_USE_SKYLAKE
+    return sz_rfind_byte_skylake(haystack, h_length, needle);
 #elif SZ_USE_HASWELL
     return sz_rfind_byte_haswell(haystack, h_length, needle);
 #elif SZ_USE_NEON
@@ -1716,7 +1703,7 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cp
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-#if SZ_USE_ICE
+#if SZ_USE_SKYLAKE
     return sz_find_skylake(haystack, h_length, needle, n_length);
 #elif SZ_USE_HASWELL
     return sz_find_haswell(haystack, h_length, needle, n_length);
@@ -1728,7 +1715,7 @@ SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t n
 }
 
 SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-#if SZ_USE_ICE
+#if SZ_USE_SKYLAKE
     return sz_rfind_skylake(haystack, h_length, needle, n_length);
 #elif SZ_USE_HASWELL
     return sz_rfind_haswell(haystack, h_length, needle, n_length);
