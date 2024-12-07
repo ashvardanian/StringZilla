@@ -1431,6 +1431,12 @@ static void test_levenshtein_distances() {
         received_score = sz::alignment_score(r, l, costs, -1);
         if (received != expected) print_failure("Levenshtein", r, l, expected, received);
         if ((std::size_t)(-received_score) != expected) print_failure("Scoring", r, l, expected, received_score);
+
+        // Validate the bounded variants:
+        if (received > 1) {
+            assert(sz::edit_distance(l, r, received) == received);
+            assert(sz::edit_distance(r, l, received - 1) == SZ_SIZE_MAX);
+        }
     };
 
     for (auto explicit_case : explicit_cases)
@@ -1553,6 +1559,20 @@ static void test_stl_containers() {
 
 int main(int argc, char const **argv) {
 
+    auto dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, SZ_SIZE_MAX);
+    sz_assert(dist == 5);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, 3);
+    sz_assert(dist == SZ_SIZE_MAX);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, 4);
+    sz_assert(dist == SZ_SIZE_MAX);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, 5);
+    sz_assert(dist == 5);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, 6);
+    sz_assert(dist == 5);
+
+    // Similarity measures and fuzzy search
+    test_levenshtein_distances();
+
     // Let's greet the user nicely
     sz_unused(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
@@ -1595,9 +1615,6 @@ int main(int argc, char const **argv) {
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
     test_search_with_misaligned_repetitions();
 #endif
-
-    // Similarity measures and fuzzy search
-    test_levenshtein_distances();
 
     // Sequences of strings
     test_sequence_algorithms();

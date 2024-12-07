@@ -1367,6 +1367,20 @@ Other algorithms previously considered and deprecated:
 > [Exact String Matching Algorithms in Java](https://www-igm.univ-mlv.fr/~lecroq/string).
 > [SIMD-friendly algorithms for substring searching](http://0x80.pl/articles/simd-strfind.html).
 
+### Exact Multiple Substring Search
+
+Few algorithms for multiple substring search are known.
+Most are based on the Aho-Corasick automaton, which is a generalization of the KMP algorithm.
+The naive implementation, however:
+
+- Allocates disjoint memory for each Trie node and Automaton state.
+- Requires a lot of pointer chasing, limiting speculative execution.
+- Has a lot of branches and conditional moves, which are hard to predict.
+- Matches text a character at a time, which is slow on modern CPUs.
+
+There are several ways to improve the original algorithm.
+One is to use sparse DFA representation, which is more cache-friendly, but would require extra processing to navigate state transitions.
+
 ### Levenshtein Edit Distance
 
 Levenshtein distance is the best known edit-distance for strings, that checks, how many insertions, deletions, and substitutions are needed to transform one string to another.
@@ -1388,10 +1402,11 @@ It's less known, than the others, derived from the Baeza-Yates-Gonnet algorithm,
 StringZilla introduces a different approach, extensively used in Unum's internal combinatorial optimization libraries.
 The approach doesn't change the number of trivial operations, but performs them in a different order, removing the data dependency, that occurs when computing the insertion costs.
 This results in much better vectorization for intra-core parallelism and potentially multi-core evaluation of a single request.
+Moreover, it's easy to generalize to weighted edit-distances, where the cost of a substitution between two characters may not be the same for all pairs, often used in bioinformatics.
 
 Next design goals:
 
-- [ ] Generalize fast traversals to rectangular matrices.
+- [x] Generalize fast traversals to non-square matrices.
 - [ ] Port x86 AVX-512 solution to Arm NEON.
 
 > § Reading materials.
@@ -1424,6 +1439,10 @@ With that solved, the SIMD implementation will become 5x faster than the serial 
 [faq-pam]: https://en.wikipedia.org/wiki/Point_accepted_mutation
 [faq-dipeptide]: https://en.wikipedia.org/wiki/Dipeptide
 [faq-titin]: https://en.wikipedia.org/wiki/Titin
+
+Next design goals:
+
+- [ ] Needleman-Wunsch Automata
 
 ### Memory Copying, Fills, and Moves
 

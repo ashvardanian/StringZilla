@@ -1,7 +1,7 @@
 /**
- *  @brief  StringZilla is a collection of simple string algorithms, designed to be used in Big Data applications.
- *          It may be slower than LibC, but has a broader & cleaner interface, and a very short implementation
- *          targeting modern x86 CPUs with AVX-512 and Arm NEON and older CPUs with SWAR and auto-vectorization.
+ *  @brief  StringZilla is a collection of advanced string algorithms, designed to be used in Big Data applications.
+ *          It is generally faster than LibC, and has a broader & cleaner interface, and targets modern x86 CPUs
+ *          with AVX-512 and Arm NEON and older CPUs with SWAR and auto-vectorization.
  *
  *  Consider overriding the following macros to customize the library:
  *
@@ -843,12 +843,12 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
  *  @see    sz_hamming_distance_utf8
  *  @see    https://en.wikipedia.org/wiki/Hamming_distance
  */
-SZ_DYNAMIC sz_size_t sz_hamming_distance(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                         sz_size_t bound);
+SZ_DYNAMIC sz_size_t sz_hamming_distance( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_size_t bound);
 
 /** @copydoc sz_hamming_distance */
-SZ_PUBLIC sz_size_t sz_hamming_distance_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                               sz_size_t bound);
+SZ_PUBLIC sz_size_t sz_hamming_distance_serial( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_size_t bound);
 
 /**
  *  @brief  Computes the Hamming distance between two @b UTF8 strings - number of not matching characters.
@@ -887,10 +887,11 @@ typedef sz_size_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_s
  *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
  *                  so the memory usage is linear in relation to ::a_length and ::b_length.
  *                  If SZ_NULL is passed, will initialize to the systems default `malloc`.
- *  @param bound    Upper bound on the distance, that allows us to exit early.
- *                  If zero is passed, the maximum possible distance will be equal to the length of the longer input.
- *  @return         Unsigned integer for edit distance, the `bound` if was exceeded or `SZ_SIZE_MAX`
- *                  if the memory allocation failed.
+ *  @param bound    Exclusive upper bound on the distance, that allows us to exit early.
+ *                  Pass `SZ_SIZE_MAX` or any value greater than `(max(a_length, b_length))` to ignore.
+ *                  Pass zero to check if the strings are equal.
+ *  @return         Unsigned integer for the edit distance. Zero means the strings are equal.
+ *                  Returns the `bound` if it was exceeded or `SZ_SIZE_MAX` if the memory allocation failed.
  *
  *  @see    sz_memory_allocator_init_fixed, sz_memory_allocator_init_default
  *  @see    https://en.wikipedia.org/wiki/Levenshtein_distance
@@ -1022,8 +1023,9 @@ typedef void (*sz_hashes_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_size_t, sz_hash_
  *  @param window_length        Length of the rolling window in bytes.
  *  @see                        sz_hashes, sz_hashes_intersection
  */
-SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
-                                     sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
+SZ_PUBLIC void sz_hashes_fingerprint(                          //
+    sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+    sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
 
 typedef void (*sz_hashes_fingerprint_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_ptr_t, sz_size_t);
 
@@ -1041,8 +1043,9 @@ typedef void (*sz_hashes_fingerprint_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_ptr_
  *  @param window_length        Length of the rolling window in bytes.
  *  @see                        sz_hashes, sz_hashes_fingerprint
  */
-SZ_PUBLIC sz_size_t sz_hashes_intersection(sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
-                                           sz_cptr_t fingerprint, sz_size_t fingerprint_bytes);
+SZ_PUBLIC sz_size_t sz_hashes_intersection(                    //
+    sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
+    sz_cptr_t fingerprint, sz_size_t fingerprint_bytes);
 
 typedef sz_size_t (*sz_hashes_intersection_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_cptr_t, sz_size_t);
 
@@ -1773,8 +1776,8 @@ SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, 
 
     // TODO: Investigate alternative strategies for long needles.
     // On very long needles we have the luxury to choose!
-    // Often dealing with UTF8, we will likely benfit from shifting the first and second characters
-    // further to the right, to achieve not only uniqness within the needle, but also avoid common
+    // Often dealing with UTF8, we will likely benefit from shifting the first and second characters
+    // further to the right, to achieve not only uniqueness within the needle, but also avoid common
     // rune prefixes of 2-, 3-, and 4-byte codes.
     if (length > 8) {
         // Pivot the first and second points right, until we find a character, that:
@@ -1788,7 +1791,7 @@ SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, 
         sz_u8_t const *start_u8 = (sz_u8_t const *)start;
         sz_size_t vibrant_first = *first, vibrant_second = *second, vibrant_third = *third;
 
-        // Let's begin with the seccond character, as the termination criterea there is more obvious
+        // Let's begin with the seccond character, as the termination criteria there is more obvious
         // and we may end up with more variants to check for the first candidate.
         for (; (start_u8[vibrant_second] > 191 || start_u8[vibrant_second] == start_u8[vibrant_third]) &&
                (vibrant_second + 1 < vibrant_third);
@@ -2455,18 +2458,18 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
     current_distances[0] = current_distances[1] = 1;
 
     // Progress through the upper triangle of the Levenshtein matrix.
-    sz_size_t next_skew_diagonal_index = 2;
-    for (; next_skew_diagonal_index != n; ++next_skew_diagonal_index) {
-        sz_size_t const next_skew_diagonal_length = next_skew_diagonal_index + 1;
-        for (sz_size_t i = 0; i + 2 < next_skew_diagonal_length; ++i) {
-            sz_size_t cost_of_substitution = shorter[next_skew_diagonal_index - i - 2] != longer[i];
+    sz_size_t next_diagonal_index = 2;
+    for (; next_diagonal_index != n; ++next_diagonal_index) {
+        sz_size_t const next_diagonal_length = next_diagonal_index + 1;
+        for (sz_size_t i = 0; i + 2 < next_diagonal_length; ++i) {
+            sz_size_t cost_of_substitution = shorter[next_diagonal_index - i - 2] != longer[i];
             sz_size_t cost_if_substitution = previous_distances[i] + cost_of_substitution;
             sz_size_t cost_if_deletion_or_insertion = sz_min_of_two(current_distances[i], current_distances[i + 1]) + 1;
             next_distances[i + 1] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
         }
-        // Don't forget to populate the first row and the fiest column of the Levenshtein matrix.
-        next_distances[0] = next_distances[next_skew_diagonal_length - 1] = next_skew_diagonal_index;
-        // Perform a circular rotarion of those buffers, to reuse the memory.
+        // Don't forget to populate the first row and the first column of the Levenshtein matrix.
+        next_distances[0] = next_distances[next_diagonal_length - 1] = next_diagonal_index;
+        // Perform a circular rotation of those buffers, to reuse the memory.
         sz_size_t *temporary = previous_distances;
         previous_distances = current_distances;
         current_distances = next_distances;
@@ -2476,17 +2479,16 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
     // By now we've scanned through the upper triangle of the matrix, where each subsequent iteration results in a
     // larger diagonal. From now onwards, we will be shrinking. Instead of adding value equal to the skewed diagonal
     // index on either side, we will be cropping those values out.
-    sz_size_t total_diagonals = n + n - 1;
-    for (; next_skew_diagonal_index != total_diagonals; ++next_skew_diagonal_index) {
-        sz_size_t const next_skew_diagonal_length = total_diagonals - next_skew_diagonal_index;
-        for (sz_size_t i = 0; i != next_skew_diagonal_length; ++i) {
-            sz_size_t cost_of_substitution =
-                shorter[shorter_length - 1 - i] != longer[next_skew_diagonal_index - n + i];
+    sz_size_t diagonals_count = n + n - 1;
+    for (; next_diagonal_index != diagonals_count; ++next_diagonal_index) {
+        sz_size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
+        for (sz_size_t i = 0; i != next_diagonal_length; ++i) {
+            sz_size_t cost_of_substitution = shorter[shorter_length - 1 - i] != longer[next_diagonal_index - n + i];
             sz_size_t cost_if_substitution = previous_distances[i] + cost_of_substitution;
             sz_size_t cost_if_deletion_or_insertion = sz_min_of_two(current_distances[i], current_distances[i + 1]) + 1;
             next_distances[i] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
         }
-        // Perform a circular rotarion of those buffers, to reuse the memory, this time, with a shift,
+        // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
         // dropping the first element in the current array.
         sz_size_t *temporary = previous_distances;
         previous_distances = current_distances + 1;
@@ -2737,7 +2739,8 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
          --longer_length, --shorter_length);
 
     // Bounded computations may exit early.
-    if (bound) {
+    int const is_bounded = bound < longer_length;
+    if (is_bounded) {
         // If one of the strings is empty - the edit distance is equal to the length of the other one.
         if (longer_length == 0) return sz_min_of_two(shorter_length, bound);
         if (shorter_length == 0) return sz_min_of_two(longer_length, bound);
@@ -2746,7 +2749,7 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     }
 
     if (shorter_length == 0) return longer_length; // If no mismatches were found - the distance is zero.
-    if (shorter_length == longer_length && !bound)
+    if (shorter_length == longer_length && !is_bounded)
         return _sz_edit_distance_skewed_diagonals_serial(longer, longer_length, shorter, shorter_length, bound, alloc);
     return _sz_edit_distance_wagner_fisher_serial(longer, longer_length, shorter, shorter_length, bound, sz_false_k,
                                                   alloc);
@@ -4555,10 +4558,10 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t windo
  *  @brief  AVX-512 implementation of the string search algorithms.
  *
  *  Different subsets of AVX-512 were introduced in different years:
- *  * 2017 SkyLake: F, CD, ER, PF, VL, DQ, BW
- *  * 2018 CannonLake: IFMA, VBMI
- *  * 2019 IceLake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES
- *  * 2020 TigerLake: VP2INTERSECT
+ *  - 2017 SkyLake: F, CD, ER, PF, VL, DQ, BW
+ *  - 2018 CannonLake: IFMA, VBMI
+ *  - 2019 IceLake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES
+ *  - 2020 TigerLake: VP2INTERSECT
  */
 #pragma region AVX512 Implementation
 
@@ -5130,10 +5133,268 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
     return SZ_NULL_CHAR;
 }
 
+#pragma clang attribute pop
+#pragma GCC pop_options
+
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2"))), \
+                             apply_to = function)
+
+/**
+ *  @brief  Computes the edit distance between two very short byte-strings using the AVX-512VBMI extensions.
+ *
+ *  Applies to string lengths up to 63, and evaluates at most (63 * 2 + 1 = 127) diagonals, or just as many loop cycles.
+ *  Supports an early exit, if the distance is bounded.
+ *  Keeps all of the data and Levenshtein matrices skew diagonal in just a couple of registers.
+ *  Benefits from the @b `vpermb` instructions, that can rotate the bytes across the entire ZMM register.
+ */
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_avx512( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                        //
+    sz_cptr_t longer, sz_size_t longer_length,                          //
+    sz_size_t bound) {
+
+    sz_size_t const max_length = 63u;
+    sz_assert(shorter_length <= longer_length && "The 'shorter' string is longer than the 'longer' one.");
+    sz_assert(shorter_length < max_length && "The length must fit into 16-bit integer. Otherwise use serial variant.");
+
+    // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
+    // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
+    sz_size_t const shorter_dim = shorter_length + 1;
+    sz_size_t const longer_dim = longer_length + 1;
+
+    // The next few buffers will be swapped around.
+    sz_u512_vec_t previous_vec, current_vec, next_vec;
+    sz_u512_vec_t gaps_vec, substitutions_vec;
+
+    // Load the strings into ZMM registers - just once.
+    sz_u512_vec_t longer_vec, shorter_vec, shorter_rotated_vec, rotate_left_vec, rotate_right_vec, ones_vec, bound_vec;
+    longer_vec.zmm = _mm512_maskz_loadu_epi8(_sz_u64_mask_until(longer_length), longer);
+    rotate_left_vec.zmm = _mm512_set_epi8(                              //
+        0, 63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49,  //
+        48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, //
+        32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, //
+        16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1);
+    rotate_right_vec.zmm = _mm512_set_epi8(                             //
+        62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48,     //
+        47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, //
+        31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, //
+        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 63);
+    ones_vec.zmm = _mm512_set1_epi8(1);
+    bound_vec.zmm = _mm512_set1_epi8(bound <= 255 ? (sz_u8_t)bound : 255);
+
+    // To simplify comparisons and traversals, we want to reverse the order of bytes in the shorter string.
+    for (sz_size_t i = 0; i != shorter_length; ++i) shorter_vec.u8s[63 - i] = shorter[i];
+    shorter_rotated_vec.zmm = _mm512_permutexvar_epi8(rotate_right_vec.zmm, shorter_vec.zmm);
+
+    // Let's say we are dealing with 3 and 5 letter words.
+    // The matrix will have size 4 x 6, parameterized as (shorter_dim x longer_dim).
+    // It will have:
+    // - 4 diagonals of increasing length, at positions: 0, 1, 2, 3.
+    // - 2 diagonals of fixed length, at positions: 4, 5.
+    // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
+    sz_size_t const diagonals_count = shorter_dim + longer_dim - 1;
+
+    // Initialize the first two diagonals:
+    //
+    //      previous_vec.u8s[0] = 0;
+    //      current_vec.u8s[0] = current_vec.u8s[1] = 1;
+    //
+    // We can do a similar thing with vector ops:
+    previous_vec.zmm = _mm512_setzero_si512();
+    current_vec.zmm = _mm512_set1_epi8(1);
+
+    // We skip diagonals 0 and 1, as they are trivial.
+    // We will start with diagonal 2, which has length 3, with the first and last elements being preset,
+    // so we are effectively computing just one value, as will be marked by a single set bit in
+    // the `next_diagonal_mask` on the very first iteration.
+    sz_size_t next_diagonal_index = 2;
+    __mmask64 next_diagonal_mask = 0;
+
+    // Progress through the upper triangle of the Levenshtein matrix.
+    for (; next_diagonal_index != shorter_dim; ++next_diagonal_index) {
+        // After this iteration, the values at offset `0` and `next_diagonal_index` in the `next_vec`
+        // should be set to `next_diagonal_index`, but it's easier to broadcast the value to the whole vector,
+        // and later merge with a mask with new values.
+        next_vec.zmm = _mm512_set1_epi8((sz_u8_t)next_diagonal_index);
+
+        // The mask also adds one set bit.
+        next_diagonal_mask = _kor_mask64(next_diagonal_mask, 1);
+        next_diagonal_mask = _kshiftli_mask64(next_diagonal_mask, 1);
+
+        // Check for equality between string slices.
+        __mmask64 conflict_mask = _mm512_cmpneq_epi8_mask(longer_vec.zmm, shorter_rotated_vec.zmm);
+        substitutions_vec.zmm = _mm512_mask_add_epi8(previous_vec.zmm, conflict_mask, previous_vec.zmm, ones_vec.zmm);
+        substitutions_vec.zmm = _mm512_permutexvar_epi8(rotate_right_vec.zmm, substitutions_vec.zmm);
+        gaps_vec.zmm = _mm512_add_epi8(
+            // Insertions or deletions
+            _mm512_min_epu8(_mm512_permutexvar_epi8(rotate_right_vec.zmm, current_vec.zmm), current_vec.zmm),
+            ones_vec.zmm);
+        next_vec.zmm = _mm512_mask_min_epu8(next_vec.zmm, next_diagonal_mask, gaps_vec.zmm, substitutions_vec.zmm);
+
+        // Mark the current skewed diagonal as the previous one and the next one as the current one.
+        previous_vec.zmm = current_vec.zmm;
+        current_vec.zmm = next_vec.zmm;
+
+        // Shift the shorter string
+        shorter_rotated_vec.zmm = _mm512_permutexvar_epi8(rotate_right_vec.zmm, shorter_rotated_vec.zmm);
+
+        // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
+        __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) { //
+            return SZ_SIZE_MAX;
+        }
+    }
+
+    // Now let's handle the anti-diagonal band of the matrix, between the top and bottom triangles.
+    for (; next_diagonal_index != longer_dim; ++next_diagonal_index) {
+        // After this iteration, the value `shorted_dim - 1` in the `next_vec`
+        // should be set to `next_diagonal_index`, but it's easier to broadcast the value to the whole vector,
+        // and later merge with a mask with new values.
+        next_vec.zmm = _mm512_set1_epi8((sz_u8_t)next_diagonal_index);
+
+        // Make sure we update the first entry.
+        next_diagonal_mask = _kor_mask64(next_diagonal_mask, 1);
+
+        // Check for equality between string slices.
+        __mmask64 conflict_mask = _mm512_cmpneq_epi8_mask(longer_vec.zmm, shorter_rotated_vec.zmm);
+        substitutions_vec.zmm = _mm512_mask_add_epi8(previous_vec.zmm, conflict_mask, previous_vec.zmm, ones_vec.zmm);
+        gaps_vec.zmm = _mm512_add_epi8(
+            // Insertions or deletions
+            _mm512_min_epu8(current_vec.zmm, _mm512_permutexvar_epi8(rotate_left_vec.zmm, current_vec.zmm)),
+            ones_vec.zmm);
+        next_vec.zmm = _mm512_mask_min_epu8(next_vec.zmm, next_diagonal_mask, gaps_vec.zmm, substitutions_vec.zmm);
+
+        // Mark the current skewed diagonal as the previous one and the next one as the current one.
+        previous_vec.zmm = _mm512_permutexvar_epi8(rotate_left_vec.zmm, current_vec.zmm);
+        current_vec.zmm = next_vec.zmm;
+
+        // Let's shift the longer string now.
+        longer_vec.zmm = _mm512_permutexvar_epi8(rotate_left_vec.zmm, longer_vec.zmm);
+
+        // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
+        __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) { //
+            return SZ_SIZE_MAX;
+        }
+    }
+
+    // Now let's handle the bottom right triangle.
+    for (; next_diagonal_index != diagonals_count; ++next_diagonal_index) {
+
+        // Check for equality between string slices.
+        __mmask64 conflict_mask = _mm512_cmpneq_epi8_mask(longer_vec.zmm, shorter_rotated_vec.zmm);
+        substitutions_vec.zmm = _mm512_mask_add_epi8(previous_vec.zmm, conflict_mask, previous_vec.zmm, ones_vec.zmm);
+        gaps_vec.zmm = _mm512_add_epi8(
+            // Insertions or deletions
+            _mm512_min_epu8(current_vec.zmm, _mm512_permutexvar_epi8(rotate_left_vec.zmm, current_vec.zmm)),
+            ones_vec.zmm);
+        next_vec.zmm = _mm512_min_epu8(gaps_vec.zmm, substitutions_vec.zmm);
+
+        // Mark the current skewed diagonal as the previous one and the next one as the current one.
+        previous_vec.zmm = _mm512_permutexvar_epi8(rotate_left_vec.zmm, current_vec.zmm);
+        current_vec.zmm = next_vec.zmm;
+
+        // Let's shift the longer string now.
+        longer_vec.zmm = _mm512_permutexvar_epi8(rotate_left_vec.zmm, longer_vec.zmm);
+
+        // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
+        __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) { //
+            return SZ_SIZE_MAX;
+        }
+        // In every following iterations we take use a shorter prefix of each register,
+        // but we don't need to update the `next_diagonal_mask` anymore... except for the early exit.
+        next_diagonal_mask = _kshiftri_mask64(next_diagonal_mask, 1);
+    }
+    return current_vec.u8s[0];
+}
+
+/**
+ *  @brief  Computes the edit distance between two somewhat short bytes-strings using the AVX-512VBMI extensions.
+ *
+ *  Applies to string lengths up to 127, and evaluates at most (127 * 2 + 1 = 255) diagonals.
+ *  Supports an early exit, if the distance is bounded.
+ *  Uses a lot more CPU registers space, than the `upto63` variant.
+ *  Benefits from the @b `vpermi2b` instructions, that can rotate the bytes in 2 registers at once.
+ *
+ *  This may be one of the most freuqently called kernels for:
+ *  - source code analysis, assuming most lines are either under 80 or under 120 characters long.
+ *  - DNA sequence alignment, as most short reads are 50-300 characters long.
+ */
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto127_avx512( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                         //
+    sz_cptr_t longer, sz_size_t longer_length,                           //
+    sz_size_t bound) {
+    sz_unused(shorter && shorter_length && longer && longer_length && bound);
+    return 0;
+}
+
+/**
+ *  @brief  Computes the edit distance between two longer bytes-strings using the AVX-512VBMI extensions.
+ *
+ *  Applies to string lengths up to 255, and evaluates at most (255 * 2 + 1 = 511) diagonals.
+ *  Supports an early exit, if the distance is bounded.
+ *  Uses a lot more CPU registers space, than the `upto63` variant.
+ *
+ *  Each of 2x string ends up occupying 4 ZMM registers, and each of 3x diagonals uses 4 ZMM registers.
+ *  So 20x of the 32x are persistently occupied, and the rest are used for math temporarily.
+ *  This is the largest space-efficient variant, as strings beyond 255 characters may require
+ *  16-bit accumulators, which would be a significant bottleneck.
+ */
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto_avx512( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                      //
+    sz_cptr_t longer, sz_size_t longer_length,                        //
+    sz_size_t bound) {
+    sz_unused(shorter && shorter_length && longer && longer_length && bound);
+    return 0;
+}
+
+/**
+ *  @brief  Computes the edit distance between two longer bytes-strings using the AVX-512VBMI extensions,
+ *          assuming the upper distance bound can not exceed 255, but the string length can be arbitrary.
+ *
+ *  Applies to string lengths up to 255, and evaluates at most (255 * 2 + 1 = 511) diagonals.
+ *  Supports an early exit, if the distance is bounded.
+ *  Uses a lot more CPU registers space, than the `upto63` variant.
+ *
+ *  Each of 2x string ends up occupying 4 ZMM registers, and each of 3x diagonals uses 4 ZMM registers.
+ *  So 20x of the 32x are persistently occupied, and the rest are used for math temporarily.
+ *  This is the largest space-efficient variant, as strings beyond 255 characters may require
+ *  16-bit accumulators, which would be a significant bottleneck.
+ */
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto255bound_avx512( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                              //
+    sz_cptr_t longer, sz_size_t longer_length,                                //
+    sz_size_t bound) {
+    sz_unused(shorter && shorter_length && longer && longer_length && bound);
+    return 0;
+}
+
+/**
+ *  @brief  Computes the edit distance between two mid-length UTF-8-strings using the AVX-512VBMI extensions.
+ *
+ *  Applies to string lengths up to 127, and evaluates at most (127 * 2 + 1 = 511) diagonals.
+ *  Supports an early exit, if the distance is bounded.
+ *  Benefits from the @b `valignd` instructions used to rotate UTF-32 unpacked unicode codepoints.
+ *
+ *  Each string is unpacked into 128 characters * 4 bytes per character / 64 bytes per register = 8 registers.
+ *
+ */
+SZ_INTERNAL sz_size_t _sz_edit_distance_utf8_skewed_diagonals_upto127_avx512( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                              //
+    sz_cptr_t longer, sz_size_t longer_length,                                //
+    sz_size_t bound) {
+    sz_unused(shorter && shorter_length && longer && longer_length && bound);
+    return 0;
+}
+
 SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
     sz_cptr_t shorter, sz_size_t shorter_length,                         //
     sz_cptr_t longer, sz_size_t longer_length,                           //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
+
+    sz_unused(shorter && longer && bound && alloc);
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_memory_allocator_t global_alloc;
@@ -5143,25 +5404,27 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
     }
 
     // TODO: Generalize!
-    sz_size_t max_length = 256u * 256u;
-    sz_assert(!bound && "For bounded search the method should only evaluate one band of the matrix.");
-    sz_assert(shorter_length == longer_length && "The method hasn't been generalized to different length inputs yet.");
+    sz_size_t const max_length = 256u * 256u;
+    sz_assert(shorter_length <= longer_length && "The 'shorter' string is longer than the 'longer' one.");
     sz_assert(shorter_length < max_length && "The length must fit into 16-bit integer. Otherwise use serial variant.");
     sz_unused(longer_length && bound && max_length);
 
+#if 0
     // We are going to store 3 diagonals of the matrix.
-    // The length of the longest (main) diagonal would be `n = (shorter_length + 1)`.
-    sz_size_t n = shorter_length + 1;
+    // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
+    sz_size_t const shorter_dim = shorter_length + 1;
+    sz_size_t const longer_dim = longer_length + 1;
     // Unlike the serial version, we also want to avoid reverse-order iteration over teh shorter string.
     // So let's allocate a bit more memory and reverse-export our shorter string into that buffer.
-    sz_size_t buffer_length = sizeof(sz_u16_t) * n * 3 + shorter_length;
-    sz_u16_t *distances = (sz_u16_t *)alloc->allocate(buffer_length, alloc->handle);
+    sz_size_t const buffer_length = sizeof(sz_u16_t) * longer_dim * 3 + shorter_length;
+    sz_u16_t *const distances = (sz_u16_t *)alloc->allocate(buffer_length, alloc->handle);
     if (!distances) return SZ_SIZE_MAX;
 
+    // The next few pointers will be swapped around.
     sz_u16_t *previous_distances = distances;
-    sz_u16_t *current_distances = previous_distances + n;
-    sz_u16_t *next_distances = current_distances + n;
-    sz_ptr_t shorter_reversed = (sz_ptr_t)(next_distances + n);
+    sz_u16_t *current_distances = previous_distances + longer_dim;
+    sz_u16_t *next_distances = current_distances + longer_dim;
+    sz_ptr_t const shorter_reversed = (sz_ptr_t)(next_distances + longer_dim);
 
     // Export the reversed string into the buffer.
     for (sz_size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
@@ -5175,47 +5438,61 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
     sz_u512_vec_t insertions_vec, deletions_vec, substitutions_vec, next_vec;
     sz_u512_vec_t ones_u16_vec;
     ones_u16_vec.zmm = _mm512_set1_epi16(1);
+
     // This is a mixed-precision implementation, using 8-bit representations for part of the operations.
     // Even there, in case `SZ_USE_X86_AVX2=0`, let's use the `sz_u512_vec_t` type, addressing the first YMM halfs.
     sz_u512_vec_t shorter_vec, longer_vec;
     sz_u512_vec_t ones_u8_vec;
     ones_u8_vec.ymms[0] = _mm256_set1_epi8(1);
 
+    // Let's say we are dealing with 3 and 5 letter words.
+    // The matrix will have size 4 x 6, parameterized as (shorter_dim x longer_dim).
+    // It will have:
+    // - 4 diagonals of increasing length, at positions: 0, 1, 2, 3.
+    // - 2 diagonals of fixed length, at positions: 4, 5.
+    // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
+    sz_size_t const diagonals_count = shorter_dim + longer_dim - 1;
+
     // Progress through the upper triangle of the Levenshtein matrix.
-    sz_size_t next_skew_diagonal_index = 2;
-    for (; next_skew_diagonal_index != n; ++next_skew_diagonal_index) {
-        sz_size_t const next_skew_diagonal_length = next_skew_diagonal_index + 1;
-        for (sz_size_t i = 0; i + 2 < next_skew_diagonal_length;) {
-            sz_u32_t remaining_length = (sz_u32_t)(next_skew_diagonal_length - i - 2);
+    sz_size_t next_diagonal_index = 2;
+    for (; next_diagonal_index != shorter_dim; ++next_diagonal_index) {
+        sz_size_t const next_diagonal_length = next_diagonal_index + 1;
+        for (sz_size_t offset_within_diagonal = 0; offset_within_diagonal + 2 < next_diagonal_length;) {
+            sz_u32_t remaining_length = (sz_u32_t)(next_diagonal_length - offset_within_diagonal - 2);
             sz_u32_t register_length = remaining_length < 32 ? remaining_length : 32;
             sz_u32_t remaining_length_mask = _bzhi_u32(0xFFFFFFFFu, register_length);
-            longer_vec.ymms[0] = _mm256_maskz_loadu_epi8(remaining_length_mask, longer + i);
-            // Our original code addressed the shorter string `[next_skew_diagonal_index - i - 2]` for growing `i`.
-            // If the `shorter` string was reversed, the `[next_skew_diagonal_index - i - 2]` would
-            // be equal to `[shorter_length - 1 - next_skew_diagonal_index + i + 2]`.
-            // Which simplified would be equal to `[shorter_length - next_skew_diagonal_index + i + 1]`.
-            shorter_vec.ymms[0] = _mm256_maskz_loadu_epi8(
-                remaining_length_mask, shorter_reversed + shorter_length - next_skew_diagonal_index + i + 1);
+            longer_vec.ymms[0] = _mm256_maskz_loadu_epi8(remaining_length_mask, longer + offset_within_diagonal);
+            // Our original code addressed the shorter string `[next_diagonal_index - offset_within_diagonal - 2]`
+            // for growing `offset_within_diagonal`. If the `shorter` string was reversed, the
+            // `[next_diagonal_index - offset_within_diagonal - 2]` would be equal to `[shorter_length - 1 -
+            // next_diagonal_index + offset_within_diagonal + 2]`. Which simplified would be equal to
+            // `[shorter_length - next_diagonal_index + offset_within_diagonal + 1]`.
+            shorter_vec.ymms[0] = _mm256_maskz_loadu_epi8( //
+                remaining_length_mask,
+                shorter_reversed + shorter_length - next_diagonal_index + offset_within_diagonal + 1);
             // For substitutions, perform the equality comparison using AVX2 instead of AVX-512
             // to get the result as a vector, instead of a bitmask. Adding 1 to every scalar we can overflow
             // transforming from {0xFF, 0} values to {0, 1} values - exactly what we need. Then - upcast to 16-bit.
             substitutions_vec.zmm = _mm512_cvtepi8_epi16( //
                 _mm256_add_epi8(_mm256_cmpeq_epi8(longer_vec.ymms[0], shorter_vec.ymms[0]), ones_u8_vec.ymms[0]));
             substitutions_vec.zmm = _mm512_add_epi16( //
-                substitutions_vec.zmm, _mm512_maskz_loadu_epi16(remaining_length_mask, previous_distances + i));
+                substitutions_vec.zmm,
+                _mm512_maskz_loadu_epi16(remaining_length_mask, previous_distances + offset_within_diagonal));
             // For insertions and deletions, on modern hardware, it's faster to issue two separate loads,
             // than rotate the bytes in the ZMM register.
-            insertions_vec.zmm = _mm512_maskz_loadu_epi16(remaining_length_mask, current_distances + i);
-            deletions_vec.zmm = _mm512_maskz_loadu_epi16(remaining_length_mask, current_distances + i + 1);
+            insertions_vec.zmm =
+                _mm512_maskz_loadu_epi16(remaining_length_mask, current_distances + offset_within_diagonal);
+            deletions_vec.zmm =
+                _mm512_maskz_loadu_epi16(remaining_length_mask, current_distances + offset_within_diagonal + 1);
             // First get the minimum of insertions and deletions.
             next_vec.zmm = _mm512_add_epi16(_mm512_min_epu16(insertions_vec.zmm, deletions_vec.zmm), ones_u16_vec.zmm);
             next_vec.zmm = _mm512_min_epu16(next_vec.zmm, substitutions_vec.zmm);
-            _mm512_mask_storeu_epi16(next_distances + i + 1, remaining_length_mask, next_vec.zmm);
-            i += register_length;
+            _mm512_mask_storeu_epi16(next_distances + offset_within_diagonal + 1, remaining_length_mask, next_vec.zmm);
+            offset_within_diagonal += register_length;
         }
-        // Don't forget to populate the first row and the fiest column of the Levenshtein matrix.
-        next_distances[0] = next_distances[next_skew_diagonal_length - 1] = (sz_u16_t)next_skew_diagonal_index;
-        // Perform a circular rotarion of those buffers, to reuse the memory.
+        // Don't forget to populate the first row and the first column of the Levenshtein matrix.
+        next_distances[0] = next_distances[next_diagonal_length - 1] = (sz_u16_t)next_diagonal_index;
+        // Perform a circular rotation (three-way swap) of those buffers, to reuse the memory.
         sz_u16_t *temporary = previous_distances;
         previous_distances = current_distances;
         current_distances = next_distances;
@@ -5225,15 +5502,13 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
     // By now we've scanned through the upper triangle of the matrix, where each subsequent iteration results in a
     // larger diagonal. From now onwards, we will be shrinking. Instead of adding value equal to the skewed diagonal
     // index on either side, we will be cropping those values out.
-    sz_size_t total_diagonals = n + n - 1;
-    for (; next_skew_diagonal_index != total_diagonals; ++next_skew_diagonal_index) {
-        sz_size_t const next_skew_diagonal_length = total_diagonals - next_skew_diagonal_index;
-        for (sz_size_t i = 0; i != next_skew_diagonal_length;) {
-            sz_u32_t remaining_length = (sz_u32_t)(next_skew_diagonal_length - i);
+    for (; next_diagonal_index != diagonals_count; ++next_diagonal_index) {
+        sz_size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
+        for (sz_size_t i = 0; i != next_diagonal_length;) {
+            sz_u32_t remaining_length = (sz_u32_t)(next_diagonal_length - i);
             sz_u32_t register_length = remaining_length < 32 ? remaining_length : 32;
             sz_u32_t remaining_length_mask = _bzhi_u32(0xFFFFFFFFu, register_length);
-            longer_vec.ymms[0] =
-                _mm256_maskz_loadu_epi8(remaining_length_mask, longer + next_skew_diagonal_index - n + i);
+            longer_vec.ymms[0] = _mm256_maskz_loadu_epi8(remaining_length_mask, longer + next_diagonal_index - n + i);
             // Our original code addressed the shorter string `[shorter_length - 1 - i]` for growing `i`.
             // If the `shorter` string was reversed, the `[shorter_length - 1 - i]` would
             // be equal to `[shorter_length - 1 - shorter_length + 1 + i]`.
@@ -5257,7 +5532,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
             i += register_length;
         }
 
-        // Perform a circular rotarion of those buffers, to reuse the memory, this time, with a shift,
+        // Perform a circular rotation (three-way swap) of those buffers, to reuse the memory, this time, with a shift,
         // dropping the first element in the current array.
         sz_u16_t *temporary = previous_distances;
         previous_distances = current_distances + 1;
@@ -5269,6 +5544,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
     sz_size_t result = current_distances[0];
     alloc->free(distances, buffer_length, alloc->handle);
     return result;
+#endif
+    return 0;
 }
 
 SZ_INTERNAL sz_size_t sz_edit_distance_avx512(   //
@@ -5276,20 +5553,36 @@ SZ_INTERNAL sz_size_t sz_edit_distance_avx512(   //
     sz_cptr_t longer, sz_size_t longer_length,   //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
 
-    if (shorter_length == longer_length && !bound && shorter_length && shorter_length < 256u * 256u)
-        return _sz_edit_distance_skewed_diagonals_upto65k_avx512(shorter, shorter_length, longer, longer_length, bound,
-                                                                 alloc);
+    // Bounded computations may exit early.
+    int const is_bounded = bound < longer_length;
+    if (is_bounded) {
+        // If one of the strings is empty - the edit distance is equal to the length of the other one.
+        if (longer_length == 0) return sz_min_of_two(shorter_length, bound);
+        if (shorter_length == 0) return sz_min_of_two(longer_length, bound);
+        // If the difference in length is beyond the `bound`, there is no need to check at all.
+        if (longer_length - shorter_length > bound) return bound;
+    }
+
+    // Make sure the shorter string is actually shorter.
+    if (shorter_length > longer_length) {
+        sz_cptr_t temporary = shorter;
+        shorter = longer;
+        longer = temporary;
+        sz_size_t temporary_length = shorter_length;
+        shorter_length = longer_length;
+        longer_length = temporary_length;
+    }
+
+    // Dispatch the right implementation based on the length of the strings.
+    if (longer_length < 64u)
+        return _sz_edit_distance_skewed_diagonals_upto63_avx512( //
+            shorter, shorter_length, longer, longer_length, bound);
+    // else if (longer_length < 256u * 256u)
+    //     return _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
+    //         shorter, shorter_length, longer, longer_length, bound, alloc);
     else
         return sz_edit_distance_serial(shorter, shorter_length, longer, longer_length, bound, alloc);
 }
-
-#pragma clang attribute pop
-#pragma GCC pop_options
-
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,bmi,bmi2"))), \
-                             apply_to = function)
 
 SZ_PUBLIC sz_u64_t sz_checksum_avx512(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
@@ -5671,10 +5964,11 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_
     sz_u512_vec_t lower_nibbles_vec, higher_nibbles_vec;
     sz_u512_vec_t bitset_even_vec, bitset_odd_vec;
     sz_u512_vec_t bitmask_vec, bitmask_lookup_vec;
-    bitmask_lookup_vec.zmm = _mm512_set_epi8(-128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
-                                             -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
-                                             -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
-                                             -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
+    bitmask_lookup_vec.zmm = _mm512_set_epi8(                       //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
+        -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
 
     while (length) {
         // The following algorithm is a transposed equivalent of the "SIMDized check which bytes are in a set"
@@ -5744,6 +6038,29 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_
 
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
     return sz_rfind_charset_serial(text, length, filter);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_many_avx512(                        //
+    sz_cptr_t haystack, sz_size_t haystack_length,              //
+    sz_cptr_t const *needles, sz_size_t const *needles_lengths, //
+    sz_size_t *needle_offset) {
+
+    // When dealing with huge needles vocabularies, like in tokenization workloads, we need to construct an automaton.
+    // But in many cases, the vocabulary is small enough to use a simpler DFA-less approach, combining the ideas from
+    // the `sz_find_avx512` and `sz_find_charset_avx512` functions.
+    //
+    // Pick the offsets within needles where there is the least variance in the characters.
+    // Like for "the", "then", "there", "these", "those", "their", "they", "them", "that", "this", "thus", "than":
+    //
+    //    0: 't'
+    //    1: 'h'
+    //    2: 'e', 'a', 'i', 'o', 'u'
+    //    3: 'n', 'r', 's', 'i', 'y', 'm', 't'
+    //
+    // So depending on our "register budget", we can use a different number of pivot points: offset 0, 1, 2 make
+    // the most sense if we can only use 3 ZMM registers.
+    sz_unused(haystack && haystack_length && needles && needles_lengths && needle_offset);
+    return 0;
 }
 
 /**
