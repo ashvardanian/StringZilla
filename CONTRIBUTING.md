@@ -116,7 +116,7 @@ Replacing the default compiler is not recommended, as it may break the system, b
 
 ```bash
 brew install llvm
-cmake -D CMAKE_BUILD_TYPE=Release -D SIMSIMD_BUILD_TESTS=1 \
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 \
     -D CMAKE_C_COMPILER="$(brew --prefix llvm)/bin/clang" \
     -D CMAKE_CXX_COMPILER="$(brew --prefix llvm)/bin/clang++" \
     -B build_release

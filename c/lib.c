@@ -92,7 +92,7 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
         (sz_cap_x86_gfni_k * (supports_gfni)) |             //
         (sz_cap_serial_k));
 
-#endif // SIMSIMD_TARGET_X86
+#endif // SZ_TARGET_X86
 
 #if SZ_USE_ARM_NEON || SZ_USE_ARM_SVE
 
@@ -107,7 +107,7 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
         (sz_cap_arm_neon_k * supports_neon) | //
         (sz_cap_serial_k));
 
-#endif // SIMSIMD_TARGET_ARM
+#endif // SZ_TARGET_ARM
 
     return sz_cap_serial_k;
 }
