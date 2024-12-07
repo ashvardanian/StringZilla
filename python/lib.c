@@ -1858,8 +1858,8 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
                 return NULL;
     }
 
-    Py_ssize_t bound = 0; // Default value for bound
-    if (bound_obj && ((bound = PyLong_AsSsize_t(bound_obj)) < 0)) {
+    sz_size_t bound = SZ_SIZE_MAX; // Default value for bound
+    if (bound_obj && ((bound = (sz_size_t)PyLong_AsSize_t(bound_obj)) == (sz_size_t)(-1))) {
         PyErr_Format(PyExc_ValueError, "Bound must be a non-negative integer");
         return NULL;
     }
@@ -1877,8 +1877,7 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
     reusing_allocator.free = &temporary_memory_free;
     reusing_allocator.handle = &temporary_memory;
 
-    sz_size_t distance =
-        function(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &reusing_allocator);
+    sz_size_t distance = function(str1.start, str1.length, str2.start, str2.length, bound, &reusing_allocator);
 
     // Check for memory allocation issues
     if (distance == SZ_SIZE_MAX) {
