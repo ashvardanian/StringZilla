@@ -2,23 +2,37 @@
  *  @brief  StringZilla is a collection of advanced string algorithms, designed to be used in Big Data applications.
  *          It is generally faster than LibC, and has a broader & cleaner interface, and targets modern x86 CPUs
  *          with AVX-512 and Arm NEON and older CPUs with SWAR and auto-vectorization.
+ *  @file   stringzilla.h
+ *  @author Ash Vardanian
+ *
+ *  @see    StringZilla docs: https://github.com/ashvardanian/StringZilla/blob/main/README.md
+ *  @see    LibC string docs: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
+ *
+ *  @section    Introduction
+ *
+ *
+ *  @section    Compilation Settings
  *
  *  Consider overriding the following macros to customize the library:
  *
  *  - `SZ_DEBUG=0` - whether to enable debug assertions and logging.
+ *  - `SZ_AVOID_LIBC=0` - whether to avoid including the standard C library headers.
  *  - `SZ_DYNAMIC_DISPATCH=0` - whether to use runtime dispatching of the most advanced SIMD backend.
  *  - `SZ_USE_MISALIGNED_LOADS=0` - whether to use misaligned loads on platforms that support them.
+ *
+ *  Performance tuning:
+ *
  *  - `SZ_SWAR_THRESHOLD=24` - threshold for switching to SWAR backend over serial byte-level for-loops.
- *  - `SZ_USE_X86_AVX512=?` - whether to use AVX-512 instructions on x86_64.
- *  - `SZ_USE_X86_AVX2=?` - whether to use AVX2 instructions on x86_64.
- *  - `SZ_USE_ARM_NEON=?` - whether to use NEON instructions on ARM.
- *  - `SZ_USE_ARM_SVE=?` - whether to use SVE instructions on ARM.
+ *  - `SZ_CACHE_LINE_WIDTH=64` - cache-line width that affects the execution of some algorithms.
+ *  - `SZ_CACHE_SIZE=1048576` - the combined size of L1d and L2 caches in bytes, affecting temporal loads.
  *
- *  @see    StringZilla: https://github.com/ashvardanian/StringZilla/blob/main/README.md
- *  @see    LibC String: https://pubs.opengroup.org/onlinepubs/009695399/basedefs/string.h.html
+ *  Different generations of CPUs and SIMD capabilities can be enabled or disabled with the following macros:
  *
- *  @file   stringzilla.h
- *  @author Ash Vardanian
+ *  - `SZ_USE_HASWELL=?` - whether to use AVX2 instructions on x86_64.
+ *  - `SZ_USE_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
+ *  - `SZ_USE_ICE=?` - whether to use AVX-512 VBMI instructions on x86_64.
+ *  - `SZ_USE_NEON=?` - whether to use NEON instructions on ARM.
+ *  - `SZ_USE_SVE=?` - whether to use SVE and SVE2 instructions on ARM.
  */
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
@@ -27,228 +41,9 @@
 #define STRINGZILLA_VERSION_MINOR 11
 #define STRINGZILLA_VERSION_PATCH 0
 
-/**
- *  @brief  When set to 1, the library will include the following LibC headers: <stddef.h> and <stdint.h>.
- *          In debug builds (SZ_DEBUG=1), the library will also include <stdio.h> and <stdlib.h>.
- *
- *  You may want to disable this compiling for use in the kernel, or in embedded systems.
- *  You may also avoid them, if you are very sensitive to compilation time and avoid pre-compiled headers.
- *  https://artificial-mind.net/projects/compile-health/
- */
-#ifndef SZ_AVOID_LIBC
-#define SZ_AVOID_LIBC (0) // true or false
-#endif
-
-/**
- *  @brief  A misaligned load can be - trying to fetch eight consecutive bytes from an address
- *          that is not divisible by eight. On x86 enabled by default. On ARM it's not.
- *
- *  Most platforms support it, but there is no industry standard way to check for those.
- *  This value will mostly affect the performance of the serial (SWAR) backend.
- */
-#ifndef SZ_USE_MISALIGNED_LOADS
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-#define SZ_USE_MISALIGNED_LOADS (1) // true or false
-#else
-#define SZ_USE_MISALIGNED_LOADS (0) // true or false
-#endif
-#endif
-
-/**
- *  @brief  Removes compile-time dispatching, and replaces it with runtime dispatching.
- *          So the `sz_find` function will invoke the most advanced backend supported by the CPU,
- *          that runs the program, rather than the most advanced backend supported by the CPU
- *          used to compile the library or the downstream application.
- */
-#ifndef SZ_DYNAMIC_DISPATCH
-#define SZ_DYNAMIC_DISPATCH (0) // true or false
-#endif
-
-/**
- *  @brief  Analogous to `size_t` and `std::size_t`, unsigned integer, identical to pointer size.
- *          64-bit on most platforms where pointers are 64-bit.
- *          32-bit on platforms where pointers are 32-bit.
- */
-#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
-#define SZ_DETECT_64_BIT (1)
-#define SZ_SIZE_MAX (0xFFFFFFFFFFFFFFFFull)  // Largest unsigned integer that fits into 64 bits.
-#define SZ_SSIZE_MAX (0x7FFFFFFFFFFFFFFFull) // Largest signed integer that fits into 64 bits.
-#else
-#define SZ_DETECT_64_BIT (0)
-#define SZ_SIZE_MAX (0xFFFFFFFFu)  // Largest unsigned integer that fits into 32 bits.
-#define SZ_SSIZE_MAX (0x7FFFFFFFu) // Largest signed integer that fits into 32 bits.
-#endif
-
-/**
- *  @brief  On Big-Endian machines StringZilla will work in compatibility mode.
- *          This disables SWAR hacks to minimize code duplication, assuming practically
- *          all modern popular platforms are Little-Endian.
- *
- *  This variable is hard to infer from macros reliably. It's best to set it manually.
- *  For that CMake provides the `TestBigEndian` and `CMAKE_<LANG>_BYTE_ORDER` (from 3.20 onwards).
- *  In Python one can check `sys.byteorder == 'big'` in the `setup.py` script and pass the appropriate macro.
- *  https://stackoverflow.com/a/27054190
- */
-#ifndef SZ_DETECT_BIG_ENDIAN
-#if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || defined(__BIG_ENDIAN__) || defined(__ARMEB__) || \
-    defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__)
-#define SZ_DETECT_BIG_ENDIAN (1) //< It's a big-endian target architecture
-#else
-#define SZ_DETECT_BIG_ENDIAN (0) //< It's a little-endian target architecture
-#endif
-#endif
-
-/*
- *  Debugging and testing.
- */
-#ifndef SZ_DEBUG
-#if defined(DEBUG) || defined(_DEBUG) // This means "Not using DEBUG information".
-#define SZ_DEBUG (1)
-#else
-#define SZ_DEBUG (0)
-#endif
-#endif
-
-/**
- *  @brief  Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops.
- *          On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
- *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
- */
-#ifndef SZ_SWAR_THRESHOLD
-#if SZ_DEBUG
-#define SZ_SWAR_THRESHOLD (8u) // 8 bytes in debug builds
-#else
-#define SZ_SWAR_THRESHOLD (24u) // 24 bytes in release builds
-#endif
-#endif
-
-/*  Annotation for the public API symbols:
- *
- *  - `SZ_PUBLIC` is used for functions that are part of the public API.
- *  - `SZ_INTERNAL` is used for internal helper functions with unstable APIs.
- *  - `SZ_DYNAMIC` is used for functions that are part of the public API, but are dispatched at runtime.
- */
-#ifndef SZ_DYNAMIC
-#if SZ_DYNAMIC_DISPATCH
-#if defined(_WIN32) || defined(__CYGWIN__)
-#define SZ_DYNAMIC __declspec(dllexport)
-#define SZ_EXTERNAL __declspec(dllimport)
-#define SZ_PUBLIC inline static
-#define SZ_INTERNAL inline static
-#else
-#define SZ_DYNAMIC __attribute__((visibility("default")))
-#define SZ_EXTERNAL extern
-#define SZ_PUBLIC __attribute__((unused)) inline static
-#define SZ_INTERNAL __attribute__((always_inline)) inline static
-#endif // _WIN32 || __CYGWIN__
-#else
-#define SZ_DYNAMIC inline static
-#define SZ_EXTERNAL extern
-#define SZ_PUBLIC inline static
-#define SZ_INTERNAL inline static
-#endif // SZ_DYNAMIC_DISPATCH
-#endif // SZ_DYNAMIC
-
-/**
- *  @brief  Alignment macro for 64-byte alignment.
- */
-#if defined(_MSC_VER)
-#define SZ_ALIGN64 __declspec(align(64))
-#elif defined(__GNUC__) || defined(__clang__)
-#define SZ_ALIGN64 __attribute__((aligned(64)))
-#else
-#define SZ_ALIGN64
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/*
- *  Let's infer the integer types or pull them from LibC,
- *  if that is allowed by the user.
- */
-#if !SZ_AVOID_LIBC
-#include <stddef.h>           // `size_t`
-#include <stdint.h>           // `uint8_t`
-typedef int8_t sz_i8_t;       // Always 8 bits
-typedef uint8_t sz_u8_t;      // Always 8 bits
-typedef uint16_t sz_u16_t;    // Always 16 bits
-typedef int32_t sz_i32_t;     // Always 32 bits
-typedef uint32_t sz_u32_t;    // Always 32 bits
-typedef uint64_t sz_u64_t;    // Always 64 bits
-typedef int64_t sz_i64_t;     // Always 64 bits
-typedef size_t sz_size_t;     // Pointer-sized unsigned integer, 32 or 64 bits
-typedef ptrdiff_t sz_ssize_t; // Signed version of `sz_size_t`, 32 or 64 bits
-
-#else // if SZ_AVOID_LIBC:
-
-// ! The C standard doesn't specify the signedness of char.
-// ! On x86 char is signed by default while on Arm it is unsigned by default.
-// ! That's why we don't define `sz_char_t` and generally use explicit `sz_i8_t` and `sz_u8_t`.
-typedef signed char sz_i8_t;         // Always 8 bits
-typedef unsigned char sz_u8_t;       // Always 8 bits
-typedef unsigned short sz_u16_t;     // Always 16 bits
-typedef int sz_i32_t;                // Always 32 bits
-typedef unsigned int sz_u32_t;       // Always 32 bits
-typedef long long sz_i64_t;          // Always 64 bits
-typedef unsigned long long sz_u64_t; // Always 64 bits
-
-// Now we need to redefine the `size_t`.
-// Microsoft Visual C++ (MSVC) typically follows LLP64 data model on 64-bit platforms,
-// where integers, pointers, and long types have different sizes:
-//
-//  > `int` is 32 bits
-//  > `long` is 32 bits
-//  > `long long` is 64 bits
-//  > pointer (thus, `size_t`) is 64 bits
-//
-// In contrast, GCC and Clang on 64-bit Unix-like systems typically follow the LP64 model, where:
-//
-//  > `int` is 32 bits
-//  > `long` and pointer (thus, `size_t`) are 64 bits
-//  > `long long` is also 64 bits
-//
-// Source: https://learn.microsoft.com/en-us/windows/win32/winprog64/abstract-data-models
-#if SZ_DETECT_64_BIT
-typedef unsigned long long sz_size_t; // 64-bit.
-typedef long long sz_ssize_t;         // 64-bit.
-#else
-typedef unsigned sz_size_t;  // 32-bit.
-typedef unsigned sz_ssize_t; // 32-bit.
-#endif // SZ_DETECT_64_BIT
-
-#endif // SZ_AVOID_LIBC
-
-/**
- *  @brief  Compile-time assert macro similar to `static_assert` in C++.
- */
-#define sz_static_assert(condition, name)                \
-    typedef struct {                                     \
-        int static_assert_##name : (condition) ? 1 : -1; \
-    } sz_static_assert_##name##_t
-
-sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
-sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
-
-#pragma region Public API
-
-typedef char *sz_ptr_t;          // A type alias for `char *`
-typedef char const *sz_cptr_t;   // A type alias for `char const *`
-typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching functions
-
-typedef sz_u64_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
-
-typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        // Only one relevant bit
-typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; // Only three possible states: <=>
-
-/**
- *  @brief  Tiny string-view structure. It's POD type, unlike the `std::string_view`.
- */
-typedef struct sz_string_view_t {
-    sz_cptr_t start;
-    sz_size_t length;
-} sz_string_view_t;
 
 /**
  *  @brief  Enumeration of SIMD capabilities of the target architecture.
@@ -276,176 +71,6 @@ typedef enum sz_capability_t {
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
 SZ_DYNAMIC sz_capability_t sz_capabilities(void);
-
-/**
- *  @brief  Bit-set structure for 256 possible byte values. Useful for filtering and search.
- *  @see    sz_charset_init, sz_charset_add, sz_charset_contains, sz_charset_invert
- */
-typedef union sz_charset_t {
-    sz_u64_t _u64s[4];
-    sz_u32_t _u32s[8];
-    sz_u16_t _u16s[16];
-    sz_u8_t _u8s[32];
-} sz_charset_t;
-
-/** @brief  Initializes a bit-set to an empty collection, meaning - all characters are banned. */
-SZ_PUBLIC void sz_charset_init(sz_charset_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
-
-/** @brief  Adds a character to the set and accepts @b unsigned integers. */
-SZ_PUBLIC void sz_charset_add_u8(sz_charset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
-
-/** @brief  Adds a character to the set. Consider @b sz_charset_add_u8. */
-SZ_PUBLIC void sz_charset_add(sz_charset_t *s, char c) { sz_charset_add_u8(s, *(sz_u8_t *)(&c)); } // bitcast
-
-/** @brief  Checks if the set contains a given character and accepts @b unsigned integers. */
-SZ_PUBLIC sz_bool_t sz_charset_contains_u8(sz_charset_t const *s, sz_u8_t c) {
-    // Checking the bit can be done in different ways:
-    // - (s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
-    // - (s->_u32s[c >> 5] & (1u << (c & 31u))) != 0
-    // - (s->_u16s[c >> 4] & (1u << (c & 15u))) != 0
-    // - (s->_u8s[c >> 3] & (1u << (c & 7u))) != 0
-    return (sz_bool_t)((s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0);
-}
-
-/** @brief  Checks if the set contains a given character. Consider @b sz_charset_contains_u8. */
-SZ_PUBLIC sz_bool_t sz_charset_contains(sz_charset_t const *s, char c) {
-    return sz_charset_contains_u8(s, *(sz_u8_t *)(&c)); // bitcast
-}
-
-/** @brief  Inverts the contents of the set, so allowed character get disallowed, and vice versa. */
-SZ_PUBLIC void sz_charset_invert(sz_charset_t *s) {
-    s->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
-        s->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
-}
-
-typedef void *(*sz_memory_allocate_t)(sz_size_t, void *);
-typedef void (*sz_memory_free_t)(void *, sz_size_t, void *);
-typedef sz_u64_t (*sz_random_generator_t)(void *);
-
-/**
- *  @brief  Some complex pattern matching algorithms may require memory allocations.
- *          This structure is used to pass the memory allocator to those functions.
- *  @see    sz_memory_allocator_init_fixed
- */
-typedef struct sz_memory_allocator_t {
-    sz_memory_allocate_t allocate;
-    sz_memory_free_t free;
-    void *handle;
-} sz_memory_allocator_t;
-
-/**
- *  @brief  Initializes a memory allocator to use the system default `malloc` and `free`.
- *          ! The function is not available if the library was compiled with `SZ_AVOID_LIBC`.
- *
- *  @param alloc    Memory allocator to initialize.
- */
-SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
-
-/**
- *  @brief  Initializes a memory allocator to use a static-capacity buffer.
- *          No dynamic allocations will be performed.
- *
- *  @param alloc    Memory allocator to initialize.
- *  @param buffer   Buffer to use for allocations.
- *  @param length   Length of the buffer. @b Must be greater than 8 bytes. Different values would be optimal for
- *                  different algorithms and input lengths, but 4096 bytes (one RAM page) is a good default.
- */
-SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
-
-/**
- *  @brief  The number of bytes a stack-allocated string can hold, including the SZ_NULL termination character.
- *          ! This can't be changed from outside. Don't use the `#error` as it may already be included and set.
- */
-#ifdef SZ_STRING_INTERNAL_SPACE
-#undef SZ_STRING_INTERNAL_SPACE
-#endif
-#define SZ_STRING_INTERNAL_SPACE (sizeof(sz_size_t) * 3 - 1) // 3 pointers minus one byte for an 8-bit length
-
-/**
- *  @brief  Tiny memory-owning string structure with a Small String Optimization (SSO).
- *          Differs in layout from Folly, Clang, GCC, and probably most other implementations.
- *          It's designed to avoid any branches on read-only operations, and can store up
- *          to 22 characters on stack on 64-bit machines, followed by the SZ_NULL-termination character.
- *
- *  @section Changing Length
- *
- *  One nice thing about this design, is that you can, in many cases, change the length of the string
- *  without any branches, invoking a `+=` or `-=` on the 64-bit `length` field. If the string is on heap,
- *  the solution is obvious. If it's on stack, inplace decrement wouldn't affect the top bytes of the string,
- *  only changing the last byte containing the length.
- */
-typedef union sz_string_t {
-
-#if !SZ_DETECT_BIG_ENDIAN
-
-    struct external {
-        sz_ptr_t start;
-        sz_size_t length;
-        sz_size_t space;
-        sz_size_t padding;
-    } external;
-
-    struct internal {
-        sz_ptr_t start;
-        sz_u8_t length;
-        char chars[SZ_STRING_INTERNAL_SPACE];
-    } internal;
-
-#else
-
-    struct external {
-        sz_ptr_t start;
-        sz_size_t space;
-        sz_size_t padding;
-        sz_size_t length;
-    } external;
-
-    struct internal {
-        sz_ptr_t start;
-        char chars[SZ_STRING_INTERNAL_SPACE];
-        sz_u8_t length;
-    } internal;
-
-#endif
-
-    sz_size_t words[4];
-
-} sz_string_t;
-
-typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
-typedef sz_u64_t (*sz_checksum_t)(sz_cptr_t, sz_size_t);
-typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
-typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
-typedef void (*sz_to_converter_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
-
-/**
- *  @brief  Computes the 64-bit check-sum of bytes in a string.
- *          Similar to `std::ranges::accumulate`.
- *
- *  @param text     String to aggregate.
- *  @param length   Number of bytes in the text.
- *  @return         64-bit unsigned value.
- */
-SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_checksum */
-SZ_PUBLIC sz_u64_t sz_checksum_serial(sz_cptr_t text, sz_size_t length);
-
-/**
- *  @brief  Computes the 64-bit unsigned hash of a string. Fairly fast for short strings,
- *          simple implementation, and supports rolling computation, reused in other APIs.
- *          Similar to `std::hash` in C++.
- *
- *  @param text     String to hash.
- *  @param length   Number of bytes in the text.
- *  @return         64-bit hash value.
- *
- *  @see    sz_hashes, sz_hashes_fingerprint, sz_hashes_intersection
- */
-SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length);
-
-/** @copydoc sz_hash */
-SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
 
 /**
  *  @brief  Checks if two string are equal.
@@ -479,139 +104,6 @@ SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, 
 
 /** @copydoc sz_order */
 SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
-
-/**
- *  @brief  Look Up Table @b (LUT) transformation of a string. Equivalent to `for (char & c : text) c = lut[c]`.
- *
- *  Can be used to implement some form of string normalization, partially masking punctuation marks,
- *  or converting between different character sets, like uppercase or lowercase. Surprisingly, also has
- *  broad implications in image processing, where image channel transformations are often done using LUTs.
- *
- *  @param text     String to be normalized.
- *  @param length   Number of bytes in the string.
- *  @param lut      Look Up Table to apply. Must be exactly @b 256 bytes long.
- *  @param result   Output string, can point to the same address as ::text.
- */
-SZ_DYNAMIC void sz_look_up_transform(sz_cptr_t text, sz_size_t length, sz_cptr_t lut, sz_ptr_t result);
-
-typedef void (*sz_look_up_transform_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_ptr_t);
-
-/** @copydoc sz_look_up_transform */
-SZ_PUBLIC void sz_look_up_transform_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t lut, sz_ptr_t result);
-
-/**
- *  @brief  Equivalent to `for (char & c : text) c = tolower(c)`.
- *
- *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
- *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
- *  can be done by flipping the 5th bit each inappropriate character byte. This, however,
- *  breaks for extended ASCII, so a different solution is needed.
- *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
- *
- *  @param text     String to be normalized.
- *  @param length   Number of bytes in the string.
- *  @param result   Output string, can point to the same address as ::text.
- */
-SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-
-/**
- *  @brief  Equivalent to `for (char & c : text) c = toupper(c)`.
- *
- *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
- *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
- *  can be done by flipping the 5th bit each inappropriate character byte. This, however,
- *  breaks for extended ASCII, so a different solution is needed.
- *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
- *
- *  @param text     String to be normalized.
- *  @param length   Number of bytes in the string.
- *  @param result   Output string, can point to the same address as ::text.
- */
-SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-
-/**
- *  @brief  Equivalent to `for (char & c : text) c = toascii(c)`.
- *
- *  @param text     String to be normalized.
- *  @param length   Number of bytes in the string.
- *  @param result   Output string, can point to the same address as ::text.
- */
-SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-
-/**
- *  @brief  Checks if all characters in the range are valid ASCII characters.
- *
- *  @param text     String to be analyzed.
- *  @param length   Number of bytes in the string.
- *  @return         Whether all characters are valid ASCII characters.
- */
-SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length);
-
-/**
- *  @brief  Generates a random string for a given alphabet, avoiding integer division and modulo operations.
- *          Similar to `text[i] = alphabet[rand() % cardinality]`.
- *
- *  The modulo operation is expensive, and should be avoided in performance-critical code.
- *  We avoid it using small lookup tables and replacing it with a multiplication and shifts, similar to `libdivide`.
- *  Alternative algorithms would include:
- *      - Montgomery form: https://en.algorithmica.org/hpc/number-theory/montgomery/
- *      - Barret reduction: https://www.nayuki.io/page/barrett-reduction-algorithm
- *      - Lemire's trick: https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
- *
- *  @param alphabet     Set of characters to sample from.
- *  @param cardinality  Number of characters to sample from.
- *  @param text         Output string, can point to the same address as ::text.
- *  @param generate     Callback producing random numbers given the generator state.
- *  @param generator    Generator state, can be a pointer to a seed, or a pointer to a random number generator.
- */
-SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
-                            sz_random_generator_t generate, void *generator);
-
-/** @copydoc sz_generate */
-SZ_PUBLIC void sz_generate_serial(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
-                                  sz_random_generator_t generate, void *generator);
-
-/**
- *  @brief  Similar to `memcpy`, copies contents of one string into another.
- *          The behavior is undefined if the strings overlap.
- *
- *  @param target   String to copy into.
- *  @param length   Number of bytes to copy.
- *  @param source   String to copy from.
- */
-SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_copy */
-SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/**
- *  @brief  Similar to `memmove`, copies (moves) contents of one string into another.
- *          Unlike `sz_copy`, allows overlapping strings as arguments.
- *
- *  @param target   String to copy into.
- *  @param length   Number of bytes to copy.
- *  @param source   String to copy from.
- */
-SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_move */
-SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-typedef void (*sz_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
-
-/**
- *  @brief  Similar to `memset`, fills a string with a given value.
- *
- *  @param target   String to fill.
- *  @param length   Number of bytes to fill.
- *  @param value    Value to fill with.
- */
-SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-
-/** @copydoc sz_fill */
-SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-
-typedef void (*sz_fill_t)(sz_ptr_t, sz_size_t, sz_u8_t);
 
 /**
  *  @brief  Initializes a string class instance to an empty value.
@@ -1154,62 +646,62 @@ SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t l
  *  Hardware feature detection.
  *  All of those can be controlled by the user.
  */
-#ifndef SZ_USE_X86_AVX512
+#ifndef SZ_USE_ICE
 #ifdef __AVX512BW__
-#define SZ_USE_X86_AVX512 1
+#define SZ_USE_ICE 1
 #else
-#define SZ_USE_X86_AVX512 0
+#define SZ_USE_ICE 0
 #endif
 #endif
 
-#ifndef SZ_USE_X86_AVX2
+#ifndef SZ_USE_HASWELL
 #ifdef __AVX2__
-#define SZ_USE_X86_AVX2 1
+#define SZ_USE_HASWELL 1
 #else
-#define SZ_USE_X86_AVX2 0
+#define SZ_USE_HASWELL 0
 #endif
 #endif
 
-#ifndef SZ_USE_ARM_NEON
+#ifndef SZ_USE_NEON
 #ifdef __ARM_NEON
-#define SZ_USE_ARM_NEON 1
+#define SZ_USE_NEON 1
 #else
-#define SZ_USE_ARM_NEON 0
+#define SZ_USE_NEON 0
 #endif
 #endif
 
-#ifndef SZ_USE_ARM_SVE
+#ifndef SZ_USE_SVE
 #ifdef __ARM_FEATURE_SVE
-#define SZ_USE_ARM_SVE 1
+#define SZ_USE_SVE 1
 #else
-#define SZ_USE_ARM_SVE 0
+#define SZ_USE_SVE 0
 #endif
 #endif
 
 /*
  *  Include hardware-specific headers.
  */
-#if SZ_USE_X86_AVX512 || SZ_USE_X86_AVX2
+#if SZ_USE_ICE || SZ_USE_HASWELL
 #include <immintrin.h>
 #endif // SZ_USE_X86...
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
 #if !defined(_MSC_VER)
 #include <arm_acle.h>
 #endif
 #include <arm_neon.h>
-#endif // SZ_USE_ARM_NEON
-#if SZ_USE_ARM_SVE
+#endif // SZ_USE_NEON
+#if SZ_USE_SVE
 #if !defined(_MSC_VER)
 #include <arm_sve.h>
 #endif
-#endif // SZ_USE_ARM_SVE
+#endif // SZ_USE_SVE
 
 #pragma region Hardware Specific API
 
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
 
 /** @copydoc sz_equal */
-SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
+SZ_PUBLIC sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
 SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 /** @copydoc sz_copy */
@@ -1219,19 +711,19 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 /** @copydoc sz_fill */
 SZ_PUBLIC void sz_fill_avx512(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 /** @copydoc sz_look_up_transform */
-SZ_PUBLIC void sz_look_up_transform_avx512(sz_cptr_t source, sz_size_t length, sz_cptr_t table, sz_ptr_t target);
+SZ_PUBLIC void sz_look_up_transform_ice(sz_cptr_t source, sz_size_t length, sz_cptr_t table, sz_ptr_t target);
 /** @copydoc sz_find_byte */
 SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 /** @copydoc sz_rfind_byte */
 SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 /** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 /** @copydoc sz_rfind */
-SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
+SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 /** @copydoc sz_find_charset */
-SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
+SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 /** @copydoc sz_rfind_charset */
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_ice(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 /** @copydoc sz_edit_distance */
 SZ_PUBLIC sz_size_t sz_edit_distance_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
                                             sz_size_t bound, sz_memory_allocator_t *alloc);
@@ -1244,7 +736,7 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t text, sz_size_t length, sz_size_t wind
                                 sz_hash_callback_t callback, void *callback_handle);
 #endif
 
-#if SZ_USE_X86_AVX2
+#if SZ_USE_HASWELL
 /** @copydoc sz_equal */
 SZ_PUBLIC sz_bool_t sz_equal_avx2(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
@@ -1270,7 +762,7 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t text, sz_size_t length, sz_size_t window
                               sz_hash_callback_t callback, void *callback_handle);
 #endif
 
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
 /** @copydoc sz_equal */
 SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
@@ -1297,7 +789,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t text, sz_size_t length, sz_ch
 SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
 #endif
 
-#if SZ_USE_ARM_SVE
+#if SZ_USE_SVE
 /** @copydoc sz_equal */
 SZ_PUBLIC sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 /** @copydoc sz_order */
@@ -1554,7 +1046,7 @@ SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
     x |= x >> 4;
     x |= x >> 8;
     x |= x >> 16;
-#if SZ_DETECT_64_BIT
+#if _SZ_IS_64_BIT
     x |= x >> 32;
 #endif
     x++;
@@ -1740,79 +1232,6 @@ SZ_INTERNAL void _sz_hashes_fingerprint_scalar_callback(sz_cptr_t start, sz_size
     *scalar_ptr ^= hash;
 }
 
-/**
- *  @brief  Chooses the offsets of the most interesting characters in a search needle.
- *
- *  Search throughput can significantly deteriorate if we are matching the wrong characters.
- *  Say the needle is "aXaYa", and we are comparing the first, second, and last character.
- *  If we use SIMD and compare many offsets at a time, comparing against "a" in every register is a waste.
- *
- *  Similarly, dealing with UTF8 inputs, we know that the lower bits of each character code carry more information.
- *  Cyrillic alphabet, for example, falls into [0x0410, 0x042F] code range for uppercase [А, Я], and
- *  into [0x0430, 0x044F] for lowercase [а, я]. Scanning through a text written in Russian, half of the
- *  bytes will carry absolutely no value and will be equal to 0x04.
- */
-SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, //
-                                             sz_size_t *first, sz_size_t *second, sz_size_t *third) {
-    *first = 0;
-    *second = length / 2;
-    *third = length - 1;
-
-    //
-    int has_duplicates =                   //
-        start[*first] == start[*second] || //
-        start[*first] == start[*third] ||  //
-        start[*second] == start[*third];
-
-    // Loop through letters to find non-colliding variants.
-    if (length > 3 && has_duplicates) {
-        // Pivot the middle point right, until we find a character different from the first one.
-        for (; start[*second] == start[*first] && *second + 1 < *third; ++(*second)) {}
-        // Pivot the third (last) point left, until we find a different character.
-        for (; (start[*third] == start[*second] || start[*third] == start[*first]) && *third > (*second + 1);
-             --(*third)) {}
-    }
-
-    // TODO: Investigate alternative strategies for long needles.
-    // On very long needles we have the luxury to choose!
-    // Often dealing with UTF8, we will likely benefit from shifting the first and second characters
-    // further to the right, to achieve not only uniqueness within the needle, but also avoid common
-    // rune prefixes of 2-, 3-, and 4-byte codes.
-    if (length > 8) {
-        // Pivot the first and second points right, until we find a character, that:
-        // > is different from others.
-        // > doesn't start with 0b'110x'xxxx - only 5 bits of relevant info.
-        // > doesn't start with 0b'1110'xxxx - only 4 bits of relevant info.
-        // > doesn't start with 0b'1111'0xxx - only 3 bits of relevant info.
-        //
-        // So we are practically searching for byte values that start with 0b0xxx'xxxx or 0b'10xx'xxxx.
-        // Meaning they fall in the range [0, 127] and [128, 191], in other words any unsigned int up to 191.
-        sz_u8_t const *start_u8 = (sz_u8_t const *)start;
-        sz_size_t vibrant_first = *first, vibrant_second = *second, vibrant_third = *third;
-
-        // Let's begin with the seccond character, as the termination criteria there is more obvious
-        // and we may end up with more variants to check for the first candidate.
-        for (; (start_u8[vibrant_second] > 191 || start_u8[vibrant_second] == start_u8[vibrant_third]) &&
-               (vibrant_second + 1 < vibrant_third);
-             ++vibrant_second) {}
-
-        // Now check if we've indeed found a good candidate or should revert the `vibrant_second` to `second`.
-        if (start_u8[vibrant_second] < 191) { *second = vibrant_second; }
-        else { vibrant_second = *second; }
-
-        // Now check the first character.
-        for (; (start_u8[vibrant_first] > 191 || start_u8[vibrant_first] == start_u8[vibrant_second] ||
-                start_u8[vibrant_first] == start_u8[vibrant_third]) &&
-               (vibrant_first + 1 < vibrant_second);
-             ++vibrant_first) {}
-
-        // Now check if we've indeed found a good candidate or should revert the `vibrant_first` to `first`.
-        // We don't need to shift the third one when dealing with texts as the last byte of the text is
-        // also the last byte of a rune and contains the most information.
-        if (start_u8[vibrant_first] < 191) { *first = vibrant_first; }
-    }
-}
-
 #pragma GCC visibility pop
 #pragma endregion
 
@@ -1853,26 +1272,6 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
     sz_copy((sz_ptr_t)buffer, (sz_cptr_t)&length, sizeof(sz_size_t));
 }
 
-/**
- *  @brief  Byte-level equality comparison between two strings.
- *          If unaligned loads are allowed, uses a switch-table to avoid loops on short strings.
- */
-SZ_PUBLIC sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    sz_cptr_t const a_end = a + length;
-#if SZ_USE_MISALIGNED_LOADS
-    if (length >= SZ_SWAR_THRESHOLD) {
-        sz_u64_vec_t a_vec, b_vec;
-        for (; a + 8 <= a_end; a += 8, b += 8) {
-            a_vec = sz_u64_load(a);
-            b_vec = sz_u64_load(b);
-            if (a_vec.u64 != b_vec.u64) return sz_false_k;
-        }
-    }
-#endif
-    while (a != a_end && *a == *b) a++, b++;
-    return (sz_bool_t)(a_end == a);
-}
-
 SZ_PUBLIC sz_cptr_t sz_find_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
     for (sz_cptr_t const end = text + length; text != end; ++text)
         if (sz_charset_contains(set, *text)) return text;
@@ -1904,7 +1303,7 @@ SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr
     sz_bool_t a_shorter = (sz_bool_t)(a_length < b_length);
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
-#if SZ_USE_MISALIGNED_LOADS && !SZ_DETECT_BIG_ENDIAN
+#if SZ_USE_MISALIGNED_LOADS && !_SZ_IS_BIG_ENDIAN
     for (sz_u64_vec_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
         a_vec = sz_u64_load(a);
         b_vec = sz_u64_load(b);
@@ -1943,7 +1342,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     if (!h_length) return SZ_NULL_CHAR;
     sz_cptr_t const h_end = h + h_length;
 
-#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevety.
+#if !_SZ_IS_BIG_ENDIAN       // Use SWAR only on little-endian platforms for brevity.
 #if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
         if (*h == *n) return h;
@@ -1980,7 +1379,7 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     // Reposition the `h` pointer to the end, as we will be walking backwards.
     h = h + h_length - 1;
 
-#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevety.
+#if !_SZ_IS_BIG_ENDIAN       // Use SWAR only on little-endian platforms for brevity.
 #if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)(h + 1) & 7ull) && h >= h_start; --h)
         if (*h == *n) return h;
@@ -2364,7 +1763,7 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
 
-#if SZ_DETECT_BIG_ENDIAN
+#if _SZ_IS_BIG_ENDIAN
     sz_find_t backends[] = {
         (sz_find_t)sz_find_byte_serial,
         (sz_find_t)_sz_find_horspool_upto_256bytes_serial,
@@ -2823,7 +2222,7 @@ SZ_PUBLIC sz_size_t sz_hamming_distance_serial( //
 
     // Walk through both strings using SWAR and counting the number of differing characters.
     sz_size_t distance = max_length - min_length;
-#if SZ_USE_MISALIGNED_LOADS && !SZ_DETECT_BIG_ENDIAN
+#if SZ_USE_MISALIGNED_LOADS && !_SZ_IS_BIG_ENDIAN
     if (min_length >= SZ_SWAR_THRESHOLD) {
         sz_u64_vec_t a_vec, b_vec, match_vec;
         for (; a + 8 <= a_end && distance < bound; a += 8, b += 8) {
@@ -3278,7 +2677,7 @@ SZ_PUBLIC void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_s
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
     *length = string->external.length & (0x00000000000000FFull | is_big_mask);
     // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
-    *space = sz_u64_blend(SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
+    *space = sz_u64_blend(_SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
     *is_external = (sz_bool_t)!is_small;
 }
 
@@ -3336,7 +2735,7 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
     string->words[2] = 0;
     string->words[3] = 0;
     // If we are lucky, no memory allocations will be needed.
-    if (space_needed <= SZ_STRING_INTERNAL_SPACE) {
+    if (space_needed <= _SZ_STRING_INTERNAL_SPACE) {
         string->internal.start = &string->internal.chars[0];
         string->internal.length = (sz_u8_t)length;
     }
@@ -3357,7 +2756,7 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
     sz_assert(string && allocator && "Strings and allocators can't be SZ_NULL.");
 
     sz_size_t new_space = new_capacity + 1;
-    if (new_space <= SZ_STRING_INTERNAL_SPACE) return string->external.start;
+    if (new_space <= _SZ_STRING_INTERNAL_SPACE) return string->external.start;
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -3486,64 +2885,6 @@ SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *alloca
     if (!sz_string_is_on_stack(string))
         allocator->free(string->external.start, string->external.space, allocator->handle);
     sz_string_init(string);
-}
-
-// When overriding libc, disable optimisations for this function beacuse MSVC will optimize the loops into a memset.
-// Which then causes a stack overflow due to infinite recursion (memset -> sz_fill_serial -> memset).
-#if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
-#pragma optimize("", off)
-#endif
-SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    sz_ptr_t end = target + length;
-    // Dealing with short strings, a single sequential pass would be faster.
-    // If the size is larger than 2 words, then at least 1 of them will be aligned.
-    // But just one aligned word may not be worth SWAR.
-    if (length < SZ_SWAR_THRESHOLD)
-        while (target != end) *(target++) = value;
-
-    // In case of long strings, skip unaligned bytes, and then fill the rest in 64-bit chunks.
-    else {
-        sz_u64_t value64 = (sz_u64_t)value * 0x0101010101010101ull;
-        while ((sz_size_t)target & 7ull) *(target++) = value;
-        while (target + 8 <= end) *(sz_u64_t *)target = value64, target += 8;
-        while (target != end) *(target++) = value;
-    }
-}
-#if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
-#pragma optimize("", on)
-#endif
-
-SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_MISALIGNED_LOADS
-    while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)source, target += 8, source += 8, length -= 8;
-#endif
-    while (length--) *(target++) = *(source++);
-}
-
-SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    // Implementing `memmove` is trickier, than `memcpy`, as the ranges may overlap.
-    // Existing implementations often have two passes, in normal and reversed order,
-    // depending on the relation of `target` and `source` addresses.
-    // https://student.cs.uwaterloo.ca/~cs350/common/os161-src-html/doxygen/html/memmove_8c_source.html
-    // https://marmota.medium.com/c-language-making-memmove-def8792bb8d5
-    //
-    // We can use the `memcpy` like left-to-right pass if we know that the `target` is before `source`.
-    // Or if we know that they don't intersect! In that case the traversal order is irrelevant,
-    // but older CPUs may predict and fetch forward-passes better.
-    if (target < source || target >= source + length) {
-#if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)(source), target += 8, source += 8, length -= 8;
-#endif
-        while (length--) *(target++) = *(source++);
-    }
-    else {
-        // Jump to the end and walk backwards.
-        target += length, source += length;
-#if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)(target -= 8) = *(sz_u64_t const *)(source -= 8), length -= 8;
-#endif
-        while (length--) *(--target) = *(--source);
-    }
 }
 
 #pragma endregion
@@ -3803,7 +3144,7 @@ SZ_INTERNAL sz_bool_t _sz_sort_is_less(sz_sequence_t *sequence, sz_size_t i_key,
 
 SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_length) {
 
-#if SZ_DETECT_BIG_ENDIAN
+#if _SZ_IS_BIG_ENDIAN
     // TODO: Implement partial sort for big-endian systems. For now this sorts the whole thing.
     sz_unused(partial_order_length);
     sz_sort_introsort(sequence, (sz_sequence_comparator_t)_sz_sort_is_less);
@@ -3824,7 +3165,7 @@ SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_
 }
 
 SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) {
-#if SZ_DETECT_BIG_ENDIAN
+#if _SZ_IS_BIG_ENDIAN
     sz_sort_introsort(sequence, (sz_sequence_comparator_t)_sz_sort_is_less);
 #else
     sz_sort_partial(sequence, sequence->count);
@@ -3839,7 +3180,7 @@ SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) {
  */
 #pragma region AVX2 Implementation
 
-#if SZ_USE_X86_AVX2
+#if SZ_USE_HASWELL
 #pragma GCC push_options
 #pragma GCC target("avx2")
 #pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
@@ -4564,7 +3905,7 @@ SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t windo
  */
 #pragma region AVX512 Implementation
 
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
@@ -4690,7 +4031,7 @@ SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr
     return sz_equal_k;
 }
 
-SZ_PUBLIC sz_bool_t sz_equal_avx512(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+SZ_PUBLIC sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     __mmask64 mask;
     sz_u512_vec_t a_vec, b_vec;
 
@@ -4950,7 +4291,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
@@ -4982,7 +4323,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                    _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
             while (matches) {
                 int potential_offset = sz_u64_ctz(matches);
-                if (sz_equal_avx512(h + potential_offset, n, n_length)) return h + potential_offset;
+                if (sz_equal_skylake(h + potential_offset, n, n_length)) return h + potential_offset;
                 matches &= matches - 1;
             }
 
@@ -5040,7 +4381,7 @@ SZ_PUBLIC sz_cptr_t sz_find_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
                                _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_ctz(matches);
-            if (n_length <= 3 || sz_equal_avx512(h + potential_offset, n, n_length)) return h + potential_offset;
+            if (n_length <= 3 || sz_equal_skylake(h + potential_offset, n, n_length)) return h + potential_offset;
             matches &= matches - 1;
         }
     }
@@ -5070,7 +4411,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_avx512(sz_cptr_t h, sz_size_t h_length, sz_cpt
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This almost never fires, but it's better to be safe than sorry.
     if (h_length < n_length || !n_length) return SZ_NULL_CHAR;
@@ -5101,7 +4442,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
                                _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_clz(matches);
-            if (n_length <= 3 || sz_equal_avx512(h + h_length - n_length - potential_offset, n, n_length))
+            if (n_length <= 3 || sz_equal_skylake(h + h_length - n_length - potential_offset, n, n_length))
                 return h + h_length - n_length - potential_offset;
             sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
                       "The bit must be set before we squash it");
@@ -5121,7 +4462,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_avx512(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
                                _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
         while (matches) {
             int potential_offset = sz_u64_clz(matches);
-            if (n_length <= 3 || sz_equal_avx512(h + 64 - potential_offset - 1, n, n_length))
+            if (n_length <= 3 || sz_equal_skylake(h + 64 - potential_offset - 1, n, n_length))
                 return h + 64 - potential_offset - 1;
             sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
                       "The bit must be set before we squash it");
@@ -5439,7 +4780,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
     ones_u16_vec.zmm = _mm512_set1_epi16(1);
 
     // This is a mixed-precision implementation, using 8-bit representations for part of the operations.
-    // Even there, in case `SZ_USE_X86_AVX2=0`, let's use the `sz_u512_vec_t` type, addressing the first YMM halfs.
+    // Even there, in case `SZ_USE_HASWELL=0`, let's use the `sz_u512_vec_t` type, addressing the first YMM halfs.
     sz_u512_vec_t shorter_vec, longer_vec;
     sz_u512_vec_t ones_u8_vec;
     ones_u8_vec.ymms[0] = _mm256_set1_epi8(1);
@@ -5810,7 +5151,7 @@ SZ_PUBLIC void sz_hashes_avx512(sz_cptr_t start, sz_size_t length, sz_size_t win
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
                              apply_to = function)
 
-SZ_PUBLIC void sz_look_up_transform_avx512(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+SZ_PUBLIC void sz_look_up_transform_ice(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
@@ -5920,7 +5261,7 @@ SZ_PUBLIC void sz_look_up_transform_avx512(sz_cptr_t source, sz_size_t length, s
     }
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
+SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
 
     // Before initializing the AVX-512 vectors, we may want to run the sequential code for the first few bytes.
     // In practice, that only hurts, even when we have matches every 5-ish bytes.
@@ -6035,7 +5376,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_avx512(sz_cptr_t text, sz_size_t length, sz_
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_ice(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
     return sz_rfind_charset_serial(text, length, filter);
 }
 
@@ -6046,7 +5387,7 @@ SZ_PUBLIC sz_cptr_t sz_find_many_avx512(                        //
 
     // When dealing with huge needles vocabularies, like in tokenization workloads, we need to construct an automaton.
     // But in many cases, the vocabulary is small enough to use a simpler DFA-less approach, combining the ideas from
-    // the `sz_find_avx512` and `sz_find_charset_avx512` functions.
+    // the `sz_find_skylake` and `sz_find_charset_ice` functions.
     //
     // Pick the offsets within needles where there is the least variance in the characters.
     // Like for "the", "then", "there", "these", "those", "their", "they", "them", "that", "this", "thus", "than":
@@ -6363,7 +5704,7 @@ SZ_PUBLIC sz_bool_t sz_detect_encoding(sz_cptr_t text, sz_size_t length) {
  */
 #pragma region ARM NEON
 
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.2-a+simd")
 #pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
@@ -6758,7 +6099,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_ch
  */
 #pragma region ARM SVE
 
-#if SZ_USE_ARM_SVE
+#if SZ_USE_SVE
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.2-a+sve")
 #pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
@@ -6902,11 +6243,11 @@ SZ_PUBLIC void sz_hashes_fingerprint(sz_cptr_t start, sz_size_t length, sz_size_
 #if !SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     return sz_checksum_avx512(text, length);
-#elif SZ_USE_X86_AVX2
+#elif SZ_USE_HASWELL
     return sz_checksum_avx2(text, length);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     return sz_checksum_neon(text, length);
 #else
     return sz_checksum_serial(text, length);
@@ -6914,11 +6255,11 @@ SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length) {
 }
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-#if SZ_USE_X86_AVX512
-    return sz_equal_avx512(a, b, length);
-#elif SZ_USE_X86_AVX2
+#if SZ_USE_ICE
+    return sz_equal_skylake(a, b, length);
+#elif SZ_USE_HASWELL
     return sz_equal_avx2(a, b, length);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     return sz_equal_neon(a, b, length);
 #else
     return sz_equal_serial(a, b, length);
@@ -6926,11 +6267,11 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 }
 
 SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     return sz_order_avx512(a, a_length, b, b_length);
-#elif SZ_USE_X86_AVX2
+#elif SZ_USE_HASWELL
     return sz_order_avx2(a, a_length, b, b_length);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     return sz_order_neon(a, a_length, b, b_length);
 #else
     return sz_order_serial(a, a_length, b, b_length);
@@ -6938,11 +6279,11 @@ SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, 
 }
 
 SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     sz_copy_avx512(target, source, length);
-#elif SZ_USE_X86_AVX2
+#elif SZ_USE_HASWELL
     sz_copy_avx2(target, source, length);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     sz_copy_neon(target, source, length);
 #else
     sz_copy_serial(target, source, length);
@@ -6950,11 +6291,11 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 }
 
 SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     sz_move_avx512(target, source, length);
-#elif SZ_USE_X86_AVX2
+#elif SZ_USE_HASWELL
     sz_move_avx2(target, source, length);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     sz_move_neon(target, source, length);
 #else
     sz_move_serial(target, source, length);
@@ -6962,11 +6303,11 @@ SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 }
 
 SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     sz_fill_avx512(target, length, value);
-#elif SZ_USE_X86_AVX2
+#elif SZ_USE_HASWELL
     sz_fill_avx2(target, length, value);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     sz_fill_neon(target, length, value);
 #else
     sz_fill_serial(target, length, value);
@@ -6974,11 +6315,11 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 }
 
 SZ_DYNAMIC void sz_look_up_transform(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
-#if SZ_USE_X86_AVX512
-    sz_look_up_transform_avx512(source, length, lut, target);
-#elif SZ_USE_X86_AVX2
+#if SZ_USE_ICE
+    sz_look_up_transform_ice(source, length, lut, target);
+#elif SZ_USE_HASWELL
     sz_look_up_transform_avx2(source, length, lut, target);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     sz_look_up_transform_neon(source, length, lut, target);
 #else
     sz_look_up_transform_serial(source, length, lut, target);
@@ -6986,11 +6327,11 @@ SZ_DYNAMIC void sz_look_up_transform(sz_cptr_t source, sz_size_t length, sz_cptr
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     return sz_find_byte_avx512(haystack, h_length, needle);
-#elif SZ_USE_X86_AVX2
+#elif SZ_USE_HASWELL
     return sz_find_byte_avx2(haystack, h_length, needle);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     return sz_find_byte_neon(haystack, h_length, needle);
 #else
     return sz_find_byte_serial(haystack, h_length, needle);
@@ -6998,11 +6339,11 @@ SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
 }
 
 SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     return sz_rfind_byte_avx512(haystack, h_length, needle);
-#elif SZ_USE_X86_AVX2
+#elif SZ_USE_HASWELL
     return sz_rfind_byte_avx2(haystack, h_length, needle);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     return sz_rfind_byte_neon(haystack, h_length, needle);
 #else
     return sz_rfind_byte_serial(haystack, h_length, needle);
@@ -7010,11 +6351,11 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cp
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-#if SZ_USE_X86_AVX512
-    return sz_find_avx512(haystack, h_length, needle, n_length);
-#elif SZ_USE_X86_AVX2
+#if SZ_USE_ICE
+    return sz_find_skylake(haystack, h_length, needle, n_length);
+#elif SZ_USE_HASWELL
     return sz_find_avx2(haystack, h_length, needle, n_length);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     return sz_find_neon(haystack, h_length, needle, n_length);
 #else
     return sz_find_serial(haystack, h_length, needle, n_length);
@@ -7022,11 +6363,11 @@ SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t n
 }
 
 SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length) {
-#if SZ_USE_X86_AVX512
-    return sz_rfind_avx512(haystack, h_length, needle, n_length);
-#elif SZ_USE_X86_AVX2
+#if SZ_USE_ICE
+    return sz_rfind_skylake(haystack, h_length, needle, n_length);
+#elif SZ_USE_HASWELL
     return sz_rfind_avx2(haystack, h_length, needle, n_length);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     return sz_rfind_neon(haystack, h_length, needle, n_length);
 #else
     return sz_rfind_serial(haystack, h_length, needle, n_length);
@@ -7034,11 +6375,11 @@ SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t 
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
-#if SZ_USE_X86_AVX512
-    return sz_find_charset_avx512(text, length, set);
-#elif SZ_USE_X86_AVX2
+#if SZ_USE_ICE
+    return sz_find_charset_ice(text, length, set);
+#elif SZ_USE_HASWELL
     return sz_find_charset_avx2(text, length, set);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     return sz_find_charset_neon(text, length, set);
 #else
     return sz_find_charset_serial(text, length, set);
@@ -7046,11 +6387,11 @@ SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charse
 }
 
 SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
-#if SZ_USE_X86_AVX512
-    return sz_rfind_charset_avx512(text, length, set);
-#elif SZ_USE_X86_AVX2
+#if SZ_USE_ICE
+    return sz_rfind_charset_ice(text, length, set);
+#elif SZ_USE_HASWELL
     return sz_rfind_charset_avx2(text, length, set);
-#elif SZ_USE_ARM_NEON
+#elif SZ_USE_NEON
     return sz_rfind_charset_neon(text, length, set);
 #else
     return sz_rfind_charset_serial(text, length, set);
@@ -7075,7 +6416,7 @@ SZ_DYNAMIC sz_size_t sz_edit_distance( //
     sz_cptr_t a, sz_size_t a_length,   //
     sz_cptr_t b, sz_size_t b_length,   //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     return sz_edit_distance_avx512(a, a_length, b, b_length, bound, alloc);
 #else
     return sz_edit_distance_serial(a, a_length, b, b_length, bound, alloc);
@@ -7092,7 +6433,7 @@ SZ_DYNAMIC sz_size_t sz_edit_distance_utf8( //
 SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
                                          sz_error_cost_t const *subs, sz_error_cost_t gap,
                                          sz_memory_allocator_t *alloc) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     return sz_alignment_score_avx512(a, a_length, b, b_length, subs, gap, alloc);
 #else
     return sz_alignment_score_serial(a, a_length, b, b_length, subs, gap, alloc);
@@ -7101,9 +6442,9 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cpt
 
 SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
                           sz_hash_callback_t callback, void *callback_handle) {
-#if SZ_USE_X86_AVX512
+#if SZ_USE_ICE
     sz_hashes_avx512(text, length, window_length, window_step, callback, callback_handle);
-#elif SZ_USE_X86_AVX2
+#elif SZ_USE_HASWELL
     sz_hashes_avx2(text, length, window_length, window_step, callback, callback_handle);
 #else
     sz_hashes_serial(text, length, window_length, window_step, callback, callback_handle);
