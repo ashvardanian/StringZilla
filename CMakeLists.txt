@@ -46,7 +46,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
   message(STATUS "Platform: ARM")
 endif()
 
-# Determine if StringZilla is built as a subproject (using `add_subdirectory`)
+# Determine if StringZilla is built as a sub-project (using `add_subdirectory`)
 # or if it is the main project
 set(STRINGZILLA_IS_MAIN_PROJECT OFF)
 
@@ -99,7 +99,7 @@ endif()
 
 if (MSVC)
   # Remove /RTC* from MSVC debug flags by default (it will be added back in the set_compiler_flags function)
-  # Beacuse /RTC* cannot be used without the crt so it needs to be disabled for that specifc target
+  # Because /RTC* cannot be used without the crt so it needs to be disabled for that specific target
   string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
   string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif()
@@ -303,18 +303,20 @@ if(${STRINGZILLA_BUILD_SHARED})
       endif()
 
       target_compile_definitions(${target} PRIVATE
-        "SZ_USE_X86_AVX512=1"
-        "SZ_USE_X86_AVX2=1"
-        "SZ_USE_ARM_NEON=0"
-        "SZ_USE_ARM_SVE=0")
+        "SZ_USE_HASWELL=1"
+        "SZ_USE_SKYLAKE=1"
+        "SZ_USE_ICE=1"
+        "SZ_USE_NEON=0"
+        "SZ_USE_SVE=0")
     elseif(SZ_PLATFORM_ARM)
       set_compiler_flags(${target} "" "armv8-a")
 
       target_compile_definitions(${target} PRIVATE
-        "SZ_USE_X86_AVX512=0"
-        "SZ_USE_X86_AVX2=0"
-        "SZ_USE_ARM_NEON=1"
-        "SZ_USE_ARM_SVE=1")
+        "SZ_USE_HASWELL=0"
+        "SZ_USE_SKYLAKE=0"
+        "SZ_USE_ICE=0"
+        "SZ_USE_NEON=1"
+        "SZ_USE_SVE=1")
     endif()
 
     if (MSVC)
@@ -337,7 +339,7 @@ if(${STRINGZILLA_BUILD_SHARED})
   target_compile_definitions(stringzillite PRIVATE "SZ_AVOID_LIBC=1")
   target_compile_definitions(stringzillite PRIVATE "SZ_OVERRIDE_LIBC=1")
 
-  # Avoid built-ins on MSVC and other compilers, as that will cause compileration errors
+  # Avoid built-ins on MSVC and other compilers, as that will cause compilation errors
   target_compile_options(stringzillite PRIVATE
     "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>"
     "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")

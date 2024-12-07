@@ -54,10 +54,11 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     # GCC is our primary compiler, so when packaging the library, even if the current machine
     # doesn't support AVX-512 or SVE, still precompile those.
     macros_args = [
-        ("SZ_USE_X86_AVX512", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ARM_SVE", "1" if is_64bit_arm() else "0"),
-        ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_SVE", "1" if is_64bit_arm() else "0"),
         ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
 
@@ -89,10 +90,11 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     # During Universal builds, however, even AVX header cause compilation errors.
     can_use_avx2 = is_64bit_x86() and sysconfig.get_platform().startswith("universal")
     macros_args = [
-        ("SZ_USE_X86_AVX512", "0"),
-        ("SZ_USE_X86_AVX2", "1" if can_use_avx2 else "0"),
-        ("SZ_USE_ARM_SVE", "0"),
-        ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_HASWELL", "1" if can_use_avx2 else "0"),
+        ("SZ_USE_SKYLAKE", "0"),
+        ("SZ_USE_ICE", "0"),
+        ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_SVE", "0"),
     ]
 
     return compile_args, link_args, macros_args
@@ -107,10 +109,11 @@ def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
 
     # When packaging the library, even if the current machine doesn't support AVX-512 or SVE, still precompile those.
     macros_args = [
-        ("SZ_USE_X86_AVX512", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ARM_SVE", "0"),
-        ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_HASWELL", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_SKYLAKE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
+        ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_SVE", "0"),
         ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
 

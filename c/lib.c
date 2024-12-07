@@ -77,7 +77,7 @@ SZ_INTERNAL sz_capability_t sz_capabilities_arm(void) {
 
 SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
 
-#if SZ_USE_X86_AVX512 || SZ_USE_X86_AVX2
+#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 
     /// The states of 4 registers populated for a specific "cpuid" assembly call
     union four_registers_t {
@@ -131,7 +131,7 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
 
 #endif // SZ_TARGET_X86
 
-#if SZ_USE_ARM_NEON || SZ_USE_ARM_SVE
+#if SZ_USE_NEON || SZ_USE_SVE
 
     return sz_capabilities_arm();
 
@@ -196,7 +196,7 @@ static void sz_dispatch_table_init(void) {
     impl->alignment_score = sz_alignment_score_serial;
     impl->hashes = sz_hashes_serial;
 
-#if SZ_USE_X86_AVX2
+#if SZ_USE_HASWELL
     if (caps & sz_cap_x86_avx2_k) {
         impl->equal = sz_equal_avx2;
         impl->order = sz_order_avx2;
@@ -216,34 +216,36 @@ static void sz_dispatch_table_init(void) {
     }
 #endif
 
-#if SZ_USE_X86_AVX512
+#if SZ_USE_SKYLAKE
     if (caps & sz_cap_x86_avx512f_k) {
-        impl->equal = sz_equal_avx512;
+        impl->equal = sz_equal_skylake;
         impl->order = sz_order_avx512;
 
         impl->copy = sz_copy_avx512;
         impl->move = sz_move_avx512;
         impl->fill = sz_fill_avx512;
 
-        impl->find = sz_find_avx512;
-        impl->rfind = sz_rfind_avx512;
+        impl->find = sz_find_skylake;
+        impl->rfind = sz_rfind_skylake;
         impl->find_byte = sz_find_byte_avx512;
         impl->rfind_byte = sz_rfind_byte_avx512;
 
         impl->edit_distance = sz_edit_distance_avx512;
     }
+#endif
 
+#if SZ_USE_ICE
     if ((caps & sz_cap_x86_avx512f_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_avx512vbmi2_k) &&
         (caps & sz_cap_x86_avx512bw_k) && (caps & sz_cap_x86_avx512vbmi_k)) {
-        impl->find_from_set = sz_find_charset_avx512;
-        impl->rfind_from_set = sz_rfind_charset_avx512;
+        impl->find_from_set = sz_find_charset_ice;
+        impl->rfind_from_set = sz_rfind_charset_ice;
         impl->alignment_score = sz_alignment_score_avx512;
-        impl->look_up_transform = sz_look_up_transform_avx512;
+        impl->look_up_transform = sz_look_up_transform_ice;
         impl->checksum = sz_checksum_avx512;
     }
 #endif
 
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
     if (caps & sz_cap_arm_neon_k) {
         impl->equal = sz_equal_neon;
 
@@ -361,14 +363,16 @@ SZ_DYNAMIC sz_size_t sz_edit_distance_utf8( //
     return _sz_edit_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc);
 }
 
-SZ_DYNAMIC sz_ssize_t sz_alignment_score(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                         sz_error_cost_t const *subs, sz_error_cost_t gap,
-                                         sz_memory_allocator_t *alloc) {
+SZ_DYNAMIC sz_ssize_t sz_alignment_score( //
+    sz_cptr_t a, sz_size_t a_length,      //
+    sz_cptr_t b, sz_size_t b_length,      //
+    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc) {
     return sz_dispatch_table.alignment_score(a, a_length, b, b_length, subs, gap, alloc);
 }
 
-SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t step, //
-                          sz_hash_callback_t callback, void *callback_handle) {
+SZ_DYNAMIC void sz_hashes(                                                     //
+    sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t step, //
+    sz_hash_callback_t callback, void *callback_handle) {
     sz_dispatch_table.hashes(text, length, window_length, step, callback, callback_handle);
 }
 
@@ -409,8 +413,9 @@ sz_u64_t _sz_random_generator(void *empty_state) {
 }
 #endif
 
-SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
-                            sz_random_generator_t generator, void *generator_user_data) {
+SZ_DYNAMIC void sz_generate( //
+    sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
+    sz_random_generator_t generator, void *generator_user_data) {
 #if !SZ_AVOID_LIBC
     if (!generator) generator = _sz_random_generator;
 #endif
