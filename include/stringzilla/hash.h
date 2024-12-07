@@ -74,8 +74,9 @@ SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length);
  *  @param callback_handle  Optional user-provided pointer to be passed to the `callback`.
  *  @see                    sz_hashes_fingerprint, sz_hashes_intersection
  */
-SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
-                          sz_hash_callback_t callback, void *callback_handle);
+SZ_DYNAMIC void sz_hashes(                                                            //
+    sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
+    sz_hash_callback_t callback, void *callback_handle);
 
 /**
  *  @brief  Computes the Karp-Rabin rolling hashes of a string outputting a binary fingerprint.
@@ -140,14 +141,19 @@ SZ_DYNAMIC void sz_generate(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t 
 
 /** @copydoc sz_checksum */
 SZ_PUBLIC sz_u64_t sz_checksum_serial(sz_cptr_t text, sz_size_t length);
+
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
+
 /** @copydoc sz_generate */
-SZ_PUBLIC void sz_generate_serial(sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length,
-                                  sz_random_generator_t generate, void *generator);
+SZ_PUBLIC void sz_generate_serial( //
+    sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length, sz_random_generator_t generate,
+    void *generator);
+
 /** @copydoc sz_hashes */
-SZ_PUBLIC void sz_hashes_serial(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
-                                sz_hash_callback_t callback, void *callback_handle);
+SZ_PUBLIC void sz_hashes_serial(                                                      //
+    sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
+    sz_hash_callback_t callback, void *callback_handle);
 
 #pragma endregion // Core API
 

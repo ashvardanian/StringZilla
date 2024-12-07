@@ -150,6 +150,15 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score(                             //
     sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
     sz_memory_allocator_t *alloc);
 
+/**
+ *  @brief  Checks if all characters in the range are valid ASCII characters.
+ *
+ *  @param text     String to be analyzed.
+ *  @param length   Number of bytes in the string.
+ *  @return         Whether all characters are valid ASCII characters.
+ */
+SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length);
+
 /** @copydoc sz_hamming_distance */
 SZ_PUBLIC sz_size_t sz_hamming_distance_serial( //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_size_t bound);
@@ -707,9 +716,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_avx512( //
 
         // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
         __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
-        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) { //
-            return SZ_SIZE_MAX;
-        }
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return SZ_SIZE_MAX;
     }
 
     // Now let's handle the anti-diagonal band of the matrix, between the top and bottom triangles.
@@ -740,9 +747,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_avx512( //
 
         // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
         __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
-        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) { //
-            return SZ_SIZE_MAX;
-        }
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return SZ_SIZE_MAX;
     }
 
     // Now let's handle the bottom right triangle.
@@ -766,9 +771,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_avx512( //
 
         // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
         __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
-        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) { //
-            return SZ_SIZE_MAX;
-        }
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return SZ_SIZE_MAX;
+
         // In every following iterations we take use a shorter prefix of each register,
         // but we don't need to update the `next_diagonal_mask` anymore... except for the early exit.
         next_diagonal_mask = _kshiftri_mask64(next_diagonal_mask, 1);

@@ -3,18 +3,26 @@
  *  @file   types.h
  *  @author Ash Vardanian
  *
- *  Consider overriding the following macros to customize the library:
+ *  Includes the following types:
  *
- *  - `SZ_DEBUG=0` - whether to enable debug assertions and logging.
- *  - `SZ_AVOID_LIBC=0` - whether to avoid including the standard C library headers.
- *  - `SZ_DYNAMIC_DISPATCH=0` - whether to use runtime dispatching of the most advanced SIMD backend.
- *  - `SZ_USE_MISALIGNED_LOADS=0` - whether to use misaligned loads on platforms that support them.
- *  - `SZ_SWAR_THRESHOLD=24` - threshold for switching to SWAR backend over serial byte-level for-loops.
- *  - `SZ_USE_HASWELL=?` - whether to use AVX2 instructions on x86_64.
- *  - `SZ_USE_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
- *  - `SZ_USE_ICE=?` - whether to use AVX-512 VBMI instructions on x86_64.
- *  - `SZ_USE_NEON=?` - whether to use NEON instructions on ARM.
- *  - `SZ_USE_SVE=?` - whether to use SVE and SVE2 instructions on ARM.
+ *  - `sz_u8_t`, `sz_u16_t`, `sz_u32_t`, `sz_u64_t` - unsigned integers of 8, 16, 32, and 64 bits.
+ *  - `sz_i8_t`, `sz_i16_t`, `sz_i32_t`, `sz_i64_t` - signed integers of 8, 16, 32, and 64 bits.
+ *  - `sz_size_t`, `sz_ssize_t` - unsigned and signed integers of the same size as a pointer.
+ *  - `sz_ptr_t`, `sz_cptr_t` - pointer and constant pointer to a C-style string.
+ *  - `sz_bool_t` - boolean type, `sz_true_k` and `sz_false_k` constants.
+ *  - `sz_ordering_t` - for comparison results, `sz_less_k`, `sz_equal_k`, `sz_greater_k`.
+ *  - @b `sz_u8_vec_t`, `sz_u16_vec_t`, `sz_u32_vec_t`, `sz_u64_vec_t` - @b SWAR vector types.
+ *  - @b `sz_u128_vec_t`, `sz_u256_vec_t`, `sz_u512_vec_t` - @b SIMD vector types for x86 and Arm.
+ *  - @b `sz_rune_t` - for 32-bit Unicode code points ~ @b runes.
+ *  - `sz_rune_length_t` - to describe the number of bytes in a UTF8-encoded rune.
+ *  - `sz_error_cost_t` - for substitution costs in string alignment and scoring algorithms.
+ *
+ *  The library also defines the following higher-level structures:
+ *
+ *  - `sz_string_view_t` - for a C-style `std::string_view`-like structure.
+ *  - `sz_memory_allocator_t` - a wrapper for memory-management functions.
+ *  - `sz_sequence_t` - a wrapper to access strings forming a sequential container.
+ *  - `sz_charset_t` - a bitset for 256 possible byte values.
  */
 #ifndef STRINGZILLA_TYPES_H_
 #define STRINGZILLA_TYPES_H_
@@ -864,8 +872,8 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_byte_equal(sz_u64_vec_t a, sz_u64_vec_t b)
 /**
  *  @brief  Clamps signed offsets in a string to a valid range. Used for Pythonic-style slicing.
  */
-SZ_INTERNAL void sz_ssize_clamp_interval(sz_size_t length, sz_ssize_t start, sz_ssize_t end,
-                                         sz_size_t *normalized_offset, sz_size_t *normalized_length) {
+SZ_INTERNAL void sz_ssize_clamp_interval( //
+    sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
     // TODO: Remove branches.
     // Normalize negative indices
     if (start < 0) start += length;
@@ -1023,7 +1031,7 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 /** @brief  Helper function, using the supplied fixed-capacity buffer to allocate memory. */
 SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
     sz_size_t capacity;
-    sz_copy((sz_ptr_t)&capacity, (sz_cptr_t)handle, sizeof(sz_size_t));
+    *(sz_ptr_t)&capacity = *(sz_cptr_t)handle;
     sz_size_t consumed_capacity = sizeof(sz_size_t);
     if (consumed_capacity + length > capacity) return SZ_NULL_CHAR;
     return (sz_ptr_t)handle + consumed_capacity;
@@ -1098,7 +1106,7 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
     alloc->allocate = (sz_memory_allocate_t)_sz_memory_allocate_fixed;
     alloc->free = (sz_memory_free_t)_sz_memory_free_fixed;
     alloc->handle = &buffer;
-    sz_copy((sz_ptr_t)buffer, (sz_cptr_t)&length, sizeof(sz_size_t));
+    *(sz_ptr_t)buffer = *(sz_cptr_t)&length;
 }
 
 #pragma endregion

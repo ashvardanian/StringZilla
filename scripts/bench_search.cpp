@@ -29,13 +29,13 @@ tracked_binary_functions_t find_functions() {
              return (match == std::string_view::npos ? h.size() : match);
          }},
         {"sz_find_serial", wrap_sz(sz_find_serial), true},
-#if SZ_USE_X86_AVX512
-        {"sz_find_avx512", wrap_sz(sz_find_avx512), true},
+#if SZ_USE_SKYLAKE
+        {"sz_find_skylake", wrap_sz(sz_find_skylake), true},
 #endif
-#if SZ_USE_X86_AVX2
-        {"sz_find_avx2", wrap_sz(sz_find_avx2), true},
+#if SZ_USE_HASWELL
+        {"sz_find_haswell", wrap_sz(sz_find_haswell), true},
 #endif
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
         {"sz_find_neon", wrap_sz(sz_find_neon), true},
 #endif
         {"strstr/strchr",
@@ -90,13 +90,13 @@ tracked_binary_functions_t rfind_functions() {
              return (match == std::string_view::npos ? 0 : match);
          }},
         {"sz_rfind_serial", wrap_sz(sz_rfind_serial), true},
-#if SZ_USE_X86_AVX512
-        {"sz_rfind_avx512", wrap_sz(sz_rfind_avx512), true},
+#if SZ_USE_SKYLAKE
+        {"sz_rfind_skylake", wrap_sz(sz_rfind_skylake), true},
 #endif
-#if SZ_USE_X86_AVX2
-        {"sz_rfind_avx2", wrap_sz(sz_rfind_avx2), true},
+#if SZ_USE_HASWELL
+        {"sz_rfind_haswell", wrap_sz(sz_rfind_haswell), true},
 #endif
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
         {"sz_rfind_neon", wrap_sz(sz_rfind_neon), true},
 #endif
         {"std::search<R>",
@@ -140,13 +140,13 @@ tracked_binary_functions_t find_charset_functions() {
              return (match == std::string_view::npos ? h.size() : match);
          }},
         {"sz_find_charset_serial", wrap_sz(sz_find_charset_serial), true},
-#if SZ_USE_X86_AVX2
-        {"sz_find_charset_avx2", wrap_sz(sz_find_charset_avx2), true},
+#if SZ_USE_HASWELL
+        {"sz_find_charset_haswell", wrap_sz(sz_find_charset_haswell), true},
 #endif
-#if SZ_USE_X86_AVX512
-        {"sz_find_charset_avx512", wrap_sz(sz_find_charset_avx512), true},
+#if SZ_USE_ICE
+        {"sz_find_charset_ice", wrap_sz(sz_find_charset_ice), true},
 #endif
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
         {"sz_find_charset_neon", wrap_sz(sz_find_charset_neon), true},
 #endif
         {"strcspn", [](std::string_view h, std::string_view n) { return strcspn(h.data(), n.data()); }},
@@ -171,10 +171,10 @@ tracked_binary_functions_t rfind_charset_functions() {
              return (match == std::string_view::npos ? 0 : match);
          }},
         {"sz_rfind_charset_serial", wrap_sz(sz_rfind_charset_serial), true},
-#if SZ_USE_X86_AVX512
-        {"sz_rfind_charset_avx512", wrap_sz(sz_rfind_charset_avx512), true},
+#if SZ_USE_ICE
+        {"sz_rfind_charset_ice", wrap_sz(sz_rfind_charset_ice), true},
 #endif
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
         {"sz_rfind_charset_neon", wrap_sz(sz_rfind_charset_neon), true},
 #endif
     };
@@ -184,8 +184,8 @@ tracked_binary_functions_t rfind_charset_functions() {
 /**
  *  @brief  Evaluation for search string operations: find.
  */
-void bench_finds(std::string const &haystack, std::vector<std::string> const &strings,
-                 tracked_binary_functions_t &&variants) {
+void bench_finds( //
+    std::string const &haystack, std::vector<std::string> const &strings, tracked_binary_functions_t &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
@@ -234,8 +234,8 @@ void bench_finds(std::string const &haystack, std::vector<std::string> const &st
 /**
  *  @brief  Evaluation for reverse order search string operations: find.
  */
-void bench_rfinds(std::string const &haystack, std::vector<std::string> const &strings,
-                  tracked_binary_functions_t &&variants) {
+void bench_rfinds( //
+    std::string const &haystack, std::vector<std::string> const &strings, tracked_binary_functions_t &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
@@ -336,15 +336,17 @@ int main(int argc, char const **argv) {
         bench_search(dataset.text, filter_by_length<std::string>(dataset.tokens, token_length));
     }
 
-    // Run bechnmarks on abstract tokens of different length
+    // Run benchmarks on abstract tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
         std::printf("Benchmarking for missing tokens of length %zu:\n", token_length);
-        bench_search(dataset.text, std::vector<std::string> {
-                                       std::string(token_length, '\1'),
-                                       std::string(token_length, '\2'),
-                                       std::string(token_length, '\3'),
-                                       std::string(token_length, '\4'),
-                                   });
+        bench_search(     //
+            dataset.text, //
+            std::vector<std::string> {
+                std::string(token_length, '\1'),
+                std::string(token_length, '\2'),
+                std::string(token_length, '\3'),
+                std::string(token_length, '\4'),
+            });
     }
 
     std::printf("All benchmarks passed.\n");

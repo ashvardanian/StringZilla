@@ -11,10 +11,10 @@
 // Those parameters must never be explicitly set during releases,
 // but they come handy during development, if you want to validate
 // different ISA-specific implementations.
-// #define SZ_USE_X86_AVX2 0
-// #define SZ_USE_X86_AVX512 0
-// #define SZ_USE_ARM_NEON 0
-// #define SZ_USE_ARM_SVE 0
+// #define SZ_USE_HASWELL 0
+// #define SZ_USE_ICE 0
+// #define SZ_USE_NEON 0
+// #define SZ_USE_SVE 0
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
 // Put this at the top to make sure it pulls all the right dependencies
@@ -1576,10 +1576,10 @@ int main(int argc, char const **argv) {
     // Let's greet the user nicely
     sz_unused(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
-    std::printf("- Uses AVX2: %s \n", SZ_USE_X86_AVX2 ? "yes" : "no");
-    std::printf("- Uses AVX512: %s \n", SZ_USE_X86_AVX512 ? "yes" : "no");
-    std::printf("- Uses NEON: %s \n", SZ_USE_ARM_NEON ? "yes" : "no");
-    std::printf("- Uses SVE: %s \n", SZ_USE_ARM_SVE ? "yes" : "no");
+    std::printf("- Uses AVX2: %s \n", SZ_USE_HASWELL ? "yes" : "no");
+    std::printf("- Uses AVX512: %s \n", SZ_USE_ICE ? "yes" : "no");
+    std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
+    std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
 
     // Basic utilities
     test_arithmetical_utilities();

@@ -476,7 +476,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz
 
 #endif // SZ_USE_AVX512
 
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
 
 SZ_PUBLIC sz_cptr_t sz_find_neon_too_smart(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
@@ -946,7 +946,7 @@ SZ_PUBLIC void sz_hashes_neon_readahead(sz_cptr_t start, sz_size_t length, sz_si
     }
 }
 
-#endif // SZ_USE_ARM_NEON
+#endif // SZ_USE_NEON
 
 #ifdef __cplusplus
 } // extern "C"

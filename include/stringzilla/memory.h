@@ -9,7 +9,7 @@
  *  - `sz_move` - analog to `memmove`
  *  - `sz_fill` - analog to `memset`
  *  - `sz_look_up_transform` - LUT transformation of a string, similar to OpenCV LUT
- *  - `sz_detect_encoding` - similar to `iconv` or `chardet`
+ *  - TODO: `sz_detect_encoding` - similar to `iconv` or `chardet`
  *
  *  Convenience functions for character-set mapping:
  *
@@ -148,15 +148,6 @@ SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
  *  @param result   Output string, can point to the same address as ::text.
  */
 SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-
-/**
- *  @brief  Checks if all characters in the range are valid ASCII characters.
- *
- *  @param text     String to be analyzed.
- *  @param length   Number of bytes in the string.
- *  @return         Whether all characters are valid ASCII characters.
- */
-SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length);
 
 #pragma endregion // Helper API
 
