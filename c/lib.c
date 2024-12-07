@@ -38,6 +38,43 @@ extern void *malloc(size_t length);
 #endif
 #endif
 
+// On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
+#if defined(__APPLE__) && defined(__MACH__)
+#define SZ_APPLE 1
+#include <sys/sysctl.h>
+#endif
+
+#if defined(__linux__)
+#define SZ_LINUX 1
+#endif
+
+SZ_INTERNAL sz_capability_t sz_capabilities_arm(void) {
+    // https://github.com/ashvardanian/SimSIMD/blob/28e536083602f85ad0c59456782c8864463ffb0e/include/simsimd/simsimd.h#L434
+    // for documentation on how we detect capabilities across different ARM platforms.
+#if defined(SZ_APPLE)
+
+    // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
+    uint32_t supports_neon = 0;
+    size_t size = sizeof(supports_neon);
+    if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 0;
+
+    return (sz_capability_t)(                   //
+        (sz_cap_arm_neon_k * (supports_neon)) | //
+        (sz_cap_serial_k));
+
+#elif defined(SZ_LINUX)
+    unsigned supports_neon = 1; // NEON is always supported
+    __asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(id_aa64pfr0_el1));
+    unsigned supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
+    return (sz_capability_t)(               //
+        (sz_cap_neon_k * (supports_neon)) | //
+        (sz_cap_sve_k * (supports_sve)) |   //
+        (sz_cap_serial_k));
+#else // SIMSIMD_DEFINED_LINUX
+    return sz_cap_serial_k;
+#endif
+}
+
 SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
 
 #if SZ_USE_X86_AVX512 || SZ_USE_X86_AVX2
@@ -96,22 +133,12 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
 
 #if SZ_USE_ARM_NEON || SZ_USE_ARM_SVE
 
-    // Every 64-bit Arm CPU supports NEON
-    unsigned supports_neon = 1;
-    unsigned supports_sve = 0;
-    unsigned supports_sve2 = 0;
-    sz_unused(supports_sve);
-    sz_unused(supports_sve2);
-
-    return (sz_capability_t)(                 //
-        (sz_cap_arm_neon_k * supports_neon) | //
-        (sz_cap_serial_k));
+    return sz_capabilities_arm();
 
 #endif // SIMSIMD_TARGET_ARM
 
     return sz_cap_serial_k;
 }
-
 typedef struct sz_implementations_t {
     sz_equal_t equal;
     sz_order_t order;
