@@ -253,15 +253,15 @@ jobs:
 
           cmake --build build_release --config Release
 
-          cp build_release/libstringzillite.so "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
-          mkdir -p "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN"
-          touch "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
-          mkdir -p "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib"
-          mkdir "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
-          cp include/stringzilla/stringzilla.h "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
-          cp build_release/libstringzillite.so "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
-          echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
-          dpkg-deb --build "stringzillite_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
+          cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
+          mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN"
+          touch "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib"
+          mkdir "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
+          cp include/stringzilla/stringzilla.h "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
+          cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
+          echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          dpkg-deb --build "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
 
       - name: Upload library
         uses: xresloader/upload-to-github-release@v1
@@ -314,14 +314,14 @@ jobs:
         run: |
           cmake -DCMAKE_BUILD_TYPE=Release -B build_release
           cmake --build build_release --config Release
-          tar -cvf "stringzillite_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "build_release/stringzillite.dll" "./include/stringzilla/stringzilla.h"
+          tar -cvf "stringzilla_bare_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar" "build_release/stringzilla_bare.dll" "./include/stringzilla/stringzilla.h"
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          file: "stringzillite_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar"
+          file: "stringzilla_bare_windows_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.tar"
           update_latest_release: true
 
   create_macos_library:
@@ -349,7 +349,7 @@ jobs:
         run: |
           cmake -DCMAKE_BUILD_TYPE=Release -B build_release
           cmake --build build_release --config Release        
-          zip -r stringzillite_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzillite.dylib include/stringzilla/stringzilla.h
+          zip -r stringzilla_bare_macos_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.zip build_release/libstringzilla_bare.dylib include/stringzilla/stringzilla.h
 
       - name: Upload archive
         uses: xresloader/upload-to-github-release@v1
