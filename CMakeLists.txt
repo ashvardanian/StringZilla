@@ -8,10 +8,10 @@
 # 
 # Tests for different C++ standards:
 #
-#   - stringzilla_test_cpp11: A test executable for C++11. 
-#   - stringzilla_test_cpp14: A test executable for C++14.
-#   - stringzilla_test_cpp17: A test executable for C++17.
-#   - stringzilla_test_cpp20: A test executable for C++20.
+#   - stringzilla_test_cpp11: C++11 baseline support.
+#   - stringzilla_test_cpp14: C++14 support with `std::less<std::string>`-like function objects.
+#   - stringzilla_test_cpp17: C++17 support with `std::string_view` compatibility.
+#   - stringzilla_test_cpp20: C++20 support with `<=>` operator and more `constexpr` features.
 #
 # Tests for different SIMD architectures:
 #

@@ -28,18 +28,18 @@
 /*  We need to detect the version of the C++ language we are compiled with.
  *  This will affect recent features like `operator<=>` and tests against STL.
  */
-#define SZ_DETECT_CPP_23 (__cplusplus >= 202101L)
-#define SZ_DETECT_CPP20 (__cplusplus >= 202002L)
-#define SZ_DETECT_CPP_17 (__cplusplus >= 201703L)
-#define SZ_DETECT_CPP14 (__cplusplus >= 201402L)
-#define SZ_DETECT_CPP_11 (__cplusplus >= 201103L)
-#define SZ_DETECT_CPP_98 (__cplusplus >= 199711L)
+#define _SZ_IS_CPP23 (__cplusplus >= 202101L)
+#define _SZ_IS_CPP20 (__cplusplus >= 202002L)
+#define _SZ_IS_CPP17 (__cplusplus >= 201703L)
+#define _SZ_IS_CPP14 (__cplusplus >= 201402L)
+#define _SZ_IS_CPP11 (__cplusplus >= 201103L)
+#define _SZ_IS_CPP98 (__cplusplus >= 199711L)
 
 /**
  *  @brief  The `constexpr` keyword has different applicability scope in different C++ versions.
  *          Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
  */
-#if SZ_DETECT_CPP20
+#if _SZ_IS_CPP20
 #define sz_constexpr_if_cpp20 constexpr
 #else
 #define sz_constexpr_if_cpp20
@@ -50,7 +50,7 @@
 #include <bitset>
 #include <string>
 #include <vector>
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 #include <string_view>
 #endif
 #endif
@@ -398,7 +398,7 @@ struct end_sentinel_type {};
 struct include_overlaps_type {};
 struct exclude_overlaps_type {};
 
-#if SZ_DETECT_CPP_17
+#if _SZ_IS_CPP17
 inline static constexpr end_sentinel_type end_sentinel;
 inline static constexpr include_overlaps_type include_overlaps;
 inline static constexpr exclude_overlaps_type exclude_overlaps;
@@ -1265,7 +1265,7 @@ class basic_string_slice {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 
     template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
     sz_constexpr_if_cpp20 basic_string_slice(std::string_view const &other) noexcept
@@ -1496,7 +1496,7 @@ class basic_string_slice {
                sz_equal(data() + other.first.size(), other.second.data(), other.second.size()) == sz_true_k;
     }
 
-#if SZ_DETECT_CPP20
+#if _SZ_IS_CPP20
 
     /**  @brief  Computes the lexicographic ordering between this and the ::other string. */
     std::strong_ordering operator<=>(string_view other) const noexcept {
@@ -2175,7 +2175,7 @@ class basic_string {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 
     basic_string(std::string_view other) noexcept(false) : basic_string(other.data(), other.size()) {}
     basic_string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
@@ -2421,7 +2421,7 @@ class basic_string {
     bool operator==(string_view other) const noexcept { return view() == other; }
     bool operator==(const_pointer other) const noexcept { return view() == string_view(other); }
 
-#if SZ_DETECT_CPP20
+#if _SZ_IS_CPP20
 
     /**  @brief  Computes the lexicographic ordering between this and the ::other string. */
     std::strong_ordering operator<=>(basic_string const &other) const noexcept { return view() <=> other.view(); }

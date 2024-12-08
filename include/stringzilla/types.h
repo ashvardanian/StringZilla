@@ -703,12 +703,12 @@ SZ_PUBLIC void sz_sequence_from_u64tape( //
 #define SZ_CACHE_LINE_WIDTH (64) // bytes
 
 /**
- *  @brief  Similar to `assert`, the `_sz_assert` is used in the SZ_DEBUG mode
- *          to check the invariants of the library. It's a no-op in the SZ_RELEASE mode.
+ *  @brief  Similar to `assert`, the `_sz_assert` is used in the `SZ_DEBUG` mode
+ *          to check the invariants of the library. It's a no-op in the "Release" mode.
  *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
 #if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC)
-#include <stdio.h>  // `fprintf`
+#include <stdio.h>  // `fprintf`, `stderr`
 #include <stdlib.h> // `EXIT_FAILURE`
 SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int line) {
     fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
