@@ -15,6 +15,8 @@
 
 #include "types.h"
 
+#include "compare.h" // `sz_compare`
+
 #ifdef __cplusplus
 extern "C" {
 #endif

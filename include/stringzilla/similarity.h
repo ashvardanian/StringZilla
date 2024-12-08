@@ -579,8 +579,8 @@ SZ_PUBLIC sz_size_t sz_hamming_distance_utf8_serial( //
 #pragma region Haswell Implementation
 #if SZ_USE_HASWELL
 #pragma GCC push_options
-#pragma GCC target("haswell")
-#pragma clang attribute push(__attribute__((target("haswell"))), apply_to = function)
+#pragma GCC target("avx2")
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 
 #pragma clang attribute pop
 #pragma GCC pop_options

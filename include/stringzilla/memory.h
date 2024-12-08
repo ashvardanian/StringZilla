@@ -328,8 +328,8 @@ SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 
 #if SZ_USE_HASWELL
 #pragma GCC push_options
-#pragma GCC target("haswell")
-#pragma clang attribute push(__attribute__((target("haswell"))), apply_to = function)
+#pragma GCC target("avx2")
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 
 SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     char value_char = *(char *)&value;
@@ -1253,7 +1253,7 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
-#pragma region Core Funcitonality
+#pragma region Core Functionality
 
 SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_ICE

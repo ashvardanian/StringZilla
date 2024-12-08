@@ -24,9 +24,10 @@
 #ifndef STRINGZILLA_SMALL_STRING_H_
 #define STRINGZILLA_SMALL_STRING_H_
 
+#include "types.h"
+
 #include "find.h"   // `sz_equal`
 #include "memory.h" // `sz_copy`, `sz_move`, `sz_fill`
-#include "types.h"  // `sz_size_t`, `sz_ptr_t`, `sz_cptr_t`
 
 #ifdef __cplusplus
 extern "C" {
