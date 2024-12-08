@@ -55,8 +55,8 @@ tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width, st
     };
     std::string suffix = std::to_string(window_width) + ":step" + std::to_string(step);
     tracked_unary_functions_t result = {
-#if SZ_USE_ICE
-        {"sz_hashes_avx512:" + suffix, wrap_sz(sz_hashes_avx512)},
+#if SZ_USE_SKYLAKE
+        {"sz_hashes_skylake:" + suffix, wrap_sz(sz_hashes_skylake)},
 #endif
 #if SZ_USE_HASWELL
         {"sz_hashes_haswell:" + suffix, wrap_sz(sz_hashes_haswell)},
@@ -120,8 +120,8 @@ tracked_binary_functions_t equality_functions() {
 #if SZ_USE_HASWELL
         {"sz_equal_haswell", wrap_sz(sz_equal_haswell), true},
 #endif
-#if SZ_USE_ICE
-        {"sz_equal_avx512", wrap_sz(sz_equal_avx512), true},
+#if SZ_USE_SKYLAKE
+        {"sz_equal_skylake", wrap_sz(sz_equal_skylake), true},
 #endif
         {"memcmp",
          [](std::string_view a, std::string_view b) {
@@ -147,8 +147,8 @@ tracked_binary_functions_t ordering_functions() {
 #if SZ_USE_HASWELL
         {"sz_order_haswell", wrap_sz(sz_order_haswell), true},
 #endif
-#if SZ_USE_ICE
-        {"sz_order_avx512", wrap_sz(sz_order_avx512), true},
+#if SZ_USE_SKYLAKE
+        {"sz_order_skylake", wrap_sz(sz_order_skylake), true},
 #endif
         {"memcmp",
          [](std::string_view a, std::string_view b) {

@@ -64,29 +64,29 @@ SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_copy */
-SZ_PUBLIC sz_cptr_t sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
-SZ_PUBLIC sz_cptr_t sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_rfind_fill */
-SZ_PUBLIC sz_cptr_t sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 #endif
 
 #if SZ_USE_SKYLAKE
 /** @copydoc sz_copy */
-SZ_PUBLIC sz_cptr_t sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
-SZ_PUBLIC sz_cptr_t sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_rfind_fill */
-SZ_PUBLIC sz_cptr_t sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_PUBLIC void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_copy */
-SZ_PUBLIC sz_cptr_t sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_move */
-SZ_PUBLIC sz_cptr_t sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_rfind_fill */
-SZ_PUBLIC sz_cptr_t sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 #endif
 
 /**
@@ -358,13 +358,13 @@ SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value)
         if (head_length & 8) *(sz_u64_t *)target = value64, target += 8, head_length -= 8;
         if (head_length & 16)
             _mm_store_si128((__m128i *)target, _mm_set1_epi8(value_char)), target += 16, head_length -= 16;
-        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        _sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
 
         // Fill the aligned body of the buffer.
         for (; body_length >= 32; target += 32, body_length -= 32) _mm256_store_si256((__m256i *)target, value_vec);
 
         // Fill the tail of the buffer. This part is much cleaner with AVX-512.
-        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        _sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
         if (tail_length & 16)
             _mm_store_si128((__m128i *)target, _mm_set1_epi8(value_char)), target += 16, tail_length -= 16;
         if (tail_length & 8) *(sz_u64_t *)target = value64, target += 8, tail_length -= 8;
@@ -374,7 +374,7 @@ SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value)
     }
 }
 
-SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores" and "loads".
     //
@@ -387,7 +387,7 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     // For now, let's avoid the cases beyond the L2 size.
     int is_huge = length > 1ull * 1024ull * 1024ull;
     if (length <= 32) { sz_copy_serial(target, source, length); }
-    // When dealing wirh larger arrays, the optimization is not as simple as with the `sz_fill_haswell` function,
+    // When dealing with larger arrays, the optimization is not as simple as with the `sz_fill_haswell` function,
     // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
     // we can use aligned loads and stores, and the performance will be great.
     else if ((sz_size_t)target % 32 == 0 && (sz_size_t)source % 32 == 0 && !is_huge) {
@@ -411,7 +411,7 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
         if (head_length & 16)
             _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
                 head_length -= 16;
-        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        _sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
 
         // Fill the aligned body of the buffer.
         if (!is_huge) {
@@ -429,7 +429,7 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
         }
 
         // Fill the tail of the buffer. This part is much cleaner with AVX-512.
-        sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        _sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
         if (tail_length & 16)
             _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
                 tail_length -= 16;
@@ -440,7 +440,7 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     }
 }
 
-SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target < source || target >= source + length) {
         for (; length >= 32; target += 32, source += 32, length -= 32)
             _mm256_storeu_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
@@ -454,7 +454,7 @@ SZ_PUBLIC void sz_move_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     }
 }
 
-SZ_PUBLIC void sz_look_up_transform_avx2(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+SZ_PUBLIC void sz_look_up_transform_haswell(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
@@ -637,7 +637,7 @@ SZ_PUBLIC void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value)
     }
 }
 
-SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores" and "loads".
     //
@@ -656,7 +656,7 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         __mmask64 mask = _sz_u64_mask_until(length);
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     }
-    // When dealing wirh larger arrays, the optimization is not as simple as with the `sz_fill_skylake` function,
+    // When dealing with larger arrays, the optimization is not as simple as with the `sz_fill_skylake` function,
     // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
     // we can use aligned loads and stores, and the performance will be great.
     else if ((sz_size_t)target % 64 == 0 && (sz_size_t)source % 64 == 0 && !is_huge) {
@@ -715,7 +715,7 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     }
 }
 
-SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target == source) return; // Don't be silly, don't move the data if it's already there.
 
     // On very short buffers, that are one cache line in width or less, we don't need any loops.
@@ -757,7 +757,7 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
     }
 
     // If the regions don't overlap at all, just use "copy" and save some brain cells thinking about corner cases.
-    else if (target + length < source || target >= source + length) { sz_copy_avx512(target, source, length); }
+    else if (target + length < source || target >= source + length) { sz_copy_skylake(target, source, length); }
 
     // When the buffer is over 64 bytes, it's guaranteed to touch at least two cache lines - the head and tail,
     // and may include more cache-lines in-between. Knowing this, we can avoid expensive unaligned stores
@@ -1257,9 +1257,9 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
 
 SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_ICE
-    sz_copy_avx512(target, source, length);
+    sz_copy_skylake(target, source, length);
 #elif SZ_USE_HASWELL
-    sz_copy_avx2(target, source, length);
+    sz_copy_haswell(target, source, length);
 #elif SZ_USE_NEON
     sz_copy_neon(target, source, length);
 #else
@@ -1269,9 +1269,9 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 
 SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if SZ_USE_ICE
-    sz_move_avx512(target, source, length);
+    sz_move_skylake(target, source, length);
 #elif SZ_USE_HASWELL
-    sz_move_avx2(target, source, length);
+    sz_move_haswell(target, source, length);
 #elif SZ_USE_NEON
     sz_move_neon(target, source, length);
 #else

@@ -356,6 +356,12 @@ typedef union sz_charset_t {
 /** @brief  Initializes a bit-set to an empty collection, meaning - all characters are banned. */
 SZ_PUBLIC void sz_charset_init(sz_charset_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
 
+/** @brief  Initializes a bit-set to all ASCII character. */
+SZ_PUBLIC void sz_charset_init_ascii(sz_charset_t *s) {
+    s->_u64s[0] = s->_u64s[1] = 0xFFFFFFFFFFFFFFFFull;
+    s->_u64s[2] = s->_u64s[3] = 0;
+}
+
 /** @brief  Adds a character to the set and accepts @b unsigned integers. */
 SZ_PUBLIC void sz_charset_add_u8(sz_charset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
 
@@ -697,7 +703,7 @@ SZ_PUBLIC void sz_sequence_from_u64tape( //
 #define SZ_CACHE_LINE_WIDTH (64) // bytes
 
 /**
- *  @brief  Similar to `assert`, the `sz_assert` is used in the SZ_DEBUG mode
+ *  @brief  Similar to `assert`, the `_sz_assert` is used in the SZ_DEBUG mode
  *          to check the invariants of the library. It's a no-op in the SZ_RELEASE mode.
  *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
@@ -708,12 +714,12 @@ SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int l
     fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     exit(EXIT_FAILURE);
 }
-#define sz_assert(condition)                                                      \
+#define _sz_assert(condition)                                                     \
     do {                                                                          \
         if (!(condition)) { _sz_assert_failure(#condition, __FILE__, __LINE__); } \
     } while (0)
 #else
-#define sz_assert(condition) ((void)(condition))
+#define _sz_assert(condition) ((void)(condition))
 #endif
 
 /*  Intrinsics aliases for MSVC, GCC, Clang, and Clang-Cl.
@@ -732,13 +738,13 @@ SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int l
 // Use the serial version on 32-bit x86 and on Arm.
 #if (defined(_WIN32) && !defined(_WIN64)) || defined(_M_ARM) || defined(_M_ARM64)
 SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) {
-    sz_assert(x != 0);
+    _sz_assert(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
 SZ_INTERNAL int sz_u64_clz(sz_u64_t x) {
-    sz_assert(x != 0);
+    _sz_assert(x != 0);
     int n = 0;
     while ((x & 0x8000000000000000ull) == 0) { n++, x <<= 1; }
     return n;
@@ -749,13 +755,13 @@ SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) {
     return (((x + (x >> 4)) & 0x0F0F0F0F0F0F0F0Full) * 0x0101010101010101ull) >> 56;
 }
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) {
-    sz_assert(x != 0);
+    _sz_assert(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) {
-    sz_assert(x != 0);
+    _sz_assert(x != 0);
     int n = 0;
     while ((x & 0x80000000u) == 0) { n++, x <<= 1; }
     return n;
@@ -896,7 +902,7 @@ SZ_INTERNAL void sz_ssize_clamp_interval( //
  *  @brief  Compute the logarithm base 2 of a positive integer, rounding down.
  */
 SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
-    sz_assert(x > 0 && "Non-positive numbers have no defined logarithm");
+    _sz_assert(x > 0 && "Non-positive numbers have no defined logarithm");
     sz_size_t leading_zeros = sz_u64_clz(x);
     return 63 - leading_zeros;
 }
@@ -1040,33 +1046,6 @@ SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
 /** @brief  Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
 SZ_INTERNAL void _sz_memory_free_fixed(sz_ptr_t start, sz_size_t length, void *handle) {
     sz_unused(start && length && handle);
-}
-
-/** @brief  An internal callback used to set a bit in a power-of-two length binary fingerprint of a string. */
-SZ_INTERNAL void _sz_hashes_fingerprint_pow2_callback(sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *handle) {
-    sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
-    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
-    sz_size_t fingerprint_bytes = fingerprint_buffer->length;
-    fingerprint_u8s[(hash / 8) & (fingerprint_bytes - 1)] |= (1 << (hash & 7));
-    sz_unused(start && length);
-}
-
-/** @brief  An internal callback used to set a bit in a @b non power-of-two length binary fingerprint of a string. */
-SZ_INTERNAL void _sz_hashes_fingerprint_non_pow2_callback(sz_cptr_t start, sz_size_t length, sz_u64_t hash,
-                                                          void *handle) {
-    sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
-    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
-    sz_size_t fingerprint_bytes = fingerprint_buffer->length;
-    fingerprint_u8s[(hash / 8) % fingerprint_bytes] |= (1 << (hash & 7));
-    sz_unused(start && length);
-}
-
-/** @brief  An internal callback, used to mix all the running hashes into one pointer-size value. */
-SZ_INTERNAL void _sz_hashes_fingerprint_scalar_callback(sz_cptr_t start, sz_size_t length, sz_u64_t hash,
-                                                        void *scalar_handle) {
-    sz_unused(start && length && hash && scalar_handle);
-    sz_size_t *scalar_ptr = (sz_size_t *)scalar_handle;
-    *scalar_ptr ^= hash;
 }
 
 #pragma GCC visibility pop

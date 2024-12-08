@@ -16,6 +16,7 @@
 #ifndef STRINGZILLA_SIMILARITY_H_
 #define STRINGZILLA_SIMILARITY_H_
 
+#include "find.h"
 #include "types.h"
 
 #ifdef __cplusplus
@@ -183,6 +184,20 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(                       //
     sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
     sz_memory_allocator_t *alloc);
 
+#if SZ_USE_ICE
+
+SZ_INTERNAL sz_size_t sz_edit_distance_ice(      //
+    sz_cptr_t shorter, sz_size_t shorter_length, //
+    sz_cptr_t longer, sz_size_t longer_length,   //
+    sz_size_t bound, sz_memory_allocator_t *alloc);
+
+SZ_INTERNAL sz_ssize_t sz_alignment_score_ice(   //
+    sz_cptr_t shorter, sz_size_t shorter_length, //
+    sz_cptr_t longer, sz_size_t longer_length,   //
+    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc);
+
+#endif
+
 #pragma endregion // Core API
 
 #pragma region Serial Implementation
@@ -200,8 +215,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
     }
 
     // TODO: Generalize to remove the following asserts!
-    sz_assert(!bound && "For bounded search the method should only evaluate one band of the matrix.");
-    sz_assert(shorter_length == longer_length && "The method hasn't been generalized to different length inputs yet.");
+    _sz_assert(!bound && "For bounded search the method should only evaluate one band of the matrix.");
+    _sz_assert(shorter_length == longer_length && "The method hasn't been generalized to different length inputs yet.");
     sz_unused(longer_length && bound);
 
     // We are going to store 3 diagonals of the matrix.
@@ -269,7 +284,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
  *          Stores only 2 rows of the Levenshtein matrix, but uses 64-bit integers for the distance values,
  *          and upcasts UTF8 variable-length codepoints to 64-bit integers for faster addressing.
  *
- *  ! In the worst case for 2 strings of length 100, that contain just one 16-bit codepoint this will result in extra:
+ *  ! In the worst case for 2 strings of length 100, that contain just one 16-bit codepoint this will result in
+ * extra:
  *      + 2 rows * 100 slots * 8 bytes/slot = 1600 bytes of memory for the two rows of the Levenshtein matrix rows.
  *      + 100 codepoints * 2 strings * 4 bytes/codepoint = 800 bytes of memory for the UTF8 buffer.
  *      = 2400 bytes of memory or @b 12x memory amplification!
@@ -302,10 +318,13 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
 
     // If the strings contain Unicode characters, let's estimate the max character width,
     // and use it to allocate a larger buffer to decode UTF8.
-    if ((can_be_unicode == sz_true_k) &&
-        (sz_isascii(longer, longer_length) == sz_false_k || sz_isascii(shorter, shorter_length) == sz_false_k)) {
-        buffer_length += (shorter_length + longer_length) * sizeof(sz_rune_t);
-    }
+    sz_charset_t ascii_charset;
+    sz_charset_init_ascii(&ascii_charset);
+    sz_charset_invert(&ascii_charset);
+    int const longer_is_ascii = sz_find_charset_serial(longer, longer_length, &ascii_charset) == SZ_NULL_CHAR;
+    int const shorter_is_ascii = sz_find_charset_serial(shorter, shorter_length, &ascii_charset) == SZ_NULL_CHAR;
+    int const will_convert_to_unicode = can_be_unicode == sz_true_k && (!longer_is_ascii || !shorter_is_ascii);
+    if (will_convert_to_unicode) { buffer_length += (shorter_length + longer_length) * sizeof(sz_rune_t); }
     else { can_be_unicode = sz_false_k; }
 
     // If the allocation fails, return the maximum distance.
@@ -619,19 +638,19 @@ SZ_PUBLIC sz_size_t sz_hamming_distance_utf8_serial( //
 /**
  *  @brief  Computes the edit distance between two very short byte-strings using the AVX-512VBMI extensions.
  *
- *  Applies to string lengths up to 63, and evaluates at most (63 * 2 + 1 = 127) diagonals, or just as many loop cycles.
- *  Supports an early exit, if the distance is bounded.
- *  Keeps all of the data and Levenshtein matrices skew diagonal in just a couple of registers.
- *  Benefits from the @b `vpermb` instructions, that can rotate the bytes across the entire ZMM register.
+ *  Applies to string lengths up to 63, and evaluates at most (63 * 2 + 1 = 127) diagonals, or just as many loop
+ * cycles. Supports an early exit, if the distance is bounded. Keeps all of the data and Levenshtein matrices skew
+ * diagonal in just a couple of registers. Benefits from the @b `vpermb` instructions, that can rotate the bytes
+ * across the entire ZMM register.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_avx512( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                        //
-    sz_cptr_t longer, sz_size_t longer_length,                          //
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                     //
+    sz_cptr_t longer, sz_size_t longer_length,                       //
     sz_size_t bound) {
 
     sz_size_t const max_length = 63u;
-    sz_assert(shorter_length <= longer_length && "The 'shorter' string is longer than the 'longer' one.");
-    sz_assert(shorter_length < max_length && "The length must fit into 16-bit integer. Otherwise use serial variant.");
+    _sz_assert(shorter_length <= longer_length && "The 'shorter' string is longer than the 'longer' one.");
+    _sz_assert(shorter_length < max_length && "The length must fit into 16-bit integer. Otherwise use serial variant.");
 
     // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
     // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
@@ -792,9 +811,9 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_avx512( //
  *  - source code analysis, assuming most lines are either under 80 or under 120 characters long.
  *  - DNA sequence alignment, as most short reads are 50-300 characters long.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto127_avx512( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                         //
-    sz_cptr_t longer, sz_size_t longer_length,                           //
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto127_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                      //
+    sz_cptr_t longer, sz_size_t longer_length,                        //
     sz_size_t bound) {
     sz_unused(shorter && shorter_length && longer && longer_length && bound);
     return 0;
@@ -812,9 +831,9 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto127_avx512( //
  *  This is the largest space-efficient variant, as strings beyond 255 characters may require
  *  16-bit accumulators, which would be a significant bottleneck.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto_avx512( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                      //
-    sz_cptr_t longer, sz_size_t longer_length,                        //
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                   //
+    sz_cptr_t longer, sz_size_t longer_length,                     //
     sz_size_t bound) {
     sz_unused(shorter && shorter_length && longer && longer_length && bound);
     return 0;
@@ -833,9 +852,9 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto_avx512( //
  *  This is the largest space-efficient variant, as strings beyond 255 characters may require
  *  16-bit accumulators, which would be a significant bottleneck.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto255bound_avx512( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                              //
-    sz_cptr_t longer, sz_size_t longer_length,                                //
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto255bound_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                           //
+    sz_cptr_t longer, sz_size_t longer_length,                             //
     sz_size_t bound) {
     sz_unused(shorter && shorter_length && longer && longer_length && bound);
     return 0;
@@ -850,17 +869,17 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto255bound_avx512( //
  *
  *  Each string is unpacked into 128 characters * 4 bytes per character / 64 bytes per register = 8 registers.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_utf8_skewed_diagonals_upto127_avx512( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                              //
-    sz_cptr_t longer, sz_size_t longer_length,                                //
+SZ_INTERNAL sz_size_t _sz_edit_distance_utf8_skewed_diagonals_upto127_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                           //
+    sz_cptr_t longer, sz_size_t longer_length,                             //
     sz_size_t bound) {
     sz_unused(shorter && shorter_length && longer && longer_length && bound);
     return 0;
 }
 
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                         //
-    sz_cptr_t longer, sz_size_t longer_length,                           //
+SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                      //
+    sz_cptr_t longer, sz_size_t longer_length,                        //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
 
     sz_unused(shorter && longer && bound && alloc);
@@ -874,8 +893,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
 
     // TODO: Generalize!
     sz_size_t const max_length = 256u * 256u;
-    sz_assert(shorter_length <= longer_length && "The 'shorter' string is longer than the 'longer' one.");
-    sz_assert(shorter_length < max_length && "The length must fit into 16-bit integer. Otherwise use serial variant.");
+    _sz_assert(shorter_length <= longer_length && "The 'shorter' string is longer than the 'longer' one.");
+    _sz_assert(shorter_length < max_length && "The length must fit into 16-bit integer. Otherwise use serial variant.");
     sz_unused(longer_length && bound && max_length);
 
 #if 0
@@ -1017,7 +1036,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
     return 0;
 }
 
-SZ_INTERNAL sz_size_t sz_edit_distance_avx512(   //
+SZ_INTERNAL sz_size_t sz_edit_distance_ice(      //
     sz_cptr_t shorter, sz_size_t shorter_length, //
     sz_cptr_t longer, sz_size_t longer_length,   //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
@@ -1044,10 +1063,10 @@ SZ_INTERNAL sz_size_t sz_edit_distance_avx512(   //
 
     // Dispatch the right implementation based on the length of the strings.
     if (longer_length < 64u)
-        return _sz_edit_distance_skewed_diagonals_upto63_avx512( //
+        return _sz_edit_distance_skewed_diagonals_upto63_ice( //
             shorter, shorter_length, longer, longer_length, bound);
     // else if (longer_length < 256u * 256u)
-    //     return _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
+    //     return _sz_edit_distance_skewed_diagonals_upto65k_ice( //
     //         shorter, shorter_length, longer, longer_length, bound, alloc);
     else
         return sz_edit_distance_serial(shorter, shorter_length, longer, longer_length, bound, alloc);
@@ -1061,9 +1080,9 @@ SZ_INTERNAL sz_size_t sz_edit_distance_avx512(   //
  *
  *  Unlike the `_sz_edit_distance_skewed_diagonals_upto65k_avx512` method, this one uses signed integers to store
  *  the accumulated score. Moreover, it's primary bottleneck is the latency of gathering the substitution costs
- *  from the substitution matrix. If we use the diagonal order, we will be comparing a slice of the first string with
- *  a slice of the second. If we stick to the conventional horizontal order, we will be comparing one character against
- *  a slice, which is much easier to optimize. In that case we are sampling costs not from arbitrary parts of
+ *  from the substitution matrix. If we use the diagonal order, we will be comparing a slice of the first string
+ * with a slice of the second. If we stick to the conventional horizontal order, we will be comparing one character
+ * against a slice, which is much easier to optimize. In that case we are sampling costs not from arbitrary parts of
  *  a 256 x 256 matrix, but from a single row!
  */
 SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
@@ -1091,7 +1110,7 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
 
     sz_size_t const max_length = 256ull * 256ull * 256ull;
     sz_size_t const n = longer_length + 1;
-    sz_assert(n < max_length && "The length must fit into 24-bit integer. Otherwise use serial variant.");
+    _sz_assert(n < max_length && "The length must fit into 24-bit integer. Otherwise use serial variant.");
     sz_unused(longer_length && max_length);
 
     sz_size_t buffer_length = sizeof(sz_i32_t) * n * 2;
@@ -1099,7 +1118,7 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
     sz_i32_t *previous_distances = distances;
     sz_i32_t *current_distances = previous_distances + n;
 
-    // Intialize the first row of the Levenshtein matrix with `iota`.
+    // Initialize the first row of the Levenshtein matrix with `iota`.
     for (sz_size_t idx_longer = 0; idx_longer != n; ++idx_longer)
         previous_distances[idx_longer] = (sz_i32_t)idx_longer * gap;
 
@@ -1135,8 +1154,9 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
         //    for (sz_size_t idx_longer = 0; idx_longer < longer_length; ++idx_longer) {
         //        sz_ssize_t cost_deletion = previous_distances[idx_longer + 1] + gap;
         //        sz_ssize_t cost_insertion = current_distances[idx_longer] + gap;
-        //        sz_ssize_t cost_substitution = previous_distances[idx_longer] + row_subs[longer_unsigned[idx_longer]];
-        //        current_distances[idx_longer + 1] = sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
+        //        sz_ssize_t cost_substitution = previous_distances[idx_longer] +
+        //        row_subs[longer_unsigned[idx_longer]]; current_distances[idx_longer + 1] =
+        //        sz_min_of_three(cost_deletion, cost_insertion, cost_substitution);
         //    }
         //
         // Given the complexity of handling the data-dependency between consecutive insertion cost computations
@@ -1201,9 +1221,10 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
                 // "experimental" section.
                 //
                 // Another approach might be loop unrolling:
-                //      current_vec.i32s[0] = last_in_row = sz_i32_max_of_two(current_vec.i32s[0], last_in_row + gap);
-                //      current_vec.i32s[1] = last_in_row = sz_i32_max_of_two(current_vec.i32s[1], last_in_row + gap);
-                //      current_vec.i32s[2] = last_in_row = sz_i32_max_of_two(current_vec.i32s[2], last_in_row + gap);
+                //      current_vec.i32s[0] = last_in_row = sz_i32_max_of_two(current_vec.i32s[0], last_in_row +
+                //      gap); current_vec.i32s[1] = last_in_row = sz_i32_max_of_two(current_vec.i32s[1], last_in_row
+                //      + gap); current_vec.i32s[2] = last_in_row = sz_i32_max_of_two(current_vec.i32s[2],
+                //      last_in_row + gap);
                 //      ... yet this approach is also quite expensive.
                 for (int i = 0; i != 16; ++i)
                     current_vec.i32s[i] = last_in_row = sz_max_of_two(current_vec.i32s[i], last_in_row + gap);
@@ -1345,7 +1366,7 @@ SZ_DYNAMIC sz_size_t sz_edit_distance( //
     sz_cptr_t b, sz_size_t b_length,   //
     sz_size_t bound, sz_memory_allocator_t *alloc) {
 #if SZ_USE_ICE
-    return sz_edit_distance_avx512(a, a_length, b, b_length, bound, alloc);
+    return sz_edit_distance_ice(a, a_length, b, b_length, bound, alloc);
 #else
     return sz_edit_distance_serial(a, a_length, b, b_length, bound, alloc);
 #endif

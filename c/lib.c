@@ -3,10 +3,20 @@
  *  @brief      StringZilla C library with dynamic backed dispatch for the most appropriate implementation.
  *  @author     Ash Vardanian
  *  @date       January 16, 2024
- *  @copyright  Copyright (c) 2024
  */
-#if defined(_WIN32) || defined(__CYGWIN__)
-#include <windows.h> // `DllMain`
+#if SZ_AVOID_LIBC
+// If we don't have the LibC, the `malloc` definition in `stringzilla.h` will be illformed.
+#ifdef _MSC_VER
+typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
+extern __declspec(dllimport) int rand(void);
+extern __declspec(dllimport) void free(void *start);
+extern __declspec(dllimport) void *malloc(size_t length);
+#else
+typedef __SIZE_TYPE__ size_t; // For GCC/Clang
+extern int rand(void);
+extern void free(void *start);
+extern void *malloc(size_t length);
+#endif
 #endif
 
 // When enabled, this library will override the symbols usually provided by the C standard library.
@@ -23,35 +33,32 @@
 #define SZ_DYNAMIC_DISPATCH 1
 #include <stringzilla/stringzilla.h>
 
-#if SZ_AVOID_LIBC
-// If we don't have the LibC, the `malloc` definition in `stringzilla.h` will be illformed.
-#ifdef _MSC_VER
-typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
-extern __declspec(dllimport) int rand(void);
-extern __declspec(dllimport) void free(void *start);
-extern __declspec(dllimport) void *malloc(size_t length);
-#else
-typedef __SIZE_TYPE__ size_t; // For GCC/Clang
-extern int rand(void);
-extern void free(void *start);
-extern void *malloc(size_t length);
-#endif
+// Inferring target OS: Windows, MacOS, or Linux
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(__CYGWIN__)
+#define _SZ_IS_WINDOWS 1
+#elif defined(__APPLE__) && defined(__MACH__)
+#define _SZ_IS_APPLE 1
+#elif defined(__linux__)
+#define _SZ_IS_LINUX 1
 #endif
 
 // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
-#if defined(__APPLE__) && defined(__MACH__)
-#define SZ_APPLE 1
+#if defined(_SZ_IS_APPLE)
 #include <sys/sysctl.h>
 #endif
 
-#if defined(__linux__)
-#define SZ_LINUX 1
+#if defined(_SZ_IS_WINDOWS)
+#include <windows.h> // `DllMain`
 #endif
 
-SZ_INTERNAL sz_capability_t sz_capabilities_arm(void) {
+/**
+ *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
+ *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ */
+SZ_INTERNAL sz_capability_t _sz_capabilities_arm(void) {
     // https://github.com/ashvardanian/SimSIMD/blob/28e536083602f85ad0c59456782c8864463ffb0e/include/simsimd/simsimd.h#L434
     // for documentation on how we detect capabilities across different ARM platforms.
-#if defined(SZ_APPLE)
+#if defined(_SZ_IS_APPLE)
 
     // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
     uint32_t supports_neon = 0;
@@ -62,20 +69,47 @@ SZ_INTERNAL sz_capability_t sz_capabilities_arm(void) {
         (sz_cap_arm_neon_k * (supports_neon)) | //
         (sz_cap_serial_k));
 
-#elif defined(SZ_LINUX)
-    unsigned supports_neon = 1; // NEON is always supported
+#elif defined(_SZ_IS_LINUX)
+
+    // Read CPUID registers directly
+    unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
+
+    // Now let's unpack the status flags from ID_AA64ISAR0_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
+    __asm__ __volatile__("mrs %0, ID_AA64ISAR0_EL1" : "=r"(id_aa64isar0_el1));
+    // Now let's unpack the status flags from ID_AA64ISAR1_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR1-EL1--AArch64-Instruction-Set-Attribute-Register-1?lang=en
+    __asm__ __volatile__("mrs %0, ID_AA64ISAR1_EL1" : "=r"(id_aa64isar1_el1));
+    // Now let's unpack the status flags from ID_AA64PFR0_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64PFR0-EL1--AArch64-Processor-Feature-Register-0?lang=en
     __asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(id_aa64pfr0_el1));
+    // SVE, bits [35:32] of ID_AA64PFR0_EL1
     unsigned supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
-    return (sz_capability_t)(               //
-        (sz_cap_neon_k * (supports_neon)) | //
-        (sz_cap_sve_k * (supports_sve)) |   //
+    // Now let's unpack the status flags from ID_AA64ZFR0_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ZFR0-EL1--SVE-Feature-ID-Register-0?lang=en
+    if (supports_sve) __asm__ __volatile__("mrs %0, ID_AA64ZFR0_EL1" : "=r"(id_aa64zfr0_el1));
+    // SVEver, bits [3:0] can be used to check for capability levels:
+    //  - 0b0000: SVE is implemented
+    //  - 0b0001: SVE2 is implemented
+    //  - 0b0010: SVE2.1 is implemented
+    // This value must match the existing indicator obtained from ID_AA64PFR0_EL1:
+    unsigned supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
+    unsigned supports_sve2p1 = ((id_aa64zfr0_el1) & 0xF) >= 2;
+    unsigned supports_neon = 1; // NEON is always supported
+
+    return (sz_capability_t)(                   //
+        (sz_cap_neon_k * (supports_neon)) |     //
+        (sz_cap_sve_k * (supports_sve)) |       //
+        (sz_cap_sve2_k * (supports_sve2)) |     //
+        (sz_cap_sve2p1_k * (supports_sve2p1)) | //
         (sz_cap_serial_k));
-#else // SIMSIMD_DEFINED_LINUX
+
+#else // if !defined(_SZ_IS_APPLE) && !defined(_SZ_IS_LINUX)
     return sz_cap_serial_k;
 #endif
 }
 
-SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
+SZ_INTERNAL sz_capability_t _sz_capabilities_x86(void) {
 
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 
@@ -91,54 +125,50 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
     __cpuidex(info1.array, 1, 0);
     __cpuidex(info7.array, 7, 0);
 #else
-    __asm__ __volatile__("cpuid"
-                         : "=a"(info1.named.eax), "=b"(info1.named.ebx), "=c"(info1.named.ecx), "=d"(info1.named.edx)
-                         : "a"(1), "c"(0));
-    __asm__ __volatile__("cpuid"
-                         : "=a"(info7.named.eax), "=b"(info7.named.ebx), "=c"(info7.named.ecx), "=d"(info7.named.edx)
-                         : "a"(7), "c"(0));
+    __asm__ __volatile__( //
+        "cpuid"
+        : "=a"(info1.named.eax), "=b"(info1.named.ebx), "=c"(info1.named.ecx), "=d"(info1.named.edx)
+        : "a"(1), "c"(0));
+    __asm__ __volatile__( //
+        "cpuid"
+        : "=a"(info7.named.eax), "=b"(info7.named.ebx), "=c"(info7.named.ecx), "=d"(info7.named.edx)
+        : "a"(7), "c"(0));
 #endif
 
-    // Check for AVX2 (Function ID 7, EBX register)
+    // Check for AVX2 (Function ID 7, EBX register), you can take the relevant flags from the LLVM implementation:
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L148
     unsigned supports_avx2 = (info7.named.ebx & 0x00000020) != 0;
-    // Check for AVX512F (Function ID 7, EBX register)
-    // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L155
     unsigned supports_avx512f = (info7.named.ebx & 0x00010000) != 0;
-    // Check for AVX512BW (Function ID 7, EBX register)
-    // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L166
     unsigned supports_avx512bw = (info7.named.ebx & 0x40000000) != 0;
-    // Check for AVX512VL (Function ID 7, EBX register)
-    // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L167C25-L167C35
     unsigned supports_avx512vl = (info7.named.ebx & 0x80000000) != 0;
-    // Check for GFNI (Function ID 1, ECX register)
-    // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L171C30-L171C40
     unsigned supports_avx512vbmi = (info7.named.ecx & 0x00000002) != 0;
     unsigned supports_avx512vbmi2 = (info7.named.ecx & 0x00000040) != 0;
-    // Check for GFNI (Function ID 1, ECX register)
-    // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L177C30-L177C40
-    unsigned supports_gfni = (info7.named.ecx & 0x00000100) != 0;
+    unsigned supports_vaes = (info7.named.ecx & 0x00000200) != 0;
 
-    return (sz_capability_t)(                               //
-        (sz_cap_x86_avx2_k * supports_avx2) |               //
-        (sz_cap_x86_avx512f_k * supports_avx512f) |         //
-        (sz_cap_x86_avx512vl_k * supports_avx512vl) |       //
-        (sz_cap_x86_avx512bw_k * supports_avx512bw) |       //
-        (sz_cap_x86_avx512vbmi_k * supports_avx512vbmi) |   //
-        (sz_cap_x86_avx512vbmi2_k * supports_avx512vbmi2) | //
-        (sz_cap_x86_gfni_k * (supports_gfni)) |             //
+    return (sz_capability_t)(                                                                                //
+        (sz_cap_haswell_k * supports_avx2) |                                                                 //
+        (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw && supports_vaes)) | //
+        (sz_cap_ice_k * (supports_avx512vbmi && supports_avx512vbmi2)) |                                     //
         (sz_cap_serial_k));
-
-#endif // SZ_TARGET_X86
-
-#if SZ_USE_NEON || SZ_USE_SVE
-
-    return sz_capabilities_arm();
-
-#endif // SZ_TARGET_ARM
-
+#else
     return sz_cap_serial_k;
+#endif
 }
+
+/**
+ *  @brief  Function to determine the SIMD capabilities of the current 64-bit x86 machine at @b runtime.
+ *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ */
+SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
+#if _SZ_IS_X86
+    return _sz_capabilities_x86();
+#elif _SZ_IS_ARM
+    return _sz_capabilities_arm();
+#else
+    return sz_cap_serial_k;
+#endif
+}
+
 typedef struct sz_implementations_t {
     sz_equal_t equal;
     sz_order_t order;
@@ -197,56 +227,54 @@ static void sz_dispatch_table_init(void) {
     impl->hashes = sz_hashes_serial;
 
 #if SZ_USE_HASWELL
-    if (caps & sz_cap_x86_avx2_k) {
-        impl->equal = sz_equal_avx2;
-        impl->order = sz_order_avx2;
+    if (caps & sz_cap_haswell_k) {
+        impl->equal = sz_equal_haswell;
+        impl->order = sz_order_haswell;
 
-        impl->copy = sz_copy_avx2;
-        impl->move = sz_move_avx2;
-        impl->fill = sz_fill_avx2;
-        impl->look_up_transform = sz_look_up_transform_avx2;
-        impl->checksum = sz_checksum_avx2;
+        impl->copy = sz_copy_haswell;
+        impl->move = sz_move_haswell;
+        impl->fill = sz_fill_haswell;
+        impl->look_up_transform = sz_look_up_transform_haswell;
+        impl->checksum = sz_checksum_haswell;
 
-        impl->find_byte = sz_find_byte_avx2;
-        impl->rfind_byte = sz_rfind_byte_avx2;
-        impl->find = sz_find_avx2;
-        impl->rfind = sz_rfind_avx2;
-        impl->find_from_set = sz_find_charset_avx2;
-        impl->rfind_from_set = sz_rfind_charset_avx2;
+        impl->find_byte = sz_find_byte_haswell;
+        impl->rfind_byte = sz_rfind_byte_haswell;
+        impl->find = sz_find_haswell;
+        impl->rfind = sz_rfind_haswell;
+        impl->find_from_set = sz_find_charset_haswell;
+        impl->rfind_from_set = sz_rfind_charset_haswell;
     }
 #endif
 
 #if SZ_USE_SKYLAKE
-    if (caps & sz_cap_x86_avx512f_k) {
+    if (caps & sz_cap_skylake_k) {
         impl->equal = sz_equal_skylake;
-        impl->order = sz_order_avx512;
+        impl->order = sz_order_skylake;
 
-        impl->copy = sz_copy_avx512;
-        impl->move = sz_move_avx512;
-        impl->fill = sz_fill_avx512;
+        impl->copy = sz_copy_skylake;
+        impl->move = sz_move_skylake;
+        impl->fill = sz_fill_skylake;
 
         impl->find = sz_find_skylake;
         impl->rfind = sz_rfind_skylake;
-        impl->find_byte = sz_find_byte_avx512;
-        impl->rfind_byte = sz_rfind_byte_avx512;
-
-        impl->edit_distance = sz_edit_distance_avx512;
+        impl->find_byte = sz_find_byte_skylake;
+        impl->rfind_byte = sz_rfind_byte_skylake;
     }
 #endif
 
 #if SZ_USE_ICE
-    if ((caps & sz_cap_x86_avx512f_k) && (caps & sz_cap_x86_avx512vl_k) && (caps & sz_cap_x86_avx512vbmi2_k) &&
-        (caps & sz_cap_x86_avx512bw_k) && (caps & sz_cap_x86_avx512vbmi_k)) {
+    if (caps & sz_cap_ice_k) {
         impl->find_from_set = sz_find_charset_ice;
         impl->rfind_from_set = sz_rfind_charset_ice;
-        impl->alignment_score = sz_alignment_score_avx512;
+        impl->edit_distance = sz_edit_distance_ice;
+        impl->alignment_score = sz_alignment_score_ice;
         impl->look_up_transform = sz_look_up_transform_ice;
-        impl->checksum = sz_checksum_avx512;
+        impl->checksum = sz_checksum_ice;
     }
 #endif
 
 #if SZ_USE_NEON
-    if (caps & sz_cap_arm_neon_k) {
+    if (caps & sz_cap_neon_k) {
         impl->equal = sz_equal_neon;
 
         impl->copy = sz_copy_neon;

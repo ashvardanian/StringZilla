@@ -121,7 +121,7 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil(1000000000ull) == (1ull << 30));
     assert(sz_size_bit_ceil(2000000000ull) == (1ull << 31));
 
-#if SZ_DETECT_64_BIT
+#if _SZ_IS_64_BIT
     assert(sz_size_bit_ceil(4000000000ull) == (1ull << 32));
     assert(sz_size_bit_ceil(8000000000ull) == (1ull << 33));
     assert(sz_size_bit_ceil(16000000000ull) == (1ull << 34));
@@ -130,11 +130,6 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil((1ull << 62) + 1) == (1ull << 63));
     assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
 #endif
-
-    for (sz_u16_t number = 0; number != 256; ++number)
-        for (sz_u16_t divisor = 2; divisor != 256; ++divisor)
-            assert(sz_u8_divide(static_cast<sz_u8_t>(number), static_cast<sz_u8_t>(divisor)) ==
-                   (static_cast<sz_u8_t>(number) / static_cast<sz_u8_t>(divisor)));
 }
 
 inline void expect_equality(char const *a, char const *b, std::size_t size) {
@@ -571,7 +566,7 @@ static void test_stl_compatibility_for_updates() {
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
-    if (SZ_DETECT_64_BIT) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
+    if (_SZ_IS_64_BIT) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
@@ -1559,16 +1554,16 @@ static void test_stl_containers() {
 
 int main(int argc, char const **argv) {
 
-    auto dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, SZ_SIZE_MAX);
-    sz_assert(dist == 5);
-    dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, 3);
-    sz_assert(dist == SZ_SIZE_MAX);
-    dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, 4);
-    sz_assert(dist == SZ_SIZE_MAX);
-    dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, 5);
-    sz_assert(dist == 5);
-    dist = _sz_edit_distance_skewed_diagonals_upto63_avx512("kiten", 5, "katerinas", 9, 6);
-    sz_assert(dist == 5);
+    auto dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, SZ_SIZE_MAX);
+    _sz_assert(dist == 5);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 3);
+    _sz_assert(dist == SZ_SIZE_MAX);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 4);
+    _sz_assert(dist == SZ_SIZE_MAX);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 5);
+    _sz_assert(dist == 5);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 6);
+    _sz_assert(dist == 5);
 
     // Similarity measures and fuzzy search
     test_levenshtein_distances();

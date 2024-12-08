@@ -624,7 +624,8 @@ sz_string_view_t needle = {your_subtext, your_subtext_length};
 
 // Perform string-level operations
 sz_size_t substring_position = sz_find(haystack.start, haystack.length, needle.start, needle.length);
-sz_size_t substring_position = sz_find_avx512(haystack.start, haystack.length, needle.start, needle.length);
+sz_size_t substring_position = sz_find_skylake(haystack.start, haystack.length, needle.start, needle.length);
+sz_size_t substring_position = sz_find_haswell(haystack.start, haystack.length, needle.start, needle.length);
 sz_size_t substring_position = sz_find_neon(haystack.start, haystack.length, needle.start, needle.length);
 
 // Hash strings
@@ -747,7 +748,7 @@ typedef union sz_string_t {
     struct internal {
         sz_ptr_t start;
         sz_u8_t length;
-        char chars[SZ_STRING_INTERNAL_SPACE]; /// Ends with a null-terminator.
+        char chars[_SZ_STRING_INTERNAL_SPACE]; /// Ends with a null-terminator.
     } internal;
 
     struct external {

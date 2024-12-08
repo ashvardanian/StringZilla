@@ -47,7 +47,10 @@ SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length);
  *
  *  @see    sz_hashes, sz_hashes_fingerprint, sz_hashes_intersection
  */
-SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length);
+SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length) {
+    sz_unused(text && length);
+    return 0;
+}
 
 /**
  *  @brief  Computes the Karp-Rabin rolling hashes of a string supplying them to the provided `callback`.
@@ -99,7 +102,9 @@ SZ_DYNAMIC void sz_hashes(                                                      
  */
 SZ_PUBLIC void sz_hashes_fingerprint(                          //
     sz_cptr_t text, sz_size_t length, sz_size_t window_length, //
-    sz_ptr_t fingerprint, sz_size_t fingerprint_bytes);
+    sz_ptr_t fingerprint, sz_size_t fingerprint_bytes) {
+    sz_unused(text && length && window_length && fingerprint && fingerprint_bytes);
+}
 
 /**
  *  @brief  Given a hash-fingerprint of a textual document, computes the number of intersecting hashes
@@ -145,15 +150,17 @@ SZ_PUBLIC sz_u64_t sz_checksum_serial(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
 
-/** @copydoc sz_generate */
-SZ_PUBLIC void sz_generate_serial( //
-    sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length, sz_random_generator_t generate,
-    void *generator);
-
 /** @copydoc sz_hashes */
 SZ_PUBLIC void sz_hashes_serial(                                                      //
     sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
     sz_hash_callback_t callback, void *callback_handle);
+
+/** @copydoc sz_generate */
+SZ_PUBLIC void sz_generate_serial( //
+    sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length, sz_random_generator_t generate,
+    void *generator) {
+    sz_unused(alphabet && cardinality && text && length && generate && generator);
+}
 
 #pragma endregion // Core API
 
@@ -337,6 +344,33 @@ SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t win
     }
 }
 
+/** @brief  An internal callback used to set a bit in a power-of-two length binary fingerprint of a string. */
+SZ_INTERNAL void _sz_hashes_fingerprint_pow2_callback(sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *handle) {
+    sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
+    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
+    sz_size_t fingerprint_bytes = fingerprint_buffer->length;
+    fingerprint_u8s[(hash / 8) & (fingerprint_bytes - 1)] |= (1 << (hash & 7));
+    sz_unused(start && length);
+}
+
+/** @brief  An internal callback used to set a bit in a @b non power-of-two length binary fingerprint of a string. */
+SZ_INTERNAL void _sz_hashes_fingerprint_non_pow2_callback( //
+    sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *handle) {
+    sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
+    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
+    sz_size_t fingerprint_bytes = fingerprint_buffer->length;
+    fingerprint_u8s[(hash / 8) % fingerprint_bytes] |= (1 << (hash & 7));
+    sz_unused(start && length);
+}
+
+/** @brief  An internal callback, used to mix all the running hashes into one pointer-size value. */
+SZ_INTERNAL void _sz_hashes_fingerprint_scalar_callback( //
+    sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *scalar_handle) {
+    sz_unused(start && length && hash && scalar_handle);
+    sz_size_t *scalar_ptr = (sz_size_t *)scalar_handle;
+    *scalar_ptr ^= hash;
+}
+
 #undef _sz_shift_low
 #undef _sz_shift_high
 #undef _sz_hash_mix
@@ -350,10 +384,10 @@ SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t win
 #pragma region Haswell Implementation
 #if SZ_USE_HASWELL
 #pragma GCC push_options
-#pragma GCC target("haswell")
-#pragma clang attribute push(__attribute__((target("haswell"))), apply_to = function)
+#pragma GCC target("avx2")
+#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 
-SZ_PUBLIC sz_u64_t sz_checksum_avx2(sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC sz_u64_t sz_checksum_haswell(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "loads".
     //
@@ -448,8 +482,8 @@ SZ_INTERNAL __m256i _mm256_mul_epu64(__m256i a, __m256i b) {
     return prod;
 }
 
-SZ_PUBLIC void sz_hashes_avx2(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step, //
-                              sz_hash_callback_t callback, void *callback_handle) {
+SZ_PUBLIC void sz_hashes_haswell(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step, //
+                                 sz_hash_callback_t callback, void *callback_handle) {
 
     if (length < window_length || !window_length) return;
     if (length < 4 * window_length) {
@@ -702,8 +736,8 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
     }
 }
 
-SZ_PUBLIC void sz_hashes_ice(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step, //
-                             sz_hash_callback_t callback, void *callback_handle) {
+SZ_PUBLIC void sz_hashes_skylake(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step, //
+                                 sz_hash_callback_t callback, void *callback_handle) {
 
     if (length < window_length || !window_length) return;
     if (length < 4 * window_length) {
@@ -888,7 +922,7 @@ SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length) {
 #if SZ_USE_ICE
     return sz_checksum_ice(text, length);
 #elif SZ_USE_HASWELL
-    return sz_checksum_avx2(text, length);
+    return sz_checksum_haswell(text, length);
 #elif SZ_USE_NEON
     return sz_checksum_neon(text, length);
 #else
@@ -898,10 +932,10 @@ SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length) {
 
 SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
                           sz_hash_callback_t callback, void *callback_handle) {
-#if SZ_USE_ICE
-    sz_hashes_ice(text, length, window_length, window_step, callback, callback_handle);
+#if SZ_USE_SKYLAKE
+    sz_hashes_skylake(text, length, window_length, window_step, callback, callback_handle);
 #elif SZ_USE_HASWELL
-    sz_hashes_avx2(text, length, window_length, window_step, callback, callback_handle);
+    sz_hashes_haswell(text, length, window_length, window_step, callback, callback_handle);
 #else
     sz_hashes_serial(text, length, window_length, window_step, callback, callback_handle);
 #endif

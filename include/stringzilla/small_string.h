@@ -261,7 +261,7 @@ SZ_PUBLIC sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const 
 }
 
 SZ_PUBLIC void sz_string_init(sz_string_t *string) {
-    sz_assert(string && "String can't be SZ_NULL.");
+    _sz_assert(string && "String can't be SZ_NULL.");
 
     // Only 8 + 1 + 1 need to be initialized.
     string->internal.start = &string->internal.chars[0];
@@ -275,7 +275,7 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
 
 SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
-    sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
+    _sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
     // Initialize the string to zeros for safety.
     string->words[1] = 0;
     string->words[2] = 0;
@@ -292,14 +292,14 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
         string->external.length = length;
         string->external.space = space_needed;
     }
-    sz_assert(&string->internal.start == &string->external.start && "Alignment confusion");
+    _sz_assert(&string->internal.start == &string->external.start && "Alignment confusion");
     string->external.start[length] = 0;
     return string->external.start;
 }
 
 SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator) {
 
-    sz_assert(string && allocator && "Strings and allocators can't be SZ_NULL.");
+    _sz_assert(string && allocator && "Strings and allocators can't be SZ_NULL.");
 
     sz_size_t new_space = new_capacity + 1;
     if (new_space <= _SZ_STRING_INTERNAL_SPACE) return string->external.start;
@@ -309,7 +309,7 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
     sz_size_t string_space;
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
-    sz_assert(new_space > string_space && "New space must be larger than current.");
+    _sz_assert(new_space > string_space && "New space must be larger than current.");
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return SZ_NULL_CHAR;
@@ -327,7 +327,7 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
 
 SZ_PUBLIC sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator) {
 
-    sz_assert(string && allocator && "Strings and allocators can't be SZ_NULL.");
+    _sz_assert(string && allocator && "Strings and allocators can't be SZ_NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -356,7 +356,7 @@ SZ_PUBLIC sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_alloca
 SZ_PUBLIC sz_ptr_t sz_string_expand( //
     sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_memory_allocator_t *allocator) {
 
-    sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
+    _sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -393,7 +393,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand( //
 
 SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
 
-    sz_assert(string && "String can't be SZ_NULL.");
+    _sz_assert(string && "String can't be SZ_NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;

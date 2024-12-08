@@ -113,23 +113,23 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t h_length, sz_c
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 /** @copydoc sz_rfind */
-SZ_PUBLIC sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 #endif
 
 #if SZ_USE_SKYLAKE
 /** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 /** @copydoc sz_rfind */
-SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_find */
-SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 /** @copydoc sz_rfind */
-SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 #endif
 
 /**
@@ -173,23 +173,23 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_find_charset */
-SZ_PUBLIC sz_cptr_t sz_find_charset_haswell(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_find_charset_haswell(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
 /** @copydoc sz_rfind_charset */
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_haswell(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_haswell(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
 #endif
 
 #if SZ_USE_ICE
 /** @copydoc sz_find_charset */
-SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
 /** @copydoc sz_rfind_charset */
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_ice(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_ice(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
 #endif
 
 #if SZ_USE_NEON
 /** @copydoc sz_find_charset */
-SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
 /** @copydoc sz_rfind_charset */
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
+SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
 #endif
 
 #pragma endregion // Core API
@@ -375,7 +375,7 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_2byte_equal(sz_u64_vec_t a, sz_u64_vec_t b
 SZ_INTERNAL sz_cptr_t _sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
-    sz_assert(h_length >= 2 && "The haystack is too short.");
+    _sz_assert(h_length >= 2 && "The haystack is too short.");
     sz_cptr_t const h_end = h + h_length;
 
 #if !SZ_USE_MISALIGNED_LOADS
@@ -429,7 +429,7 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_4byte_equal(sz_u64_vec_t a, sz_u64_vec_t b
 SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
-    sz_assert(h_length >= 4 && "The haystack is too short.");
+    _sz_assert(h_length >= 4 && "The haystack is too short.");
     sz_cptr_t const h_end = h + h_length;
 
 #if !SZ_USE_MISALIGNED_LOADS
@@ -493,7 +493,7 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_3byte_equal(sz_u64_vec_t a, sz_u64_vec_t b
 SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
-    sz_assert(h_length >= 3 && "The haystack is too short.");
+    _sz_assert(h_length >= 3 && "The haystack is too short.");
     sz_cptr_t const h_end = h + h_length;
 
 #if !SZ_USE_MISALIGNED_LOADS
@@ -550,7 +550,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_
 SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial( //
     sz_cptr_t h_chars, sz_size_t h_length,                    //
     sz_cptr_t n_chars, sz_size_t n_length) {
-    sz_assert(n_length <= 256 && "The pattern is too long.");
+    _sz_assert(n_length <= 256 && "The pattern is too long.");
     // Several popular string matching algorithms are using a bad-character shift table.
     // Boyer Moore: https://www-igm.univ-mlv.fr/~lecroq/string/node14.html
     // Quick Search: https://www-igm.univ-mlv.fr/~lecroq/string/node19.html
@@ -604,7 +604,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial( //
 SZ_INTERNAL sz_cptr_t _sz_rfind_horspool_upto_256bytes_serial( //
     sz_cptr_t h_chars, sz_size_t h_length,                     //
     sz_cptr_t n_chars, sz_size_t n_length) {
-    sz_assert(n_length <= 256 && "The pattern is too long.");
+    _sz_assert(n_length <= 256 && "The pattern is too long.");
     union {
         sz_u8_t jumps[256];
         sz_u64_vec_t vecs[64];
@@ -941,7 +941,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_haswell(sz_cptr_t text, sz_size_t length, sz
         //          sz_u8_t input = *(sz_u8_t const *)(text + i);
         //          sz_u8_t lo_nibble = input & 0x0f;
         //          sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
-        //          sz_assert(bitmask_vec.u8s[i] == bitmask);
+        //          _sz_assert(bitmask_vec.u8s[i] == bitmask);
         //      }
         //
         // Shift right every byte by 4 bits.
@@ -959,8 +959,8 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_haswell(sz_cptr_t text, sz_size_t length, sz
         //          sz_u8_t hi_nibble = input >> 4;
         //          sz_u8_t bitset_even = bitset_ptr[hi_nibble * 2];
         //          sz_u8_t bitset_odd = bitset_ptr[hi_nibble * 2 + 1];
-        //          sz_assert(bitset_even_vec.u8s[i] == bitset_even);
-        //          sz_assert(bitset_odd_vec.u8s[i] == bitset_odd);
+        //          _sz_assert(bitset_even_vec.u8s[i] == bitset_even);
+        //          _sz_assert(bitset_odd_vec.u8s[i] == bitset_odd);
         //      }
         //
         __m256i take_first = _mm256_cmpgt_epi8(_mm256_set1_epi8(8), lower_nibbles_vec.ymm);
@@ -1183,8 +1183,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
             int potential_offset = sz_u64_clz(matches);
             if (n_length <= 3 || sz_equal_skylake(h + h_length - n_length - potential_offset, n, n_length))
                 return h + h_length - n_length - potential_offset;
-            sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
-                      "The bit must be set before we squash it");
+            _sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
+                       "The bit must be set before we squash it");
             matches &= ~((sz_u64_t)1 << (63 - potential_offset));
         }
     }
@@ -1204,8 +1204,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
             int potential_offset = sz_u64_clz(matches);
             if (n_length <= 3 || sz_equal_skylake(h + 64 - potential_offset - 1, n, n_length))
                 return h + 64 - potential_offset - 1;
-            sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
-                      "The bit must be set before we squash it");
+            _sz_assert((matches & ((sz_u64_t)1 << (63 - potential_offset))) != 0 &&
+                       "The bit must be set before we squash it");
             matches &= ~((sz_u64_t)1 << (63 - potential_offset));
         }
     }
@@ -1223,13 +1223,16 @@ SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
  *      - 2017 Skylake: F, CD, ER, PF, VL, DQ, BW,
  *      - 2018 CannonLake: IFMA, VBMI,
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
+ *
+ *  We are going to use VBMI2 for `_mm256_maskz_compress_epi8`.
  */
 #pragma region Ice Lake Implementation
 #if SZ_USE_ICE
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2"))), \
-                             apply_to = function)
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
+#pragma clang attribute push(                                                                          \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
+    apply_to = function)
 
 SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
 
@@ -1247,7 +1250,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t text, sz_size_t length, sz_cha
     sz_u512_vec_t filter_even_vec, filter_odd_vec;
     __m256i filter_ymm = _mm256_lddqu_si256((__m256i const *)filter);
     // There are a few way to initialize filters without having native strided loads.
-    // In the cronological order of experiments:
+    // In the chronological order of experiments:
     // - serial code initializing 128 bytes of odd and even mask
     // - using several shuffles
     // - using `_mm512_permutexvar_epi8`
@@ -1260,14 +1263,14 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t text, sz_size_t length, sz_cha
     // After the unzipping operation, we can validate the contents of the vectors like this:
     //
     //      for (sz_size_t i = 0; i != 16; ++i) {
-    //          sz_assert(filter_even_vec.u8s[i] == filter->_u8s[i * 2]);
-    //          sz_assert(filter_odd_vec.u8s[i] == filter->_u8s[i * 2 + 1]);
-    //          sz_assert(filter_even_vec.u8s[i + 16] == filter->_u8s[i * 2]);
-    //          sz_assert(filter_odd_vec.u8s[i + 16] == filter->_u8s[i * 2 + 1]);
-    //          sz_assert(filter_even_vec.u8s[i + 32] == filter->_u8s[i * 2]);
-    //          sz_assert(filter_odd_vec.u8s[i + 32] == filter->_u8s[i * 2 + 1]);
-    //          sz_assert(filter_even_vec.u8s[i + 48] == filter->_u8s[i * 2]);
-    //          sz_assert(filter_odd_vec.u8s[i + 48] == filter->_u8s[i * 2 + 1]);
+    //          _sz_assert(filter_even_vec.u8s[i] == filter->_u8s[i * 2]);
+    //          _sz_assert(filter_odd_vec.u8s[i] == filter->_u8s[i * 2 + 1]);
+    //          _sz_assert(filter_even_vec.u8s[i + 16] == filter->_u8s[i * 2]);
+    //          _sz_assert(filter_odd_vec.u8s[i + 16] == filter->_u8s[i * 2 + 1]);
+    //          _sz_assert(filter_even_vec.u8s[i + 32] == filter->_u8s[i * 2]);
+    //          _sz_assert(filter_odd_vec.u8s[i + 32] == filter->_u8s[i * 2 + 1]);
+    //          _sz_assert(filter_even_vec.u8s[i + 48] == filter->_u8s[i * 2]);
+    //          _sz_assert(filter_odd_vec.u8s[i + 48] == filter->_u8s[i * 2 + 1]);
     //      }
     //
     sz_u512_vec_t text_vec;
@@ -1310,7 +1313,7 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t text, sz_size_t length, sz_cha
         //          sz_u8_t input = *(sz_u8_t const *)(text + i);
         //          sz_u8_t lo_nibble = input & 0x0f;
         //          sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
-        //          sz_assert(bitmask_vec.u8s[i] == bitmask);
+        //          _sz_assert(bitmask_vec.u8s[i] == bitmask);
         //      }
         //
         // Shift right every byte by 4 bits.
@@ -1328,8 +1331,8 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t text, sz_size_t length, sz_cha
         //          sz_u8_t hi_nibble = input >> 4;
         //          sz_u8_t bitset_even = bitset_ptr[hi_nibble * 2];
         //          sz_u8_t bitset_odd = bitset_ptr[hi_nibble * 2 + 1];
-        //          sz_assert(bitset_even_vec.u8s[i] == bitset_even);
-        //          sz_assert(bitset_odd_vec.u8s[i] == bitset_odd);
+        //          _sz_assert(bitset_even_vec.u8s[i] == bitset_even);
+        //          _sz_assert(bitset_odd_vec.u8s[i] == bitset_odd);
         //      }
         //
         // TODO: Is this a good place for ternary logic?
@@ -1539,8 +1542,8 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
             int potential_offset = sz_u64_clz(matches) / 4;
             if (sz_equal_neon(h + h_length - n_length - potential_offset, n, n_length))
                 return h + h_length - n_length - potential_offset;
-            sz_assert((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
-                      "The bit must be set before we squash it");
+            _sz_assert((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
+                       "The bit must be set before we squash it");
             matches &= ~(1ull << (63 - potential_offset * 4));
         }
     }
