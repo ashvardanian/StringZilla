@@ -1,4 +1,37 @@
-cmake_minimum_required(VERSION 3.1)
+# StringZilla CMakeLists.txt
+#
+# This file defines several library build & installation targets:
+#
+# - stringzilla_header: A header-only library with the StringZilla C and C++ headers.
+# - stringzilla_shared: A shared library with the StringZilla C and C++ headers and dynamic SIMD dispatch.
+# - stringzilla_bare: A shared library with the StringZilla headers, but without linking the standard C library.
+# 
+# Tests for different C++ standards:
+#
+#   - stringzilla_test_cpp11: A test executable for C++11. 
+#   - stringzilla_test_cpp14: A test executable for C++14.
+#   - stringzilla_test_cpp17: A test executable for C++17.
+#   - stringzilla_test_cpp20: A test executable for C++20.
+#
+# Tests for different SIMD architectures:
+#
+#   - stringzilla_test_cpp20_serial: A test executable for serial execution.
+#   - stringzilla_test_cpp20_haswell: A test executable for AVX2.
+#   - stringzilla_test_cpp20_ice: A test executable for AVX-512.
+#   - stringzilla_test_cpp20_neon: A test executable for ARM Neon.
+#   - stringzilla_test_cpp20_sve: A test executable for ARM Scalable Vector Extension.
+#
+# Benchmarks:
+#
+#   - stringzilla_bench_search: A benchmark for substring search operations.
+#   - stringzilla_bench_similarity: A benchmark for similarity operations.
+#   - stringzilla_bench_sort: A benchmark for sorting operations.
+#   - stringzilla_bench_token: A benchmark for comparators and hash functions.
+#   - stringzilla_bench_container: A benchmark for STL containers powered by StringZilla.
+#   - stringzilla_bench_memory: A benchmark for LibC-style low-level memory operations.
+#
+# For higher-level language bindings separate build scripts are provided, native to each toolchain.
+cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 project(
   stringzilla
   VERSION 3.11.0
@@ -7,7 +40,7 @@ project(
   HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla")
 
 set(CMAKE_C_STANDARD 99)
-set(CMAKE_CXX_STANDARD 17) # This gives many issues for msvc and clang-cl, especially if later on you set it to std-c++11 later on in the tests...
+set(CMAKE_CXX_STANDARD 11)
 
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -270,18 +303,19 @@ if(${STRINGZILLA_BUILD_TEST})
   if(SZ_PLATFORM_X86)
     # x86 specific backends
     if (MSVC)
-      define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "AVX")
-      define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "AVX2")
-      define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "AVX512")
+      define_launcher(stringzilla_test_cpp20_serial scripts/test.cpp 20 "AVX")
+      define_launcher(stringzilla_test_cpp20_haswell scripts/test.cpp 20 "AVX2")
+      define_launcher(stringzilla_test_cpp20_ice scripts/test.cpp 20 "AVX512")
     else()
-      define_launcher(stringzilla_test_cpp20_x86_serial scripts/test.cpp 20 "ivybridge")
-      define_launcher(stringzilla_test_cpp20_x86_avx2 scripts/test.cpp 20 "haswell")
-      define_launcher(stringzilla_test_cpp20_x86_avx512 scripts/test.cpp 20 "sapphirerapids")
+      define_launcher(stringzilla_test_cpp20_serial scripts/test.cpp 20 "ivybridge")
+      define_launcher(stringzilla_test_cpp20_haswell scripts/test.cpp 20 "haswell")
+      define_launcher(stringzilla_test_cpp20_ice scripts/test.cpp 20 "sapphirerapids")
     endif()
   elseif(SZ_PLATFORM_ARM)
     # ARM specific backends
-    define_launcher(stringzilla_test_cpp20_arm_serial scripts/test.cpp 20 "armv8-a")
-    define_launcher(stringzilla_test_cpp20_arm_neon scripts/test.cpp 20 "armv8-a+simd")
+    define_launcher(stringzilla_test_cpp20_serial scripts/test.cpp 20 "armv8-a")
+    define_launcher(stringzilla_test_cpp20_neon scripts/test.cpp 20 "armv8-a+simd")
+    define_launcher(stringzilla_test_cpp20_sve scripts/test.cpp 20 "armv8.2-a+sve")
   endif()
 endif()
 
@@ -335,16 +369,16 @@ if(${STRINGZILLA_BUILD_SHARED})
   target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
 
   # Try compiling a version without linking the LibC
-  define_shared(stringzillite)
-  target_compile_definitions(stringzillite PRIVATE "SZ_AVOID_LIBC=1")
-  target_compile_definitions(stringzillite PRIVATE "SZ_OVERRIDE_LIBC=1")
+  define_shared(stringzilla_bare)
+  target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
+  target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
 
   # Avoid built-ins on MSVC and other compilers, as that will cause compilation errors
-  target_compile_options(stringzillite PRIVATE
+  target_compile_options(stringzilla_bare PRIVATE
     "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>"
     "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
-  target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
-  target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
+  target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
+  target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
 
 
 endif()
@@ -362,7 +396,7 @@ if(STRINGZILLA_INSTALL)
     RESOURCE
     RUNTIME)
   install(
-    TARGETS stringzillite
+    TARGETS stringzilla_bare
     ARCHIVE
     BUNDLE
     FRAMEWORK
