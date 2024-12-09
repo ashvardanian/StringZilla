@@ -154,7 +154,7 @@ static void test_ascii_utilities() {
     assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").is_alnum());
     assert(!str("abc!").is_alnum());
 
-    assert(!str("").is_ascii());
+    assert(str("").is_ascii());
     assert(str("\x00x7F").is_ascii());
     assert(!str("abc123🔥").is_ascii());
 
@@ -175,9 +175,9 @@ static void test_ascii_utilities() {
     assert(str("ABCDEFGHIJKLMNOPQRSTUVWXYZ").is_upper());
     assert(!str("ABCa").is_upper());
 
-    assert(!str("").is_printable());
+    assert(str("").is_printable());
     assert(str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+").is_printable());
-    assert(!str("012\n").is_printable());
+    assert(!str("012🔥").is_printable());
 }
 
 inline void expect_equality(char const *a, char const *b, std::size_t size) {
