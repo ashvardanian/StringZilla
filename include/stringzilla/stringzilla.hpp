@@ -283,7 +283,7 @@ class basic_charset {
     template <std::size_t count_characters>
     explicit basic_charset(char_type const (&chars)[count_characters]) noexcept : basic_charset() {
         static_assert(count_characters > 0, "Character array cannot be empty");
-        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+        for (std::size_t i = 0; i != count_characters; ++i) {
             char_type c = chars[i];
             bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
         }
@@ -292,7 +292,7 @@ class basic_charset {
     template <std::size_t count_characters>
     explicit basic_charset(std::array<char_type, count_characters> const &chars) noexcept : basic_charset() {
         static_assert(count_characters > 0, "Character array cannot be empty");
-        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+        for (std::size_t i = 0; i != count_characters; ++i) {
             char_type c = chars[i];
             bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
         }
