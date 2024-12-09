@@ -255,7 +255,7 @@ public extension StringZillaViewable {
     /// - Throws: If a memory allocation error has happened.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func editDistance<S: StringZillaViewable>(from other: S, bound: UInt64 = 0) throws -> UInt64? {
+    func editDistance<S: StringZillaViewable>(from other: S, bound: UInt64 = UInt64.max) throws -> UInt64? {
         var result: UInt64?
         
         // Use a do-catch block to handle potential errors
