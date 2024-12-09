@@ -138,8 +138,8 @@ static void test_arithmetical_utilities() {
 }
 
 /**
- * @brief Tests various ASCII-based methods (e.g., is_alpha, is_digit)
- *        provided by `sz::string` and `sz::string_view`.
+ *  @brief  Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
+ *          provided by `sz::string` and `sz::string_view`.
  */
 template <typename string_type>
 static void test_ascii_utilities() {
