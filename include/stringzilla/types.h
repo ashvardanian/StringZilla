@@ -545,10 +545,10 @@ typedef union sz_u256_vec_t {
  *          as well as 4x XMM registers or 2x YMM registers or 1x ZMM register.
  */
 typedef union sz_u512_vec_t {
-#if SZ_USE_ICE
+#if SZ_USE_SKYLAKE || SZ_USE_ICE
     __m512i zmm;
 #endif
-#if SZ_USE_HASWELL
+#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
     __m256i ymms[2];
     __m128i xmms[4];
 #endif
