@@ -11,10 +11,10 @@
 // Those parameters must never be explicitly set during releases,
 // but they come handy during development, if you want to validate
 // different ISA-specific implementations.
-// #define SZ_USE_X86_AVX2 0
-// #define SZ_USE_X86_AVX512 0
-// #define SZ_USE_ARM_NEON 0
-// #define SZ_USE_ARM_SVE 0
+// #define SZ_USE_HASWELL 0
+// #define SZ_USE_ICE 0
+// #define SZ_USE_NEON 0
+// #define SZ_USE_SVE 0
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
 // Put this at the top to make sure it pulls all the right dependencies
@@ -38,7 +38,7 @@
 #include <string>      // Baseline
 #include <string_view> // Baseline
 
-#if !SZ_DETECT_CPP_11
+#if !_SZ_IS_CPP11
 #error "This test requires C++11 or later."
 #endif
 
@@ -52,7 +52,7 @@ using sz::literals::operator""_sz;
  *  Instantiate all the templates to make the symbols visible and also check
  *  for weird compilation errors on uncommon paths.
  */
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 template class std::basic_string_view<char>;
 #endif
 template class sz::basic_string_slice<char>;
@@ -121,7 +121,7 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil(1000000000ull) == (1ull << 30));
     assert(sz_size_bit_ceil(2000000000ull) == (1ull << 31));
 
-#if SZ_DETECT_64_BIT
+#if _SZ_IS_64_BIT
     assert(sz_size_bit_ceil(4000000000ull) == (1ull << 32));
     assert(sz_size_bit_ceil(8000000000ull) == (1ull << 33));
     assert(sz_size_bit_ceil(16000000000ull) == (1ull << 34));
@@ -130,11 +130,49 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil((1ull << 62) + 1) == (1ull << 63));
     assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
 #endif
+}
 
-    for (sz_u16_t number = 0; number != 256; ++number)
-        for (sz_u16_t divisor = 2; divisor != 256; ++divisor)
-            assert(sz_u8_divide(static_cast<sz_u8_t>(number), static_cast<sz_u8_t>(divisor)) ==
-                   (static_cast<sz_u8_t>(number) / static_cast<sz_u8_t>(divisor)));
+/**
+ *  @brief  Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
+ *          provided by `sz::string` and `sz::string_view`.
+ */
+template <typename string_type>
+static void test_ascii_utilities() {
+
+    using str = string_type;
+
+    assert(!str("").is_alpha());
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").is_alpha());
+    assert(!str("abc9").is_alpha());
+
+    assert(!str("").is_alnum());
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").is_alnum());
+    assert(!str("abc!").is_alnum());
+
+    assert(str("").is_ascii());
+    assert(str("\x00x7F").is_ascii());
+    assert(!str("abc123🔥").is_ascii());
+
+    assert(!str("").is_digit());
+    assert(str("0123456789").is_digit());
+    assert(!str("012a").is_digit());
+
+    assert(!str("").is_lower());
+    assert(str("abcdefghijklmnopqrstuvwxyz").is_lower());
+    assert(!str("abcA").is_lower());
+    assert(!str("abc\n").is_lower());
+
+    assert(!str("").is_space());
+    assert(str(" \t\n\r\f\v").is_space());
+    assert(!str(" \t\r\na").is_space());
+
+    assert(!str("").is_upper());
+    assert(str("ABCDEFGHIJKLMNOPQRSTUVWXYZ").is_upper());
+    assert(!str("ABCa").is_upper());
+
+    assert(str("").is_printable());
+    assert(str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+").is_printable());
+    assert(!str("012🔥").is_printable());
 }
 
 inline void expect_equality(char const *a, char const *b, std::size_t size) {
@@ -417,7 +455,7 @@ static void test_stl_compatibility_for_reads() {
     assert(str("b") >= str("a"));
     assert(str("a") < str("aa"));
 
-#if SZ_DETECT_CPP20 && __cpp_lib_three_way_comparison
+#if _SZ_IS_CPP20 && __cpp_lib_three_way_comparison
     // Spaceship operator instead of conventional comparions.
     assert((str("a") <=> str("b")) == std::strong_ordering::less);
     assert((str("b") <=> str("a")) == std::strong_ordering::greater);
@@ -460,7 +498,7 @@ static void test_stl_compatibility_for_reads() {
     assert(str("hello world").compare(6, 5, "worlds", 5) == 0);    // Substring "world" in both strings
     assert(str("hello world").compare(6, 5, "worlds", 6) < 0);     // Substring "world" is less than "worlds"
 
-#if SZ_DETECT_CPP20 && __cpp_lib_starts_ends_with
+#if _SZ_IS_CPP20 && __cpp_lib_starts_ends_with
     // Prefix and suffix checks against strings.
     assert(str("https://cppreference.com").starts_with(str("http")) == true);
     assert(str("https://cppreference.com").starts_with(str("ftp")) == false);
@@ -480,7 +518,7 @@ static void test_stl_compatibility_for_reads() {
     assert(str("string_view").ends_with("View") == false);
 #endif
 
-#if SZ_DETECT_CPP_23 && __cpp_lib_string_contains
+#if _SZ_IS_CPP23 && __cpp_lib_string_contains
     // Checking basic substring presence.
     assert(str("hello").contains(str("ell")) == true);
     assert(str("hello").contains(str("oll")) == false);
@@ -511,7 +549,7 @@ static void test_stl_compatibility_for_reads() {
     assert(std::hash<str> {}("hello") != 0);
     assert_scoped(std::ostringstream os, os << str("hello"), os.str() == "hello");
 
-#if SZ_DETECT_CPP14
+#if _SZ_IS_CPP14
     // Comparison function objects are a C++14 feature.
     assert(std::equal_to<str> {}("hello", "world") == false);
     assert(std::less<str> {}("hello", "world") == true);
@@ -571,7 +609,7 @@ static void test_stl_compatibility_for_updates() {
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
-    if (SZ_DETECT_64_BIT) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
+    if (_SZ_IS_64_BIT) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
@@ -665,7 +703,7 @@ static void test_stl_conversions() {
         sz_unused(sz);
         sz_unused(szv);
     }
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
     // From STL `string_view` to StringZilla and vice-versa.
     {
         std::string_view stl {"hello"};
@@ -1184,7 +1222,7 @@ static void test_search() {
     assert(rsplits[4] == "");
 }
 
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 
 /**
  *  Evaluates the correctness of a "matcher", searching for all the occurrences of the `needle_stl`
@@ -1394,6 +1432,20 @@ static void test_levenshtein_distances() {
         {"abc", "adc", 1},                  // one substitution
         {"abc", "abc", 0},                  // same string
         {"ggbuzgjux{}l", "gbuzgjux{}l", 1}, // one insertion (prepended)
+        {"apple", "aple", 1},
+        // Unicode:
+        {"αβγδ", "αγδ", 2},                      // Each Greek symbol is 2 bytes in size
+        {"مرحبا بالعالم", "مرحبا يا عالم", 3},   // "Hello World" vs "Welcome to the World" ?
+        {"école", "école", 3},                   // letter "é" as a single character vs "e" + "´"
+        {"Schön", "Scho\u0308n", 3},             // "ö" represented as "o" + "¨"
+        {"💖", "💗", 1},                         // 4-byte emojis: Different hearts
+        {"𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓", 3},          // Ancient Chinese characters, no spaces vs spaces
+        {"München", "Muenchen", 2},              // German name with umlaut vs. its transcription
+        {"façade", "facade", 2},                 // "ç" represented as "c" with cedilla vs. plain "c"
+        {"こんにちは世界", "こんばんは世界", 3}, // Japanese: "Good morning world" vs "Good evening world"
+        {"👩‍👩‍👧‍👦", "👨‍👩‍👧‍👦", 1}, // Family emojis with different compositions
+        {"Data科学123", "Data科學321", 3},
+        {"🙂🌍🚀", "🙂🌎✨", 5},
     };
 
     using matrix_t = std::int8_t[256][256];
@@ -1417,6 +1469,12 @@ static void test_levenshtein_distances() {
         received_score = sz::alignment_score(r, l, costs, -1);
         if (received != expected) print_failure("Levenshtein", r, l, expected, received);
         if ((std::size_t)(-received_score) != expected) print_failure("Scoring", r, l, expected, received_score);
+
+        // Validate the bounded variants:
+        if (received > 1) {
+            assert(sz::edit_distance(l, r, received) == received);
+            assert(sz::edit_distance(r, l, received - 1) == SZ_SIZE_MAX);
+        }
     };
 
     for (auto explicit_case : explicit_cases)
@@ -1435,6 +1493,7 @@ static void test_levenshtein_distances() {
         std::size_t iterations;
     } fuzzy_cases[] = {
         {10, 1000},
+        {64, 128},
         {100, 100},
         {1000, 10},
     };
@@ -1538,21 +1597,37 @@ static void test_stl_containers() {
 
 int main(int argc, char const **argv) {
 
+    auto dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, SZ_SIZE_MAX);
+    _sz_assert(dist == 5);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 3);
+    _sz_assert(dist == SZ_SIZE_MAX);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 4);
+    _sz_assert(dist == SZ_SIZE_MAX);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 5);
+    _sz_assert(dist == 5);
+    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 6);
+    _sz_assert(dist == 5);
+
+    // Similarity measures and fuzzy search
+    test_levenshtein_distances();
+
     // Let's greet the user nicely
     sz_unused(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
-    std::printf("- Uses AVX2: %s \n", SZ_USE_X86_AVX2 ? "yes" : "no");
-    std::printf("- Uses AVX512: %s \n", SZ_USE_X86_AVX512 ? "yes" : "no");
-    std::printf("- Uses NEON: %s \n", SZ_USE_ARM_NEON ? "yes" : "no");
-    std::printf("- Uses SVE: %s \n", SZ_USE_ARM_SVE ? "yes" : "no");
+    std::printf("- Uses AVX2: %s \n", SZ_USE_HASWELL ? "yes" : "no");
+    std::printf("- Uses AVX512: %s \n", SZ_USE_ICE ? "yes" : "no");
+    std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
+    std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
 
     // Basic utilities
     test_arithmetical_utilities();
+    test_ascii_utilities<sz::string>();
+    test_ascii_utilities<sz::string_view>();
     test_memory_utilities();
     test_replacements();
 
 // Compatibility with STL
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
     test_stl_compatibility_for_reads<std::string_view>();
 #endif
     test_stl_compatibility_for_reads<std::string>();
@@ -1577,12 +1652,9 @@ int main(int argc, char const **argv) {
     test_stl_conversions();
     test_comparisons();
     test_search();
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
     test_search_with_misaligned_repetitions();
 #endif
-
-    // Similarity measures and fuzzy search
-    test_levenshtein_distances();
 
     // Sequences of strings
     test_sequence_algorithms();

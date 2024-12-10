@@ -69,16 +69,16 @@ tracked_unary_functions_t copy_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
     tracked_unary_functions_t result = {
         {"memcpy" + suffix, wrap_sz(memcpy)},
         {"sz_copy_serial" + suffix, wrap_sz(sz_copy_serial)},
-#if SZ_USE_X86_AVX512
-        {"sz_copy_avx512" + suffix, wrap_sz(sz_copy_avx512)},
+#if SZ_USE_SKYLAKE
+        {"sz_copy_skylake" + suffix, wrap_sz(sz_copy_skylake)},
 #endif
-#if SZ_USE_X86_AVX2
-        {"sz_copy_avx2" + suffix, wrap_sz(sz_copy_avx2)},
+#if SZ_USE_HASWELL
+        {"sz_copy_haswell" + suffix, wrap_sz(sz_copy_haswell)},
 #endif
-#if SZ_USE_ARM_SVE
+#if SZ_USE_SVE
         {"sz_copy_sve" + suffix, wrap_sz(sz_copy_sve)},
 #endif
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
         {"sz_copy_neon" + suffix, wrap_sz(sz_copy_neon)},
 #endif
     };
@@ -109,16 +109,16 @@ tracked_unary_functions_t fill_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
              return slice.size();
          })},
         {"sz_fill_serial", wrap_sz(sz_fill_serial)},
-#if SZ_USE_X86_AVX512
-        {"sz_fill_avx512", wrap_sz(sz_fill_avx512)},
+#if SZ_USE_SKYLAKE
+        {"sz_fill_avx512", wrap_sz(sz_fill_skylake)},
 #endif
-#if SZ_USE_X86_AVX2
-        {"sz_fill_avx2", wrap_sz(sz_fill_avx2)},
+#if SZ_USE_HASWELL
+        {"sz_fill_haswell", wrap_sz(sz_fill_haswell)},
 #endif
-#if SZ_USE_ARM_SVE
+#if SZ_USE_SVE
         {"sz_fill_sve", wrap_sz(sz_fill_sve)},
 #endif
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
         {"sz_fill_neon", wrap_sz(sz_fill_neon)},
 #endif
     };
@@ -149,13 +149,13 @@ tracked_unary_functions_t move_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
     tracked_unary_functions_t result = {
         {"memmove" + suffix, wrap_sz(memmove)},
         {"sz_move_serial" + suffix, wrap_sz(sz_move_serial)},
-#if SZ_USE_X86_AVX512
-        {"sz_move_avx512" + suffix, wrap_sz(sz_move_avx512)},
+#if SZ_USE_SKYLAKE
+        {"sz_move_skylake" + suffix, wrap_sz(sz_move_skylake)},
 #endif
-#if SZ_USE_X86_AVX2
-        {"sz_move_avx2" + suffix, wrap_sz(sz_move_avx2)},
+#if SZ_USE_HASWELL
+        {"sz_move_haswell" + suffix, wrap_sz(sz_move_haswell)},
 #endif
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
         {"sz_move_neon" + suffix, wrap_sz(sz_move_neon)},
 #endif
     };
@@ -192,13 +192,13 @@ tracked_unary_functions_t transform_functions() {
              return slice.size();
          })},
         {"sz_look_up_transform_serial", wrap_sz(sz_look_up_transform_serial)},
-#if SZ_USE_X86_AVX512
-        {"sz_look_up_transform_avx512", wrap_sz(sz_look_up_transform_avx512)},
+#if SZ_USE_ICE
+        {"sz_look_up_transform_ice", wrap_sz(sz_look_up_transform_ice)},
 #endif
-#if SZ_USE_X86_AVX2
-        {"sz_look_up_transform_avx2", wrap_sz(sz_look_up_transform_avx2)},
+#if SZ_USE_HASWELL
+        {"sz_look_up_transform_haswell", wrap_sz(sz_look_up_transform_haswell)},
 #endif
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
         {"sz_look_up_transform_neon", wrap_sz(sz_look_up_transform_neon)},
 #endif
     };

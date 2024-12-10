@@ -22,13 +22,12 @@ tracked_unary_functions_t checksum_functions() {
                                     [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
          }},
         {"sz_checksum_serial", wrap_sz(sz_checksum_serial), true},
-#if SZ_USE_X86_AVX2
-        {"sz_checksum_avx2", wrap_sz(sz_checksum_avx2), true},
+#if SZ_USE_HASWELL
+        {"sz_checksum_haswell", wrap_sz(sz_checksum_haswell), true},
 #endif
-#if SZ_USE_X86_AVX512
-        {"sz_checksum_avx512", wrap_sz(sz_checksum_avx512), true},
+#if SZ_USE_ICE
 #endif
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
         {"sz_checksum_neon", wrap_sz(sz_checksum_neon), true},
 #endif
     };
@@ -56,11 +55,11 @@ tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width, st
     };
     std::string suffix = std::to_string(window_width) + ":step" + std::to_string(step);
     tracked_unary_functions_t result = {
-#if SZ_USE_X86_AVX512
-        {"sz_hashes_avx512:" + suffix, wrap_sz(sz_hashes_avx512)},
+#if SZ_USE_SKYLAKE
+        {"sz_hashes_skylake:" + suffix, wrap_sz(sz_hashes_skylake)},
 #endif
-#if SZ_USE_X86_AVX2
-        {"sz_hashes_avx2:" + suffix, wrap_sz(sz_hashes_avx2)},
+#if SZ_USE_HASWELL
+        {"sz_hashes_haswell:" + suffix, wrap_sz(sz_hashes_haswell)},
 #endif
         {"sz_hashes_serial:" + suffix, wrap_sz(sz_hashes_serial)},
     };
@@ -118,11 +117,11 @@ tracked_binary_functions_t equality_functions() {
     tracked_binary_functions_t result = {
         {"std::string_view.==", [](std::string_view a, std::string_view b) { return (a == b); }},
         {"sz_equal_serial", wrap_sz(sz_equal_serial), true},
-#if SZ_USE_X86_AVX2
-        {"sz_equal_avx2", wrap_sz(sz_equal_avx2), true},
+#if SZ_USE_HASWELL
+        {"sz_equal_haswell", wrap_sz(sz_equal_haswell), true},
 #endif
-#if SZ_USE_X86_AVX512
-        {"sz_equal_avx512", wrap_sz(sz_equal_avx512), true},
+#if SZ_USE_SKYLAKE
+        {"sz_equal_skylake", wrap_sz(sz_equal_skylake), true},
 #endif
         {"memcmp",
          [](std::string_view a, std::string_view b) {
@@ -145,11 +144,11 @@ tracked_binary_functions_t ordering_functions() {
              return (order == 0 ? sz_equal_k : (order < 0 ? sz_less_k : sz_greater_k));
          }},
         {"sz_order_serial", wrap_sz(sz_order_serial), true},
-#if SZ_USE_X86_AVX2
-        {"sz_order_avx2", wrap_sz(sz_order_avx2), true},
+#if SZ_USE_HASWELL
+        {"sz_order_haswell", wrap_sz(sz_order_haswell), true},
 #endif
-#if SZ_USE_X86_AVX512
-        {"sz_order_avx512", wrap_sz(sz_order_avx512), true},
+#if SZ_USE_SKYLAKE
+        {"sz_order_skylake", wrap_sz(sz_order_skylake), true},
 #endif
         {"memcmp",
          [](std::string_view a, std::string_view b) {

@@ -8,7 +8,7 @@
 
 pub mod sz {
 
-    use core::ffi::c_void;
+    use core::{ffi::c_void, usize};
 
     // Import the functions from the StringZilla C library.
     extern "C" {
@@ -54,6 +54,10 @@ pub mod sz {
             needle_length: usize,
         ) -> *const c_void;
 
+        fn sz_hash(text: *const c_void, length: usize) -> u64;
+
+        fn sz_checksum(text: *const c_void, length: usize) -> u64;
+
         fn sz_edit_distance(
             haystack1: *const c_void,
             haystack1_length: usize,
@@ -98,8 +102,6 @@ pub mod sz {
             allocator: *const c_void,
         ) -> isize;
 
-        // type RandomGeneratorT = fn(*mut c_void) -> u64;
-
         fn sz_generate(
             alphabet: *const c_void,
             alphabet_size: usize,
@@ -108,6 +110,51 @@ pub mod sz {
             generate: *const c_void,
             generator: *mut c_void,
         );
+    }
+
+    /// Computes the checksum value of unsigned bytes in a given byte slice `text`.
+    /// This function is useful for verifying data integrity and detecting changes in
+    /// binary data, such as files or network packets.
+    ///
+    /// # Arguments
+    ///
+    /// * `text`: The byte slice to compute the checksum for.
+    ///
+    /// # Returns
+    ///
+    /// A `u64` representing the checksum value of the input byte slice.
+    pub fn checksum<T>(text: T) -> u64
+    where
+        T: AsRef<[u8]>,
+    {
+        let text_ref = text.as_ref();
+        let text_pointer = text_ref.as_ptr() as _;
+        let text_length = text_ref.len();
+        let result = unsafe { sz_checksum(text_pointer, text_length) };
+        return result;
+    }
+
+    /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
+    /// This function is designed to provide a high-quality hash value for use in
+    /// hash tables, data structures, and cryptographic applications.
+    /// Unlike the checksum function, the hash function is order-sensitive.
+    ///
+    /// # Arguments
+    ///
+    /// * `text`: The byte slice to compute the checksum for.
+    ///
+    /// # Returns
+    ///
+    /// A `u64` representing the hash value of the input byte slice.
+    pub fn hash<T>(text: T) -> u64
+    where
+        T: AsRef<[u8]>,
+    {
+        let text_ref = text.as_ref();
+        let text_pointer = text_ref.as_ptr() as _;
+        let text_length = text_ref.len();
+        let result = unsafe { sz_hash(text_pointer, text_length) };
+        return result;
     }
 
     /// Locates the first matching substring within `haystack` that equals `needle`.
@@ -445,7 +492,7 @@ pub mod sz {
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
     {
-        edit_distance_bounded(first, second, 0)
+        edit_distance_bounded(first, second, usize::MAX)
     }
 
     /// Computes the Levenshtein edit distance between two UTF8 strings, using the Wagner-Fisher
@@ -465,7 +512,7 @@ pub mod sz {
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
     {
-        edit_distance_utf8_bounded(first, second, 0)
+        edit_distance_utf8_bounded(first, second, usize::MAX)
     }
 
     /// Computes the Hamming edit distance between two strings, counting the number of substituted characters.
@@ -987,6 +1034,34 @@ pub trait StringZilla<'a, N>
 where
     N: AsRef<[u8]> + 'a,
 {
+    /// Computes the checksum value of unsigned bytes in a given string.
+    /// This function is useful for verifying data integrity and detecting changes in
+    /// binary data, such as files or network packets.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let text = "Hello";
+    /// assert_eq!(text.sz_checksum(), Some(500));
+    /// ```
+    fn sz_checksum(&self) -> u64;
+
+    /// Computes a 64-bit AES-based hash value for a given string.
+    /// This function is designed to provide a high-quality hash value for use in
+    /// hash tables, data structures, and cryptographic applications.
+    /// Unlike the checksum function, the hash function is order-sensitive.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// assert_ne!("Hello".sz_hash(), "World".sz_hash());
+    /// ```
+    fn sz_hash(&self) -> u64;
+
     /// Searches for the first occurrence of `needle` in `self`.
     ///
     /// # Examples
@@ -1071,6 +1146,45 @@ where
     /// assert_eq!(first.sz_edit_distance(second.as_bytes()), 3);
     /// ```
     fn sz_edit_distance(&self, other: N) -> usize;
+
+    /// Computes the Levenshtein edit distance between `self` and `other`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let first = "kitten";
+    /// let second = "sitting";
+    /// assert_eq!(first.sz_edit_distance_utf8(second.as_bytes()), 3);
+    /// ```
+    fn sz_edit_distance_utf8(&self, other: N) -> usize;
+
+    /// Computes the bounded Levenshtein edit distance between `self` and `other`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let first = "kitten";
+    /// let second = "sitting";
+    /// assert_eq!(first.sz_edit_distance_bounded(second.as_bytes()), 3);
+    /// ```
+    fn sz_edit_distance_bounded(&self, other: N, bound: usize) -> usize;
+
+    /// Computes the bounded Levenshtein edit distance between `self` and `other`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::StringZilla;
+    ///
+    /// let first = "kitten";
+    /// let second = "sitting";
+    /// assert_eq!(first.sz_edit_distance_utf8_bounded(second.as_bytes()), 3);
+    /// ```
+    fn sz_edit_distance_utf8_bounded(&self, other: N, bound: usize) -> usize;
 
     /// Computes the alignment score between `self` and `other` using the specified
     /// substitution matrix and gap penalty.
@@ -1231,7 +1345,6 @@ where
     /// assert_eq!(matches, vec![b"!", b"d", b"l", b"r", b"w", b" ", b",", b"l", b"l", b"H"]);
     /// ```
     fn sz_find_last_not_of(&'a self, needles: &'a N) -> RangeRMatches<'a>;
-
 }
 
 impl<'a, T, N> StringZilla<'a, N> for T
@@ -1239,6 +1352,14 @@ where
     T: AsRef<[u8]> + ?Sized,
     N: AsRef<[u8]> + 'a,
 {
+    fn sz_checksum(&self) -> u64 {
+        sz::checksum(self)
+    }
+
+    fn sz_hash(&self) -> u64 {
+        sz::hash(self)
+    }
+
     fn sz_find(&self, needle: N) -> Option<usize> {
         sz::find(self, needle)
     }
@@ -1265,6 +1386,18 @@ where
 
     fn sz_edit_distance(&self, other: N) -> usize {
         sz::edit_distance(self, other)
+    }
+
+    fn sz_edit_distance_utf8(&self, other: N) -> usize {
+        sz::edit_distance_utf8(self, other)
+    }
+
+    fn sz_edit_distance_bounded(&self, other: N, bound: usize) -> usize {
+        sz::edit_distance_bounded(self, other, bound)
+    }
+
+    fn sz_edit_distance_utf8_bounded(&self, other: N, bound: usize) -> usize {
+        sz::edit_distance_utf8_bounded(self, other, bound)
     }
 
     fn sz_alignment_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> isize {

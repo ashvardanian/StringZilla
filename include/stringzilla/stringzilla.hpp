@@ -20,6 +20,7 @@
  *  @brief  When set to 1, the library will include the C++ STL headers and implement
  *          automatic conversion from and to `std::stirng_view` and `std::basic_string<any_allocator>`.
  */
+#include "types.h"
 #ifndef SZ_AVOID_STL
 #define SZ_AVOID_STL (0) // true or false
 #endif
@@ -27,18 +28,18 @@
 /*  We need to detect the version of the C++ language we are compiled with.
  *  This will affect recent features like `operator<=>` and tests against STL.
  */
-#define SZ_DETECT_CPP_23 (__cplusplus >= 202101L)
-#define SZ_DETECT_CPP20 (__cplusplus >= 202002L)
-#define SZ_DETECT_CPP_17 (__cplusplus >= 201703L)
-#define SZ_DETECT_CPP14 (__cplusplus >= 201402L)
-#define SZ_DETECT_CPP_11 (__cplusplus >= 201103L)
-#define SZ_DETECT_CPP_98 (__cplusplus >= 199711L)
+#define _SZ_IS_CPP23 (__cplusplus >= 202101L)
+#define _SZ_IS_CPP20 (__cplusplus >= 202002L)
+#define _SZ_IS_CPP17 (__cplusplus >= 201703L)
+#define _SZ_IS_CPP14 (__cplusplus >= 201402L)
+#define _SZ_IS_CPP11 (__cplusplus >= 201103L)
+#define _SZ_IS_CPP98 (__cplusplus >= 199711L)
 
 /**
  *  @brief  The `constexpr` keyword has different applicability scope in different C++ versions.
  *          Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
  */
-#if SZ_DETECT_CPP20
+#if _SZ_IS_CPP20
 #define sz_constexpr_if_cpp20 constexpr
 #else
 #define sz_constexpr_if_cpp20
@@ -49,7 +50,7 @@
 #include <bitset>
 #include <string>
 #include <vector>
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 #include <string_view>
 #endif
 #endif
@@ -283,7 +284,7 @@ class basic_charset {
     template <std::size_t count_characters>
     explicit basic_charset(char_type const (&chars)[count_characters]) noexcept : basic_charset() {
         static_assert(count_characters > 0, "Character array cannot be empty");
-        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+        for (std::size_t i = 0; i != count_characters; ++i) {
             char_type c = chars[i];
             bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
         }
@@ -292,7 +293,7 @@ class basic_charset {
     template <std::size_t count_characters>
     explicit basic_charset(std::array<char_type, count_characters> const &chars) noexcept : basic_charset() {
         static_assert(count_characters > 0, "Character array cannot be empty");
-        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+        for (std::size_t i = 0; i != count_characters; ++i) {
             char_type c = chars[i];
             bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
         }
@@ -308,7 +309,7 @@ class basic_charset {
         basic_charset result = *this;
         result.bitset_._u64s[0] |= other.bitset_._u64s[0], result.bitset_._u64s[1] |= other.bitset_._u64s[1],
             result.bitset_._u64s[2] |= other.bitset_._u64s[2], result.bitset_._u64s[3] |= other.bitset_._u64s[3];
-        return *this;
+        return result;
     }
 
     inline basic_charset &add(char_type c) noexcept {
@@ -397,7 +398,7 @@ struct end_sentinel_type {};
 struct include_overlaps_type {};
 struct exclude_overlaps_type {};
 
-#if SZ_DETECT_CPP_17
+#if _SZ_IS_CPP17
 inline static constexpr end_sentinel_type end_sentinel;
 inline static constexpr include_overlaps_type include_overlaps;
 inline static constexpr exclude_overlaps_type exclude_overlaps;
@@ -1264,7 +1265,7 @@ class basic_string_slice {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 
     template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
     sz_constexpr_if_cpp20 basic_string_slice(std::string_view const &other) noexcept
@@ -1495,7 +1496,7 @@ class basic_string_slice {
                sz_equal(data() + other.first.size(), other.second.data(), other.second.size()) == sz_true_k;
     }
 
-#if SZ_DETECT_CPP20
+#if _SZ_IS_CPP20
 
     /**  @brief  Computes the lexicographic ordering between this and the ::other string. */
     std::strong_ordering operator<=>(string_view other) const noexcept {
@@ -2069,7 +2070,7 @@ class basic_string {
      *  @brief  The number of characters that can be stored in the internal buffer.
      *          Depends on the size of the internal buffer for the "Small String Optimization".
      */
-    static constexpr size_type min_capacity = SZ_STRING_INTERNAL_SPACE - 1;
+    static constexpr size_type min_capacity = _SZ_STRING_INTERNAL_SPACE - 1;
 
 #pragma region Constructors and STL Utilities
 
@@ -2174,7 +2175,7 @@ class basic_string {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 
     basic_string(std::string_view other) noexcept(false) : basic_string(other.data(), other.size()) {}
     basic_string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
@@ -2420,7 +2421,7 @@ class basic_string {
     bool operator==(string_view other) const noexcept { return view() == other; }
     bool operator==(const_pointer other) const noexcept { return view() == string_view(other); }
 
-#if SZ_DETECT_CPP20
+#if _SZ_IS_CPP20
 
     /**  @brief  Computes the lexicographic ordering between this and the ::other string. */
     std::strong_ordering operator<=>(basic_string const &other) const noexcept { return view() <=> other.view(); }
@@ -3663,8 +3664,9 @@ bool basic_string<char_type_, allocator_>::try_assign(concatenation<first_type, 
 }
 
 template <typename char_type_, typename allocator_>
-bool basic_string<char_type_, allocator_>::try_preparing_replacement(size_type offset, size_type length,
-                                                                     size_type replacement_length) noexcept {
+bool basic_string<char_type_, allocator_>::try_preparing_replacement( //
+    size_type offset, size_type length, size_type replacement_length) noexcept {
+
     // There are three cases:
     // 1. The replacement is the same length as the replaced range.
     // 2. The replacement is shorter than the replaced range.
@@ -3759,10 +3761,11 @@ typename concatenation_result<first_type, second_type, following_types...>::type
     //      std::string result;
     //      result.reserve(total_size);
     //      (result.append(strings), ...);
-    return ashvardanian::stringzilla::concatenate(
+    return ashvardanian::stringzilla::concatenate( //
         std::forward<first_type>(first),
-        ashvardanian::stringzilla::concatenate(std::forward<second_type>(second),
-                                               std::forward<following_types>(following)...));
+        ashvardanian::stringzilla::concatenate( //
+            std::forward<second_type>(second),  //
+            std::forward<following_types>(following)...));
 }
 
 /**
@@ -3770,8 +3773,9 @@ typename concatenation_result<first_type, second_type, following_types...>::type
  *  @see    sz_edit_distance
  */
 template <typename char_type_>
-std::size_t hamming_distance(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                             std::size_t bound = 0) noexcept {
+std::size_t hamming_distance(                                                         //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
+    std::size_t bound = 0) noexcept {
     return sz_hamming_distance(a.data(), a.size(), b.data(), b.size(), bound);
 }
 
@@ -3780,8 +3784,9 @@ std::size_t hamming_distance(basic_string_slice<char_type_> const &a, basic_stri
  *  @see    sz_edit_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t hamming_distance(basic_string<char_type_, allocator_type_> const &a,
-                             basic_string<char_type_, allocator_type_> const &b, std::size_t bound = 0) noexcept {
+std::size_t hamming_distance(                                                                               //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
+    std::size_t bound = 0) noexcept {
     return ashvardanian::stringzilla::hamming_distance(a.view(), b.view(), bound);
 }
 
@@ -3790,8 +3795,8 @@ std::size_t hamming_distance(basic_string<char_type_, allocator_type_> const &a,
  *  @see    sz_hamming_distance_utf8
  */
 template <typename char_type_>
-std::size_t hamming_distance_utf8(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                                  std::size_t bound = 0) noexcept {
+std::size_t hamming_distance_utf8( //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, std::size_t bound = 0) noexcept {
     return sz_hamming_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound);
 }
 
@@ -3800,8 +3805,9 @@ std::size_t hamming_distance_utf8(basic_string_slice<char_type_> const &a, basic
  *  @see    sz_edit_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t hamming_distance_utf8(basic_string<char_type_, allocator_type_> const &a,
-                                  basic_string<char_type_, allocator_type_> const &b, std::size_t bound = 0) noexcept {
+std::size_t hamming_distance_utf8( //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b,
+    std::size_t bound = 0) noexcept {
     return ashvardanian::stringzilla::hamming_distance_utf8(a.view(), b.view(), bound);
 }
 
@@ -3810,8 +3816,9 @@ std::size_t hamming_distance_utf8(basic_string<char_type_, allocator_type_> cons
  *  @see    sz_edit_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t edit_distance(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                          std::size_t bound = 0, allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
+std::size_t edit_distance( //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, std::size_t bound = SZ_SIZE_MAX,
+    allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
     std::size_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
             result = sz_edit_distance(a.data(), a.size(), b.data(), b.size(), bound, &alloc);
@@ -3826,8 +3833,9 @@ std::size_t edit_distance(basic_string_slice<char_type_> const &a, basic_string_
  *  @see    sz_edit_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::size_t edit_distance(basic_string<char_type_, allocator_type_> const &a,
-                          basic_string<char_type_, allocator_type_> const &b, std::size_t bound = 0) noexcept(false) {
+std::size_t edit_distance(                                                                                  //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
+    std::size_t bound = SZ_SIZE_MAX) noexcept(false) {
     return ashvardanian::stringzilla::edit_distance(a.view(), b.view(), bound, a.get_allocator());
 }
 
@@ -3836,9 +3844,9 @@ std::size_t edit_distance(basic_string<char_type_, allocator_type_> const &a,
  *  @see    sz_edit_distance_utf8
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t edit_distance_utf8(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                               std::size_t bound = 0,
-                               allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
+std::size_t edit_distance_utf8(                                                       //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
+    std::size_t bound = SZ_SIZE_MAX, allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
     std::size_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
             result = sz_edit_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &alloc);
@@ -3853,9 +3861,9 @@ std::size_t edit_distance_utf8(basic_string_slice<char_type_> const &a, basic_st
  *  @see    sz_edit_distance_utf8
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::size_t edit_distance_utf8(basic_string<char_type_, allocator_type_> const &a,
-                               basic_string<char_type_, allocator_type_> const &b,
-                               std::size_t bound = 0) noexcept(false) {
+std::size_t edit_distance_utf8(                                                                             //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
+    std::size_t bound = SZ_SIZE_MAX) noexcept(false) {
     return ashvardanian::stringzilla::edit_distance_utf8(a.view(), b.view(), bound, a.get_allocator());
 }
 
@@ -3864,9 +3872,10 @@ std::size_t edit_distance_utf8(basic_string<char_type_, allocator_type_> const &
  *  @see    sz_alignment_score
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                               std::int8_t const (&subs)[256][256], std::int8_t gap = -1,
-                               allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
+std::ptrdiff_t alignment_score(                                                       //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
+    std::int8_t const (&subs)[256][256], std::int8_t gap = -1,
+    allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
 
     static_assert(sizeof(sz_error_cost_t) == sizeof(std::int8_t), "sz_error_cost_t must be 8-bit.");
     static_assert(std::is_signed<sz_error_cost_t>() == std::is_signed<std::int8_t>(),
@@ -3886,9 +3895,9 @@ std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_st
  *  @see    sz_alignment_score
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::ptrdiff_t alignment_score(basic_string<char_type_, allocator_type_> const &a,
-                               basic_string<char_type_, allocator_type_> const &b, //
-                               std::int8_t const (&subs)[256][256], std::int8_t gap = -1) noexcept(false) {
+std::ptrdiff_t alignment_score(                                                                             //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
+    std::int8_t const (&subs)[256][256], std::int8_t gap = -1) noexcept(false) {
     return ashvardanian::stringzilla::alignment_score(a.view(), b.view(), subs, gap, a.get_allocator());
 }
 
@@ -3900,8 +3909,9 @@ std::ptrdiff_t alignment_score(basic_string<char_type_, allocator_type_> const &
  *  @param  alphabet   A string of characters to choose from.
  */
 template <typename char_type_, typename generator_type_>
-void randomize(basic_string_slice<char_type_> string, generator_type_ &generator,
-               string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+void randomize( //
+    basic_string_slice<char_type_> string, generator_type_ &generator,
+    string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
     static_assert(!std::is_const<char_type_>::value, "The string must be mutable.");
     sz_random_generator_t generator_callback = &_call_random_generator<generator_type_>;
     sz_generate(alphabet.data(), alphabet.size(), string.data(), string.size(), generator_callback, &generator);
@@ -3921,8 +3931,9 @@ void transform(basic_string_slice<char_type_> string, basic_look_up_table<char_t
  *  @brief  Maps all characters in the current string into another buffer using the provided lookup table.
  */
 template <typename char_type_>
-void transform(basic_string_slice<char_type_ const> source, basic_look_up_table<char_type_> const &table,
-               char_type_ *target) noexcept {
+void transform( //
+    basic_string_slice<char_type_ const> source, basic_look_up_table<char_type_> const &table,
+    char_type_ *target) noexcept {
     static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
     sz_look_up_transform((sz_cptr_t)source.data(), (sz_size_t)source.size(), (sz_cptr_t)table.raw(), (sz_ptr_t)target);
 }
@@ -4007,8 +4018,9 @@ void sorted_order(objects_type_ const *begin, objects_type_ const *end, sorted_i
  *  @see    sz_hashes
  */
 template <std::size_t bitset_bits_, typename char_type_>
-void hashes_fingerprint(basic_string_slice<char_type_> const &str, std::size_t window_length,
-                        std::bitset<bitset_bits_> &fingerprint) noexcept {
+void hashes_fingerprint( //
+    basic_string_slice<char_type_> const &str, std::size_t window_length,
+    std::bitset<bitset_bits_> &fingerprint) noexcept {
     constexpr std::size_t fingerprint_bytes = sizeof(std::bitset<bitset_bits_>);
     return sz_hashes_fingerprint(str.data(), str.size(), window_length, (sz_ptr_t)&fingerprint, fingerprint_bytes);
 }
@@ -4018,8 +4030,8 @@ void hashes_fingerprint(basic_string_slice<char_type_> const &str, std::size_t w
  *  @see    sz_hashes
  */
 template <std::size_t bitset_bits_, typename char_type_>
-std::bitset<bitset_bits_> hashes_fingerprint(basic_string_slice<char_type_> const &str,
-                                             std::size_t window_length) noexcept {
+std::bitset<bitset_bits_> hashes_fingerprint( //
+    basic_string_slice<char_type_> const &str, std::size_t window_length) noexcept {
     std::bitset<bitset_bits_> fingerprint;
     ashvardanian::stringzilla::hashes_fingerprint(str, window_length, fingerprint);
     return fingerprint;
@@ -4040,8 +4052,8 @@ std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename objects_type_, typename string_extractor_>
-std::vector<sorted_idx_t> sorted_order(objects_type_ const *begin, objects_type_ const *end,
-                                       string_extractor_ &&extractor) noexcept(false) {
+std::vector<sorted_idx_t> sorted_order( //
+    objects_type_ const *begin, objects_type_ const *end, string_extractor_ &&extractor) noexcept(false) {
     std::vector<sorted_idx_t> order(end - begin);
     sorted_order(begin, end, order.data(), std::forward<string_extractor_>(extractor));
     return order;
@@ -4054,8 +4066,8 @@ std::vector<sorted_idx_t> sorted_order(objects_type_ const *begin, objects_type_
  */
 template <typename string_like_type_>
 std::vector<sorted_idx_t> sorted_order(string_like_type_ const *begin, string_like_type_ const *end) noexcept(false) {
-    static_assert(std::is_convertible<string_like_type_, string_view>::value,
-                  "The type must be convertible to string_view.");
+    static_assert( //
+        std::is_convertible<string_like_type_, string_view>::value, "The type must be convertible to string_view.");
     return sorted_order(begin, end, [](string_like_type_ const &s) -> string_view { return s; });
 }
 
@@ -4066,8 +4078,8 @@ std::vector<sorted_idx_t> sorted_order(string_like_type_ const *begin, string_li
  */
 template <typename string_like_type_>
 std::vector<sorted_idx_t> sorted_order(std::vector<string_like_type_> const &array) noexcept(false) {
-    static_assert(std::is_convertible<string_like_type_, string_view>::value,
-                  "The type must be convertible to string_view.");
+    static_assert( //
+        std::is_convertible<string_like_type_, string_view>::value, "The type must be convertible to string_view.");
     return sorted_order(array.data(), array.data() + array.size(),
                         [](string_like_type_ const &s) -> string_view { return s; });
 }
