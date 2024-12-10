@@ -408,7 +408,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
         /* If the minimum distance in this row exceeded the bound, return early */                                    \
         if (min_distance >= bound) {                                                                                  \
             alloc->free(buffer, buffer_length, alloc->handle);                                                        \
-            return bound;                                                                                             \
+            return longer_length + 1;                                                                                 \
         }                                                                                                             \
         _distance_t *temporary = previous_distances;                                                                  \
         previous_distances = current_distances;                                                                       \
@@ -416,7 +416,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     }                                                                                                                 \
     sz_size_t result = previous_distances[shorter_length];                                                            \
     alloc->free(buffer, buffer_length, alloc->handle);                                                                \
-    return sz_min_of_two(result, bound);
+    return result;
 
     // Dispatch the actual computation.
     if (!bound) {
@@ -735,7 +735,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_ice( //
 
         // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
         __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
-        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return SZ_SIZE_MAX;
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return longer_length + 1;
     }
 
     // Now let's handle the anti-diagonal band of the matrix, between the top and bottom triangles.
@@ -766,7 +766,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_ice( //
 
         // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
         __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
-        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return SZ_SIZE_MAX;
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return longer_length + 1;
     }
 
     // Now let's handle the bottom right triangle.
@@ -790,7 +790,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_ice( //
 
         // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
         __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
-        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return SZ_SIZE_MAX;
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return longer_length + 1;
 
         // In every following iterations we take use a shorter prefix of each register,
         // but we don't need to update the `next_diagonal_mask` anymore... except for the early exit.
