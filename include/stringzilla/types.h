@@ -800,17 +800,6 @@ SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return __builtin_bswap
 SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap32(val); }
 #endif
 
-/*
- */
-SZ_INTERNAL sz_u16_t _sz_u16_mask_until(sz_size_t n) { return (0x0001u << n) - 1u; }
-SZ_INTERNAL sz_u32_t _sz_u32_mask_until(sz_size_t n) { return (0x00000001u << n) - 1u; }
-SZ_INTERNAL sz_u64_t _sz_u64_mask_until(sz_size_t n) { return (0x0000000000000001ull << n) - 1ull; }
-SZ_INTERNAL sz_u16_t _sz_u16_clamp_mask_until(sz_size_t n) { return n < 16 ? _sz_u16_mask_until(n) : 0xFFFFu; }
-SZ_INTERNAL sz_u32_t _sz_u32_clamp_mask_until(sz_size_t n) { return n < 32 ? _sz_u32_mask_until(n) : 0xFFFFFFFFu; }
-SZ_INTERNAL sz_u64_t _sz_u64_clamp_mask_until(sz_size_t n) {
-    return n < 64 ? _sz_u64_mask_until(n) : 0xFFFFFFFFFFFFFFFFull;
-}
-
 SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
 
 /**
@@ -864,6 +853,22 @@ SZ_INTERNAL sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x 
 
 /** @brief  Branchless minimum function for two signed 32-bit integers. */
 SZ_INTERNAL sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x - y) & (x - y) >> 31); }
+
+/*  In AVX-512 we actively use masked operations and the "K mask registers".
+ *  Producing a mask for the first N elements of a sequence can be done using the `1 << N - 1` idiom.
+ *  It, however, induces undefined behavior if `N == 64` or `N == 32` on 64-bit or 32-bit systems respectively.
+ *  Alternatively, the BZHI instruction can be used to clear the bits above N.
+ */
+#if SZ_USE_SKYLAKE || SZ_USE_ICE
+SZ_INTERNAL __mmask16 _sz_u16_mask_until(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, n); }
+SZ_INTERNAL __mmask32 _sz_u32_mask_until(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, n); }
+SZ_INTERNAL __mmask64 _sz_u64_mask_until(sz_size_t n) { return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, n); }
+SZ_INTERNAL __mmask16 _sz_u16_clamp_mask_until(sz_size_t n) { return n < 16 ? _sz_u16_mask_until(n) : 0xFFFFu; }
+SZ_INTERNAL __mmask32 _sz_u32_clamp_mask_until(sz_size_t n) { return n < 32 ? _sz_u32_mask_until(n) : 0xFFFFFFFFu; }
+SZ_INTERNAL __mmask64 _sz_u64_clamp_mask_until(sz_size_t n) {
+    return n < 64 ? _sz_u64_mask_until(n) : 0xFFFFFFFFFFFFFFFFull;
+}
+#endif
 
 /**
  *  @brief  Byte-level equality comparison between two 64-bit integers.
