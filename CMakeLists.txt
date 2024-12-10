@@ -111,18 +111,8 @@ endif()
 
 # Configuration
 include(GNUInstallDirs)
-set(STRINGZILLA_TARGET_NAME ${PROJECT_NAME})
 set(STRINGZILLA_INCLUDE_BUILD_DIR "${PROJECT_SOURCE_DIR}/include/")
 set(STRINGZILLA_INCLUDE_INSTALL_DIR "${CMAKE_INSTALL_INCLUDEDIR}")
-
-# Define our library
-add_library(${STRINGZILLA_TARGET_NAME} INTERFACE)
-add_library(${PROJECT_NAME}::${STRINGZILLA_TARGET_NAME} ALIAS ${STRINGZILLA_TARGET_NAME})
-
-target_include_directories(
-  ${STRINGZILLA_TARGET_NAME}
-  INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}>
-  $<INSTALL_INTERFACE:include>)
 
 
 if(${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER 3.13)
@@ -142,7 +132,6 @@ function(set_compiler_flags target cpp_standard target_arch)
   get_target_property(target_type ${target} TYPE)
 
   target_include_directories(${target} PRIVATE scripts)
-  target_link_libraries(${target} PRIVATE ${STRINGZILLA_TARGET_NAME})
 
   # Set output directory for single-configuration generators (like Make)
   set_target_properties(${target} PROPERTIES
@@ -278,6 +267,7 @@ endfunction()
 function(define_launcher exec_name source cpp_standard target_arch)
   add_executable(${exec_name} ${source})
   set_compiler_flags(${exec_name} ${cpp_standard} "${target_arch}")
+  target_link_libraries(${exec_name} PRIVATE stringzilla_header)
   add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction()
 
@@ -319,10 +309,20 @@ if(${STRINGZILLA_BUILD_TEST})
   endif()
 endif()
 
+# Define our libraries, first the header-only version
+add_library(stringzilla_header INTERFACE)
+add_library(${PROJECT_NAME}::stringzilla_header ALIAS stringzilla_header)
+target_include_directories(
+  stringzilla_header
+  INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}>
+  $<INSTALL_INTERFACE:include>)
+
+
 if(${STRINGZILLA_BUILD_SHARED})
 
   function(define_shared target)
     add_library(${target} SHARED c/lib.c)
+    add_library(${PROJECT_NAME}::${target} ALIAS ${target})
 
     set_target_properties(${target} PROPERTIES
       VERSION ${PROJECT_VERSION}
