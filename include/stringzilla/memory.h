@@ -1256,7 +1256,7 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
 #pragma region Core Functionality
 
 SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_ICE
+#if SZ_USE_SKYLAKE
     sz_copy_skylake(target, source, length);
 #elif SZ_USE_HASWELL
     sz_copy_haswell(target, source, length);
@@ -1268,7 +1268,7 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 }
 
 SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_ICE
+#if SZ_USE_SKYLAKE
     sz_move_skylake(target, source, length);
 #elif SZ_USE_HASWELL
     sz_move_haswell(target, source, length);
@@ -1280,7 +1280,7 @@ SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 }
 
 SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-#if SZ_USE_ICE
+#if SZ_USE_SKYLAKE
     sz_fill_skylake(target, length, value);
 #elif SZ_USE_HASWELL
     sz_fill_haswell(target, length, value);
