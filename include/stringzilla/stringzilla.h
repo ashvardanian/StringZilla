@@ -1941,7 +1941,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr
     if (!h_length) return SZ_NULL_CHAR;
     sz_cptr_t const h_end = h + h_length;
 
-#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevety.
+#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevity.
 #if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)h & 7ull) && h < h_end; ++h)
         if (*h == *n) return h;
@@ -1978,7 +1978,7 @@ sz_cptr_t sz_rfind_byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
     // Reposition the `h` pointer to the end, as we will be walking backwards.
     h = h + h_length - 1;
 
-#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevety.
+#if !SZ_DETECT_BIG_ENDIAN    // Use SWAR only on little-endian platforms for brevity.
 #if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
     for (; ((sz_size_t)(h + 1) & 7ull) && h >= h_start; --h)
         if (*h == *n) return h;
@@ -2464,9 +2464,9 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
             sz_size_t cost_if_deletion_or_insertion = sz_min_of_two(current_distances[i], current_distances[i + 1]) + 1;
             next_distances[i + 1] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
         }
-        // Don't forget to populate the first row and the fiest column of the Levenshtein matrix.
+        // Don't forget to populate the first row and the first column of the Levenshtein matrix.
         next_distances[0] = next_distances[next_skew_diagonal_length - 1] = next_skew_diagonal_index;
-        // Perform a circular rotarion of those buffers, to reuse the memory.
+        // Perform a circular rotation of those buffers, to reuse the memory.
         sz_size_t *temporary = previous_distances;
         previous_distances = current_distances;
         current_distances = next_distances;
@@ -2486,7 +2486,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
             sz_size_t cost_if_deletion_or_insertion = sz_min_of_two(current_distances[i], current_distances[i + 1]) + 1;
             next_distances[i] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
         }
-        // Perform a circular rotarion of those buffers, to reuse the memory, this time, with a shift,
+        // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
         // dropping the first element in the current array.
         sz_size_t *temporary = previous_distances;
         previous_distances = current_distances + 1;
@@ -3486,25 +3486,24 @@ SZ_PUBLIC void sz_string_free(sz_string_t *string, sz_memory_allocator_t *alloca
     sz_string_init(string);
 }
 
-// When overriding libc, disable optimisations for this function beacuse MSVC will optimize the loops into a memset.
+// When overriding libc, disable optimizations for this function because MSVC will optimize the loops into a memset.
 // Which then causes a stack overflow due to infinite recursion (memset -> sz_fill_serial -> memset).
 #if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
 #pragma optimize("", off)
 #endif
 SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    sz_ptr_t end = target + length;
     // Dealing with short strings, a single sequential pass would be faster.
     // If the size is larger than 2 words, then at least 1 of them will be aligned.
     // But just one aligned word may not be worth SWAR.
     if (length < SZ_SWAR_THRESHOLD)
-        while (target != end) *(target++) = value;
+        while (length--) *(target++) = value;
 
     // In case of long strings, skip unaligned bytes, and then fill the rest in 64-bit chunks.
     else {
         sz_u64_t value64 = (sz_u64_t)value * 0x0101010101010101ull;
-        while ((sz_size_t)target & 7ull) *(target++) = value;
-        while (target + 8 <= end) *(sz_u64_t *)target = value64, target += 8;
-        while (target != end) *(target++) = value;
+        while ((sz_size_t)target & 7ull) *(target++) = value, length--;
+        while (length >= 8) *(sz_u64_t *)target = value64, target += 8, length -= 8;
+        while (length--) *(target++) = value;
     }
 }
 #if defined(_MSC_VER) && defined(SZ_OVERRIDE_LIBC) && SZ_OVERRIDE_LIBC
@@ -3512,6 +3511,13 @@ SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value) 
 #endif
 
 SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    // The most typical implementation of `memcpy` suffers from Undefined Behavior:
+    //
+    //   for (char const *end = source + length; source < end; source++) *target++ = *source;
+    //
+    // As NULL pointer arithmetic is undefined for calls like `memcpy(NULL, NULL, 0)`.
+    // That's mitigated in C2y with the N3322 proposal, but our solution uses a design, that has no such issues.
+    // https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
 #if SZ_USE_MISALIGNED_LOADS
     while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)source, target += 8, source += 8, length -= 8;
 #endif
@@ -5215,7 +5221,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
         }
         // Don't forget to populate the first row and the fiest column of the Levenshtein matrix.
         next_distances[0] = next_distances[next_skew_diagonal_length - 1] = (sz_u16_t)next_skew_diagonal_index;
-        // Perform a circular rotarion of those buffers, to reuse the memory.
+        // Perform a circular rotation of those buffers, to reuse the memory.
         sz_u16_t *temporary = previous_distances;
         previous_distances = current_distances;
         current_distances = next_distances;
@@ -5257,7 +5263,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_avx512( //
             i += register_length;
         }
 
-        // Perform a circular rotarion of those buffers, to reuse the memory, this time, with a shift,
+        // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
         // dropping the first element in the current array.
         sz_u16_t *temporary = previous_distances;
         previous_distances = current_distances + 1;

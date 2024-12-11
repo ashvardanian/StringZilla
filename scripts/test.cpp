@@ -153,13 +153,22 @@ inline void expect_equality(char const *a, char const *b, std::size_t size) {
  *  Uses a large heap-allocated buffer to ensure that operations optimized for @b larger-than-L2-cache memory
  *  regions are tested. Uses a combination of deterministic and random tests with uniform and exponential distributions.
  */
-static void test_memory_utilities(std::size_t experiments = 1024ull * 1024ull,
-                                  std::size_t max_l2_size = 1024ull * 1024ull) {
+static void test_memory_utilities( //
+    std::size_t experiments = 1024ull * 1024ull, std::size_t max_l2_size = 1024ull * 1024ull) {
 
     // We will be mirroring the operations on both standard and StringZilla strings.
     std::string text_stl(max_l2_size, '-');
     std::string text_sz(max_l2_size, '-');
     expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
+
+    // The traditional `memset` and `memcpy` functions are undefined for zero-length buffers and NULL pointers
+    // for older C standards.  However, with the N3322 proposal for C2y, that issue has been resolved.
+    // https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
+    //
+    // Let's make sure, that our versions don't trigger any undefined behavior.
+    sz::memset(NULL, 0, 0);
+    sz::memcpy(NULL, NULL, 0);
+    sz::memmove(NULL, NULL, 0);
 
     // First start with simple deterministic tests.
     // Let's use `memset` to fill the strings with a pattern like "122333444455555...00000000000011111111111..."
