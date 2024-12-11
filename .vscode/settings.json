@@ -268,7 +268,8 @@
     "xtree": "cpp",
     "xutility": "cpp",
     "errno.h": "c",
-    "text_encoding": "cpp"
+    "text_encoding": "cpp",
+    "ranges": "cpp"
   },
   "python.pythonPath": "~/miniconda3/bin/python"
 }

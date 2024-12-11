@@ -38,7 +38,7 @@ tracked_binary_functions_t distance_functions() {
     });
     auto wrap_sz_distance = [alloc](auto function) mutable -> binary_function_t {
         return binary_function_t([function, alloc](std::string_view a, std::string_view b) mutable -> std::size_t {
-            return function(a.data(), a.length(), b.data(), b.length(), (sz_size_t)0, &alloc);
+            return function(a.data(), a.length(), b.data(), b.length(), SZ_SIZE_MAX, &alloc);
         });
     };
     auto wrap_sz_scoring = [alloc, costs_ptr](auto function) mutable -> binary_function_t {
@@ -113,10 +113,24 @@ void bench_similarity_on_input_data(int argc, char const **argv) {
     std::printf("Benchmarking on real words:\n");
     bench_similarity(dataset.tokens);
 
+    struct size_range_t {
+        std::size_t min_length;
+        std::size_t max_length;
+    };
+
     // Run benchmarks on tokens of different length
-    for (std::size_t token_length : {20}) {
-        std::printf("Benchmarking on real words of length %zu and longer:\n", token_length);
-        bench_similarity(filter_by_length(dataset.tokens, token_length, std::greater_equal<std::size_t> {}));
+    for (size_range_t size : {
+             size_range_t {1, 16},
+             size_range_t {17, 32},
+             size_range_t {33, 64},
+             size_range_t {65, 128},
+         }) {
+        auto filtered_dataset = filter_by_length(dataset.tokens, size.min_length, std::greater_equal<std::size_t> {});
+        filtered_dataset = filter_by_length(filtered_dataset, size.max_length, std::greater_equal<std::size_t> {});
+        if (filtered_dataset.size() < 3) continue;
+        std::printf("Benchmarking on %zu real words of length %zu to %zu:\n", filtered_dataset.size(), size.min_length,
+                    size.max_length);
+        bench_similarity(std::move(filtered_dataset));
     }
 }
 

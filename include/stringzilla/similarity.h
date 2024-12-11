@@ -639,9 +639,12 @@ SZ_PUBLIC sz_size_t sz_hamming_distance_utf8_serial( //
  *  @brief  Computes the edit distance between two very short byte-strings using the AVX-512VBMI extensions.
  *
  *  Applies to string lengths up to 63, and evaluates at most (63 * 2 + 1 = 127) diagonals, or just as many loop
- * cycles. Supports an early exit, if the distance is bounded. Keeps all of the data and Levenshtein matrices skew
- * diagonal in just a couple of registers. Benefits from the @b `vpermb` instructions, that can rotate the bytes
- * across the entire ZMM register.
+ *  cycles. Supports an early exit, if the distance is bounded. Keeps all of the data and Levenshtein matrices skew
+ *  diagonal in just a couple of registers. Benefits from the @b `vpermb` instructions, that can rotate the bytes
+ *  across the entire ZMM register.
+ *
+ *? Bounds check, for inputs ranging from 33 to 64 bytes doesn't affect the performance at all.
+ *? It's also worth exploring `_mm512_alignr_epi8` and `_mm512_maskz_compress_epi8` for the shift.
  */
 SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_ice( //
     sz_cptr_t shorter, sz_size_t shorter_length,                     //
@@ -678,6 +681,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_ice( //
     bound_vec.zmm = _mm512_set1_epi8(bound <= 255 ? (sz_u8_t)bound : 255);
 
     // To simplify comparisons and traversals, we want to reverse the order of bytes in the shorter string.
+    shorter_vec.zmm = _mm512_setzero_si512(); //? To simplify debugging.
     for (sz_size_t i = 0; i != shorter_length; ++i) shorter_vec.u8s[63 - i] = shorter[i];
     shorter_rotated_vec.zmm = _mm512_permutexvar_epi8(rotate_right_vec.zmm, shorter_vec.zmm);
 

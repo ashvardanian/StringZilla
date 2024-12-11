@@ -367,11 +367,14 @@ if(${STRINGZILLA_BUILD_SHARED})
   define_shared(stringzilla_shared)
   target_compile_definitions(stringzilla_shared PRIVATE "SZ_AVOID_LIBC=0")
   target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
-
+  target_include_directories(stringzilla_shared PUBLIC include)
+  
+  
   # Try compiling a version without linking the LibC
   define_shared(stringzilla_bare)
   target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
   target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
+  target_include_directories(stringzilla_bare PUBLIC include)
 
   # Avoid built-ins on MSVC and other compilers, as that will cause compilation errors
   target_compile_options(stringzilla_bare PRIVATE

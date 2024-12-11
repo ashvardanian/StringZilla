@@ -110,7 +110,7 @@ tracked_unary_functions_t fill_functions(sz_cptr_t dataset_start_ptr, sz_ptr_t o
          })},
         {"sz_fill_serial", wrap_sz(sz_fill_serial)},
 #if SZ_USE_SKYLAKE
-        {"sz_fill_avx512", wrap_sz(sz_fill_skylake)},
+        {"sz_fill_skylake", wrap_sz(sz_fill_skylake)},
 #endif
 #if SZ_USE_HASWELL
         {"sz_fill_haswell", wrap_sz(sz_fill_haswell)},

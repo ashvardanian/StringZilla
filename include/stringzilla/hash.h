@@ -736,8 +736,8 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
     }
 }
 
-SZ_PUBLIC void sz_hashes_skylake(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step, //
-                                 sz_hash_callback_t callback, void *callback_handle) {
+SZ_PUBLIC void sz_hashes_ice(sz_cptr_t start, sz_size_t length, sz_size_t window_length, sz_size_t step, //
+                             sz_hash_callback_t callback, void *callback_handle) {
 
     if (length < window_length || !window_length) return;
     if (length < 4 * window_length) {
@@ -932,8 +932,8 @@ SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length) {
 
 SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
                           sz_hash_callback_t callback, void *callback_handle) {
-#if SZ_USE_SKYLAKE
-    sz_hashes_skylake(text, length, window_length, window_step, callback, callback_handle);
+#if SZ_USE_ICE
+    sz_hashes_ice(text, length, window_length, window_step, callback, callback_handle);
 #elif SZ_USE_HASWELL
     sz_hashes_haswell(text, length, window_length, window_step, callback, callback_handle);
 #else

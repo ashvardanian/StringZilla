@@ -55,8 +55,8 @@ tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width, st
     };
     std::string suffix = std::to_string(window_width) + ":step" + std::to_string(step);
     tracked_unary_functions_t result = {
-#if SZ_USE_SKYLAKE
-        {"sz_hashes_skylake:" + suffix, wrap_sz(sz_hashes_skylake)},
+#if SZ_USE_ICE
+        {"sz_hashes_ice:" + suffix, wrap_sz(sz_hashes_ice)},
 #endif
 #if SZ_USE_HASWELL
         {"sz_hashes_haswell:" + suffix, wrap_sz(sz_hashes_haswell)},

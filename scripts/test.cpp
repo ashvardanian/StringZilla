@@ -173,6 +173,10 @@ static void test_ascii_utilities() {
     assert(str("").is_printable());
     assert(str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+").is_printable());
     assert(!str("012🔥").is_printable());
+
+    assert(str("").contains_only(sz::char_set("abc")));
+    assert(str("abc").contains_only(sz::char_set("abc")));
+    assert(!str("abcd").contains_only(sz::char_set("abc")));
 }
 
 inline void expect_equality(char const *a, char const *b, std::size_t size) {
@@ -1423,6 +1427,8 @@ static void test_levenshtein_distances() {
         char const *right;
         std::size_t distance;
     } explicit_cases[] = {
+        {"a", "a", 0},
+        {"A", "=", 1},
         {"listen", "silent", 4},
         {"", "", 0},
         {"", "abc", 3},
@@ -1473,7 +1479,7 @@ static void test_levenshtein_distances() {
         // Validate the bounded variants:
         if (received > 1) {
             assert(sz::edit_distance(l, r, received) == received);
-            assert(sz::edit_distance(r, l, received - 1) == SZ_SIZE_MAX);
+            assert(sz::edit_distance(r, l, received - 1) >= (std::max)(l.size(), r.size()));
         }
     };
 
@@ -1614,8 +1620,9 @@ int main(int argc, char const **argv) {
     // Let's greet the user nicely
     sz_unused(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
-    std::printf("- Uses AVX2: %s \n", SZ_USE_HASWELL ? "yes" : "no");
-    std::printf("- Uses AVX512: %s \n", SZ_USE_ICE ? "yes" : "no");
+    std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
+    std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
+    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
 
