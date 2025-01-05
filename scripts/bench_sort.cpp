@@ -232,9 +232,9 @@ int main(int argc, char const **argv) {
         });
         expect_sorted(strings, permute_base);
 
-        bench_permute(
-            "hybrid_stable_sort_cpp", strings, permute_base,
-            [](strings_t const &strings, permute_t &permute) { hybrid_stable_sort_cpp(strings, permute.data()); });
+        bench_permute("hybrid_stable_sort_cpp", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+            hybrid_stable_sort_cpp(strings, permute.data());
+        });
         expect_sorted(strings, permute_new);
         expect_same(permute_base, permute_new);
     }
