@@ -66,14 +66,18 @@ void populate_from_file(std::string path, strings_t &strings,
     while (strings.size() < limit && std::getline(f, s, ' ')) strings.push_back(s);
 }
 
-constexpr size_t offset_in_word = 0;
+constexpr size_t offset_in_word = 4;
 
 static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     // What if we take up-to 4 first characters and the index
-    for (size_t i = 0; i != strings.size(); ++i)
-        std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
-                    std::min<std::size_t>(strings[order[i]].size(), 4ul));
+    for (size_t i = 0; i != strings.size(); ++i) {
+        size_t index = order[i];
+
+        for (size_t j = 0; j < std::min<std::size_t>(strings[(sz_size_t)index].size(), 4ul); ++j) {
+            std::memcpy((char *)&order[i] + offset_in_word + 3 - j, strings[(sz_size_t)index].c_str() + j, 1ul);
+        }
+    }
 
     std::sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
         char *i_bytes = (char *)&i;
@@ -91,9 +95,13 @@ static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     // What if we take up-to 4 first characters and the index
-    for (size_t i = 0; i != strings.size(); ++i)
-        std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
-                    std::min<std::size_t>(strings[order[i]].size(), 4ull));
+    for (size_t i = 0; i != strings.size(); ++i) {
+        size_t index = order[i];
+
+        for (size_t j = 0; j < std::min<std::size_t>(strings[(sz_size_t)index].size(), 4ul); ++j) {
+            std::memcpy((char *)&order[i] + offset_in_word + 3 - j, strings[(sz_size_t)index].c_str() + j, 1ul);
+        }
+    }
 
     std::stable_sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
         char *i_bytes = (char *)&i;
@@ -196,7 +204,7 @@ int main(int argc, char const **argv) {
         });
         expect_sorted(strings, permute_new);
 
-#if __linux__ && defined(_GNU_SOURCE)
+#if __linux__ && defined(_GNU_SOURCE) & !defined(__BIONIC__)
         bench_permute("qsort_r", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
             sz_sequence_t array;
             array.order = permute.data();
