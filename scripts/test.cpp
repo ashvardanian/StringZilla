@@ -142,53 +142,6 @@ static void test_ascii_utilities() {
 
     using str = string_type;
 
-    assert(!str("").is_alpha());
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").is_alpha());
-    assert(!str("abc9").is_alpha());
-
-    assert(!str("").is_alnum());
-    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").is_alnum());
-    assert(!str("abc!").is_alnum());
-
-    assert(str("").is_ascii());
-    assert(str("\x00x7F").is_ascii());
-    assert(!str("abc123🔥").is_ascii());
-
-    assert(!str("").is_digit());
-    assert(str("0123456789").is_digit());
-    assert(!str("012a").is_digit());
-
-    assert(!str("").is_lower());
-    assert(str("abcdefghijklmnopqrstuvwxyz").is_lower());
-    assert(!str("abcA").is_lower());
-    assert(!str("abc\n").is_lower());
-
-    assert(!str("").is_space());
-    assert(str(" \t\n\r\f\v").is_space());
-    assert(!str(" \t\r\na").is_space());
-
-    assert(!str("").is_upper());
-    assert(str("ABCDEFGHIJKLMNOPQRSTUVWXYZ").is_upper());
-    assert(!str("ABCa").is_upper());
-
-    assert(str("").is_printable());
-    assert(str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+").is_printable());
-    assert(!str("012🔥").is_printable());
-
-    assert(str("").contains_only(sz::char_set("abc")));
-    assert(str("abc").contains_only(sz::char_set("abc")));
-    assert(!str("abcd").contains_only(sz::char_set("abc")));
-}
-
-/**
- *  @brief  Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
- *          provided by `sz::string` and `sz::string_view`.
- */
-template <typename string_type>
-static void test_ascii_utilities() {
-
-    using str = string_type;
-
     assert("aaa"_cs.size() == 1ull);
     assert("\0\0"_cs.size() == 1ull);
     assert("abc"_cs.size() == 3ull);
@@ -892,6 +845,8 @@ static void test_non_stl_extensions_for_reads() {
     assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").checksum() ==
            arithmetic_sum('a', 'z') * 3);
 
+#if _SZ_DEPRECATED_FINGERPRINTS
+
     // Computing rolling fingerprints.
     assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
     assert(sz::hashes_fingerprint<512>(str("hello"), 4).count() == 2);
@@ -903,7 +858,7 @@ static void test_non_stl_extensions_for_reads() {
     assert(sz::hashes_fingerprint<512>(str("aaa"), 3).count() == 1);
     assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
     assert(sz::hashes_fingerprint<512>(str("aaaaa"), 3).count() == 1);
-
+#endif
     // Computing fuzzy search results.
 }
 

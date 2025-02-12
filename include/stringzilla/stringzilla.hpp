@@ -4019,7 +4019,7 @@ void sorted_order(objects_type_ const *begin, objects_type_ const *end, sorted_i
 }
 
 #if !SZ_AVOID_STL
-
+#if _SZ_DEPRECATED_FINGERPRINTS
 /**
  *  @brief  Computes the Rabin-Karp-like rolling binary fingerprint of a string.
  *  @see    sz_hashes
@@ -4052,6 +4052,7 @@ template <std::size_t bitset_bits_, typename char_type_>
 std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str, std::size_t window_length) noexcept {
     return ashvardanian::stringzilla::hashes_fingerprint<bitset_bits_>(str.view(), window_length);
 }
+#endif
 
 /**
  *  @brief  Computes the permutation of an array, that would lead to sorted order.
