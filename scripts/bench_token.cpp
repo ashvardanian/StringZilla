@@ -46,6 +46,7 @@ tracked_unary_functions_t hashing_functions() {
 }
 
 tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width, std::size_t step) {
+#if _SZ_DEPRECATED_FINGERPRINTS
     auto wrap_sz = [=](auto function) -> unary_function_t {
         return unary_function_t([function, window_width, step](std::string_view s) {
             sz_size_t mixed_hash = 0;
@@ -53,8 +54,10 @@ tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width, st
             return mixed_hash;
         });
     };
+#endif
     std::string suffix = std::to_string(window_width) + ":step" + std::to_string(step);
     tracked_unary_functions_t result = {
+#if _SZ_DEPRECATED_FINGERPRINTS
 #if SZ_USE_ICE
         {"sz_hashes_ice:" + suffix, wrap_sz(sz_hashes_ice)},
 #endif
@@ -62,6 +65,7 @@ tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width, st
         {"sz_hashes_haswell:" + suffix, wrap_sz(sz_hashes_haswell)},
 #endif
         {"sz_hashes_serial:" + suffix, wrap_sz(sz_hashes_serial)},
+#endif
     };
     return result;
 }

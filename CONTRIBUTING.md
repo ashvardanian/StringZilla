@@ -129,8 +129,8 @@ Using modern syntax, this is how you build and run the test suite:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug -B build_debug
-cmake --build build_debug --config Debug          # Which will produce the following targets:
-build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
+cmake --build build_debug --config Debug      # Which will produce the following targets:
+build_debug/stringzilla_test_cpp20            # Unit test for the entire library compiled for current hardware
 build_debug/stringzilla_test_cpp20_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
 build_debug/stringzilla_test_cpp20_serial     # Arm variant compiled without Neon
 ```

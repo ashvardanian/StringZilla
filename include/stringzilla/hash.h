@@ -78,11 +78,6 @@ SZ_PUBLIC sz_u64_t sz_checksum_serial(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length);
 
-/** @copydoc sz_hashes */
-SZ_PUBLIC void sz_hashes_serial(                                                      //
-    sz_cptr_t text, sz_size_t length, sz_size_t window_length, sz_size_t window_step, //
-    sz_hash_callback_t callback, void *callback_handle);
-
 /** @copydoc sz_generate */
 SZ_PUBLIC void sz_generate_serial( //
     sz_cptr_t alphabet, sz_size_t cardinality, sz_ptr_t text, sz_size_t length, sz_random_generator_t generate,
@@ -261,7 +256,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_haswell(sz_cptr_t text, sz_size_t length) {
             text_vec.ymm = _mm256_lddqu_si256((__m256i const *)text);
             sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
         }
-        // Accumulating 256 bits is harders, as we need to extract the 128-bit sums first.
+        // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
         __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
         __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
         __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
@@ -291,7 +286,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_haswell(sz_cptr_t text, sz_size_t length) {
                 sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
             }
         }
-        // When the biffer is huge, we can traverse it in 2 directions.
+        // When the buffer is huge, we can traverse it in 2 directions.
         else {
             sz_u256_vec_t text_reversed_vec, sums_reversed_vec;
             sums_reversed_vec.ymm = _mm256_setzero_si256();
@@ -312,7 +307,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_haswell(sz_cptr_t text, sz_size_t length) {
         // Handle the tail
         while (tail_length--) result += *text++;
 
-        // Accumulating 256 bits is harders, as we need to extract the 128-bit sums first.
+        // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
         __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
         __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
         __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);

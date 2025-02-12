@@ -224,7 +224,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
 
     impl->edit_distance = sz_edit_distance_serial;
     impl->alignment_score = sz_alignment_score_serial;
-    impl->hashes = sz_hashes_serial;
+    impl->hashes = 0;
 
 #if SZ_USE_HASWELL
     if (caps & sz_cap_haswell_k) {
