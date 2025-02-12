@@ -725,12 +725,12 @@ haystack.compare(needle) == 1; // Or `haystack <=> needle` in C++ 20 and beyond
 StringZilla also provides string literals for automatic type resolution, [similar to STL][stl-literal]:
 
 ```cpp
-using sz::literals::operator""_sz;
+using sz::literals::operator""_sv;
 using std::literals::operator""sv;
 
 auto a = "some string"; // char const *
 auto b = "some string"sv; // std::string_view
-auto b = "some string"_sz; // sz::string_view
+auto b = "some string"_sv; // sz::string_view
 ```
 
 [stl-literal]: https://en.cppreference.com/w/cpp/string/basic_string_view/operator%22%22sv
@@ -888,7 +888,7 @@ str("a:b").back(-2) == ":b"; // similar to Python's `"a:b"[-2:]`
 str("a:b").sub(1, -1) == ":"; // similar to Python's `"a:b"[1:-1]`
 str("a:b").sub(-2, -1) == ":"; // similar to Python's `"a:b"[-2:-1]`
 str("a:b").sub(-2, 1) == ""; // similar to Python's `"a:b"[-2:1]`
-"a:b"_sz[{-2, -1}] == ":"; // works on views and overloads `operator[]`
+"a:b"_sv[{-2, -1}] == ":"; // works on views and overloads `operator[]`
 ```
 
 Assuming StringZilla is a header-only library you can use the full API in some translation units and gradually transition to safer restricted API in others.
@@ -1197,8 +1197,10 @@ __`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
 > This may affect the type resolution system on obscure hardware platforms. 
 > Moreover, one may let `stringzilla` override the common symbols like the `memcpy` and `memset` with its own implementations.
 > In that case you can use the [`LD_PRELOAD` trick][ld-preload-trick] to prioritize it's symbols over the ones from the LibC and accelerate existing string-heavy applications without recompiling them.
+> It also adds a layer of security, as the `stringzilla` isn't [undefined for NULL inputs][redhat-memcpy-ub] like `memcpy(NULL, NULL, 0)`.
 
 [ld-preload-trick]: https://ashvardanian.com/posts/ld-preload-libsee
+[redhat-memcpy-ub]: https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
 
 __`SZ_AVOID_STL`__ and __`SZ_SAFETY_OVER_COMPATIBILITY`__:
 

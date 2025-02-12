@@ -122,7 +122,7 @@ def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     return compile_args, link_args, macros_args
 
 
-if sys.platform == "linux":
+if sys.platform == "linux" or sys.platform.startswith("freebsd"):
     compile_args, link_args, macros_args = linux_settings()
 
 elif sys.platform == "darwin":

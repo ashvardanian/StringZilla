@@ -39,7 +39,7 @@
 
 #define STRINGZILLA_VERSION_MAJOR 3
 #define STRINGZILLA_VERSION_MINOR 11
-#define STRINGZILLA_VERSION_PATCH 0
+#define STRINGZILLA_VERSION_PATCH 3
 
 #include "compare.h"      // `sz_equal`, `sz_order`
 #include "find.h"         // `sz_find`, `sz_find_charset`, `sz_rfind`

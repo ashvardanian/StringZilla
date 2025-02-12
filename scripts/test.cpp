@@ -46,7 +46,8 @@
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
-using sz::literals::operator""_sz;
+using sz::literals::operator""_sv; // for `sz::string_view`
+using sz::literals::operator""_cs; // for `sz::char_set`
 
 /*
  *  Instantiate all the templates to make the symbols visible and also check
@@ -58,7 +59,7 @@ template class std::basic_string_view<char>;
 template class sz::basic_string_slice<char>;
 template class std::basic_string<char>;
 template class sz::basic_string<char>;
-template class sz::basic_charset<char>;
+template class sz::basic_char_set<char>;
 
 template class std::vector<sz::string>;
 template class std::map<sz::string, int>;
@@ -179,6 +180,61 @@ static void test_ascii_utilities() {
     assert(!str("abcd").contains_only(sz::char_set("abc")));
 }
 
+/**
+ *  @brief  Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
+ *          provided by `sz::string` and `sz::string_view`.
+ */
+template <typename string_type>
+static void test_ascii_utilities() {
+
+    using str = string_type;
+
+    assert("aaa"_cs.size() == 1ull);
+    assert("\0\0"_cs.size() == 1ull);
+    assert("abc"_cs.size() == 3ull);
+    assert("a\0bc"_cs.size() == 4ull);
+
+    assert(!"abc"_cs.contains('\0'));
+    assert(str("bca").contains_only("abc"_cs));
+
+    assert(!str("").is_alpha());
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ").is_alpha());
+    assert(!str("abc9").is_alpha());
+
+    assert(!str("").is_alnum());
+    assert(str("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").is_alnum());
+    assert(!str("abc!").is_alnum());
+
+    assert(str("").is_ascii());
+    assert(str("\x00x7F").is_ascii());
+    assert(!str("abc123🔥").is_ascii());
+
+    assert(!str("").is_digit());
+    assert(str("0123456789").is_digit());
+    assert(!str("012a").is_digit());
+
+    assert(!str("").is_lower());
+    assert(str("abcdefghijklmnopqrstuvwxyz").is_lower());
+    assert(!str("abcA").is_lower());
+    assert(!str("abc\n").is_lower());
+
+    assert(!str("").is_space());
+    assert(str(" \t\n\r\f\v").is_space());
+    assert(!str(" \t\r\na").is_space());
+
+    assert(!str("").is_upper());
+    assert(str("ABCDEFGHIJKLMNOPQRSTUVWXYZ").is_upper());
+    assert(!str("ABCa").is_upper());
+
+    assert(str("").is_printable());
+    assert(str("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+").is_printable());
+    assert(!str("012🔥").is_printable());
+
+    assert(str("").contains_only("abc"_cs));
+    assert(str("abc").contains_only("abc"_cs));
+    assert(!str("abcd").contains_only("abc"_cs));
+}
+
 inline void expect_equality(char const *a, char const *b, std::size_t size) {
     if (std::memcmp(a, b, size) == 0) return;
     std::size_t mismatch_position = 0;
@@ -195,13 +251,22 @@ inline void expect_equality(char const *a, char const *b, std::size_t size) {
  *  Uses a large heap-allocated buffer to ensure that operations optimized for @b larger-than-L2-cache memory
  *  regions are tested. Uses a combination of deterministic and random tests with uniform and exponential distributions.
  */
-static void test_memory_utilities(std::size_t experiments = 1024ull * 1024ull,
-                                  std::size_t max_l2_size = 1024ull * 1024ull) {
+static void test_memory_utilities( //
+    std::size_t experiments = 1024ull * 1024ull, std::size_t max_l2_size = 1024ull * 1024ull) {
 
     // We will be mirroring the operations on both standard and StringZilla strings.
     std::string text_stl(max_l2_size, '-');
     std::string text_sz(max_l2_size, '-');
     expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
+
+    // The traditional `memset` and `memcpy` functions are undefined for zero-length buffers and NULL pointers
+    // for older C standards.  However, with the N3322 proposal for C2y, that issue has been resolved.
+    // https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
+    //
+    // Let's make sure, that our versions don't trigger any undefined behavior.
+    sz::memset(NULL, 0, 0);
+    sz::memcpy(NULL, NULL, 0);
+    sz::memmove(NULL, NULL, 0);
 
     // First start with simple deterministic tests.
     // Let's use `memset` to fill the strings with a pattern like "122333444455555...00000000000011111111111..."
@@ -871,9 +936,9 @@ void test_non_stl_extensions_for_updates() {
     assert_scoped(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
     assert_scoped(str s = "hello", s.replace_all("l", "1"), s == "he11o");
     assert_scoped(str s = "hello", s.replace_all("he", "al"), s == "alllo");
-    assert_scoped(str s = "hello", s.replace_all(sz::char_set("x"), "!"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all(sz::char_set("o"), "!"), s == "hell!");
-    assert_scoped(str s = "hello", s.replace_all(sz::char_set("ho"), "!"), s == "!ell!");
+    assert_scoped(str s = "hello", s.replace_all("x"_cs, "!"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all("o"_cs, "!"), s == "hell!");
+    assert_scoped(str s = "hello", s.replace_all("ho"_cs, "!"), s == "!ell!");
 
     // Shorter replacements.
     assert_scoped(str s = "hello", s.replace_all("xx", "x"), s == "hello");
@@ -881,8 +946,8 @@ void test_non_stl_extensions_for_updates() {
     assert_scoped(str s = "hello", s.replace_all("h", ""), s == "ello");
     assert_scoped(str s = "hello", s.replace_all("o", ""), s == "hell");
     assert_scoped(str s = "hello", s.replace_all("llo", "!"), s == "he!");
-    assert_scoped(str s = "hello", s.replace_all(sz::char_set("x"), ""), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all(sz::char_set("lo"), ""), s == "he");
+    assert_scoped(str s = "hello", s.replace_all("x"_cs, ""), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all("lo"_cs, ""), s == "he");
 
     // Longer replacements.
     assert_scoped(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
@@ -890,8 +955,8 @@ void test_non_stl_extensions_for_updates() {
     assert_scoped(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
     assert_scoped(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
     assert_scoped(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
-    assert_scoped(str s = "hello", s.replace_all(sz::char_set("x"), "xx"), s == "hello");
-    assert_scoped(str s = "hello", s.replace_all(sz::char_set("lo"), "lo"), s == "helololo");
+    assert_scoped(str s = "hello", s.replace_all("x"_cs, "xx"), s == "hello");
+    assert_scoped(str s = "hello", s.replace_all("lo"_cs, "lo"), s == "helololo");
 
     // Directly mapping bytes using a Look-Up Table.
     sz::look_up_table invert_case = sz::look_up_table::identity();
@@ -905,8 +970,8 @@ void test_non_stl_extensions_for_updates() {
     assert(str(str("a") | str("b")) == "ab");
     assert(str(str("a") | str("b") | str("ab")) == "abab");
 
-    assert(str(sz::concatenate("a"_sz, "b"_sz)) == "ab");
-    assert(str(sz::concatenate("a"_sz, "b"_sz, "c"_sz)) == "abc");
+    assert(str(sz::concatenate("a"_sv, "b"_sv)) == "ab");
+    assert(str(sz::concatenate("a"_sv, "b"_sv, "c"_sv)) == "abc");
 
     // Randomization.
     assert(str::random(0).empty());
@@ -1095,15 +1160,15 @@ static void test_updates(std::size_t repetitions = 1024) {
  */
 static void test_comparisons() {
     // Comparing relative order of the strings
-    assert("a"_sz.compare("a") == 0);
-    assert("a"_sz.compare("ab") == -1);
-    assert("ab"_sz.compare("a") == 1);
-    assert("a"_sz.compare("a\0"_sz) == -1);
-    assert("a\0"_sz.compare("a") == 1);
-    assert("a\0"_sz.compare("a\0"_sz) == 0);
-    assert("a"_sz == "a"_sz);
-    assert("a"_sz != "a\0"_sz);
-    assert("a\0"_sz == "a\0"_sz);
+    assert("a"_sv.compare("a") == 0);
+    assert("a"_sv.compare("ab") == -1);
+    assert("ab"_sv.compare("a") == 1);
+    assert("a"_sv.compare("a\0"_sv) == -1);
+    assert("a\0"_sv.compare("a") == 1);
+    assert("a\0"_sv.compare("a\0"_sv) == 0);
+    assert("a"_sv == "a"_sv);
+    assert("a"_sv != "a\0"_sv);
+    assert("a\0"_sv == "a\0"_sv);
 }
 
 /**
@@ -1132,57 +1197,57 @@ static void test_search() {
     assert(sz::string_view(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
            sz::string_view::npos);
 
-    assert("aabaa"_sz.remove_prefix("a") == "abaa");
-    assert("aabaa"_sz.remove_suffix("a") == "aaba");
-    assert("aabaa"_sz.lstrip(sz::char_set {"a"}) == "baa");
-    assert("aabaa"_sz.rstrip(sz::char_set {"a"}) == "aab");
-    assert("aabaa"_sz.strip(sz::char_set {"a"}) == "b");
+    assert("aabaa"_sv.remove_prefix("a") == "abaa");
+    assert("aabaa"_sv.remove_suffix("a") == "aaba");
+    assert("aabaa"_sv.lstrip("a"_cs) == "baa");
+    assert("aabaa"_sv.rstrip("a"_cs) == "aab");
+    assert("aabaa"_sv.strip("a"_cs) == "b");
 
     // Check more advanced composite operations
-    assert("abbccc"_sz.partition('b').before.size() == 1);
-    assert("abbccc"_sz.partition("bb").before.size() == 1);
-    assert("abbccc"_sz.partition("bb").match.size() == 2);
-    assert("abbccc"_sz.partition("bb").after.size() == 3);
-    assert("abbccc"_sz.partition("bb").before == "a");
-    assert("abbccc"_sz.partition("bb").match == "bb");
-    assert("abbccc"_sz.partition("bb").after == "ccc");
-    assert("abb ccc"_sz.partition(sz::whitespaces_set()).after == "ccc");
+    assert("abbccc"_sv.partition('b').before.size() == 1);
+    assert("abbccc"_sv.partition("bb").before.size() == 1);
+    assert("abbccc"_sv.partition("bb").match.size() == 2);
+    assert("abbccc"_sv.partition("bb").after.size() == 3);
+    assert("abbccc"_sv.partition("bb").before == "a");
+    assert("abbccc"_sv.partition("bb").match == "bb");
+    assert("abbccc"_sv.partition("bb").after == "ccc");
+    assert("abb ccc"_sv.partition(sz::whitespaces_set()).after == "ccc");
 
     // Check ranges of search matches
-    assert("hello"_sz.find_all("l").size() == 2);
-    assert("hello"_sz.rfind_all("l").size() == 2);
+    assert("hello"_sv.find_all("l").size() == 2);
+    assert("hello"_sv.rfind_all("l").size() == 2);
 
-    assert(""_sz.find_all(".", sz::include_overlaps_type {}).size() == 0);
-    assert(""_sz.find_all(".", sz::exclude_overlaps_type {}).size() == 0);
-    assert("."_sz.find_all(".", sz::include_overlaps_type {}).size() == 1);
-    assert("."_sz.find_all(".", sz::exclude_overlaps_type {}).size() == 1);
-    assert(".."_sz.find_all(".", sz::include_overlaps_type {}).size() == 2);
-    assert(".."_sz.find_all(".", sz::exclude_overlaps_type {}).size() == 2);
-    assert(""_sz.rfind_all(".", sz::include_overlaps_type {}).size() == 0);
-    assert(""_sz.rfind_all(".", sz::exclude_overlaps_type {}).size() == 0);
-    assert("."_sz.rfind_all(".", sz::include_overlaps_type {}).size() == 1);
-    assert("."_sz.rfind_all(".", sz::exclude_overlaps_type {}).size() == 1);
-    assert(".."_sz.rfind_all(".", sz::include_overlaps_type {}).size() == 2);
-    assert(".."_sz.rfind_all(".", sz::exclude_overlaps_type {}).size() == 2);
+    assert(""_sv.find_all(".", sz::include_overlaps_type {}).size() == 0);
+    assert(""_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 0);
+    assert("."_sv.find_all(".", sz::include_overlaps_type {}).size() == 1);
+    assert("."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 1);
+    assert(".."_sv.find_all(".", sz::include_overlaps_type {}).size() == 2);
+    assert(".."_sv.find_all(".", sz::exclude_overlaps_type {}).size() == 2);
+    assert(""_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 0);
+    assert(""_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 0);
+    assert("."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 1);
+    assert("."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 1);
+    assert(".."_sv.rfind_all(".", sz::include_overlaps_type {}).size() == 2);
+    assert(".."_sv.rfind_all(".", sz::exclude_overlaps_type {}).size() == 2);
 
-    assert("a.b.c.d"_sz.find_all(".").size() == 3);
-    assert("a.,b.,c.,d"_sz.find_all(".,").size() == 3);
-    assert("a.,b.,c.,d"_sz.rfind_all(".,").size() == 3);
-    assert("a.b,c.d"_sz.find_all(sz::char_set(".,")).size() == 3);
-    assert("a...b...c"_sz.rfind_all("..").size() == 4);
-    assert("a...b...c"_sz.rfind_all("..", sz::include_overlaps_type {}).size() == 4);
-    assert("a...b...c"_sz.rfind_all("..", sz::exclude_overlaps_type {}).size() == 2);
+    assert("a.b.c.d"_sv.find_all(".").size() == 3);
+    assert("a.,b.,c.,d"_sv.find_all(".,").size() == 3);
+    assert("a.,b.,c.,d"_sv.rfind_all(".,").size() == 3);
+    assert("a.b,c.d"_sv.find_all(".,"_cs).size() == 3);
+    assert("a...b...c"_sv.rfind_all("..").size() == 4);
+    assert("a...b...c"_sv.rfind_all("..", sz::include_overlaps_type {}).size() == 4);
+    assert("a...b...c"_sv.rfind_all("..", sz::exclude_overlaps_type {}).size() == 2);
 
-    auto finds = "a.b.c"_sz.find_all(sz::char_set("abcd")).template to<std::vector<std::string>>();
+    auto finds = "a.b.c"_sv.find_all("abcd"_cs).template to<std::vector<std::string>>();
     assert(finds.size() == 3);
     assert(finds[0] == "a");
 
-    auto rfinds = "a.b.c"_sz.rfind_all(sz::char_set("abcd")).template to<std::vector<std::string>>();
+    auto rfinds = "a.b.c"_sv.rfind_all("abcd"_cs).template to<std::vector<std::string>>();
     assert(rfinds.size() == 3);
     assert(rfinds[0] == "c");
 
     {
-        auto splits = ".a..c."_sz.split(sz::char_set(".")).template to<std::vector<std::string>>();
+        auto splits = ".a..c."_sv.split("."_cs).template to<std::vector<std::string>>();
         assert(splits.size() == 5);
         assert(splits[0] == "");
         assert(splits[1] == "a");
@@ -1190,36 +1255,36 @@ static void test_search() {
     }
 
     {
-        auto splits = "line1\nline2\nline3"_sz.split("line3").template to<std::vector<std::string>>();
+        auto splits = "line1\nline2\nline3"_sv.split("line3").template to<std::vector<std::string>>();
         assert(splits.size() == 2);
         assert(splits[0] == "line1\nline2\n");
         assert(splits[1] == "");
     }
 
-    assert(""_sz.split(".").size() == 1);
-    assert(""_sz.rsplit(".").size() == 1);
+    assert(""_sv.split(".").size() == 1);
+    assert(""_sv.rsplit(".").size() == 1);
 
-    assert("hello"_sz.split("l").size() == 3);
-    assert("hello"_sz.rsplit("l").size() == 3);
-    assert(*advanced("hello"_sz.split("l").begin(), 0) == "he");
-    assert(*advanced("hello"_sz.rsplit("l").begin(), 0) == "o");
-    assert(*advanced("hello"_sz.split("l").begin(), 1) == "");
-    assert(*advanced("hello"_sz.rsplit("l").begin(), 1) == "");
-    assert(*advanced("hello"_sz.split("l").begin(), 2) == "o");
-    assert(*advanced("hello"_sz.rsplit("l").begin(), 2) == "he");
+    assert("hello"_sv.split("l").size() == 3);
+    assert("hello"_sv.rsplit("l").size() == 3);
+    assert(*advanced("hello"_sv.split("l").begin(), 0) == "he");
+    assert(*advanced("hello"_sv.rsplit("l").begin(), 0) == "o");
+    assert(*advanced("hello"_sv.split("l").begin(), 1) == "");
+    assert(*advanced("hello"_sv.rsplit("l").begin(), 1) == "");
+    assert(*advanced("hello"_sv.split("l").begin(), 2) == "o");
+    assert(*advanced("hello"_sv.rsplit("l").begin(), 2) == "he");
 
-    assert("a.b.c.d"_sz.split(".").size() == 4);
-    assert("a.b.c.d"_sz.rsplit(".").size() == 4);
-    assert(*("a.b.c.d"_sz.split(".").begin()) == "a");
-    assert(*("a.b.c.d"_sz.rsplit(".").begin()) == "d");
-    assert(*advanced("a.b.c.d"_sz.split(".").begin(), 1) == "b");
-    assert(*advanced("a.b.c.d"_sz.rsplit(".").begin(), 1) == "c");
-    assert(*advanced("a.b.c.d"_sz.split(".").begin(), 3) == "d");
-    assert(*advanced("a.b.c.d"_sz.rsplit(".").begin(), 3) == "a");
-    assert("a.b.,c,d"_sz.split(".,").size() == 2);
-    assert("a.b,c.d"_sz.split(sz::char_set(".,")).size() == 4);
+    assert("a.b.c.d"_sv.split(".").size() == 4);
+    assert("a.b.c.d"_sv.rsplit(".").size() == 4);
+    assert(*("a.b.c.d"_sv.split(".").begin()) == "a");
+    assert(*("a.b.c.d"_sv.rsplit(".").begin()) == "d");
+    assert(*advanced("a.b.c.d"_sv.split(".").begin(), 1) == "b");
+    assert(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 1) == "c");
+    assert(*advanced("a.b.c.d"_sv.split(".").begin(), 3) == "d");
+    assert(*advanced("a.b.c.d"_sv.rsplit(".").begin(), 3) == "a");
+    assert("a.b.,c,d"_sv.split(".,").size() == 2);
+    assert("a.b,c.d"_sv.split(".,"_cs).size() == 4);
 
-    auto rsplits = ".a..c."_sz.rsplit(sz::char_set(".")).template to<std::vector<std::string>>();
+    auto rsplits = ".a..c."_sv.rsplit("."_cs).template to<std::vector<std::string>>();
     assert(rsplits.size() == 5);
     assert(rsplits[0] == "");
     assert(rsplits[1] == "c");
