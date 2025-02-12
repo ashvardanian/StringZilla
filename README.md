@@ -724,12 +724,12 @@ haystack.compare(needle) == 1; // Or `haystack <=> needle` in C++ 20 and beyond
 StringZilla also provides string literals for automatic type resolution, [similar to STL][stl-literal]:
 
 ```cpp
-using sz::literals::operator""_sz;
+using sz::literals::operator""_sv;
 using std::literals::operator""sv;
 
 auto a = "some string"; // char const *
 auto b = "some string"sv; // std::string_view
-auto b = "some string"_sz; // sz::string_view
+auto b = "some string"_sv; // sz::string_view
 ```
 
 [stl-literal]: https://en.cppreference.com/w/cpp/string/basic_string_view/operator%22%22sv
@@ -887,7 +887,7 @@ str("a:b").back(-2) == ":b"; // similar to Python's `"a:b"[-2:]`
 str("a:b").sub(1, -1) == ":"; // similar to Python's `"a:b"[1:-1]`
 str("a:b").sub(-2, -1) == ":"; // similar to Python's `"a:b"[-2:-1]`
 str("a:b").sub(-2, 1) == ""; // similar to Python's `"a:b"[-2:1]`
-"a:b"_sz[{-2, -1}] == ":"; // works on views and overloads `operator[]`
+"a:b"_sv[{-2, -1}] == ":"; // works on views and overloads `operator[]`
 ```
 
 Assuming StringZilla is a header-only library you can use the full API in some translation units and gradually transition to safer restricted API in others.

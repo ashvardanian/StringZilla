@@ -67,7 +67,7 @@ namespace ashvardanian {
 namespace stringzilla {
 
 template <typename>
-class basic_charset;
+class basic_char_set;
 template <typename>
 class basic_string_slice;
 template <typename, typename>
@@ -266,79 +266,85 @@ inline carray<64> const &base64() noexcept {
  *  @brief  A set of characters represented as a bitset with 256 slots.
  */
 template <typename char_type_ = char>
-class basic_charset {
+class basic_char_set {
     sz_charset_t bitset_;
 
   public:
     using char_type = char_type_;
 
-    basic_charset() noexcept {
+    constexpr basic_char_set() noexcept {
         // ! Instead of relying on the `sz_charset_init`, we have to reimplement it to support `constexpr`.
         bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
     }
-    explicit basic_charset(std::initializer_list<char_type> chars) noexcept : basic_charset() {
+    explicit constexpr basic_char_set(std::initializer_list<char_type> chars) noexcept : basic_char_set() {
         // ! Instead of relying on the `sz_charset_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
         for (auto c : chars) bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
     }
-    template <std::size_t count_characters>
-    explicit basic_charset(char_type const (&chars)[count_characters]) noexcept : basic_charset() {
-        static_assert(count_characters > 0, "Character array cannot be empty");
-        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+
+    explicit constexpr basic_char_set(char_type const *chars, std::size_t count_characters) noexcept
+        : basic_char_set() {
+        for (std::size_t i = 0; i < count_characters; ++i) {
             char_type c = chars[i];
             bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
         }
     }
 
     template <std::size_t count_characters>
-    explicit basic_charset(std::array<char_type, count_characters> const &chars) noexcept : basic_charset() {
+    explicit constexpr basic_char_set(std::array<char_type, count_characters> const &chars) noexcept
+        : basic_char_set() {
         static_assert(count_characters > 0, "Character array cannot be empty");
-        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+        for (std::size_t i = 0; i < count_characters; ++i) {
             char_type c = chars[i];
             bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
         }
     }
 
-    basic_charset(basic_charset const &other) noexcept : bitset_(other.bitset_) {}
-    basic_charset &operator=(basic_charset const &other) noexcept {
+    constexpr basic_char_set(basic_char_set const &other) noexcept : bitset_(other.bitset_) {}
+    constexpr basic_char_set &operator=(basic_char_set const &other) noexcept {
         bitset_ = other.bitset_;
         return *this;
     }
 
-    basic_charset operator|(basic_charset other) const noexcept {
-        basic_charset result = *this;
+    constexpr basic_char_set operator|(basic_char_set other) const noexcept {
+        basic_char_set result = *this;
         result.bitset_._u64s[0] |= other.bitset_._u64s[0], result.bitset_._u64s[1] |= other.bitset_._u64s[1],
             result.bitset_._u64s[2] |= other.bitset_._u64s[2], result.bitset_._u64s[3] |= other.bitset_._u64s[3];
-        return *this;
+        return result;
     }
 
-    inline basic_charset &add(char_type c) noexcept {
+    inline basic_char_set &add(char_type c) noexcept {
         sz_charset_add(&bitset_, sz_bitcast(sz_u8_t, c));
         return *this;
+    }
+    inline std::size_t size() const noexcept {
+        return                                                                      //
+            sz_u64_popcount(bitset_._u64s[0]) + sz_u64_popcount(bitset_._u64s[1]) + //
+            sz_u64_popcount(bitset_._u64s[2]) + sz_u64_popcount(bitset_._u64s[3]);
     }
     inline sz_charset_t &raw() noexcept { return bitset_; }
     inline sz_charset_t const &raw() const noexcept { return bitset_; }
     inline bool contains(char_type c) const noexcept { return sz_charset_contains(&bitset_, sz_bitcast(sz_u8_t, c)); }
-    inline basic_charset inverted() const noexcept {
-        basic_charset result = *this;
+    inline basic_char_set inverted() const noexcept {
+        basic_char_set result = *this;
         sz_charset_invert(&result.bitset_);
         return result;
     }
 };
 
-using char_set = basic_charset<char>;
+using char_set = basic_char_set<char>;
 
-inline char_set ascii_letters_set() { return char_set {ascii_letters()}; }
-inline char_set ascii_lowercase_set() { return char_set {ascii_lowercase()}; }
-inline char_set ascii_uppercase_set() { return char_set {ascii_uppercase()}; }
-inline char_set ascii_printables_set() { return char_set {ascii_printables()}; }
-inline char_set ascii_controls_set() { return char_set {ascii_controls()}; }
-inline char_set digits_set() { return char_set {digits()}; }
-inline char_set hexdigits_set() { return char_set {hexdigits()}; }
-inline char_set octdigits_set() { return char_set {octdigits()}; }
-inline char_set punctuation_set() { return char_set {punctuation()}; }
-inline char_set whitespaces_set() { return char_set {whitespaces()}; }
-inline char_set newlines_set() { return char_set {newlines()}; }
-inline char_set base64_set() { return char_set {base64()}; }
+inline char_set ascii_letters_set() { return char_set {ascii_letters(), sizeof(ascii_letters())}; }
+inline char_set ascii_lowercase_set() { return char_set {ascii_lowercase(), sizeof(ascii_lowercase())}; }
+inline char_set ascii_uppercase_set() { return char_set {ascii_uppercase(), sizeof(ascii_uppercase())}; }
+inline char_set ascii_printables_set() { return char_set {ascii_printables(), sizeof(ascii_printables())}; }
+inline char_set ascii_controls_set() { return char_set {ascii_controls(), sizeof(ascii_controls())}; }
+inline char_set digits_set() { return char_set {digits(), sizeof(digits())}; }
+inline char_set hexdigits_set() { return char_set {hexdigits(), sizeof(hexdigits())}; }
+inline char_set octdigits_set() { return char_set {octdigits(), sizeof(octdigits())}; }
+inline char_set punctuation_set() { return char_set {punctuation(), sizeof(punctuation())}; }
+inline char_set whitespaces_set() { return char_set {whitespaces(), sizeof(whitespaces())}; }
+inline char_set newlines_set() { return char_set {newlines(), sizeof(newlines())}; }
+inline char_set base64_set() { return char_set {base64(), sizeof(base64())}; }
 
 /**
  *  @brief  A look-up table for character replacement operations.
@@ -3446,7 +3452,8 @@ using string = basic_string<char, std::allocator<char>>;
 static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 pointers.");
 
 namespace literals {
-constexpr string_view operator""_sz(char const *str, std::size_t length) noexcept { return {str, length}; }
+constexpr string_view operator""_sv(char const *str, std::size_t length) noexcept { return {str, length}; }
+constexpr char_set operator""_cs(char const *str, std::size_t length) noexcept { return char_set {str, length}; }
 } // namespace literals
 
 template <typename char_type_, typename allocator_>
