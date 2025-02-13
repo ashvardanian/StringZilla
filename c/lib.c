@@ -259,6 +259,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->rfind = sz_rfind_skylake;
         impl->find_byte = sz_find_byte_skylake;
         impl->rfind_byte = sz_rfind_byte_skylake;
+        impl->checksum = sz_checksum_skylake;
     }
 #endif
 

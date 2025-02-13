@@ -5,15 +5,9 @@
  *
  *  Includes core APIs:
  *
- *  - `sz_checksum` - for byte-level checksums.
+ *  - `sz_checksum` - for byte-level 64-bit unsigned checksums.
  *  - `sz_hash` - for 64-bit single-shot hashing.
- *  - `sz_hashes` - producing the rolling hashes of a string.
  *  - `sz_generate` - populating buffers with random data.
- *
- *  Convenience functions for character-set matching:
- *
- *  - `sz_hashes_fingerprint`
- *  - `sz_hashes_intersection`
  */
 #ifndef STRINGZILLA_HASH_H_
 #define STRINGZILLA_HASH_H_
@@ -334,25 +328,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_haswell(sz_cptr_t text, sz_size_t length) {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
 
-#pragma clang attribute pop
-#pragma GCC pop_options
-#endif            // SZ_USE_SKYLAKE
-#pragma endregion // Skylake Implementation
-
-/*  AVX512 implementation of the string search algorithms for Ice Lake and newer CPUs.
- *  Includes extensions:
- *      - 2017 Skylake: F, CD, ER, PF, VL, DQ, BW,
- *      - 2018 CannonLake: IFMA, VBMI,
- *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
- */
-#pragma region Ice Lake Implementation
-#if SZ_USE_ICE
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2"))), \
-                             apply_to = function)
-
-SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC sz_u64_t sz_checksum_skylake(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "loads".
     //
@@ -363,6 +339,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
     sz_u512_vec_t text_vec, sums_vec;
 
     // When the buffer is small, there isn't much to innovate.
+    // Separately handling even smaller payloads doesn't increase performance even on synthetic benchmarks.
     if (length <= 16) {
         __mmask16 mask = _sz_u16_mask_until(length);
         text_vec.xmms[0] = _mm_maskz_loadu_epi8(mask, text);
@@ -375,7 +352,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
         __mmask32 mask = _sz_u32_mask_until(length);
         text_vec.ymms[0] = _mm256_maskz_loadu_epi8(mask, text);
         sums_vec.ymms[0] = _mm256_sad_epu8(text_vec.ymms[0], _mm256_setzero_si256());
-        // Accumulating 256 bits is harders, as we need to extract the 128-bit sums first.
+        // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
         __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymms[0]);
         __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymms[0], 1);
         __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
@@ -389,12 +366,21 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
         sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512());
         return _mm512_reduce_add_epi64(sums_vec.zmm);
     }
+    // For large buffers, fitting into L1 cache sizes, there are other tricks we can use.
+    //
+    // 1. Moving in both directions to maximize the throughput, when fetching from multiple
+    //    memory pages. Also helps with cache set-associativity issues, as we won't always
+    //    be fetching the same buckets in the lookup table.
+    //
+    // Bidirectional traversal generally adds about 10% to such algorithms.
     else if (!is_huge) {
         sz_size_t head_length = (64 - ((sz_size_t)text % 64)) % 64; // 63 or less.
         sz_size_t tail_length = (sz_size_t)(text + length) % 64;    // 63 or less.
         sz_size_t body_length = length - head_length - tail_length; // Multiple of 64.
+        _sz_assert(body_length % 64 == 0 && head_length < 64 && tail_length < 64);
         __mmask64 head_mask = _sz_u64_mask_until(head_length);
         __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+
         text_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, text);
         sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512());
         for (text += head_length; body_length >= 64; text += 64, body_length -= 64) {
@@ -407,12 +393,9 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
     }
     // For gigantic buffers, exceeding typical L1 cache sizes, there are other tricks we can use.
     //
-    //      1. Moving in both directions to maximize the throughput, when fetching from multiple
-    //         memory pages. Also helps with cache set-associativity issues, as we won't always
-    //         be fetching the same entries in the lookup table.
-    //      2. Using non-temporal stores to avoid polluting the cache.
-    //      3. Prefetching the next cache line, to avoid stalling the CPU. This generally useless
-    //         for predictable patterns, so disregard this advice.
+    // 1. Using non-temporal loads to avoid polluting the cache.
+    // 2. Prefetching the next cache line, to avoid stalling the CPU. This generally useless
+    //    for predictable patterns, so disregard this advice.
     //
     // Bidirectional traversal generally adds about 10% to such algorithms.
     else {
@@ -428,8 +411,150 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
         text_reversed_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, text + head_length + body_length);
         sums_reversed_vec.zmm = _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512());
 
-        // Now in the main loop, we can use non-temporal loads and stores,
-        // performing the operation in both directions.
+        // Now in the main loop, we can use non-temporal loads, performing the operation in both directions.
+        for (text += head_length; body_length >= 128; text += 64, text += 64, body_length -= 128) {
+            text_vec.zmm = _mm512_stream_load_si512((__m512i *)(text));
+            sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512()));
+            text_reversed_vec.zmm = _mm512_stream_load_si512((__m512i *)(text + body_length - 64));
+            sums_reversed_vec.zmm =
+                _mm512_add_epi64(sums_reversed_vec.zmm, _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512()));
+        }
+        if (body_length >= 64) {
+            text_vec.zmm = _mm512_stream_load_si512((__m512i *)(text));
+            sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512()));
+        }
+
+        return _mm512_reduce_add_epi64(_mm512_add_epi64(sums_vec.zmm, sums_reversed_vec.zmm));
+    }
+}
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+#endif            // SZ_USE_SKYLAKE
+#pragma endregion // Skylake Implementation
+
+/*  AVX512 implementation of the string search algorithms for Ice Lake and newer CPUs.
+ *  Includes extensions:
+ *  - 2017 Skylake: F, CD, ER, PF, VL, DQ, BW,
+ *  - 2018 CannonLake: IFMA, VBMI,
+ *  - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
+ */
+#pragma region Ice Lake Implementation
+#if SZ_USE_ICE
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vnni", "bmi", "bmi2")
+#pragma clang attribute push(                                                                         \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vnni,bmi,bmi2"))), \
+    apply_to = function)
+
+SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
+    // The naive implementation of this function is very simple.
+    // It assumes the CPU is great at handling unaligned "loads".
+    //
+    // A typical AWS Sapphire Rapids instance can have 48 KB x 2 blocks of L1 data cache per core,
+    // 2 MB x 2 blocks of L2 cache per core, and one shared 60 MB buffer of L3 cache.
+    // With two strings, we may consider the overall workload huge, if each exceeds 1 MB in length.
+    int const is_huge = length >= 1ull * 1024ull * 1024ull;
+    sz_u512_vec_t text_vec, sums_vec;
+
+    // When the buffer is small, there isn't much to innovate.
+    // Separately handling even smaller payloads doesn't increase performance even on synthetic benchmarks.
+    if (length <= 16) {
+        __mmask16 mask = _sz_u16_mask_until(length);
+        text_vec.xmms[0] = _mm_maskz_loadu_epi8(mask, text);
+        sums_vec.xmms[0] = _mm_sad_epu8(text_vec.xmms[0], _mm_setzero_si128());
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_vec.xmms[0]);
+        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_vec.xmms[0], 1);
+        return low + high;
+    }
+    else if (length <= 32) {
+        __mmask32 mask = _sz_u32_mask_until(length);
+        text_vec.ymms[0] = _mm256_maskz_loadu_epi8(mask, text);
+        sums_vec.ymms[0] = _mm256_sad_epu8(text_vec.ymms[0], _mm256_setzero_si256());
+        // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
+        __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymms[0]);
+        __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymms[0], 1);
+        __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
+        sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_xmm);
+        sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_xmm, 1);
+        return low + high;
+    }
+    else if (length <= 64) {
+        __mmask64 mask = _sz_u64_mask_until(length);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(mask, text);
+        sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512());
+        return _mm512_reduce_add_epi64(sums_vec.zmm);
+    }
+    // For large buffers, fitting into L1 cache sizes, there are other tricks we can use.
+    //
+    // 1. Moving in both directions to maximize the throughput, when fetching from multiple
+    //    memory pages. Also helps with cache set-associativity issues, as we won't always
+    //    be fetching the same buckets in the lookup table.
+    // 2. Port-level parallelism, can be used to hide the latency of expensive SIMD instructions.
+    //    - `VPSADBW (ZMM, ZMM, ZMM)` combination with `VPADDQ (ZMM, ZMM, ZMM)`:
+    //        - On Ice Lake, the `VPSADBW` is 3 cycles on port 5; the `VPADDQ` is 1 cycle on ports 0/5.
+    //        - On Zen 4, the `VPSADBW` is 3 cycles on ports 0/1; the `VPADDQ` is 1 cycle on ports 0/1/2/3.
+    //    - `VPDPBUSDS (ZMM, ZMM, ZMM)`:
+    //        - On Ice Lake, the `VPDPBUSDS` is 5 cycles on port 0.
+    //        - On Zen 4, the `VPDPBUSDS` is 4 cycles on ports 0/1.
+    //
+    // Bidirectional traversal generally adds about 10% to such algorithms.
+    else if (!is_huge) {
+        sz_size_t head_length = (64 - ((sz_size_t)text % 64)) % 64; // 63 or less.
+        sz_size_t tail_length = (sz_size_t)(text + length) % 64;    // 63 or less.
+        sz_size_t body_length = length - head_length - tail_length; // Multiple of 64.
+        _sz_assert(body_length % 64 == 0 && head_length < 64 && tail_length < 64);
+        __mmask64 head_mask = _sz_u64_mask_until(head_length);
+        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+
+        sz_u512_vec_t zeros_vec, ones_vec;
+        zeros_vec.zmm = _mm512_setzero_si512();
+        ones_vec.zmm = _mm512_set1_epi8(1);
+
+        // Take care of the unaligned head and tail!
+        sz_u512_vec_t text_reversed_vec, sums_reversed_vec;
+        text_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, text);
+        sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, zeros_vec.zmm);
+        text_reversed_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, text + head_length + body_length);
+        sums_reversed_vec.zmm = _mm512_dpbusds_epi32(zeros_vec.zmm, text_reversed_vec.zmm, ones_vec.zmm);
+
+        // Now in the main loop, we can use aligned loads, performing the operation in both directions.
+        for (text += head_length; body_length >= 128; text += 64, text += 64, body_length -= 128) {
+            text_reversed_vec.zmm = _mm512_load_si512((__m512i *)(text + body_length - 64));
+            sums_reversed_vec.zmm = _mm512_dpbusds_epi32(sums_reversed_vec.zmm, text_reversed_vec.zmm, ones_vec.zmm);
+            text_vec.zmm = _mm512_load_si512((__m512i *)(text));
+            sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, zeros_vec.zmm));
+        }
+        // There may be an aligned chunk of 64 bytes left.
+        if (body_length >= 64) {
+            _sz_assert(body_length == 64);
+            text_vec.zmm = _mm512_load_si512((__m512i *)(text));
+            sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, zeros_vec.zmm));
+        }
+
+        return _mm512_reduce_add_epi64(sums_vec.zmm) + _mm512_reduce_add_epi32(sums_reversed_vec.zmm);
+    }
+    // For gigantic buffers, exceeding typical L1 cache sizes, there are other tricks we can use.
+    //
+    // 1. Using non-temporal loads to avoid polluting the cache.
+    // 2. Prefetching the next cache line, to avoid stalling the CPU. This generally useless
+    //    for predictable patterns, so disregard this advice.
+    //
+    // Bidirectional traversal generally adds about 10% to such algorithms.
+    else {
+        sz_u512_vec_t text_reversed_vec, sums_reversed_vec;
+        sz_size_t head_length = (64 - ((sz_size_t)text % 64)) % 64;
+        sz_size_t tail_length = (sz_size_t)(text + length) % 64;
+        sz_size_t body_length = length - head_length - tail_length;
+        __mmask64 head_mask = _sz_u64_mask_until(head_length);
+        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+
+        text_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, text);
+        sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512());
+        text_reversed_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, text + head_length + body_length);
+        sums_reversed_vec.zmm = _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512());
+
+        // Now in the main loop, we can use non-temporal loads, performing the operation in both directions.
         for (text += head_length; body_length >= 128; text += 64, text += 64, body_length -= 128) {
             text_vec.zmm = _mm512_stream_load_si512((__m512i *)(text));
             sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512()));
@@ -506,6 +631,8 @@ SZ_PUBLIC sz_u64_t sz_checksum_neon(sz_cptr_t text, sz_size_t length) {
 SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length) {
 #if SZ_USE_ICE
     return sz_checksum_ice(text, length);
+#elif SZ_USE_SKYLAKE
+    return sz_checksum_skylake(text, length);
 #elif SZ_USE_HASWELL
     return sz_checksum_haswell(text, length);
 #elif SZ_USE_NEON

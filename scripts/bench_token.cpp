@@ -21,14 +21,18 @@ tracked_unary_functions_t checksum_functions() {
              return std::accumulate(s.begin(), s.end(), (std::size_t)0,
                                     [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
          }},
-        {"sz_checksum_serial", wrap_sz(sz_checksum_serial), true},
+        {"sz_checksum_serial", wrap_sz(sz_checksum_serial), false},
 #if SZ_USE_HASWELL
-        {"sz_checksum_haswell", wrap_sz(sz_checksum_haswell), true},
+        {"sz_checksum_haswell", wrap_sz(sz_checksum_haswell), false},
+#endif
+#if SZ_USE_SKYLAKE
+        {"sz_checksum_skylake", wrap_sz(sz_checksum_skylake), false},
 #endif
 #if SZ_USE_ICE
+        {"sz_checksum_ice", wrap_sz(sz_checksum_ice), false},
 #endif
 #if SZ_USE_NEON
-        {"sz_checksum_neon", wrap_sz(sz_checksum_neon), true},
+        {"sz_checksum_neon", wrap_sz(sz_checksum_neon), false},
 #endif
     };
     return result;
