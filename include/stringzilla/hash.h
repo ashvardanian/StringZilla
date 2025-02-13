@@ -414,7 +414,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_skylake(sz_cptr_t text, sz_size_t length) {
         sums_reversed_vec.zmm = _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512());
 
         // Now in the main loop, we can use non-temporal loads, performing the operation in both directions.
-        for (text += head_length; body_length >= 128; text += 64, text += 64, body_length -= 128) {
+        for (text += head_length; body_length >= 128; text += 64, body_length -= 128) {
             text_vec.zmm = _mm512_stream_load_si512((__m512i *)(text));
             sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512()));
             text_reversed_vec.zmm = _mm512_stream_load_si512((__m512i *)(text + body_length - 64));
@@ -501,6 +501,8 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
     //        - On Zen 4, the `VPDPBUSDS` is 4 cycles on ports 0/1.
     //
     // Bidirectional traversal generally adds about 10% to such algorithms.
+    // Port level parallelism can yield more, but remember that one of the instructions accumulates
+    // with 32-bit integers and the other one will be using 64-bit integers.
     else if (!is_huge) {
         sz_size_t head_length = (64 - ((sz_size_t)text % 64)) % 64; // 63 or less.
         sz_size_t tail_length = (sz_size_t)(text + length) % 64;    // 63 or less.
@@ -521,7 +523,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
         sums_reversed_vec.zmm = _mm512_dpbusds_epi32(zeros_vec.zmm, text_reversed_vec.zmm, ones_vec.zmm);
 
         // Now in the main loop, we can use aligned loads, performing the operation in both directions.
-        for (text += head_length; body_length >= 128; text += 64, text += 64, body_length -= 128) {
+        for (text += head_length; body_length >= 128; text += 64, body_length -= 128) {
             text_reversed_vec.zmm = _mm512_load_si512((__m512i *)(text + body_length - 64));
             sums_reversed_vec.zmm = _mm512_dpbusds_epi32(sums_reversed_vec.zmm, text_reversed_vec.zmm, ones_vec.zmm);
             text_vec.zmm = _mm512_load_si512((__m512i *)(text));
@@ -557,7 +559,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
         sums_reversed_vec.zmm = _mm512_sad_epu8(text_reversed_vec.zmm, _mm512_setzero_si512());
 
         // Now in the main loop, we can use non-temporal loads, performing the operation in both directions.
-        for (text += head_length; body_length >= 128; text += 64, text += 64, body_length -= 128) {
+        for (text += head_length; body_length >= 128; text += 64, body_length -= 128) {
             text_vec.zmm = _mm512_stream_load_si512((__m512i *)(text));
             sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512()));
             text_reversed_vec.zmm = _mm512_stream_load_si512((__m512i *)(text + body_length - 64));
