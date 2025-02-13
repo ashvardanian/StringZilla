@@ -284,16 +284,18 @@ SZ_PUBLIC sz_u64_t sz_checksum_haswell(sz_cptr_t text, sz_size_t length) {
         else {
             sz_u256_vec_t text_reversed_vec, sums_reversed_vec;
             sums_reversed_vec.ymm = _mm256_setzero_si256();
-            for (; body_length >= 64; text += 64, body_length -= 64) {
+            for (; body_length >= 64; text += 32, body_length -= 64) {
                 text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
                 sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
-                text_reversed_vec.ymm = _mm256_stream_load_si256((__m256i *)(text + body_length - 64));
+                text_reversed_vec.ymm = _mm256_stream_load_si256((__m256i *)(text + body_length - 32));
                 sums_reversed_vec.ymm = _mm256_add_epi64(
                     sums_reversed_vec.ymm, _mm256_sad_epu8(text_reversed_vec.ymm, _mm256_setzero_si256()));
             }
             if (body_length >= 32) {
+                _sz_assert(body_length == 32);
                 text_vec.ymm = _mm256_stream_load_si256((__m256i *)(text));
                 sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
+                text += 32;
             }
             sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, sums_reversed_vec.ymm);
         }
