@@ -36,9 +36,20 @@
 #define _SZ_IS_CPP98 (__cplusplus >= 199711L)
 
 /**
- *  @brief  The `constexpr` keyword has different applicability scope in different C++ versions.
+ *  @brief  Expands to `constexpr` in C++20 and later, and to nothing in older C++ versions.
  *          Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
+ *
+ *  The `constexpr` keyword has different applicability scope in different C++ versions.
+ *  - C++11: Introduced `constexpr`, but no loops or multiple `return` statements were allowed.
+ *  - C++14: Allowed loops, multiple statements, and local variables in `constexpr` functions.
+ *  - C++17: Added the `if constexpr` construct for compile-time branching.
+ *  - C++20: Added some dynamic memory allocations, `virtual` functions, and `try`/`catch` blocks.
  */
+#if _SZ_IS_CPP14
+#define sz_constexpr_if_cpp14 constexpr
+#else
+#define sz_constexpr_if_cpp14
+#endif
 #if _SZ_IS_CPP20
 #define sz_constexpr_if_cpp20 constexpr
 #else
@@ -277,12 +288,12 @@ class basic_char_set {
         // ! Instead of relying on the `sz_charset_init`, we have to reimplement it to support `constexpr`.
         bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
     }
-    explicit constexpr basic_char_set(std::initializer_list<char_type> chars) noexcept : basic_char_set() {
+    explicit sz_constexpr_if_cpp14 basic_char_set(std::initializer_list<char_type> chars) noexcept : basic_char_set() {
         // ! Instead of relying on the `sz_charset_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
         for (auto c : chars) bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
     }
 
-    explicit constexpr basic_char_set(char_type const *chars, std::size_t count_characters) noexcept
+    explicit sz_constexpr_if_cpp14 basic_char_set(char_type const *chars, std::size_t count_characters) noexcept
         : basic_char_set() {
         for (std::size_t i = 0; i < count_characters; ++i) {
             char_type c = chars[i];
@@ -291,7 +302,7 @@ class basic_char_set {
     }
 
     template <std::size_t count_characters>
-    explicit constexpr basic_char_set(std::array<char_type, count_characters> const &chars) noexcept
+    explicit sz_constexpr_if_cpp14 basic_char_set(std::array<char_type, count_characters> const &chars) noexcept
         : basic_char_set() {
         static_assert(count_characters > 0, "Character array cannot be empty");
         for (std::size_t i = 0; i < count_characters; ++i) {
@@ -1232,8 +1243,8 @@ class basic_string_slice {
         : start_(c_string), length_(null_terminated_length(c_string)) {}
     constexpr basic_string_slice(pointer c_string, size_type length) noexcept : start_(c_string), length_(length) {}
 
-    sz_constexpr_if_cpp20 basic_string_slice(basic_string_slice const &other) noexcept = default;
-    sz_constexpr_if_cpp20 basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
+    constexpr basic_string_slice(basic_string_slice const &other) noexcept = default;
+    constexpr basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
     basic_string_slice(std::nullptr_t) = delete;
 
     /**  @brief Exchanges the view with that of the `other`. */
@@ -1927,13 +1938,13 @@ class basic_string_slice {
     }
 
   private:
-    sz_constexpr_if_cpp20 string_slice &assign(string_view const &other) noexcept {
+    sz_constexpr_if_cpp14 string_slice &assign(string_view const &other) noexcept {
         start_ = (pointer)other.data();
         length_ = other.size();
         return *this;
     }
 
-    sz_constexpr_if_cpp20 static size_type null_terminated_length(const_pointer s) noexcept {
+    sz_constexpr_if_cpp14 static size_type null_terminated_length(const_pointer s) noexcept {
         const_pointer p = s;
         while (*p) ++p;
         return p - s;
@@ -2080,7 +2091,7 @@ class basic_string {
 
 #pragma region Constructors and STL Utilities
 
-    sz_constexpr_if_cpp20 basic_string() noexcept {
+    sz_constexpr_if_cpp14 basic_string() noexcept {
         // ! Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
         string_.internal.start = &string_.internal.chars[0];
         string_.words[1] = 0;
@@ -3454,7 +3465,9 @@ static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 point
 
 namespace literals {
 constexpr string_view operator""_sv(char const *str, std::size_t length) noexcept { return {str, length}; }
-constexpr char_set operator""_cs(char const *str, std::size_t length) noexcept { return char_set {str, length}; }
+sz_constexpr_if_cpp14 char_set operator""_cs(char const *str, std::size_t length) noexcept {
+    return char_set {str, length};
+}
 } // namespace literals
 
 template <typename char_type_, typename allocator_>
