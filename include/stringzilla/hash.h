@@ -456,11 +456,11 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
     // 2 MB x 2 blocks of L2 cache per core, and one shared 60 MB buffer of L3 cache.
     // With two strings, we may consider the overall workload huge, if each exceeds 1 MB in length.
     int const is_huge = length >= 1ull * 1024ull * 1024ull;
-    sz_u512_vec_t text_vec, sums_vec;
 
     // When the buffer is small, there isn't much to innovate.
     // Separately handling even smaller payloads doesn't increase performance even on synthetic benchmarks.
     if (length <= 16) {
+        sz_u512_vec_t text_vec, sums_vec;
         __mmask16 mask = _sz_u16_mask_until(length);
         text_vec.xmms[0] = _mm_maskz_loadu_epi8(mask, text);
         sums_vec.xmms[0] = _mm_sad_epu8(text_vec.xmms[0], _mm_setzero_si128());
@@ -469,6 +469,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
         return low + high;
     }
     else if (length <= 32) {
+        sz_u512_vec_t text_vec, sums_vec;
         __mmask32 mask = _sz_u32_mask_until(length);
         text_vec.ymms[0] = _mm256_maskz_loadu_epi8(mask, text);
         sums_vec.ymms[0] = _mm256_sad_epu8(text_vec.ymms[0], _mm256_setzero_si256());
@@ -481,12 +482,18 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
         return low + high;
     }
     else if (length <= 64) {
+        sz_u512_vec_t text_vec, sums_vec;
         __mmask64 mask = _sz_u64_mask_until(length);
         text_vec.zmm = _mm512_maskz_loadu_epi8(mask, text);
         sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512());
         return _mm512_reduce_add_epi64(sums_vec.zmm);
     }
     // For large buffers, fitting into L1 cache sizes, there are other tricks we can use.
+    // The naive idea may be to use `_mm512_unpacklo_epi8`-like operations to upcast to larger integers,
+    // and then accumulating with `_mm512_madd_epi16`-like addition. This however, may require multiple levels
+    // of upcasting, and bottlenecks port 5 on most Intel machines.
+    //
+    // There is, however, a way to further optimize our `_mm512_sad_epu8`-based solution:
     //
     // 1. Moving in both directions to maximize the throughput, when fetching from multiple
     //    memory pages. Also helps with cache set-associativity issues, as we won't always
@@ -502,6 +509,10 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
     // Bidirectional traversal generally adds about 10% to such algorithms.
     // Port level parallelism can yield more, but remember that one of the instructions accumulates
     // with 32-bit integers and the other one will be using 64-bit integers.
+    //
+    // The problem, however, is that the element-wise `VPADDQ` may also be dispatched on port 0.
+    // So we can use one more trick! We can delay the element-wise addition by using `VPERMILPS` on port 5,
+    // and introducing a dependency chain that will make the CPU scheduler delay the `VPADDQ` instruction.
     else if (!is_huge) {
         sz_size_t head_length = (64 - ((sz_size_t)text % 64)) % 64; // 63 or less.
         sz_size_t tail_length = (sz_size_t)(text + length) % 64;    // 63 or less.
@@ -509,37 +520,70 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
         _sz_assert(body_length % 64 == 0 && head_length < 64 && tail_length < 64);
         __mmask64 head_mask = _sz_u64_mask_until(head_length);
         __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+        __m512i swap_nearby = _mm512_setr_epi32(1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14);
+        __mmask16 interleave_mask = 0b1010101010101010;
 
         sz_u512_vec_t zeros_vec, ones_vec;
         zeros_vec.zmm = _mm512_setzero_si512();
         ones_vec.zmm = _mm512_set1_epi8(1);
 
         // Take care of the unaligned head and tail!
-        sz_u512_vec_t text_reversed_vec, sums_reversed_vec;
-        text_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, text);
-        sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, zeros_vec.zmm);
-        text_reversed_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, text + head_length + body_length);
-        sums_reversed_vec.zmm = _mm512_dpbusds_epi32(zeros_vec.zmm, text_reversed_vec.zmm, ones_vec.zmm);
+        sz_u512_vec_t text0_vec, text1_vec, text2_vec, text3_vec, sums02_i32even_vec, sums13_i32_vec;
+        text0_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, text);
+        sums02_i32even_vec.zmm = _mm512_sad_epu8(text0_vec.zmm, zeros_vec.zmm);
+        text3_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, text + head_length + body_length);
+        sums13_i32_vec.zmm = _mm512_dpbusds_epi32(zeros_vec.zmm, text3_vec.zmm, ones_vec.zmm);
+
+        // We will also need 2 temporary registers to store partial 64-bit sums for the normal direction.
+        sz_u512_vec_t sums0_i32_vec, sums2_i32_vec;
 
         // Now in the main loop, we can use aligned loads, performing the operation in both directions.
-        for (text += head_length; body_length >= 128; text += 64, body_length -= 128) {
-            text_reversed_vec.zmm = _mm512_load_si512((__m512i *)(text + body_length - 64));
-            sums_reversed_vec.zmm = _mm512_dpbusds_epi32(sums_reversed_vec.zmm, text_reversed_vec.zmm, ones_vec.zmm);
-            text_vec.zmm = _mm512_load_si512((__m512i *)(text));
-            sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, zeros_vec.zmm));
+        for (text += head_length; body_length >= 256; text += 128, body_length -= 256) {
+            // Fetch 2 chunks of 64 bytes in each direction ~ 256 bytes per cycle.
+            text0_vec.zmm = _mm512_load_si512((__m512i *)(text));
+            text1_vec.zmm = _mm512_load_si512((__m512i *)(text + 64));
+            text2_vec.zmm = _mm512_load_si512((__m512i *)(text + body_length - 128));
+            text3_vec.zmm = _mm512_load_si512((__m512i *)(text + body_length - 64));
+            // § Port 0 section
+            //
+            // Multiply each byte in `text2_vec` and `text3_vec` by 1 and accumulate into 32-bit sums.
+            sums13_i32_vec.zmm = _mm512_dpbusds_epi32(sums13_i32_vec.zmm, text1_vec.zmm, ones_vec.zmm);
+            sums13_i32_vec.zmm = _mm512_dpbusds_epi32(sums13_i32_vec.zmm, text3_vec.zmm, ones_vec.zmm);
+            // § Port 5 section
+            //
+            // The `_mm512_sad_epu8` will take place on port 5.
+            // It will aggregate absolute byte differences into 8x 16-bit integers.
+            // It will keep a quarter of bytes in `sums0_i32_vec` and `sums2_i32_vec` free.
+            // Let's accumulate them as 32-bit integers, leaving half of 32-bit words free.
+            //
+            // The subsequent `_mm512_add_epi32` or `_mm512_add_epi64` can take place on port 0 or 5,
+            // so we need to fool the scheduler so he doesn't even consider it 😎
+            // To delay addition we can make the operation dependent on more instructions bound to retire
+            // on port 5! That can be something like a `_mm512_permute_ps`, which will take just 1 cycle.
+            sums0_i32_vec.zmm = _mm512_sad_epu8(text0_vec.zmm, zeros_vec.zmm);
+            sums2_i32_vec.zmm = _mm512_sad_epu8(text2_vec.zmm, zeros_vec.zmm);
+            // This is practically a no-op, because we simply swap nearby values in the register,
+            // that will be anyways accumulated down the road. But the difference between having it and not is:
+            // - 11.25 GB/s for `VPSADBW`-only Skylake version
+            // - 11.63 GB/s with `VPDPBUSDS`
+            sums0_i32_vec.zmm = _mm512_castps_si512(_mm512_mask_permutevar_ps( //
+                _mm512_castsi512_ps(sums0_i32_vec.zmm), interleave_mask,       //
+                _mm512_castsi512_ps(sums2_i32_vec.zmm), swap_nearby));
+            sums02_i32even_vec.zmm = _mm512_add_epi32(sums02_i32even_vec.zmm, sums0_i32_vec.zmm);
         }
         // There may be an aligned chunk of 64 bytes left.
-        if (body_length >= 64) {
-            _sz_assert(body_length == 64);
-            text_vec.zmm = _mm512_load_si512((__m512i *)(text));
-            sums_vec.zmm = _mm512_add_epi64(sums_vec.zmm, _mm512_sad_epu8(text_vec.zmm, zeros_vec.zmm));
+        for (; body_length >= 64; text += 64, body_length -= 64) {
+            text0_vec.zmm = _mm512_load_si512((__m512i *)(text));
+            sums02_i32even_vec.zmm =
+                _mm512_add_epi32(sums02_i32even_vec.zmm, _mm512_sad_epu8(text0_vec.zmm, zeros_vec.zmm));
         }
 
-        return _mm512_reduce_add_epi64(sums_vec.zmm) + _mm512_reduce_add_epi32(sums_reversed_vec.zmm);
+        return _mm512_reduce_add_epi32(sums02_i32even_vec.zmm) + _mm512_reduce_add_epi32(sums13_i32_vec.zmm);
     }
     // For gigantic buffers, exceeding typical L1 cache sizes, there are other tricks we can use.
     //
     // 1. Using non-temporal loads to avoid polluting the cache.
+    //    That `VMOVNTDQA (ZMM, M512)` instruction has the "1*p05+1*p23" port signature on Ice Lake.
     // 2. Prefetching the next cache line, to avoid stalling the CPU. This generally useless
     //    for predictable patterns, so disregard this advice.
     //
@@ -552,6 +596,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_ice(sz_cptr_t text, sz_size_t length) {
         __mmask64 head_mask = _sz_u64_mask_until(head_length);
         __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
 
+        sz_u512_vec_t text_vec, sums_vec;
         text_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, text);
         sums_vec.zmm = _mm512_sad_epu8(text_vec.zmm, _mm512_setzero_si512());
         text_reversed_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask, text + head_length + body_length);
