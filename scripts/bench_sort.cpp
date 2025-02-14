@@ -66,14 +66,18 @@ void populate_from_file(std::string path, strings_t &strings,
     while (strings.size() < limit && std::getline(f, s, ' ')) strings.push_back(s);
 }
 
-constexpr size_t offset_in_word = 0;
+constexpr size_t offset_in_word = 4;
 
 static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     // What if we take up-to 4 first characters and the index
-    for (size_t i = 0; i != strings.size(); ++i)
-        std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
-                    std::min<std::size_t>(strings[order[i]].size(), 4ul));
+    for (size_t i = 0; i != strings.size(); ++i) {
+        size_t index = order[i];
+
+        for (size_t j = 0; j < std::min<std::size_t>(strings[(sz_size_t)index].size(), 4ul); ++j) {
+            std::memcpy((char *)&order[i] + offset_in_word + 3 - j, strings[(sz_size_t)index].c_str() + j, 1ul);
+        }
+    }
 
     std::sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
         char *i_bytes = (char *)&i;
@@ -81,9 +85,37 @@ static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
         return *(uint32_t *)(i_bytes + offset_in_word) < *(uint32_t *)(j_bytes + offset_in_word);
     });
 
-    for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
+    const auto extract_bytes = [](sz_u64_t v) -> uint32_t {
+        char *bytes = (char *)&v;
+        return *(uint32_t *)(bytes + offset_in_word);
+    };
 
-    std::sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) { return strings[i] < strings[j]; });
+    if (strings.size() >= 2) {
+        size_t prev_index = 0;
+        uint64_t prev_bytes = extract_bytes(order[0]);
+
+        for (size_t i = 1; i < strings.size(); ++i) {
+            uint32_t bytes = extract_bytes(order[i]);
+            if (bytes != prev_bytes) {
+                std::sort(order + prev_index, order + i, [&](sz_u64_t i, sz_u64_t j) {
+                    // Assumes: offset_in_word==4
+                    sz_size_t i_index = i & 0xFFFF'FFFF;
+                    sz_size_t j_index = j & 0xFFFF'FFFF;
+                    return strings[i_index] < strings[j_index];
+                });
+                prev_index = i;
+                prev_bytes = bytes;
+            }
+        }
+
+        std::sort(order + prev_index, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
+            sz_size_t i_index = i & 0xFFFF'FFFF;
+            sz_size_t j_index = j & 0xFFFF'FFFF;
+            return strings[i_index] < strings[j_index];
+        });
+    }
+
+    for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
 
     return strings.size();
 }
@@ -91,9 +123,13 @@ static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
 
     // What if we take up-to 4 first characters and the index
-    for (size_t i = 0; i != strings.size(); ++i)
-        std::memcpy((char *)&order[i] + offset_in_word, strings[order[i]].c_str(),
-                    std::min<std::size_t>(strings[order[i]].size(), 4ull));
+    for (size_t i = 0; i != strings.size(); ++i) {
+        size_t index = order[i];
+
+        for (size_t j = 0; j < std::min<std::size_t>(strings[(sz_size_t)index].size(), 4ul); ++j) {
+            std::memcpy((char *)&order[i] + offset_in_word + 3 - j, strings[(sz_size_t)index].c_str() + j, 1ul);
+        }
+    }
 
     std::stable_sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
         char *i_bytes = (char *)&i;
@@ -101,9 +137,37 @@ static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
         return *(uint32_t *)(i_bytes + offset_in_word) < *(uint32_t *)(j_bytes + offset_in_word);
     });
 
-    for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
+    const auto extract_bytes = [](sz_u64_t v) -> uint32_t {
+        char *bytes = (char *)&v;
+        return *(uint32_t *)(bytes + offset_in_word);
+    };
 
-    std::stable_sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) { return strings[i] < strings[j]; });
+    if (strings.size() >= 2) {
+        size_t prev_index = 0;
+        uint64_t prev_bytes = extract_bytes(order[0]);
+
+        for (size_t i = 1; i < strings.size(); ++i) {
+            uint32_t bytes = extract_bytes(order[i]);
+            if (bytes != prev_bytes) {
+                std::stable_sort(order + prev_index, order + i, [&](sz_u64_t i, sz_u64_t j) {
+                    // Assumes: offset_in_word==4
+                    sz_size_t i_index = i & 0xFFFF'FFFF;
+                    sz_size_t j_index = j & 0xFFFF'FFFF;
+                    return strings[i_index] < strings[j_index];
+                });
+                prev_index = i;
+                prev_bytes = bytes;
+            }
+        }
+
+        std::stable_sort(order + prev_index, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
+            sz_size_t i_index = i & 0xFFFF'FFFF;
+            sz_size_t j_index = j & 0xFFFF'FFFF;
+            return strings[i_index] < strings[j_index];
+        });
+    }
+
+    for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
 
     return strings.size();
 }
@@ -196,7 +260,7 @@ int main(int argc, char const **argv) {
         });
         expect_sorted(strings, permute_new);
 
-#if __linux__ && defined(_GNU_SOURCE)
+#if __linux__ && defined(_GNU_SOURCE) && !defined(__BIONIC__)
         bench_permute("qsort_r", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
             sz_sequence_t array;
             array.order = permute.data();
@@ -232,9 +296,9 @@ int main(int argc, char const **argv) {
         });
         expect_sorted(strings, permute_base);
 
-        bench_permute(
-            "hybrid_stable_sort_cpp", strings, permute_base,
-            [](strings_t const &strings, permute_t &permute) { hybrid_stable_sort_cpp(strings, permute.data()); });
+        bench_permute("hybrid_stable_sort_cpp", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+            hybrid_stable_sort_cpp(strings, permute.data());
+        });
         expect_sorted(strings, permute_new);
         expect_same(permute_base, permute_new);
     }
