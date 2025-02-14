@@ -270,6 +270,8 @@ SZ_PUBLIC sz_u64_t sz_checksum_haswell(sz_cptr_t text, sz_size_t length) {
 
         // Handle the head
         while (head_length--) result += *text++;
+        // Handle the tail
+        while (tail_length) result += text[length - (tail_length--) - 1];
 
         sz_u256_vec_t text_vec, sums_vec;
         sums_vec.ymm = _mm256_setzero_si256();
@@ -299,9 +301,6 @@ SZ_PUBLIC sz_u64_t sz_checksum_haswell(sz_cptr_t text, sz_size_t length) {
             }
             sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, sums_reversed_vec.ymm);
         }
-
-        // Handle the tail
-        while (tail_length--) result += *text++;
 
         // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
         __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
