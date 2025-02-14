@@ -1058,7 +1058,8 @@ static void *_call_allocate(sz_size_t n, void *allocator_state) noexcept {
 
 template <typename allocator_type_>
 static void _call_free(void *ptr, sz_size_t n, void *allocator_state) noexcept {
-    return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
+    using value_type_ = typename allocator_type_::value_type;
+    return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<value_type_ *>(ptr), n);
 }
 
 template <typename generator_type_>
