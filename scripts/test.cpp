@@ -1595,22 +1595,49 @@ static void test_sequence_algorithms() {
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz::sorted_idx_t>;
 
+    // Basic tests with predetermined orders.
     assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::sorted_order(x) == order_t({0u, 1u, 2u, 3u}));
     assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::sorted_order(x) == order_t({3u, 0u, 1u, 2u}));
     assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::sorted_order(x) == order_t({1u, 0u, 3u, 2u}));
 
-    // Generate random strings of different lengths.
-    for (std::size_t dataset_size : {10, 100, 1000, 10000}) {
-        // Build the dataset.
+    // Test on long strings of identical length.
+    for (std::size_t dataset_size : {10u, 40u, 1000u, 10000u}) {
         strs_t dataset;
-        for (std::size_t i = 0; i != dataset_size; ++i)
-            dataset.push_back(sz::scripts::random_string(i % 32, "abcdefghijklmnopqrstuvwxyz", 26));
+        constexpr std::size_t long_length = 20;
+        dataset.reserve(dataset_size);
+        for (std::size_t i = 0; i < dataset_size; ++i)
+            dataset.push_back(sz::scripts::random_string(long_length, "abcd", 4));
+
+        auto order = sz::sorted_order(dataset);
+        for (std::size_t i = 1; i < dataset.size(); ++i) assert(dataset[order[i - 1]] <= dataset[order[i]]);
+    }
+
+    // Test on random strings of varying (but small) lengths.
+    for (std::size_t dataset_size : {10u, 40u, 1000u, 10000u}) {
+        strs_t dataset;
+        dataset.reserve(dataset_size);
+        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 32, "abcd", 4));
 
         // Run several iterations of fuzzy tests.
-        for (std::size_t experiment_idx = 0; experiment_idx != 10; ++experiment_idx) {
+        for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
             auto order = sz::sorted_order(dataset);
-            for (std::size_t i = 1; i != dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
+            for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
+        }
+    }
+
+    // Test on random strings of varying lengths with zero characters.
+    for (std::size_t dataset_size : {10u, 100u, 1000u, 10000u}) {
+        strs_t dataset;
+        dataset.reserve(dataset_size);
+        for (std::size_t i = 0; i < dataset_size; ++i)
+            dataset.push_back(sz::scripts::random_string(i % 32, "abcd\0", 5));
+
+        // Run several iterations of fuzzy tests.
+        for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
+            std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
+            auto order = sz::sorted_order(dataset);
+            for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
         }
     }
 }
