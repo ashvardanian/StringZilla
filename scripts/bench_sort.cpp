@@ -127,9 +127,9 @@ void expect_same(permute_t const &permute_base, permute_t const &permute_new) {
 template <typename algo_at>
 void bench_permute(char const *name, strings_t &strings, permute_t &permute, algo_at &&algo) {
     namespace stdc = std::chrono;
-    using stdcc = stdc::high_resolution_clock;
+    using clock_t = stdc::high_resolution_clock;
     constexpr std::size_t iterations = 3;
-    stdcc::time_point t1 = stdcc::now();
+    clock_t::time_point t1 = clock_t::now();
 
     // Run multiple iterations
     for (std::size_t i = 0; i != iterations; ++i) {
@@ -138,10 +138,10 @@ void bench_permute(char const *name, strings_t &strings, permute_t &permute, alg
     }
 
     // Measure elapsed time
-    stdcc::time_point t2 = stdcc::now();
+    clock_t::time_point t2 = clock_t::now();
     double dif = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count() * 1.0;
-    double milisecs = dif / (iterations * 1e6);
-    std::printf("Elapsed time is %.2lf miliseconds/iteration for %s.\n", milisecs, name);
+    double millisecs = dif / (iterations * 1e6);
+    std::printf("Elapsed time is %.2lf milliseconds/iteration for %s.\n", millisecs, name);
 }
 
 int main(int argc, char const **argv) {

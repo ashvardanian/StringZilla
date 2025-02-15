@@ -267,10 +267,11 @@ typedef size_t sz_size_t;     // Pointer-sized unsigned integer, 32 or 64 bits
 typedef ptrdiff_t sz_ssize_t; // Signed version of `sz_size_t`, 32 or 64 bits
 
 #else // if SZ_AVOID_LIBC:
-
-// ! The C standard doesn't specify the signedness of char.
-// ! On x86 char is signed by default while on Arm it is unsigned by default.
-// ! That's why we don't define `sz_char_t` and generally use explicit `sz_i8_t` and `sz_u8_t`.
+/**
+ *  ! The C standard doesn't specify the signedness of char.
+ *  ! On x86 char is signed by default while on Arm it is unsigned by default.
+ *  ! That's why we don't define `sz_char_t` and generally use explicit `sz_i8_t` and `sz_u8_t`.
+ */
 typedef signed char sz_i8_t;         // Always 8 bits
 typedef unsigned char sz_u8_t;       // Always 8 bits
 typedef unsigned short sz_u16_t;     // Always 16 bits
@@ -279,22 +280,24 @@ typedef unsigned int sz_u32_t;       // Always 32 bits
 typedef long long sz_i64_t;          // Always 64 bits
 typedef unsigned long long sz_u64_t; // Always 64 bits
 
-// Now we need to redefine the `size_t`.
-// Microsoft Visual C++ (MSVC) typically follows LLP64 data model on 64-bit platforms,
-// where integers, pointers, and long types have different sizes:
-//
-//  > `int` is 32 bits
-//  > `long` is 32 bits
-//  > `long long` is 64 bits
-//  > pointer (thus, `size_t`) is 64 bits
-//
-// In contrast, GCC and Clang on 64-bit Unix-like systems typically follow the LP64 model, where:
-//
-//  > `int` is 32 bits
-//  > `long` and pointer (thus, `size_t`) are 64 bits
-//  > `long long` is also 64 bits
-//
-// Source: https://learn.microsoft.com/en-us/windows/win32/winprog64/abstract-data-models
+/**
+ *  Now we need to redefine the `size_t`.
+ *  Microsoft Visual C++ (MSVC) typically follows LLP64 data model on 64-bit platforms,
+ *  where integers, pointers, and long types have different sizes:
+ *
+ *   > `int` is 32 bits
+ *   > `long` is 32 bits
+ *   > `long long` is 64 bits
+ *   > pointer (thus, `size_t`) is 64 bits
+ *
+ *  In contrast, GCC and Clang on 64-bit Unix-like systems typically follow the LP64 model, where:
+ *
+ *   > `int` is 32 bits
+ *   > `long` and pointer (thus, `size_t`) are 64 bits
+ *   > `long long` is also 64 bits
+ *
+ *  Source: https://learn.microsoft.com/en-us/windows/win32/winprog64/abstract-data-models
+ */
 #if _SZ_IS_64_BIT
 typedef unsigned long long sz_size_t; // 64-bit.
 typedef long long sz_ssize_t;         // 64-bit.
@@ -438,36 +441,48 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
 
 #pragma region API Signature Types
 
+/** @brief  Signature of ::sz_hash. */
 typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
-typedef sz_u64_t (*sz_checksum_t)(sz_cptr_t, sz_size_t);
-typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
-typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
-typedef void (*sz_to_converter_t)(sz_cptr_t, sz_size_t, sz_ptr_t);
 
+/** @brief  Signature of ::sz_checksum. */
+typedef sz_u64_t (*sz_checksum_t)(sz_cptr_t, sz_size_t);
+
+/** @brief  Signature of ::sz_equal. */
+typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
+
+/** @brief  Signature of ::sz_order. */
+typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
+
+/** @brief  Signature of ::sz_look_up_transform. */
 typedef void (*sz_look_up_transform_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_ptr_t);
 
+/** @brief  Signature of ::sz_move. */
 typedef void (*sz_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
 
+/** @brief  Signature of ::sz_fill. */
 typedef void (*sz_fill_t)(sz_ptr_t, sz_size_t, sz_u8_t);
 
+/** @brief  Signature of ::sz_find_byte. */
 typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
+
+/** @brief  Signature of ::sz_find. */
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
+
+/** @brief  Signature of ::sz_find_set. */
 typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_charset_t const *);
 
+/** @brief  Signature of ::sz_hamming_distance. */
 typedef sz_size_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t);
 
+/** @brief  Signature of ::sz_edit_distance. */
 typedef sz_size_t (*sz_edit_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_memory_allocator_t *);
 
+/** @brief  Signature of ::sz_alignment_score. */
 typedef sz_ssize_t (*sz_alignment_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_error_cost_t const *,
                                            sz_error_cost_t, sz_memory_allocator_t *);
 
-typedef void (*sz_hash_callback_t)(sz_cptr_t, sz_size_t, sz_u64_t, void *user);
-
-typedef void (*sz_hashes_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_size_t, sz_hash_callback_t, void *);
-
-typedef void (*sz_hashes_fingerprint_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_ptr_t, sz_size_t);
-
-typedef sz_size_t (*sz_hashes_intersection_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_cptr_t, sz_size_t);
+/** @brief  Signature of ::sz_sort. */
+typedef sz_bool_t (*sz_sort_t)(sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
 
 #pragma endregion
 
@@ -728,15 +743,16 @@ SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int l
  */
 #if defined(_MSC_VER) && !defined(__clang__) // On Clang-CL
 #include <intrin.h>
-
-// Sadly, when building Win32 images, we can't use the `_tzcnt_u64`, `_lzcnt_u64`,
-// `_BitScanForward64`, or `_BitScanReverse64` intrinsics. For now it's a simple `for`-loop.
-// TODO: In the future we can switch to a more efficient De Bruijn's algorithm.
-// https://www.chessprogramming.org/BitScan
-// https://www.chessprogramming.org/De_Bruijn_Sequence
-// https://gist.github.com/resilar/e722d4600dbec9752771ab4c9d47044f
-//
-// Use the serial version on 32-bit x86 and on Arm.
+/*
+ *  Sadly, when building Win32 images, we can't use the `_tzcnt_u64`, `_lzcnt_u64`,
+ *  `_BitScanForward64`, or `_BitScanReverse64` intrinsics. For now it's a simple `for`-loop.
+ *  TODO: In the future we can switch to a more efficient De Bruijn's algorithm.
+ *  https://www.chessprogramming.org/BitScan
+ *  https://www.chessprogramming.org/De_Bruijn_Sequence
+ *  https://gist.github.com/resilar/e722d4600dbec9752771ab4c9d47044f
+ *
+ *  Use the serial version on 32-bit x86 and on Arm.
+ */
 #if (defined(_WIN32) && !defined(_WIN64)) || defined(_M_ARM) || defined(_M_ARM64)
 SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) {
     _sz_assert(x != 0);
@@ -780,8 +796,10 @@ SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) { return (int)_tzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) { return (int)_lzcnt_u32(x); }
 SZ_INTERNAL int sz_u32_popcount(sz_u32_t x) { return (int)__popcnt(x); }
 #endif
-// Force the byteswap functions to be intrinsics, because when /Oi- is given, these will turn into CRT function calls,
-// which breaks when `SZ_AVOID_LIBC` is given
+/*
+ *  Force the byteswap functions to be intrinsics, because when `/Oi-` is given,
+ *  these will turn into CRT function calls, which breaks when `SZ_AVOID_LIBC` is given.
+ */
 #pragma intrinsic(_byteswap_uint64)
 SZ_INTERNAL sz_u64_t sz_u64_bytes_reverse(sz_u64_t val) { return _byteswap_uint64(val); }
 #pragma intrinsic(_byteswap_ulong)

@@ -63,7 +63,7 @@ struct tracked_function_gt {
     void print() const {
         bool is_binary = std::is_same<function_type, binary_function_t>();
 
-        // If failures have occured, output them to file tos implify the debugging process.
+        // If failures have occurred, output them to file to simplify the debugging process.
         bool contains_failures = !failed_strings.empty();
         if (contains_failures) {
             // The file name is made of the string hash and the function name.
@@ -161,7 +161,7 @@ inline std::vector<result_string_type> filter_by_length(std::vector<from_string_
     return result;
 }
 
-inline static std::size_t seconds_per_benchmark = SZ_DEBUG ? 1 : 5;
+inline static std::size_t seconds_per_benchmark = SZ_DEBUG ? 1 : 10;
 
 struct dataset_t {
     std::string text;
@@ -239,8 +239,8 @@ template <typename strings_type, typename function_type>
 benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&function) {
 
     namespace stdc = std::chrono;
-    using stdcc = stdc::high_resolution_clock;
-    stdcc::time_point t1 = stdcc::now();
+    using clock_t = stdc::high_resolution_clock;
+    clock_t::time_point t1 = clock_t::now();
     benchmark_result_t result;
     std::size_t lookup_mask = bit_floor(strings.size()) - 1;
 
@@ -254,7 +254,7 @@ benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&funct
             result.iterations += 4;
         }
 
-        stdcc::time_point t2 = stdcc::now();
+        clock_t::time_point t2 = clock_t::now();
         result.seconds = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count() / 1.e9;
         if (result.seconds > seconds_per_benchmark) break;
     }
@@ -273,8 +273,8 @@ template <typename strings_type, typename function_type>
 benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&function) {
 
     namespace stdc = std::chrono;
-    using stdcc = stdc::high_resolution_clock;
-    stdcc::time_point t1 = stdcc::now();
+    using clock_t = stdc::high_resolution_clock;
+    clock_t::time_point t1 = clock_t::now();
     benchmark_result_t result;
     std::size_t lookup_mask = bit_floor(strings.size()) - 1;
     std::size_t largest_prime = static_cast<std::size_t>(18446744073709551557ull);
@@ -290,7 +290,7 @@ benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&
             result.iterations += 4;
         }
 
-        stdcc::time_point t2 = stdcc::now();
+        clock_t::time_point t2 = clock_t::now();
         result.seconds = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count() / 1.e9;
         if (result.seconds > seconds_per_benchmark) break;
     }
