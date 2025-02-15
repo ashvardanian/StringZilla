@@ -16,6 +16,7 @@
 #include <bench.hpp>
 
 using namespace ashvardanian::stringzilla::scripts;
+namespace sz = ashvardanian::stringzilla;
 
 using strings_t = std::vector<std::string>;
 using idx_t = sz_size_t;
@@ -33,11 +34,6 @@ static sz_size_t get_length(sz_sequence_t const *array_c, sz_size_t i) {
     return array[i].size();
 }
 
-static sz_bool_t has_under_four_chars(sz_sequence_t const *array_c, sz_size_t i) {
-    strings_t const &array = *reinterpret_cast<strings_t const *>(array_c->handle);
-    return (sz_bool_t)(array[i].size() < 4);
-}
-
 #if defined(_MSC_VER)
 static int _get_qsort_order(void *arg, const void *a, const void *b) {
 #else
@@ -47,8 +43,8 @@ static int _get_qsort_order(const void *a, const void *b, void *arg) {
     sz_size_t idx_a = *(sz_size_t *)a;
     sz_size_t idx_b = *(sz_size_t *)b;
 
-    const char *str_a = sequence->get_start(sequence, idx_a);
-    const char *str_b = sequence->get_start(sequence, idx_b);
+    char const *str_a = sequence->get_start(sequence, idx_a);
+    char const *str_b = sequence->get_start(sequence, idx_b);
     sz_size_t len_a = sequence->get_length(sequence, idx_a);
     sz_size_t len_b = sequence->get_length(sequence, idx_b);
 
@@ -58,134 +54,10 @@ static int _get_qsort_order(const void *a, const void *b, void *arg) {
 
 #pragma endregion
 
-void populate_from_file(std::string path, strings_t &strings,
-                        std::size_t limit = std::numeric_limits<std::size_t>::max()) {
-
-    std::ifstream f(path, std::ios::in);
-    std::string s;
-    while (strings.size() < limit && std::getline(f, s, ' ')) strings.push_back(s);
-}
-
-constexpr size_t offset_in_word = 4;
-
-static idx_t hybrid_sort_cpp(strings_t const &strings, sz_u64_t *order) {
-
-    // What if we take up-to 4 first characters and the index
-    for (size_t i = 0; i != strings.size(); ++i) {
-        size_t index = order[i];
-
-        for (size_t j = 0; j < std::min<std::size_t>(strings[(sz_size_t)index].size(), 4ul); ++j) {
-            std::memcpy((char *)&order[i] + offset_in_word + 3 - j, strings[(sz_size_t)index].c_str() + j, 1ul);
-        }
-    }
-
-    std::sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
-        char *i_bytes = (char *)&i;
-        char *j_bytes = (char *)&j;
-        return *(uint32_t *)(i_bytes + offset_in_word) < *(uint32_t *)(j_bytes + offset_in_word);
-    });
-
-    const auto extract_bytes = [](sz_u64_t v) -> uint32_t {
-        char *bytes = (char *)&v;
-        return *(uint32_t *)(bytes + offset_in_word);
-    };
-
-    if (strings.size() >= 2) {
-        size_t prev_index = 0;
-        uint64_t prev_bytes = extract_bytes(order[0]);
-
-        for (size_t i = 1; i < strings.size(); ++i) {
-            uint32_t bytes = extract_bytes(order[i]);
-            if (bytes != prev_bytes) {
-                std::sort(order + prev_index, order + i, [&](sz_u64_t i, sz_u64_t j) {
-                    // Assumes: offset_in_word==4
-                    sz_size_t i_index = i & 0xFFFF'FFFF;
-                    sz_size_t j_index = j & 0xFFFF'FFFF;
-                    return strings[i_index] < strings[j_index];
-                });
-                prev_index = i;
-                prev_bytes = bytes;
-            }
-        }
-
-        std::sort(order + prev_index, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
-            sz_size_t i_index = i & 0xFFFF'FFFF;
-            sz_size_t j_index = j & 0xFFFF'FFFF;
-            return strings[i_index] < strings[j_index];
-        });
-    }
-
-    for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
-
-    return strings.size();
-}
-
-static idx_t hybrid_stable_sort_cpp(strings_t const &strings, sz_u64_t *order) {
-
-    // What if we take up-to 4 first characters and the index
-    for (size_t i = 0; i != strings.size(); ++i) {
-        size_t index = order[i];
-
-        for (size_t j = 0; j < std::min<std::size_t>(strings[(sz_size_t)index].size(), 4ul); ++j) {
-            std::memcpy((char *)&order[i] + offset_in_word + 3 - j, strings[(sz_size_t)index].c_str() + j, 1ul);
-        }
-    }
-
-    std::stable_sort(order, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
-        char *i_bytes = (char *)&i;
-        char *j_bytes = (char *)&j;
-        return *(uint32_t *)(i_bytes + offset_in_word) < *(uint32_t *)(j_bytes + offset_in_word);
-    });
-
-    const auto extract_bytes = [](sz_u64_t v) -> uint32_t {
-        char *bytes = (char *)&v;
-        return *(uint32_t *)(bytes + offset_in_word);
-    };
-
-    if (strings.size() >= 2) {
-        size_t prev_index = 0;
-        uint64_t prev_bytes = extract_bytes(order[0]);
-
-        for (size_t i = 1; i < strings.size(); ++i) {
-            uint32_t bytes = extract_bytes(order[i]);
-            if (bytes != prev_bytes) {
-                std::stable_sort(order + prev_index, order + i, [&](sz_u64_t i, sz_u64_t j) {
-                    // Assumes: offset_in_word==4
-                    sz_size_t i_index = i & 0xFFFF'FFFF;
-                    sz_size_t j_index = j & 0xFFFF'FFFF;
-                    return strings[i_index] < strings[j_index];
-                });
-                prev_index = i;
-                prev_bytes = bytes;
-            }
-        }
-
-        std::stable_sort(order + prev_index, order + strings.size(), [&](sz_u64_t i, sz_u64_t j) {
-            sz_size_t i_index = i & 0xFFFF'FFFF;
-            sz_size_t j_index = j & 0xFFFF'FFFF;
-            return strings[i_index] < strings[j_index];
-        });
-    }
-
-    for (size_t i = 0; i != strings.size(); ++i) std::memset((char *)&order[i] + offset_in_word, 0, 4ul);
-
-    return strings.size();
-}
-
-void expect_partitioned_by_length(strings_t const &strings, permute_t const &permute) {
-    if (!std::is_partitioned(permute.begin(), permute.end(), [&](size_t i) { return strings[i].size() < 4; }))
-        throw std::runtime_error("Partitioning failed!");
-}
-
 void expect_sorted(strings_t const &strings, permute_t const &permute) {
     if (!std::is_sorted(permute.begin(), permute.end(),
                         [&](std::size_t i, std::size_t j) { return strings[i] < strings[j]; }))
         throw std::runtime_error("Sorting failed!");
-}
-
-void expect_same(permute_t const &permute_base, permute_t const &permute_new) {
-    if (!std::equal(permute_base.begin(), permute_base.end(), permute_new.begin()))
-        throw std::runtime_error("Permutations differ!");
 }
 
 template <typename algo_at>
@@ -229,7 +101,8 @@ int main(int argc, char const **argv) {
         array.handle = &strings;
         array.get_start = get_start;
         array.get_length = get_length;
-        sz_sort(&array, NULL, permute.data());
+        sz::_with_alloc<std::allocator<char>>(
+            [&](sz_memory_allocator_t &alloc) { return sz_sort(&array, &alloc, permute.data()); });
     });
     expect_sorted(strings, permute_new);
 
@@ -257,21 +130,11 @@ int main(int argc, char const **argv) {
     sz_unused(_get_qsort_order);
 #endif
 
-    bench_permute("hybrid_sort_cpp", strings, permute_new,
-                  [](strings_t const &strings, permute_t &permute) { hybrid_sort_cpp(strings, permute.data()); });
-    expect_sorted(strings, permute_new);
-
     std::printf("---- Stable Sorting:\n");
     bench_permute("std::stable_sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
         std::stable_sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
     });
     expect_sorted(strings, permute_base);
-
-    bench_permute("hybrid_stable_sort_cpp", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-        hybrid_stable_sort_cpp(strings, permute.data());
-    });
-    expect_sorted(strings, permute_new);
-    expect_same(permute_base, permute_new);
 
     return 0;
 }
