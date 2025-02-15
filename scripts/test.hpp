@@ -52,7 +52,7 @@ struct uniform_uint8_distribution_t {
 };
 
 inline void randomize_string(char *string, std::size_t length, char const *alphabet, std::size_t cardinality) {
-    uniform_uint8_distribution_t distribution(cardinality);
+    uniform_uint8_distribution_t distribution(cardinality - 1);
     std::generate(string, string + length, [&]() -> char { return alphabet[distribution(global_random_generator())]; });
 }
 
