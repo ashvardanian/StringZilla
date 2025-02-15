@@ -284,7 +284,7 @@ class basic_char_set {
   public:
     using char_type = char_type_;
 
-    constexpr basic_char_set() noexcept {
+    sz_constexpr_if_cpp14 basic_char_set() noexcept {
         // ! Instead of relying on the `sz_charset_init`, we have to reimplement it to support `constexpr`.
         bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
     }
@@ -311,8 +311,8 @@ class basic_char_set {
         }
     }
 
-    constexpr basic_char_set(basic_char_set const &other) noexcept : bitset_(other.bitset_) {}
-    constexpr basic_char_set &operator=(basic_char_set const &other) noexcept {
+    sz_constexpr_if_cpp14 basic_char_set(basic_char_set const &other) noexcept : bitset_(other.bitset_) {}
+    sz_constexpr_if_cpp14 basic_char_set &operator=(basic_char_set const &other) noexcept {
         bitset_ = other.bitset_;
         return *this;
     }
@@ -1244,8 +1244,8 @@ class basic_string_slice {
         : start_(c_string), length_(null_terminated_length(c_string)) {}
     constexpr basic_string_slice(pointer c_string, size_type length) noexcept : start_(c_string), length_(length) {}
 
-    constexpr basic_string_slice(basic_string_slice const &other) noexcept = default;
-    constexpr basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
+    basic_string_slice(basic_string_slice const &other) noexcept = default;
+    basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
     basic_string_slice(std::nullptr_t) = delete;
 
     /**  @brief Exchanges the view with that of the `other`. */
