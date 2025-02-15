@@ -797,6 +797,23 @@ static void test_non_stl_extensions_for_reads() {
     assert((str("hello")[{100, -100}] == ""));
     assert((str("hello")[{-100, -100}] == ""));
 
+    // Checksums
+    auto accumulate_bytes = [](str const &s) -> std::size_t {
+        return std::accumulate(s.begin(), s.end(), (std::size_t)0,
+                               [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
+    };
+    assert(str("a").checksum() == (std::size_t)'a');
+    assert(str("0").checksum() == (std::size_t)'0');
+    assert(str("0123456789").checksum() == arithmetic_sum('0', '9'));
+    assert(str("abcdefghijklmnopqrstuvwxyz").checksum() == arithmetic_sum('a', 'z'));
+    assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").checksum() ==
+           arithmetic_sum('a', 'z') * 3);
+    assert_scoped(
+        str s =
+            "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、"
+            "被过度消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事以来，他没有过过一天没有名气的日子。",
+        (void)0, s.checksum() == accumulate_bytes(s));
+
     // Computing edit-distances.
     assert(sz::hamming_distance(str("hello"), str("hello")) == 0);
     assert(sz::hamming_distance(str("hello"), str("hell")) == 1);
@@ -836,14 +853,6 @@ static void test_non_stl_extensions_for_reads() {
     assert(sz::alignment_score(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg"), costs, -1) == -14);
     assert(sz::alignment_score(str("hello"), str("hello"), costs, -1) == 0);
     assert(sz::alignment_score(str("hello"), str("hell"), costs, -1) == -1);
-
-    // Checksums
-    assert(str("a").checksum() == (std::size_t)'a');
-    assert(str("0").checksum() == (std::size_t)'0');
-    assert(str("0123456789").checksum() == arithmetic_sum('0', '9'));
-    assert(str("abcdefghijklmnopqrstuvwxyz").checksum() == arithmetic_sum('a', 'z'));
-    assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").checksum() ==
-           arithmetic_sum('a', 'z') * 3);
 
 #if _SZ_DEPRECATED_FINGERPRINTS
 
