@@ -95,14 +95,14 @@ int main(int argc, char const **argv) {
     });
     expect_sorted(strings, permute_base);
 
-    bench_permute("sz_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("sz_sort_serial", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
         sz_sequence_t array;
         array.count = strings.size();
         array.handle = &strings;
         array.get_start = get_start;
         array.get_length = get_length;
         sz::_with_alloc<std::allocator<char>>(
-            [&](sz_memory_allocator_t &alloc) { return sz_sort(&array, &alloc, permute.data()); });
+            [&](sz_memory_allocator_t &alloc) { return sz_sort_serial(&array, &alloc, permute.data()); });
     });
     expect_sorted(strings, permute_new);
 

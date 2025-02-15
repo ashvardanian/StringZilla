@@ -1601,22 +1601,43 @@ static void test_sequence_algorithms() {
     assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::sorted_order(x) == order_t({1u, 0u, 3u, 2u}));
 
     // Test on long strings of identical length.
-    for (std::size_t dataset_size : {10u, 100u, 1000u, 10000u}) {
-        strs_t dataset;
-        constexpr std::size_t long_length = 20;
-        dataset.reserve(dataset_size);
-        for (std::size_t i = 0; i < dataset_size; ++i)
-            dataset.push_back(sz::scripts::random_string(long_length, "ab", 2));
+    for (std::size_t string_length : {5u, 25u}) {
+        for (std::size_t dataset_size : {10u, 100u, 1000u, 10000u}) {
+            strs_t dataset;
+            dataset.reserve(dataset_size);
+            for (std::size_t i = 0; i < dataset_size; ++i)
+                dataset.push_back(sz::scripts::random_string(string_length, "ab", 2));
 
-        auto order = sz::sorted_order(dataset);
-        for (std::size_t i = 1; i < dataset.size(); ++i) assert(dataset[order[i - 1]] <= dataset[order[i]]);
+            // Run several iterations of fuzzy tests.
+            for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
+                std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
+                auto order = sz::sorted_order(dataset);
+                for (std::size_t i = 1; i < dataset.size(); ++i) assert(dataset[order[i - 1]] <= dataset[order[i]]);
+            }
+        }
     }
 
-    // Test on random strings of varying (but small) lengths.
+    // Test on random very small strings of varying lengths, likely with many equal inputs.
     for (std::size_t dataset_size : {10u, 100u, 1000u, 10000u}) {
         strs_t dataset;
         dataset.reserve(dataset_size);
-        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 32, "ab", 2));
+        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 6, "ab", 2));
+
+        // Run several iterations of fuzzy tests.
+        for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
+            std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
+            auto order = sz::sorted_order(dataset);
+            for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
+        }
+    }
+
+    // Test on random strings of varying lengths.
+    for (std::size_t dataset_size : {10u, 100u, 1000u, 10000u}) {
+        strs_t dataset;
+        dataset.reserve(dataset_size);
+        constexpr std::size_t min_length = 6;
+        for (std::size_t i = 0; i < dataset_size; ++i)
+            dataset.push_back(sz::scripts::random_string(min_length + i % 32, "ab", 2));
 
         // Run several iterations of fuzzy tests.
         for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
@@ -1657,7 +1678,6 @@ static void test_stl_containers() {
 }
 
 int main(int argc, char const **argv) {
-    test_sequence_algorithms();
 
     // Let's greet the user nicely
     sz_unused(argc && argv);

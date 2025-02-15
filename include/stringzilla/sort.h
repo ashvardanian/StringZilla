@@ -48,10 +48,10 @@ SZ_PUBLIC sz_bool_t sz_sort_sve(sz_sequence_t const *collection, sz_memory_alloc
 
 typedef sz_size_t _sz_sorting_window_t;
 
-SZ_PUBLIC void _sz_sort_serial_export_prefixes(                             //
-    sz_sequence_t const *const collection,                                  //
-    _sz_sorting_window_t *const global_windows,                             //
-    sz_size_t const start_in_collection, sz_size_t const end_in_collection, //
+SZ_PUBLIC void _sz_sort_serial_export_prefixes(                                            //
+    sz_sequence_t const *const collection,                                                 //
+    _sz_sorting_window_t *const global_windows, sz_sorted_idx_t const *const global_order, //
+    sz_size_t const start_in_collection, sz_size_t const end_in_collection,                //
     sz_size_t const start_character) {
 
     // Depending on the architecture, we will export a different number of bytes.
@@ -60,11 +60,18 @@ SZ_PUBLIC void _sz_sort_serial_export_prefixes(                             //
 
     // Perform the same operation for every string.
     for (sz_size_t i = start_in_collection; i < end_in_collection; ++i) {
+
+        // On the first recursion level, the `global_order` is the identity permutation.
+        sz_sorted_idx_t const partial_order_index = global_order[i];
+        if (SZ_DEBUG && start_character == 0)
+            _sz_assert(partial_order_index == i && "At start this must be an identity permutation.");
+
         // Get the string slice in global memory.
-        sz_cptr_t const source_str = collection->get_start(collection, i);
-        sz_size_t const length = collection->get_length(collection, i);
+        sz_cptr_t const source_str = collection->get_start(collection, partial_order_index);
+        sz_size_t const length = collection->get_length(collection, partial_order_index);
         sz_size_t const remaining_length = length > start_character ? length - start_character : 0;
         sz_size_t const exported_length = remaining_length > window_capacity ? window_capacity : remaining_length;
+
         // Fill with zeros, export a slice, and mark the exported length.
         sz_size_t *target_integer = &global_windows[i];
         sz_ptr_t target_str = (sz_ptr_t)target_integer;
@@ -76,8 +83,8 @@ SZ_PUBLIC void _sz_sort_serial_export_prefixes(                             //
 #else
         *target_integer = sz_u32_bytes_reverse(*target_integer);
 #endif
-        _sz_assert(                                                      //
-            (length <= start_in_collection) == (*target_integer == 0) && //
+        _sz_assert(                                                  //
+            (length <= start_character) == (*target_integer == 0) && //
             "We can have a zero value if only the string is shorter than other strings at this position.");
     }
 
@@ -101,19 +108,25 @@ SZ_PUBLIC void _sz_sort_serial_export_prefixes(                             //
 }
 
 /**
- *  @brief  Helper function of the serial QuickSort algorithm, that rearranges the elements in
+ *  @brief  The most important part of the QuickSort algorithm, that rearranges the elements in
  *          such a way, that all entries around the pivot are less than the pivot.
  *
  *  It means that no relative order among the elements on the left or right side of the pivot is preserved.
  *  We chose the pivot point using Robert Sedgewick's method - the median of three elements - the first,
  *  the middle, and the last element of the given range.
+ *
+ *  Moreover, considering our iterative refinement procedure, we can't just use the normal 2-way partitioning,
+ *  as it will scatter the values equal to the pivot into the left and right partitions. Instead we use the
+ *  Dutch National Flag @b 3-way partitioning, outputting the range of values equal to the pivot.
+ *
+ *  @see https://en.wikipedia.org/wiki/Dutch_national_flag_problem
  */
-SZ_PUBLIC sz_size_t _sz_sort_serial_partition(                                       //
+SZ_PUBLIC void _sz_sort_serial_3way_partition(                                       //
     _sz_sorting_window_t *const global_windows, sz_sorted_idx_t *const global_order, //
-    sz_size_t const start_in_collection, sz_size_t const end_in_collection) {
+    sz_size_t const start_in_collection, sz_size_t const end_in_collection,          //
+    sz_size_t *first_pivot_offset, sz_size_t *last_pivot_offset) {
 
-    // Chose the pivot offset.
-    sz_size_t pivot_offset;
+    // Chose the pivot offset with Sedgewick's method.
     _sz_sorting_window_t pivot_window;
     {
         sz_size_t const middle_offset = start_in_collection + (end_in_collection - start_in_collection) / 2;
@@ -123,40 +136,52 @@ SZ_PUBLIC sz_size_t _sz_sort_serial_partition(                                  
         _sz_sorting_window_t const middle_window = global_windows[middle_offset];
         _sz_sorting_window_t const last_window = global_windows[last_offset];
         if (first_window < middle_window) {
-            if (middle_window < last_window) { pivot_offset = middle_offset, pivot_window = middle_window; }
-            else if (first_window < last_window) { pivot_offset = last_offset, pivot_window = last_window; }
-            else { pivot_offset = first_offset, pivot_window = first_window; }
+            if (middle_window < last_window) { pivot_window = middle_window; }
+            else if (first_window < last_window) { pivot_window = last_window; }
+            else { pivot_window = first_window; }
         }
         else {
-            if (first_window < last_window) { pivot_offset = first_offset, pivot_window = first_window; }
-            else if (middle_window < last_window) { pivot_offset = last_offset, pivot_window = last_window; }
-            else { pivot_offset = middle_offset, pivot_window = middle_window; }
+            if (first_window < last_window) { pivot_window = first_window; }
+            else if (middle_window < last_window) { pivot_window = last_window; }
+            else { pivot_window = middle_window; }
         }
     }
 
-    // Loop through the collection and move the elements around the pivot.
-    sz_size_t left_offset = start_in_collection;
-    sz_size_t right_offset = end_in_collection - 1;
-    while (left_offset < right_offset) {
-        // Find the first element on the left that is greater than the pivot.
-        while (global_windows[left_offset] < pivot_window) ++left_offset;
-        // Find the first element on the right that is less than the pivot.
-        while (global_windows[right_offset] > pivot_window) --right_offset;
-        // Swap the elements if they are in the wrong order.
-        if (left_offset <= right_offset) {
+    // Loop through the collection and move the elements around the pivot with the 3-way partitioning.
+    sz_size_t partitioning_progress = start_in_collection;       // Current index.
+    sz_size_t less_than_pivot_offset = start_in_collection;      // Boundary for elements < pivot_window.
+    sz_size_t greater_than_pivot_offset = end_in_collection - 1; // Boundary for elements > pivot_window.
+
+    while (partitioning_progress <= greater_than_pivot_offset) {
+        // Element is less than pivot: swap into the < pivot region.
+        if (global_windows[partitioning_progress] < pivot_window) {
 #if defined(_SZ_IS_64_BIT)
-            sz_u64_swap(&global_order[left_offset], &global_order[right_offset]);
-            sz_u64_swap(&global_windows[left_offset], &global_windows[right_offset]);
+            sz_u64_swap(&global_order[partitioning_progress], &global_order[less_than_pivot_offset]);
+            sz_u64_swap(&global_windows[partitioning_progress], &global_windows[less_than_pivot_offset]);
 #else
-            sz_u32_swap(&global_order[left_offset], &global_order[right_offset]);
-            sz_u32_swap(&global_windows[left_offset], &global_windows[right_offset]);
+            sz_u32_swap(&global_order[partitioning_progress], &global_order[less_than_pivot_offset]);
+            sz_u32_swap(&global_windows[partitioning_progress], &global_windows[less_than_pivot_offset]);
 #endif
-            ++left_offset;
-            --right_offset;
+            ++partitioning_progress;
+            ++less_than_pivot_offset;
         }
+        // Element is greater than pivot: swap into the > pivot region.
+        else if (global_windows[partitioning_progress] > pivot_window) {
+#if defined(_SZ_IS_64_BIT)
+            sz_u64_swap(&global_order[partitioning_progress], &global_order[greater_than_pivot_offset]);
+            sz_u64_swap(&global_windows[partitioning_progress], &global_windows[greater_than_pivot_offset]);
+#else
+            sz_u32_swap(&global_order[partitioning_progress], &global_order[greater_than_pivot_offset]);
+            sz_u32_swap(&global_windows[partitioning_progress], &global_windows[greater_than_pivot_offset]);
+#endif
+            --greater_than_pivot_offset;
+        }
+        // Element equals pivot_window: leave it in place.
+        else { ++partitioning_progress; }
     }
 
-    return pivot_offset;
+    *first_pivot_offset = less_than_pivot_offset;
+    *last_pivot_offset = greater_than_pivot_offset;
 }
 
 SZ_PUBLIC void _sz_sort_serial_recursively(                                    //
@@ -165,18 +190,21 @@ SZ_PUBLIC void _sz_sort_serial_recursively(                                    /
     sz_size_t const start_in_collection, sz_size_t const end_in_collection,    //
     sz_size_t const start_character) {
 
-    // Partition the collection around some pivot
-    sz_size_t pivot_index =
-        _sz_sort_serial_partition(global_windows, global_order, start_in_collection, end_in_collection);
+    // Partition the collection around some pivot or 2 pivots in a 3-way partitioning
+    sz_size_t first_pivot_index, last_pivot_index;
+    _sz_sort_serial_3way_partition(             //
+        global_windows, global_order,           //
+        start_in_collection, end_in_collection, //
+        &first_pivot_index, &last_pivot_index);
 
     // Recursively sort the left partition
-    if (start_in_collection < pivot_index)
-        _sz_sort_serial_recursively(collection, global_windows, global_order, start_in_collection, pivot_index,
+    if (start_in_collection < first_pivot_index)
+        _sz_sort_serial_recursively(collection, global_windows, global_order, start_in_collection, first_pivot_index,
                                     start_character);
 
     // Recursively sort the right partition
-    if (pivot_index + 1 < end_in_collection)
-        _sz_sort_serial_recursively(collection, global_windows, global_order, pivot_index + 1, end_in_collection,
+    if (last_pivot_index + 1 < end_in_collection)
+        _sz_sort_serial_recursively(collection, global_windows, global_order, last_pivot_index + 1, end_in_collection,
                                     start_character);
 }
 
@@ -187,7 +215,7 @@ SZ_PUBLIC void _sz_sort_serial_next_window(                                    /
     sz_size_t const start_character) {
 
     // Prepare the new range of windows
-    _sz_sort_serial_export_prefixes(collection, global_windows, start_in_collection, end_in_collection,
+    _sz_sort_serial_export_prefixes(collection, global_windows, global_order, start_in_collection, end_in_collection,
                                     start_character);
 
     // Sort current windows with a quicksort
@@ -208,7 +236,7 @@ SZ_PUBLIC void _sz_sort_serial_next_window(                                    /
 
         // If the identical windows are not trivial and each string has more characters, sort them recursively
         sz_cptr_t current_window_str = (sz_cptr_t)&current_window_integer;
-        sz_size_t current_window_length = (sz_size_t)current_window_str[window_capacity];
+        sz_size_t current_window_length = (sz_size_t)current_window_str[0]; //! The byte order was swapped
         if (nested_end - nested_start > 1 && current_window_length == window_capacity) {
             _sz_sort_serial_next_window(collection, global_windows, global_order, nested_start, nested_end,
                                         start_character + window_capacity);
@@ -296,7 +324,7 @@ SZ_PUBLIC void _sz_sort_ice_recursively(                                       /
     sz_size_t const start_character) {
 
     // Prepare the new range of windows
-    _sz_sort_serial_export_prefixes(collection, global_windows, start_in_collection, end_in_collection,
+    _sz_sort_serial_export_prefixes(collection, global_windows, global_order, start_in_collection, end_in_collection,
                                     start_character);
 
     // We can implement a form of a Radix sort here, that will count the number of elements with
