@@ -11,44 +11,6 @@
 
 using namespace ashvardanian::stringzilla::scripts;
 
-tracked_unary_functions_t checksum_functions() {
-    auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
-    };
-    tracked_unary_functions_t result = {
-        {"std::accumulate",
-         [](std::string_view s) {
-             return std::accumulate(s.begin(), s.end(), (std::size_t)0,
-                                    [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
-         }},
-        {"sz_checksum_serial", wrap_sz(sz_checksum_serial), true},
-#if SZ_USE_HASWELL
-        {"sz_checksum_haswell", wrap_sz(sz_checksum_haswell), true},
-#endif
-#if SZ_USE_SKYLAKE
-        {"sz_checksum_skylake", wrap_sz(sz_checksum_skylake), true},
-#endif
-#if SZ_USE_ICE
-        {"sz_checksum_ice", wrap_sz(sz_checksum_ice), true},
-#endif
-#if SZ_USE_NEON
-        {"sz_checksum_neon", wrap_sz(sz_checksum_neon), true},
-#endif
-    };
-    return result;
-}
-
-tracked_unary_functions_t hashing_functions() {
-    auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
-    };
-    tracked_unary_functions_t result = {
-        {"sz_hash_serial", wrap_sz(sz_hash_serial)},
-        {"std::hash", [](std::string_view s) { return std::hash<std::string_view> {}(s); }},
-    };
-    return result;
-}
-
 tracked_unary_functions_t sliding_hashing_functions(std::size_t window_width, std::size_t step) {
 #if _SZ_DEPRECATED_FINGERPRINTS
     auto wrap_sz = [=](auto function) -> unary_function_t {
@@ -116,59 +78,6 @@ tracked_unary_functions_t random_generation_functions(std::size_t token_length) 
     return result;
 }
 
-tracked_binary_functions_t equality_functions() {
-    auto wrap_sz = [](auto function) -> binary_function_t {
-        return binary_function_t([function](std::string_view a, std::string_view b) {
-            return (a.size() == b.size() && function(a.data(), b.data(), a.size()));
-        });
-    };
-    tracked_binary_functions_t result = {
-        {"std::string_view.==", [](std::string_view a, std::string_view b) { return (a == b); }},
-        {"sz_equal_serial", wrap_sz(sz_equal_serial), true},
-#if SZ_USE_HASWELL
-        {"sz_equal_haswell", wrap_sz(sz_equal_haswell), true},
-#endif
-#if SZ_USE_SKYLAKE
-        {"sz_equal_skylake", wrap_sz(sz_equal_skylake), true},
-#endif
-        {"memcmp",
-         [](std::string_view a, std::string_view b) {
-             return (a.size() == b.size() && memcmp(a.data(), b.data(), a.size()) == 0);
-         }},
-    };
-    return result;
-}
-
-tracked_binary_functions_t ordering_functions() {
-    auto wrap_sz = [](auto function) -> binary_function_t {
-        return binary_function_t([function](std::string_view a, std::string_view b) {
-            return function(a.data(), a.size(), b.data(), b.size());
-        });
-    };
-    tracked_binary_functions_t result = {
-        {"std::string_view.compare",
-         [](std::string_view a, std::string_view b) {
-             auto order = a.compare(b);
-             return (order == 0 ? sz_equal_k : (order < 0 ? sz_less_k : sz_greater_k));
-         }},
-        {"sz_order_serial", wrap_sz(sz_order_serial), true},
-#if SZ_USE_HASWELL
-        {"sz_order_haswell", wrap_sz(sz_order_haswell), true},
-#endif
-#if SZ_USE_SKYLAKE
-        {"sz_order_skylake", wrap_sz(sz_order_skylake), true},
-#endif
-        {"memcmp",
-         [](std::string_view a, std::string_view b) {
-             auto order = memcmp(a.data(), b.data(), a.size() < b.size() ? a.size() : b.size());
-             return order != 0 ? (a.size() == b.size() ? (order < 0 ? sz_less_k : sz_greater_k)
-                                                       : (a.size() < b.size() ? sz_less_k : sz_greater_k))
-                               : sz_equal_k;
-         }},
-    };
-    return result;
-}
-
 template <typename string_type>
 void bench_dereferencing(std::string name, std::vector<string_type> strings) {
     auto func = unary_function_t([](std::string_view s) { return s.size(); });
@@ -183,8 +92,6 @@ void bench(strings_type &&strings) {
     // Benchmark logical operations
     bench_unary_functions(strings, checksum_functions());
     bench_unary_functions(strings, hashing_functions());
-    bench_unary_functions(strings, sliding_hashing_functions(8, 1));
-    bench_unary_functions(strings, fingerprinting_functions());
     bench_binary_functions(strings, equality_functions());
     bench_binary_functions(strings, ordering_functions());
 
@@ -198,11 +105,7 @@ void bench(strings_type &&strings) {
 
 void bench_on_input_data(int argc, char const **argv) {
     dataset_t dataset = prepare_benchmark_environment(argc, argv);
-#if 0
     std::printf("Benchmarking on the entire dataset:\n");
-    bench_unary_functions(dataset.tokens, random_generation_functions(100));
-    bench_unary_functions(dataset.tokens, random_generation_functions(20));
-    bench_unary_functions(dataset.tokens, random_generation_functions(5));
 
     // When performing fingerprinting, it's extremely important to:
     //      1. Have small output fingerprints that fit the cache.
@@ -215,25 +118,9 @@ void bench_on_input_data(int argc, char const **argv) {
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(33, 8));
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, sliding_hashing_functions(127, 16));
 
-    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, hashing_functions());
-
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions(128, 4 * 1024));
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions(128, 64 * 1024));
     bench_unary_functions<std::vector<std::string_view>>({dataset.text}, fingerprinting_functions(128, 1024 * 1024));
-#endif
-    // Baseline benchmarks for real words, coming in all lengths
-    std::printf("Benchmarking on real words:\n");
-    bench(dataset.tokens);
-    std::printf("Benchmarking on real lines:\n");
-    bench(dataset.lines);
-    std::printf("Benchmarking on entire dataset:\n");
-    bench<std::vector<std::string_view>>({dataset.text});
-
-    // Run benchmarks on tokens of different length
-    for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
-        std::printf("Benchmarking on real words of length %zu:\n", token_length);
-        bench(filter_by_length(dataset.tokens, token_length));
-    }
 }
 
 void bench_on_synthetic_data() {
