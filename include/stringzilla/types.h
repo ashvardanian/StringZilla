@@ -482,7 +482,7 @@ typedef sz_ssize_t (*sz_alignment_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_s
                                            sz_error_cost_t, sz_memory_allocator_t *);
 
 /** @brief  Signature of ::sz_sort. */
-typedef sz_bool_t (*sz_sort_t)(sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
+typedef sz_bool_t (*sz_sort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
 
 #pragma endregion
 

@@ -29,7 +29,7 @@ extern "C" {
  *  @param order The output - indices of the sorted collection elements.
  *  @return Whether the operation was successful.
  */
-SZ_PUBLIC sz_bool_t sz_sort(sz_sequence_t const *collection, sz_memory_allocator_t *alloc, sz_sorted_idx_t *order);
+SZ_DYNAMIC sz_bool_t sz_sort(sz_sequence_t const *collection, sz_memory_allocator_t *alloc, sz_sorted_idx_t *order);
 
 /** @copydoc sz_sort */
 SZ_PUBLIC sz_bool_t sz_sort_serial(sz_sequence_t const *collection, sz_memory_allocator_t *alloc,
@@ -306,9 +306,18 @@ SZ_PUBLIC void _sz_sort_ice_recursively(                                       /
 
 #pragma endregion // Ice Lake Implementation
 
-SZ_PUBLIC sz_bool_t sz_sort(sz_sequence_t const *collection, sz_memory_allocator_t *alloc, sz_sorted_idx_t *order) {
+/*  Pick the right implementation for the string search algorithms.
+ *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
+ */
+#pragma region Compile Time Dispatching
+#if !SZ_DYNAMIC_DISPATCH
+
+SZ_DYNAMIC sz_bool_t sz_sort(sz_sequence_t const *collection, sz_memory_allocator_t *alloc, sz_sorted_idx_t *order) {
     return sz_sort_serial(collection, alloc, order);
 }
+
+#endif            // !SZ_DYNAMIC_DISPATCH
+#pragma endregion // Compile Time Dispatching
 
 #ifdef __cplusplus
 }
