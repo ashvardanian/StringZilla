@@ -153,91 +153,61 @@ int main(int argc, char const **argv) {
     permute_base.resize(strings.size());
     permute_new.resize(strings.size());
 
-    // Partitioning
-    {
-        std::printf("---- Partitioning:\n");
-        bench_permute("std::partition", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::partition(permute.begin(), permute.end(), [&](size_t i) { return strings[i].size() < 4; });
-        });
-        expect_partitioned_by_length(strings, permute_base);
-
-        bench_permute("std::stable_partition", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::stable_partition(permute.begin(), permute.end(), [&](size_t i) { return strings[i].size() < 4; });
-        });
-        expect_partitioned_by_length(strings, permute_base);
-
-        bench_permute("sz_partition", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            sz_sequence_t array;
-            array.order = permute.data();
-            array.count = strings.size();
-            array.handle = &strings;
-            sz_partition(&array, &has_under_four_chars);
-        });
-        expect_partitioned_by_length(strings, permute_new);
-        // TODO: expect_same(permute_base, permute_new);
-    }
-
     // Sorting
-    {
-        std::printf("---- Sorting:\n");
-        bench_permute("std::sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
-        });
-        expect_sorted(strings, permute_base);
+    bench_permute("std::sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
+        std::sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
+    });
+    expect_sorted(strings, permute_base);
 
-        bench_permute("sz_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            sz_sequence_t array;
-            array.order = permute.data();
-            array.count = strings.size();
-            array.handle = &strings;
-            array.get_start = get_start;
-            array.get_length = get_length;
-            sz_sort(&array);
-        });
-        expect_sorted(strings, permute_new);
+    bench_permute("sz_sort", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+        sz_sequence_t array;
+        array.count = strings.size();
+        array.handle = &strings;
+        array.get_start = get_start;
+        array.get_length = get_length;
+        sz_sort(&array, NULL, permute.data());
+    });
+    expect_sorted(strings, permute_new);
 
 #if __linux__ && defined(_GNU_SOURCE)
-        bench_permute("qsort_r", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            sz_sequence_t array;
-            array.order = permute.data();
-            array.count = strings.size();
-            array.handle = &strings;
-            array.get_start = get_start;
-            array.get_length = get_length;
-            qsort_r(array.order, array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
-        });
-        expect_sorted(strings, permute_new);
+    bench_permute("qsort_r", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+        sz_sequence_t array;
+        array.count = strings.size();
+        array.handle = &strings;
+        array.get_start = get_start;
+        array.get_length = get_length;
+        qsort_r(permute.data(), array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
+    });
+    expect_sorted(strings, permute_new);
 #elif defined(_MSC_VER)
-        bench_permute("qsort_s", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
-            sz_sequence_t array;
-            array.order = permute.data();
-            array.count = strings.size();
-            array.handle = &strings;
-            array.get_start = get_start;
-            array.get_length = get_length;
-            qsort_s(array.order, array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
-        });
-        expect_sorted(strings, permute_new);
+    bench_permute("qsort_s", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+        sz_sequence_t array;
+        array.count = strings.size();
+        array.handle = &strings;
+        array.get_start = get_start;
+        array.get_length = get_length;
+        qsort_s(permute.data(), array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
+    });
+    expect_sorted(strings, permute_new);
 #else
-        sz_unused(_get_qsort_order);
+    sz_unused(_get_qsort_order);
 #endif
 
-        bench_permute("hybrid_sort_cpp", strings, permute_new,
-                      [](strings_t const &strings, permute_t &permute) { hybrid_sort_cpp(strings, permute.data()); });
-        expect_sorted(strings, permute_new);
+    bench_permute("hybrid_sort_cpp", strings, permute_new,
+                  [](strings_t const &strings, permute_t &permute) { hybrid_sort_cpp(strings, permute.data()); });
+    expect_sorted(strings, permute_new);
 
-        std::printf("---- Stable Sorting:\n");
-        bench_permute("std::stable_sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-            std::stable_sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
-        });
-        expect_sorted(strings, permute_base);
+    std::printf("---- Stable Sorting:\n");
+    bench_permute("std::stable_sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
+        std::stable_sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
+    });
+    expect_sorted(strings, permute_base);
 
-        bench_permute(
-            "hybrid_stable_sort_cpp", strings, permute_base,
-            [](strings_t const &strings, permute_t &permute) { hybrid_stable_sort_cpp(strings, permute.data()); });
-        expect_sorted(strings, permute_new);
-        expect_same(permute_base, permute_new);
-    }
+    bench_permute("hybrid_stable_sort_cpp", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
+        hybrid_stable_sort_cpp(strings, permute.data());
+    });
+    expect_sorted(strings, permute_new);
+    expect_same(permute_base, permute_new);
 
     return 0;
 }
