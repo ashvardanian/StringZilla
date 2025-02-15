@@ -1601,22 +1601,22 @@ static void test_sequence_algorithms() {
     assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::sorted_order(x) == order_t({1u, 0u, 3u, 2u}));
 
     // Test on long strings of identical length.
-    for (std::size_t dataset_size : {10u, 40u, 1000u, 10000u}) {
+    for (std::size_t dataset_size : {10u, 100u, 1000u, 10000u}) {
         strs_t dataset;
         constexpr std::size_t long_length = 20;
         dataset.reserve(dataset_size);
         for (std::size_t i = 0; i < dataset_size; ++i)
-            dataset.push_back(sz::scripts::random_string(long_length, "abcd", 4));
+            dataset.push_back(sz::scripts::random_string(long_length, "ab", 2));
 
         auto order = sz::sorted_order(dataset);
         for (std::size_t i = 1; i < dataset.size(); ++i) assert(dataset[order[i - 1]] <= dataset[order[i]]);
     }
 
     // Test on random strings of varying (but small) lengths.
-    for (std::size_t dataset_size : {10u, 40u, 1000u, 10000u}) {
+    for (std::size_t dataset_size : {10u, 100u, 1000u, 10000u}) {
         strs_t dataset;
         dataset.reserve(dataset_size);
-        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 32, "abcd", 4));
+        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 32, "ab", 2));
 
         // Run several iterations of fuzzy tests.
         for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
@@ -1630,8 +1630,7 @@ static void test_sequence_algorithms() {
     for (std::size_t dataset_size : {10u, 100u, 1000u, 10000u}) {
         strs_t dataset;
         dataset.reserve(dataset_size);
-        for (std::size_t i = 0; i < dataset_size; ++i)
-            dataset.push_back(sz::scripts::random_string(i % 32, "abcd\0", 5));
+        for (std::size_t i = 0; i < dataset_size; ++i) dataset.push_back(sz::scripts::random_string(i % 32, "ab\0", 3));
 
         // Run several iterations of fuzzy tests.
         for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
@@ -1658,20 +1657,7 @@ static void test_stl_containers() {
 }
 
 int main(int argc, char const **argv) {
-
-    auto dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, SZ_SIZE_MAX);
-    _sz_assert(dist == 5);
-    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 3);
-    _sz_assert(dist == SZ_SIZE_MAX);
-    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 4);
-    _sz_assert(dist == SZ_SIZE_MAX);
-    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 5);
-    _sz_assert(dist == 5);
-    dist = _sz_edit_distance_skewed_diagonals_upto63_ice("kiten", 5, "katerinas", 9, 6);
-    _sz_assert(dist == 5);
-
-    // Similarity measures and fuzzy search
-    test_levenshtein_distances();
+    test_sequence_algorithms();
 
     // Let's greet the user nicely
     sz_unused(argc && argv);

@@ -76,7 +76,28 @@ SZ_PUBLIC void _sz_sort_serial_export_prefixes(                             //
 #else
         *target_integer = sz_u32_bytes_reverse(*target_integer);
 #endif
+        _sz_assert(                                                      //
+            (length <= start_in_collection) == (*target_integer == 0) && //
+            "We can have a zero value if only the string is shorter than other strings at this position.");
     }
+
+    // As our goal is to sort the strings using the exported integer "windows",
+    // this is a good place to validate the correctness of the exported data.
+    if (SZ_DEBUG && start_character == 0)
+        for (sz_size_t i = start_in_collection + 1; i < end_in_collection; ++i) {
+            _sz_sorting_window_t const previous_window = global_windows[i - 1];
+            _sz_sorting_window_t const current_window = global_windows[i];
+            sz_cptr_t const previous_str = collection->get_start(collection, i - 1);
+            sz_size_t const previous_length = collection->get_length(collection, i - 1);
+            sz_cptr_t const current_str = collection->get_start(collection, i);
+            sz_size_t const current_length = collection->get_length(collection, i);
+            sz_ordering_t const ordering = sz_order(                                                 //
+                previous_str, previous_length > window_capacity ? window_capacity : previous_length, //
+                current_str, current_length > window_capacity ? window_capacity : current_length);
+            _sz_assert(                                                          //
+                (previous_window < current_window) == (ordering == sz_less_k) && //
+                "The exported windows should be in the same order as the original strings.");
+        }
 }
 
 /**
@@ -143,21 +164,20 @@ SZ_PUBLIC void _sz_sort_serial_recursively(                                    /
     _sz_sorting_window_t *const global_windows, sz_size_t *const global_order, //
     sz_size_t const start_in_collection, sz_size_t const end_in_collection,    //
     sz_size_t const start_character) {
+
     // Partition the collection around some pivot
     sz_size_t pivot_index =
         _sz_sort_serial_partition(global_windows, global_order, start_in_collection, end_in_collection);
 
     // Recursively sort the left partition
-    if (start_in_collection < pivot_index) {
+    if (start_in_collection < pivot_index)
         _sz_sort_serial_recursively(collection, global_windows, global_order, start_in_collection, pivot_index,
                                     start_character);
-    }
 
     // Recursively sort the right partition
-    if (pivot_index + 1 < end_in_collection) {
+    if (pivot_index + 1 < end_in_collection)
         _sz_sort_serial_recursively(collection, global_windows, global_order, pivot_index + 1, end_in_collection,
                                     start_character);
-    }
 }
 
 SZ_PUBLIC void _sz_sort_serial_next_window(                                    //
@@ -258,7 +278,7 @@ SZ_PUBLIC sz_bool_t sz_sort_serial(sz_sequence_t const *collection, sz_memory_al
     if (!windows) return sz_false_k;
 
     // Recursively sort the whole collection.
-    _sz_sort_serial_recursively(collection, windows, order, 0, collection->count, 0);
+    _sz_sort_serial_next_window(collection, windows, order, 0, collection->count, 0);
 
     // Free temporary storage.
     alloc->free(windows, collection->count * sizeof(_sz_sorting_window_t), alloc);
