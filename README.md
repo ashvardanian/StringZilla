@@ -632,7 +632,7 @@ sz_size_t substring_position = sz_find_neon(haystack.start, haystack.length, nee
 sz_u64_t hash = sz_hash(haystack.start, haystack.length);
 
 // Perform collection level operations
-sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
+sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};
 sz_sort(&array, &your_config);
 ```
 

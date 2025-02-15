@@ -188,7 +188,8 @@ typedef struct sz_implementations_t {
 
     sz_edit_distance_t edit_distance;
     sz_alignment_score_t alignment_score;
-    sz_hashes_t hashes;
+
+    sz_sort_t sort;
 
 } sz_implementations_t;
 
@@ -224,7 +225,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
 
     impl->edit_distance = sz_edit_distance_serial;
     impl->alignment_score = sz_alignment_score_serial;
-    impl->hashes = 0;
+    impl->sort = sz_sort_serial;
 
 #if SZ_USE_HASWELL
     if (caps & sz_cap_haswell_k) {

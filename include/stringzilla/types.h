@@ -320,7 +320,8 @@ typedef char *sz_ptr_t;          // A type alias for `char *`
 typedef char const *sz_cptr_t;   // A type alias for `char const *`
 typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching functions
 
-typedef sz_u64_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
+struct sz_sequence_t;              // Forward declaration of an ordered collection of strings
+typedef sz_size_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
 
 typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        // Only one relevant bit
 typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; // Only three possible states: <=>
@@ -626,20 +627,16 @@ SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_le
 
 #pragma region String Sequences API
 
-struct sz_sequence_t;
-
 typedef sz_cptr_t (*sz_sequence_member_start_t)(struct sz_sequence_t const *, sz_size_t);
 typedef sz_size_t (*sz_sequence_member_length_t)(struct sz_sequence_t const *, sz_size_t);
 typedef sz_bool_t (*sz_sequence_predicate_t)(struct sz_sequence_t const *, sz_size_t);
-typedef sz_bool_t (*sz_sequence_comparator_t)(struct sz_sequence_t const *, sz_size_t, sz_size_t);
 typedef sz_bool_t (*sz_string_is_less_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 typedef struct sz_sequence_t {
-    sz_sorted_idx_t *order;
+    void const *handle;
     sz_size_t count;
     sz_sequence_member_start_t get_start;
     sz_sequence_member_length_t get_length;
-    void const *handle;
 } sz_sequence_t;
 
 /**

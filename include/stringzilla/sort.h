@@ -1,14 +1,12 @@
 /**
- *  @brief  Hardware-accelerated string sorting.
+ *  @brief  Hardware-accelerated string collection sorting and intersections.
  *  @file   sort.h
  *  @author Ash Vardanian
  *
  *  Includes core APIs:
  *
- *  - `sz_partition` - to split the sequence into two parts based on a predicate.
- *  - `sz_merge` - to merge two consecutive sorted chunks forming the same continuous `sequence`.
- *  - `sz_sort` - to sort an arbitrary string sequence.
- *  - `sz_sort_partial` - to partially sort an arbitrary string sequence.
+ *  - `sz_sort` - to sort an arbitrary string collection.
+ *  - TODO: `sz_stable_sort` - to sort a string collection while preserving the relative order of equal elements.
  */
 #ifndef STRINGZILLA_SORT_H_
 #define STRINGZILLA_SORT_H_
@@ -24,320 +22,293 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief  Similar to `std::partition`, given a predicate splits the sequence into two parts.
- *          The algorithm is unstable, meaning that elements may change relative order, as long
- *          as they are in the right partition. This is the simpler algorithm for partitioning.
- */
-SZ_PUBLIC sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate);
-
-/**
- *  @brief  Inplace `std::set_union` for two consecutive chunks forming the same continuous `sequence`.
+ *  @brief  Faster `std::sort` for an arbitrary string sequence.
  *
- *  @param partition The number of elements in the first sub-sequence in `sequence`.
- *  @param less Comparison function, to determine the lexicographic ordering.
+ *  @param collection The collection of strings to sort.
+ *  @param alloc Memory allocator for temporary storage.
+ *  @param order The output - indices of the sorted collection elements.
+ *  @return Whether the operation was successful.
  */
-SZ_PUBLIC void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequence_comparator_t less);
+SZ_PUBLIC sz_bool_t sz_sort(sz_sequence_t const *collection, sz_memory_allocator_t *alloc, sz_sorted_idx_t *order);
 
-/**
- *  @brief  Sorting algorithm, combining Radix Sort for the first 32 bits of every word
- *          and a follow-up by a more conventional sorting procedure on equally prefixed parts.
- */
-SZ_PUBLIC void sz_sort(sz_sequence_t *sequence);
+/** @copydoc sz_sort */
+SZ_PUBLIC sz_bool_t sz_sort_serial(sz_sequence_t const *collection, sz_memory_allocator_t *alloc,
+                                   sz_sorted_idx_t *order);
 
-/**
- *  @brief  Partial sorting algorithm, combining Radix Sort for the first 32 bits of every word
- *          and a follow-up by a more conventional sorting procedure on equally prefixed parts.
- */
-SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t n);
+/** @copydoc sz_sort */
+SZ_PUBLIC sz_bool_t sz_sort_skylake(sz_sequence_t const *collection, sz_memory_allocator_t *alloc,
+                                    sz_sorted_idx_t *order);
 
-/**
- *  @brief  Intro-Sort algorithm that supports custom comparators.
- */
-SZ_PUBLIC void sz_sort_intro(sz_sequence_t *sequence, sz_sequence_comparator_t less);
+/** @copydoc sz_sort */
+SZ_PUBLIC sz_bool_t sz_sort_sve(sz_sequence_t const *collection, sz_memory_allocator_t *alloc, sz_sorted_idx_t *order);
 
 #pragma endregion
 
 #pragma region Serial Implementation
 
-SZ_PUBLIC sz_size_t sz_partition(sz_sequence_t *sequence, sz_sequence_predicate_t predicate) {
+typedef sz_size_t _sz_sorting_window_t;
 
-    sz_size_t matches = 0;
-    while (matches != sequence->count && predicate(sequence, sequence->order[matches])) ++matches;
+SZ_PUBLIC void _sz_sort_serial_export_prefixes(                             //
+    sz_sequence_t const *const collection,                                  //
+    _sz_sorting_window_t *const global_windows,                             //
+    sz_size_t const start_in_collection, sz_size_t const end_in_collection, //
+    sz_size_t const start_character) {
 
-    for (sz_size_t i = matches + 1; i < sequence->count; ++i)
-        if (predicate(sequence, sequence->order[i]))
-            sz_u64_swap(sequence->order + i, sequence->order + matches), ++matches;
+    // Depending on the architecture, we will export a different number of bytes.
+    // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
+    sz_size_t const window_capacity = sizeof(_sz_sorting_window_t) - 1;
 
-    return matches;
+    // Perform the same operation for every string.
+    for (sz_size_t i = start_in_collection; i < end_in_collection; ++i) {
+        // Get the string slice in global memory.
+        sz_cptr_t const source_str = collection->get_start(collection, i);
+        sz_size_t const length = collection->get_length(collection, i);
+        sz_size_t const remaining_length = length > start_character ? length - start_character : 0;
+        sz_size_t const exported_length = remaining_length > window_capacity ? window_capacity : remaining_length;
+        // Fill with zeros, export a slice, and mark the exported length.
+        sz_size_t *target_integer = &global_windows[i];
+        sz_ptr_t target_str = (sz_ptr_t)target_integer;
+        *target_integer = 0;
+        for (sz_size_t j = 0; j < exported_length; ++j) target_str[j] = source_str[j + start_character];
+        target_str[window_capacity] = exported_length;
+#if defined(_SZ_IS_64_BIT)
+        *target_integer = sz_u64_bytes_reverse(*target_integer);
+#else
+        *target_integer = sz_u32_bytes_reverse(*target_integer);
+#endif
+    }
 }
 
-SZ_PUBLIC void sz_merge(sz_sequence_t *sequence, sz_size_t partition, sz_sequence_comparator_t less) {
+/**
+ *  @brief  Helper function of the serial QuickSort algorithm, that rearranges the elements in
+ *          such a way, that all entries around the pivot are less than the pivot.
+ *
+ *  It means that no relative order among the elements on the left or right side of the pivot is preserved.
+ *  We chose the pivot point using Robert Sedgewick's method - the median of three elements - the first,
+ *  the middle, and the last element of the given range.
+ */
+SZ_PUBLIC sz_size_t _sz_sort_serial_partition(                                       //
+    _sz_sorting_window_t *const global_windows, sz_sorted_idx_t *const global_order, //
+    sz_size_t const start_in_collection, sz_size_t const end_in_collection) {
 
-    sz_size_t start_b = partition + 1;
-
-    // If the direct merge is already sorted
-    if (!less(sequence, sequence->order[start_b], sequence->order[partition])) return;
-
-    sz_size_t start_a = 0;
-    while (start_a <= partition && start_b <= sequence->count) {
-
-        // If element 1 is in right place
-        if (!less(sequence, sequence->order[start_b], sequence->order[start_a])) { start_a++; }
+    // Chose the pivot offset.
+    sz_size_t pivot_offset;
+    _sz_sorting_window_t pivot_window;
+    {
+        sz_size_t const middle_offset = start_in_collection + (end_in_collection - start_in_collection) / 2;
+        sz_size_t const last_offset = end_in_collection - 1;
+        sz_size_t const first_offset = start_in_collection;
+        _sz_sorting_window_t const first_window = global_windows[first_offset];
+        _sz_sorting_window_t const middle_window = global_windows[middle_offset];
+        _sz_sorting_window_t const last_window = global_windows[last_offset];
+        if (first_window < middle_window) {
+            if (middle_window < last_window) { pivot_offset = middle_offset, pivot_window = middle_window; }
+            else if (first_window < last_window) { pivot_offset = last_offset, pivot_window = last_window; }
+            else { pivot_offset = first_offset, pivot_window = first_window; }
+        }
         else {
-            sz_size_t value = sequence->order[start_b];
-            sz_size_t index = start_b;
-
-            // Shift all the elements between element 1
-            // element 2, right by 1.
-            while (index != start_a) { sequence->order[index] = sequence->order[index - 1], index--; }
-            sequence->order[start_a] = value;
-
-            // Update all the pointers
-            start_a++;
-            partition++;
-            start_b++;
+            if (first_window < last_window) { pivot_offset = first_offset, pivot_window = first_window; }
+            else if (middle_window < last_window) { pivot_offset = last_offset, pivot_window = last_window; }
+            else { pivot_offset = middle_offset, pivot_window = middle_window; }
         }
+    }
+
+    // Loop through the collection and move the elements around the pivot.
+    sz_size_t left_offset = start_in_collection;
+    sz_size_t right_offset = end_in_collection - 1;
+    while (left_offset <= right_offset) {
+        // Find the first element on the left that is greater than the pivot.
+        while (global_windows[left_offset] < pivot_window) ++left_offset;
+        // Find the first element on the right that is less than the pivot.
+        while (global_windows[right_offset] > pivot_window) --right_offset;
+        // Swap the elements if they are in the wrong order.
+        if (left_offset <= right_offset) {
+#if defined(_SZ_IS_64_BIT)
+            sz_u64_swap(&global_order[left_offset], &global_order[right_offset]);
+            sz_u64_swap(&global_windows[left_offset], &global_windows[right_offset]);
+#else
+            sz_u32_swap(&global_order[left_offset], &global_order[right_offset]);
+            sz_u32_swap(&global_windows[left_offset], &global_windows[right_offset]);
+#endif
+            ++left_offset;
+            --right_offset;
+        }
+    }
+
+    return pivot_offset;
+}
+
+SZ_PUBLIC void _sz_sort_serial_recursively(                                    //
+    sz_sequence_t const *const collection,                                     //
+    _sz_sorting_window_t *const global_windows, sz_size_t *const global_order, //
+    sz_size_t const start_in_collection, sz_size_t const end_in_collection,    //
+    sz_size_t const start_character) {
+    // Partition the collection around some pivot
+    sz_size_t pivot_index =
+        _sz_sort_serial_partition(global_windows, global_order, start_in_collection, end_in_collection);
+
+    // Recursively sort the left partition
+    if (start_in_collection < pivot_index) {
+        _sz_sort_serial_recursively(collection, global_windows, global_order, start_in_collection, pivot_index,
+                                    start_character);
+    }
+
+    // Recursively sort the right partition
+    if (pivot_index + 1 < end_in_collection) {
+        _sz_sort_serial_recursively(collection, global_windows, global_order, pivot_index + 1, end_in_collection,
+                                    start_character);
     }
 }
 
-SZ_PUBLIC void sz_sort_insertion(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
-    sz_u64_t *keys = sequence->order;
-    sz_size_t keys_count = sequence->count;
-    for (sz_size_t i = 1; i < keys_count; i++) {
-        sz_u64_t i_key = keys[i];
+SZ_PUBLIC void _sz_sort_serial_next_window(                                    //
+    sz_sequence_t const *const collection,                                     //
+    _sz_sorting_window_t *const global_windows, sz_size_t *const global_order, //
+    sz_size_t const start_in_collection, sz_size_t const end_in_collection,    //
+    sz_size_t const start_character) {
+
+    // Prepare the new range of windows
+    _sz_sort_serial_export_prefixes(collection, global_windows, start_in_collection, end_in_collection,
+                                    start_character);
+
+    // Sort current windows with a quicksort
+    _sz_sort_serial_recursively(collection, global_windows, global_order, start_in_collection, end_in_collection,
+                                start_character);
+
+    // Depending on the architecture, we will export a different number of bytes.
+    // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
+    sz_size_t const window_capacity = sizeof(_sz_sorting_window_t) - 1;
+
+    // Repeat the procedure for the identical windows
+    sz_size_t nested_start = start_in_collection;
+    sz_size_t nested_end = start_in_collection;
+    while (nested_end != end_in_collection) {
+        // Find the end of the identical windows
+        _sz_sorting_window_t current_window_integer = global_windows[nested_start];
+        while (nested_end != end_in_collection && current_window_integer == global_windows[nested_end]) ++nested_end;
+
+        // If the identical windows are not trivial and each string has more characters, sort them recursively
+        sz_cptr_t current_window_str = (sz_cptr_t)&current_window_integer;
+        int current_window_length = current_window_str[window_capacity];
+        if (nested_end - nested_start > 1 && current_window_length == window_capacity) {
+            _sz_sort_serial_next_window(collection, global_windows, global_order, nested_start, nested_end,
+                                        start_character + window_capacity);
+        }
+        // Move to the next
+        nested_start = nested_end;
+    }
+}
+
+SZ_PUBLIC void _sz_sort_serial_insertion(sz_sequence_t const *collection, sz_memory_allocator_t *alloc,
+                                         sz_sorted_idx_t *order) {
+    // This algorithm needs no memory allocations:
+    sz_unused(alloc);
+
+    // Assume `order` is already initialized with 0, 1, 2, ... N.
+    for (sz_size_t i = 1; i < collection->count; ++i) {
+        sz_sorted_idx_t current_idx = order[i];
         sz_size_t j = i;
-        for (; j > 0 && less(sequence, i_key, keys[j - 1]); --j) keys[j] = keys[j - 1];
-        keys[j] = i_key;
-    }
-}
+        while (j > 0) {
+            // Get the two strings to compare.
+            sz_sorted_idx_t previous_idx = order[j - 1];
+            sz_cptr_t previous_start = collection->get_start(collection, previous_idx);
+            sz_cptr_t current_start = collection->get_start(collection, current_idx);
+            sz_size_t previous_length = collection->get_length(collection, previous_idx);
+            sz_size_t current_length = collection->get_length(collection, current_idx);
 
-SZ_INTERNAL void _sz_sift_down( //
-    sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_u64_t *order, sz_size_t start, sz_size_t end) {
-    sz_size_t root = start;
-    while (2 * root + 1 <= end) {
-        sz_size_t child = 2 * root + 1;
-        if (child + 1 <= end && less(sequence, order[child], order[child + 1])) { child++; }
-        if (!less(sequence, order[root], order[child])) { return; }
-        sz_u64_swap(order + root, order + child);
-        root = child;
-    }
-}
+            // Use the provided sz_order to compare.
+            sz_ordering_t ordering = sz_order(previous_start, previous_length, current_start, current_length);
 
-SZ_INTERNAL void _sz_heapify(sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_u64_t *order, sz_size_t count) {
-    sz_size_t start = (count - 2) / 2;
-    while (1) {
-        _sz_sift_down(sequence, less, order, start, count - 1);
-        if (start == 0) return;
-        start--;
-    }
-}
+            // If the previous string is not greater than current_idx, we're done.
+            if (ordering != sz_greater_k) break;
 
-SZ_INTERNAL void _sz_heapsort(sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_size_t first, sz_size_t last) {
-    sz_u64_t *order = sequence->order;
-    sz_size_t count = last - first;
-    _sz_heapify(sequence, less, order + first, count);
-    sz_size_t end = count - 1;
-    while (end > 0) {
-        sz_u64_swap(order + first, order + first + end);
-        end--;
-        _sz_sift_down(sequence, less, order + first, 0, end);
-    }
-}
-
-SZ_PUBLIC void sz_sort_introsort_recursion( //
-    sz_sequence_t *sequence, sz_sequence_comparator_t less, sz_size_t first, sz_size_t last, sz_size_t depth) {
-
-    sz_size_t length = last - first;
-    switch (length) {
-    case 0:
-    case 1: return;
-    case 2:
-        if (less(sequence, sequence->order[first + 1], sequence->order[first]))
-            sz_u64_swap(&sequence->order[first], &sequence->order[first + 1]);
-        return;
-    case 3: {
-        sz_u64_t a = sequence->order[first];
-        sz_u64_t b = sequence->order[first + 1];
-        sz_u64_t c = sequence->order[first + 2];
-        if (less(sequence, b, a)) sz_u64_swap(&a, &b);
-        if (less(sequence, c, b)) sz_u64_swap(&c, &b);
-        if (less(sequence, b, a)) sz_u64_swap(&a, &b);
-        sequence->order[first] = a;
-        sequence->order[first + 1] = b;
-        sequence->order[first + 2] = c;
-        return;
-    }
-    }
-    // Until a certain length, the quadratic-complexity insertion-sort is fine
-    if (length <= 16) {
-        sz_sequence_t sub_seq = *sequence;
-        sub_seq.order += first;
-        sub_seq.count = length;
-        sz_sort_insertion(&sub_seq, less);
-        return;
-    }
-
-    // Fallback to N-logN-complexity heap-sort
-    if (depth == 0) {
-        _sz_heapsort(sequence, less, first, last);
-        return;
-    }
-
-    --depth;
-
-    // Median-of-three logic to choose pivot
-    sz_size_t median = first + length / 2;
-    if (less(sequence, sequence->order[median], sequence->order[first]))
-        sz_u64_swap(&sequence->order[first], &sequence->order[median]);
-    if (less(sequence, sequence->order[last - 1], sequence->order[first]))
-        sz_u64_swap(&sequence->order[first], &sequence->order[last - 1]);
-    if (less(sequence, sequence->order[median], sequence->order[last - 1]))
-        sz_u64_swap(&sequence->order[median], &sequence->order[last - 1]);
-
-    // Partition using the median-of-three as the pivot
-    sz_u64_t pivot = sequence->order[median];
-    sz_size_t left = first;
-    sz_size_t right = last - 1;
-    while (1) {
-        while (less(sequence, sequence->order[left], pivot)) left++;
-        while (less(sequence, pivot, sequence->order[right])) right--;
-        if (left >= right) break;
-        sz_u64_swap(&sequence->order[left], &sequence->order[right]);
-        left++;
-        right--;
-    }
-
-    // Recursively sort the partitions
-    sz_sort_introsort_recursion(sequence, less, first, left, depth);
-    sz_sort_introsort_recursion(sequence, less, right + 1, last, depth);
-}
-
-SZ_PUBLIC void sz_sort_introsort(sz_sequence_t *sequence, sz_sequence_comparator_t less) {
-    if (sequence->count == 0) return;
-    sz_size_t size_is_not_power_of_two = (sequence->count & (sequence->count - 1)) != 0;
-    sz_size_t depth_limit = sz_size_log2i_nonzero(sequence->count) + size_is_not_power_of_two;
-    sz_sort_introsort_recursion(sequence, less, 0, sequence->count, depth_limit);
-}
-
-SZ_PUBLIC void sz_sort_recursion( //
-    sz_sequence_t *sequence, sz_size_t bit_idx, sz_size_t bit_max, sz_sequence_comparator_t comparator,
-    sz_size_t partial_order_length) {
-
-    if (!sequence->count) return;
-
-    // Array of size one doesn't need sorting - only needs the prefix to be discarded.
-    if (sequence->count == 1) {
-        sz_u32_t *order_half_words = (sz_u32_t *)sequence->order;
-        order_half_words[1] = 0;
-        return;
-    }
-
-    // Partition a range of integers according to a specific bit value
-    sz_size_t split = 0;
-    sz_u64_t mask = (1ull << 63) >> bit_idx;
-
-    // The clean approach would be to perform a single pass over the sequence.
-    //
-    //    while (split != sequence->count && !(sequence->order[split] & mask)) ++split;
-    //    for (sz_size_t i = split + 1; i < sequence->count; ++i)
-    //        if (!(sequence->order[i] & mask)) sz_u64_swap(sequence->order + i, sequence->order + split), ++split;
-    //
-    // This, however, doesn't take into account the high relative cost of writes and swaps.
-    // To circumvent that, we can first count the total number entries to be mapped into either part.
-    // And then walk through both parts, swapping the entries that are in the wrong part.
-    // This would often lead to ~15% performance gain.
-    sz_size_t count_with_bit_set = 0;
-    for (sz_size_t i = 0; i != sequence->count; ++i) count_with_bit_set += (sequence->order[i] & mask) != 0;
-    split = sequence->count - count_with_bit_set;
-
-    // It's possible that the sequence is already partitioned.
-    if (split != 0 && split != sequence->count) {
-        // Use two pointers to efficiently reposition elements.
-        // On pointer walks left-to-right from the start, and the other walks right-to-left from the end.
-        sz_size_t left = 0;
-        sz_size_t right = sequence->count - 1;
-        while (1) {
-            // Find the next element with the bit set on the left side.
-            while (left < split && !(sequence->order[left] & mask)) ++left;
-            // Find the next element without the bit set on the right side.
-            while (right >= split && (sequence->order[right] & mask)) --right;
-            // Swap the mispositioned elements.
-            if (left < split && right >= split) {
-                sz_u64_swap(sequence->order + left, sequence->order + right);
-                ++left;
-                --right;
-            }
-            else { break; }
+            // Otherwise, shift the previous element to the right.
+            order[j] = order[j - 1];
+            --j;
         }
-    }
-
-    // Go down recursively.
-    if (bit_idx < bit_max) {
-        sz_sequence_t a = *sequence;
-        a.count = split;
-        sz_sort_recursion(&a, bit_idx + 1, bit_max, comparator, partial_order_length);
-
-        sz_sequence_t b = *sequence;
-        b.order += split;
-        b.count -= split;
-        sz_sort_recursion(&b, bit_idx + 1, bit_max, comparator, partial_order_length);
-    }
-    // Reached the end of recursion.
-    else {
-        // Discard the prefixes.
-        sz_u32_t *order_half_words = (sz_u32_t *)sequence->order;
-        for (sz_size_t i = 0; i != sequence->count; ++i) { order_half_words[i * 2 + 1] = 0; }
-
-        sz_sequence_t a = *sequence;
-        a.count = split;
-        sz_sort_introsort(&a, comparator);
-
-        sz_sequence_t b = *sequence;
-        b.order += split;
-        b.count -= split;
-        sz_sort_introsort(&b, comparator);
+        order[j] = current_idx;
     }
 }
 
-SZ_INTERNAL sz_bool_t _sz_sort_is_less(sz_sequence_t *sequence, sz_size_t i_key, sz_size_t j_key) {
-    sz_cptr_t i_str = sequence->get_start(sequence, i_key);
-    sz_cptr_t j_str = sequence->get_start(sequence, j_key);
-    sz_size_t i_len = sequence->get_length(sequence, i_key);
-    sz_size_t j_len = sequence->get_length(sequence, j_key);
-    return (sz_bool_t)(sz_order_serial(i_str, i_len, j_str, j_len) == sz_less_k);
-}
+SZ_PUBLIC sz_bool_t sz_sort_serial(sz_sequence_t const *collection, sz_memory_allocator_t *alloc,
+                                   sz_sorted_idx_t *order) {
 
-SZ_PUBLIC void sz_sort_partial(sz_sequence_t *sequence, sz_size_t partial_order_length) {
+    // First, initialize the `order` with `std::iota`-like behavior.
+    for (sz_size_t i = 0; i != collection->count; ++i) order[i] = i;
 
-#if _SZ_IS_BIG_ENDIAN
-    // TODO: Implement partial sort for big-endian systems. For now this sorts the whole thing.
-    sz_unused(partial_order_length);
-    sz_sort_introsort(sequence, (sz_sequence_comparator_t)_sz_sort_is_less);
-#else
-
-    // Export up to 4 bytes into the `sequence` bits themselves
-    for (sz_size_t i = 0; i != sequence->count; ++i) {
-        sz_cptr_t begin = sequence->get_start(sequence, sequence->order[i]);
-        sz_size_t length = sequence->get_length(sequence, sequence->order[i]);
-        length = length > 4u ? 4u : length;
-        sz_ptr_t prefix = (sz_ptr_t)&sequence->order[i];
-        for (sz_size_t j = 0; j != length; ++j) prefix[7 - j] = begin[j];
+    // On very small collections - just use the quadratic-complexity insertion sort
+    // without any smart optimizations or memory allocations.
+    if (collection->count <= 32) {
+        _sz_sort_serial_insertion(collection, alloc, order);
+        return sz_true_k;
     }
 
-    // Perform optionally-parallel radix sort on them
-    sz_sort_recursion(sequence, 0, 32, (sz_sequence_comparator_t)_sz_sort_is_less, partial_order_length);
-#endif
-}
+    // One of the reasons for slow string operations is the significant overhead of branching when performing
+    // individual string comparisons.
+    //
+    // The core idea of our algorithm is to minimize character-level loops in string comparisons and
+    // instead operate on larger integer words - 4 or 8 bytes at once, on 32-bit or 64-bit architectures, respectively.
+    // Let's say we have N strings and the pointer size is P.
+    //
+    // Our recursive algorithm will take the first P bytes of each string and sort them as integers.
+    // Assuming that some strings may contain or even end with NULL bytes, we need to make sure, that their length
+    // is included in those P-long words. So, in reality, we will be taking (P-1) bytes from each string on every
+    // iteration of a recursive algorithm.
+    _sz_sorting_window_t *windows =
+        (_sz_sorting_window_t *)alloc->allocate(collection->count * sizeof(_sz_sorting_window_t), alloc);
+    if (!windows) return sz_false_k;
 
-SZ_PUBLIC void sz_sort(sz_sequence_t *sequence) {
-#if _SZ_IS_BIG_ENDIAN
-    sz_sort_introsort(sequence, (sz_sequence_comparator_t)_sz_sort_is_less);
-#else
-    sz_sort_partial(sequence, sequence->count);
-#endif
+    // Recursively sort the whole collection.
+    _sz_sort_serial_recursively(collection, windows, order, 0, collection->count, 0);
+
+    // Free temporary storage.
+    alloc->free(windows, collection->count * sizeof(_sz_sorting_window_t), alloc);
+    return sz_true_k;
 }
 
 #pragma endregion // Serial Implementation
+
+#pragma region Ice Lake Implementation
+
+SZ_PUBLIC void _sz_sort_ice_recursively(                                       //
+    sz_sequence_t const *const collection,                                     //
+    _sz_sorting_window_t *const global_windows, sz_size_t *const global_order, //
+    sz_size_t const start_in_collection, sz_size_t const end_in_collection,    //
+    sz_size_t const start_character) {
+
+    // Prepare the new range of windows
+    _sz_sort_serial_export_prefixes(collection, global_windows, start_in_collection, end_in_collection,
+                                    start_character);
+
+    // We can implement a form of a Radix sort here, that will count the number of elements with
+    // a certain bit set. The naive approach may require too many loops over data. A more "vectorized"
+    // approach would be to maintain a histogram for several bits at once. For 4 bits we will
+    // need 2^4 = 16 counters.
+    sz_size_t histogram[16] = {0};
+    for (sz_size_t byte_in_window = 0; byte_in_window != sizeof(_sz_sorting_window_t); ++byte_in_window) {
+        // First sort based on the low nibble of each byte.
+        for (sz_size_t i = start_in_collection; i < end_in_collection; ++i) {
+            sz_size_t const byte = (global_windows[i] >> (byte_in_window * 8)) & 0xFF;
+            ++histogram[byte];
+        }
+        sz_size_t offset = start_in_collection;
+        for (sz_size_t i = 0; i != 16; ++i) {
+            sz_size_t const count = histogram[i];
+            histogram[i] = offset;
+            offset += count;
+        }
+        for (sz_size_t i = start_in_collection; i < end_in_collection; ++i) {
+            sz_size_t const byte = (global_windows[i] >> (byte_in_window * 8)) & 0xFF;
+            global_order[histogram[byte]] = i;
+            ++histogram[byte];
+        }
+    }
+}
+
+#pragma endregion // Ice Lake Implementation
+
+SZ_PUBLIC sz_bool_t sz_sort(sz_sequence_t const *collection, sz_memory_allocator_t *alloc, sz_sorted_idx_t *order) {
+    return sz_sort_serial(collection, alloc, order);
+}
 
 #ifdef __cplusplus
 }

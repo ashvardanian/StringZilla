@@ -4024,12 +4024,13 @@ void sorted_order(objects_type_ const *begin, objects_type_ const *end, sorted_i
     for (std::size_t i = 0; i != args.count; ++i) order[i] = static_cast<sorted_idx_t>(i);
 
     sz_sequence_t array;
-    array.order = reinterpret_cast<sorted_idx_t *>(order);
     array.count = args.count;
     array.handle = &args;
     array.get_start = _call_sequence_member_start<objects_type_, string_extractor_>;
     array.get_length = _call_sequence_member_length<objects_type_, string_extractor_>;
-    sz_sort(&array);
+
+    using sz_alloc_type = sz_memory_allocator_t;
+    _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) { return sz_sort(&array, &alloc, order); });
 }
 
 #if !SZ_AVOID_STL
