@@ -38,8 +38,6 @@ SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length);
  *  @param text     String to hash.
  *  @param length   Number of bytes in the text.
  *  @return         64-bit hash value.
- *
- *  @see    sz_hashes, sz_hashes_fingerprint, sz_hashes_intersection
  */
 SZ_PUBLIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length) {
     sz_unused(text && length);
@@ -268,10 +266,10 @@ SZ_PUBLIC sz_u64_t sz_checksum_haswell(sz_cptr_t text, sz_size_t length) {
         sz_size_t body_length = length - head_length - tail_length; // Multiple of 32.
         sz_u64_t result = 0;
 
+        // Handle the tail before we start updating the `text` pointer
+        while (tail_length) result += text[length - (tail_length--)];
         // Handle the head
         while (head_length--) result += *text++;
-        // Handle the tail
-        while (tail_length) result += text[length - (tail_length--) - 1];
 
         sz_u256_vec_t text_vec, sums_vec;
         sums_vec.ymm = _mm256_setzero_si256();
