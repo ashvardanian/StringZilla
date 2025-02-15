@@ -21,18 +21,18 @@ tracked_unary_functions_t checksum_functions() {
              return std::accumulate(s.begin(), s.end(), (std::size_t)0,
                                     [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
          }},
-        {"sz_checksum_serial", wrap_sz(sz_checksum_serial), false},
+        {"sz_checksum_serial", wrap_sz(sz_checksum_serial), true},
 #if SZ_USE_HASWELL
-        {"sz_checksum_haswell", wrap_sz(sz_checksum_haswell), false},
+        {"sz_checksum_haswell", wrap_sz(sz_checksum_haswell), true},
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_checksum_skylake", wrap_sz(sz_checksum_skylake), false},
+        {"sz_checksum_skylake", wrap_sz(sz_checksum_skylake), true},
 #endif
 #if SZ_USE_ICE
-        {"sz_checksum_ice", wrap_sz(sz_checksum_ice), false},
+        {"sz_checksum_ice", wrap_sz(sz_checksum_ice), true},
 #endif
 #if SZ_USE_NEON
-        {"sz_checksum_neon", wrap_sz(sz_checksum_neon), false},
+        {"sz_checksum_neon", wrap_sz(sz_checksum_neon), true},
 #endif
     };
     return result;
@@ -242,6 +242,7 @@ void bench_on_synthetic_data() {
 
 int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting token-level benchmarks.\n");
+    std::printf("- Seconds per benchmark: %zu\n", seconds_per_benchmark);
 
     if (argc < 2) { bench_on_synthetic_data(); }
     else { bench_on_input_data(argc, argv); }
