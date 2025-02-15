@@ -116,7 +116,7 @@ SZ_PUBLIC sz_size_t _sz_sort_serial_partition(                                  
     // Loop through the collection and move the elements around the pivot.
     sz_size_t left_offset = start_in_collection;
     sz_size_t right_offset = end_in_collection - 1;
-    while (left_offset <= right_offset) {
+    while (left_offset < right_offset) {
         // Find the first element on the left that is greater than the pivot.
         while (global_windows[left_offset] < pivot_window) ++left_offset;
         // Find the first element on the right that is less than the pivot.
@@ -188,7 +188,7 @@ SZ_PUBLIC void _sz_sort_serial_next_window(                                    /
 
         // If the identical windows are not trivial and each string has more characters, sort them recursively
         sz_cptr_t current_window_str = (sz_cptr_t)&current_window_integer;
-        int current_window_length = current_window_str[window_capacity];
+        sz_size_t current_window_length = (sz_size_t)current_window_str[window_capacity];
         if (nested_end - nested_start > 1 && current_window_length == window_capacity) {
             _sz_sort_serial_next_window(collection, global_windows, global_order, nested_start, nested_end,
                                         start_character + window_capacity);
