@@ -3974,8 +3974,8 @@ void randomize(basic_string_slice<char_type_> string, string_view alphabet = "ab
 using sorted_idx_t = sz_sorted_idx_t;
 
 /**
- *  @brief  Internal data-structure used to forward the arguments to the `sz_sort` function.
- *  @see    sorted_order
+ *  @brief  Internal data-structure used to forward the arguments to the `sz_sequence_argsort` function.
+ *  @see    argsort
  */
 template <typename objects_type_, typename string_extractor_>
 struct _sequence_args {
@@ -4004,18 +4004,18 @@ sz_size_t _call_sequence_member_length(struct sz_sequence_t const *sequence, sz_
 /**
  *  @brief  Computes the permutation of an array, that would lead to sorted order.
  *          The elements of the array must be convertible to a `string_view` with the given extractor.
- *          Unlike the `sz_sort` C interface, overwrites the output array.
+ *          Unlike the `sz_sequence_argsort` C interface, overwrites the output array.
  *
  *  @param[in] begin       The pointer to the first element of the array.
  *  @param[in] end         The pointer to the element after the last element of the array.
  *  @param[out] order      The pointer to the output array of indices, that will be populated with the permutation.
  *  @param[in] extractor   The function object that extracts the string from the object.
  *
- *  @see    sz_sort
+ *  @see    sz_sequence_argsort
  */
 template <typename objects_type_, typename string_extractor_>
-void sorted_order(objects_type_ const *begin, objects_type_ const *end, sorted_idx_t *order,
-                  string_extractor_ &&extractor) noexcept {
+void argsort(objects_type_ const *begin, objects_type_ const *end, sorted_idx_t *order,
+             string_extractor_ &&extractor) noexcept {
 
     // Pack the arguments into a single structure to reference it from the callback.
     _sequence_args<objects_type_, string_extractor_> args = {begin, static_cast<std::size_t>(end - begin), order,
@@ -4030,7 +4030,8 @@ void sorted_order(objects_type_ const *begin, objects_type_ const *end, sorted_i
     array.get_length = _call_sequence_member_length<objects_type_, string_extractor_>;
 
     using sz_alloc_type = sz_memory_allocator_t;
-    _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) { return sz_sort(&array, &alloc, order); });
+    _with_alloc<std::allocator<sz_u8_t>>(
+        [&](sz_alloc_type &alloc) { return sz_sequence_argsort(&array, &alloc, order); });
 }
 
 #if !SZ_AVOID_STL
@@ -4075,10 +4076,10 @@ std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename objects_type_, typename string_extractor_>
-std::vector<sorted_idx_t> sorted_order( //
+std::vector<sorted_idx_t> argsort( //
     objects_type_ const *begin, objects_type_ const *end, string_extractor_ &&extractor) noexcept(false) {
     std::vector<sorted_idx_t> order(end - begin);
-    sorted_order(begin, end, order.data(), std::forward<string_extractor_>(extractor));
+    argsort(begin, end, order.data(), std::forward<string_extractor_>(extractor));
     return order;
 }
 
@@ -4088,10 +4089,10 @@ std::vector<sorted_idx_t> sorted_order( //
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename string_like_type_>
-std::vector<sorted_idx_t> sorted_order(string_like_type_ const *begin, string_like_type_ const *end) noexcept(false) {
+std::vector<sorted_idx_t> argsort(string_like_type_ const *begin, string_like_type_ const *end) noexcept(false) {
     static_assert( //
         std::is_convertible<string_like_type_, string_view>::value, "The type must be convertible to string_view.");
-    return sorted_order(begin, end, [](string_like_type_ const &s) -> string_view { return s; });
+    return argsort(begin, end, [](string_like_type_ const &s) -> string_view { return s; });
 }
 
 /**
@@ -4100,11 +4101,11 @@ std::vector<sorted_idx_t> sorted_order(string_like_type_ const *begin, string_li
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename string_like_type_>
-std::vector<sorted_idx_t> sorted_order(std::vector<string_like_type_> const &array) noexcept(false) {
+std::vector<sorted_idx_t> argsort(std::vector<string_like_type_> const &array) noexcept(false) {
     static_assert( //
         std::is_convertible<string_like_type_, string_view>::value, "The type must be convertible to string_view.");
-    return sorted_order(array.data(), array.data() + array.size(),
-                        [](string_like_type_ const &s) -> string_view { return s; });
+    return argsort(array.data(), array.data() + array.size(),
+                   [](string_like_type_ const &s) -> string_view { return s; });
 }
 
 #endif

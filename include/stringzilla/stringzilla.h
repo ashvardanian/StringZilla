@@ -47,7 +47,7 @@
 #include "memory.h"       // `sz_copy`, `sz_move`, `sz_fill`
 #include "similarity.h"   // `sz_edit_distance`, `sz_alignment_score`
 #include "small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
-#include "sort.h"         // `sz_sort`, `sz_sort_partial`, `sz_partition`
+#include "sort.h"         // `sz_sequence_argsort`, `sz_pgrams_sort`, `sz_pgrams_sort_stable`
 #include "types.h"        // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`
 
 #ifdef __cplusplus

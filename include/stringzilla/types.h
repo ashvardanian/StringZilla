@@ -325,6 +325,7 @@ typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching f
 
 struct sz_sequence_t;              // Forward declaration of an ordered collection of strings
 typedef sz_size_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
+typedef sz_size_t sz_pgram_t;      // "Pointer-sized N-gram" of a string
 
 typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        // Only one relevant bit
 typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; // Only three possible states: <=>
@@ -481,8 +482,8 @@ typedef sz_size_t (*sz_edit_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size
 typedef sz_ssize_t (*sz_alignment_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_error_cost_t const *,
                                            sz_error_cost_t, sz_memory_allocator_t *);
 
-/** @brief  Signature of ::sz_sort. */
-typedef sz_bool_t (*sz_sort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
+/** @brief  Signature of ::sz_sequence_argsort. */
+typedef sz_bool_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
 
 #pragma endregion
 
@@ -644,8 +645,6 @@ SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_le
 
 typedef sz_cptr_t (*sz_sequence_member_start_t)(struct sz_sequence_t const *, sz_size_t);
 typedef sz_size_t (*sz_sequence_member_length_t)(struct sz_sequence_t const *, sz_size_t);
-typedef sz_bool_t (*sz_sequence_predicate_t)(struct sz_sequence_t const *, sz_size_t);
-typedef sz_bool_t (*sz_string_is_less_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 typedef struct sz_sequence_t {
     void const *handle;
@@ -982,24 +981,6 @@ SZ_INTERNAL sz_u64_t sz_u64_transpose(sz_u64_t x) {
     t = 0xaa00aa00aa00aa00ull & (x ^ (x << 9));
     x ^= t ^ (t >> 9);
     return x;
-}
-
-/**
- *  @brief  Helper, that swaps two 64-bit integers representing the order of elements in the sequence.
- */
-SZ_INTERNAL void sz_u64_swap(sz_u64_t *a, sz_u64_t *b) {
-    sz_u64_t t = *a;
-    *a = *b;
-    *b = t;
-}
-
-/**
- *  @brief  Helper, that swaps two 64-bit integers representing the order of elements in the sequence.
- */
-SZ_INTERNAL void sz_pointer_swap(void **a, void **b) {
-    void *t = *a;
-    *a = *b;
-    *b = t;
 }
 
 /**

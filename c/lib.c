@@ -189,7 +189,7 @@ typedef struct sz_implementations_t {
     sz_edit_distance_t edit_distance;
     sz_alignment_score_t alignment_score;
 
-    sz_sort_t sort;
+    sz_sequence_argsort_t sequence_argsort;
 
 } sz_implementations_t;
 
@@ -225,7 +225,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
 
     impl->edit_distance = sz_edit_distance_serial;
     impl->alignment_score = sz_alignment_score_serial;
-    impl->sort = sz_sort_serial;
+    impl->sequence_argsort = sz_sequence_argsort_serial;
 
 #if SZ_USE_HASWELL
     if (caps & sz_cap_haswell_k) {
@@ -416,8 +416,8 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score( //
     return sz_dispatch_table.alignment_score(a, a_length, b, b_length, subs, gap, alloc);
 }
 
-SZ_DYNAMIC sz_bool_t sz_sort(sz_sequence_t const *array, sz_memory_allocator_t *alloc, sz_size_t *order) {
-    return sz_dispatch_table.sort(array, alloc, order);
+SZ_DYNAMIC sz_bool_t sz_sequence_argsort(sz_sequence_t const *array, sz_memory_allocator_t *alloc, sz_size_t *order) {
+    return sz_dispatch_table.sequence_argsort(array, alloc, order);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {

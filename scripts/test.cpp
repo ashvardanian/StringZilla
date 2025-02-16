@@ -1596,9 +1596,9 @@ static void test_sequence_algorithms() {
     using order_t = std::vector<sz::sorted_idx_t>;
 
     // Basic tests with predetermined orders.
-    assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::sorted_order(x) == order_t({0u, 1u, 2u, 3u}));
-    assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::sorted_order(x) == order_t({3u, 0u, 1u, 2u}));
-    assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::sorted_order(x) == order_t({1u, 0u, 3u, 2u}));
+    assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::argsort(x) == order_t({0u, 1u, 2u, 3u}));
+    assert_scoped(strs_t x({"b", "c", "d", "a"}), (void)0, sz::argsort(x) == order_t({3u, 0u, 1u, 2u}));
+    assert_scoped(strs_t x({"b", "a", "d", "c"}), (void)0, sz::argsort(x) == order_t({1u, 0u, 3u, 2u}));
 
     // Test on long strings of identical length.
     for (std::size_t string_length : {5u, 25u}) {
@@ -1611,7 +1611,7 @@ static void test_sequence_algorithms() {
             // Run several iterations of fuzzy tests.
             for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
                 std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
-                auto order = sz::sorted_order(dataset);
+                auto order = sz::argsort(dataset);
                 for (std::size_t i = 1; i < dataset.size(); ++i) assert(dataset[order[i - 1]] <= dataset[order[i]]);
             }
         }
@@ -1626,7 +1626,7 @@ static void test_sequence_algorithms() {
         // Run several iterations of fuzzy tests.
         for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
-            auto order = sz::sorted_order(dataset);
+            auto order = sz::argsort(dataset);
             for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
         }
     }
@@ -1642,7 +1642,7 @@ static void test_sequence_algorithms() {
         // Run several iterations of fuzzy tests.
         for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
-            auto order = sz::sorted_order(dataset);
+            auto order = sz::argsort(dataset);
             for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
         }
     }
@@ -1656,7 +1656,7 @@ static void test_sequence_algorithms() {
         // Run several iterations of fuzzy tests.
         for (std::size_t experiment_idx = 0; experiment_idx < 10; ++experiment_idx) {
             std::shuffle(dataset.begin(), dataset.end(), global_random_generator());
-            auto order = sz::sorted_order(dataset);
+            auto order = sz::argsort(dataset);
             for (std::size_t i = 1; i < dataset_size; ++i) { assert(dataset[order[i - 1]] <= dataset[order[i]]); }
         }
     }

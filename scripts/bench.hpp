@@ -44,24 +44,24 @@ using binary_function_t = std::function<std::size_t(std::string_view, std::strin
 /**
  *  @brief  Wrapper for a single execution backend.
  */
-template <typename function_type>
+template <typename function_type_>
 struct tracked_function_gt {
     std::string name {""};
-    function_type function {nullptr};
+    function_type_ function {nullptr};
     bool needs_testing {false};
 
     std::size_t failed_count;
     std::vector<std::string> failed_strings;
     benchmark_result_t results;
 
-    tracked_function_gt(std::string name = "", function_type function = nullptr, bool needs_testing = false)
+    tracked_function_gt(std::string name = "", function_type_ function = nullptr, bool needs_testing = false)
         : name(name), function(function), needs_testing(needs_testing), failed_count(0), failed_strings(), results() {}
 
     tracked_function_gt(tracked_function_gt const &) = default;
     tracked_function_gt &operator=(tracked_function_gt const &) = default;
 
     void print() const {
-        bool is_binary = std::is_same<function_type, binary_function_t>();
+        bool is_binary = std::is_same<function_type_, binary_function_t>();
 
         // If failures have occurred, output them to file to simplify the debugging process.
         bool contains_failures = !failed_strings.empty();
@@ -230,34 +230,45 @@ inline sz_string_view_t to_c(sz::string const &str) noexcept { return {str.data(
 inline sz_string_view_t to_c(sz_string_view_t str) noexcept { return str; }
 
 /**
+ *  @brief  Invoke the same function many times, until the total time elapsed exceeds the limit.
+ *  @return Total seconds elapsed.
+ */
+template <typename function_type_>
+seconds_t repeat_until_limit(function_type_ &&function) {
+
+    namespace stdc = std::chrono;
+    using clock_t = stdc::high_resolution_clock;
+    clock_t::time_point start_time = clock_t::now();
+    seconds_t seconds = 0;
+
+    while (seconds < seconds_per_benchmark) {
+        function();
+        clock_t::time_point current_time = clock_t::now();
+        seconds = stdc::duration_cast<stdc::nanoseconds>(current_time - start_time).count() / 1.e9;
+    }
+    return seconds;
+}
+
+/**
  *  @brief  Loop over all elements in a dataset in somewhat random order, benchmarking the function cost.
  *  @param  strings Strings to loop over. Length must be a power of two.
  *  @param  function Function to be applied to each `sz_string_view_t`. Must return the number of bytes processed.
  *  @return Number of seconds per iteration.
  */
-template <typename strings_type, typename function_type>
-benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&function) {
+template <typename strings_type_, typename function_type_>
+benchmark_result_t bench_on_tokens(strings_type_ &&strings, function_type_ &&function) {
 
-    namespace stdc = std::chrono;
-    using clock_t = stdc::high_resolution_clock;
-    clock_t::time_point t1 = clock_t::now();
     benchmark_result_t result;
-    std::size_t lookup_mask = bit_floor(strings.size()) - 1;
-
-    while (true) {
+    std::size_t const lookup_mask = bit_floor(strings.size()) - 1;
+    result.seconds = repeat_until_limit([&]() {
         // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
-        {
-            result.bytes_passed += function(strings[(result.iterations + 0) & lookup_mask]) +
-                                   function(strings[(result.iterations + 1) & lookup_mask]) +
-                                   function(strings[(result.iterations + 2) & lookup_mask]) +
-                                   function(strings[(result.iterations + 3) & lookup_mask]);
-            result.iterations += 4;
-        }
-
-        clock_t::time_point t2 = clock_t::now();
-        result.seconds = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count() / 1.e9;
-        if (result.seconds > seconds_per_benchmark) break;
-    }
+        result.bytes_passed += //
+            function(strings[(result.iterations + 0) & lookup_mask]) +
+            function(strings[(result.iterations + 1) & lookup_mask]) +
+            function(strings[(result.iterations + 2) & lookup_mask]) +
+            function(strings[(result.iterations + 3) & lookup_mask]);
+        result.iterations += 4;
+    });
 
     return result;
 }
@@ -269,31 +280,22 @@ benchmark_result_t bench_on_tokens(strings_type &&strings, function_type &&funct
  *                   Must return the number of bytes processed.
  *  @return Number of seconds per iteration.
  */
-template <typename strings_type, typename function_type>
-benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&function) {
+template <typename strings_type_, typename function_type_>
+benchmark_result_t bench_on_token_pairs(strings_type_ &&strings, function_type_ &&function) {
 
-    namespace stdc = std::chrono;
-    using clock_t = stdc::high_resolution_clock;
-    clock_t::time_point t1 = clock_t::now();
     benchmark_result_t result;
     std::size_t lookup_mask = bit_floor(strings.size()) - 1;
     std::size_t largest_prime = static_cast<std::size_t>(18446744073709551557ull);
-
-    while (true) {
+    result.seconds = repeat_until_limit([&]() {
         // Unroll a few iterations, to avoid some for-loops overhead and minimize impact of time-tracking
-        {
-            auto second = (result.iterations * largest_prime) & lookup_mask;
-            result.bytes_passed += function(strings[(result.iterations + 0) & lookup_mask], strings[second]) +
-                                   function(strings[(result.iterations + 1) & lookup_mask], strings[second]) +
-                                   function(strings[(result.iterations + 2) & lookup_mask], strings[second]) +
-                                   function(strings[(result.iterations + 3) & lookup_mask], strings[second]);
-            result.iterations += 4;
-        }
-
-        clock_t::time_point t2 = clock_t::now();
-        result.seconds = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count() / 1.e9;
-        if (result.seconds > seconds_per_benchmark) break;
-    }
+        auto second_index = (result.iterations * largest_prime) & lookup_mask;
+        result.bytes_passed += //
+            function(strings[(result.iterations + 0) & lookup_mask], strings[second_index]) +
+            function(strings[(result.iterations + 1) & lookup_mask], strings[second_index]) +
+            function(strings[(result.iterations + 2) & lookup_mask], strings[second_index]) +
+            function(strings[(result.iterations + 3) & lookup_mask], strings[second_index]);
+        result.iterations += 4;
+    });
 
     return result;
 }
@@ -301,8 +303,8 @@ benchmark_result_t bench_on_token_pairs(strings_type &&strings, function_type &&
 /**
  *  @brief  Evaluation for unary string operations: hashing.
  */
-template <typename strings_type, typename functions_type>
-void bench_unary_functions(strings_type &&strings, functions_type &&variants) {
+template <typename strings_type_, typename functions_type>
+void bench_unary_functions(strings_type_ &&strings, functions_type &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];
@@ -337,8 +339,8 @@ void bench_unary_functions(strings_type &&strings, functions_type &&variants) {
 /**
  *  @brief  Evaluation for binary string operations: equality, ordering, prefix, suffix, distance.
  */
-template <typename strings_type, typename functions_type>
-void bench_binary_functions(strings_type &&strings, functions_type &&variants) {
+template <typename strings_type_, typename functions_type>
+void bench_binary_functions(strings_type_ &&strings, functions_type &&variants) {
 
     for (std::size_t variant_idx = 0; variant_idx != variants.size(); ++variant_idx) {
         auto &variant = variants[variant_idx];

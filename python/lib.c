@@ -3214,7 +3214,7 @@ static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_sort
     sequence.get_start = parts_get_start;
     sequence.get_length = parts_get_length;
     for (sz_sorted_idx_t i = 0; i != sequence.count; ++i) sequence.order[i] = i;
-    sz_sort(&sequence);
+    sz_sequence_argsort(&sequence);
 
     // Export results
     *parts_output = parts;

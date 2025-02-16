@@ -19,8 +19,7 @@ using namespace ashvardanian::stringzilla::scripts;
 namespace sz = ashvardanian::stringzilla;
 
 using strings_t = std::vector<std::string>;
-using idx_t = sz_size_t;
-using permute_t = std::vector<sz_u64_t>;
+using permute_t = std::vector<sz_sorted_idx_t>;
 
 #pragma region C callbacks
 
@@ -54,87 +53,128 @@ static int _get_qsort_order(const void *a, const void *b, void *arg) {
 
 #pragma endregion
 
-void expect_sorted(strings_t const &strings, permute_t const &permute) {
+template <typename strings_type_>
+void expect_sorted(strings_type_ const &strings, permute_t const &permute) {
     if (!std::is_sorted(permute.begin(), permute.end(),
                         [&](std::size_t i, std::size_t j) { return strings[i] < strings[j]; }))
         throw std::runtime_error("Sorting failed!");
 }
 
-template <typename algo_at>
-void bench_permute(char const *name, strings_t &strings, permute_t &permute, algo_at &&algo) {
-    namespace stdc = std::chrono;
-    using clock_t = stdc::high_resolution_clock;
-    constexpr std::size_t iterations = 3;
-    clock_t::time_point t1 = clock_t::now();
+template <typename callback_type_>
+void bench_permute(char const *name, callback_type_ &&callback) {
 
     // Run multiple iterations
-    for (std::size_t i = 0; i != iterations; ++i) {
-        std::iota(permute.begin(), permute.end(), 0);
-        algo(strings, permute);
-    }
+    std::size_t iterations = 0;
+    seconds_t duration = repeat_until_limit([&]() {
+        callback();
+        iterations++;
+    });
 
     // Measure elapsed time
-    clock_t::time_point t2 = clock_t::now();
-    double dif = stdc::duration_cast<stdc::nanoseconds>(t2 - t1).count() * 1.0;
-    double millisecs = dif / (iterations * 1e6);
-    std::printf("Elapsed time is %.2lf milliseconds/iteration for %s.\n", millisecs, name);
+    duration /= iterations;
+    if (duration >= 0.1) { std::printf("Elapsed time is %.2lf seconds for %s.\n", duration, name); }
+    else if (duration >= 0.001) { std::printf("Elapsed time is %.2lf milliseconds for %s.\n", duration * 1e3, name); }
+    else { std::printf("Elapsed time is %.2lf microseconds for %s.\n", duration * 1e6, name); }
 }
 
 int main(int argc, char const **argv) {
     std::printf("StringZilla. Starting sorting benchmarks.\n");
-    dataset_t dataset = prepare_benchmark_environment(argc, argv);
-    strings_t strings {dataset.tokens.begin(), dataset.tokens.end()};
+    dataset_t const dataset = prepare_benchmark_environment(argc, argv);
+    strings_t const strings {dataset.tokens.begin(), dataset.tokens.end()};
+    permute_t permute(strings.size());
+    using allocator_t = std::allocator<char>;
 
-    permute_t permute_base, permute_new;
-    permute_base.resize(strings.size());
-    permute_new.resize(strings.size());
-
-    // Sorting
-    bench_permute("std::sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-        std::sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
+    // Before sorting the strings themselves, which is a heavy operation, let's sort some prefixes
+    // to understand how the sorting algorithm behaves.
+    std::vector<sz_pgram_t> pgrams(strings.size());
+    std::transform(strings.begin(), strings.end(), pgrams.begin(), [](std::string const &str) {
+        sz_pgram_t pgram = 0;
+        std::memcpy(&pgram, str.c_str(), (std::min)(sizeof(pgram), str.size()));
+        return pgram;
     });
-    expect_sorted(strings, permute_base);
 
-    bench_permute("sz_sort_serial", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+    // Sorting P-grams
+    bench_permute("std::sort(pgrams)", [&]() {
+        std::iota(permute.begin(), permute.end(), 0);
+        std::sort(permute.begin(), permute.end(),
+                  [&](sz_sorted_idx_t i, sz_sorted_idx_t j) { return pgrams[i] < pgrams[j]; });
+    });
+    expect_sorted(pgrams, permute);
+
+    // Unlike the `std::sort` adaptation above, the `sz_pgrams_sort_serial` also sorts the input array inplace
+    std::vector<sz_pgram_t> pgrams_sorted(strings.size());
+    bench_permute("sz_pgrams_sort_serial", [&]() {
+        std::copy(pgrams.begin(), pgrams.end(), pgrams_sorted.begin());
+        std::iota(permute.begin(), permute.end(), 0);
+        sz::_with_alloc<allocator_t>([&](sz_memory_allocator_t &alloc) {
+            return sz_pgrams_sort_serial(pgrams_sorted.data(), pgrams_sorted.size(), &alloc, permute.data());
+        });
+    });
+    expect_sorted(pgrams, permute);
+
+    // Unlike the `std::sort` adaptation above, the `sz_pgrams_sort_stable_serial` also sorts the input array inplace
+    bench_permute("sz_pgrams_sort_stable_serial", [&]() {
+        std::copy(pgrams.begin(), pgrams.end(), pgrams_sorted.begin());
+        std::iota(permute.begin(), permute.end(), 0);
+        sz::_with_alloc<allocator_t>([&](sz_memory_allocator_t &alloc) {
+            return sz_pgrams_sort_stable_serial(pgrams_sorted.data(), pgrams_sorted.size(), &alloc, permute.data());
+        });
+    });
+    expect_sorted(pgrams, permute);
+
+    // Sorting strings
+    bench_permute("std::sort(positions)", [&]() {
+        std::iota(permute.begin(), permute.end(), 0);
+        std::sort(permute.begin(), permute.end(),
+                  [&](sz_sorted_idx_t i, sz_sorted_idx_t j) { return strings[i] < strings[j]; });
+    });
+    expect_sorted(strings, permute);
+
+    bench_permute("sz_sequence_argsort", [&]() {
+        std::iota(permute.begin(), permute.end(), 0);
         sz_sequence_t array;
         array.count = strings.size();
         array.handle = &strings;
         array.get_start = get_start;
         array.get_length = get_length;
-        sz::_with_alloc<std::allocator<char>>(
-            [&](sz_memory_allocator_t &alloc) { return sz_sort_serial(&array, &alloc, permute.data()); });
+        sz::_with_alloc<allocator_t>(
+            [&](sz_memory_allocator_t &alloc) { return sz_sequence_argsort(&array, &alloc, permute.data()); });
     });
-    expect_sorted(strings, permute_new);
+    expect_sorted(strings, permute);
 
 #if __linux__ && defined(_GNU_SOURCE) && !defined(__BIONIC__)
-    bench_permute("qsort_r", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("qsort_r", [&]() {
+        std::iota(permute.begin(), permute.end(), 0);
         sz_sequence_t array;
         array.count = strings.size();
         array.handle = &strings;
         array.get_start = get_start;
         array.get_length = get_length;
-        qsort_r(permute.data(), array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
+        qsort_r(permute.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
     });
-    expect_sorted(strings, permute_new);
+    expect_sorted(strings, permute);
 #elif defined(_MSC_VER)
-    bench_permute("qsort_s", strings, permute_new, [](strings_t const &strings, permute_t &permute) {
+    bench_permute("qsort_s", [&]() {
+        std::iota(permute.begin(), permute.end(), 0);
         sz_sequence_t array;
         array.count = strings.size();
         array.handle = &strings;
         array.get_start = get_start;
         array.get_length = get_length;
-        qsort_s(permute.data(), array.count, sizeof(sz_u64_t), _get_qsort_order, &array);
+        qsort_s(permute.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
     });
-    expect_sorted(strings, permute_new);
+    expect_sorted(strings, permute);
 #else
     sz_unused(_get_qsort_order);
 #endif
 
     std::printf("---- Stable Sorting:\n");
-    bench_permute("std::stable_sort", strings, permute_base, [](strings_t const &strings, permute_t &permute) {
-        std::stable_sort(permute.begin(), permute.end(), [&](idx_t i, idx_t j) { return strings[i] < strings[j]; });
+    bench_permute("std::stable_sort", [&]() {
+        std::iota(permute.begin(), permute.end(), 0);
+        std::stable_sort(permute.begin(), permute.end(),
+                         [&](sz_sorted_idx_t i, sz_sorted_idx_t j) { return strings[i] < strings[j]; });
     });
-    expect_sorted(strings, permute_base);
+    expect_sorted(strings, permute);
 
     return 0;
 }

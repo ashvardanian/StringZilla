@@ -229,7 +229,7 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>13.00</b> s
     </td>
     <td align="center">
-      <code>sz_sort</code><br/>
+      <code>sz_sequence_argsort</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>1.91</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>2.37</b> s
     </td>
@@ -429,7 +429,7 @@ lines: Strs = text.split(separator='\n') # 4 bytes per line overhead for under 4
 batch: Strs = lines.sample(seed=42) # 10x faster than `random.choices`
 lines.shuffle(seed=42) # or shuffle all lines in place and shard with slices
 # WIP: lines.sort() # explodes to 16 bytes per line overhead for any length text
-# WIP: sorted_order: tuple = lines.argsort() # similar to `numpy.argsort`
+# WIP: argsort: tuple = lines.argsort() # similar to `numpy.argsort`
 ```
 
 Working on [RedPajama][redpajama], addressing 20 Billion annotated english documents, one will need only 160 GB of RAM instead of Terabytes.
@@ -633,7 +633,7 @@ sz_u64_t hash = sz_hash(haystack.start, haystack.length);
 
 // Perform collection level operations
 sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};
-sz_sort(&array, &your_config);
+sz_sequence_argsort(&array, &your_config);
 ```
 
 <details>
@@ -1129,14 +1129,14 @@ C++ generic algorithm is not perfect either.
 There is no guarantee in the standard that `std::sort` won't allocate any memory.
 If you are running on embedded, in real-time or on 100+ CPU cores per node, you may want to avoid that.
 StringZilla doesn't solve the general case, but hopes to improve the performance for strings.
-Use `sz_sort`, or the high-level `sz::sorted_order`, which can be used sort any collection of elements convertible to `sz::string_view`.
+Use `sz_sequence_argsort`, or the high-level `sz::argsort`, which can be used sort any collection of elements convertible to `sz::string_view`.
 
 ```cpp
 std::vector<std::string> data({"c", "b", "a"});
-std::vector<std::size_t> order = sz::sorted_order(data); //< Simple shortcut
+std::vector<std::size_t> order = sz::argsort(data); //< Simple shortcut
 
 // Or, taking care of memory allocation:
-sz::sorted_order(data.begin(), data.end(), order.data(), [](auto const &x) -> sz::string_view { return x; });
+sz::argsort(data.begin(), data.end(), order.data(), [](auto const &x) -> sz::string_view { return x; });
 ```
 
 ### Standard C++ Containers with String Keys
