@@ -19,6 +19,11 @@
  *  - `sz_pgrams_sort` - to inplace sort continuous pointer-sized integers with QuickSort.
  *  - `sz_pgrams_sort_stable` - to inplace stable-sort continuous pointer-sized integers with a MergeSort.
  *
+ *  For cases, when the input is known to be tiny, we provide quadratic-complexity insertion sort adaptations:
+ *
+ *  - `sz_sequence_argsort_with_insertion` - for string collections.
+ *  - `sz_pgrams_sort_stable_with_insertion` - for continuous unsigned integers.
+ *
  */
 #ifndef STRINGZILLA_SORT_H_
 #define STRINGZILLA_SORT_H_
@@ -142,6 +147,73 @@ SZ_PUBLIC sz_bool_t sz_sequence_argsort_stable_sve(sz_sequence_t const *sequence
 /** @copydoc sz_pgrams_sort_stable */
 SZ_PUBLIC sz_bool_t sz_pgrams_sort_stable_sve(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                               sz_sorted_idx_t *order);
+
+#pragma endregion
+
+#pragma region Generic Helpers
+
+/**
+ *  @brief  Quadratic complexity insertion sort adjust for our @b argsort usecase.
+ *          Needs no extra memory and is used as a fallback for small inputs.
+ */
+SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence, sz_sorted_idx_t *order) {
+    // Assume `order` is already initialized with 0, 1, 2, ... N.
+    for (sz_size_t i = 1; i < sequence->count; ++i) {
+        sz_sorted_idx_t current_idx = order[i];
+        sz_size_t j = i;
+        while (j > 0) {
+            // Get the two strings to compare.
+            sz_sorted_idx_t previous_idx = order[j - 1];
+            sz_cptr_t previous_start = sequence->get_start(sequence, previous_idx);
+            sz_cptr_t current_start = sequence->get_start(sequence, current_idx);
+            sz_size_t previous_length = sequence->get_length(sequence, previous_idx);
+            sz_size_t current_length = sequence->get_length(sequence, current_idx);
+
+            // Use the provided sz_order to compare.
+            sz_ordering_t ordering = sz_order(previous_start, previous_length, current_start, current_length);
+
+            // If the previous string is not greater than current_idx, we're done.
+            if (ordering != sz_greater_k) break;
+
+            // Otherwise, shift the previous element to the right.
+            order[j] = order[j - 1];
+            --j;
+        }
+        order[j] = current_idx;
+    }
+}
+
+/**
+ *  @brief  Quadratic complexity insertion sort adjust for our @b pgram-sorting usecase.
+ *          Needs no extra memory and is used as a fallback for small inputs.
+ */
+
+SZ_PUBLIC void sz_pgrams_sort_stable_with_insertion(sz_pgram_t *pgrams, sz_size_t count, sz_sorted_idx_t *order) {
+
+    // Assume `order` is already initialized with 0, 1, 2, ... N.
+    for (sz_size_t i = 1; i < count; ++i) {
+        // Save the current key and corresponding index.
+        sz_pgram_t current_key = pgrams[i];
+        sz_sorted_idx_t current_idx = order[i];
+        sz_size_t j = i;
+
+        // Shift elements of the sorted region that are greater than the current key
+        // to the right. This loop stops as soon as the correct insertion point is found.
+        while (j > 0 && pgrams[j - 1] > current_key) {
+            pgrams[j] = pgrams[j - 1];
+            order[j] = order[j - 1];
+            --j;
+        }
+
+        // Insert the current key and index into their proper location.
+        pgrams[j] = current_key;
+        order[j] = current_idx;
+    }
+
+    if (SZ_DEBUG)
+        for (sz_size_t i = 1; i < count; ++i)
+            _sz_assert(pgrams[i - 1] <= pgrams[i] && "The pgrams should be sorted in ascending order.");
+}
 
 #pragma endregion
 
@@ -341,37 +413,6 @@ SZ_PUBLIC void _sz_sequence_argsort_serial_next_pgrams(                   //
     }
 }
 
-SZ_PUBLIC void _sz_sequence_argsort_serial_insertion(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                     sz_sorted_idx_t *order) {
-    // This algorithm needs no memory allocations:
-    sz_unused(alloc);
-
-    // Assume `order` is already initialized with 0, 1, 2, ... N.
-    for (sz_size_t i = 1; i < sequence->count; ++i) {
-        sz_sorted_idx_t current_idx = order[i];
-        sz_size_t j = i;
-        while (j > 0) {
-            // Get the two strings to compare.
-            sz_sorted_idx_t previous_idx = order[j - 1];
-            sz_cptr_t previous_start = sequence->get_start(sequence, previous_idx);
-            sz_cptr_t current_start = sequence->get_start(sequence, current_idx);
-            sz_size_t previous_length = sequence->get_length(sequence, previous_idx);
-            sz_size_t current_length = sequence->get_length(sequence, current_idx);
-
-            // Use the provided sz_order to compare.
-            sz_ordering_t ordering = sz_order(previous_start, previous_length, current_start, current_length);
-
-            // If the previous string is not greater than current_idx, we're done.
-            if (ordering != sz_greater_k) break;
-
-            // Otherwise, shift the previous element to the right.
-            order[j] = order[j - 1];
-            --j;
-        }
-        order[j] = current_idx;
-    }
-}
-
 SZ_PUBLIC sz_bool_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                                sz_sorted_idx_t *order) {
 
@@ -381,7 +422,7 @@ SZ_PUBLIC sz_bool_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz
     // On very small collections - just use the quadratic-complexity insertion sort
     // without any smart optimizations or memory allocations.
     if (sequence->count <= 32) {
-        _sz_sequence_argsort_serial_insertion(sequence, alloc, order);
+        sz_sequence_argsort_with_insertion(sequence, order);
         return sz_true_k;
     }
 
@@ -543,22 +584,20 @@ SZ_PUBLIC sz_bool_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t c
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t i = 0; i != count; ++i) order[i] = i;
 
+    // On very small collections - just use the quadratic-complexity insertion sort
+    // without any smart optimizations or memory allocations.
+    if (count <= 32) {
+        sz_pgrams_sort_stable_with_insertion(pgrams, count, order);
+        return sz_true_k;
+    }
+
     // Go through short chunks of 8 elements and sort them with a sorting network.
-    for (sz_size_t i = 0; i + 8 <= count; i += 8) _sz_sequence_argsort_stable_serial_8x_network(pgrams + i, order + i);
+    for (sz_size_t i = 0; i + 8u <= count; i += 8u)
+        _sz_sequence_argsort_stable_serial_8x_network(pgrams + i, order + i);
 
     // For the tail of the array, sort it with insertion sort.
-    for (sz_size_t i = count & ~7; i < count; i++) {
-        sz_pgram_t current_address = pgrams[i];
-        sz_sorted_idx_t current_idx = order[i];
-        sz_size_t j = i;
-        while (j > 0 && pgrams[j - 1] > current_address) {
-            pgrams[j] = pgrams[j - 1];
-            order[j] = order[j - 1];
-            --j;
-        }
-        pgrams[j] = current_address;
-        order[j] = current_idx;
-    }
+    sz_size_t const tail_count = count & 7u;
+    sz_pgrams_sort_stable_with_insertion(pgrams + count - tail_count, tail_count, order + count - tail_count);
 
     // At this point, the array is partitioned into sorted runs.
     // We'll now merge these runs until the whole array is sorted.
@@ -589,8 +628,8 @@ SZ_PUBLIC sz_bool_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t c
 
             // Determine the number of elements in the right run.
             sz_size_t right_count = run_size;
-            if (i + run_size >= count) { right_count = 0; }
-            else if (i + run_size + right_count > count) { right_count = count - (i + run_size); }
+            if (i + left_count >= count) { right_count = 0; }
+            else if (i + left_count + right_count > count) { right_count = count - (i + left_count); }
 
             // Merge the two runs:
             _sz_sequence_argsort_stable_serial_merge(                             //
