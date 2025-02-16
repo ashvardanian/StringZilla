@@ -498,6 +498,7 @@ void _sz_sequence_argsort_stable_serial_merge(                                  
     // Compute the end pointers for each input array
     sz_pgram_t const *const first_end = first_pgrams + first_count;
     sz_pgram_t const *const second_end = second_pgrams + second_count;
+    sz_pgram_t *const merged_begin = result_pgrams;
 
     // Merge until one array is exhausted
     while (first_pgrams < first_end && second_pgrams < second_end) {
@@ -510,13 +511,11 @@ void _sz_sequence_argsort_stable_serial_merge(                                  
             *result_indices++ = *second_indices++;
         }
         else {
-            // Equal keys: for stability, choose the one from the first array
+            // Equal keys: for stability, choose the one from the first array, and don't increment the second array
             *result_pgrams++ = *first_pgrams;
             *result_indices++ = *first_indices;
             ++first_pgrams;
             ++first_indices;
-            ++second_pgrams;
-            ++second_indices;
         }
     }
 
@@ -531,6 +530,11 @@ void _sz_sequence_argsort_stable_serial_merge(                                  
         *result_pgrams++ = *second_pgrams++;
         *result_indices++ = *second_indices++;
     }
+
+    // Validate the merged result.
+    if (SZ_DEBUG)
+        for (sz_size_t i = 1; i < first_count + second_count; ++i)
+            _sz_assert(merged_begin[i - 1] <= merged_begin[i] && "The merged pgrams must be in ascending order.");
 }
 
 SZ_PUBLIC sz_bool_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
