@@ -863,6 +863,16 @@ SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { retur
  */
 #define _sz_order_scalars(a, b) ((sz_ordering_t)((a > b) - (a < b)))
 
+/**
+ *  Convenience macro to swap two values of the same type.
+ */
+#define _sz_swap(type, a, b) \
+    do {                     \
+        type _tmp = (a);     \
+        (a) = (b);           \
+        (b) = _tmp;          \
+    } while (0)
+
 /** @brief  Branchless minimum function for two signed 32-bit integers. */
 SZ_INTERNAL sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { return y + ((x - y) & (x - y) >> 31); }
 

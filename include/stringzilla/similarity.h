@@ -437,8 +437,8 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
-        sz_pointer_swap((void **)&longer_length, (void **)&shorter_length);
-        sz_pointer_swap((void **)&longer, (void **)&shorter);
+        _sz_swap(sz_size_t, longer_length, shorter_length);
+        _sz_swap(sz_cptr_t, longer, shorter);
     }
 
     // Skip the matching prefixes and suffixes, they won't affect the distance.
@@ -478,8 +478,8 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
-        sz_pointer_swap((void **)&longer_length, (void **)&shorter_length);
-        sz_pointer_swap((void **)&longer, (void **)&shorter);
+        _sz_swap(sz_size_t, longer_length, shorter_length);
+        _sz_swap(sz_cptr_t, longer, shorter);
     }
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
@@ -513,7 +513,7 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
         }
 
         // Swap previous_distances and current_distances pointers
-        sz_pointer_swap((void **)&previous_distances, (void **)&current_distances);
+        _sz_swap(sz_ssize_t *, previous_distances, current_distances);
     }
 
     // Cache scalar before `free` call.
@@ -1101,8 +1101,8 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
     if (shorter_length > longer_length) {
-        sz_pointer_swap((void **)&longer_length, (void **)&shorter_length);
-        sz_pointer_swap((void **)&longer, (void **)&shorter);
+        _sz_swap(sz_size_t, longer_length, shorter_length);
+        _sz_swap(sz_cptr_t, longer, shorter);
     }
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
@@ -1291,7 +1291,7 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
         }
 
         // Swap previous_distances and current_distances pointers
-        sz_pointer_swap((void **)&previous_distances, (void **)&current_distances);
+        _sz_swap(sz_i32_t *, previous_distances, current_distances);
     }
 
     // Cache scalar before `free` call.
