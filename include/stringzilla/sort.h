@@ -150,7 +150,7 @@ SZ_PUBLIC sz_bool_t sz_pgrams_sort_stable_sve(sz_pgram_t *pgrams, sz_size_t coun
 
 #pragma endregion
 
-#pragma region Generic Helpers
+#pragma region Generic Public Helpers
 
 /**
  *  @brief  Quadratic complexity insertion sort adjust for our @b argsort usecase.
@@ -210,16 +210,148 @@ SZ_PUBLIC void sz_pgrams_sort_stable_with_insertion(sz_pgram_t *pgrams, sz_size_
         order[j] = current_idx;
     }
 
-    if (SZ_DEBUG)
-        for (sz_size_t i = 1; i < count; ++i)
-            _sz_assert(pgrams[i - 1] <= pgrams[i] && "The pgrams should be sorted in ascending order.");
+#if SZ_DEBUG
+    for (sz_size_t i = 1; i < count; ++i)
+        _sz_assert(pgrams[i - 1] <= pgrams[i] && "The pgrams should be sorted in ascending order.");
+#endif
 }
 
-#pragma endregion
+#pragma endregion // Generic Public Helpers
+
+#pragma region Generic Internal Helpers
+
+/**
+ *  @brief  Convenience macro for of conditional swap of "pgrams" and their indices for a sorting network.
+ *  @see    https://en.wikipedia.org/wiki/Sorting_network
+ */
+#define _sz_sequence_sorting_network_conditional_swap(i, j)    \
+    do {                                                       \
+        if (pgrams[i] > pgrams[j]) {                           \
+            _sz_swap(sz_pgram_t, pgrams[i], pgrams[j]);        \
+            _sz_swap(sz_sorted_idx_t, offsets[i], offsets[j]); \
+        }                                                      \
+    } while (0)
+
+/**
+ *  @brief  Sorting network for 2 elements is just a single compare–swap.
+ */
+SZ_INTERNAL void _sz_sequence_sorting_network_2x(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+    _sz_sequence_sorting_network_conditional_swap(0, 1);
+}
+
+/**
+ *  @brief  Sorting network for 3 elements.
+ *
+ *  The network uses 3 compare–swap operations:
+ *
+ *      Stage 1: (0, 1)
+ *      Stage 2: (0, 2)
+ *      Stage 3: (1, 2)
+ */
+SZ_INTERNAL void _sz_sequence_sorting_network_3x(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+
+    _sz_sequence_sorting_network_conditional_swap(0, 1);
+    _sz_sequence_sorting_network_conditional_swap(0, 2);
+    _sz_sequence_sorting_network_conditional_swap(1, 2);
+
+#if SZ_DEBUG
+    for (sz_size_t i = 1; i < 3; ++i)
+        _sz_assert(pgrams[i - 1] <= pgrams[i] && "Sorting network for 3 elements failed.");
+#endif
+}
+
+/**
+ *  @brief  Sorting network for 4 elements.
+ *
+ *  The network uses 5 compare–swap operations:
+ *
+ *      Stage 1: (0, 1) and (2, 3)
+ *      Stage 2: (0, 2)
+ *      Stage 3: (1, 3)
+ *      Stage 4: (1, 2)
+ */
+SZ_INTERNAL void _sz_sequence_sorting_network_4x(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+
+    // Stage 1: Compare–swap adjacent pairs.
+    _sz_sequence_sorting_network_conditional_swap(0, 1);
+    _sz_sequence_sorting_network_conditional_swap(2, 3);
+
+    // Stage 2: Compare–swap (0, 2)
+    _sz_sequence_sorting_network_conditional_swap(0, 2);
+
+    // Stage 3: Compare–swap (1, 3)
+    _sz_sequence_sorting_network_conditional_swap(1, 3);
+
+    // Stage 4: Final compare–swap (1, 2)
+    _sz_sequence_sorting_network_conditional_swap(1, 2);
+
+#if SZ_DEBUG
+    for (sz_size_t i = 1; i < 4; ++i)
+        _sz_assert(pgrams[i - 1] <= pgrams[i] && "Sorting network for 4 elements failed.");
+#endif
+}
+
+/**
+ *  @brief  A scalar sorting network for 8 elements that reorders both the pgrams
+ *          and their corresponding offsets in only 19 comparisons, the most efficient
+ *          variant currently known.
+ *
+ *  The network consists of 6 stages with the following compare–swap pairs:
+ *
+ *      Stage 1: (0,1), (2,3), (4,5), (6,7)
+ *      Stage 2: (0,2), (1,3), (4,6), (5,7)
+ *      Stage 3: (1,2), (5,6)
+ *      Stage 4: (0,4), (1,5), (2,6), (3,7)
+ *      Stage 5: (2,4), (3,5)
+ *      Stage 6: (1,2), (3,4), (5,6)
+ */
+SZ_INTERNAL void _sz_sequence_sorting_network_8x(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+
+    // Stage 1: Compare–swap adjacent pairs.
+    _sz_sequence_sorting_network_conditional_swap(0, 1);
+    _sz_sequence_sorting_network_conditional_swap(2, 3);
+    _sz_sequence_sorting_network_conditional_swap(4, 5);
+    _sz_sequence_sorting_network_conditional_swap(6, 7);
+
+    // Stage 2: Compare–swap with stride 2.
+    _sz_sequence_sorting_network_conditional_swap(0, 2);
+    _sz_sequence_sorting_network_conditional_swap(1, 3);
+    _sz_sequence_sorting_network_conditional_swap(4, 6);
+    _sz_sequence_sorting_network_conditional_swap(5, 7);
+
+    // Stage 3: Compare–swap between middle elements.
+    _sz_sequence_sorting_network_conditional_swap(1, 2);
+    _sz_sequence_sorting_network_conditional_swap(5, 6);
+
+    // Stage 4: Compare–swap across the two halves.
+    _sz_sequence_sorting_network_conditional_swap(0, 4);
+    _sz_sequence_sorting_network_conditional_swap(1, 5);
+    _sz_sequence_sorting_network_conditional_swap(2, 6);
+    _sz_sequence_sorting_network_conditional_swap(3, 7);
+
+    // Stage 5: Compare–swap within each half.
+    _sz_sequence_sorting_network_conditional_swap(2, 4);
+    _sz_sequence_sorting_network_conditional_swap(3, 5);
+
+    // Stage 6: Final compare–swap of adjacent elements.
+    _sz_sequence_sorting_network_conditional_swap(1, 2);
+    _sz_sequence_sorting_network_conditional_swap(3, 4);
+    _sz_sequence_sorting_network_conditional_swap(5, 6);
+
+#if SZ_DEBUG
+    // Validate the sorting network.
+    for (sz_size_t i = 1; i < 8; ++i)
+        _sz_assert(pgrams[i - 1] <= pgrams[i] && "The sorting network must sort the pgrams in ascending order.");
+#endif
+}
+
+#undef _sz_sequence_sorting_network_conditional_swap
+
+#pragma endregion // Generic Internal Helpers
 
 #pragma region Serial QuickSort Implementation
 
-SZ_PUBLIC void _sz_sequence_argsort_serial_export_next_pgrams(                  //
+SZ_INTERNAL void _sz_sequence_argsort_serial_export_next_pgrams(                //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
@@ -227,7 +359,7 @@ SZ_PUBLIC void _sz_sequence_argsort_serial_export_next_pgrams(                  
 
     // Depending on the architecture, we will export a different number of bytes.
     // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
-    sz_size_t const window_capacity = sizeof(sz_pgram_t) - 1;
+    sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
 
     // Perform the same operation for every string.
     for (sz_size_t i = start_in_sequence; i < end_in_sequence; ++i) {
@@ -241,14 +373,14 @@ SZ_PUBLIC void _sz_sequence_argsort_serial_export_next_pgrams(                  
         sz_cptr_t const source_str = sequence->get_start(sequence, partial_order_index);
         sz_size_t const length = sequence->get_length(sequence, partial_order_index);
         sz_size_t const remaining_length = length > start_character ? length - start_character : 0;
-        sz_size_t const exported_length = remaining_length > window_capacity ? window_capacity : remaining_length;
+        sz_size_t const exported_length = remaining_length > pgram_capacity ? pgram_capacity : remaining_length;
 
         // Fill with zeros, export a slice, and mark the exported length.
         sz_pgram_t *target_pgram = &global_pgrams[i];
         sz_ptr_t target_str = (sz_ptr_t)target_pgram;
         *target_pgram = 0;
         for (sz_size_t j = 0; j < exported_length; ++j) target_str[j] = source_str[j + start_character];
-        target_str[window_capacity] = exported_length;
+        target_str[pgram_capacity] = exported_length;
 #if defined(_SZ_IS_64_BIT)
         *target_pgram = sz_u64_bytes_reverse(*target_pgram);
 #else
@@ -259,36 +391,52 @@ SZ_PUBLIC void _sz_sequence_argsort_serial_export_next_pgrams(                  
             "We can have a zero value if only the string is shorter than other strings at this position.");
     }
 
-    // As our goal is to sort the strings using the exported integer "windows",
+    // As our goal is to sort the strings using the exported integer "pgrams",
     // this is a good place to validate the correctness of the exported data.
     if (SZ_DEBUG && start_character == 0)
         for (sz_size_t i = start_in_sequence + 1; i < end_in_sequence; ++i) {
-            sz_pgram_t const previous_window = global_pgrams[i - 1];
-            sz_pgram_t const current_window = global_pgrams[i];
+            sz_pgram_t const previous_pgram = global_pgrams[i - 1];
+            sz_pgram_t const current_pgram = global_pgrams[i];
             sz_cptr_t const previous_str = sequence->get_start(sequence, i - 1);
             sz_size_t const previous_length = sequence->get_length(sequence, i - 1);
             sz_cptr_t const current_str = sequence->get_start(sequence, i);
             sz_size_t const current_length = sequence->get_length(sequence, i);
-            sz_ordering_t const ordering = sz_order(                                                 //
-                previous_str, previous_length > window_capacity ? window_capacity : previous_length, //
-                current_str, current_length > window_capacity ? window_capacity : current_length);
-            _sz_assert(                                                          //
-                (previous_window < current_window) == (ordering == sz_less_k) && //
-                "The exported windows should be in the same order as the original strings.");
+            sz_ordering_t const ordering = sz_order(                                               //
+                previous_str, previous_length > pgram_capacity ? pgram_capacity : previous_length, //
+                current_str, current_length > pgram_capacity ? pgram_capacity : current_length);
+            _sz_assert(                                                        //
+                (previous_pgram < current_pgram) == (ordering == sz_less_k) && //
+                "The exported pgrams should be in the same order as the original strings.");
         }
 }
 
 /**
- *  @brief  The most important part of the QuickSort algorithm, that rearranges the elements in
- *          such a way, that all entries around the pivot are less than the pivot.
+ *  @brief  Picks the "pivot" value for the QuickSort algorithm's partitioning step using Robert Sedgewick's method,
+ *          the median of three elements - the first, the middle, and the last element of the given range.
+ */
+SZ_INTERNAL sz_pgram_t _sz_sequence_partitioning_pivot(sz_pgram_t const *pgrams, sz_size_t count) {
+    sz_size_t const middle_offset = count / 2;
+    sz_pgram_t const first_pgram = pgrams[0];
+    sz_pgram_t const middle_pgram = pgrams[middle_offset];
+    sz_pgram_t const last_pgram = pgrams[count - 1];
+    if (first_pgram < middle_pgram) {
+        if (middle_pgram < last_pgram) { return middle_pgram; }
+        else if (first_pgram < last_pgram) { return last_pgram; }
+        else { return first_pgram; }
+    }
+    else {
+        if (first_pgram < last_pgram) { return first_pgram; }
+        else if (middle_pgram < last_pgram) { return last_pgram; }
+        else { return middle_pgram; }
+    }
+}
+
+/**
+ *  @brief  The most important part of the QuickSort algorithm partitioning the elements around the pivot.
  *
- *  It means that no relative order among the elements on the left or right side of the pivot is preserved.
- *  We chose the pivot point using Robert Sedgewick's method - the median of three elements - the first,
- *  the middle, and the last element of the given range.
- *
- *  Moreover, considering our iterative refinement procedure, we can't just use the normal 2-way partitioning,
- *  as it will scatter the values equal to the pivot into the left and right partitions. Instead we use the
- *  Dutch National Flag @b 3-way partitioning, outputting the range of values equal to the pivot.
+ *  The classical variant uses the normal 2-way partitioning, but it will scatter the values equal to the pivot
+ *  into the left and right partitions. Instead we use the Dutch National Flag @b 3-way partitioning, outputting
+ *  the range of values equal to the pivot.
  *
  *  @see https://en.wikipedia.org/wiki/Dutch_national_flag_problem
  */
@@ -297,47 +445,42 @@ SZ_PUBLIC void _sz_sequence_argsort_serial_3way_partition(                //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
     sz_size_t *first_pivot_offset, sz_size_t *last_pivot_offset) {
 
-    // Chose the pivot offset with Sedgewick's method.
-    sz_pgram_t pivot_window;
-    {
-        sz_size_t const middle_offset = start_in_sequence + (end_in_sequence - start_in_sequence) / 2;
-        sz_size_t const last_offset = end_in_sequence - 1;
-        sz_size_t const first_offset = start_in_sequence;
-        sz_pgram_t const first_window = global_pgrams[first_offset];
-        sz_pgram_t const middle_window = global_pgrams[middle_offset];
-        sz_pgram_t const last_window = global_pgrams[last_offset];
-        if (first_window < middle_window) {
-            if (middle_window < last_window) { pivot_window = middle_window; }
-            else if (first_window < last_window) { pivot_window = last_window; }
-            else { pivot_window = first_window; }
-        }
-        else {
-            if (first_window < last_window) { pivot_window = first_window; }
-            else if (middle_window < last_window) { pivot_window = last_window; }
-            else { pivot_window = middle_window; }
-        }
+    // On very small inputs this procedure is rudimentary.
+    sz_size_t const count = end_in_sequence - start_in_sequence;
+    if (count <= 4) {
+        sz_pgram_t *const pgrams = global_pgrams + start_in_sequence;
+        sz_sorted_idx_t *const offsets = global_order + start_in_sequence;
+        if (count == 2) { _sz_sequence_sorting_network_2x(pgrams, offsets); }
+        else if (count == 3) { _sz_sequence_sorting_network_3x(pgrams, offsets); }
+        else if (count == 4) { _sz_sequence_sorting_network_4x(pgrams, offsets); }
+        *first_pivot_offset = start_in_sequence;
+        *last_pivot_offset = end_in_sequence;
+        return;
     }
+
+    // Chose the pivot offset with Sedgewick's method.
+    sz_pgram_t const pivot_pgram = _sz_sequence_partitioning_pivot(global_pgrams + start_in_sequence, count);
 
     // Loop through the collection and move the elements around the pivot with the 3-way partitioning.
     sz_size_t partitioning_progress = start_in_sequence; // Current index.
-    sz_size_t smaller_offset = start_in_sequence;        // Boundary for elements < pivot_window.
-    sz_size_t greater_offset = end_in_sequence - 1;      // Boundary for elements > pivot_window.
+    sz_size_t smaller_offset = start_in_sequence;        // Boundary for elements < `pivot_pgram`.
+    sz_size_t greater_offset = end_in_sequence - 1;      // Boundary for elements > `pivot_pgram`.
 
     while (partitioning_progress <= greater_offset) {
         // Element is less than pivot: swap into the < pivot region.
-        if (global_pgrams[partitioning_progress] < pivot_window) {
+        if (global_pgrams[partitioning_progress] < pivot_pgram) {
             _sz_swap(sz_sorted_idx_t, global_order[partitioning_progress], global_order[smaller_offset]);
             _sz_swap(sz_pgram_t, global_pgrams[partitioning_progress], global_pgrams[smaller_offset]);
             ++partitioning_progress;
             ++smaller_offset;
         }
         // Element is greater than pivot: swap into the > pivot region.
-        else if (global_pgrams[partitioning_progress] > pivot_window) {
+        else if (global_pgrams[partitioning_progress] > pivot_pgram) {
             _sz_swap(sz_sorted_idx_t, global_order[partitioning_progress], global_order[greater_offset]);
             _sz_swap(sz_pgram_t, global_pgrams[partitioning_progress], global_pgrams[greater_offset]);
             --greater_offset;
         }
-        // Element equals pivot_window: leave it in place.
+        // Element equals `pivot_pgram`: leave it in place.
         else { ++partitioning_progress; }
     }
 
@@ -349,7 +492,7 @@ SZ_PUBLIC void _sz_sequence_argsort_serial_3way_partition(                //
  *  @brief  Recursive Quick-Sort implementation backing both the `sz_sequence_argsort` and `sz_pgrams_sort`,
  *          and using the `_sz_sequence_argsort_serial_3way_partition` under the hood.
  */
-SZ_PUBLIC void _sz_sequence_argsort_serial_recursively(                   //
+SZ_INTERNAL void _sz_sequence_argsort_serial_recursively(                 //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence) {
 
@@ -372,41 +515,41 @@ SZ_PUBLIC void _sz_sequence_argsort_serial_recursively(                   //
 /**
  *  @brief  Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
  *          It combines `_sz_sequence_argsort_serial_export_next_pgrams` and `_sz_sequence_argsort_serial_recursively`,
- *          recursively diving into the identical windows.
+ *          recursively diving into the identical pgrams.
  */
-SZ_PUBLIC void _sz_sequence_argsort_serial_next_pgrams(                   //
+SZ_INTERNAL void _sz_sequence_argsort_serial_next_pgrams(                 //
     sz_sequence_t const *const sequence,                                  //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
     sz_size_t const start_character) {
 
-    // Prepare the new range of windows
+    // Prepare the new range of pgrams
     _sz_sequence_argsort_serial_export_next_pgrams(sequence, global_pgrams, global_order, start_in_sequence,
                                                    end_in_sequence, start_character);
 
-    // Sort current windows with a quicksort
+    // Sort current pgrams with a quicksort
     _sz_sequence_argsort_serial_recursively(global_pgrams, global_order, start_in_sequence, end_in_sequence);
 
     // Depending on the architecture, we will export a different number of bytes.
     // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
-    sz_size_t const window_capacity = sizeof(sz_pgram_t) - 1;
+    sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
 
-    // Repeat the procedure for the identical windows
+    // Repeat the procedure for the identical pgrams
     sz_size_t nested_start = start_in_sequence;
     sz_size_t nested_end = start_in_sequence;
     while (nested_end != end_in_sequence) {
-        // Find the end of the identical windows
-        sz_pgram_t current_window_integer = global_pgrams[nested_start];
-        while (nested_end != end_in_sequence && current_window_integer == global_pgrams[nested_end]) ++nested_end;
+        // Find the end of the identical pgrams
+        sz_pgram_t current_pgram = global_pgrams[nested_start];
+        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
 
-        // If the identical windows are not trivial and each string has more characters, sort them recursively
-        sz_cptr_t current_window_str = (sz_cptr_t)&current_window_integer;
-        sz_size_t current_window_length = (sz_size_t)current_window_str[0]; //! The byte order was swapped
+        // If the identical pgrams are not trivial and each string has more characters, sort them recursively
+        sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
         int has_multiple_strings = nested_end - nested_start > 1;
-        int has_more_characters_in_each = current_window_length == window_capacity;
+        int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each) {
             _sz_sequence_argsort_serial_next_pgrams(sequence, global_pgrams, global_order, nested_start, nested_end,
-                                                    start_character + window_capacity);
+                                                    start_character + pgram_capacity);
         }
         // Move to the next
         nested_start = nested_end;
@@ -438,14 +581,14 @@ SZ_PUBLIC sz_bool_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz
     // is included in those P-long words. So, in reality, we will be taking (P-1) bytes from each string on every
     // iteration of a recursive algorithm.
     sz_size_t memory_usage = sequence->count * sizeof(sz_pgram_t);
-    sz_pgram_t *windows = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
-    if (!windows) return sz_false_k;
+    sz_pgram_t *pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    if (!pgrams) return sz_false_k;
 
     // Recursively sort the whole sequence.
-    _sz_sequence_argsort_serial_next_pgrams(sequence, windows, order, 0, sequence->count, 0);
+    _sz_sequence_argsort_serial_next_pgrams(sequence, pgrams, order, 0, sequence->count, 0);
 
     // Free temporary storage.
-    alloc->free(windows, memory_usage, alloc);
+    alloc->free(pgrams, memory_usage, alloc);
     return sz_true_k;
 }
 
@@ -464,74 +607,10 @@ SZ_PUBLIC sz_bool_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count, s
 #pragma region Serial MergeSort Implementation
 
 /**
- *  @brief  A scalar sorting network for 8 elements that reorders both the keys
- *          and their corresponding offsets in only 19 comparisons, the most efficient
- *          variant currently known.
- *  @see    https://en.wikipedia.org/wiki/Sorting_network
- *
- *  The network consists of 6 stages with the following compare–swap pairs:
- *
- *      Stage 1: (0,1), (2,3), (4,5), (6,7)
- *      Stage 2: (0,2), (1,3), (4,6), (5,7)
- *      Stage 3: (1,2), (5,6)
- *      Stage 4: (0,4), (1,5), (2,6), (3,7)
- *      Stage 5: (2,4), (3,5)
- *      Stage 6: (1,2), (3,4), (5,6)
- */
-void _sz_sequence_argsort_stable_serial_8x_network(sz_pgram_t *keys, sz_sorted_idx_t *offsets) {
-
-#define _sz_sequence_argsort_stable_8x_conditional_swap(i, j)  \
-    do {                                                       \
-        if (keys[i] > keys[j]) {                               \
-            _sz_swap(sz_pgram_t, keys[i], keys[j]);            \
-            _sz_swap(sz_sorted_idx_t, offsets[i], offsets[j]); \
-        }                                                      \
-    } while (0)
-
-    // Stage 1: Compare–swap adjacent pairs.
-    _sz_sequence_argsort_stable_8x_conditional_swap(0, 1);
-    _sz_sequence_argsort_stable_8x_conditional_swap(2, 3);
-    _sz_sequence_argsort_stable_8x_conditional_swap(4, 5);
-    _sz_sequence_argsort_stable_8x_conditional_swap(6, 7);
-
-    // Stage 2: Compare–swap with stride 2.
-    _sz_sequence_argsort_stable_8x_conditional_swap(0, 2);
-    _sz_sequence_argsort_stable_8x_conditional_swap(1, 3);
-    _sz_sequence_argsort_stable_8x_conditional_swap(4, 6);
-    _sz_sequence_argsort_stable_8x_conditional_swap(5, 7);
-
-    // Stage 3: Compare–swap between middle elements.
-    _sz_sequence_argsort_stable_8x_conditional_swap(1, 2);
-    _sz_sequence_argsort_stable_8x_conditional_swap(5, 6);
-
-    // Stage 4: Compare–swap across the two halves.
-    _sz_sequence_argsort_stable_8x_conditional_swap(0, 4);
-    _sz_sequence_argsort_stable_8x_conditional_swap(1, 5);
-    _sz_sequence_argsort_stable_8x_conditional_swap(2, 6);
-    _sz_sequence_argsort_stable_8x_conditional_swap(3, 7);
-
-    // Stage 5: Compare–swap within each half.
-    _sz_sequence_argsort_stable_8x_conditional_swap(2, 4);
-    _sz_sequence_argsort_stable_8x_conditional_swap(3, 5);
-
-    // Stage 6: Final compare–swap of adjacent elements.
-    _sz_sequence_argsort_stable_8x_conditional_swap(1, 2);
-    _sz_sequence_argsort_stable_8x_conditional_swap(3, 4);
-    _sz_sequence_argsort_stable_8x_conditional_swap(5, 6);
-
-#undef _sz_sequence_argsort_stable_8x_conditional_swap
-
-    // Validate the sorting network.
-    if (SZ_DEBUG)
-        for (sz_size_t i = 1; i < 8; ++i)
-            _sz_assert(keys[i - 1] <= keys[i] && "The sorting network must sort the keys in ascending order.");
-}
-
-/**
  *  @brief  Helper function similar to `std::set_union` over pairs of integers and their original indices.
  *  @see    https://en.cppreference.com/w/cpp/algorithm/set_union
  */
-void _sz_sequence_argsort_stable_serial_merge(                                                      //
+SZ_INTERNAL void _sz_sequence_argsort_stable_serial_merge(                                          //
     sz_pgram_t const *first_pgrams, sz_sorted_idx_t const *first_indices, sz_size_t first_count,    //
     sz_pgram_t const *second_pgrams, sz_sorted_idx_t const *second_indices, sz_size_t second_count, //
     sz_pgram_t *result_pgrams, sz_sorted_idx_t *result_indices) {
@@ -592,8 +671,7 @@ SZ_PUBLIC sz_bool_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t c
     }
 
     // Go through short chunks of 8 elements and sort them with a sorting network.
-    for (sz_size_t i = 0; i + 8u <= count; i += 8u)
-        _sz_sequence_argsort_stable_serial_8x_network(pgrams + i, order + i);
+    for (sz_size_t i = 0; i + 8u <= count; i += 8u) _sz_sequence_sorting_network_8x(pgrams + i, order + i);
 
     // For the tail of the array, sort it with insertion sort.
     sz_size_t const tail_count = count & 7u;
