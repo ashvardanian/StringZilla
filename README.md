@@ -629,7 +629,7 @@ sz_size_t substring_position = sz_find_haswell(haystack.start, haystack.length, 
 sz_size_t substring_position = sz_find_neon(haystack.start, haystack.length, needle.start, needle.length);
 
 // Hash strings
-sz_u64_t hash = sz_hash(haystack.start, haystack.length);
+sz_u64_t hash = sz_hash(haystack.start, haystack.length, 42); // or any other seed ;)
 
 // Perform collection level operations
 sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};

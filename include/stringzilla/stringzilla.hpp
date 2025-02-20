@@ -1929,7 +1929,7 @@ class basic_string_slice {
     size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }
 
     /**  @brief  Aggregates the values of individual bytes of a string. */
-    size_type checksum() const noexcept { return static_cast<size_type>(sz_checksum(start_, length_)); }
+    size_type bytesum() const noexcept { return static_cast<size_type>(sz_bytesum(start_, length_)); }
 
     /**  @brief  Populate a character set with characters present in this string. */
     char_set as_set() const noexcept {
@@ -3326,33 +3326,30 @@ class basic_string {
     size_type hash() const noexcept { return view().hash(); }
 
     /**  @brief  Aggregates the values of individual bytes of a string. */
-    size_type checksum() const noexcept { return view().checksum(); }
+    size_type bytesum() const noexcept { return view().bytesum(); }
 
     /**
-     *  @brief  Overwrites the string with random characters from the given alphabet using the random generator.
+     *  @brief  Overwrites the string with random binary data.
      *
-     *  @param  generator  A random generator function object that returns a random number in the range [0, 2^64).
-     *  @param  alphabet   A string of characters to choose from.
+     *  @param  nonce   "Number used ONCE" to initialize the random number generator, @b don't repeat it!
+     *  @param  key     A 128-bit key to initialize the AES-CTR block-cypher, zeros by default.
      */
-    template <typename generator_type>
-    basic_string &randomize(generator_type &generator, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+    basic_string &randomize(sz_u64_t nonce, sz_aes128_block_t key = {}) noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        sz_random_generator_t generator_callback = &_call_random_generator<generator_type>;
-        sz_generate(alphabet.data(), alphabet.size(), start, length, generator_callback, &generator);
+        sz_generate(start, length, nonce, &key);
         return *this;
     }
 
     /**
-     *  @brief  Overwrites the string with random characters from the given alphabet
-     *          using `std::rand` as the random generator.
-     *
-     *  @param  alphabet   A string of characters to choose from.
+     *  @brief  Overwrites the string with random binary data.
+     *          Produces the nonce from a static variable, incrementing it each time.
+     *          In this case the undefined behaviour in concurrent environments plays in our favor.
      */
-    basic_string &randomize(string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
-        auto generator = []() { return static_cast<sz_u64_t>(std::rand()); };
-        return randomize(generator, alphabet);
+    basic_string &randomize() noexcept {
+        static sz_u64_t nonce = 42;
+        return randomize(nonce++, {});
     }
 
     /**
@@ -3360,25 +3357,19 @@ class basic_string {
      *          May throw exceptions if the memory allocation fails.
      *
      *  @param  length     The length of the generated string.
-     *  @param  alphabet   A string of characters to choose from.
+     *  @param  nonce   "Number used ONCE" to initialize the random number generator, @b don't repeat it!
      */
-    static basic_string random(size_type length, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept(false) {
-        return basic_string(length, '\0').randomize(alphabet);
+    static basic_string random(size_type length, sz_u64_t nonce) noexcept(false) {
+        return basic_string(length, '\0').randomize(nonce);
     }
 
     /**
      *  @brief  Generate a new random string of given length using the provided random number generator.
      *          May throw exceptions if the memory allocation fails.
      *
-     *  @param  generator  A random generator function object that returns a random number in the range [0, 2^64).
      *  @param  length     The length of the generated string.
-     *  @param  alphabet   A string of characters to choose from.
      */
-    template <typename generator_type>
-    static basic_string random(generator_type &generator, size_type length,
-                               string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept(false) {
-        return basic_string(length, '\0').randomize(generator, alphabet);
-    }
+    static basic_string random(size_type length) noexcept(false) { return basic_string(length, '\0').randomize(); }
 
     /**
      *  @brief  Replaces ( @b in-place ) all occurrences of a given string with the ::replacement string.

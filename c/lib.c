@@ -177,7 +177,12 @@ typedef struct sz_implementations_t {
     sz_move_t move;
     sz_fill_t fill;
     sz_look_up_transform_t look_up_transform;
-    sz_checksum_t checksum;
+
+    sz_bytesum_t bytesum;
+    sz_hash_t hash;
+    sz_hash_state_init_t hash_state_init;
+    sz_hash_state_stream_t hash_state_stream;
+    sz_hash_state_fold_t hash_state_fold;
 
     sz_find_byte_t find_byte;
     sz_find_byte_t rfind_byte;
@@ -214,7 +219,12 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     impl->move = sz_move_serial;
     impl->fill = sz_fill_serial;
     impl->look_up_transform = sz_look_up_transform_serial;
-    impl->checksum = sz_checksum_serial;
+
+    impl->bytesum = sz_bytesum_serial;
+    impl->hash = sz_hash_serial;
+    impl->hash_state_init = sz_hash_state_init_serial;
+    impl->hash_state_stream = sz_hash_state_stream_serial;
+    impl->hash_state_fold = sz_hash_state_fold_serial;
 
     impl->find = sz_find_serial;
     impl->rfind = sz_rfind_serial;
@@ -236,7 +246,12 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->move = sz_move_haswell;
         impl->fill = sz_fill_haswell;
         impl->look_up_transform = sz_look_up_transform_haswell;
-        impl->checksum = sz_checksum_haswell;
+
+        impl->bytesum = sz_bytesum_haswell;
+        impl->hash = sz_hash_haswell;
+        impl->hash_state_init = sz_hash_state_init_haswell;
+        impl->hash_state_stream = sz_hash_state_stream_haswell;
+        impl->hash_state_fold = sz_hash_state_fold_haswell;
 
         impl->find_byte = sz_find_byte_haswell;
         impl->rfind_byte = sz_rfind_byte_haswell;
@@ -256,11 +271,17 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->move = sz_move_skylake;
         impl->fill = sz_fill_skylake;
 
+        impl->bytesum = sz_bytesum_skylake;
+        impl->hash = sz_hash_skylake;
+        impl->hash_state_init = sz_hash_state_init_skylake;
+        impl->hash_state_stream = sz_hash_state_stream_skylake;
+        impl->hash_state_fold = sz_hash_state_fold_skylake;
+
         impl->find = sz_find_skylake;
         impl->rfind = sz_rfind_skylake;
         impl->find_byte = sz_find_byte_skylake;
         impl->rfind_byte = sz_rfind_byte_skylake;
-        impl->checksum = sz_checksum_skylake;
+        impl->bytesum = sz_bytesum_skylake;
     }
 #endif
 
@@ -268,10 +289,17 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     if (caps & sz_cap_ice_k) {
         impl->find_from_set = sz_find_charset_ice;
         impl->rfind_from_set = sz_rfind_charset_ice;
+
         impl->edit_distance = sz_edit_distance_ice;
         impl->alignment_score = sz_alignment_score_ice;
+
         impl->look_up_transform = sz_look_up_transform_ice;
-        impl->checksum = sz_checksum_ice;
+
+        impl->bytesum = sz_bytesum_ice;
+        impl->hash = sz_hash_ice;
+        impl->hash_state_init = sz_hash_state_init_ice;
+        impl->hash_state_stream = sz_hash_state_stream_ice;
+        impl->hash_state_fold = sz_hash_state_fold_ice;
     }
 #endif
 
@@ -283,7 +311,12 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->move = sz_move_neon;
         impl->fill = sz_fill_neon;
         impl->look_up_transform = sz_look_up_transform_neon;
-        impl->checksum = sz_checksum_neon;
+
+        impl->bytesum = sz_bytesum_neon;
+        impl->hash = sz_hash_neon;
+        impl->hash_state_init = sz_hash_state_init_neon;
+        impl->hash_state_stream = sz_hash_state_stream_neon;
+        impl->hash_state_fold = sz_hash_state_fold_neon;
 
         impl->find = sz_find_neon;
         impl->rfind = sz_rfind_neon;
@@ -331,7 +364,23 @@ BOOL WINAPI _DllMainCRTStartup(HINSTANCE hints, DWORD forward_reason, LPVOID lp)
 __attribute__((constructor)) static void sz_dispatch_table_init_on_gcc_or_clang(void) { sz_dispatch_table_init(); }
 #endif
 
-SZ_DYNAMIC sz_u64_t sz_checksum(sz_cptr_t text, sz_size_t length) { return sz_dispatch_table.checksum(text, length); }
+SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) { return sz_dispatch_table.bytesum(text, length); }
+
+SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+    return sz_dispatch_table.hash(text, length, seed);
+}
+
+SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
+    sz_dispatch_table.hash_state_init(state, seed);
+}
+
+SZ_DYNAMIC void sz_hash_state_stream(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+    sz_dispatch_table.hash_state_stream(state, text, length);
+}
+
+SZ_DYNAMIC sz_u64_t sz_hash_state_fold(sz_hash_state_t const *state) {
+    return sz_dispatch_table.hash_state_fold(state);
+}
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_dispatch_table.equal(a, b, length);

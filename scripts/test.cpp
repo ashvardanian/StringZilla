@@ -802,17 +802,17 @@ static void test_non_stl_extensions_for_reads() {
         return std::accumulate(s.begin(), s.end(), (std::size_t)0,
                                [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
     };
-    assert(str("a").checksum() == (std::size_t)'a');
-    assert(str("0").checksum() == (std::size_t)'0');
-    assert(str("0123456789").checksum() == arithmetic_sum('0', '9'));
-    assert(str("abcdefghijklmnopqrstuvwxyz").checksum() == arithmetic_sum('a', 'z'));
-    assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").checksum() ==
+    assert(str("a").bytesum() == (std::size_t)'a');
+    assert(str("0").bytesum() == (std::size_t)'0');
+    assert(str("0123456789").bytesum() == arithmetic_sum('0', '9'));
+    assert(str("abcdefghijklmnopqrstuvwxyz").bytesum() == arithmetic_sum('a', 'z'));
+    assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").bytesum() ==
            arithmetic_sum('a', 'z') * 3);
     assert_scoped(
         str s =
             "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、"
             "被过度消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事以来，他没有过过一天没有名气的日子。",
-        (void)0, s.checksum() == accumulate_bytes(s));
+        (void)0, s.bytesum() == accumulate_bytes(s));
 
     // Computing edit-distances.
     assert(sz::hamming_distance(str("hello"), str("hello")) == 0);

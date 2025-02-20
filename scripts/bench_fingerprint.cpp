@@ -90,7 +90,7 @@ void bench(strings_type &&strings) {
     if (strings.size() == 0) return;
 
     // Benchmark logical operations
-    bench_unary_functions(strings, checksum_functions());
+    bench_unary_functions(strings, bytesum_functions());
     bench_unary_functions(strings, hashing_functions());
     bench_binary_functions(strings, equality_functions());
     bench_binary_functions(strings, ordering_functions());

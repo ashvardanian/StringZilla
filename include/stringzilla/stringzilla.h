@@ -43,7 +43,7 @@
 
 #include "compare.h"      // `sz_equal`, `sz_order`
 #include "find.h"         // `sz_find`, `sz_find_charset`, `sz_rfind`
-#include "hash.h"         // `sz_checksum`, `sz_hash`, `sz_hashes`
+#include "hash.h"         // `sz_bytesum`, `sz_hash`, `sz_state_init`, `sz_state_stream`, `sz_state_fold`
 #include "memory.h"       // `sz_copy`, `sz_move`, `sz_fill`
 #include "similarity.h"   // `sz_edit_distance`, `sz_alignment_score`
 #include "small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`

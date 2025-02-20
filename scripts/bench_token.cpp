@@ -11,7 +11,7 @@
 
 using namespace ashvardanian::stringzilla::scripts;
 
-tracked_unary_functions_t checksum_functions() {
+tracked_unary_functions_t bytesum_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
         return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
     };
@@ -21,18 +21,18 @@ tracked_unary_functions_t checksum_functions() {
              return std::accumulate(s.begin(), s.end(), (std::size_t)0,
                                     [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
          }},
-        {"sz_checksum_serial", wrap_sz(sz_checksum_serial), true},
+        {"sz_bytesum_serial", wrap_sz(sz_bytesum_serial), true},
 #if SZ_USE_HASWELL
-        {"sz_checksum_haswell", wrap_sz(sz_checksum_haswell), true},
+        {"sz_bytesum_haswell", wrap_sz(sz_bytesum_haswell), true},
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_checksum_skylake", wrap_sz(sz_checksum_skylake), true},
+        {"sz_bytesum_skylake", wrap_sz(sz_bytesum_skylake), true},
 #endif
 #if SZ_USE_ICE
-        {"sz_checksum_ice", wrap_sz(sz_checksum_ice), true},
+        {"sz_bytesum_ice", wrap_sz(sz_bytesum_ice), true},
 #endif
 #if SZ_USE_NEON
-        {"sz_checksum_neon", wrap_sz(sz_checksum_neon), true},
+        {"sz_bytesum_neon", wrap_sz(sz_bytesum_neon), true},
 #endif
     };
     return result;
@@ -139,7 +139,7 @@ void bench(strings_type &&strings) {
     if (strings.size() == 0) return;
 
     // Benchmark logical operations
-    bench_unary_functions(strings, checksum_functions());
+    bench_unary_functions(strings, bytesum_functions());
     bench_unary_functions(strings, hashing_functions());
     bench_binary_functions(strings, equality_functions());
     bench_binary_functions(strings, ordering_functions());

@@ -56,7 +56,7 @@ pub mod sz {
 
         fn sz_hash(text: *const c_void, length: usize) -> u64;
 
-        fn sz_checksum(text: *const c_void, length: usize) -> u64;
+        fn sz_bytesum(text: *const c_void, length: usize) -> u64;
 
         fn sz_edit_distance(
             haystack1: *const c_void,
@@ -123,21 +123,21 @@ pub mod sz {
     /// # Returns
     ///
     /// A `u64` representing the checksum value of the input byte slice.
-    pub fn checksum<T>(text: T) -> u64
+    pub fn bytesum<T>(text: T) -> u64
     where
         T: AsRef<[u8]>,
     {
         let text_ref = text.as_ref();
         let text_pointer = text_ref.as_ptr() as _;
         let text_length = text_ref.len();
-        let result = unsafe { sz_checksum(text_pointer, text_length) };
+        let result = unsafe { sz_bytesum(text_pointer, text_length) };
         return result;
     }
 
     /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
     /// This function is designed to provide a high-quality hash value for use in
     /// hash tables, data structures, and cryptographic applications.
-    /// Unlike the checksum function, the hash function is order-sensitive.
+    /// Unlike the bytesum function, the hash function is order-sensitive.
     ///
     /// # Arguments
     ///
@@ -1034,7 +1034,7 @@ pub trait StringZilla<'a, N>
 where
     N: AsRef<[u8]> + 'a,
 {
-    /// Computes the checksum value of unsigned bytes in a given string.
+    /// Computes the bytesum value of unsigned bytes in a given string.
     /// This function is useful for verifying data integrity and detecting changes in
     /// binary data, such as files or network packets.
     ///
@@ -1044,14 +1044,14 @@ where
     /// use stringzilla::StringZilla;
     ///
     /// let text = "Hello";
-    /// assert_eq!(text.sz_checksum(), Some(500));
+    /// assert_eq!(text.sz_bytesum(), Some(500));
     /// ```
-    fn sz_checksum(&self) -> u64;
+    fn sz_bytesum(&self) -> u64;
 
     /// Computes a 64-bit AES-based hash value for a given string.
     /// This function is designed to provide a high-quality hash value for use in
     /// hash tables, data structures, and cryptographic applications.
-    /// Unlike the checksum function, the hash function is order-sensitive.
+    /// Unlike the bytesum function, the hash function is order-sensitive.
     ///
     /// # Examples
     ///
@@ -1352,8 +1352,8 @@ where
     T: AsRef<[u8]> + ?Sized,
     N: AsRef<[u8]> + 'a,
 {
-    fn sz_checksum(&self) -> u64 {
-        sz::checksum(self)
+    fn sz_bytesum(&self) -> u64 {
+        sz::bytesum(self)
     }
 
     fn sz_hash(&self) -> u64 {

@@ -443,10 +443,19 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
 #pragma region API Signature Types
 
 /** @brief  Signature of ::sz_hash. */
-typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t);
+typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t, sz_u64_t);
 
-/** @brief  Signature of ::sz_checksum. */
-typedef sz_u64_t (*sz_checksum_t)(sz_cptr_t, sz_size_t);
+/** @brief  Signature of ::sz_hash_state_init. */
+typedef void (*sz_hash_state_init_t)(struct sz_hash_state_t *, sz_u64_t);
+
+/** @brief  Signature of ::sz_hash_state_stream. */
+typedef void (*sz_hash_state_stream_t)(struct sz_hash_state_t *, sz_cptr_t, sz_size_t);
+
+/** @brief  Signature of ::sz_hash_state_fold. */
+typedef sz_u64_t (*sz_hash_state_fold_t)(struct sz_hash_state_t const *);
+
+/** @brief  Signature of ::sz_bytesum. */
+typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 
 /** @brief  Signature of ::sz_equal. */
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
@@ -887,6 +896,7 @@ SZ_INTERNAL sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x 
 #pragma GCC push_options
 #pragma GCC target("bmi", "bmi2")
 #pragma clang attribute push(__attribute__((target("bmi,bmi2"))), apply_to = function)
+SZ_INTERNAL __mmask8 _sz_u8_mask_until(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, n); }
 SZ_INTERNAL __mmask16 _sz_u16_mask_until(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, n); }
 SZ_INTERNAL __mmask32 _sz_u32_mask_until(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, n); }
 SZ_INTERNAL __mmask64 _sz_u64_mask_until(sz_size_t n) { return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, n); }
