@@ -939,11 +939,8 @@ void test_non_stl_extensions_for_updates() {
 
     // Randomization.
     assert(str::random(0).empty());
-    assert(str::random(4, "a") == "aaaa");
-    assert(str::random(4, "aaaa") == "aaaa");
-    assert(str::random(global_random_generator(), 4, "aaaa") == "aaaa");
-    assert_scoped(str s = str::random(128, "ACGT"), (void)s,
-                  s.contains('A') && s.contains('C') && s.contains('G') && s.contains('T'));
+    assert(str::random(4).size() == 4);
+    assert(str::random(4, 42).size() == 4);
 }
 
 /**

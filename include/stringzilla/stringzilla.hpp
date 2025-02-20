@@ -1926,7 +1926,9 @@ class basic_string_slice {
 #pragma endregion
 
     /**  @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
-    size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }
+    size_type hash(std::uint64_t seed = 42) const noexcept {
+        return static_cast<size_type>(sz_hash(start_, length_, static_cast<sz_u64_t>(seed)));
+    }
 
     /**  @brief  Aggregates the values of individual bytes of a string. */
     size_type bytesum() const noexcept { return static_cast<size_type>(sz_bytesum(start_, length_)); }
@@ -2795,7 +2797,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Erases ( @b in-place ) a range of characters defined with signed offsets.
+     *  @brief  Erases @b (in-place) a range of characters defined with signed offsets.
      *  @return Number of characters removed.
      */
     size_type try_erase(difference_type signed_start_offset = 0, difference_type signed_end_offset = npos) noexcept {
@@ -2807,7 +2809,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a range of characters at a given signed offset.
+     *  @brief  Inserts @b (in-place) a range of characters at a given signed offset.
      *  @return `true` if the insertion was successful, `false` otherwise.
      */
     bool try_insert(difference_type signed_offset, string_view string) noexcept {
@@ -2823,7 +2825,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @return `true` if the replacement was successful, `false` otherwise.
      */
     bool try_replace(difference_type signed_start_offset, difference_type signed_end_offset,
@@ -2874,7 +2876,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a ::character multiple times at the given offset.
+     *  @brief  Inserts @b (in-place) a ::character multiple times at the given offset.
      *  @throw  `std::out_of_range` if `offset > size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2890,7 +2892,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a range of characters at the given offset.
+     *  @brief  Inserts @b (in-place) a range of characters at the given offset.
      *  @throw  `std::out_of_range` if `offset > size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2907,7 +2909,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a range of characters at the given offset.
+     *  @brief  Inserts @b (in-place) a range of characters at the given offset.
      *  @throw  `std::out_of_range` if `offset > size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2917,7 +2919,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a slice of another string at the given offset.
+     *  @brief  Inserts @b (in-place) a slice of another string at the given offset.
      *  @throw  `std::out_of_range` if `offset > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2928,7 +2930,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) one ::character at the given iterator position.
+     *  @brief  Inserts @b (in-place) one ::character at the given iterator position.
      *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2940,7 +2942,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a ::character multiple times at the given iterator position.
+     *  @brief  Inserts @b (in-place) a ::character multiple times at the given iterator position.
      *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2952,7 +2954,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a range at the given iterator position.
+     *  @brief  Inserts @b (in-place) a range at the given iterator position.
      *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2975,7 +2977,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) an initializer list of characters.
+     *  @brief  Inserts @b (in-place) an initializer list of characters.
      *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2985,7 +2987,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Erases ( @b in-place ) the given range of characters.
+     *  @brief  Erases @b (in-place) the given range of characters.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @see    `try_erase_slice` for a cleaner exception-less alternative.
      */
@@ -2997,7 +2999,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Erases ( @b in-place ) the given range of characters.
+     *  @brief  Erases @b (in-place) the given range of characters.
      *  @return Iterator pointing following the erased character, or end() if no such character exists.
      */
     iterator erase(const_iterator first, const_iterator last) noexcept {
@@ -3008,13 +3010,13 @@ class basic_string {
     }
 
     /**
-     *  @brief  Erases ( @b in-place ) the one character at a given postion.
+     *  @brief  Erases @b (in-place) the one character at a given postion.
      *  @return Iterator pointing following the erased character, or end() if no such character exists.
      */
     iterator erase(const_iterator pos) noexcept { return erase(pos, pos + 1); }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3028,7 +3030,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3038,7 +3040,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()` or `pos2 > str.size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3049,7 +3051,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3059,7 +3061,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3070,7 +3072,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3080,7 +3082,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3090,7 +3092,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a repetition of given characters.
+     *  @brief  Replaces @b (in-place) a range of characters with a repetition of given characters.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3104,7 +3106,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a repetition of given characters.
+     *  @brief  Replaces @b (in-place) a range of characters with a repetition of given characters.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3115,7 +3117,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3134,7 +3136,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given initializer list.
+     *  @brief  Replaces @b (in-place) a range of characters with a given initializer list.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3332,13 +3334,12 @@ class basic_string {
      *  @brief  Overwrites the string with random binary data.
      *
      *  @param  nonce   "Number used ONCE" to initialize the random number generator, @b don't repeat it!
-     *  @param  key     A 128-bit key to initialize the AES-CTR block-cypher, zeros by default.
      */
-    basic_string &randomize(sz_u64_t nonce, sz_aes128_block_t key = {}) noexcept {
+    basic_string &randomize(sz_u64_t nonce) noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        sz_generate(start, length, nonce, &key);
+        sz_generate(start, length, nonce);
         return *this;
     }
 
@@ -3349,7 +3350,7 @@ class basic_string {
      */
     basic_string &randomize() noexcept {
         static sz_u64_t nonce = 42;
-        return randomize(nonce++, {});
+        return randomize(nonce++);
     }
 
     /**
@@ -3372,7 +3373,7 @@ class basic_string {
     static basic_string random(size_type length) noexcept(false) { return basic_string(length, '\0').randomize(); }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurrences of a given string with the ::replacement string.
+     *  @brief  Replaces @b (in-place) all occurrences of a given string with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3385,7 +3386,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurrences of a given character set with the ::replacement string.
+     *  @brief  Replaces @b (in-place) all occurrences of a given character set with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3398,7 +3399,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurrences of a given string with the ::replacement string.
+     *  @brief  Replaces @b (in-place) all occurrences of a given string with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3410,7 +3411,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurrences of a given character set with the ::replacement string.
+     *  @brief  Replaces @b (in-place) all occurrences of a given character set with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3422,7 +3423,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all characters in the string using the provided lookup table.
+     *  @brief  Replaces @b (in-place) all characters in the string using the provided lookup table.
      */
     basic_string &transform(look_up_table const &table) noexcept {
         transform(table, data());
@@ -3917,20 +3918,16 @@ std::ptrdiff_t alignment_score(                                                 
  *  @brief  Overwrites the string slice with random characters from the given alphabet using the random generator.
  *
  *  @param  string     The string to overwrite.
- *  @param  generator  A random generator function object that returns a random number in the range [0, 2^64).
- *  @param  alphabet   A string of characters to choose from.
+ *  @param  nonce      "Number used ONCE" to initialize the random number generator, @b don't repeat it!
  */
-template <typename char_type_, typename generator_type_>
-void randomize( //
-    basic_string_slice<char_type_> string, generator_type_ &generator,
-    string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+template <typename char_type_>
+void randomize(basic_string_slice<char_type_> string, sz_u64_t nonce) noexcept {
     static_assert(!std::is_const<char_type_>::value, "The string must be mutable.");
-    sz_random_generator_t generator_callback = &_call_random_generator<generator_type_>;
-    sz_generate(alphabet.data(), alphabet.size(), string.data(), string.size(), generator_callback, &generator);
+    sz_generate(string.data(), string.size(), nonce);
 }
 
 /**
- *  @brief  Replaces ( @b in-place ) all characters in the string using the provided lookup table.
+ *  @brief  Replaces @b (in-place) all characters in the string using the provided lookup table.
  */
 template <typename char_type_>
 void transform(basic_string_slice<char_type_> string, basic_look_up_table<char_type_> const &table) noexcept {

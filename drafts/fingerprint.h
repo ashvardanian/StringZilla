@@ -1,17 +1,8 @@
 /**
- *  @brief  Hardware-accelerated string hashing and checksums.
+ *  @brief  Hardware-accelerated rolling string hashes or fingerprints.
  *  @file   hash.h
  *  @author Ash Vardanian
- *
- *  Includes core APIs:
- *
- *  - `sz_checksum` - for byte-level checksums.
- *  - `sz_hash` - for 64-bit single-shot hashing.
- *  - `sz_hashes` - producing the rolling hashes of a string.
- *  - `sz_generate` - populating buffers with random data.
- *
- *  Convenience functions for character-set matching:
- *
+
  *  - `sz_hashes_fingerprint`
  *  - `sz_hashes_intersection`
  */

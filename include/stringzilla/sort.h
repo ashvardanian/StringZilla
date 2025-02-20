@@ -31,6 +31,7 @@
 #include "types.h"
 
 #include "compare.h" // `sz_compare`
+#include "memory.h"  // `sz_copy`
 
 #ifdef __cplusplus
 extern "C" {
@@ -414,19 +415,19 @@ SZ_INTERNAL void _sz_sequence_argsort_serial_export_next_pgrams(                
  *  @brief  Picks the "pivot" value for the QuickSort algorithm's partitioning step using Robert Sedgewick's method,
  *          the median of three elements - the first, the middle, and the last element of the given range.
  */
-SZ_INTERNAL sz_pgram_t _sz_sequence_partitioning_pivot(sz_pgram_t const *pgrams, sz_size_t count) {
+SZ_INTERNAL sz_pgram_t const *_sz_sequence_partitioning_pivot(sz_pgram_t const *pgrams, sz_size_t count) {
     sz_size_t const middle_offset = count / 2;
-    sz_pgram_t const first_pgram = pgrams[0];
-    sz_pgram_t const middle_pgram = pgrams[middle_offset];
-    sz_pgram_t const last_pgram = pgrams[count - 1];
-    if (first_pgram < middle_pgram) {
-        if (middle_pgram < last_pgram) { return middle_pgram; }
-        else if (first_pgram < last_pgram) { return last_pgram; }
+    sz_pgram_t const *first_pgram = &pgrams[0];
+    sz_pgram_t const *middle_pgram = &pgrams[middle_offset];
+    sz_pgram_t const *last_pgram = &pgrams[count - 1];
+    if (*first_pgram < *middle_pgram) {
+        if (*middle_pgram < *last_pgram) { return middle_pgram; }
+        else if (*first_pgram < *last_pgram) { return last_pgram; }
         else { return first_pgram; }
     }
     else {
-        if (first_pgram < last_pgram) { return first_pgram; }
-        else if (middle_pgram < last_pgram) { return last_pgram; }
+        if (*first_pgram < *last_pgram) { return first_pgram; }
+        else if (*middle_pgram < *last_pgram) { return last_pgram; }
         else { return middle_pgram; }
     }
 }
@@ -440,7 +441,7 @@ SZ_INTERNAL sz_pgram_t _sz_sequence_partitioning_pivot(sz_pgram_t const *pgrams,
  *
  *  @see https://en.wikipedia.org/wiki/Dutch_national_flag_problem
  */
-SZ_PUBLIC void _sz_sequence_argsort_serial_3way_partition(                //
+SZ_INTERNAL void _sz_sequence_argsort_serial_3way_partition(              //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
     sz_size_t *first_pivot_offset, sz_size_t *last_pivot_offset) {
@@ -459,7 +460,7 @@ SZ_PUBLIC void _sz_sequence_argsort_serial_3way_partition(                //
     }
 
     // Chose the pivot offset with Sedgewick's method.
-    sz_pgram_t const pivot_pgram = _sz_sequence_partitioning_pivot(global_pgrams + start_in_sequence, count);
+    sz_pgram_t const pivot_pgram = *_sz_sequence_partitioning_pivot(global_pgrams + start_in_sequence, count);
 
     // Loop through the collection and move the elements around the pivot with the 3-way partitioning.
     sz_size_t partitioning_progress = start_in_sequence; // Current index.
@@ -492,7 +493,7 @@ SZ_PUBLIC void _sz_sequence_argsort_serial_3way_partition(                //
  *  @brief  Recursive Quick-Sort implementation backing both the `sz_sequence_argsort` and `sz_pgrams_sort`,
  *          and using the `_sz_sequence_argsort_serial_3way_partition` under the hood.
  */
-SZ_INTERNAL void _sz_sequence_argsort_serial_recursively(                 //
+SZ_PUBLIC void _sz_sequence_argsort_serial_recursively(                   //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence) {
 
@@ -517,7 +518,7 @@ SZ_INTERNAL void _sz_sequence_argsort_serial_recursively(                 //
  *          It combines `_sz_sequence_argsort_serial_export_next_pgrams` and `_sz_sequence_argsort_serial_recursively`,
  *          recursively diving into the identical pgrams.
  */
-SZ_INTERNAL void _sz_sequence_argsort_serial_next_pgrams(                 //
+SZ_PUBLIC void _sz_sequence_argsort_serial_next_pgrams(                   //
     sz_sequence_t const *const sequence,                                  //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
@@ -735,43 +736,177 @@ SZ_PUBLIC sz_bool_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t c
 
 #pragma endregion // Serial MergeSort Implementation
 
+/*  AVX512 implementation of the string search algorithms for Ice Lake and newer CPUs.
+ *  Includes extensions:
+ *      - 2017 Skylake: F, CD, ER, PF, VL, DQ, BW,
+ *      - 2018 CannonLake: IFMA, VBMI,
+ *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
+ *
+ *  We are going to use VBMI2 for `_mm256_maskz_compress_epi8`.
+ */
 #pragma region Ice Lake Implementation
+#if SZ_USE_ICE
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
+#pragma clang attribute push(                                                                          \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
+    apply_to = function)
 
-SZ_PUBLIC void _sz_sequence_argsort_ice_recursively(                    //
-    sz_sequence_t const *const collection,                              //
-    sz_pgram_t *const global_pgrams, sz_size_t *const global_order,     //
-    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, //
-    sz_size_t const start_character) {
+/**
+ *  @brief  The most important part of the QuickSort algorithm partitioning the elements around the pivot.
+ *          Unlike the serial algorithm, uses compressed stores to filter and move the elements around the pivot.
+ *          Assuming the extreme cost of shuffling between 2 ZMM registers based on 2 different masks, we use
+ *          extra memory to store the elements smaller and greater than the pivot somewhere else.
+ */
+SZ_INTERNAL void _sz_sequence_argsort_ice_2way_partition(                           //
+    sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
+    sz_pgram_t *const partitioned_pgrams, sz_sorted_idx_t *const partitioned_order, //
+    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,             //
+    sz_size_t *const first_pivot_offset, sz_size_t *const last_pivot_offset) {
 
-    // Prepare the new range of windows
-    _sz_sequence_argsort_serial_export_next_pgrams(collection, global_pgrams, global_order, start_in_sequence,
-                                                   end_in_sequence, start_character);
+    sz_size_t const count = end_in_sequence - start_in_sequence;
+    sz_size_t const pgrams_per_register = sizeof(sz_u512_vec_t) / sizeof(sz_pgram_t);
 
-    // We can implement a form of a Radix sort here, that will count the number of elements with
-    // a certain bit set. The naive approach may require too many loops over data. A more "vectorized"
-    // approach would be to maintain a histogram for several bits at once. For 4 bits we will
-    // need 2^4 = 16 counters.
-    sz_size_t histogram[16] = {0};
-    for (sz_size_t byte_in_window = 0; byte_in_window != sizeof(sz_pgram_t); ++byte_in_window) {
-        // First sort based on the low nibble of each byte.
-        for (sz_size_t i = start_in_sequence; i < end_in_sequence; ++i) {
-            sz_size_t const byte = (global_pgrams[i] >> (byte_in_window * 8)) & 0xFF;
-            ++histogram[byte];
-        }
-        sz_size_t offset = start_in_sequence;
-        for (sz_size_t i = 0; i != 16; ++i) {
-            sz_size_t const count = histogram[i];
-            histogram[i] = offset;
-            offset += count;
-        }
-        for (sz_size_t i = start_in_sequence; i < end_in_sequence; ++i) {
-            sz_size_t const byte = (global_pgrams[i] >> (byte_in_window * 8)) & 0xFF;
-            global_order[histogram[byte]] = i;
-            ++histogram[byte];
-        }
+    // Choose the pivot offset with Sedgewick's method.
+    sz_pgram_t const *pivot_pgram_ptr = _sz_sequence_partitioning_pivot(initial_order + start_in_sequence, count);
+    sz_pgram_t const pivot_pgram = *pivot_pgram_ptr;
+    sz_u512_vec_t pivot_vec;
+    pivot_vec.zmm = _mm512_set1_epi64(pivot_pgram);
+
+    // Reading data is always cheaper than writing, so we can further minimize the writes, if
+    // we know exactly, how many elements are smaller or greater than the pivot.
+    sz_size_t count_smaller = 0, count_greater = 0;
+    sz_size_t const tail_count = count & 7u;
+    __mmask8 const tail_mask = _sz_u8_mask_until(tail_count);
+
+    sz_u512_vec_t pgrams_vec, order_vec;
+    for (sz_size_t i = start_in_sequence; i < end_in_sequence; i += pgrams_per_register) {
+        pgrams_vec.zmm =                               //
+            i + pgrams_per_register <= end_in_sequence //
+                ? _mm512_loadu_si512(initial_pgrams + i)
+                : _mm512_maskz_loadu_epi64(tail_mask, initial_pgrams + i);
+        count_smaller += sz_u32_popcount(_mm512_cmplt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
+        count_greater += sz_u32_popcount(_mm512_cmpgt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
     }
+
+    // Now all we need to do is to loop through the collection and export them into the temporary buffer
+    // in 3 separate segments - smaller, equal, and greater than the pivot.
+    sz_size_t const count_equal = count - count_smaller - count_greater;
+    sz_size_t smaller_offset = start_in_sequence;
+    sz_size_t equal_offset = start_in_sequence + count_smaller;
+    sz_size_t greater_offset = start_in_sequence + count_smaller + count_equal;
+
+    // The naive algorithm - unzip the elements into 3 separate buffers.
+    for (sz_size_t i = start_in_sequence; i < end_in_sequence; i += pgrams_per_register) {
+        if (i + pgrams_per_register <= end_in_sequence) {
+            pgrams_vec.zmm = _mm512_loadu_si512(initial_pgrams + i);
+            order_vec.zmm = _mm512_loadu_si512(initial_order + i);
+        }
+        else {
+            pgrams_vec.zmm = _mm512_maskz_loadu_epi64(tail_count, initial_pgrams + i);
+            order_vec.zmm = _mm512_maskz_loadu_epi64(tail_count, initial_order + i);
+        }
+        pgrams_vec.zmm = _mm512_loadu_si512(initial_pgrams + i);
+        order_vec.zmm = _mm512_loadu_si512(initial_order + i);
+        __mmask8 const smaller_mask = _mm512_cmplt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm);
+        __mmask8 const equal_mask = _mm512_cmpeq_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm);
+        __mmask8 const greater_mask = _mm512_cmpgt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm);
+
+        // Compress the elements into the temporary buffer.
+        _mm512_mask_compressstoreu_epi64(partitioned_pgrams + smaller_offset, smaller_mask, pgrams_vec.zmm);
+        _mm512_mask_compressstoreu_epi64(partitioned_order + smaller_offset, smaller_mask, order_vec.zmm);
+        smaller_offset += _mm_popcnt_u32(smaller_mask);
+
+        _mm512_mask_compressstoreu_epi64(partitioned_pgrams + equal_offset, equal_mask, pgrams_vec.zmm);
+        _mm512_mask_compressstoreu_epi64(partitioned_order + equal_offset, equal_mask, order_vec.zmm);
+        equal_offset += _mm_popcnt_u32(equal_mask);
+
+        _mm512_mask_compressstoreu_epi64(partitioned_pgrams + greater_offset, greater_mask, pgrams_vec.zmm);
+        _mm512_mask_compressstoreu_epi64(partitioned_order + greater_offset, greater_mask, order_vec.zmm);
+        greater_offset += _mm_popcnt_u32(greater_mask);
+    }
+
+    // Copy back.
+    sz_copy((sz_ptr_t)(initial_pgrams), (sz_cptr_t)(partitioned_pgrams), count_smaller * sizeof(sz_pgram_t));
+    sz_copy((sz_ptr_t)(initial_order), (sz_cptr_t)(partitioned_order), count_smaller * sizeof(sz_pgram_t));
+    sz_copy((sz_ptr_t)(initial_pgrams + count_smaller),      //
+            (sz_cptr_t)(partitioned_pgrams + count_smaller), //
+            count_equal * sizeof(sz_pgram_t));
+    sz_copy((sz_ptr_t)(initial_order + count_smaller),      //
+            (sz_cptr_t)(partitioned_order + count_smaller), //
+            count_equal * sizeof(sz_pgram_t));
+    sz_copy((sz_ptr_t)(initial_pgrams + count_smaller + count_equal),      //
+            (sz_cptr_t)(partitioned_pgrams + count_smaller + count_equal), //
+            count_greater);
+    sz_copy((sz_ptr_t)(initial_order + count_smaller + count_equal),      //
+            (sz_cptr_t)(partitioned_order + count_smaller + count_equal), //
+            count_greater);
+
+    // Return the offsets of the equal elements.
+    *first_pivot_offset = count_smaller;
+    *last_pivot_offset = count_smaller + count_equal;
 }
 
+/**
+ *  @brief  Recursive Quick-Sort implementation backing both the `sz_sequence_argsort_ice` and `sz_pgrams_sort_ice`,
+ *          and using the `_sz_sequence_argsort_ice_2way_partition` under the hood.
+ */
+SZ_INTERNAL void _sz_sequence_argsort_ice_recursively(              //
+    sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,     //
+    sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order, //
+    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence) {
+
+    // On very small inputs, when we don't even have enough input for a single ZMM register,
+    // use simple insertion sort without any extra memory.
+    sz_size_t const count = end_in_sequence - start_in_sequence;
+    sz_size_t const pgrams_per_register = sizeof(sz_u512_vec_t) / sizeof(sz_pgram_t);
+    if (count <= pgrams_per_register) {
+        sz_pgrams_sort_stable_with_insertion( //
+            initial_pgrams + start_in_sequence, count, initial_order + start_in_sequence);
+        return;
+    }
+
+    // Partition the collection around some pivot
+    sz_size_t first_pivot_index, last_pivot_index;
+    _sz_sequence_argsort_ice_2way_partition(                              //
+        initial_pgrams, initial_order, temporary_pgrams, temporary_order, //
+        start_in_sequence, end_in_sequence,                               //
+        &first_pivot_index, &last_pivot_index);
+
+    // Recursively sort the left and right partitions, tracking where the output goes
+    if (start_in_sequence < first_pivot_index)
+        _sz_sequence_argsort_ice_recursively(                                 //
+            initial_pgrams, initial_order, temporary_pgrams, temporary_order, //
+            start_in_sequence, first_pivot_index);
+    if (last_pivot_index + 1 < end_in_sequence)
+        _sz_sequence_argsort_ice_recursively(                                 //
+            initial_pgrams, initial_order, temporary_pgrams, temporary_order, //
+            last_pivot_index + 1, end_in_sequence);
+}
+
+SZ_PUBLIC sz_bool_t sz_pgrams_sort_ice(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                       sz_sorted_idx_t *order) {
+
+    // First, initialize the `order` with `std::iota`-like behavior.
+    for (sz_size_t i = 0; i != count; ++i) order[i] = i;
+
+    // Allocate memory for partitioning the elements around the pivot.
+    sz_size_t memory_usage = sizeof(sz_pgram_t) * count + sizeof(sz_sorted_idx_t) * count;
+    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
+    if (!temporary_pgrams) return sz_false_k;
+
+    // Reuse the string sorting algorithm for sorting the "pgrams".
+    _sz_sequence_argsort_ice_recursively(pgrams, order, temporary_pgrams, temporary_order, 0, count);
+
+    // Deallocate the temporary memory used for partitioning.
+    alloc->free(temporary_pgrams, memory_usage, alloc);
+    return sz_true_k;
+}
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+#endif            // SZ_USE_ICE
 #pragma endregion // Ice Lake Implementation
 
 /*  Pick the right implementation for the string search algorithms.

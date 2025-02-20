@@ -40,11 +40,23 @@ tracked_unary_functions_t bytesum_functions() {
 
 tracked_unary_functions_t hashing_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
+        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size(), 42); });
     };
     tracked_unary_functions_t result = {
-        {"sz_hash_serial", wrap_sz(sz_hash_serial)},
         {"std::hash", [](std::string_view s) { return std::hash<std::string_view> {}(s); }},
+        {"sz_hash_serial", wrap_sz(sz_hash_serial)},
+#if SZ_USE_HASWELL
+        {"sz_hash_haswell", wrap_sz(sz_hash_haswell)},
+#endif
+#if SZ_USE_SKYLAKE
+        {"sz_hash_skylake", wrap_sz(sz_hash_skylake)},
+#endif
+#if SZ_USE_ICE
+        {"sz_hash_ice", wrap_sz(sz_hash_ice)},
+#endif
+#if SZ_USE_NEON
+        {"sz_hash_neon", wrap_sz(sz_hash_neon)},
+#endif
     };
     return result;
 }
@@ -65,11 +77,11 @@ tracked_unary_functions_t random_generation_functions(std::size_t token_length) 
              randomize_string(buffer.data(), token_length, alphabet.data(), alphabet.size());
              return token_length;
          })},
-        {"sz::randomize" + suffix, unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
-             sz::string_span span(buffer.data(), token_length);
-             sz::randomize(span, global_random_generator(), alphabet);
-             return token_length;
-         })},
+        // {"sz::randomize" + suffix, unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
+        //      sz::string_span span(buffer.data(), token_length);
+        //      sz::randomize(span, global_random_generator(), alphabet);
+        //      return token_length;
+        //  })},
     };
     return result;
 }

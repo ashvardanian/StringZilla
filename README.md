@@ -622,14 +622,22 @@ Both are companions of the `sz_find`, first for x86 CPUs with AVX-512 support, a
 sz_string_view_t haystack = {your_text, your_text_length};
 sz_string_view_t needle = {your_subtext, your_subtext_length};
 
-// Perform string-level operations
+// Perform string-level operations auto-picking the backend or dispatching manually
 sz_size_t substring_position = sz_find(haystack.start, haystack.length, needle.start, needle.length);
 sz_size_t substring_position = sz_find_skylake(haystack.start, haystack.length, needle.start, needle.length);
 sz_size_t substring_position = sz_find_haswell(haystack.start, haystack.length, needle.start, needle.length);
 sz_size_t substring_position = sz_find_neon(haystack.start, haystack.length, needle.start, needle.length);
 
-// Hash strings
-sz_u64_t hash = sz_hash(haystack.start, haystack.length, 42); // or any other seed ;)
+// Hash strings at once
+sz_u64_t hash = sz_hash(haystack.start, haystack.length, 42);    // 42 is the seed
+sz_u64_t checksum = sz_bytesum(haystack.start, haystack.length); // or accumulate byte values
+
+// Hash strings incrementally with "init", "stream", and "fold":
+sz_hash_state_t state; 
+sz_hash_state_init(&state, 42);
+sz_hash_state_stream(&state, haystack.start, 1);                       // first char
+sz_hash_state_stream(&state, haystack.start + 1, haystack.length - 1); // rest of the string
+sz_u64_t hash = sz_hash_state_fold(&state);
 
 // Perform collection level operations
 sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};

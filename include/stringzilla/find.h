@@ -5,7 +5,6 @@
  *
  *  Includes core APIs:
  *
- *  - `sz_equal`
  *  - `sz_find` and reverse-order `sz_rfind`
  *  - `sz_find_byte` and reverse-order `sz_rfind_byte`
  *  - `sz_find_charset` and reverse-order `sz_rfind_charset`
@@ -138,10 +137,10 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
  *          May have identical implementation and performance to ::sz_rfind_charset.
  *
  *  Useful for parsing, when we want to skip a set of characters. Examples:
- *  * 6 whitespaces: " \t\n\r\v\f".
- *  * 16 digits forming a float number: "0123456789,.eE+-".
- *  * 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
- *  * 2 JSON string special characters useful to locate the end of the string: "\"\\".
+ *  - 6 whitespaces: " \t\n\r\v\f".
+ *  - 16 digits forming a float number: "0123456789,.eE+-".
+ *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
+ *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
  *
  *  @param text     String to be scanned.
  *  @param set      Set of relevant characters.
@@ -155,10 +154,10 @@ SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charse
  *          May have identical implementation and performance to ::sz_find_charset.
  *
  *  Useful for parsing, when we want to skip a set of characters. Examples:
- *  * 6 whitespaces: " \t\n\r\v\f".
- *  * 16 digits forming a float number: "0123456789,.eE+-".
- *  * 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
- *  * 2 JSON string special characters useful to locate the end of the string: "\"\\".
+ *  - 6 whitespaces: " \t\n\r\v\f".
+ *  - 16 digits forming a float number: "0123456789,.eE+-".
+ *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
+ *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
  *
  *  @param text     String to be scanned.
  *  @param set      Set of relevant characters.

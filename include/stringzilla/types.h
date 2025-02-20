@@ -323,6 +323,7 @@ typedef char *sz_ptr_t;          // A type alias for `char *`
 typedef char const *sz_cptr_t;   // A type alias for `char const *`
 typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching functions
 
+struct sz_hash_state_t;            // Forward declaration of a hash state structure
 struct sz_sequence_t;              // Forward declaration of an ordered collection of strings
 typedef sz_size_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
 typedef sz_size_t sz_pgram_t;      // "Pointer-sized N-gram" of a string
@@ -406,7 +407,6 @@ SZ_PUBLIC void sz_charset_invert(sz_charset_t *s) {
 
 typedef void *(*sz_memory_allocate_t)(sz_size_t, void *);
 typedef void (*sz_memory_free_t)(void *, sz_size_t, void *);
-typedef sz_u64_t (*sz_random_generator_t)(void *);
 
 /**
  *  @brief  Some complex pattern matching algorithms may require memory allocations.
@@ -456,6 +456,9 @@ typedef sz_u64_t (*sz_hash_state_fold_t)(struct sz_hash_state_t const *);
 
 /** @brief  Signature of ::sz_bytesum. */
 typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
+
+/** @brief  Signature of ::sz_generate. */
+typedef void (*sz_generate_t)(sz_ptr_t, sz_size_t, sz_u64_t);
 
 /** @brief  Signature of ::sz_equal. */
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);

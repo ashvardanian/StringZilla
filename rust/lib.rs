@@ -54,9 +54,11 @@ pub mod sz {
             needle_length: usize,
         ) -> *const c_void;
 
-        fn sz_hash(text: *const c_void, length: usize) -> u64;
-
         fn sz_bytesum(text: *const c_void, length: usize) -> u64;
+
+        fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
+
+        fn sz_generate(text: *mut c_void, length: usize, seed: u64) -> u64;
 
         fn sz_edit_distance(
             haystack1: *const c_void,
@@ -102,14 +104,6 @@ pub mod sz {
             allocator: *const c_void,
         ) -> isize;
 
-        fn sz_generate(
-            alphabet: *const c_void,
-            alphabet_size: usize,
-            text: *mut c_void,
-            length: usize,
-            generate: *const c_void,
-            generator: *mut c_void,
-        );
     }
 
     /// Computes the checksum value of unsigned bytes in a given byte slice `text`.

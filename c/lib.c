@@ -183,6 +183,7 @@ typedef struct sz_implementations_t {
     sz_hash_state_init_t hash_state_init;
     sz_hash_state_stream_t hash_state_stream;
     sz_hash_state_fold_t hash_state_fold;
+    sz_generate_t generate;
 
     sz_find_byte_t find_byte;
     sz_find_byte_t rfind_byte;
@@ -225,6 +226,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     impl->hash_state_init = sz_hash_state_init_serial;
     impl->hash_state_stream = sz_hash_state_stream_serial;
     impl->hash_state_fold = sz_hash_state_fold_serial;
+    impl->generate = sz_generate_serial;
 
     impl->find = sz_find_serial;
     impl->rfind = sz_rfind_serial;
@@ -252,6 +254,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_init = sz_hash_state_init_haswell;
         impl->hash_state_stream = sz_hash_state_stream_haswell;
         impl->hash_state_fold = sz_hash_state_fold_haswell;
+        impl->generate = sz_generate_haswell;
 
         impl->find_byte = sz_find_byte_haswell;
         impl->rfind_byte = sz_rfind_byte_haswell;
@@ -276,6 +279,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_init = sz_hash_state_init_skylake;
         impl->hash_state_stream = sz_hash_state_stream_skylake;
         impl->hash_state_fold = sz_hash_state_fold_skylake;
+        impl->generate = sz_generate_skylake;
 
         impl->find = sz_find_skylake;
         impl->rfind = sz_rfind_skylake;
@@ -300,6 +304,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_init = sz_hash_state_init_ice;
         impl->hash_state_stream = sz_hash_state_stream_ice;
         impl->hash_state_fold = sz_hash_state_fold_ice;
+        impl->generate = sz_generate_ice;
     }
 #endif
 
@@ -317,6 +322,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_init = sz_hash_state_init_neon;
         impl->hash_state_stream = sz_hash_state_stream_neon;
         impl->hash_state_fold = sz_hash_state_fold_neon;
+        impl->generate = sz_generate_neon;
 
         impl->find = sz_find_neon;
         impl->rfind = sz_rfind_neon;
@@ -380,6 +386,10 @@ SZ_DYNAMIC void sz_hash_state_stream(sz_hash_state_t *state, sz_cptr_t text, sz_
 
 SZ_DYNAMIC sz_u64_t sz_hash_state_fold(sz_hash_state_t const *state) {
     return sz_dispatch_table.hash_state_fold(state);
+}
+
+SZ_DYNAMIC void sz_generate(sz_ptr_t result, sz_size_t result_length, sz_u64_t nonce) {
+    sz_dispatch_table.generate(result, result_length, nonce);
 }
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
@@ -499,22 +509,6 @@ SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_
     return sz_rfind_charset(h, h_length, &set);
 }
 
-#if !SZ_AVOID_LIBC
-sz_u64_t _sz_random_generator(void *empty_state) {
-    sz_unused(empty_state);
-    return (sz_u64_t)rand();
-}
-#endif
-
-SZ_DYNAMIC void sz_generate( //
-    sz_cptr_t alphabet, sz_size_t alphabet_size, sz_ptr_t result, sz_size_t result_length,
-    sz_random_generator_t generator, void *generator_user_data) {
-#if !SZ_AVOID_LIBC
-    if (!generator) generator = _sz_random_generator;
-#endif
-    sz_generate_serial(alphabet, alphabet_size, result, result_length, generator, generator_user_data);
-}
-
 // Provide overrides for the libc mem* functions
 #if SZ_OVERRIDE_LIBC && !defined(__CYGWIN__)
 
@@ -591,8 +585,8 @@ SZ_DYNAMIC void *memrchr(void const *s, int c_wide, size_t n) {
 }
 
 SZ_DYNAMIC void memfrob(void *s, size_t n) {
-    char const *base64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    sz_generate(base64, 64, s, n, SZ_NULL, SZ_NULL);
+    static sz_u64_t nonce = 42;
+    sz_generate(s, n, nonce++);
 }
 
 #endif
