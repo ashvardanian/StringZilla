@@ -196,6 +196,9 @@ typedef struct sz_implementations_t {
     sz_alignment_score_t alignment_score;
 
     sz_sequence_argsort_t sequence_argsort;
+    sz_pgrams_sort_t pgrams_sort;
+    sz_sequence_argsort_stable_t sequence_argsort_stable;
+    sz_pgrams_sort_stable_t pgrams_sort_stable;
 
 } sz_implementations_t;
 
@@ -237,7 +240,11 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
 
     impl->edit_distance = sz_edit_distance_serial;
     impl->alignment_score = sz_alignment_score_serial;
+
     impl->sequence_argsort = sz_sequence_argsort_serial;
+    impl->pgrams_sort = sz_pgrams_sort_serial;
+    impl->sequence_argsort_stable = sz_sequence_argsort_stable_serial;
+    impl->pgrams_sort_stable = sz_pgrams_sort_stable_serial;
 
 #if SZ_USE_HASWELL
     if (caps & sz_cap_haswell_k) {
@@ -305,6 +312,11 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_stream = sz_hash_state_stream_ice;
         impl->hash_state_fold = sz_hash_state_fold_ice;
         impl->generate = sz_generate_ice;
+
+        impl->sequence_argsort = sz_sequence_argsort_ice;
+        impl->pgrams_sort = sz_pgrams_sort_ice;
+        impl->sequence_argsort_stable = sz_sequence_argsort_stable_ice;
+        impl->pgrams_sort_stable = sz_pgrams_sort_stable_ice;
     }
 #endif
 
@@ -330,6 +342,15 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->rfind_byte = sz_rfind_byte_neon;
         impl->find_from_set = sz_find_charset_neon;
         impl->rfind_from_set = sz_rfind_charset_neon;
+    }
+#endif
+
+#if SZ_USE_SVE
+    if (caps & sz_cap_sve_k) {
+        impl->sequence_argsort = sz_sequence_argsort_sve;
+        impl->pgrams_sort = sz_pgrams_sort_sve;
+        impl->sequence_argsort_stable = sz_sequence_argsort_stable_sve;
+        impl->pgrams_sort_stable = sz_pgrams_sort_stable_sve;
     }
 #endif
 }
@@ -477,6 +498,21 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score( //
 
 SZ_DYNAMIC sz_bool_t sz_sequence_argsort(sz_sequence_t const *array, sz_memory_allocator_t *alloc, sz_size_t *order) {
     return sz_dispatch_table.sequence_argsort(array, alloc, order);
+}
+
+SZ_DYNAMIC sz_bool_t sz_pgrams_sort(sz_pgram_t *array, sz_size_t count, sz_memory_allocator_t *alloc,
+                                    sz_size_t *order) {
+    return sz_dispatch_table.pgrams_sort(array, count, alloc, order);
+}
+
+SZ_DYNAMIC sz_bool_t sz_sequence_argsort_stable(sz_sequence_t const *array, sz_memory_allocator_t *alloc,
+                                                sz_size_t *order) {
+    return sz_dispatch_table.sequence_argsort_stable(array, alloc, order);
+}
+
+SZ_DYNAMIC sz_bool_t sz_pgrams_sort_stable(sz_pgram_t *array, sz_size_t count, sz_memory_allocator_t *alloc,
+                                           sz_size_t *order) {
+    return sz_dispatch_table.pgrams_sort_stable(array, count, alloc, order);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {

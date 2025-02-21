@@ -996,7 +996,46 @@ SZ_PUBLIC sz_bool_t sz_sequence_argsort_ice(sz_sequence_t const *sequence, sz_me
 
 SZ_DYNAMIC sz_bool_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                          sz_sorted_idx_t *order) {
+#if SZ_USE_ICE
+    return sz_sequence_argsort_ice(sequence, alloc, order);
+#elif SZ_USE_SVE
+    return sz_sequence_argsort_sve(sequence, alloc, order);
+#else
     return sz_sequence_argsort_serial(sequence, alloc, order);
+#endif
+}
+
+SZ_DYNAMIC sz_bool_t sz_pgrams_sort(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                    sz_sorted_idx_t *order) {
+#if SZ_USE_ICE
+    return sz_pgrams_sort_ice(pgrams, count, alloc, order);
+#elif SZ_USE_SVE
+    return sz_pgrams_sort_sve(pgrams, count, alloc, order);
+#else
+    return sz_pgrams_sort_serial(pgrams, count, alloc, order);
+#endif
+}
+
+SZ_DYNAMIC sz_bool_t sz_sequence_argsort_stable(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                                sz_sorted_idx_t *order) {
+#if SZ_USE_ICE
+    return sz_sequence_argsort_ice(sequence, alloc, order);
+#elif SZ_USE_SVE
+    return sz_sequence_argsort_sve(sequence, alloc, order);
+#else
+    return sz_sequence_argsort_serial(sequence, alloc, order);
+#endif
+}
+
+SZ_DYNAMIC sz_bool_t sz_pgrams_sort_stable(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                           sz_sorted_idx_t *order) {
+#if SZ_USE_ICE
+    return sz_pgrams_sort_ice(pgrams, count, alloc, order);
+#elif SZ_USE_SVE
+    return sz_pgrams_sort_sve(pgrams, count, alloc, order);
+#else
+    return sz_pgrams_sort_serial(pgrams, count, alloc, order);
+#endif
 }
 
 #endif            // !SZ_DYNAMIC_DISPATCH
