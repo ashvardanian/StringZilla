@@ -112,6 +112,15 @@ int main(int argc, char const **argv) {
     });
     expect_sorted(pgrams, permute);
 
+    bench_permute("sz_pgrams_sort_ice", [&]() {
+        std::copy(pgrams.begin(), pgrams.end(), pgrams_sorted.begin());
+        std::iota(permute.begin(), permute.end(), 0);
+        sz::_with_alloc<allocator_t>([&](sz_memory_allocator_t &alloc) {
+            return sz_pgrams_sort_ice(pgrams_sorted.data(), pgrams_sorted.size(), &alloc, permute.data());
+        });
+    });
+    expect_sorted(pgrams, permute);
+
     // Unlike the `std::sort` adaptation above, the `sz_pgrams_sort_stable_serial` also sorts the input array inplace
     bench_permute("sz_pgrams_sort_stable_serial", [&]() {
         std::copy(pgrams.begin(), pgrams.end(), pgrams_sorted.begin());
