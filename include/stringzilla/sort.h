@@ -665,6 +665,13 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, 
         return sz_success_k;
     }
 
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
     // One of the reasons for slow string operations is the significant overhead of branching when performing
     // individual string comparisons.
     //
@@ -772,6 +779,13 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t
     // For the tail of the array, sort it with insertion sort.
     sz_size_t const tail_count = count & 7u;
     sz_pgrams_sort_stable_with_insertion(pgrams + count - tail_count, tail_count, order + count - tail_count);
+
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
 
     // At this point, the array is partitioned into sorted runs.
     // We'll now merge these runs until the whole array is sorted.
@@ -991,6 +1005,13 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t i = 0; i != count; ++i) order[i] = i;
 
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
     // Allocate memory for partitioning the elements around the pivot.
     sz_size_t memory_usage = sizeof(sz_pgram_t) * count + sizeof(sz_sorted_idx_t) * count;
     sz_pgram_t *temporary_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
@@ -1064,6 +1085,13 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
     if (count <= 32) {
         sz_sequence_argsort_with_insertion(sequence, order);
         return sz_success_k;
+    }
+
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
     }
 
     // Allocate memory for partitioning the elements around the pivot.
