@@ -3,12 +3,12 @@
  *  @file   memory.h
  *  @author Ash Vardanian
  *
- *  Includes:
+ *  Includes core APIs for contiguous memory operations:
  *
  *  - `sz_copy` - analog to `memcpy`
  *  - `sz_move` - analog to `memmove`
  *  - `sz_fill` - analog to `memset`
- *  - `sz_look_up_transform` - LUT transformation of a string, similar to OpenCV LUT
+ *  - `sz_lookup` - LUT transformation of a string, similar to OpenCV LUT
  *  - TODO: `sz_detect_encoding` - similar to `iconv` or `chardet`
  *
  *  Convenience functions for character-set mapping:
@@ -28,11 +28,27 @@ extern "C" {
 
 /**
  *  @brief  Similar to `memcpy`, copies contents of one string into another.
- *          The behavior is undefined if the strings overlap.
  *
- *  @param target   String to copy into.
- *  @param length   Number of bytes to copy.
- *  @param source   String to copy from.
+ *  @param[out] target String to copy into. Can be `NULL`, if the @p length is zero.
+ *  @param[in] length Number of bytes to copy. Can be a zero.
+ *  @param[in] source String to copy from. Can be `NULL`, if the @p length is zero.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/memory.h>
+ *      int main() {
+ *          char output[2];
+ *          sz_copy(output, "hi", 2);
+ *          return output[0] == 'h' && output[1] == 'i' ? 0 : 1;
+ *      }
+ *  @endcode
+ *
+ *  @pre    The @p target and @p source must not overlap.
+ *  @sa     sz_move
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_copy_serial, sz_copy_haswell, sz_copy_skylake, sz_copy_neon
  */
 SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
@@ -40,20 +56,83 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
  *  @brief  Similar to `memmove`, copies (moves) contents of one string into another.
  *          Unlike `sz_copy`, allows overlapping strings as arguments.
  *
- *  @param target   String to copy into.
- *  @param length   Number of bytes to copy.
- *  @param source   String to copy from.
+ *  @param[out] target String to copy into. Can be `NULL`, if the @p length is zero.
+ *  @param[in] length Number of bytes to copy. Can be a zero.
+ *  @param[in] source String to copy from. Can be `NULL`, if the @p length is zero.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/memory.h>
+ *      int main() {
+ *          char buffer[3] = {'a', 'b', 'c'};
+ *          sz_move(buffer, buffer + 1, 2);
+ *          return buffer[0] == 'b' && buffer[1] == 'c' && buffer[2] == 'c' ? 0 : 1;
+ *      }
+ *  @endcode
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_move_serial, sz_move_haswell, sz_move_skylake, sz_move_neon
  */
 SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
  *  @brief  Similar to `memset`, fills a string with a given value.
  *
- *  @param target   String to fill.
- *  @param length   Number of bytes to fill.
- *  @param value    Value to fill with.
+ *  @param[out] target String to fill. Can be `NULL`, if the @p length is zero.
+ *  @param[in] length Number of bytes to fill. Can be a zero.
+ *  @param[in] value Value to fill with.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *     #include <stringzilla/memory.h>
+ *     int main() {
+ *          char buffer[2];
+ *          sz_fill(buffer, 2, 'x');
+ *          return buffer[0] == 'x' && buffer[1] == 'x' ? 0 : 1;
+ *     }
+ *  @endcode
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_fill_serial, sz_fill_haswell, sz_fill_skylake, sz_fill_neon
  */
 SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+
+/**
+ *  @brief  Look Up Table @b (LUT) transformation of a @p source string. Same as `for (char &c : text) c = lut[c]`.
+ *  @see    https://en.wikipedia.org/wiki/Lookup_table
+ *
+ *  Can be used to implement some form of string normalization, partially masking punctuation marks,
+ *  or converting between different character sets, like uppercase or lowercase. Surprisingly, also has
+ *  broad implications in image processing, where image channel transformations are often done using LUTs.
+ *
+ *  @param[out] target Output string, can point to the same address as @p source.
+ *  @param[in] length Number of bytes in the string.
+ *  @param[in] source String to be mapped using the @p lut table into the @p target.
+ *  @param[in] lut Look Up Table to apply. Must be exactly @b 256 bytes long.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *     #include <ctype.h> // for `tolower`
+ *     #include <stringzilla/memory.h>
+ *     int main() {
+ *          char to_lower_lut[256];
+ *          for (int i = 0; i < 256; ++i) to_lower_lut[i] = tolower(i);
+ *          char buffer[3] = {'A', 'B', 'C'};
+ *          sz_lookup(buffer, 3, buffer, to_lower_lut);
+ *          return buffer[0] == 'a' && buffer[1] == 'b' && buffer[2] == 'c' ? 0 : 1;
+ *     }
+ *  @endcode
+ *
+ *  @pre    The @p lut must be exactly 256 bytes long, even if the @p source string has no characters in the top range.
+ *  @pre    The @p target and @p source can be the same, but must not overlap.
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_lookup_serial, sz_lookup_haswell, sz_lookup_ice, sz_lookup_neon
+ */
+SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
 
 /** @copydoc sz_copy */
 SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
@@ -61,6 +140,8 @@ SZ_PUBLIC void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
 SZ_PUBLIC void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_fill */
 SZ_PUBLIC void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_lookup */
+SZ_PUBLIC void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
 
 #if SZ_USE_HASWELL
 /** @copydoc sz_copy */
@@ -69,6 +150,8 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
 SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_rfind_fill */
 SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_lookup */
+SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
 #endif
 
 #if SZ_USE_SKYLAKE
@@ -80,6 +163,11 @@ SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
 SZ_PUBLIC void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
 #endif
 
+#if SZ_USE_ICE
+/** @copydoc sz_lookup */
+SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
+#endif
+
 #if SZ_USE_NEON
 /** @copydoc sz_copy */
 SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
@@ -87,24 +175,9 @@ SZ_PUBLIC void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
 SZ_PUBLIC void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /** @copydoc sz_rfind_fill */
 SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_lookup */
+SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut);
 #endif
-
-/**
- *  @brief  Look Up Table @b (LUT) transformation of a string. Equivalent to `for (char & c : text) c = lut[c]`.
- *
- *  Can be used to implement some form of string normalization, partially masking punctuation marks,
- *  or converting between different character sets, like uppercase or lowercase. Surprisingly, also has
- *  broad implications in image processing, where image channel transformations are often done using LUTs.
- *
- *  @param text     String to be normalized.
- *  @param length   Number of bytes in the string.
- *  @param lut      Look Up Table to apply. Must be exactly @b 256 bytes long.
- *  @param result   Output string, can point to the same address as ::text.
- */
-SZ_DYNAMIC void sz_look_up_transform(sz_cptr_t text, sz_size_t length, sz_cptr_t lut, sz_ptr_t result);
-
-/** @copydoc sz_look_up_transform */
-SZ_PUBLIC void sz_look_up_transform_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t lut, sz_ptr_t result);
 
 #pragma endregion // Core API
 
@@ -120,7 +193,7 @@ SZ_PUBLIC void sz_look_up_transform_serial(sz_cptr_t text, sz_size_t length, sz_
  *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  *
  *  @param text     String to be normalized.
- *  @param length   Number of bytes in the string.
+ *  @param[in] length   Number of bytes in the string.
  *  @param result   Output string, can point to the same address as ::text.
  */
 SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
@@ -135,7 +208,7 @@ SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
  *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  *
  *  @param text     String to be normalized.
- *  @param length   Number of bytes in the string.
+ *  @param[in] length   Number of bytes in the string.
  *  @param result   Output string, can point to the same address as ::text.
  */
 SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
@@ -144,7 +217,7 @@ SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
  *  @brief  Equivalent to `for (char & c : text) c = toascii(c)`.
  *
  *  @param text     String to be normalized.
- *  @param length   Number of bytes in the string.
+ *  @param[in] length   Number of bytes in the string.
  *  @param result   Output string, can point to the same address as ::text.
  */
 SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
@@ -203,7 +276,7 @@ SZ_INTERNAL sz_u8_t sz_u8_toupper(sz_u8_t c) {
     return upped[c];
 }
 
-SZ_PUBLIC void sz_look_up_transform_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t lut, sz_ptr_t result) {
+SZ_PUBLIC void sz_lookup_serial(sz_ptr_t result, sz_size_t length, sz_cptr_t text, sz_cptr_t lut) {
     sz_u8_t const *unsigned_lut = (sz_u8_t const *)lut;
     sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
     sz_u8_t *unsigned_result = (sz_u8_t *)result;
@@ -454,13 +527,13 @@ SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     }
 }
 
-SZ_PUBLIC void sz_look_up_transform_haswell(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+SZ_PUBLIC void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
     // But if at least 3 cache lines are touched, the AVX-2 implementation should be faster.
     if (length <= 128) {
-        sz_look_up_transform_serial(source, length, lut, target);
+        sz_lookup_serial(target, length, source, lut);
         return;
     }
 
@@ -587,7 +660,7 @@ SZ_PUBLIC void sz_look_up_transform_haswell(sz_cptr_t source, sz_size_t length, 
     }
 
     // Handle the tail.
-    if (length) sz_look_up_transform_serial(source, length, lut, target);
+    if (length) sz_lookup_serial(target, length, source, lut);
 }
 
 #pragma clang attribute pop
@@ -838,13 +911,13 @@ SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2"))), \
                              apply_to = function)
 
-SZ_PUBLIC void sz_look_up_transform_ice(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
     // But if at least 3 cache lines are touched, the AVX-512 implementation should be faster.
     if (length <= 128) {
-        sz_look_up_transform_serial(source, length, lut, target);
+        sz_lookup_serial(target, length, source, lut);
         return;
     }
 
@@ -1075,12 +1148,12 @@ SZ_PUBLIC void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     if (length) sz_fill_serial(target, length, value);
 }
 
-SZ_PUBLIC void sz_look_up_transform_neon(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
     if (length <= 128) {
-        sz_look_up_transform_serial(source, length, lut, target);
+        sz_lookup_serial(target, length, source, lut);
         return;
     }
 
@@ -1291,15 +1364,15 @@ SZ_DYNAMIC void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 #endif
 }
 
-SZ_DYNAMIC void sz_look_up_transform(sz_cptr_t source, sz_size_t length, sz_cptr_t lut, sz_ptr_t target) {
+SZ_DYNAMIC void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, sz_cptr_t lut) {
 #if SZ_USE_ICE
-    sz_look_up_transform_ice(source, length, lut, target);
+    sz_lookup_ice(target, length, source, lut);
 #elif SZ_USE_HASWELL
-    sz_look_up_transform_haswell(source, length, lut, target);
+    sz_lookup_haswell(target, length, source, lut);
 #elif SZ_USE_NEON
-    sz_look_up_transform_neon(source, length, lut, target);
+    sz_lookup_neon(target, length, source, lut);
 #else
-    sz_look_up_transform_serial(source, length, lut, target);
+    sz_lookup_serial(target, length, source, lut);
 #endif
 }
 

@@ -3438,7 +3438,7 @@ class basic_string {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        sz_look_up_transform((sz_cptr_t)start, (sz_size_t)length, (sz_cptr_t)table.raw(), (sz_ptr_t)output);
+        sz_lookup((sz_ptr_t)output, (sz_size_t)length, (sz_cptr_t)start, (sz_cptr_t)table.raw());
     }
 
   private:
@@ -3930,21 +3930,20 @@ void randomize(basic_string_slice<char_type_> string, sz_u64_t nonce) noexcept {
  *  @brief  Replaces @b (in-place) all characters in the string using the provided lookup table.
  */
 template <typename char_type_>
-void transform(basic_string_slice<char_type_> string, basic_look_up_table<char_type_> const &table) noexcept {
+void lookup(basic_string_slice<char_type_> string, basic_look_up_table<char_type_> const &table) noexcept {
     static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
-    sz_look_up_transform((sz_cptr_t)string.data(), (sz_size_t)string.size(), (sz_cptr_t)table.raw(),
-                         (sz_ptr_t)string.data());
+    sz_lookup((sz_ptr_t)string.data(), (sz_size_t)string.size(), (sz_cptr_t)string.data(), (sz_cptr_t)table.raw());
 }
 
 /**
  *  @brief  Maps all characters in the current string into another buffer using the provided lookup table.
  */
 template <typename char_type_>
-void transform( //
+void lookup( //
     basic_string_slice<char_type_ const> source, basic_look_up_table<char_type_> const &table,
     char_type_ *target) noexcept {
     static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
-    sz_look_up_transform((sz_cptr_t)source.data(), (sz_size_t)source.size(), (sz_cptr_t)table.raw(), (sz_ptr_t)target);
+    sz_lookup((sz_ptr_t)target, (sz_size_t)source.size(), (sz_cptr_t)source.data(), (sz_cptr_t)table.raw());
 }
 
 /**

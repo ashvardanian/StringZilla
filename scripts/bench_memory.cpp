@@ -191,15 +191,15 @@ tracked_unary_functions_t transform_functions() {
              std::transform(slice.begin(), slice.end(), output, [](char c) { return c + 1; });
              return slice.size();
          })},
-        {"sz_look_up_transform_serial", wrap_sz(sz_look_up_transform_serial)},
+        {"sz_lookup_serial", wrap_sz(sz_lookup_serial)},
 #if SZ_USE_ICE
-        {"sz_look_up_transform_ice", wrap_sz(sz_look_up_transform_ice)},
+        {"sz_lookup_ice", wrap_sz(sz_lookup_ice)},
 #endif
 #if SZ_USE_HASWELL
-        {"sz_look_up_transform_haswell", wrap_sz(sz_look_up_transform_haswell)},
+        {"sz_lookup_haswell", wrap_sz(sz_lookup_haswell)},
 #endif
 #if SZ_USE_NEON
-        {"sz_look_up_transform_neon", wrap_sz(sz_look_up_transform_neon)},
+        {"sz_lookup_neon", wrap_sz(sz_lookup_neon)},
 #endif
     };
     return result;
