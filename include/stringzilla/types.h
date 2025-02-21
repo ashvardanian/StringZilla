@@ -332,6 +332,25 @@ typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                       
 typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; // Only three possible states: <=>
 
 /**
+ *  @brief  Describes an error status of a function.
+ */
+typedef enum {
+    /**
+     *  For algorithms that return a status, this status indicates that the operation was successful.
+     */
+    sz_success_k = 0,
+    /**
+     *  For algorithms that require memory allocation, this status indicates that the allocation failed.
+     */
+    sz_bad_alloc_k = -1,
+    /**
+     *  For algorithms that have an upper bound on some parameter, like the maximum number of iterations,
+     *  or the maximum edit distance, this status indicates that the limit was reached.
+     */
+    sz_reached_limit_k = -2,
+} sz_status_t;
+
+/**
  *  @brief  Describes the length of a UTF8 @b rune / character / codepoint in bytes.
  */
 typedef enum {
