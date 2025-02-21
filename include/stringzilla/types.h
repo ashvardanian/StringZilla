@@ -461,68 +461,71 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
 
 #pragma region API Signature Types
 
-/** @brief  Signature of ::sz_hash. */
+/** @brief  Signature of `sz_hash`. */
 typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t, sz_u64_t);
 
-/** @brief  Signature of ::sz_hash_state_init. */
+/** @brief  Signature of `sz_hash_state_init`. */
 typedef void (*sz_hash_state_init_t)(struct sz_hash_state_t *, sz_u64_t);
 
-/** @brief  Signature of ::sz_hash_state_stream. */
+/** @brief  Signature of `sz_hash_state_stream`. */
 typedef void (*sz_hash_state_stream_t)(struct sz_hash_state_t *, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of ::sz_hash_state_fold. */
+/** @brief  Signature of `sz_hash_state_fold`. */
 typedef sz_u64_t (*sz_hash_state_fold_t)(struct sz_hash_state_t const *);
 
-/** @brief  Signature of ::sz_bytesum. */
+/** @brief  Signature of `sz_bytesum`. */
 typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of ::sz_generate. */
+/** @brief  Signature of `sz_generate`. */
 typedef void (*sz_generate_t)(sz_ptr_t, sz_size_t, sz_u64_t);
 
-/** @brief  Signature of ::sz_equal. */
+/** @brief  Signature of `sz_equal`. */
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of ::sz_order. */
+/** @brief  Signature of `sz_order`. */
 typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of ::sz_look_up_transform. */
-typedef void (*sz_look_up_transform_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_ptr_t);
+/** @brief  Signature of `sz_lookup`. */
+typedef void (*sz_lookup_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_ptr_t);
 
-/** @brief  Signature of ::sz_move. */
+/** @brief  Signature of `sz_move`. */
 typedef void (*sz_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of ::sz_fill. */
+/** @brief  Signature of `sz_fill`. */
 typedef void (*sz_fill_t)(sz_ptr_t, sz_size_t, sz_u8_t);
 
-/** @brief  Signature of ::sz_find_byte. */
+/** @brief  Signature of `sz_find_byte`. */
 typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 
-/** @brief  Signature of ::sz_find. */
+/** @brief  Signature of `sz_find`. */
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of ::sz_find_set. */
+/** @brief  Signature of `sz_find_set`. */
 typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_charset_t const *);
 
-/** @brief  Signature of ::sz_hamming_distance. */
-typedef sz_size_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t);
+/** @brief  Signature of `sz_hamming_distance`. */
+typedef sz_status_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_size_t *);
 
-/** @brief  Signature of ::sz_edit_distance. */
-typedef sz_size_t (*sz_edit_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_memory_allocator_t *);
+/** @brief  Signature of `sz_levenshtein_distance`. */
+typedef sz_status_t (*sz_levenshtein_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t,
+                                                 sz_memory_allocator_t *, sz_size_t *);
 
-/** @brief  Signature of ::sz_alignment_score. */
-typedef sz_ssize_t (*sz_alignment_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_error_cost_t const *,
-                                           sz_error_cost_t, sz_memory_allocator_t *);
+/** @brief  Signature of `sz_needleman_wunsch_score`. */
+typedef sz_status_t (*sz_needleman_wunsch_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_error_cost_t const *,
+                                                   sz_error_cost_t, sz_memory_allocator_t *, sz_ssize_t *);
 
-/** @brief  Signature of ::sz_sequence_argsort. */
-typedef sz_bool_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
+/** @brief  Signature of `sz_sequence_argsort`. */
+typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *,
+                                             sz_bool_t *);
 
-/** @brief  Signature of ::sz_pgrams_sort. */
-typedef sz_bool_t (*sz_pgrams_sort_t)(sz_pgram_t *, sz_size_t, sz_memory_allocator_t *, sz_sorted_idx_t *);
+/** @brief  Signature of `sz_pgrams_sort`. */
+typedef sz_status_t (*sz_pgrams_sort_t)(sz_pgram_t *, sz_size_t, sz_memory_allocator_t *, sz_sorted_idx_t *,
+                                        sz_bool_t *);
 
-/** @brief  Signature of ::sz_sequence_argsort_stable. */
+/** @brief  Signature of `sz_sequence_argsort_stable`. */
 typedef sz_sequence_argsort_t sz_sequence_argsort_stable_t;
 
-/** @brief  Signature of ::sz_pgrams_sort_stable. */
+/** @brief  Signature of `sz_pgrams_sort_stable`. */
 typedef sz_pgrams_sort_t sz_pgrams_sort_stable_t;
 
 #pragma endregion
@@ -683,9 +686,17 @@ SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_le
 
 #pragma region String Sequences API
 
-typedef sz_cptr_t (*sz_sequence_member_start_t)(struct sz_sequence_t const *, sz_size_t);
-typedef sz_size_t (*sz_sequence_member_length_t)(struct sz_sequence_t const *, sz_size_t);
+/** @brief Signature of `sz_sequence_t::get_start` used to get the start of a member string at a given index. */
+typedef sz_cptr_t (*sz_sequence_member_start_t)(void const *, sz_size_t);
+/** @brief Signature of `sz_sequence_t::get_length` used to get the length of a member string at a given index. */
+typedef sz_size_t (*sz_sequence_member_length_t)(void const *, sz_size_t);
 
+/**
+ *  @brief  Structure to represent an ordered collection of strings.
+ *          It's a generic structure that can be used to represent a sequence of strings in different layouts.
+ *          It can be easily combined with Apache Arrow and its tape-like concatenated strings.
+ *  @sa     sz_sequence_from_null_terminated_strings
+ */
 typedef struct sz_sequence_t {
     void const *handle;
     sz_size_t count;
@@ -694,20 +705,12 @@ typedef struct sz_sequence_t {
 } sz_sequence_t;
 
 /**
- *  @brief  Initiates the sequence structure from a tape layout, used by Apache Arrow.
- *          Expects ::offsets to contains `count + 1` entries, the last pointing at the end
- *          of the last string, indicating the total length of the ::tape.
+ *  @brief Initiates the sequence structure from a typical C-style strings array, like `char *[]`.
+ *  @param[in] start Pointer to the array of strings.
+ *  @param[in] count Number of strings in the array.
+ *  @param[out] sequence Sequence structure to initialize.
  */
-SZ_PUBLIC void sz_sequence_from_u32tape( //
-    sz_cptr_t *start, sz_u32_t const *offsets, sz_size_t count, sz_sequence_t *sequence);
-
-/**
- *  @brief  Initiates the sequence structure from a tape layout, used by Apache Arrow.
- *          Expects ::offsets to contains `count + 1` entries, the last pointing at the end
- *          of the last string, indicating the total length of the ::tape.
- */
-SZ_PUBLIC void sz_sequence_from_u64tape( //
-    sz_cptr_t *start, sz_u64_t const *offsets, sz_size_t count, sz_sequence_t *sequence);
+SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count, sz_sequence_t *sequence);
 
 #pragma endregion
 
@@ -857,7 +860,7 @@ SZ_INTERNAL sz_u32_t sz_u32_bytes_reverse(sz_u32_t val) { return __builtin_bswap
 SZ_INTERNAL sz_u64_t sz_u64_rotl(sz_u64_t x, sz_u64_t r) { return (x << r) | (x >> (64 - r)); }
 
 /**
- *  @brief  Select bits from either ::a or ::b depending on the value of ::mask bits.
+ *  @brief  Select bits from either @p a or @p b depending on the value of @p mask bits.
  *
  *  Similar to `_mm_blend_epi16` intrinsic on x86.
  *  Described in the "Bit Twiddling Hacks" by Sean Eron Anderson.
@@ -987,7 +990,7 @@ SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
 }
 
 /**
- *  @brief  Compute the smallest power of two greater than or equal to ::x.
+ *  @brief  Compute the smallest power of two greater than or equal to @p x.
  */
 SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
     // Unlike the commonly used trick with `clz` intrinsics, is valid across the whole range of `x`.
@@ -1147,6 +1150,25 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
     alloc->free = (sz_memory_free_t)_sz_memory_free_fixed;
     alloc->handle = &buffer;
     *(sz_ptr_t)buffer = *(sz_cptr_t)&length;
+}
+
+SZ_PUBLIC sz_cptr_t _sz_sequence_from_null_terminated_strings_get_start(void const *handle, sz_size_t i) {
+    sz_cptr_t const *start = (sz_cptr_t const *)handle;
+    return start[i];
+}
+
+SZ_PUBLIC sz_size_t _sz_sequence_from_null_terminated_strings_get_length(void const *handle, sz_size_t i) {
+    sz_cptr_t const *start = (sz_cptr_t const *)handle;
+    sz_size_t length = 0;
+    for (sz_cptr_t ptr = start[i]; *ptr; ptr++) length++;
+    return length;
+}
+
+SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count, sz_sequence_t *sequence) {
+    sequence->handle = start;
+    sequence->count = count;
+    sequence->get_start = _sz_sequence_from_null_terminated_strings_get_start;
+    sequence->get_length = _sz_sequence_from_null_terminated_strings_get_length;
 }
 
 #pragma endregion

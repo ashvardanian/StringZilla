@@ -1576,8 +1576,8 @@ void test_replacements(std::size_t lookup_tables_to_try = 128, std::size_t slice
             std::size_t slice_offset = std::rand() % (body.length());
             std::size_t slice_length = std::rand() % (body.length() - slice_offset);
 
-            sz::transform<char>(sz::string_view(body.data() + slice_offset, slice_length), lut,
-                                const_cast<char *>(transformed.data()) + slice_offset);
+            sz::lookup<char>(sz::string_view(body.data() + slice_offset, slice_length), lut,
+                             const_cast<char *>(transformed.data()) + slice_offset);
             for (std::size_t i = 0; i != slice_length; ++i) {
                 assert(transformed[slice_offset + i] == lut[body[slice_offset + i]]);
             }
@@ -1591,6 +1591,17 @@ void test_replacements(std::size_t lookup_tables_to_try = 128, std::size_t slice
 static void test_sequence_algorithms() {
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz::sorted_idx_t>;
+
+    // Make sure teh helper functions work as expected.
+    {
+        sz_sequence_t sequence;
+        sz_cptr_t strings[] = {"banana", "apple", "cherry"};
+        sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
+        assert(sequence.size == 3);
+        assert(sequence.get_start(sequence.handle, 0) == "banana"_sv);
+        assert(sequence.get_start(sequence.handle, 1) == "apple"_sv);
+        assert(sequence.get_start(sequence.handle, 2) == "cherry"_sv);
+    }
 
     // Basic tests with predetermined orders.
     assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::argsort(x) == order_t({0u, 1u, 2u, 3u}));
