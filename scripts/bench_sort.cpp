@@ -139,7 +139,7 @@ int main(int argc, char const **argv) {
     });
     expect_sorted(strings, permute);
 
-    bench_permute("sz_sequence_argsort", [&]() {
+    bench_permute("sz_sequence_argsort_serial", [&]() {
         std::iota(permute.begin(), permute.end(), 0);
         sz_sequence_t array;
         array.count = strings.size();
@@ -147,7 +147,19 @@ int main(int argc, char const **argv) {
         array.get_start = get_start;
         array.get_length = get_length;
         sz::_with_alloc<allocator_t>(
-            [&](sz_memory_allocator_t &alloc) { return sz_sequence_argsort(&array, &alloc, permute.data()); });
+            [&](sz_memory_allocator_t &alloc) { return sz_sequence_argsort_serial(&array, &alloc, permute.data()); });
+    });
+    expect_sorted(strings, permute);
+
+    bench_permute("sz_sequence_argsort_ice", [&]() {
+        std::iota(permute.begin(), permute.end(), 0);
+        sz_sequence_t array;
+        array.count = strings.size();
+        array.handle = &strings;
+        array.get_start = get_start;
+        array.get_length = get_length;
+        sz::_with_alloc<allocator_t>(
+            [&](sz_memory_allocator_t &alloc) { return sz_sequence_argsort_ice(&array, &alloc, permute.data()); });
     });
     expect_sorted(strings, permute);
 

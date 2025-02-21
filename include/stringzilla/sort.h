@@ -906,6 +906,83 @@ SZ_PUBLIC sz_bool_t sz_pgrams_sort_ice(sz_pgram_t *pgrams, sz_size_t count, sz_m
     return sz_true_k;
 }
 
+/**
+ *  @brief  Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
+ *          It combines `_sz_sequence_argsort_serial_export_next_pgrams` and `_sz_sequence_argsort_serial_recursively`,
+ *          recursively diving into the identical pgrams.
+ */
+SZ_PUBLIC void _sz_sequence_argsort_ice_next_pgrams(                            //
+    sz_sequence_t const *const sequence,                                        //
+    sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,       //
+    sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, //
+    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
+    sz_size_t const start_character) {
+
+    // Prepare the new range of pgrams
+    _sz_sequence_argsort_serial_export_next_pgrams(sequence, global_pgrams, global_order, start_in_sequence,
+                                                   end_in_sequence, start_character);
+
+    // Sort current pgrams with a quicksort
+    _sz_sequence_argsort_ice_recursively(global_pgrams, global_order, temporary_pgrams, temporary_order,
+                                         start_in_sequence, end_in_sequence);
+
+    // Depending on the architecture, we will export a different number of bytes.
+    // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
+    sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
+
+    // Repeat the procedure for the identical pgrams
+    sz_size_t nested_start = start_in_sequence;
+    sz_size_t nested_end = start_in_sequence;
+    while (nested_end != end_in_sequence) {
+        // Find the end of the identical pgrams
+        sz_pgram_t current_pgram = global_pgrams[nested_start];
+        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
+
+        // If the identical pgrams are not trivial and each string has more characters, sort them recursively
+        sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
+        int has_multiple_strings = nested_end - nested_start > 1;
+        int has_more_characters_in_each = current_pgram_length == pgram_capacity;
+        if (has_multiple_strings && has_more_characters_in_each) {
+            _sz_sequence_argsort_ice_next_pgrams(sequence, global_pgrams, global_order, temporary_pgrams,
+                                                 temporary_order, nested_start, nested_end,
+                                                 start_character + pgram_capacity);
+        }
+        // Move to the next
+        nested_start = nested_end;
+    }
+}
+
+SZ_PUBLIC sz_bool_t sz_sequence_argsort_ice(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                            sz_sorted_idx_t *order) {
+
+    // First, initialize the `order` with `std::iota`-like behavior.
+    sz_size_t count = sequence->count;
+    for (sz_size_t i = 0; i != count; ++i) order[i] = i;
+
+    // On very small collections - just use the quadratic-complexity insertion sort
+    // without any smart optimizations or memory allocations.
+    if (count <= 32) {
+        sz_sequence_argsort_with_insertion(sequence, order);
+        return sz_true_k;
+    }
+
+    // Allocate memory for partitioning the elements around the pivot.
+    sz_size_t memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *temporary_pgrams = global_pgrams + count;
+    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
+    if (!global_pgrams) return sz_false_k;
+
+    // Recursively sort the whole sequence.
+    _sz_sequence_argsort_ice_next_pgrams(sequence, global_pgrams, order, temporary_pgrams, temporary_order, //
+                                         0, count, 0);
+
+    // Free temporary storage.
+    alloc->free(global_pgrams, memory_usage, alloc);
+    return sz_true_k;
+}
+
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif            // SZ_USE_ICE
