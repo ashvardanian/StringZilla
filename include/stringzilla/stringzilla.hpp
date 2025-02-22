@@ -3316,12 +3316,12 @@ class basic_string {
     concatenation<string_view, string_view> operator|(string_view other) const noexcept { return {view(), other}; }
 
     size_type edit_distance(string_view other, size_type bound = 0) const noexcept {
-        size_type distance;
+        size_type result;
         _with_alloc([&](sz_alloc_type &alloc) {
-            distance = sz_edit_distance(data(), size(), other.data(), other.size(), bound, &alloc);
-            return true;
+            return sz_levenshtein_distance(data(), size(), other.data(), other.size(), bound, &alloc, &result) !=
+                   sz_bad_alloc_k;
         });
-        return distance;
+        return result;
     }
 
     /**  @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
@@ -3783,18 +3783,20 @@ typename concatenation_result<first_type, second_type, following_types...>::type
 
 /**
  *  @brief  Calculates the Hamming edit distance in @b bytes between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_>
 std::size_t hamming_distance(                                                         //
     basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
     std::size_t bound = 0) noexcept {
-    return sz_hamming_distance(a.data(), a.size(), b.data(), b.size(), bound);
+    std::size_t result;
+    sz_hamming_distance(a.data(), a.size(), b.data(), b.size(), bound, &result);
+    return result;
 }
 
 /**
  *  @brief  Calculates the Hamming edit distance in @b bytes between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
 std::size_t hamming_distance(                                                                               //
@@ -3810,12 +3812,14 @@ std::size_t hamming_distance(                                                   
 template <typename char_type_>
 std::size_t hamming_distance_utf8( //
     basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, std::size_t bound = 0) noexcept {
-    return sz_hamming_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound);
+    std::size_t result;
+    sz_hamming_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &result);
+    return result;
 }
 
 /**
  *  @brief  Calculates the Hamming edit distance in @b unicode codepoints between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
 std::size_t hamming_distance_utf8( //
@@ -3826,7 +3830,7 @@ std::size_t hamming_distance_utf8( //
 
 /**
  *  @brief  Calculates the Levenshtein edit distance in @b bytes between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
 std::size_t edit_distance( //
@@ -3834,8 +3838,8 @@ std::size_t edit_distance( //
     allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
     std::size_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            result = sz_edit_distance(a.data(), a.size(), b.data(), b.size(), bound, &alloc);
-            return result != SZ_SIZE_MAX;
+            return sz_levenshtein_distance(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result) !=
+                   sz_bad_alloc_k;
         }))
         throw std::bad_alloc();
     return result;
@@ -3843,7 +3847,7 @@ std::size_t edit_distance( //
 
 /**
  *  @brief  Calculates the Levenshtein edit distance in @b bytes between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
 std::size_t edit_distance(                                                                                  //
@@ -3854,7 +3858,7 @@ std::size_t edit_distance(                                                      
 
 /**
  *  @brief  Calculates the Levenshtein edit distance in @b unicode codepoints between two strings.
- *  @see    sz_edit_distance_utf8
+ *  @see    sz_levenshtein_distance_utf8
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
 std::size_t edit_distance_utf8(                                                       //
@@ -3862,8 +3866,8 @@ std::size_t edit_distance_utf8(                                                 
     std::size_t bound = SZ_SIZE_MAX, allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
     std::size_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            result = sz_edit_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &alloc);
-            return result != SZ_SIZE_MAX;
+            return sz_levenshtein_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result) !=
+                   sz_bad_alloc_k;
         }))
         throw std::bad_alloc();
     return result;
@@ -3871,7 +3875,7 @@ std::size_t edit_distance_utf8(                                                 
 
 /**
  *  @brief  Calculates the Levenshtein edit distance in @b unicode codepoints between two strings.
- *  @see    sz_edit_distance_utf8
+ *  @see    sz_levenshtein_distance_utf8
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
 std::size_t edit_distance_utf8(                                                                             //
@@ -3882,7 +3886,7 @@ std::size_t edit_distance_utf8(                                                 
 
 /**
  *  @brief  Calculates the Needleman-Wunsch alignment score between two strings.
- *  @see    sz_alignment_score
+ *  @see    sz_needleman_wunsch_score
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
 std::ptrdiff_t alignment_score(                                                       //
@@ -3896,8 +3900,8 @@ std::ptrdiff_t alignment_score(                                                 
 
     std::ptrdiff_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            result = sz_alignment_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc);
-            return result != SZ_SSIZE_MAX;
+            return sz_needleman_wunsch_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc,
+                                             &result) != sz_bad_alloc_k;
         }))
         throw std::bad_alloc();
     return result;
@@ -3905,7 +3909,7 @@ std::ptrdiff_t alignment_score(                                                 
 
 /**
  *  @brief  Calculates the Needleman-Wunsch alignment score between two strings.
- *  @see    sz_alignment_score
+ *  @see    sz_needleman_wunsch_score
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
 std::ptrdiff_t alignment_score(                                                                             //
@@ -3973,17 +3977,17 @@ struct _sequence_args {
 };
 
 template <typename objects_type_, typename string_extractor_>
-sz_cptr_t _call_sequence_member_start(struct sz_sequence_t const *sequence, sz_size_t i) {
+sz_cptr_t _call_sequence_member_start(void const *sequence, sz_size_t i) {
     using handle_type = _sequence_args<objects_type_, string_extractor_>;
-    handle_type const *args = reinterpret_cast<handle_type const *>(sequence->handle);
+    handle_type const *args = reinterpret_cast<handle_type const *>(sequence);
     string_view member = args->extractor(args->begin[i]);
     return member.data();
 }
 
 template <typename objects_type_, typename string_extractor_>
-sz_size_t _call_sequence_member_length(struct sz_sequence_t const *sequence, sz_size_t i) {
+sz_size_t _call_sequence_member_length(void const *sequence, sz_size_t i) {
     using handle_type = _sequence_args<objects_type_, string_extractor_>;
-    handle_type const *args = reinterpret_cast<handle_type const *>(sequence->handle);
+    handle_type const *args = reinterpret_cast<handle_type const *>(sequence);
     string_view member = args->extractor(args->begin[i]);
     return static_cast<sz_size_t>(member.size());
 }

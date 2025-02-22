@@ -5,9 +5,9 @@
  *
  *  Includes core APIs:
  *
- *  - `sz_edit_distance` & `sz_edit_distance_utf8` for Levenshtein edit-distance computation.
- *  - `sz_alignment_score` for weighted Needleman-Wunsch global alignment.
  *  - `sz_hamming_distance` & `sz_hamming_distance_utf8` for Hamming distance computation.
+ *  - `sz_levenshtein_distance` & `sz_levenshtein_distance_utf8` for Levenshtein edit-distance computation.
+ *  - `sz_needleman_wunsch_score` for weighted Needleman-Wunsch global alignment.
  *
  *  The Hamming distance is rarely used in string processing, so only minimal compatibility is provided.
  *  The Levenshtein distance, however, is much more popular and computationally intensive.
@@ -26,130 +26,220 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief  Computes the Hamming distance between two strings - number of not matching characters.
- *          Difference in length is is counted as a mismatch.
- *
- *  @param a        First string to compare.
- *  @param a_length Number of bytes in the first string.
- *  @param b        Second string to compare.
- *  @param b_length Number of bytes in the second string.
- *
- *  @param bound    Exclusive upper bound on the distance, that allows us to exit early.
- *                  Pass `SZ_SIZE_MAX` or any value greater than `(max(a_length, b_length))` to ignore.
- *                  Pass zero to check if the strings are equal.
- *  @return         Returns an unsigned integer for the edit distance. Zero means the strings are equal.
- *                  Returns the `(max(a_length, b_length)) + 1` if the distance limit was reached.
- *
- *  @see    sz_hamming_distance_utf8
+ *  @brief  Computes the Hamming distance between two strings.
  *  @see    https://en.wikipedia.org/wiki/Hamming_distance
+ *
+ *  The Hamming distance is defined as the number of positions at which the corresponding bytes differ.
+ *  If the strings have different lengths, the extra characters in the longer string are treated as mismatches.
+ *
+ *  If the running distance reaches the @p bound, the computation aborts early. If the @p bound is zero,
+ *  the function merely checks for equality. If the @p bound is larger than the maximum length of the strings,
+ *  the function will compute the full "unbounded" distance.
+ *
+ *  @param[in] a Pointer to the first string.
+ *  @param[in] a_length Number of bytes in the first string.
+ *  @param[in] b Pointer to the second string.
+ *  @param[in] b_length Number of bytes in the second string.
+ *  @param[in] bound Exclusive upper bound on the computed distance.
+ *  @param[out] result On success, the computed byte-level Hamming distance is stored here.
+ *  @retval `sz_success_k` if the operation was successful.
+ *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/similarity.h>
+ *      int main(void) {
+ *          char const *s1 = "1011101";
+ *          char const *s2 = "1001001";
+ *          sz_size_t result, length = 7, bound = 10;
+ *          sz_status_t status = sz_hamming_distance(s1, length, s2, length, bound, &result);
+ *          return (status == sz_success_k && result == 2) ? 0 : 1;
+ *      }
+ *  @endcode
+ *
+ *  @note   This function isn't intended for UTF-8 texts and is not heavily optimized.
+ *  @sa     sz_hamming_distance_utf8
  */
-SZ_DYNAMIC sz_size_t sz_hamming_distance( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_size_t bound);
+SZ_DYNAMIC sz_status_t sz_hamming_distance( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_size_t bound, sz_size_t *result);
 
 /**
- *  @brief  Computes the Hamming distance between two @b UTF8 strings - number of not matching characters.
- *          Difference in length is is counted as a mismatch.
- *
- *  @param a        First string to compare.
- *  @param a_length Number of bytes in the first string.
- *  @param b        Second string to compare.
- *  @param b_length Number of bytes in the second string.
- *
- *  @param bound    Exclusive upper bound on the distance, that allows us to exit early.
- *                  Pass `SZ_SIZE_MAX` or any value greater than `(max(a_length, b_length))` to ignore.
- *                  Pass zero to check if the strings are equal.
- *  @return         Returns an unsigned integer for the edit distance. Zero means the strings are equal.
- *                  Returns the `(max(a_length, b_length)) + 1` if the distance limit was reached.
- *
- *  @see    sz_hamming_distance
+ *  @brief  Computes the Hamming distance between two @b UTF-8 encoded strings.
  *  @see    https://en.wikipedia.org/wiki/Hamming_distance
+ *
+ *  The Hamming distance is defined as the number of positions at which the corresponding Unicode runes differ.
+ *  If the strings have different lengths, the extra characters in the longer string are treated as mismatches.
+ *
+ *  If the running distance reaches the @p bound, the computation aborts early. If the @p bound is zero,
+ *  the function merely checks for equality. If the @p bound is larger than the maximum length of the strings,
+ *  the function will compute the full "unbounded" distance.
+ *
+ *  @param[in] a Pointer to the first string.
+ *  @param[in] a_length Number of bytes in the first string.
+ *  @param[in] b Pointer to the second string.
+ *  @param[in] b_length Number of bytes in the second string.
+ *  @param[in] bound Exclusive upper bound on the computed distance.
+ *  @param[out] result On success, the computed Unicode character-level Hamming distance is stored here.
+ *  @retval `sz_success_k` if the operation was successful.
+ *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
+ *  @retval `sz_invalid_utf8_k` if the input strings are not valid UTF-8.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/similarity.h>
+ *      int main(void) {
+ *          char const *s1 = "café";
+ *          char const *s2 = "cafe";
+ *          sz_size_t result, length1 = 5, length2 = 4, bound = 10;
+ *          sz_status_t status = sz_hamming_distance_utf8(s1, length1, s2, length2, bound, &result);
+ *          return (status == sz_success_k && result == 1) ? 0 : 1;
+ *      }
+ *  @endcode
+ *
+ *  @note   This function isn't heavily optimized.
+ *  @sa     sz_hamming_distance
  */
-SZ_DYNAMIC sz_size_t sz_hamming_distance_utf8( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_size_t bound);
+SZ_DYNAMIC sz_status_t sz_hamming_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_size_t bound, sz_size_t *result);
 
 /**
  *  @brief  Computes the Levenshtein edit-distance between two strings using the Wagner-Fisher algorithm.
  *          Similar to the Needleman-Wunsch alignment algorithm. Often used in fuzzy string matching.
  *
- *  @param a        First string to compare.
- *  @param a_length Number of bytes in the first string.
- *  @param b        Second string to compare.
- *  @param b_length Number of bytes in the second string.
+ *  If the running distance reaches the @p bound, the computation aborts early. If the @p bound is zero,
+ *  the function merely checks for equality. If the @p bound is larger than the maximum length of the strings,
+ *  the function will compute the full "unbounded" distance.
  *
- *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
- *                  so the memory usage is linear in relation to ::a_length and ::b_length.
- *                  If SZ_NULL is passed, will initialize to the systems default `malloc`.
+ *  @param[in] a Pointer to the first string.
+ *  @param[in] a_length Number of bytes in the first string.
+ *  @param[in] b Pointer to the second string.
+ *  @param[in] b_length Number of bytes in the second string.
+ *  @param[in] bound Exclusive upper bound on the computed distance.
+ *  @param[in] alloc Optional memory allocator. If `NULL` is passed, will use to the systems default `malloc`.
  *
- *  @param bound    Exclusive upper bound on the distance, that allows us to exit early.
- *                  Pass `SZ_SIZE_MAX` or any value greater than `(max(a_length, b_length))` to ignore.
- *                  Pass zero to check if the strings are equal.
- *  @return         Returns an unsigned integer for the edit distance. Zero means the strings are equal.
- *                  Returns the `(max(a_length, b_length)) + 1` if the distance limit was reached.
- *                  Returns `SZ_SIZE_MAX` if the memory allocation failed.
+ *  @param[out] result On success, the computed byte-level Levenshtein distance is stored here.
+ *  @retval `sz_success_k` if the operation was successful.
+ *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
+ *  @retval `sz_invalid_utf8_k` if the input strings are not valid UTF-8.
  *
- *  @see    sz_memory_allocator_init_fixed, sz_memory_allocator_init_default
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/similarity.h>
+ *      int main(void) {
+ *          char const *s1 = "kitten";
+ *          char const *s2 = "sitting";
+ *          sz_size_t result, length1 = 6, length2 = 7, bound = 10;
+ *          sz_status_t status = sz_levenshtein_distance(s1, length1, s2, length2, bound, NULL, &result);
+ *          return (status == sz_success_k && result == 3) ? 0 : 1;
+ *      }
+ *  @endcode
+ *
+ *  @note   The algorithm has linear memory complexity and @p a_length * @p b_length time complexity.
  *  @see    https://en.wikipedia.org/wiki/Levenshtein_distance
+ *
+ *  @note   This function isn't intended for UTF-8 texts.
+ *  @sa     sz_levenshtein_distance_utf8
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_levenshtein_distance_serial, sz_levenshtein_distance_ice
  */
-SZ_DYNAMIC sz_size_t sz_edit_distance(                                //
+SZ_DYNAMIC sz_status_t sz_levenshtein_distance(                       //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-    sz_size_t bound, sz_memory_allocator_t *alloc);
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result);
 
 /**
- *  @brief  Computes the Levenshtein edit-distance between two @b UTF8 strings.
- *          Unlike `sz_edit_distance`, reports the distance in Unicode codepoints, and not in bytes.
+ *  @brief  Computes the Levenshtein edit-distance between two @b UTF-8 strings using the Wagner-Fisher algorithm.
+ *          Similar to the Needleman-Wunsch alignment algorithm. Often used in fuzzy string matching.
  *
- *  @param a        First string to compare.
- *  @param a_length Number of bytes in the first string.
- *  @param b        Second string to compare.
- *  @param b_length Number of bytes in the second string.
+ *  If the running distance reaches the @p bound, the computation aborts early. If the @p bound is zero,
+ *  the function merely checks for equality. If the @p bound is larger than the maximum length of the strings,
+ *  the function will compute the full "unbounded" distance.
  *
- *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
- *                  so the memory usage is linear in relation to ::a_length and ::b_length.
- *                  If SZ_NULL is passed, will initialize to the systems default `malloc`.
+ *  @param[in] a Pointer to the first string.
+ *  @param[in] a_length Number of bytes in the first string.
+ *  @param[in] b Pointer to the second string.
+ *  @param[in] b_length Number of bytes in the second string.
+ *  @param[in] bound Exclusive upper bound on the computed distance.
+ *  @param[in] alloc Optional memory allocator. If `NULL` is passed, will use to the systems default `malloc`.
  *
- *  @param bound    Exclusive upper bound on the distance, that allows us to exit early.
- *                  Pass `SZ_SIZE_MAX` or any value greater than `(max(a_length, b_length))` to ignore.
- *                  Pass zero to check if the strings are equal.
- *  @return         Returns an unsigned integer for the edit distance. Zero means the strings are equal.
- *                  Returns the `(max(a_length, b_length)) + 1` if the distance limit was reached.
- *                  Returns `SZ_SIZE_MAX` if the memory allocation failed.
+ *  @param[out] result On success, the computed byte-level Levenshtein distance is stored here.
+ *  @retval `sz_success_k` if the operation was successful.
+ *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
+ *  @retval `sz_invalid_utf8_k` if the input strings are not valid UTF-8.
  *
- *  @see    sz_memory_allocator_init_fixed, sz_memory_allocator_init_default, sz_edit_distance
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/similarity.h>
+ *      int main(void) {
+ *          char const *s1 = "café";
+ *          char const *s2 = "cafe";
+ *          sz_size_t result, length1 = 5, length2 = 4, bound = 10;
+ *          sz_status_t status = sz_levenshtein_distance_utf8(s1, length1, s2, length2, bound, NULL, &result);
+ *          return (status == sz_success_k && result == 1) ? 0 : 1;
+ *      }
+ *  @endcode
+ *
+ *  @note   The algorithm has linear memory complexity and @p a_length * @p b_length time complexity.
  *  @see    https://en.wikipedia.org/wiki/Levenshtein_distance
+ *
+ *  @sa     sz_levenshtein_distance
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_levenshtein_distance_utf8_serial, sz_levenshtein_distance_utf8_ice
  */
-SZ_DYNAMIC sz_size_t sz_edit_distance_utf8(                           //
+SZ_DYNAMIC sz_status_t sz_levenshtein_distance_utf8(                  //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-    sz_size_t bound, sz_memory_allocator_t *alloc);
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result);
 
 /**
- *  @brief  Computes Needleman–Wunsch alignment score for two string. Often used in bioinformatics and cheminformatics.
- *          Similar to the Levenshtein edit-distance, parameterized for gap and substitution penalties.
+ *  @brief  Computes the Needleman–Wunsch alignment score for two strings.
+ *          Often used in bioinformatics for sequence alignment.
  *
- *  Not commutative in the general case, as the order of the strings matters, as `sz_alignment_score(a, b)` may
- *  not be equal to `sz_alignment_score(b, a)`. Becomes @b commutative, if the substitution costs are symmetric.
- *  Equivalent to the negative Levenshtein distance, if: `gap == -1` and `subs[i][j] == (i == j ? 0: -1)`.
+ *  This function calculates a similarity score by applying gap and substitution penalties,
+ *  following the Needleman–Wunsch algorithm. Note that the result is generally @b not-commutative —
+ *  that is, `sz_needleman_wunsch_score(a, b)` may differ from `sz_needleman_wunsch_score(b, a)`
+ *  unless the @p subs matrix is symmetric. With a @p gap penalty of -1 and substitution costs defined
+ *  as 0 for matches and -1 for mismatches, the score is equivalent to the negative Levenshtein distance.
  *
- *  @param a        First string to compare.
- *  @param a_length Number of bytes in the first string.
- *  @param b        Second string to compare.
- *  @param b_length Number of bytes in the second string.
- *  @param gap      Penalty cost for gaps - insertions and removals.
- *  @param subs     Substitution costs matrix with 256 x 256 values for all pairs of characters.
+ *  @param[in] a Pointer to the first string.
+ *  @param[in] a_length Number of bytes in the first string.
+ *  @param[in] b Pointer to the second string.
+ *  @param[in] b_length Number of bytes in the second string.
+ *  @param[in] subs Substitution cost matrix (256×256) for all pairs of characters.
+ *  @param[in] gap Penalty cost for gaps (insertions and deletions).
+ *  @param[in] alloc Optional memory allocator. If `NULL` is passed, the system default `malloc` is used.
+ *  @param[out] result On success, the computed byte-level Levenshtein distance is stored here.
+ *  @retval `sz_success_k` if the operation was successful.
+ *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
  *
- *  @param alloc    Temporary memory allocator. Only some of the rows of the matrix will be allocated,
- *                  so the memory usage is linear in relation to ::a_length and ::b_length.
- *                  If SZ_NULL is passed, will initialize to the systems default `malloc`.
+ *  Example usage:
  *
- *  @return         Signed similarity score. Can be negative, depending on the substitution costs.
- *                  Returns `SZ_SSIZE_MAX` if the memory allocation failed.
+ *  @code{.c}
+ *      #include <stringzilla/similarity.h>
+ *      int main(void) {
+ *          char const *s1 = "GATTACA";
+ *          char const *s2 = "GCATGCU";
+ *          sz_error_cost_t subs[256][256] = { ... };
+ *          sz_error_cost_t gap = -1;
+ *          sz_ssize_t score;
+ *          sz_status_t status = sz_needleman_wunsch_score(s1, 7, s2, 7, subs, gap, NULL, &score);
+ *          return (status == sz_success_k) ? 0 : 1;
+ *      }
+ *  @endcode
  *
- *  @see    sz_memory_allocator_init_fixed, sz_memory_allocator_init_default
+ *  @note   Algorithm has @p a_length * @p b_length worst-case time complexity and linear memory complexity.
  *  @see    https://en.wikipedia.org/wiki/Needleman%E2%80%93Wunsch_algorithm
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_needleman_wunsch_score_serial, sz_needleman_wunsch_score_ice
  */
-SZ_DYNAMIC sz_ssize_t sz_alignment_score(                             //
+SZ_DYNAMIC sz_status_t sz_needleman_wunsch_score(                     //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
     sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
-    sz_memory_allocator_t *alloc);
+    sz_memory_allocator_t *alloc, sz_ssize_t *result);
 
 /**
  *  @brief  Checks if all characters in the range are valid ASCII characters.
@@ -161,40 +251,44 @@ SZ_DYNAMIC sz_ssize_t sz_alignment_score(                             //
 SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length);
 
 /** @copydoc sz_hamming_distance */
-SZ_PUBLIC sz_size_t sz_hamming_distance_serial( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_size_t bound);
+SZ_PUBLIC sz_status_t sz_hamming_distance_serial(                     //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+    sz_size_t bound, sz_size_t *result);
 
 /** @copydoc sz_hamming_distance_utf8 */
-SZ_PUBLIC sz_size_t sz_hamming_distance_utf8_serial( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_size_t bound);
-
-/** @copydoc sz_edit_distance */
-SZ_PUBLIC sz_size_t sz_edit_distance_serial(                          //
+SZ_PUBLIC sz_status_t sz_hamming_distance_utf8_serial(                //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-    sz_size_t bound, sz_memory_allocator_t *alloc);
+    sz_size_t bound, sz_size_t *result);
 
-/** @copydoc sz_edit_distance_utf8 */
-SZ_PUBLIC sz_size_t sz_edit_distance_utf8_serial(                     //
+/** @copydoc sz_levenshtein_distance */
+SZ_PUBLIC sz_status_t sz_levenshtein_distance_serial(                 //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-    sz_size_t bound, sz_memory_allocator_t *alloc);
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result);
 
-/** @copydoc sz_alignment_score */
-SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(                       //
+/** @copydoc sz_levenshtein_distance_utf8 */
+SZ_PUBLIC sz_status_t sz_levenshtein_distance_utf8_serial(            //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result);
+
+/** @copydoc sz_needleman_wunsch_score */
+SZ_PUBLIC sz_status_t sz_needleman_wunsch_score_serial(               //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
     sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
-    sz_memory_allocator_t *alloc);
+    sz_memory_allocator_t *alloc, sz_ssize_t *result);
 
 #if SZ_USE_ICE
 
-SZ_INTERNAL sz_size_t sz_edit_distance_ice(      //
-    sz_cptr_t shorter, sz_size_t shorter_length, //
-    sz_cptr_t longer, sz_size_t longer_length,   //
-    sz_size_t bound, sz_memory_allocator_t *alloc);
+/** @copydoc sz_levenshtein_distance */
+SZ_PUBLIC sz_status_t sz_levenshtein_distance_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,   //
+    sz_cptr_t longer, sz_size_t longer_length,     //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result);
 
-SZ_INTERNAL sz_ssize_t sz_alignment_score_ice(   //
-    sz_cptr_t shorter, sz_size_t shorter_length, //
-    sz_cptr_t longer, sz_size_t longer_length,   //
-    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc);
+/** @copydoc sz_needleman_wunsch_score */
+SZ_PUBLIC sz_status_t sz_needleman_wunsch_score_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,     //
+    sz_cptr_t longer, sz_size_t longer_length,       //
+    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc, sz_ssize_t *result);
 
 #endif
 
@@ -202,10 +296,10 @@ SZ_INTERNAL sz_ssize_t sz_alignment_score_ice(   //
 
 #pragma region Serial Implementation
 
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                 //
-    sz_cptr_t longer, sz_size_t longer_length,                   //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
+SZ_INTERNAL sz_status_t _sz_levenshtein_distance_skewed_diagonals_serial( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                          //
+    sz_cptr_t longer, sz_size_t longer_length,                            //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_memory_allocator_t global_alloc;
@@ -224,7 +318,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
     sz_size_t n = shorter_length + 1;
     sz_size_t buffer_length = sizeof(sz_size_t) * n * 3;
     sz_size_t *distances = (sz_size_t *)alloc->allocate(buffer_length, alloc->handle);
-    if (!distances) return SZ_SIZE_MAX;
+    if (!distances) return sz_bad_alloc_k;
 
     sz_size_t *previous_distances = distances;
     sz_size_t *current_distances = previous_distances + n;
@@ -276,7 +370,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
     // Cache scalar before `free` call.
     sz_size_t result = current_distances[0];
     alloc->free(distances, buffer_length, alloc->handle);
-    return result;
+    *result_ptr = result;
+    return sz_success_k;
 }
 
 /**
@@ -290,10 +385,10 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_serial( //
  *      + 100 codepoints * 2 strings * 4 bytes/codepoint = 800 bytes of memory for the UTF8 buffer.
  *      = 2400 bytes of memory or @b 12x memory amplification!
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
-    sz_cptr_t longer, sz_size_t longer_length,                //
-    sz_cptr_t shorter, sz_size_t shorter_length,              //
-    sz_size_t bound, sz_bool_t can_be_unicode, sz_memory_allocator_t *alloc) {
+SZ_INTERNAL sz_status_t _sz_levenshtein_distance_wagner_fisher_serial( //
+    sz_cptr_t longer, sz_size_t longer_length,                         //
+    sz_cptr_t shorter, sz_size_t shorter_length,                       //
+    sz_size_t bound, sz_bool_t can_be_unicode, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_memory_allocator_t global_alloc;
@@ -329,7 +424,7 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
 
     // If the allocation fails, return the maximum distance.
     sz_ptr_t const buffer = (sz_ptr_t)alloc->allocate(buffer_length, alloc->handle);
-    if (!buffer) return SZ_SIZE_MAX;
+    if (!buffer) return sz_bad_alloc_k;
 
     // Let's export the UTF8 sequence into the newly allocated buffer at the end.
     if (can_be_unicode == sz_true_k) {
@@ -378,7 +473,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     /* Cache scalar before `free` call. */                                                                            \
     sz_size_t result = previous_distances[shorter_length];                                                            \
     alloc->free(buffer, buffer_length, alloc->handle);                                                                \
-    return result;
+    *result_ptr = result;                                                                                             \
+    return sz_success_k;
 
     // Let's define a separate variant for bounded distance computation.
     // Practically the same as unbounded, but also collecting the running minimum within each row for early exit.
@@ -408,7 +504,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
         /* If the minimum distance in this row exceeded the bound, return early */                                    \
         if (min_distance >= bound) {                                                                                  \
             alloc->free(buffer, buffer_length, alloc->handle);                                                        \
-            return longer_length + 1;                                                                                 \
+            *result_ptr = bound;                                                                                      \
+            return sz_success_k;                                                                                      \
         }                                                                                                             \
         _distance_t *temporary = previous_distances;                                                                  \
         previous_distances = current_distances;                                                                       \
@@ -416,7 +513,8 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     }                                                                                                                 \
     sz_size_t result = previous_distances[shorter_length];                                                            \
     alloc->free(buffer, buffer_length, alloc->handle);                                                                \
-    return result;
+    *result_ptr = result;                                                                                             \
+    return sz_success_k;
 
     // Dispatch the actual computation.
     if (!bound) {
@@ -429,10 +527,10 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_wagner_fisher_serial( //
     }
 }
 
-SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
-    sz_cptr_t longer, sz_size_t longer_length,   //
-    sz_cptr_t shorter, sz_size_t shorter_length, //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
+SZ_PUBLIC sz_status_t sz_levenshtein_distance_serial( //
+    sz_cptr_t longer, sz_size_t longer_length,        //
+    sz_cptr_t shorter, sz_size_t shorter_length,      //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
 
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
@@ -452,28 +550,48 @@ SZ_PUBLIC sz_size_t sz_edit_distance_serial(     //
     int const is_bounded = bound < longer_length;
     if (is_bounded) {
         // If one of the strings is empty - the edit distance is equal to the length of the other one.
-        if (longer_length == 0) return sz_min_of_two(shorter_length, bound);
-        if (shorter_length == 0) return sz_min_of_two(longer_length, bound);
+        if (longer_length == 0) {
+            *result_ptr = sz_min_of_two(shorter_length, bound);
+            return sz_success_k;
+        }
+        if (shorter_length == 0) {
+            *result_ptr = sz_min_of_two(longer_length, bound);
+            return sz_success_k;
+        }
         // If the difference in length is beyond the `bound`, there is no need to check at all.
-        if (longer_length - shorter_length > bound) return bound;
+        if (longer_length - shorter_length > bound) {
+            *result_ptr = bound;
+            return sz_success_k;
+        }
     }
 
-    if (shorter_length == 0) return longer_length; // If no mismatches were found - the distance is zero.
+    // If no mismatches were found - the distance is zero.
+    if (shorter_length == 0) {
+        *result_ptr = longer_length;
+        return sz_success_k;
+    }
     if (shorter_length == longer_length && !is_bounded)
-        return _sz_edit_distance_skewed_diagonals_serial(longer, longer_length, shorter, shorter_length, bound, alloc);
-    return _sz_edit_distance_wagner_fisher_serial( //
-        longer, longer_length, shorter, shorter_length, bound, sz_false_k, alloc);
+        return _sz_levenshtein_distance_skewed_diagonals_serial(longer, longer_length, shorter, shorter_length, bound,
+                                                                alloc, result_ptr);
+    return _sz_levenshtein_distance_wagner_fisher_serial( //
+        longer, longer_length, shorter, shorter_length, bound, sz_false_k, alloc, result_ptr);
 }
 
-SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
-    sz_cptr_t longer, sz_size_t longer_length,        //
-    sz_cptr_t shorter, sz_size_t shorter_length,      //
-    sz_error_cost_t const *subs, sz_error_cost_t gap, //
-    sz_memory_allocator_t *alloc) {
+SZ_PUBLIC sz_status_t sz_needleman_wunsch_score_serial( //
+    sz_cptr_t longer, sz_size_t longer_length,          //
+    sz_cptr_t shorter, sz_size_t shorter_length,        //
+    sz_error_cost_t const *subs, sz_error_cost_t gap,   //
+    sz_memory_allocator_t *alloc, sz_ssize_t *result_ptr) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one
-    if (longer_length == 0) return (sz_ssize_t)shorter_length * gap;
-    if (shorter_length == 0) return (sz_ssize_t)longer_length * gap;
+    if (longer_length == 0) {
+        *result_ptr = (sz_ssize_t)shorter_length * gap;
+        return sz_success_k;
+    }
+    if (shorter_length == 0) {
+        *result_ptr = (sz_ssize_t)longer_length * gap;
+        return sz_success_k;
+    }
 
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
@@ -519,13 +637,14 @@ SZ_PUBLIC sz_ssize_t sz_alignment_score_serial(       //
     // Cache scalar before `free` call.
     sz_ssize_t result = previous_distances[shorter_length];
     alloc->free(distances, buffer_length, alloc->handle);
-    return result;
+    *result_ptr = result;
+    return sz_success_k;
 }
 
-SZ_PUBLIC sz_size_t sz_hamming_distance_serial( //
-    sz_cptr_t a, sz_size_t a_length,            //
-    sz_cptr_t b, sz_size_t b_length,            //
-    sz_size_t bound) {
+SZ_PUBLIC sz_status_t sz_hamming_distance_serial( //
+    sz_cptr_t a, sz_size_t a_length,              //
+    sz_cptr_t b, sz_size_t b_length,              //
+    sz_size_t bound, sz_size_t *result_ptr) {
 
     sz_size_t const min_length = sz_min_of_two(a_length, b_length);
     sz_size_t const max_length = sz_max_of_two(a_length, b_length);
@@ -547,13 +666,14 @@ SZ_PUBLIC sz_size_t sz_hamming_distance_serial( //
 #endif
 
     for (; a != a_end && distance < bound; ++a, ++b) { distance += (*a != *b); }
-    return sz_min_of_two(distance, bound);
+    *result_ptr = sz_min_of_two(distance, bound);
+    return sz_success_k;
 }
 
-SZ_PUBLIC sz_size_t sz_hamming_distance_utf8_serial( //
-    sz_cptr_t a, sz_size_t a_length,                 //
-    sz_cptr_t b, sz_size_t b_length,                 //
-    sz_size_t bound) {
+SZ_PUBLIC sz_status_t sz_hamming_distance_utf8_serial( //
+    sz_cptr_t a, sz_size_t a_length,                   //
+    sz_cptr_t b, sz_size_t b_length,                   //
+    sz_size_t bound, sz_size_t *result_ptr) {
 
     sz_cptr_t const a_end = a + a_length;
     sz_cptr_t const b_end = b + b_length;
@@ -587,7 +707,8 @@ SZ_PUBLIC sz_size_t sz_hamming_distance_utf8_serial( //
         for (; a < a_end; a += a_rune_length, ++distance) _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
         for (; b < b_end; b += b_rune_length, ++distance) _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
     }
-    return distance;
+    *result_ptr = distance;
+    return sz_success_k;
 }
 
 #pragma endregion // Serial Implementation
@@ -646,9 +767,9 @@ SZ_PUBLIC sz_size_t sz_hamming_distance_utf8_serial( //
  *? Bounds check, for inputs ranging from 33 to 64 bytes doesn't affect the performance at all.
  *? It's also worth exploring `_mm512_alignr_epi8` and `_mm512_maskz_compress_epi8` for the shift.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_ice( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                     //
-    sz_cptr_t longer, sz_size_t longer_length,                       //
+SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto63_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                            //
+    sz_cptr_t longer, sz_size_t longer_length,                              //
     sz_size_t bound) {
 
     sz_size_t const max_length = 63u;
@@ -815,9 +936,9 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto63_ice( //
  *  - source code analysis, assuming most lines are either under 80 or under 120 characters long.
  *  - DNA sequence alignment, as most short reads are 50-300 characters long.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto127_ice( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                      //
-    sz_cptr_t longer, sz_size_t longer_length,                        //
+SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto127_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                             //
+    sz_cptr_t longer, sz_size_t longer_length,                               //
     sz_size_t bound) {
     sz_unused(shorter && shorter_length && longer && longer_length && bound);
     return 0;
@@ -835,9 +956,9 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto127_ice( //
  *  This is the largest space-efficient variant, as strings beyond 255 characters may require
  *  16-bit accumulators, which would be a significant bottleneck.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto_ice( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                   //
-    sz_cptr_t longer, sz_size_t longer_length,                     //
+SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                          //
+    sz_cptr_t longer, sz_size_t longer_length,                            //
     sz_size_t bound) {
     sz_unused(shorter && shorter_length && longer && longer_length && bound);
     return 0;
@@ -856,9 +977,9 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto_ice( //
  *  This is the largest space-efficient variant, as strings beyond 255 characters may require
  *  16-bit accumulators, which would be a significant bottleneck.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto255bound_ice( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                           //
-    sz_cptr_t longer, sz_size_t longer_length,                             //
+SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto255bound_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                                  //
+    sz_cptr_t longer, sz_size_t longer_length,                                    //
     sz_size_t bound) {
     sz_unused(shorter && shorter_length && longer && longer_length && bound);
     return 0;
@@ -873,20 +994,20 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto255bound_ice( //
  *
  *  Each string is unpacked into 128 characters * 4 bytes per character / 64 bytes per register = 8 registers.
  */
-SZ_INTERNAL sz_size_t _sz_edit_distance_utf8_skewed_diagonals_upto127_ice( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                           //
-    sz_cptr_t longer, sz_size_t longer_length,                             //
+SZ_INTERNAL sz_size_t _sz_levenshtein_distance_utf8_skewed_diagonals_upto127_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                                  //
+    sz_cptr_t longer, sz_size_t longer_length,                                    //
     sz_size_t bound) {
     sz_unused(shorter && shorter_length && longer && longer_length && bound);
     return 0;
 }
 
-SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_ice( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                      //
-    sz_cptr_t longer, sz_size_t longer_length,                        //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
+SZ_INTERNAL sz_status_t _sz_levenshtein_distance_skewed_diagonals_upto65k_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                               //
+    sz_cptr_t longer, sz_size_t longer_length,                                 //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
 
-    sz_unused(shorter && longer && bound && alloc);
+    sz_unused(shorter && longer && bound && alloc && result_ptr);
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_memory_allocator_t global_alloc;
@@ -1037,22 +1158,31 @@ SZ_INTERNAL sz_size_t _sz_edit_distance_skewed_diagonals_upto65k_ice( //
     alloc->free(distances, buffer_length, alloc->handle);
     return result;
 #endif
-    return 0;
+    return sz_success_k;
 }
 
-SZ_INTERNAL sz_size_t sz_edit_distance_ice(      //
-    sz_cptr_t shorter, sz_size_t shorter_length, //
-    sz_cptr_t longer, sz_size_t longer_length,   //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
+SZ_PUBLIC sz_status_t sz_levenshtein_distance_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,   //
+    sz_cptr_t longer, sz_size_t longer_length,     //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
 
     // Bounded computations may exit early.
     int const is_bounded = bound < longer_length;
     if (is_bounded) {
         // If one of the strings is empty - the edit distance is equal to the length of the other one.
-        if (longer_length == 0) return sz_min_of_two(shorter_length, bound);
-        if (shorter_length == 0) return sz_min_of_two(longer_length, bound);
+        if (longer_length == 0) {
+            *result_ptr = sz_min_of_two(shorter_length, bound);
+            return sz_success_k;
+        }
+        if (shorter_length == 0) {
+            *result_ptr = sz_min_of_two(longer_length, bound);
+            return sz_success_k;
+        }
         // If the difference in length is beyond the `bound`, there is no need to check at all.
-        if (longer_length - shorter_length > bound) return bound;
+        if (longer_length - shorter_length > bound) {
+            *result_ptr = bound;
+            return sz_success_k;
+        }
     }
 
     // Make sure the shorter string is actually shorter.
@@ -1066,14 +1196,17 @@ SZ_INTERNAL sz_size_t sz_edit_distance_ice(      //
     }
 
     // Dispatch the right implementation based on the length of the strings.
-    if (longer_length < 64u)
-        return _sz_edit_distance_skewed_diagonals_upto63_ice( //
+    if (longer_length < 64u) {
+        *result_ptr = _sz_levenshtein_distance_skewed_diagonals_upto63_ice( //
             shorter, shorter_length, longer, longer_length, bound);
+        return sz_success_k;
+    }
+
     // else if (longer_length < 256u * 256u)
-    //     return _sz_edit_distance_skewed_diagonals_upto65k_ice( //
+    //     return _sz_levenshtein_distance_skewed_diagonals_upto65k_ice( //
     //         shorter, shorter_length, longer, longer_length, bound, alloc);
     else
-        return sz_edit_distance_serial(shorter, shorter_length, longer, longer_length, bound, alloc);
+        return sz_levenshtein_distance_serial(shorter, shorter_length, longer, longer_length, bound, alloc, result_ptr);
 }
 
 /**
@@ -1082,21 +1215,27 @@ SZ_INTERNAL sz_size_t sz_edit_distance_ice(      //
  *  Assuming the costs of substitutions can be arbitrary signed 8-bit integers, the method is expected to be used
  *  on strings not exceeding 2^24 length or 16.7 million characters.
  *
- *  Unlike the `_sz_edit_distance_skewed_diagonals_upto65k_avx512` method, this one uses signed integers to store
+ *  Unlike the `_sz_levenshtein_distance_skewed_diagonals_upto65k_avx512` method, this one uses signed integers to store
  *  the accumulated score. Moreover, it's primary bottleneck is the latency of gathering the substitution costs
  *  from the substitution matrix. If we use the diagonal order, we will be comparing a slice of the first string
  * with a slice of the second. If we stick to the conventional horizontal order, we will be comparing one character
  * against a slice, which is much easier to optimize. In that case we are sampling costs not from arbitrary parts of
  *  a 256 x 256 matrix, but from a single row!
  */
-SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
-    sz_cptr_t shorter, sz_size_t shorter_length,                      //
-    sz_cptr_t longer, sz_size_t longer_length,                        //
-    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc) {
+SZ_INTERNAL sz_status_t _sz_needleman_wunsch_score_wagner_fisher_upto17m_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,                              //
+    sz_cptr_t longer, sz_size_t longer_length,                                //
+    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc, sz_ssize_t *result_ptr) {
 
     // If one of the strings is empty - the edit distance is equal to the length of the other one
-    if (longer_length == 0) return (sz_ssize_t)shorter_length * gap;
-    if (shorter_length == 0) return (sz_ssize_t)longer_length * gap;
+    if (longer_length == 0) {
+        *result_ptr = (sz_ssize_t)shorter_length * gap;
+        return sz_success_k;
+    }
+    if (shorter_length == 0) {
+        *result_ptr = (sz_ssize_t)longer_length * gap;
+        return sz_success_k;
+    }
 
     // Let's make sure that we use the amount proportional to the
     // number of elements in the shorter string, not the larger.
@@ -1119,6 +1258,7 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
 
     sz_size_t buffer_length = sizeof(sz_i32_t) * n * 2;
     sz_i32_t *distances = (sz_i32_t *)alloc->allocate(buffer_length, alloc->handle);
+    if (!distances) return sz_bad_alloc_k;
     sz_i32_t *previous_distances = distances;
     sz_i32_t *current_distances = previous_distances + n;
 
@@ -1297,19 +1437,21 @@ SZ_INTERNAL sz_ssize_t _sz_alignment_score_wagner_fisher_upto17m_ice( //
     // Cache scalar before `free` call.
     sz_ssize_t result = previous_distances[longer_length];
     alloc->free(distances, buffer_length, alloc->handle);
-    return result;
+    *result_ptr = result;
+    return sz_success_k;
 }
 
-SZ_INTERNAL sz_ssize_t sz_alignment_score_ice(   //
-    sz_cptr_t shorter, sz_size_t shorter_length, //
-    sz_cptr_t longer, sz_size_t longer_length,   //
-    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc) {
+SZ_PUBLIC sz_status_t sz_needleman_wunsch_score_ice( //
+    sz_cptr_t shorter, sz_size_t shorter_length,     //
+    sz_cptr_t longer, sz_size_t longer_length,       //
+    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc, sz_ssize_t *result_ptr) {
 
     if (sz_max_of_two(shorter_length, longer_length) < (256ull * 256ull * 256ull))
-        return _sz_alignment_score_wagner_fisher_upto17m_ice(shorter, shorter_length, longer, longer_length, subs, gap,
-                                                             alloc);
+        return _sz_needleman_wunsch_score_wagner_fisher_upto17m_ice(shorter, shorter_length, longer, longer_length,
+                                                                    subs, gap, alloc, result_ptr);
     else
-        return sz_alignment_score_serial(shorter, shorter_length, longer, longer_length, subs, gap, alloc);
+        return sz_needleman_wunsch_score_serial(shorter, shorter_length, longer, longer_length, subs, gap, alloc,
+                                                result_ptr);
 }
 
 #pragma clang attribute pop
@@ -1351,46 +1493,46 @@ SZ_INTERNAL sz_ssize_t sz_alignment_score_ice(   //
 #pragma region Compile Time Dispatching
 #if !SZ_DYNAMIC_DISPATCH
 
-SZ_DYNAMIC sz_size_t sz_hamming_distance( //
-    sz_cptr_t a, sz_size_t a_length,      //
-    sz_cptr_t b, sz_size_t b_length,      //
-    sz_size_t bound) {
-    return sz_hamming_distance_serial(a, a_length, b, b_length, bound);
+SZ_DYNAMIC sz_status_t sz_hamming_distance( //
+    sz_cptr_t a, sz_size_t a_length,        //
+    sz_cptr_t b, sz_size_t b_length,        //
+    sz_size_t bound, sz_size_t *result_ptr) {
+    return sz_hamming_distance_serial(a, a_length, b, b_length, bound, result_ptr);
 }
 
-SZ_DYNAMIC sz_size_t sz_hamming_distance_utf8( //
-    sz_cptr_t a, sz_size_t a_length,           //
-    sz_cptr_t b, sz_size_t b_length,           //
-    sz_size_t bound) {
-    return sz_hamming_distance_utf8_serial(a, a_length, b, b_length, bound);
+SZ_DYNAMIC sz_status_t sz_hamming_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length,             //
+    sz_cptr_t b, sz_size_t b_length,             //
+    sz_size_t bound, sz_size_t *result_ptr) {
+    return sz_hamming_distance_utf8_serial(a, a_length, b, b_length, bound, result_ptr);
 }
 
-SZ_DYNAMIC sz_size_t sz_edit_distance( //
-    sz_cptr_t a, sz_size_t a_length,   //
-    sz_cptr_t b, sz_size_t b_length,   //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
+SZ_DYNAMIC sz_status_t sz_levenshtein_distance( //
+    sz_cptr_t a, sz_size_t a_length,            //
+    sz_cptr_t b, sz_size_t b_length,            //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
 #if SZ_USE_ICE
-    return sz_edit_distance_ice(a, a_length, b, b_length, bound, alloc);
+    return sz_levenshtein_distance_ice(a, a_length, b, b_length, bound, alloc, result_ptr);
 #else
-    return sz_edit_distance_serial(a, a_length, b, b_length, bound, alloc);
+    return sz_levenshtein_distance_serial(a, a_length, b, b_length, bound, alloc, result_ptr);
 #endif
 }
 
-SZ_DYNAMIC sz_size_t sz_edit_distance_utf8( //
-    sz_cptr_t a, sz_size_t a_length,        //
-    sz_cptr_t b, sz_size_t b_length,        //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
-    return _sz_edit_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc);
+SZ_DYNAMIC sz_status_t sz_levenshtein_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length,                 //
+    sz_cptr_t b, sz_size_t b_length,                 //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
+    return _sz_levenshtein_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc, result_ptr);
 }
 
-SZ_DYNAMIC sz_ssize_t sz_alignment_score( //
-    sz_cptr_t a, sz_size_t a_length,      //
-    sz_cptr_t b, sz_size_t b_length,      //
-    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc) {
+SZ_DYNAMIC sz_status_t sz_needleman_wunsch_score( //
+    sz_cptr_t a, sz_size_t a_length,              //
+    sz_cptr_t b, sz_size_t b_length,              //
+    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc, sz_ssize_t *result_ptr) {
 #if SZ_USE_ICE
-    return sz_alignment_score_ice(a, a_length, b, b_length, subs, gap, alloc);
+    return sz_needleman_wunsch_score_ice(a, a_length, b, b_length, subs, gap, alloc, result_ptr);
 #else
-    return sz_alignment_score_serial(a, a_length, b, b_length, subs, gap, alloc);
+    return sz_needleman_wunsch_score_serial(a, a_length, b, b_length, subs, gap, alloc, result_ptr);
 #endif
 }
 
