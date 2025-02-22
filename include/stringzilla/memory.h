@@ -5,15 +5,27 @@
  *
  *  Includes core APIs for contiguous memory operations:
  *
- *  - `sz_copy` - analog to `memcpy`
- *  - `sz_move` - analog to `memmove`
- *  - `sz_fill` - analog to `memset`
- *  - `sz_lookup` - LUT transformation of a string, similar to OpenCV LUT
- *  - TODO: `sz_detect_encoding` - similar to `iconv` or `chardet`
+ *  - @b `sz_copy` - analog to `memcpy`, probably the most common operation in a computer
+ *  - @b `sz_move` - analog to `memmove`, allowing overlapping memory regions, often used in string manipulation
+ *  - @b `sz_fill` - analog to `memset`, often used to initialize memory with a constant value, like zero
+ *  - @b `sz_lookup` - Look-Up Table @b (LUT) transformation of a string, mapping each byte to a new value
+ *  - TODO: @b `sz_lookup_utf8` - LUT transformation of a UTF8 string, which can be used for normalization
+ *  - TODO: @b `sz_detect_encoding` - detects the character encoding similar to "iconv" or "chardet" tools
  *
- *  Convenience functions for character-set mapping:
+ *  All of the core APIs receive the target output buffer as the first argument,
+ *  and aim to minimize the number of "store" instructions, especially unaligned ones,
+ *  that can invalidate 2 cache lines.
  *
- *  - `sz_tolower`, `sz_toupper`, `sz_toascii` for ASCII ranges
+ *  Unlike many other libraries focusing on trivial SIMD transformations, like converting
+ *  lowercase to uppercase, StringZilla generalizes those to basic lookup table transforms.
+ *  For typical ASCII conversions, you can use the following @b LUT initialization functions:
+ *
+ *  - `sz_lookup_init_lower` for transforms like `tolower`
+ *  - `sz_lookup_init_upper` for transforms like `toupper`
+ *  - `sz_lookup_init_ascii` for transforms like `isascii`
+ *
+ *  The header also exposes a minimalistic @b `sz_isascii` which can be used in UTF-8 capable
+ *  methods to select a simpler execution path for ASCII characters.
  */
 #ifndef STRINGZILLA_MEMORY_H_
 #define STRINGZILLA_MEMORY_H_
@@ -28,6 +40,7 @@ extern "C" {
 
 /**
  *  @brief  Similar to `memcpy`, copies contents of one string into another.
+ *  @see    https://en.cppreference.com/w/c/string/byte/memcpy
  *
  *  @param[out] target String to copy into. Can be `NULL`, if the @p length is zero.
  *  @param[in] length Number of bytes to copy. Can be a zero.
@@ -55,6 +68,7 @@ SZ_DYNAMIC void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 /**
  *  @brief  Similar to `memmove`, copies (moves) contents of one string into another.
  *          Unlike `sz_copy`, allows overlapping strings as arguments.
+ *  @see    https://en.cppreference.com/w/c/string/byte/memmove
  *
  *  @param[out] target String to copy into. Can be `NULL`, if the @p length is zero.
  *  @param[in] length Number of bytes to copy. Can be a zero.
@@ -78,6 +92,7 @@ SZ_DYNAMIC void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
 
 /**
  *  @brief  Similar to `memset`, fills a string with a given value.
+ *  @see    https://en.cppreference.com/w/c/string/byte/memset
  *
  *  @param[out] target String to fill. Can be `NULL`, if the @p length is zero.
  *  @param[in] length Number of bytes to fill. Can be a zero.
@@ -184,52 +199,17 @@ SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
 #pragma region Helper API
 
 /**
- *  @brief  Equivalent to `for (char & c : text) c = tolower(c)`.
+ *  @brief  Initializes a lookup table for converting ASCII characters to lowercase.
  *
  *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
  *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
- *  can be done by flipping the 5th bit each inappropriate character byte. This, however,
- *  breaks for extended ASCII, so a different solution is needed.
+ *  can be done by flipping the 5th bit each inappropriate character byte.
+ *  This, however, breaks for extended ASCII, so a different solution is needed.
  *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
  *
- *  @param text     String to be normalized.
- *  @param[in] length   Number of bytes in the string.
- *  @param result   Output string, can point to the same address as ::text.
+ *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
-SZ_PUBLIC void sz_tolower(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-
-/**
- *  @brief  Equivalent to `for (char & c : text) c = toupper(c)`.
- *
- *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
- *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
- *  can be done by flipping the 5th bit each inappropriate character byte. This, however,
- *  breaks for extended ASCII, so a different solution is needed.
- *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
- *
- *  @param text     String to be normalized.
- *  @param[in] length   Number of bytes in the string.
- *  @param result   Output string, can point to the same address as ::text.
- */
-SZ_PUBLIC void sz_toupper(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-
-/**
- *  @brief  Equivalent to `for (char & c : text) c = toascii(c)`.
- *
- *  @param text     String to be normalized.
- *  @param[in] length   Number of bytes in the string.
- *  @param result   Output string, can point to the same address as ::text.
- */
-SZ_PUBLIC void sz_toascii(sz_cptr_t text, sz_size_t length, sz_ptr_t result);
-
-#pragma endregion // Helper API
-
-#pragma region Serial Implementation
-
-/**
- *  @brief  Uses a small lookup-table to convert a lowercase character to uppercase.
- */
-SZ_INTERNAL sz_u8_t sz_u8_tolower(sz_u8_t c) {
+SZ_PUBLIC void sz_lookup_init_lower(sz_ptr_t lut) {
     static sz_u8_t const lowered[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -248,13 +228,21 @@ SZ_INTERNAL sz_u8_t sz_u8_tolower(sz_u8_t c) {
         224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, //
         240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, //
     };
-    return lowered[c];
+    for (sz_size_t i = 0; i < 256; ++i) lut[i] = lowered[i];
 }
 
 /**
- *  @brief  Uses a small lookup-table to convert an uppercase character to lowercase.
+ *  @brief  Initializes a lookup table for converting ASCII characters to uppercase.
+ *
+ *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
+ *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
+ *  can be done by flipping the 5th bit each inappropriate character byte.
+ *  This, however, breaks for extended ASCII, so a different solution is needed.
+ *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
+ *
+ *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
-SZ_INTERNAL sz_u8_t sz_u8_toupper(sz_u8_t c) {
+SZ_PUBLIC void sz_lookup_init_upper(sz_ptr_t lut) {
     static sz_u8_t const upped[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -273,43 +261,23 @@ SZ_INTERNAL sz_u8_t sz_u8_toupper(sz_u8_t c) {
         224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, //
         240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, //
     };
-    return upped[c];
+    for (sz_size_t i = 0; i < 256; ++i) lut[i] = upped[i];
 }
 
-SZ_PUBLIC void sz_lookup_serial(sz_ptr_t result, sz_size_t length, sz_cptr_t text, sz_cptr_t lut) {
-    sz_u8_t const *unsigned_lut = (sz_u8_t const *)lut;
-    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
-    sz_u8_t *unsigned_result = (sz_u8_t *)result;
-    sz_u8_t const *end = unsigned_text + length;
-    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = unsigned_lut[*unsigned_text];
-}
-
-SZ_PUBLIC void sz_tolower_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    sz_u8_t *unsigned_result = (sz_u8_t *)result;
-    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
-    sz_u8_t const *end = unsigned_text + length;
-    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = sz_u8_tolower(*unsigned_text);
-}
-
-SZ_PUBLIC void sz_toupper_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    sz_u8_t *unsigned_result = (sz_u8_t *)result;
-    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
-    sz_u8_t const *end = unsigned_text + length;
-    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = sz_u8_toupper(*unsigned_text);
-}
-
-SZ_PUBLIC void sz_toascii_serial(sz_cptr_t text, sz_size_t length, sz_ptr_t result) {
-    sz_u8_t *unsigned_result = (sz_u8_t *)result;
-    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
-    sz_u8_t const *end = unsigned_text + length;
-    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = *unsigned_text & 0x7F;
+/**
+ *  @brief  Initializes a lookup table for converting bytes to ASCII characters.
+ *
+ *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
+ */
+SZ_PUBLIC void sz_lookup_init_ascii(sz_ptr_t lut) {
+    for (sz_size_t i = 0; i < 256; ++i) lut[i] = (sz_u8_t)(i & 0x7F);
 }
 
 /**
  *  @brief  Check if there is a byte in this buffer, that exceeds 127 and can't be an ASCII character.
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
  */
-SZ_PUBLIC sz_bool_t sz_isascii_serial(sz_cptr_t text, sz_size_t length) {
+SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length) {
 
     if (!length) return sz_true_k;
     sz_u8_t const *h = (sz_u8_t const *)text;
@@ -332,6 +300,18 @@ SZ_PUBLIC sz_bool_t sz_isascii_serial(sz_cptr_t text, sz_size_t length) {
     for (; h < h_end; ++h)
         if (*h & 0x80ull) return sz_false_k;
     return sz_true_k;
+}
+
+#pragma endregion // Helper API
+
+#pragma region Serial Implementation
+
+SZ_PUBLIC void sz_lookup_serial(sz_ptr_t result, sz_size_t length, sz_cptr_t text, sz_cptr_t lut) {
+    sz_u8_t const *unsigned_lut = (sz_u8_t const *)lut;
+    sz_u8_t const *unsigned_text = (sz_u8_t const *)text;
+    sz_u8_t *unsigned_result = (sz_u8_t *)result;
+    sz_u8_t const *end = unsigned_text + length;
+    for (; unsigned_text != end; ++unsigned_text, ++unsigned_result) *unsigned_result = unsigned_lut[*unsigned_text];
 }
 
 // When overriding libc, disable optimizations for this function because MSVC will optimize the loops into a `memset`.
