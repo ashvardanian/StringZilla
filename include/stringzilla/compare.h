@@ -7,8 +7,13 @@
  *
  *  - `sz_equal` - for equality comparison of two strings.
  *  - `sz_order` - for the relative order of two strings, similar to `memcmp`.
- *  - TODO: `sz_mismatch`, `sz_rmismatch` - to supersede `sz_equal`.
- *  - TODO: `sz_order_utf8` - for the relative order of two UTF-8 strings.
+ *
+ *  A valid suggestion may be to add an `sz_mismatch`, as the shared part of the `sz_order` and `sz_equal`.
+ *  That would be great for a general-purpose library, but has little practical use for string processing.
+ *  
+ *  The functions in this file can be used for both UTF-8 and other inputs.
+ *  On platforms without masked loads they use interleaved prefix and suffix vector-loads
+ *  to avoid scalar code, similar to the kernels in `memory.h`.
  */
 #ifndef STRINGZILLA_COMPARE_H_
 #define STRINGZILLA_COMPARE_H_
@@ -22,29 +27,61 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief  Checks if two string are equal.
- *          Similar to `memcmp(a, b, length) == 0` in LibC and `a == b` in STL.
+ *  @brief  Checks if two strings are equal. Equivalent to `memcmp(a, b, length) == 0` in LibC and `a == b` in STL.
+ *  @see    https://en.cppreference.com/w/c/string/byte/memcmp
  *
- *  The implementation of this function is very similar to `sz_order`, but the usage patterns are different.
- *  This function is more often used in parsing, while `sz_order` is often used in sorting.
- *  It works best on platforms with cheap
+ *  @param[in] a First string to compare.
+ *  @param[in] b Second string to compare.
+ *  @param[in] length Number of bytes to compare in both strings.
  *
- *  @param a        First string to compare.
- *  @param b        Second string to compare.
- *  @param length   Number of bytes in both strings.
- *  @return         1 if strings match, 0 otherwise.
+ *  @retval `sz_true_k` if strings are equal.
+ *  @retval `sz_false_k` if strings are different.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/compare.h>
+ *      int main() {
+ *          return sz_equal("hello", "hello", 5) && !sz_equal("hello", "world", 5);
+ *      }
+ *  @endcode
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_equal_serial, sz_equal_haswell, sz_equal_skylake, sz_equal_neon, sz_equal_sve
  */
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
 
 /**
- *  @brief  Estimates the relative order of two strings. Equivalent to `memcmp(a, b, length)` in LibC.
- *          Can be used on different length strings.
+ *  @brief  Compares two strings lexicographically. Equivalent to `memcmp(a, b, length)` in LibC.
+ *          Mostly used in sorting and associative containers. Can be used for @b UTF-8 inputs.
+ *  @see    https://en.cppreference.com/w/c/string/byte/memcmp
  *
- *  @param a        First string to compare.
- *  @param a_length Number of bytes in the first string.
- *  @param b        Second string to compare.
- *  @param b_length Number of bytes in the second string.
- *  @return         Negative if (a < b), positive if (a > b), zero if they are equal.
+ *  This function uses scalar code on most platforms, as in the majority of cases the strings that
+ *  differ - will have differences among the very first characters and fetching more than one cache
+ *  line may not be justified.
+ * 
+ *  @param[in] a First string to compare.
+ *  @param[in] a_length Number of bytes in the first string.
+ *  @param[in] b Second string to compare.
+ *  @param[in] b_length Number of bytes in the second string.
+ *
+ *  @retval `sz_less_k` if @p a is lexicographically smaller than @p b.
+ *  @retval `sz_greater_k` if @p a is lexicographically greater than @p b.
+ *  @retval `sz_equal_k` if strings @p a and @p b are identical.
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/compare.h>
+ *      int main() {
+ *          return sz_order("apple", 5, "banana", 6) < 0 &&
+ *                 sz_order("grape", 5, "grape", 5) == 0 &&
+ *                 sz_order("zebra", 5, "apple", 5) > 0;
+ *      }
+ *  @endcode
+ *
+ *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
+ *  @sa     sz_order_serial, sz_order_haswell, sz_order_skylake, sz_order_neon, sz_order_sve
  */
 SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length);
 
