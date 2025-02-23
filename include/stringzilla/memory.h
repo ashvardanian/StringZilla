@@ -439,7 +439,44 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     // 1 MB x 2 blocks of L2 cache per core, and one shared L3 cache buffer.
     // For now, let's avoid the cases beyond the L2 size.
     int is_huge = length > 1ull * 1024ull * 1024ull;
-    if (length <= 32) { sz_copy_serial(target, source, length); }
+    if (length < 8) {
+        while (length--) *(target++) = *(source++);
+    }
+    // The next few sections are identical here and in the `sz_move_haswell` function.
+    // We can use 2x 64-bit interleaving loads for each string, and then compare them for equality.
+    // The same approach is used in GLibC and was suggest by Denis Yaroshevskiy.
+    // https://codebrowser.dev/glibc/glibc/sysdeps/x86_64/multiarch/memcmp-avx2-movbe.S.html#518
+    // It shouldn't improve performance on microbenchmarks, but should be better in practice.
+    else if (length <= 16) {
+        sz_u64_t source_first_word = *(sz_u64_t const *)(source);
+        sz_u64_t source_second_word = *(sz_u64_t const *)(source + length - 8);
+        sz_u64_t *target_first_word_ptr = (sz_u64_t *)(target);
+        sz_u64_t *target_second_word_ptr = (sz_u64_t *)(target + length - 8);
+        *target_first_word_ptr = source_first_word;
+        *target_second_word_ptr = source_second_word;
+    }
+    // We can use 2x 128-bit interleaving loads for each string, and then compare them for equality.
+    else if (length <= 32) {
+        sz_u128_vec_t source_first_vec, source_second_vec;
+        sz_u128_vec_t *target_first_word_ptr, *target_second_word_ptr;
+        source_first_vec.xmm = _mm_lddqu_si128((__m128i const *)(source));
+        source_second_vec.xmm = _mm_lddqu_si128((__m128i const *)(source + length - 16));
+        target_first_word_ptr = (sz_u128_vec_t *)(target);
+        target_second_word_ptr = (sz_u128_vec_t *)(target + length - 16);
+        _mm_storeu_si128(&target_first_word_ptr->xmm, source_first_vec.xmm);
+        _mm_storeu_si128(&target_second_word_ptr->xmm, source_second_vec.xmm);
+    }
+    // We can use 2x 256-bit interleaving loads for each string, and then compare them for equality.
+    else if (length <= 64) {
+        sz_u256_vec_t source_first_vec, source_second_vec;
+        sz_u256_vec_t *target_first_word_ptr, *target_second_word_ptr;
+        source_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(source));
+        source_second_vec.ymm = _mm256_lddqu_si256((__m256i const *)(source + length - 32));
+        target_first_word_ptr = (sz_u256_vec_t *)(target);
+        target_second_word_ptr = (sz_u256_vec_t *)(target + length - 32);
+        _mm256_storeu_si256(&target_first_word_ptr->ymm, source_first_vec.ymm);
+        _mm256_storeu_si256(&target_second_word_ptr->ymm, source_second_vec.ymm);
+    }
     // When dealing with larger arrays, the optimization is not as simple as with the `sz_fill_haswell` function,
     // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
     // we can use aligned loads and stores, and the performance will be great.
@@ -471,7 +508,7 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
             for (; body_length >= 32; target += 32, source += 32, body_length -= 32)
                 _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
         }
-        // When the biffer is huge, we can traverse it in 2 directions.
+        // When the buffer is huge, we can traverse it in 2 directions.
         else {
             for (; body_length >= 64; target += 32, source += 32, body_length -= 64) {
                 _mm256_store_si256((__m256i *)(target), _mm256_lddqu_si256((__m256i const *)(source)));
@@ -494,13 +531,59 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
 }
 
 SZ_PUBLIC void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    if (target < source || target >= source + length) {
+
+    if (length < 8) {
+        if (target < source)
+            while (length--) *(target++) = *(source++);
+        else {
+            // Jump to the end and walk backwards:
+            target += length, source += length;
+            while (length--) *(--target) = *(--source);
+        }
+    }
+    // The next few sections are identical here and in the `sz_copy_haswell` function.
+    // We can use 2x 64-bit interleaving loads for each string, and then compare them for equality.
+    // The same approach is used in GLibC and was suggest by Denis Yaroshevskiy.
+    // https://codebrowser.dev/glibc/glibc/sysdeps/x86_64/multiarch/memcmp-avx2-movbe.S.html#518
+    // It shouldn't improve performance on microbenchmarks, but should be better in practice.
+    else if (length <= 16) {
+        sz_u64_t source_first_word = *(sz_u64_t const *)(source);
+        sz_u64_t source_second_word = *(sz_u64_t const *)(source + length - 8);
+        sz_u64_t *target_first_word_ptr = (sz_u64_t *)(target);
+        sz_u64_t *target_second_word_ptr = (sz_u64_t *)(target + length - 8);
+        *target_first_word_ptr = source_first_word;
+        *target_second_word_ptr = source_second_word;
+    }
+    // We can use 2x 128-bit interleaving loads for each string, and then compare them for equality.
+    else if (length <= 32) {
+        sz_u128_vec_t source_first_vec, source_second_vec;
+        sz_u128_vec_t *target_first_word_ptr, *target_second_word_ptr;
+        source_first_vec.xmm = _mm_lddqu_si128((__m128i const *)(source));
+        source_second_vec.xmm = _mm_lddqu_si128((__m128i const *)(source + length - 16));
+        target_first_word_ptr = (sz_u128_vec_t *)(target);
+        target_second_word_ptr = (sz_u128_vec_t *)(target + length - 16);
+        _mm_storeu_si128(&target_first_word_ptr->xmm, source_first_vec.xmm);
+        _mm_storeu_si128(&target_second_word_ptr->xmm, source_second_vec.xmm);
+    }
+    // We can use 2x 256-bit interleaving loads for each string, and then compare them for equality.
+    else if (length <= 64) {
+        sz_u256_vec_t source_first_vec, source_second_vec;
+        sz_u256_vec_t *target_first_word_ptr, *target_second_word_ptr;
+        source_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(source));
+        source_second_vec.ymm = _mm256_lddqu_si256((__m256i const *)(source + length - 32));
+        target_first_word_ptr = (sz_u256_vec_t *)(target);
+        target_second_word_ptr = (sz_u256_vec_t *)(target + length - 32);
+        _mm256_storeu_si256(&target_first_word_ptr->ymm, source_first_vec.ymm);
+        _mm256_storeu_si256(&target_second_word_ptr->ymm, source_second_vec.ymm);
+    }
+    // When dealing with larger arrays, we keep things simple:
+    else if (target < source || target >= source + length) {
         for (; length >= 32; target += 32, source += 32, length -= 32)
             _mm256_storeu_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
         while (length--) *(target++) = *(source++);
     }
     else {
-        // Jump to the end and walk backwards.
+        // Jump to the end and walk backwards:
         for (target += length, source += length; length >= 32; length -= 32)
             _mm256_storeu_si256((__m256i *)(target -= 32), _mm256_lddqu_si256((__m256i const *)(source -= 32)));
         while (length--) *(--target) = *(--source);
