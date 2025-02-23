@@ -10,7 +10,7 @@
  *
  *  A valid suggestion may be to add an `sz_mismatch`, as the shared part of the `sz_order` and `sz_equal`.
  *  That would be great for a general-purpose library, but has little practical use for string processing.
- *  
+ *
  *  The functions in this file can be used for both UTF-8 and other inputs.
  *  On platforms without masked loads they use interleaved prefix and suffix vector-loads
  *  to avoid scalar code, similar to the kernels in `memory.h`.
@@ -59,7 +59,7 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length);
  *  This function uses scalar code on most platforms, as in the majority of cases the strings that
  *  differ - will have differences among the very first characters and fetching more than one cache
  *  line may not be justified.
- * 
+ *
  *  @param[in] a First string to compare.
  *  @param[in] a_length Number of bytes in the first string.
  *  @param[in] b Second string to compare.
@@ -172,19 +172,60 @@ SZ_PUBLIC sz_ordering_t sz_order_haswell(sz_cptr_t a, sz_size_t a_length, sz_cpt
 }
 
 SZ_PUBLIC sz_bool_t sz_equal_haswell(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    sz_u256_vec_t a_vec, b_vec;
 
-    while (length >= 32) {
-        a_vec.ymm = _mm256_lddqu_si256((__m256i const *)a);
-        b_vec.ymm = _mm256_lddqu_si256((__m256i const *)b);
-        // One approach can be to use "movemasks", but we could also use a bitwise matching like `_mm256_testnzc_si256`.
-        int difference_mask = ~_mm256_movemask_epi8(_mm256_cmpeq_epi8(a_vec.ymm, b_vec.ymm));
-        if (difference_mask == 0) { a += 32, b += 32, length -= 32; }
-        else { return sz_false_k; }
+    if (length < 8) {
+        sz_cptr_t const a_end = a + length;
+        while (a != a_end && *a == *b) a++, b++;
+        return (sz_bool_t)(a_end == a);
     }
-
-    if (length) return sz_equal_serial(a, b, length);
-    return sz_true_k;
+    // We can use 2x 64-bit interleaving loads for each string, and then compare them for equality.
+    // The same approach is used in GLibC and was suggest by Denis Yaroshevskiy.
+    // https://codebrowser.dev/glibc/glibc/sysdeps/x86_64/multiarch/memcmp-avx2-movbe.S.html#518
+    // It shouldn't improve performance on microbenchmarks, but should be better in practice.
+    else if (length <= 16) {
+        sz_u64_t a_first_word = sz_u64_load(a).u64;
+        sz_u64_t b_first_word = sz_u64_load(b).u64;
+        sz_u64_t a_second_word = sz_u64_load(a + length - 8).u64;
+        sz_u64_t b_second_word = sz_u64_load(b + length - 8).u64;
+        return (sz_bool_t)((a_first_word == b_first_word) & (a_second_word == b_second_word));
+    }
+    // We can use 2x 128-bit interleaving loads for each string, and then compare them for equality.
+    else if (length <= 32) {
+        sz_u128_vec_t a_first_vec, b_first_vec, a_second_vec, b_second_vec;
+        a_first_vec.xmm = _mm_lddqu_si128((__m128i const *)(a));
+        b_first_vec.xmm = _mm_lddqu_si128((__m128i const *)(b));
+        a_second_vec.xmm = _mm_lddqu_si128((__m128i const *)(a + length - 16));
+        b_second_vec.xmm = _mm_lddqu_si128((__m128i const *)(b + length - 16));
+        return (sz_bool_t)(_mm_movemask_epi8(_mm_and_si128( //
+                               _mm_cmpeq_epi8(a_first_vec.xmm, b_first_vec.xmm),
+                               _mm_cmpeq_epi8(a_second_vec.xmm, b_second_vec.xmm))) == 0xFFFF);
+    }
+    // We can use 2x 256-bit interleaving loads for each string, and then compare them for equality.
+    else if (length <= 64) {
+        sz_u256_vec_t a_first_vec, b_first_vec, a_second_vec, b_second_vec;
+        a_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(a));
+        b_first_vec.ymm = _mm256_lddqu_si256((__m256i const *)(b));
+        a_second_vec.ymm = _mm256_lddqu_si256((__m256i const *)(a + length - 32));
+        b_second_vec.ymm = _mm256_lddqu_si256((__m256i const *)(b + length - 32));
+        return (sz_bool_t)(_mm256_movemask_epi8(_mm256_and_si256( //
+                               _mm256_cmpeq_epi8(a_first_vec.ymm, b_first_vec.ymm),
+                               _mm256_cmpeq_epi8(a_second_vec.ymm, b_second_vec.ymm))) == (int)0xFFFFFFFF);
+    }
+    else {
+        sz_size_t i = 0;
+        sz_u256_vec_t a_vec, b_vec;
+        do {
+            a_vec.ymm = _mm256_lddqu_si256((__m256i const *)(a + i));
+            b_vec.ymm = _mm256_lddqu_si256((__m256i const *)(b + i));
+            // One approach can be to use "movemasks", but we could also use a bitwise
+            // matching like `_mm256_testnzc_si256`.
+            if (_mm256_movemask_epi8(_mm256_cmpeq_epi8(a_vec.ymm, b_vec.ymm)) != (int)0xFFFFFFFF) return sz_false_k;
+            i += 32;
+        } while (i + 32 <= length);
+        a_vec.ymm = _mm256_lddqu_si256((__m256i const *)(a + length - 32));
+        b_vec.ymm = _mm256_lddqu_si256((__m256i const *)(b + length - 32));
+        return (sz_bool_t)(_mm256_movemask_epi8(_mm256_cmpeq_epi8(a_vec.ymm, b_vec.ymm)) == (int)0xFFFFFFFF);
+    }
 }
 
 #pragma clang attribute pop
