@@ -471,6 +471,26 @@ cargo package --list --allow-dirty
 
 If you want to run benchmarks against third-party implementations, check out the [`ashvardanian/memchr_vs_stringzilla`](https://github.com/ashvardanian/memchr_vs_stringzilla/) repository.
 
+## Contributing in Go
+
+```bash
+export GO111MODULE="off"
+go run scripts/test.go
+go run scripts/bench.go
+```
+
+To run locally import with a relative path 
+
+```bash
+   sz "../StringZilla/go/stringzilla"
+```
+
+And turn off GO111MODULE
+
+```bash
+export GO111MODULE="off"
+```
+
 ## General Recommendations
 
 ### Operations Not Worth Optimizing
