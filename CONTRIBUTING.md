@@ -483,10 +483,11 @@ cmake --build build_golang
 Then, navigate to the GoLang module root directory and run the tests from there:
 
 ```bash
+cd golang
 CGO_CFLAGS="-I$(pwd)/../include" \
 CGO_LDFLAGS="-L$(pwd)/../build_golang -lstringzilla_shared" \
 LD_LIBRARY_PATH="$(pwd)/../build_golang:$LD_LIBRARY_PATH" \
-go run ../scripts/test.go
+go test
 ```
 
 Alternatively:

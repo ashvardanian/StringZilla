@@ -45,10 +45,13 @@ func Contains(str string, substr string) bool {
 // Index returns the index of the first instance of `substr` in `str`, or -1 if `substr` is not present.
 // https://pkg.go.dev/strings#Index
 func Index(str string, substr string) int64 {
+	substrLen := len(substr)
+	if substrLen == 0 {
+		return 0
+	}
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	strLen := len(str)
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
-	substrLen := len(substr)
 	matchPtr := unsafe.Pointer(C.sz_find(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
 	if matchPtr == nil {
 		return -1
@@ -59,10 +62,13 @@ func Index(str string, substr string) int64 {
 // Index returns the index of the last instance of `substr` in `str`, or -1 if `substr` is not present.
 // https://pkg.go.dev/strings#LastIndex
 func LastIndex(str string, substr string) int64 {
-	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
-	strLen := len(str)
-	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	substrLen := len(substr)
+	strLen := int64(len(str))
+	if substrLen == 0 {
+		return strLen
+	}
+	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
+	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	matchPtr := unsafe.Pointer(C.sz_rfind(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
 	if matchPtr == nil {
 		return -1
@@ -133,11 +139,11 @@ func Count(str string, substr string, overlap bool) int64 {
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	substrLen := int64(len(substr))
 
-	if substrLen == 0 {
-		return 1 + strLen
-	}
 	if strLen == 0 || strLen < substrLen {
 		return 0
+	}
+	if substrLen == 0 {
+		return 1 + strLen
 	}
 
 	count := int64(0)
