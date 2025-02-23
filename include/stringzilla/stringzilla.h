@@ -30,7 +30,7 @@
  *
  *  - `SZ_USE_HASWELL=?` - whether to use AVX2 instructions on x86_64.
  *  - `SZ_USE_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
- *  - `SZ_USE_ICE=?` - whether to use AVX-512 VBMI instructions on x86_64.
+ *  - `SZ_USE_ICE=?` - whether to use AVX-512 VBMI & wider AES instructions on x86_64.
  *  - `SZ_USE_NEON=?` - whether to use NEON instructions on ARM.
  *  - `SZ_USE_SVE=?` - whether to use SVE and SVE2 instructions on ARM.
  */
@@ -41,14 +41,14 @@
 #define STRINGZILLA_VERSION_MINOR 11
 #define STRINGZILLA_VERSION_PATCH 3
 
-#include "compare.h"      // `sz_equal`, `sz_order`
-#include "find.h"         // `sz_find`, `sz_find_charset`, `sz_rfind`
-#include "hash.h"         // `sz_bytesum`, `sz_hash`, `sz_state_init`, `sz_state_stream`, `sz_state_fold`
-#include "memory.h"       // `sz_copy`, `sz_move`, `sz_fill`
-#include "similarity.h"   // `sz_edit_distance`, `sz_alignment_score`
-#include "small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
-#include "sort.h"         // `sz_sequence_argsort`, `sz_pgrams_sort`, `sz_pgrams_sort_stable`
 #include "types.h"        // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`
+#include "compare.h"      // `sz_equal`, `sz_order`
+#include "memory.h"       // `sz_copy`, `sz_move`, `sz_fill`
+#include "hash.h"         // `sz_bytesum`, `sz_hash`, `sz_state_init`, `sz_state_stream`, `sz_state_fold`
+#include "find.h"         // `sz_find`, `sz_find_charset`, `sz_rfind`
+#include "small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
+#include "similarity.h"   // `sz_levenshtein_distance`, `sz_needleman_wunsch_score`
+#include "sort.h"         // `sz_sequence_argsort`, `sz_pgrams_sort`, `sz_pgrams_sort_stable`
 
 #ifdef __cplusplus
 extern "C" {
