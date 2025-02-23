@@ -1,0 +1,6 @@
+# GitHub's Linguist doesn't properly classify many languages
+# https://github.com/github-linguist/linguist/blob/main/docs/overrides.md
+*.h linguist-language=C
+*.c linguist-language=C
+*.hpp lingujson-language=C++
+*.cpp lingujson-language=C++
