@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"strings"
 
-	sz "../go/stringzilla"
+	sz "github.com/ashvardanian/stringzilla/golang"
 )
 
 func assertEqual[T comparable](act T, exp T) int {

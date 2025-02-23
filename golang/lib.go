@@ -7,34 +7,25 @@
 // It requires Go 1.24 or newer to leverage the `cGo` `noescape` and `nocallback`
 // directives. Without those the latency of calling C functions from Go is too high
 // to be useful for string processing.
+//
+// Unlike the native Go `strings` package, StringZilla primarily targets byte-level
+// binary data processing, with less emphasis on UTF-8 and locale-specific tasks.
 package sz
 
 // #cgo CFLAGS: -O3
-// #cgo LDFLAGS: -lstringzilla_shared
+// #cgo LDFLAGS: -L. -L/usr/local/lib -lstringzilla_shared
 // #cgo noescape sz_find
 // #cgo noescape sz_find_byte
 // #cgo noescape sz_rfind
 // #cgo noescape sz_rfind_byte
 // #cgo noescape sz_find_char_from
 // #cgo noescape sz_rfind_char_from
-// #cgo noescape sz_look_up_transform
-// #cgo noescape sz_hamming_distance
-// #cgo noescape sz_hamming_distance_utf8
-// #cgo noescape sz_edit_distance
-// #cgo noescape sz_edit_distance_utf8
-// #cgo noescape sz_alignment_score
 // #cgo nocallback sz_find
 // #cgo nocallback sz_find_byte
 // #cgo nocallback sz_rfind
 // #cgo nocallback sz_rfind_byte
 // #cgo nocallback sz_find_char_from
 // #cgo nocallback sz_rfind_char_from
-// #cgo nocallback sz_look_up_transform
-// #cgo nocallback sz_hamming_distance
-// #cgo nocallback sz_hamming_distance_utf8
-// #cgo nocallback sz_edit_distance
-// #cgo nocallback sz_edit_distance_utf8
-// #cgo nocallback sz_alignment_score
 // #define SZ_DYNAMIC_DISPATCH 1
 // #include <stringzilla/stringzilla.h>
 import "C"
@@ -134,16 +125,16 @@ func LastIndexAny(str string, substr string) int64 {
 }
 
 // Count returns the number of overlapping or non-overlapping instances of `substr` in `str`.
-// If `substr` is an empty string, returns 1 + the number of Unicode code points in `str`.
+// If `substr` is an empty string, returns 1 + the length of the `str`.
 // https://pkg.go.dev/strings#Count
 func Count(str string, substr string, overlap bool) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
-	strLen := len(str)
+	strLen := int64(len(str))
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
-	substrLen := len(substr)
+	substrLen := int64(len(substr))
 
 	if substrLen == 0 {
-		return 1 + len([]rune(str))
+		return 1 + strLen
 	}
 	if strLen == 0 || strLen < substrLen {
 		return 0
@@ -152,23 +143,23 @@ func Count(str string, substr string, overlap bool) int64 {
 	count := int64(0)
 	if overlap == true {
 		for strLen > 0 {
-			ret := unsafe.Pointer(C.sz_find(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
-			if ret == nil {
+			matchPtr := unsafe.Pointer(C.sz_find(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
+			if matchPtr == nil {
 				break
 			}
 			count += 1
-			strLen -= (1 + int64(uintptr(ret)-uintptr(unsafe.Pointer(strPtr))))
-			strPtr = (*C.char)(unsafe.Add(ret, 1))
+			strLen -= (1 + int64(uintptr(matchPtr)-uintptr(unsafe.Pointer(strPtr))))
+			strPtr = (*C.char)(unsafe.Add(matchPtr, 1))
 		}
 	} else {
 		for strLen > 0 {
-			ret := unsafe.Pointer(C.sz_find(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
-			if ret == nil {
+			matchPtr := unsafe.Pointer(C.sz_find(strPtr, C.ulong(strLen), substrPtr, C.ulong(substrLen)))
+			if matchPtr == nil {
 				break
 			}
 			count += 1
-			strLen -= (substrLen + int64(uintptr(ret)-uintptr(unsafe.Pointer(strPtr))))
-			strPtr = (*C.char)(unsafe.Add(ret, substrLen))
+			strLen -= (substrLen + int64(uintptr(matchPtr)-uintptr(unsafe.Pointer(strPtr))))
+			strPtr = (*C.char)(unsafe.Add(matchPtr, substrLen))
 		}
 	}
 
