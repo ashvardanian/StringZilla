@@ -28,7 +28,7 @@ def is_64bit_arm() -> bool:
     if using_cibuildwheels:
         return "SZ_ARM64" in os.environ
     arch = platform.machine()
-    return  arch in ["arm64", "aarch64", "ARM64"]
+    return arch in ["arm64", "aarch64", "ARM64"]
 
 
 def is_big_endian() -> bool:
@@ -65,6 +65,7 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
 
 
 def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
+
     compile_args = [
         "-std=c99",  # use the C 99 language dialect
         "-pedantic",  # stick close to the C language standard, avoid compiler extensions
@@ -75,6 +76,8 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         "-Wno-incompatible-pointer-types",  # like: passing argument 4 of ‘sz_export_prefix_u32’ from incompatible pointer type
         "-Wno-discarded-qualifiers",  # like: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target type
         "-fPIC",  # to enable dynamic dispatch
+        "-mfloat-abi=hard",  # NEON intrinsics not available with the soft-float ABI
+        "-mmacosx-version-min=11.0",  # minimum macOS version
     ]
     link_args = [
         "-fPIC",  # to enable dynamic dispatch
@@ -106,7 +109,7 @@ def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     macros_args = [
         ("SZ_USE_X86_AVX512", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_X86_AVX2", "1" if is_64bit_x86() else "0"),
-        ("SZ_USE_ARM_SVE", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_ARM_SVE", "0"),
         ("SZ_USE_ARM_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
@@ -115,7 +118,7 @@ def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     return compile_args, link_args, macros_args
 
 
-if sys.platform == "linux":
+if sys.platform == "linux" or sys.platform.startswith('freebsd'):
     compile_args, link_args, macros_args = linux_settings()
 
 elif sys.platform == "darwin":
@@ -124,6 +127,9 @@ elif sys.platform == "darwin":
 elif sys.platform == "win32":
     compile_args, link_args, macros_args = windows_settings()
 
+# TODO: It would be great to infer available compilation flags on FreeBSD. They are likely similar to Linux
+else:
+    compile_args, link_args, macros_args = [], [], []
 
 ext_modules = [
     Extension(
@@ -150,8 +156,10 @@ with open(os.path.join(this_directory, "README.md"), "r", encoding="utf-8") as f
 setup(
     name=__lib_name__,
     version=__version__,
-    author="Ash Vardanian",
     description="SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
+    author="Ash Vardanian",
+    author_email="1983160+ashvardanian@users.noreply.github.com",
+    url="https://github.com/ashvardanian/stringzilla",
     long_description=long_description,
     long_description_content_type="text/markdown",
     license="Apache-2.0",
@@ -170,6 +178,7 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
         "Operating System :: OS Independent",

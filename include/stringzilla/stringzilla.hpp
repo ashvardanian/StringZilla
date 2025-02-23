@@ -79,6 +79,40 @@ using string_view = basic_string_slice<char const>;
 template <std::size_t count_characters>
 using carray = char[count_characters];
 
+#pragma region Memory Operations
+
+/**
+ *  @brief  Analog to @b `std::memset`, but with a more efficient implementation.
+ *  @param  target The pointer to the target memory region.
+ *  @param  value The byte value to set.
+ *  @param  n The number of bytes to copy.
+ */
+inline void memset(void *target, char value, std::size_t n) noexcept {
+    return sz_fill(reinterpret_cast<sz_ptr_t>(target), n, value);
+}
+
+/**
+ *  @brief  Analog to @b `std::memmove`, but with a more efficient implementation.
+ *  @param  target The pointer to the target memory region.
+ *  @param  source The pointer to the source memory region.
+ *  @param  n The number of bytes to copy.
+ */
+inline void memmove(void *target, void const *source, std::size_t n) noexcept {
+    return sz_move(reinterpret_cast<sz_ptr_t>(target), reinterpret_cast<sz_cptr_t>(source), n);
+}
+
+/**
+ *  @brief  Analog to @b `std::memcpy`, but with a more efficient implementation.
+ *  @param  target The pointer to the target memory region.
+ *  @param  source The pointer to the source memory region.
+ *  @param  n The number of bytes to copy.
+ */
+inline void memcpy(void *target, void const *source, std::size_t n) noexcept {
+    return sz_copy(reinterpret_cast<sz_ptr_t>(target), reinterpret_cast<sz_cptr_t>(source), n);
+}
+
+#pragma endregion
+
 #pragma region Character Sets
 
 /**
@@ -305,6 +339,55 @@ inline char_set punctuation_set() { return char_set {punctuation()}; }
 inline char_set whitespaces_set() { return char_set {whitespaces()}; }
 inline char_set newlines_set() { return char_set {newlines()}; }
 inline char_set base64_set() { return char_set {base64()}; }
+
+/**
+ *  @brief  A look-up table for character replacement operations.
+ *          Exactly 256 bytes for byte-to-byte replacement.
+ *          ! For larger character types should be allocated on the heap.
+ */
+template <typename char_type_ = char>
+class basic_look_up_table {
+    static_assert(sizeof(char_type_) == 1 || sizeof(char_type_) == 2 || sizeof(char_type_) == 4,
+                  "Character type must be 1, 2, or 4 bytes long");
+    static constexpr std::size_t size_k = sizeof(char_type_) == 1   ? 256ul
+                                          : sizeof(char_type_) == 2 ? 65536ul
+                                                                    : 4294967296ul;
+    static constexpr std::size_t bytes_k = size_k * sizeof(char_type_);
+    using usnigned_type_ = typename std::make_unsigned<char_type_>::type;
+
+    char_type_ lut_[size_k];
+
+  public:
+    using char_type = char_type_;
+
+    basic_look_up_table() noexcept { memset(&lut_[0], 0, bytes_k); }
+    explicit basic_look_up_table(char_type const (&chars)[size_k]) noexcept { memcpy(&lut_[0], chars, bytes_k); }
+    basic_look_up_table(std::array<char_type, size_k> const &chars) noexcept {
+        memcpy(&lut_[0], chars.data(), bytes_k);
+    }
+
+    basic_look_up_table(basic_look_up_table const &other) noexcept { memcpy(&lut_[0], other.lut_, bytes_k); }
+    basic_look_up_table &operator=(basic_look_up_table const &other) noexcept {
+        memcpy(&lut_[0], other.lut_, bytes_k);
+        return *this;
+    }
+
+    /**
+     *  @brief  Creates a look-up table with a one-to-one mapping of characters to themselves.
+     *  Similar to `std::iota` filling, but properly handles signed integer casts.
+     */
+    static basic_look_up_table identity() noexcept {
+        basic_look_up_table result;
+        for (std::size_t i = 0; i < size_k; ++i) { result.lut_[i] = static_cast<usnigned_type_>(i); }
+        return result;
+    }
+
+    inline sz_cptr_t raw() const noexcept { return reinterpret_cast<sz_cptr_t>(&lut_[0]); }
+    inline char_type &operator[](char_type c) noexcept { return lut_[sz_bitcast(usnigned_type_, c)]; }
+    inline char_type const &operator[](char_type c) const noexcept { return lut_[sz_bitcast(usnigned_type_, c)]; }
+};
+
+using look_up_table = basic_look_up_table<char>;
 
 #pragma endregion
 
@@ -1024,18 +1107,18 @@ class reversed_iterator_for {
         return *this;
     }
 
-    reversed_iterator_for operator++(int) const noexcept {
+    reversed_iterator_for operator++(int) noexcept {
         reversed_iterator_for temp = *this;
         --ptr_;
         return temp;
     }
 
-    reversed_iterator_for &operator--() const noexcept {
+    reversed_iterator_for &operator--() noexcept {
         ++ptr_;
         return *this;
     }
 
-    reversed_iterator_for operator--(int) const noexcept {
+    reversed_iterator_for operator--(int) noexcept {
         reversed_iterator_for temp = *this;
         ++ptr_;
         return temp;
@@ -1242,27 +1325,31 @@ class basic_string_slice {
      *  @warning The behavior is @b undefined if the position is beyond bounds.
      */
     reference sat(difference_type signed_offset) const noexcept {
-        size_type pos = (signed_offset < 0) ? size() + signed_offset : signed_offset;
+        size_type pos = static_cast<size_type>(signed_offset < 0 ? size() + signed_offset : signed_offset);
         assert(pos < size() && "string_slice::sat(i) out of bounds");
         return start_[pos];
     }
 
     /**
-     *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
-     *  @warning The behavior is @b undefined if `n > size()`.
+     *  @brief  The slice that would be dropped by `remove_prefix`, that accepts signed arguments
+     *          and does no bounds checking. Equivalent to Python's `"abc"[:2]` and `"abc"[:-1]`.
+     *  @warning The behavior is @b undefined if `n > size() || n < -size() || n == -0`.
      */
-    string_slice front(size_type n) const noexcept {
-        assert(n <= size() && "string_slice::front(n) out of bounds");
-        return {start_, n};
+    string_slice front(difference_type signed_offset) const noexcept {
+        size_type pos = static_cast<size_type>(signed_offset < 0 ? size() + signed_offset : signed_offset);
+        assert(pos <= size() && "string_slice::front(signed_offset) out of bounds");
+        return {start_, pos};
     }
 
     /**
-     *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
-     *  @warning The behavior is @b undefined if `n > size()`.
+     *  @brief  The slice that would be dropped by `remove_suffix`, that accepts signed arguments
+     *          and does no bounds checking. Equivalent to Python's `"abc"[2:]` and `"abc"[-1:]`.
+     *  @warning The behavior is @b undefined if `n > size() || n < -size() || n == -0`.
      */
-    string_slice back(size_type n) const noexcept {
-        assert(n <= size() && "string_slice::back(n) out of bounds");
-        return {start_ + length_ - n, n};
+    string_slice back(difference_type signed_offset) const noexcept {
+        size_type pos = static_cast<size_type>(signed_offset < 0 ? size() + signed_offset : signed_offset);
+        assert(pos <= size() && "string_slice::back(signed_offset) out of bounds");
+        return {start_ + pos, length_ - pos};
     }
 
     /**
@@ -1348,9 +1435,7 @@ class basic_string_slice {
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
      *  @return 0 if equal, negative if `*this` is less than `other`, positive if `*this` is greater than `other`.
      */
-    int compare(string_view other) const noexcept {
-        return (int)sz_order(start_, length_, other.start_, other.length_);
-    }
+    int compare(string_view other) const noexcept { return (int)sz_order(data(), size(), other.data(), other.size()); }
 
     /**
      *  @brief  Compares two strings lexicographically. If prefix matches, lengths are compared.
@@ -1443,7 +1528,7 @@ class basic_string_slice {
 
     /**  @brief  Checks if the string starts with the other string. */
     bool starts_with(string_view other) const noexcept {
-        return length_ >= other.length_ && sz_equal(start_, other.start_, other.length_) == sz_true_k;
+        return length_ >= other.size() && sz_equal(start_, other.data(), other.size()) == sz_true_k;
     }
 
     /**  @brief  Checks if the string starts with the other string. */
@@ -1457,8 +1542,8 @@ class basic_string_slice {
 
     /**  @brief  Checks if the string ends with the other string. */
     bool ends_with(string_view other) const noexcept {
-        return length_ >= other.length_ &&
-               sz_equal(start_ + length_ - other.length_, other.start_, other.length_) == sz_true_k;
+        return length_ >= other.size() &&
+               sz_equal(start_ + length_ - other.size(), other.data(), other.size()) == sz_true_k;
     }
 
     /**  @brief  Checks if the string ends with the other string. */
@@ -1472,12 +1557,12 @@ class basic_string_slice {
 
     /**  @brief  Python-like convenience function, dropping the matching prefix. */
     string_slice remove_prefix(string_view other) const noexcept {
-        return starts_with(other) ? string_slice {start_ + other.length_, length_ - other.length_} : *this;
+        return starts_with(other) ? string_slice {start_ + other.size(), length_ - other.size()} : *this;
     }
 
     /**  @brief  Python-like convenience function, dropping the matching suffix. */
     string_slice remove_suffix(string_view other) const noexcept {
-        return ends_with(other) ? string_slice {start_, length_ - other.length_} : *this;
+        return ends_with(other) ? string_slice {start_, length_ - other.size()} : *this;
     }
 
 #pragma endregion
@@ -1497,7 +1582,7 @@ class basic_string_slice {
      *  @return The offset of the first character of the match, or `npos` if not found.
      */
     size_type find(string_view other, size_type skip = 0) const noexcept {
-        auto ptr = sz_find(start_ + skip, length_ - skip, other.start_, other.length_);
+        auto ptr = sz_find(start_ + skip, length_ - skip, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1525,7 +1610,7 @@ class basic_string_slice {
      *  @return The offset of the first character of the match, or `npos` if not found.
      */
     size_type rfind(string_view other) const noexcept {
-        auto ptr = sz_rfind(start_, length_, other.start_, other.length_);
+        auto ptr = sz_rfind(start_, length_, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1575,10 +1660,16 @@ class basic_string_slice {
     partition_type partition(string_view pattern) const noexcept { return partition_(pattern, pattern.length()); }
 
     /**  @brief  Split the string into three parts, before the match, the match itself, and after it. */
+    partition_type partition(value_type pattern) const noexcept { return partition_(string_view(&pattern, 1), 1); }
+
+    /**  @brief  Split the string into three parts, before the match, the match itself, and after it. */
     partition_type partition(char_set pattern) const noexcept { return partition_(pattern, 1); }
 
     /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
     partition_type rpartition(string_view pattern) const noexcept { return rpartition_(pattern, pattern.length()); }
+
+    /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
+    partition_type rpartition(value_type pattern) const noexcept { return rpartition_(string_view(&pattern, 1), 1); }
 
     /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
     partition_type rpartition(char_set pattern) const noexcept { return rpartition_(pattern, 1); }
@@ -1731,7 +1822,7 @@ class basic_string_slice {
      */
     string_slice lstrip(char_set set) const noexcept {
         set = set.inverted();
-        auto new_start = sz_find_charset(start_, length_, &set.raw());
+        auto new_start = (pointer)sz_find_charset(start_, length_, &set.raw());
         return new_start ? string_slice {new_start, length_ - static_cast<size_type>(new_start - start_)}
                          : string_slice();
     }
@@ -1742,7 +1833,7 @@ class basic_string_slice {
      */
     string_slice rstrip(char_set set) const noexcept {
         set = set.inverted();
-        auto new_end = sz_rfind_charset(start_, length_, &set.raw());
+        auto new_end = (pointer)sz_rfind_charset(start_, length_, &set.raw());
         return new_end ? string_slice {start_, static_cast<size_type>(new_end - start_ + 1)} : string_slice();
     }
 
@@ -1752,7 +1843,7 @@ class basic_string_slice {
      */
     string_slice strip(char_set set) const noexcept {
         set = set.inverted();
-        auto new_start = sz_find_charset(start_, length_, &set.raw());
+        auto new_start = (pointer)sz_find_charset(start_, length_, &set.raw());
         return new_start ? string_slice {new_start,
                                          static_cast<size_type>(
                                              sz_rfind_charset(new_start, length_ - (new_start - start_), &set.raw()) -
@@ -1811,12 +1902,15 @@ class basic_string_slice {
     rsplit_chars_type rsplit(char_set set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Split around the occurrences of all newline characters. */
-    split_chars_type splitlines() const noexcept { return split(newlines_set); }
+    split_chars_type splitlines() const noexcept { return split(newlines_set()); }
 
 #pragma endregion
 
     /**  @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }
+
+    /**  @brief  Aggregates the values of individual bytes of a string. */
+    size_type checksum() const noexcept { return static_cast<size_type>(sz_checksum(start_, length_)); }
 
     /**  @brief  Populate a character set with characters present in this string. */
     char_set as_set() const noexcept {
@@ -1826,9 +1920,9 @@ class basic_string_slice {
     }
 
   private:
-    sz_constexpr_if_cpp20 string_view &assign(string_view const &other) noexcept {
-        start_ = other.start_;
-        length_ = other.length_;
+    sz_constexpr_if_cpp20 string_slice &assign(string_view const &other) noexcept {
+        start_ = (pointer)other.data();
+        length_ = other.size();
         return *this;
     }
 
@@ -1841,17 +1935,17 @@ class basic_string_slice {
     template <typename pattern_>
     partition_type partition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = find(pattern);
-        if (pos == npos) return {*this, string_view(), string_view()};
-        return {string_view(start_, pos), string_view(start_ + pos, pattern_length),
-                string_view(start_ + pos + pattern_length, length_ - pos - pattern_length)};
+        if (pos == npos) return {string_slice(*this), string_slice(), string_slice()};
+        return {string_slice(start_, pos), string_slice(start_ + pos, pattern_length),
+                string_slice(start_ + pos + pattern_length, length_ - pos - pattern_length)};
     }
 
     template <typename pattern_>
     partition_type rpartition_(pattern_ &&pattern, std::size_t pattern_length) const noexcept {
         size_type pos = rfind(pattern);
-        if (pos == npos) return {*this, string_view(), string_view()};
-        return {string_view(start_, pos), string_view(start_ + pos, pattern_length),
-                string_view(start_ + pos + pattern_length, length_ - pos - pattern_length)};
+        if (pos == npos) return {string_slice(*this), string_slice(), string_slice()};
+        return {string_slice(start_, pos), string_slice(start_ + pos, pattern_length),
+                string_slice(start_ + pos + pattern_length, length_ - pos - pattern_length)};
     }
 };
 
@@ -1871,6 +1965,7 @@ class basic_string_slice {
  *      * `try_` exception-free "try" operations that returning non-zero values on success,
  *      * `replace_all` and `erase_all` similar to Boost,
  *      * `edit_distance` - Levenshtein distance computation reusing the allocator,
+ *      * `translate` - character mapping,
  *      * `randomize`, `random` - for fast random string generation.
  *
  *  Functions defined for `basic_string_slice`, but not present in `basic_string`:
@@ -2188,15 +2283,15 @@ class basic_string {
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_view front(size_type n) const noexcept { return view().front(n); }
-    string_span front(size_type n) noexcept { return span().front(n); }
+    string_view front(difference_type n) const noexcept { return view().front(n); }
+    string_span front(difference_type n) noexcept { return span().front(n); }
 
     /**
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_view back(size_type n) const noexcept { return view().back(n); }
-    string_span back(size_type n) noexcept { return span().back(n); }
+    string_view back(difference_type n) const noexcept { return view().back(n); }
+    string_span back(difference_type n) noexcept { return span().back(n); }
 
     /**
      *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
@@ -3191,7 +3286,7 @@ class basic_string {
         return basic_string {concatenation<string_view, string_view> {view(), other}};
     }
     basic_string operator+(std::initializer_list<char_type> other) const noexcept(false) {
-        return basic_string {concatenation<string_view, string_view> {view(), other}};
+        return basic_string {concatenation<string_view, string_view> {view(), string_view(other)}};
     }
 
 #pragma endregion
@@ -3210,6 +3305,9 @@ class basic_string {
 
     /**  @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     size_type hash() const noexcept { return view().hash(); }
+
+    /**  @brief  Aggregates the values of individual bytes of a string. */
+    size_type checksum() const noexcept { return view().checksum(); }
 
     /**
      *  @brief  Overwrites the string with random characters from the given alphabet using the random generator.
@@ -3311,6 +3409,25 @@ class basic_string {
      */
     bool try_replace_all(char_set pattern, string_view replacement) noexcept {
         return try_replace_all_<char_set>(pattern, replacement);
+    }
+
+    /**
+     *  @brief  Replaces ( @b in-place ) all characters in the string using the provided lookup table.
+     */
+    basic_string &transform(look_up_table const &table) noexcept {
+        transform(table, data());
+        return *this;
+    }
+
+    /**
+     *  @brief  Maps all characters in the current string into another buffer using the provided lookup table.
+     *  @param  output  The buffer to write the transformed string into.
+     */
+    void transform(look_up_table const &table, pointer output) const noexcept {
+        sz_ptr_t start;
+        sz_size_t length;
+        sz_string_range(&string_, &start, &length);
+        sz_look_up_transform((sz_cptr_t)start, (sz_size_t)length, (sz_cptr_t)table.raw(), (sz_ptr_t)output);
     }
 
   private:
@@ -3570,6 +3687,41 @@ bool basic_string<char_type_, allocator_>::try_preparing_replacement(size_type o
     }
 }
 
+/**
+ *  @brief  Helper function-like object to order string-view convertible objects with StringZilla.
+ *  @see    Similar to `std::less<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/less
+ *
+ *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
+ *  Can be used to combine STL classes with StringZilla logic, like: `std::map<std::string, int, sz::string_view_less>`.
+ */
+struct string_view_less {
+    bool operator()(string_view a, string_view b) const noexcept { return a < b; }
+};
+
+/**
+ *  @brief  Helper function-like object to check equality between string-view convertible objects with StringZilla.
+ *  @see    Similar to `std::equal_to<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/equal_to
+ *
+ *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
+ *  Can be used to combine STL classes with StringZilla logic, like:
+ *      `std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to>`.
+ */
+struct string_view_equal_to {
+    bool operator()(string_view a, string_view b) const noexcept { return a == b; }
+};
+
+/**
+ *  @brief  Helper function-like object to hash string-view convertible objects with StringZilla.
+ *  @see    Similar to `std::hash<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/hash
+ *
+ *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
+ *  Can be used to combine STL classes with StringZilla logic, like:
+ *      `std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to>`.
+ */
+struct string_view_hash {
+    std::size_t operator()(string_view str) const noexcept { return str.hash(); }
+};
+
 /**  @brief  SFINAE-type used to infer the resulting type of concatenating multiple string together. */
 template <typename... args_types>
 struct concatenation_result {};
@@ -3756,6 +3908,26 @@ void randomize(basic_string_slice<char_type_> string, generator_type_ &generator
 }
 
 /**
+ *  @brief  Replaces ( @b in-place ) all characters in the string using the provided lookup table.
+ */
+template <typename char_type_>
+void transform(basic_string_slice<char_type_> string, basic_look_up_table<char_type_> const &table) noexcept {
+    static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
+    sz_look_up_transform((sz_cptr_t)string.data(), (sz_size_t)string.size(), (sz_cptr_t)table.raw(),
+                         (sz_ptr_t)string.data());
+}
+
+/**
+ *  @brief  Maps all characters in the current string into another buffer using the provided lookup table.
+ */
+template <typename char_type_>
+void transform(basic_string_slice<char_type_ const> source, basic_look_up_table<char_type_> const &table,
+               char_type_ *target) noexcept {
+    static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
+    sz_look_up_transform((sz_cptr_t)source.data(), (sz_size_t)source.size(), (sz_cptr_t)table.raw(), (sz_ptr_t)target);
+}
+
+/**
  *  @brief  Overwrites the string slice with random characters from the given alphabet
  *          using `std::rand` as the random generator.
  *
@@ -3764,7 +3936,7 @@ void randomize(basic_string_slice<char_type_> string, generator_type_ &generator
  */
 template <typename char_type_>
 void randomize(basic_string_slice<char_type_> string, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
-    randomize(string, &std::rand, alphabet);
+    randomize(string, std::rand, alphabet);
 }
 
 using sorted_idx_t = sz_sorted_idx_t;

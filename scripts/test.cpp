@@ -1,4 +1,4 @@
-#undef NDEBUG      // Enable all assertions
+#undef NDEBUG // Enable all assertions
 
 // Enable assertions for iterators
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
@@ -24,14 +24,16 @@
 #include <sanitizer/asan_interface.h> // ASAN
 #endif
 
-#include <algorithm> // `std::transform`
-#include <cstdio>    // `std::printf`
-#include <cstring>   // `std::memcpy`
-#include <iterator>  // `std::distance`
-#include <memory>    // `std::allocator`
-#include <random>    // `std::random_device`
-#include <sstream>   // `std::ostringstream`
-#include <vector>    // `std::vector`
+#include <algorithm>     // `std::transform`
+#include <cstdio>        // `std::printf`
+#include <cstring>       // `std::memcpy`
+#include <iterator>      // `std::distance`
+#include <map>           // `std::map`
+#include <memory>        // `std::allocator`
+#include <random>        // `std::random_device`
+#include <sstream>       // `std::ostringstream`
+#include <unordered_map> // `std::unordered_map`
+#include <vector>        // `std::vector`
 
 #include <string>      // Baseline
 #include <string_view> // Baseline
@@ -45,6 +47,26 @@
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
 using sz::literals::operator""_sz;
+
+/*
+ *  Instantiate all the templates to make the symbols visible and also check
+ *  for weird compilation errors on uncommon paths.
+ */
+#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+template class std::basic_string_view<char>;
+#endif
+template class sz::basic_string_slice<char>;
+template class std::basic_string<char>;
+template class sz::basic_string<char>;
+template class sz::basic_charset<char>;
+
+template class std::vector<sz::string>;
+template class std::map<sz::string, int>;
+template class std::unordered_map<sz::string, int>;
+
+template class std::vector<sz::string_view>;
+template class std::map<sz::string_view, int>;
+template class std::unordered_map<sz::string_view, int>;
 
 /**
  *  @brief  Several string processing operations rely on computing integer logarithms.
@@ -115,31 +137,126 @@ static void test_arithmetical_utilities() {
                    (static_cast<sz_u8_t>(number) / static_cast<sz_u8_t>(divisor)));
 }
 
-/**
- *  @brief  Validates that `sz_move` and `sz_copy` work as expected,
- *          comparing them to `std::memmove` and `std::memcpy`.
- */
-static void test_memory_utilities() {
-    constexpr std::size_t size = 1024;
-    char body_stl[size];
-    char body_sz[size];
+inline void expect_equality(char const *a, char const *b, std::size_t size) {
+    if (std::memcmp(a, b, size) == 0) return;
+    std::size_t mismatch_position = 0;
+    for (; mismatch_position < size; ++mismatch_position)
+        if (a[mismatch_position] != b[mismatch_position]) break;
+    std::fprintf(stderr, "Mismatch at position %zu: %c != %c\n", mismatch_position, a[mismatch_position],
+                 b[mismatch_position]);
+    assert(false);
+}
 
+/**
+ *  @brief  Validates that `sz::memcpy`, `sz::memset`, and `sz::memmove` work similar to their `std::` counterparts.
+ *
+ *  Uses a large heap-allocated buffer to ensure that operations optimized for @b larger-than-L2-cache memory
+ *  regions are tested. Uses a combination of deterministic and random tests with uniform and exponential distributions.
+ */
+static void test_memory_utilities( //
+    std::size_t experiments = 1024ull * 1024ull, std::size_t max_l2_size = 1024ull * 1024ull) {
+
+    // We will be mirroring the operations on both standard and StringZilla strings.
+    std::string text_stl(max_l2_size, '-');
+    std::string text_sz(max_l2_size, '-');
+    expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
+
+    // The traditional `memset` and `memcpy` functions are undefined for zero-length buffers and NULL pointers
+    // for older C standards.  However, with the N3322 proposal for C2y, that issue has been resolved.
+    // https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
+    //
+    // Let's make sure, that our versions don't trigger any undefined behavior.
+    sz::memset(NULL, 0, 0);
+    sz::memcpy(NULL, NULL, 0);
+    sz::memmove(NULL, NULL, 0);
+
+    // First start with simple deterministic tests.
+    // Let's use `memset` to fill the strings with a pattern like "122333444455555...00000000000011111111111..."
+    std::size_t count_groups = 0;
+    for (std::size_t offset = 0, fill_length = 1; offset < max_l2_size;
+         offset += fill_length, ++fill_length, ++count_groups) {
+        char fill_value = '0' + fill_length % 10;
+        fill_length = offset + fill_length > max_l2_size ? max_l2_size - offset : fill_length;
+        std::memset((void *)(text_stl.data() + offset), fill_value, fill_length);
+        sz::memset((void *)(text_sz.data() + offset), fill_value, fill_length);
+        expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
+    }
+
+    // Let's copy those chunks to an empty buffer one by one, validating the overall equivalency after every copy.
+    std::string copy_stl(max_l2_size, '-');
+    std::string copy_sz(max_l2_size, '-');
+    for (std::size_t offset = 0, fill_length = 1; offset < max_l2_size; offset += fill_length, ++fill_length) {
+        fill_length = offset + fill_length > max_l2_size ? max_l2_size - offset : fill_length;
+        std::memcpy((void *)(copy_stl.data() + offset), (void *)(text_stl.data() + offset), fill_length);
+        sz::memcpy((void *)(copy_sz.data() + offset), (void *)(text_sz.data() + offset), fill_length);
+        expect_equality(copy_stl.data(), copy_sz.data(), max_l2_size);
+    }
+    expect_equality(text_stl.data(), copy_stl.data(), max_l2_size);
+    expect_equality(text_sz.data(), copy_sz.data(), max_l2_size);
+
+    // Let's simulate a realistic `memmove` workloads, compacting parts of this buffer, removing all odd values,
+    // so the buffer will look like "224444666666..."
+    for (std::size_t offset = 0, fill_length = 1; offset < max_l2_size; offset += fill_length, ++fill_length) {
+        if (fill_length % 2 == 0) continue;             // Skip even chunks
+        if (offset + fill_length >= max_l2_size) break; // This is the last & there are no more even chunks to shift
+
+        // Make sure we don't overflow the buffer
+        std::size_t next_offset = offset + fill_length;
+        std::size_t next_fill_length = fill_length + 1;
+        next_fill_length = next_offset + next_fill_length > max_l2_size ? max_l2_size - next_offset : next_fill_length;
+
+        std::memmove((void *)(text_stl.data() + offset), (void *)(text_stl.data() + next_offset), next_fill_length);
+        sz::memmove((void *)(text_sz.data() + offset), (void *)(text_sz.data() + next_offset), next_fill_length);
+        expect_equality(text_stl.data(), text_sz.data(), max_l2_size);
+    }
+
+    // Now the opposite workload, expanding the buffer, inserting a dash "-" before every group of equal characters.
+    // We will need to navigate right-to left to avoid overwriting the groups.
+    std::size_t dashed_capacity = copy_stl.size() + count_groups;
+    std::size_t dashed_length = 0;
+    copy_stl.resize(dashed_capacity);
+    copy_sz.resize(dashed_capacity);
+    for (std::size_t reverse_offset = 0; reverse_offset < max_l2_size;) {
+
+        // Walk backwards to find the length of the current group
+        std::size_t offset = max_l2_size - reverse_offset - 1;
+        std::size_t fill_length = 1;
+        while (offset > 0 && copy_stl[offset - 1] == copy_stl[offset]) --offset, ++fill_length;
+
+        std::size_t new_offset = dashed_capacity - dashed_length - fill_length;
+        std::memmove((void *)(copy_stl.data() + new_offset), (void *)(copy_stl.data() + offset), fill_length);
+        sz::memmove((void *)(copy_sz.data() + new_offset), (void *)(copy_sz.data() + offset), fill_length);
+        expect_equality(copy_stl.data(), copy_sz.data(), max_l2_size);
+
+        // Put the delimiter
+        copy_stl[new_offset] = '-';
+        copy_sz[new_offset] = '-';
+        dashed_length += fill_length + 1;
+        reverse_offset += fill_length;
+    }
+
+    sz_unused(experiments);
+
+#if 0 // TODO:
+
+    // We are going to randomly select the "source" and "target" slices of the strings.
+    // For `memcpy` and `memset` the offsets should have uniform ditribution,
+    // while the length should decay with an exponential distribution.
+    // For `memmove` the offset should be uniform, but the "shift" and "length" should
+    // be exponenetial. The exponential distributions should be functions of the cache line width.
+    // https://en.cppreference.com/w/cpp/numeric/random/exponential_distribution
+    std::string dataset(max_l2_size, '-');
     auto &gen = global_random_generator();
-    uniform_uint8_distribution_t distribution;
-    std::generate(body_stl, body_stl + size, [&]() { return distribution(gen); });
-    std::copy(body_stl, body_stl + size, body_sz);
+    uniform_uint8_distribution_t alphabet_distribution('a', 'z');
+    std::uniform_int_distribution<std::size_t> length_distribution(1, max_l2_size);
+    std::exponential_distribution<double> shift_distribution(1.0 / SZ_CACHE_LINE_WIDTH);
 
     // Move the contents of both strings around, validating overall
     // equivalency after every random iteration.
-    for (std::size_t i = 0; i < size; i++) {
-        std::size_t offset = gen() % size;
-        std::size_t length = gen() % (size - offset);
-        std::size_t destination = gen() % (size - length);
-
-        std::memmove(body_stl + destination, body_stl + offset, length);
-        sz_move(body_sz + destination, body_sz + offset, length);
-        assert(std::memcmp(body_stl, body_sz, size) == 0);
+    for (std::size_t experiment = 0; experiment < experiments; experiment++) {
+        std::generate(dataset, dataset + size, [&]() { return alphabet_distribution(gen); });
     }
+#endif
 }
 
 #define assert_scoped(init, operation, condition) \
@@ -163,10 +280,10 @@ static void test_memory_utilities() {
 
 /**
  *  @brief  Invokes different C++ member methods of immutable strings to cover all STL APIs.
- *          This test guarantees API compatibility with STL `std::basic_string` template.
+ *          This test guarantees API @b compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
-static void test_api_readonly() {
+static void test_stl_compatibility_for_reads() {
 
     using str = string_type;
 
@@ -179,11 +296,11 @@ static void test_api_readonly() {
     assert(str("hello", 4) == "hell"); // Construct from substring
 
     // Element access.
-    assert(str("test")[0] == 't');
-    assert(str("test").at(1) == 'e');
+    assert(str("rest")[0] == 'r');
+    assert(str("rest").at(1) == 'e');
+    assert(*str("rest").data() == 'r');
     assert(str("front").front() == 'f');
     assert(str("back").back() == 'k');
-    assert(*str("data").data() == 'd');
 
     // Iterators.
     assert(*str("begin").begin() == 'b' && *str("cbegin").cbegin() == 'c');
@@ -230,6 +347,7 @@ static void test_api_readonly() {
     // More complex queries.
     assert(str("abbabbaaaaaa").find("aa") == 6);
     assert(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
+    assert(str("hello, world!").substr(0, 11).find("world") == str::npos);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);
@@ -277,13 +395,28 @@ static void test_api_readonly() {
     assert(str("abcdefgh" "\x01" "\xC6" "ijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" "\xC0" "\xFA" "0123456789+-", 68).find_last_of("\xC0\xC1") == 54);  // sets
     // clang-format on
 
-    // Boundary consitions.
+    // Boundary conditions.
     assert(str("hello").find_first_of("ox", 4) == 4);
     assert(str("hello").find_first_of("ox", 5) == str::npos);
     assert(str("hello").find_last_of("ox", 4) == 4);
     assert(str("hello").find_last_of("ox", 5) == 4);
     assert(str("hello").find_first_of("hx", 0) == 0);
     assert(str("hello").find_last_of("hx", 0) == 0);
+
+    // More complex relative patterns
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") <=
+           str("0123456789012345678901234567890123456789012345678901234567890123"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") <=
+           str("0223456789012345678901234567890123456789012345678901234567890123"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") <=
+           str("0213456789012345678901234567890123456789012345678901234567890123"));
+    assert(str("12341234") <= str("12341234"));
+    assert(str("12341234") > str("12241224"));
+    assert(str("12341234") < str("13241324"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") ==
+           str("0123456789012345678901234567890123456789012345678901234567890123"));
+    assert(str("0123456789012345678901234567890123456789012345678901234567890123") !=
+           str("0223456789012345678901234567890123456789012345678901234567890123"));
 
     // Comparisons.
     assert(str("a") != str("b"));
@@ -399,7 +532,7 @@ static void test_api_readonly() {
  *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
-static void test_api_mutable() {
+static void test_stl_compatibility_for_updates() {
 
     using str = string_type;
 
@@ -444,7 +577,10 @@ static void test_api_mutable() {
     assert(str().max_size() > 0);
     assert(str().get_allocator() == std::allocator<char>());
     assert(std::strcmp(str("c_str").c_str(), "c_str") == 0);
-    assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
+
+    // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
+    // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
+    if (SZ_DETECT_64_BIT) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
@@ -516,7 +652,10 @@ static void test_api_mutable() {
     assert_scoped(str s = "123", (void)0, str("hello").append(s.begin(), s.end()) == "hello123");
 }
 
-static void test_stl_conversion_api() {
+/**
+ *  @brief  Constructs StringZilla classes from STL and vice-versa to ensure that the conversions are working.
+ */
+static void test_stl_conversions() {
     // From a mutable STL string to StringZilla and vice-versa.
     {
         std::string stl {"hello"};
@@ -547,17 +686,49 @@ static void test_stl_conversion_api() {
 #endif
 }
 
+inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size_t step = 1) {
+    std::size_t n = (last >= first) ? ((last - first) / step + 1) : 0;
+    // Return 0 if there are no terms
+    if (n == 0) return 0;
+    // Compute the sum using the arithmetic sequence formula
+    std::size_t sum = n / 2 * (2 * first + (n - 1) * step);
+    // If n is odd, handle the remaining term separately to avoid overflow
+    if (n % 2 == 1) sum += (2 * first + (n - 1) * step) / 2;
+    return sum;
+}
+
 /**
  *  @brief  Invokes different C++ member methods of immutable strings to cover
  *          extensions beyond the STL API.
  */
 template <typename string_type>
-static void test_api_readonly_extensions() {
+static void test_non_stl_extensions_for_reads() {
     using str = string_type;
 
-    // Signed offset lokups and slices.
+    // Signed offset lookups and slices.
     assert(str("hello").sat(0) == 'h');
     assert(str("hello").sat(-1) == 'o');
+    assert(str("rest").sat(1) == 'e');
+    assert(str("rest").sat(-1) == 't');
+    assert(str("rest").sat(-4) == 'r');
+
+    assert(str("front").front() == 'f');
+    assert(str("front").front(1) == "f");
+    assert(str("front").front(2) == "fr");
+    assert(str("front").front(2) == "fr");
+    assert(str("front").front(-2) == "fro");
+    assert(str("front").front(0) == "");
+    assert(str("front").front(5) == "front");
+    assert(str("front").front(-5) == "");
+
+    assert(str("back").back() == 'k');
+    assert(str("back").back(1) == "ack");
+    assert(str("back").back(2) == "ck");
+    assert(str("back").back(-1) == "k");
+    assert(str("back").back(-2) == "ck");
+    assert(str("back").back(-4) == "back");
+    assert(str("back").back(4) == "");
+
     assert(str("hello").sub(1) == "ello");
     assert(str("hello").sub(-1) == "o");
     assert(str("hello").sub(1, 2) == "e");
@@ -615,9 +786,16 @@ static void test_api_readonly_extensions() {
     assert(sz::alignment_score(str("hello"), str("hello"), costs, -1) == 0);
     assert(sz::alignment_score(str("hello"), str("hell"), costs, -1) == -1);
 
-    assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
+    // Checksums
+    assert(str("a").checksum() == (std::size_t)'a');
+    assert(str("0").checksum() == (std::size_t)'0');
+    assert(str("0123456789").checksum() == arithmetic_sum('0', '9'));
+    assert(str("abcdefghijklmnopqrstuvwxyz").checksum() == arithmetic_sum('a', 'z'));
+    assert(str("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz").checksum() ==
+           arithmetic_sum('a', 'z') * 3);
 
     // Computing rolling fingerprints.
+    assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
     assert(sz::hashes_fingerprint<512>(str("hello"), 4).count() == 2);
     assert(sz::hashes_fingerprint<512>(str("hello"), 3).count() == 3);
 
@@ -631,7 +809,7 @@ static void test_api_readonly_extensions() {
     // Computing fuzzy search results.
 }
 
-void test_api_mutable_extensions() {
+void test_non_stl_extensions_for_updates() {
     using str = sz::string;
 
     // Try methods.
@@ -682,6 +860,14 @@ void test_api_mutable_extensions() {
     assert_scoped(str s = "hello", s.replace_all(sz::char_set("x"), "xx"), s == "hello");
     assert_scoped(str s = "hello", s.replace_all(sz::char_set("lo"), "lo"), s == "helololo");
 
+    // Directly mapping bytes using a Look-Up Table.
+    sz::look_up_table invert_case = sz::look_up_table::identity();
+    for (char c = 'a'; c <= 'z'; c++) invert_case[c] = c - 'a' + 'A';
+    for (char c = 'A'; c <= 'Z'; c++) invert_case[c] = c - 'A' + 'a';
+    assert_scoped(str s = "hello", s.transform(invert_case), s == "HELLO");
+    assert_scoped(str s = "HeLLo", s.transform(invert_case), s == "hEllO");
+    assert_scoped(str s = "H-lL0", s.transform(invert_case), s == "h-Ll0");
+
     // Concatenation.
     assert(str(str("a") | str("b")) == "ab");
     assert(str(str("a") | str("b") | str("ab")) == "abab");
@@ -723,6 +909,9 @@ static void test_constructors() {
     assert(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
+/**
+ *  @brief  Helper structure that counts the number of allocations and deallocations.
+ */
 struct accounting_allocator : public std::allocator<char> {
     inline static bool &verbose_ref() {
         static bool global_value = false;
@@ -769,6 +958,9 @@ void assert_balanced_memory(callback_type callback) {
     assert(bytes == 0);
 }
 
+/**
+ *  @brief  Checks for memory leaks in the string class using the `accounting_allocator`.
+ */
 static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
     std::size_t iterations = 4;
 
@@ -798,7 +990,7 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
         }
     });
 
-    // How about the move ctor?
+    // How about the move constructor?
     assert_balanced_memory([&]() {
         for (std::size_t i = 0; i < iterations; i++) {
             string unique_item(base);
@@ -839,27 +1031,29 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
 }
 
 /**
- *  @brief  Tests the correctness of the string class update methods, such as `append` and `erase`.
+ *  @brief  Tests the correctness of the string class update methods, such as `push_back` and `erase`.
  */
-static void test_updates() {
+static void test_updates(std::size_t repetitions = 1024) {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
-    std::string stl_string;
-    sz::string sz_string;
-    for (std::size_t length = 1; length != 200; ++length) {
-        char c = alphabet_chars[std::rand() % 26];
-        stl_string.push_back(c);
-        sz_string.push_back(c);
-        assert(sz::string_view(stl_string) == sz::string_view(sz_string));
-    }
+    for (std::size_t repetition = 0; repetition != repetitions; ++repetition) {
+        std::string stl_string;
+        sz::string sz_string;
+        for (std::size_t length = 1; length != 200; ++length) {
+            char c = alphabet_chars[std::rand() % 26];
+            stl_string.push_back(c);
+            sz_string.push_back(c);
+            assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+        }
 
-    // Compare STL and StringZilla strings erase functionality.
-    while (stl_string.length()) {
-        std::size_t offset_to_erase = std::rand() % stl_string.length();
-        std::size_t chars_to_erase = std::rand() % (stl_string.length() - offset_to_erase) + 1;
-        stl_string.erase(offset_to_erase, chars_to_erase);
-        sz_string.erase(offset_to_erase, chars_to_erase);
-        assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+        // Compare STL and StringZilla strings erase functionality.
+        while (stl_string.length()) {
+            std::size_t offset_to_erase = std::rand() % stl_string.length();
+            std::size_t chars_to_erase = std::rand() % (stl_string.length() - offset_to_erase) + 1;
+            stl_string.erase(offset_to_erase, chars_to_erase);
+            sz_string.erase(offset_to_erase, chars_to_erase);
+            assert(sz::string_view(stl_string) == sz::string_view(sz_string));
+        }
     }
 }
 
@@ -912,12 +1106,14 @@ static void test_search() {
     assert("aabaa"_sz.strip(sz::char_set {"a"}) == "b");
 
     // Check more advanced composite operations
+    assert("abbccc"_sz.partition('b').before.size() == 1);
     assert("abbccc"_sz.partition("bb").before.size() == 1);
     assert("abbccc"_sz.partition("bb").match.size() == 2);
     assert("abbccc"_sz.partition("bb").after.size() == 3);
     assert("abbccc"_sz.partition("bb").before == "a");
     assert("abbccc"_sz.partition("bb").match == "bb");
     assert("abbccc"_sz.partition("bb").after == "ccc");
+    assert("abb ccc"_sz.partition(sz::whitespaces_set()).after == "ccc");
 
     // Check ranges of search matches
     assert("hello"_sz.find_all("l").size() == 2);
@@ -952,11 +1148,20 @@ static void test_search() {
     assert(rfinds.size() == 3);
     assert(rfinds[0] == "c");
 
-    auto splits = ".a..c."_sz.split(sz::char_set(".")).template to<std::vector<std::string>>();
-    assert(splits.size() == 5);
-    assert(splits[0] == "");
-    assert(splits[1] == "a");
-    assert(splits[4] == "");
+    {
+        auto splits = ".a..c."_sz.split(sz::char_set(".")).template to<std::vector<std::string>>();
+        assert(splits.size() == 5);
+        assert(splits[0] == "");
+        assert(splits[1] == "a");
+        assert(splits[4] == "");
+    }
+
+    {
+        auto splits = "line1\nline2\nline3"_sz.split("line3").template to<std::vector<std::string>>();
+        assert(splits.size() == 2);
+        assert(splits[0] == "line1\nline2\n");
+        assert(splits[1] == "");
+    }
 
     assert(""_sz.split(".").size() == 1);
     assert(""_sz.rsplit(".").size() == 1);
@@ -1001,7 +1206,7 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
                                              std::size_t misalignment) {
     constexpr std::size_t max_repeats = 128;
 
-    // Allocate a buffer to store the haystack with enough padding to misalign it.
+    // Allocate a buffer to store the haystack with enough padding to mis-align it.
     std::size_t haystack_buffer_length = max_repeats * haystack_pattern.size() + 2 * SZ_CACHE_LINE_WIDTH;
     std::vector<char> haystack_buffer(haystack_buffer_length, 'x');
     char *haystack = haystack_buffer.data();
@@ -1269,6 +1474,36 @@ static void test_levenshtein_distances() {
 }
 
 /**
+ *  Evaluates the correctness of look-up table transforms using random lookup tables.
+ *
+ *  @param misalignment The number of bytes to misalign the haystack within the cacheline.
+ */
+void test_replacements(std::size_t lookup_tables_to_try = 128, std::size_t slices_per_table = 256) {
+
+    std::string body, transformed;
+    body.resize(1024 * 1024); // 1MB
+    transformed.resize(1024 * 1024);
+    std::generate(body.begin(), body.end(), []() { return (char)(std::rand() % 256); });
+
+    for (std::size_t lookup_table_variation = 0; lookup_table_variation != lookup_tables_to_try;
+         ++lookup_table_variation) {
+        sz::look_up_table lut;
+        for (std::size_t i = 0; i < 256; i++) lut[(char)i] = (char)(std::rand() % 256);
+
+        for (std::size_t slice_idx = 0; slice_idx != slices_per_table; ++slice_idx) {
+            std::size_t slice_offset = std::rand() % (body.length());
+            std::size_t slice_length = std::rand() % (body.length() - slice_offset);
+
+            sz::transform<char>(sz::string_view(body.data() + slice_offset, slice_length), lut,
+                                const_cast<char *>(transformed.data()) + slice_offset);
+            for (std::size_t i = 0; i != slice_length; ++i) {
+                assert(transformed[slice_offset + i] == lut[body[slice_offset + i]]);
+            }
+        }
+    }
+}
+
+/**
  *  @brief  Tests sorting functionality.
  */
 static void test_sequence_algorithms() {
@@ -1295,6 +1530,21 @@ static void test_sequence_algorithms() {
     }
 }
 
+/**
+ *  @brief  Tests constructing STL containers with StringZilla strings.
+ */
+static void test_stl_containers() {
+    std::map<sz::string, int> sorted_words_sz;
+    std::unordered_map<sz::string, int> words_sz;
+    assert(sorted_words_sz.empty());
+    assert(words_sz.empty());
+
+    std::map<std::string, int, sz::string_view_less> sorted_words_stl;
+    std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to> words_stl;
+    assert(sorted_words_stl.empty());
+    assert(words_stl.empty());
+}
+
 int main(int argc, char const **argv) {
 
     // Let's greet the user nicely
@@ -1308,22 +1558,23 @@ int main(int argc, char const **argv) {
     // Basic utilities
     test_arithmetical_utilities();
     test_memory_utilities();
+    test_replacements();
 
 // Compatibility with STL
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
-    test_api_readonly<std::string_view>();
+    test_stl_compatibility_for_reads<std::string_view>();
 #endif
-    test_api_readonly<std::string>();
-    test_api_readonly<sz::string_view>();
-    test_api_readonly<sz::string>();
+    test_stl_compatibility_for_reads<std::string>();
+    test_stl_compatibility_for_reads<sz::string_view>();
+    test_stl_compatibility_for_reads<sz::string>();
 
-    test_api_mutable<std::string>(); // Make sure the test itself is reasonable
-    test_api_mutable<sz::string>();  // The fact that this compiles is already a miracle :)
+    test_stl_compatibility_for_updates<std::string>(); // Make sure the test itself is reasonable
+    test_stl_compatibility_for_updates<sz::string>();  // The fact that this compiles is already a miracle :)
 
     // Cover the non-STL interfaces
-    test_api_readonly_extensions<sz::string_view>();
-    test_api_readonly_extensions<sz::string>();
-    test_api_mutable_extensions();
+    test_non_stl_extensions_for_reads<sz::string_view>();
+    test_non_stl_extensions_for_reads<sz::string>();
+    test_non_stl_extensions_for_updates();
 
     // The string class implementation
     test_constructors();
@@ -1332,7 +1583,7 @@ int main(int argc, char const **argv) {
     test_updates();
 
     // Advanced search operations
-    test_stl_conversion_api();
+    test_stl_conversions();
     test_comparisons();
     test_search();
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
@@ -1344,6 +1595,7 @@ int main(int argc, char const **argv) {
 
     // Sequences of strings
     test_sequence_algorithms();
+    test_stl_containers();
 
     std::printf("All tests passed... Unbelievable!\n");
     return 0;
