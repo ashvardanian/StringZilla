@@ -60,17 +60,39 @@ def find_all_sets(haystack: Str, characters: str) -> int:
     return count
 
 
+def translate(haystack: Str, look_up_table) -> str:
+    return haystack.translate(look_up_table)
+
+
 def log_functionality(
     tokens: List[str],
     pythonic_str: str,
     stringzilla_str: Str,
 ):
+    # Read-only Search
     log("str.find", pythonic_str, tokens, find_all)
     log("Str.find", stringzilla_str, tokens, find_all)
     log("str.rfind", pythonic_str, tokens, rfind_all)
     log("Str.rfind", stringzilla_str, tokens, rfind_all)
     log("re.finditer", pythonic_str, [r" \t\n\r"], find_all_regex)
     log("Str.find_first_of", stringzilla_str, [r" \t\n\r"], find_all_sets)
+
+    # Search & Modify
+    identity = bytes(range(256))
+    reverse = bytes(reversed(identity))
+    repeated = bytes(range(64)) * 4
+    hex = b"0123456789abcdef" * 16
+    log(
+        "str.translate",
+        pythonic_str,
+        [
+            bytes.maketrans(identity, reverse),
+            bytes.maketrans(identity, repeated),
+            bytes.maketrans(identity, hex),
+        ],
+        translate,
+    )
+    log("Str.translate", stringzilla_str, [reverse, repeated, hex], translate)
 
 
 def bench(

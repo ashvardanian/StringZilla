@@ -7,7 +7,7 @@ A typical codebase processes strings character by character, resulting in too ma
 LibC is different.
 It attempts to leverage SIMD instructions to boost some operations, and is often used by higher-level languages, runtimes, and databases.
 But it isn't perfect.
-1️⃣ First, even on common hardware, including over a billion 64-bit ARM CPUs, common functions like `strstr` and `memmem` only achieve 1/3 of the CPU's thoughput.
+1️⃣ First, even on common hardware, including over a billion 64-bit ARM CPUs, common functions like `strstr` and `memmem` only achieve 1/3 of the CPU's throughput.
 2️⃣ Second, SIMD coverage is inconsistent: acceleration in forward scans does not guarantee speed in the reverse-order search.
 3️⃣ At last, most high-level languages can't always use LibC, as the strings are often not NULL-terminated or may contain the Unicode "Zero" character in the middle of the string.
 That's why StringZilla was created.
@@ -171,7 +171,7 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>9.4</b> MB/s
     </td>
     <td align="center">
-      <code>uniform_int_distribution</code><br/>
+      <code>std::uniform_int_distribution</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>47.2</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>20.4</b> MB/s
     </td>
@@ -184,6 +184,28 @@ __Who is this for?__
       <code>sz_generate</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>56.2</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>25.8</b> MB/s
+    </td>
+  </tr>
+  <!-- Mapping Characters with Look-Up Table Transforms -->
+  <tr>
+    <td colspan="4" align="center">Mapping Characters with Look-Up Table Transforms</td>
+  </tr>
+  <tr>
+    <td align="center">⚪</td>
+    <td align="center">
+      <code>std::transform</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>3.81</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>2.65</b> GB/s
+    </td>
+    <td align="center">
+      <code>str.translate</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>260.0</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>140.0</b> MB/s
+    </td>
+    <td align="center">
+      <code>sz_look_up_transform</code><br/>
+      <span style="color:#ABABAB;">x86:</span> <b>21.2</b> &centerdot;
+      <span style="color:#ABABAB;">arm:</span> <b>8.5</b> GB/s
     </td>
   </tr>
   <!-- Sorting -->
@@ -254,7 +276,7 @@ StringZilla has a lot of functionality, most of which is covered by benchmarks a
 You can find those in the `./scripts` directory, with usage notes listed in the [`CONTRIBUTING.md`](CONTRIBUTING.md) file.
 Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are faster than either standard library.
 
-> Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 5 characters.
+> Most benchmarks were conducted on a 1 GB English text corpus, with an average word length of 6 characters.
 > The code was compiled with GCC 12, using `glibc` v2.35.
 > The benchmarks performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
 > Most modern Arm-based 64-bit CPUs will have similar relative speedups.
@@ -322,7 +344,12 @@ StringZilla's `Str` class is a hybrid of those two, providing `str`-like interfa
 from stringzilla import Str, File
 
 text_from_str = Str('some-string') # no copies, just a view
+text_from_bytes = Str(b'some-array') # no copies, just a view
 text_from_file = Str(File('some-file.txt')) # memory-mapped file
+
+import numpy as np
+alphabet_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)
+text_from_array = Str(memoryview(alphabet_array))
 ```
 
 The `File` class memory-maps a file from persistent memory without loading its copy into RAM.
@@ -371,6 +398,25 @@ x: int = text.find_first_not_of('chars', start=0, end=sys.maxsize)
 x: int = text.find_last_not_of('chars', start=0, end=sys.maxsize)
 x: Strs = text.split_charset(separator='chars', maxsplit=sys.maxsize, keepseparator=False)
 x: Strs = text.rsplit_charset(separator='chars', maxsplit=sys.maxsize, keepseparator=False)
+```
+
+You can also transform the string using Look-Up Tables (LUTs), mapping it to a different character set.
+This would result in a copy - `str` for `str` inputs and `bytes` for other types.
+
+```py
+x: str = text.translate('chars', {}, start=0, end=sys.maxsize, inplace=False)
+x: bytes = text.translate(b'chars', {}, start=0, end=sys.maxsize, inplace=False)
+```
+
+For efficiency reasons, pass the LUT as a string or bytes object, not as a dictionary.
+This can be useful in high-throughput applications dealing with binary data, including bioinformatics and image processing.
+Here is an example:
+
+```py
+import stringzilla as sz
+look_up_table = bytes(range(256)) # Identity LUT
+image = open("/image/path.jpeg", "rb").read()
+sz.translate(image, look_up_table, inplace=True)
 ```
 
 ### Collection-Level Operations
@@ -521,10 +567,10 @@ Similar to how `File` can be used to read a large file, other interfaces can be 
 The `Str` class has `write_to` to write the string to a file, and `offset_within` to obtain integer offsets of substring view in larger string for navigation.
 
 ```py
-web_archieve = Str("<html>...</html><html>...</html>")
-_, end_tag, next_doc = web_archieve.partition("</html>") # or use `find`
-next_doc_offset = next_doc.offset_within(web_archieve)
-web_archieve.write_to("next_doc.html") # no GIL, no copies, just a view
+web_archive = Str("<html>...</html><html>...</html>")
+_, end_tag, next_doc = web_archive.partition("</html>") # or use `find`
+next_doc_offset = next_doc.offset_within(web_archive)
+web_archive.write_to("next_doc.html") # no GIL, no copies, just a view
 ```
 
 #### PyArrow
@@ -665,10 +711,10 @@ sz::string haystack = "some string";
 sz::string_view needle = sz::string_view(haystack).substr(0, 4);
 
 auto substring_position = haystack.find(needle); // Or `rfind`
-auto hash = std::hash<sz::string_view>(haystack); // Compatible with STL's `std::hash`
+auto hash = std::hash<sz::string_view>{}(haystack); // Compatible with STL's `std::hash`
 
 haystack.end() - haystack.begin() == haystack.size(); // Or `rbegin`, `rend`
-haystack.find_first_of(" \w\t") == 4; // Or `find_last_of`, `find_first_not_of`, `find_last_not_of`
+haystack.find_first_of(" \v\t") == 4; // Or `find_last_of`, `find_first_not_of`, `find_last_not_of`
 haystack.starts_with(needle) == true; // Or `ends_with`
 haystack.remove_prefix(needle.size()); // Why is this operation in-place?!
 haystack.contains(needle) == true; // STL has this only from C++ 23 onwards
@@ -766,6 +812,25 @@ To safely print those, pass the `string_length` to `printf` as well.
 printf("%.*s\n", (int)string_length, string_start);
 ```
 
+### What's Wrong with the C Standard Library?
+
+StringZilla is not a drop-in replacement for the C Standard Library.
+It's designed to be a safer and more modern alternative.
+Conceptually:
+
+1. LibC strings are expected to be null-terminated, so to use the efficient LibC implementations on slices of larger strings, you'd have to copy them, which is more expensive than the original string operation.
+2. LibC functionality is asymmetric - you can find the first and the last occurrence of a character within a string, but you can't find the last occurrence of a substring.
+3. LibC function names are typically very short and cryptic.
+4. LibC lacks crucial functionality like hashing and doesn't provide primitives for less critical but relevant operations like fuzzy matching.
+
+Something has to be said about its support for UTF8.
+Aside from a single-byte `char` type, LibC provides `wchar_t`:
+
+- The size of `wchar_t` is not consistent across platforms. On Windows, it's typically 16 bits (suitable for UTF-16), while on Unix-like systems, it's usually 32 bits (suitable for UTF-32). This inconsistency can lead to portability issues when writing cross-platform code.
+- `wchar_t` is designed to represent wide characters in a fixed-width format (UTF-16 or UTF-32). In contrast, UTF-8 is a variable-length encoding, where each character can take from 1 to 4 bytes. This fundamental difference means that `wchar_t` and UTF-8 are incompatible.
+
+StringZilla [partially addresses those issues](#unicode-utf-8-and-wide-characters).
+
 ### What's Wrong with the C++ Standard Library?
 
 | C++ Code                             | Evaluation Result | Invoked Signature              |
@@ -816,7 +881,9 @@ When it's enabled, the _~~subjectively~~_ risky overloads from the Standard will
 using str = sz::string;
 
 str("a:b").front(1) == "a"; // no checks, unlike `substr`
+str("a:b").front(2) == "2"; // take first 2 characters
 str("a:b").back(-1) == "b"; // accepting negative indices
+str("a:b").back(-2) == ":b"; // similar to Python's `"a:b"[-2:]`
 str("a:b").sub(1, -1) == ":"; // similar to Python's `"a:b"[1:-1]`
 str("a:b").sub(-2, -1) == ":"; // similar to Python's `"a:b"[-2:-1]`
 str("a:b").sub(-2, 1) == ""; // similar to Python's `"a:b"[-2:1]`
@@ -847,9 +914,9 @@ StringZilla provides a convenient `partition` function, which returns a tuple of
 ```cpp
 auto parts = haystack.partition(':'); // Matching a character
 auto [before, match, after] = haystack.partition(':'); // Structure unpacking
-auto [before, match, after] = haystack.partition(char_set(":;")); // Character-set argument
+auto [before, match, after] = haystack.partition(sz::char_set(":;")); // Character-set argument
 auto [before, match, after] = haystack.partition(" : "); // String argument
-auto [before, match, after] = haystack.rpartition(sz::whitespaces); // Split around the last whitespace
+auto [before, match, after] = haystack.rpartition(sz::whitespaces_set()); // Split around the last whitespace
 ```
 
 Combining those with the `split` function, one can easily parse a CSV file or HTTP headers.
@@ -875,8 +942,8 @@ Here is a sneak peek of the most useful ones.
 ```cpp
 text.hash(); // -> 64 bit unsigned integer 
 text.ssize(); // -> 64 bit signed length to avoid `static_cast<std::ssize_t>(text.size())`
-text.contains_only(" \w\t"); // == text.find_first_not_of(char_set(" \w\t")) == npos;
-text.contains(sz::whitespaces); // == text.find(char_set(sz::whitespaces)) != npos;
+text.contains_only(" \w\t"); // == text.find_first_not_of(sz::char_set(" \w\t")) == npos;
+text.contains(sz::whitespaces_set()); // == text.find(sz::char_set(sz::whitespaces_set())) != npos;
 
 // Simpler slicing than `substr`
 text.front(10); // -> sz::string_view
@@ -888,9 +955,9 @@ text.front(10, cap) == text.front(std::min(10, text.size()));
 text.back(10, cap) == text.back(std::min(10, text.size()));
 
 // Character set filtering
-text.lstrip(sz::whitespaces).rstrip(sz::newlines); // like Python
-text.front(sz::whitespaces); // all leading whitespaces
-text.back(sz::digits); // all numerical symbols forming the suffix
+text.lstrip(sz::whitespaces_set()).rstrip(sz::newlines_set()); // like Python
+text.front(sz::whitespaces_set()); // all leading whitespaces
+text.back(sz::digits_set()); // all numerical symbols forming the suffix
 
 // Incremental construction
 using sz::string::unchecked;
@@ -921,7 +988,7 @@ To avoid those, StringZilla provides lazily-evaluated ranges, compatible with th
 
 ```cpp
 for (auto line : haystack.split("\r\n"))
-    for (auto word : line.split(char_set(" \w\t.,;:!?")))
+    for (auto word : line.split(sz::char_set(" \w\t.,;:!?")))
         std::cout << word << std::endl;
 ```
 
@@ -930,9 +997,9 @@ It also allows interleaving matches, if you want both inclusions of `xx` in `xxx
 Debugging pointer offsets is not a pleasant exercise, so keep the following functions in mind.
 
 - `haystack.[r]find_all(needle, interleaving)`
-- `haystack.[r]find_all(char_set(""))`
+- `haystack.[r]find_all(sz::char_set(""))`
 - `haystack.[r]split(needle)`
-- `haystack.[r]split(char_set(""))`
+- `haystack.[r]split(sz::char_set(""))`
 
 For $N$ matches the split functions will report $N+1$ matches, potentially including empty strings.
 Ranges have a few convenience methods as well:
@@ -980,8 +1047,8 @@ The STL provides `std::generate` and `std::random_device`, that can be used with
 ```cpp
 sz::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
     sz::string result(length, '\0');
-    static std::random_device seed_source; // Too expensive to construct every time
-    std::mt19937 generator(seed_source());
+    static std::random_device seed_source; // Expensive to construct - due to system calls
+    static std::mt19937 generator(seed_source()); // Also expensive - due to the state size
     std::uniform_int_distribution<std::size_t> distribution(0, cardinality);
     std::generate(result.begin(), result.end(), [&]() { return alphabet[distribution(generator)]; });
     return result;
@@ -1002,6 +1069,18 @@ dna.randomize(&std::rand, "ACGT"); // pass any generator, like `std::mt19937`
 char uuid[36];
 sz::randomize(sz::string_span(uuid, 36), "0123456789abcdef-"); // Overwrite any buffer
 ```
+
+### Bulk Replacements
+
+In text processing, it's often necessary to replace all occurrences of a specific substring or set of characters within a string.
+Standard library functions may not offer the most efficient or convenient methods for performing bulk replacements, especially when dealing with large strings or performance-critical applications.
+
+- `haystack.replace_all(needle_string, replacement_string)`
+- `haystack.replace_all(sz::char_set(""), replacement_string)`
+- `haystack.try_replace_all(needle_string, replacement_string)`
+- `haystack.try_replace_all(sz::char_set(""), replacement_string)`
+- `haystack.transform(sz::look_up_table::identity())`
+- `haystack.transform(sz::look_up_table::identity(), haystack.data())`
 
 ### Levenshtein Edit Distance and Alignment Scores
 
@@ -1117,8 +1196,10 @@ __`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
 > This may affect the type resolution system on obscure hardware platforms. 
 > Moreover, one may let `stringzilla` override the common symbols like the `memcpy` and `memset` with its own implementations.
 > In that case you can use the [`LD_PRELOAD` trick][ld-preload-trick] to prioritize it's symbols over the ones from the LibC and accelerate existing string-heavy applications without recompiling them.
+> It also adds a layer of security, as the `stringzilla` isn't [undefined for NULL inputs][redhat-memcpy-ub] like `memcpy(NULL, NULL, 0)`.
 
 [ld-preload-trick]: https://ashvardanian.com/posts/ld-preload-libsee
+[redhat-memcpy-ub]: https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
 
 __`SZ_AVOID_STL`__ and __`SZ_SAFETY_OVER_COMPATIBILITY`__:
 
@@ -1346,6 +1427,23 @@ With that solved, the SIMD implementation will become 5x faster than the serial 
 [faq-dipeptide]: https://en.wikipedia.org/wiki/Dipeptide
 [faq-titin]: https://en.wikipedia.org/wiki/Titin
 
+### Memory Copying, Fills, and Moves
+
+A lot has been written about the time computers spend copying memory and how that operation is implemented in LibC.
+Interestingly, the operation can still be improved, as most Assembly implementations use outdated instructions.
+Even performance-oriented STL replacements, like Meta's [Folly v2024.09.23 focus on AVX2](https://github.com/facebook/folly/blob/main/folly/memset.S), and don't take advantage of the new masked instructions in AVX-512 or SVE.
+
+In AVX-512, StringZilla uses non-temporal stores to avoid cache pollution, when dealing with very large strings.
+Moreover, it handles the unaligned head and the tails of the `target` buffer separately, ensuring that writes in big copies are always aligned to cache-line boundaries.
+That's true for both AVX2 and AVX-512 backends.
+
+StringZilla also contains "drafts" of smarter, but less efficient algorithms, that minimize the number of unaligned loads, perfoming shuffles and permutations.
+That's a topic for future research, as the performance gains are not yet satisfactory.
+
+> § Reading materials.
+> [`memset` benchmarks](https://github.com/nadavrot/memset_benchmark?tab=readme-ov-file) by Nadav Rotem.
+> [Cache Associativity](https://en.algorithmica.org/hpc/cpu-cache/associativity/) by Sergey Slotin.
+
 ### Random Generation
 
 Generating random strings from different alphabets is a very common operation.
@@ -1366,11 +1464,8 @@ For lexicographic sorting of strings, StringZilla uses a "hybrid-hybrid" approac
    1. IntroSort begins with a QuickSort.
    2. If the recursion depth exceeds a certain threshold, it switches to a HeapSort.
 
-Next design goals:
-
-- [ ] Generalize to arrays with over 4 billion entries.
-- [ ] Algorithmic improvements may yield another 3x performance gain.
-- [ ] SIMD-acceleration for the Radix slice.
+A better algorithm is in development.
+Check #173 for design goals and progress updates.
 
 ### Hashing
 
@@ -1463,6 +1558,11 @@ If you like strings and value efficiency, you may also enjoy the following proje
 - [hyperscan](https://github.com/intel/hyperscan) - regular expressions with SIMD acceleration.
 - [pyahocorasick](https://github.com/WojciechMula/pyahocorasick) - Aho-Corasick algorithm in Python.
 - [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) - fast string matching in C++ and Python.
+
+If you are looking for more reading materials on this topic, consider the following:
+
+- [5x faster strings with SIMD & SWAR](https://ashvardanian.com/posts/stringzilla/).
+- [The Painful Pitfalls of C++ STL Strings](https://ashvardanian.com/posts/painful-strings/).
 
 ## License 📜
 

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.1)
 project(
   stringzilla
-  VERSION 3.8.4
+  VERSION 3.11.3
   LANGUAGES C CXX
   DESCRIPTION "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances"
   HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla")
@@ -80,6 +80,7 @@ endif()
 include(GNUInstallDirs)
 set(STRINGZILLA_TARGET_NAME ${PROJECT_NAME})
 set(STRINGZILLA_INCLUDE_BUILD_DIR "${PROJECT_SOURCE_DIR}/include/")
+set(STRINGZILLA_INCLUDE_INSTALL_DIR "${CMAKE_INSTALL_INCLUDEDIR}")
 
 # Define our library
 add_library(${STRINGZILLA_TARGET_NAME} INTERFACE)
@@ -90,17 +91,6 @@ target_include_directories(
   INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}>
   $<INSTALL_INTERFACE:include>)
 
-if(STRINGZILLA_INSTALL)
-  install(
-    TARGETS ${STRINGZILLA_TARGET_NAME}
-    EXPORT ${STRINGZILLA_TARGETS_EXPORT_NAME}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    INCLUDES
-    DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR})
-  install(DIRECTORY ${STRINGZILLA_INCLUDE_BUILD_DIR}
-    DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR})
-endif()
 
 if(${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER 3.13)
   include(CTest)
@@ -264,6 +254,7 @@ if(${STRINGZILLA_BUILD_BENCHMARK})
   define_launcher(stringzilla_bench_sort scripts/bench_sort.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
   define_launcher(stringzilla_bench_token scripts/bench_token.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
   define_launcher(stringzilla_bench_container scripts/bench_container.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+  define_launcher(stringzilla_bench_memory scripts/bench_memory.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
 endif()
 
 if(${STRINGZILLA_BUILD_TEST})
@@ -302,8 +293,7 @@ if(${STRINGZILLA_BUILD_SHARED})
     set_target_properties(${target} PROPERTIES
       VERSION ${PROJECT_VERSION}
       SOVERSION 1
-      POSITION_INDEPENDENT_CODE ON
-      PUBLIC_HEADER include/stringzilla/stringzilla.h)
+      POSITION_INDEPENDENT_CODE ON)
 
     if (SZ_PLATFORM_X86)
       if (MSVC)
@@ -326,6 +316,16 @@ if(${STRINGZILLA_BUILD_SHARED})
         "SZ_USE_ARM_NEON=1"
         "SZ_USE_ARM_SVE=1")
     endif()
+
+    if (MSVC)
+      # Add dependencies for necessary runtime libraries in case of static linking
+      # This ensures that basic runtime functions are available:
+      # msvcrt.lib: Microsoft Visual C Runtime, required for basic C runtime functions on Windows.
+      # vcruntime.lib: Microsoft Visual C++ Runtime library for basic runtime functions.
+      # ucrt.lib: Universal C Runtime, necessary for linking basic C functions like I/O.
+      target_link_libraries(${target} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
+    endif()
+
   endfunction()
 
   define_shared(stringzilla_shared)
@@ -343,4 +343,33 @@ if(${STRINGZILLA_BUILD_SHARED})
     "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
   target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
   target_link_options(stringzillite PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
+
+
+endif()
+
+if(STRINGZILLA_INSTALL)
+  install(
+    TARGETS stringzilla_shared
+    ARCHIVE
+    BUNDLE
+    FRAMEWORK
+    LIBRARY
+    OBJECTS
+    PRIVATE_HEADER
+    PUBLIC_HEADER
+    RESOURCE
+    RUNTIME)
+  install(
+    TARGETS stringzillite
+    ARCHIVE
+    BUNDLE
+    FRAMEWORK
+    LIBRARY
+    OBJECTS
+    PRIVATE_HEADER
+    PUBLIC_HEADER
+    RESOURCE
+    RUNTIME)
+  install(DIRECTORY ${STRINGZILLA_INCLUDE_BUILD_DIR} DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR})
+  install(DIRECTORY ./c/ DESTINATION /usr/src/${PROJECT_NAME}/)
 endif()
