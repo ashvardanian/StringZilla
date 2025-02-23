@@ -104,11 +104,15 @@ For Python code:
 
 The primary C implementation and the C++ wrapper are built with CMake.
 Assuming the extensive use of new SIMD intrinsics and recent C++ language features, using a recent compiler is recommended.
-We prefer GCC 12, which is available from default Ubuntu repositories with Ubuntu 22.04 LTS onwards.
+We prefer GCC 12 or newer, which is available from default Ubuntu repositories with Ubuntu 22.04 LTS onwards.
 If this is your first experience with CMake, use the following commands to get started on Ubuntu:
 
 ```bash
-sudo apt-get update && sudo apt-get install cmake build-essential libjemalloc-dev g++-12 gcc-12
+sudo apt-get update
+sudo apt-get install build-essential
+sudo apt-get install cmake              # Consider pulling a newer version from PyPI
+sudo apt-get install g++-12 gcc-12      # You may already have a newer version on Ubuntu 24
+sudo apt install libstdc++6-12-dbg      # STL debugging symbols for GCC 12
 ```
 
 On MacOS it's recommended to use Homebrew and install Clang, as opposed to "Apple Clang".
@@ -129,10 +133,10 @@ Using modern syntax, this is how you build and run the test suite:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_TEST=1 -D CMAKE_BUILD_TYPE=Debug -B build_debug
-cmake --build build_debug --config Debug          # Which will produce the following targets:
-build_debug/stringzilla_test_cpp20                # Unit test for the entire library compiled for current hardware
-build_debug/stringzilla_test_cpp20_x86_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
-build_debug/stringzilla_test_cpp20_arm_serial     # Arm variant compiled without Neon
+cmake --build build_debug --config Debug      # Which will produce the following targets:
+build_debug/stringzilla_test_cpp20            # Unit test for the entire library compiled for current hardware
+build_debug/stringzilla_test_cpp20_serial     # x86 variant compiled for IvyBridge - last arch. before AVX2
+build_debug/stringzilla_test_cpp20_serial     # Arm variant compiled without Neon
 ```
 
 To use CppCheck for static analysis make sure to export the compilation commands.

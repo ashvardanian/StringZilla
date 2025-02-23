@@ -717,7 +717,7 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs)
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
-static char const doc_like_checksum[] = //
+static char const doc_like_bytesum[] = //
     "Compute the checksum of individual byte values in a string.\n"
     "\n"
     "This function can be called as a method on a Str object or as a standalone function.\n"
@@ -728,12 +728,12 @@ static char const doc_like_checksum[] = //
     "Raises:\n"
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
 
-static PyObject *Str_like_checksum(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_like_bytesum(PyObject *self, PyObject *args, PyObject *kwargs) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member || nargs > !is_member + 1 || kwargs) {
-        PyErr_SetString(PyExc_TypeError, "checksum() expects exactly one positional argument");
+        PyErr_SetString(PyExc_TypeError, "bytesum() expects exactly one positional argument");
         return NULL;
     }
 
@@ -746,7 +746,7 @@ static PyObject *Str_like_checksum(PyObject *self, PyObject *args, PyObject *kwa
         return NULL;
     }
 
-    sz_u64_t result = sz_checksum(text.start, text.length);
+    sz_u64_t result = sz_bytesum(text.start, text.length);
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
@@ -1858,8 +1858,8 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
                 return NULL;
     }
 
-    Py_ssize_t bound = 0; // Default value for bound
-    if (bound_obj && ((bound = PyLong_AsSsize_t(bound_obj)) < 0)) {
+    sz_size_t bound = SZ_SIZE_MAX; // Default value for bound
+    if (bound_obj && ((bound = (sz_size_t)PyLong_AsSize_t(bound_obj)) == (sz_size_t)(-1))) {
         PyErr_Format(PyExc_ValueError, "Bound must be a non-negative integer");
         return NULL;
     }
@@ -1877,8 +1877,7 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
     reusing_allocator.free = &temporary_memory_free;
     reusing_allocator.handle = &temporary_memory;
 
-    sz_size_t distance =
-        function(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &reusing_allocator);
+    sz_size_t distance = function(str1.start, str1.length, str2.start, str2.length, bound, &reusing_allocator);
 
     // Check for memory allocation issues
     if (distance == SZ_SIZE_MAX) {
@@ -3215,7 +3214,7 @@ static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_sort
     sequence.get_start = parts_get_start;
     sequence.get_length = parts_get_length;
     for (sz_sorted_idx_t i = 0; i != sequence.count; ++i) sequence.order[i] = i;
-    sz_sort(&sequence);
+    sz_sequence_argsort(&sequence);
 
     // Export results
     *parts_output = parts;
@@ -3685,7 +3684,7 @@ static PyMethodDef stringzilla_methods[] = {
 
     // Global unary extensions
     {"hash", Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
-    {"checksum", Str_like_checksum, SZ_METHOD_FLAGS, doc_like_checksum},
+    {"bytesum", Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
 
     {NULL, NULL, 0, NULL}};
 

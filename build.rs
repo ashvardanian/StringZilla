@@ -25,20 +25,22 @@ fn main() {
 
         // Set architecture-specific flags and macros
         if target_arch == "x86_64" {
-            build.define("SZ_USE_X86_AVX512", "1");
-            build.define("SZ_USE_X86_AVX2", "1");
+            build.define("SZ_USE_HASWELL", "1");
+            build.define("SZ_USE_SKYLAKE", "1");
+            build.define("SZ_USE_ICE", "1");
         } else {
-            build.define("SZ_USE_X86_AVX512", "0");
-            build.define("SZ_USE_X86_AVX2", "0");
+            build.define("SZ_USE_HASWELL", "0");
+            build.define("SZ_USE_SKYLAKE", "0");
+            build.define("SZ_USE_ICE", "0");
         }
 
         if target_arch == "aarch64" {
             build.flag_if_supported("-march=armv8-a+simd");
-            build.define("SZ_USE_ARM_SVE", "1");
-            build.define("SZ_USE_ARM_NEON", "1");
+            build.define("SZ_USE_NEON", "1");
+            build.define("SZ_USE_SVE", "1");
         } else {
-            build.define("SZ_USE_ARM_SVE", "0");
-            build.define("SZ_USE_ARM_NEON", "0");
+            build.define("SZ_USE_NEON", "0");
+            build.define("SZ_USE_SVE", "0");
         }
     } else if target.contains("darwin") {
         build.flag_if_supported("-fcolor-diagnostics");
@@ -47,28 +49,32 @@ fn main() {
 
         if target_arch == "x86_64" {
             // Assuming no AVX-512 support for Darwin as per setup.py logic
-            build.define("SZ_USE_X86_AVX512", "0");
-            build.define("SZ_USE_X86_AVX2", "1");
+            build.define("SZ_USE_HASWELL", "1");
+            build.define("SZ_USE_SKYLAKE", "0");
+            build.define("SZ_USE_ICE", "0");
         } else {
-            build.define("SZ_USE_X86_AVX512", "0");
-            build.define("SZ_USE_X86_AVX2", "0");
+            build.define("SZ_USE_HASWELL", "0");
+            build.define("SZ_USE_SKYLAKE", "0");
+            build.define("SZ_USE_ICE", "0");
         }
 
         if target_arch == "aarch64" {
-            build.define("SZ_USE_ARM_SVE", "0"); // Assuming no SVE support for Darwin
-            build.define("SZ_USE_ARM_NEON", "1");
+            build.define("SZ_USE_NEON", "1");
+            build.define("SZ_USE_SVE", "0"); // Assuming no SVE support for Darwin
         } else {
-            build.define("SZ_USE_ARM_SVE", "0");
-            build.define("SZ_USE_ARM_NEON", "0");
+            build.define("SZ_USE_NEON", "0");
+            build.define("SZ_USE_SVE", "0");
         }
     } else if target.contains("windows") {
         // Set architecture-specific flags and macros
         if target_arch == "x86_64" {
-            build.define("SZ_USE_X86_AVX512", "1");
-            build.define("SZ_USE_X86_AVX2", "1");
+            build.define("SZ_USE_HASWELL", "1");
+            build.define("SZ_USE_SKYLAKE", "1");
+            build.define("SZ_USE_ICE", "1");
         } else {
-            build.define("SZ_USE_X86_AVX512", "0");
-            build.define("SZ_USE_X86_AVX2", "0");
+            build.define("SZ_USE_HASWELL", "0");
+            build.define("SZ_USE_SKYLAKE", "0");
+            build.define("SZ_USE_ICE", "0");
         }
     }
 

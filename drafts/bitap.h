@@ -342,24 +342,24 @@ sz_u512_vec_t sz_inclusive_min(sz_i32_t previous, sz_error_cost_t gap, sz_u512_v
     shifted_vec.i32s[0] = previous;
     shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_vec.zmm);
     new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_one, new_vec.zmm, shifted_vec.zmm);
-    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+    _sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
 
     shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_two_vec.zmm, new_vec.zmm);
     shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_double_vec.zmm);
     new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_two, new_vec.zmm, shifted_vec.zmm);
-    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+    _sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
 
     shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_four_vec.zmm, new_vec.zmm);
     shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_quad_vec.zmm);
     new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_four, new_vec.zmm, shifted_vec.zmm);
-    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+    _sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
 
     shifted_vec.zmm = _mm512_permutexvar_epi32(shift_by_eight_vec.zmm, new_vec.zmm);
     shifted_vec.zmm = _mm512_add_epi32(shifted_vec.zmm, gap_octa_vec.zmm);
     new_vec.zmm = _mm512_mask_max_epi32(new_vec.zmm, mask_skip_eight, new_vec.zmm, shifted_vec.zmm);
 
-    sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
-    for (sz_size_t i = 1; i < 16; i++) sz_assert(new_vec.i32s[i] == max(new_vec.i32s[i - 1] + gap, new_vec.i32s[i]));
+    _sz_assert(new_vec.i32s[0] == max(previous + gap, base_vec.i32s[0]));
+    for (sz_size_t i = 1; i < 16; i++) _sz_assert(new_vec.i32s[i] == max(new_vec.i32s[i - 1] + gap, new_vec.i32s[i]));
 
     return new_vec;
 }
@@ -476,7 +476,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_charset_avx512(sz_cptr_t text, sz_size_t length, sz
 
 #endif // SZ_USE_AVX512
 
-#if SZ_USE_ARM_NEON
+#if SZ_USE_NEON
 
 SZ_PUBLIC sz_cptr_t sz_find_neon_too_smart(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
@@ -946,7 +946,7 @@ SZ_PUBLIC void sz_hashes_neon_readahead(sz_cptr_t start, sz_size_t length, sz_si
     }
 }
 
-#endif // SZ_USE_ARM_NEON
+#endif // SZ_USE_NEON
 
 #ifdef __cplusplus
 } // extern "C"
@@ -1015,7 +1015,7 @@ SZ_PUBLIC sz_ordering_t sz_order_avx2(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
     return sz_order_serial(a, a_length, b, b_length);
 }
 
-SZ_PUBLIC sz_ordering_t sz_order_avx512(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_u512_vec_t a_vec, b_vec;
 
     // The rare case, when both string are very long surves as a great example to understand
@@ -1124,8 +1124,8 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
             for (; length >= 128; target += 64, source += 64, length -= 64) {
                 second_vec.zmm = _mm512_load_si512(target + 64);
                 combined_vec.zmm = _mm512_permutex2var_epi8(first_vec.zmm, selector_vec.zmm, second_vec.zmm);
-                sz_assert(combined_vec.u8s[0] == source[0]);
-                sz_assert(combined_vec.u8s[63] == source[63]);
+                _sz_assert(combined_vec.u8s[0] == source[0]);
+                _sz_assert(combined_vec.u8s[63] == source[63]);
                 _mm512_store_si512(target, combined_vec.zmm);
                 first_vec.zmm = second_vec.zmm;
             }
@@ -1147,8 +1147,8 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
                 second_vec.zmm = _mm512_load_si512(target + 64);
                 first_shuffled_vec.zmm = _mm512_shuffle_epi8(first_vec.zmm, first_byte_permute_vec.zmm);
                 second_shuffled_vec.zmm = _mm512_shuffle_epi8(second_vec.zmm, second_byte_permute_vec.zmm);
-                sz_assert(first_shuffled_vec.u8s[0] == source[0]);
-                sz_assert(second_shuffled_vec.u8s[63] == source[63]);
+                _sz_assert(first_shuffled_vec.u8s[0] == source[0]);
+                _sz_assert(second_shuffled_vec.u8s[63] == source[63]);
                 combined_vec.zmm = _mm512_or_si512(first_shuffled_vec.zmm, second_shuffled_vec.zmm);
                 _mm512_store_si512(target, combined_vec.zmm);
                 first_vec.zmm = second_vec.zmm;
@@ -1279,8 +1279,8 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
                 second_vec.zmm = _mm512_load_si512(source_page + 64);
                 second_vec.zmm = _mm512_permutexvar_epi8(selector_vec.zmm, second_vec.zmm);
                 combined_vec.zmm = _mm512_mask_blend_epi8(blend_mask, second_vec.zmm, first_vec.zmm);
-                sz_assert(combined_vec.u8s[0] == source[0]);
-                sz_assert(combined_vec.u8s[63] == source[63]);
+                _sz_assert(combined_vec.u8s[0] == source[0]);
+                _sz_assert(combined_vec.u8s[63] == source[63]);
                 _mm512_store_si512(target, combined_vec.zmm);
                 first_vec.zmm = second_vec.zmm;
             }
@@ -1313,8 +1313,8 @@ SZ_PUBLIC void sz_move_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
                 second_vec.zmm = _mm512_load_si512(source_second_page - 64);
                 second_vec.zmm = _mm512_permutexvar_epi8(selector_vec.zmm, second_vec.zmm);
                 combined_vec.zmm = _mm512_mask_blend_epi8(blend_mask, second_vec.zmm, first_vec.zmm);
-                sz_assert(combined_vec.u8s[0] == source[0]);
-                sz_assert(combined_vec.u8s[63] == source[63]);
+                _sz_assert(combined_vec.u8s[0] == source[0]);
+                _sz_assert(combined_vec.u8s[63] == source[63]);
                 _mm512_store_si512(target + head_length + body_length, combined_vec.zmm);
                 first_vec.zmm = second_vec.zmm;
             }
