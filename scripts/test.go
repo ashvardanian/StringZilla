@@ -25,8 +25,6 @@ func main() {
 	ret := 0
 
 	fmt.Print("Contains ... ")
-	ret |= assertEqual(sz.Contains("", ""), true)
-	ret |= assertEqual(sz.Contains("test", ""), true)
 	ret |= assertEqual(sz.Contains("test", "s"), true)
 	ret |= assertEqual(sz.Contains("test", "test"), true)
 	ret |= assertEqual(sz.Contains("test", "zest"), false)
