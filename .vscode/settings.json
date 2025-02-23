@@ -86,6 +86,8 @@
     "Needleman",
     "newfunc",
     "NOARGS",
+    "nocallback",
+    "noescape",
     "noexcept",
     "NOMINMAX",
     "NOTIMPLEMENTED",
