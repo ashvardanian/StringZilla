@@ -490,6 +490,16 @@ LD_LIBRARY_PATH="$(pwd)/../build_golang:$LD_LIBRARY_PATH" \
 go test
 ```
 
+To benchmark:
+
+```bash
+cd golang
+CGO_CFLAGS="-I$(pwd)/../include" \
+CGO_LDFLAGS="-L$(pwd)/../build_golang -lstringzilla_shared" \
+LD_LIBRARY_PATH="$(pwd)/../build_golang:$LD_LIBRARY_PATH" \
+go run ../scripts/bench.go --input ../leipzig1M.txt
+```
+
 Alternatively:
 
 ```bash

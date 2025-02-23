@@ -15,16 +15,16 @@ package sz
 // #cgo CFLAGS: -O3
 // #cgo LDFLAGS: -L. -L/usr/local/lib -lstringzilla_shared
 // #cgo noescape sz_find
-// #cgo noescape sz_find_byte
-// #cgo noescape sz_rfind
-// #cgo noescape sz_rfind_byte
-// #cgo noescape sz_find_char_from
-// #cgo noescape sz_rfind_char_from
 // #cgo nocallback sz_find
+// #cgo noescape sz_find_byte
 // #cgo nocallback sz_find_byte
+// #cgo noescape sz_rfind
 // #cgo nocallback sz_rfind
+// #cgo noescape sz_rfind_byte
 // #cgo nocallback sz_rfind_byte
+// #cgo noescape sz_find_char_from
 // #cgo nocallback sz_find_char_from
+// #cgo noescape sz_rfind_char_from
 // #cgo nocallback sz_rfind_char_from
 // #define SZ_DYNAMIC_DISPATCH 1
 // #include <stringzilla/stringzilla.h>
