@@ -1,28 +1,29 @@
 /**
- *  @brief  Hardware-accelerated string collection sorting.
+ *  @brief  Hardware-accelerated string collection sorting & joins.
  *  @file   sort.h
  *  @author Ash Vardanian
  *
  *  Includes core APIs for `sz_sequence_t` string collections:
  *
- *  - `sz_sequence_argsort` - to get the sorting permutation of a string collection with QuickSort.
- *  - `sz_sequence_argsort_stable` - to get the stable-sorting permutation of a string collection with a MergeSort.
+ *  - `sz_sequence_argsort` - to get the sorting permutation of a string collection.
+ *  - `sz_sequence_join` - to compute the intersection of two arbitrary string collections.
  *
- *  The core idea of all following string algorithms is to sort strings not based on 1 character at a time,
+ *  The core idea of all following string algorithms is to process strings not based on 1 character at a time,
  *  but on a larger "Pointer-sized N-grams" fitting in 4 or 8 bytes at once, on 32-bit or 64-bit architectures,
- *  respectively. In reality we may not use the full pointer size, but only a few bytes from it, and keep the rest
- *  for some metadata.
+ *  respectively. In reality we may not use the full pointer size, but only a few bytes from it, and keep the
+ *  rest for some metadata.
  *
- *  That, however, means, that unsigned integer sorting is a constituent part of our string sorting and we can
- *  expose it as an additional set of APIs for the users:
+ *  That, however, means, that unsigned integer sorting & matching is a constituent part of our sequence
+ *  algorithms and we can expose them as an additional set of APIs for the users:
  *
- *  - `sz_pgrams_sort` - to inplace sort continuous pointer-sized integers with QuickSort.
- *  - `sz_pgrams_sort_stable` - to inplace stable-sort continuous pointer-sized integers with a MergeSort.
+ *  - `sz_pgrams_sort` - to inplace sort continuous pointer-sized integers.
+ *  - `sz_pgrams_join` - to compute the intersection of two arbitrary integer collections.
  *
- *  For cases, when the input is known to be tiny, we provide quadratic-complexity insertion sort adaptations:
+ *  Other helpers include:
  *
- *  - `sz_sequence_argsort_with_insertion` - for string collections.
- *  - `sz_pgrams_sort_stable_with_insertion` - for continuous unsigned integers.
+ *  - `sz_pgrams_sort_stable_with_insertion` - for quadratic-complexity sorting of small continuous integer arrays.
+ *  - `sz_sequence_argsort_with_insertion` - for quadratic-complexity sorting of small string collections.
+ *  - `sz_sequence_argsort_stabilize` - updates the sorting permutation to be stable.
  */
 #ifndef STRINGZILLA_SORT_H_
 #define STRINGZILLA_SORT_H_
@@ -845,7 +846,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t
 
 SZ_PUBLIC sz_status_t sz_sequence_argsort_stable_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                                         sz_sorted_idx_t *order) {
-
+    sz_unused(sequence && alloc && order);
     return sz_success_k;
 }
 
