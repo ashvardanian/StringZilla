@@ -20,6 +20,7 @@
  *  @brief  When set to 1, the library will include the C++ STL headers and implement
  *          automatic conversion from and to `std::stirng_view` and `std::basic_string<any_allocator>`.
  */
+#include "types.h"
 #ifndef SZ_AVOID_STL
 #define SZ_AVOID_STL (0) // true or false
 #endif
@@ -27,18 +28,29 @@
 /*  We need to detect the version of the C++ language we are compiled with.
  *  This will affect recent features like `operator<=>` and tests against STL.
  */
-#define SZ_DETECT_CPP_23 (__cplusplus >= 202101L)
-#define SZ_DETECT_CPP20 (__cplusplus >= 202002L)
-#define SZ_DETECT_CPP_17 (__cplusplus >= 201703L)
-#define SZ_DETECT_CPP14 (__cplusplus >= 201402L)
-#define SZ_DETECT_CPP_11 (__cplusplus >= 201103L)
-#define SZ_DETECT_CPP_98 (__cplusplus >= 199711L)
+#define _SZ_IS_CPP23 (__cplusplus >= 202101L)
+#define _SZ_IS_CPP20 (__cplusplus >= 202002L)
+#define _SZ_IS_CPP17 (__cplusplus >= 201703L)
+#define _SZ_IS_CPP14 (__cplusplus >= 201402L)
+#define _SZ_IS_CPP11 (__cplusplus >= 201103L)
+#define _SZ_IS_CPP98 (__cplusplus >= 199711L)
 
 /**
- *  @brief  The `constexpr` keyword has different applicability scope in different C++ versions.
+ *  @brief  Expands to `constexpr` in C++20 and later, and to nothing in older C++ versions.
  *          Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
+ *
+ *  The `constexpr` keyword has different applicability scope in different C++ versions.
+ *  - C++11: Introduced `constexpr`, but no loops or multiple `return` statements were allowed.
+ *  - C++14: Allowed loops, multiple statements, and local variables in `constexpr` functions.
+ *  - C++17: Added the `if constexpr` construct for compile-time branching.
+ *  - C++20: Added some dynamic memory allocations, `virtual` functions, and `try`/`catch` blocks.
  */
-#if SZ_DETECT_CPP20
+#if _SZ_IS_CPP14
+#define sz_constexpr_if_cpp14 constexpr
+#else
+#define sz_constexpr_if_cpp14
+#endif
+#if _SZ_IS_CPP20
 #define sz_constexpr_if_cpp20 constexpr
 #else
 #define sz_constexpr_if_cpp20
@@ -49,7 +61,7 @@
 #include <bitset>
 #include <string>
 #include <vector>
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 #include <string_view>
 #endif
 #endif
@@ -67,7 +79,7 @@ namespace ashvardanian {
 namespace stringzilla {
 
 template <typename>
-class basic_charset;
+class basic_char_set;
 template <typename>
 class basic_string_slice;
 template <typename, typename>
@@ -266,79 +278,85 @@ inline carray<64> const &base64() noexcept {
  *  @brief  A set of characters represented as a bitset with 256 slots.
  */
 template <typename char_type_ = char>
-class basic_charset {
+class basic_char_set {
     sz_charset_t bitset_;
 
   public:
     using char_type = char_type_;
 
-    basic_charset() noexcept {
+    sz_constexpr_if_cpp14 basic_char_set() noexcept {
         // ! Instead of relying on the `sz_charset_init`, we have to reimplement it to support `constexpr`.
         bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
     }
-    explicit basic_charset(std::initializer_list<char_type> chars) noexcept : basic_charset() {
+    explicit sz_constexpr_if_cpp14 basic_char_set(std::initializer_list<char_type> chars) noexcept : basic_char_set() {
         // ! Instead of relying on the `sz_charset_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
         for (auto c : chars) bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
     }
-    template <std::size_t count_characters>
-    explicit basic_charset(char_type const (&chars)[count_characters]) noexcept : basic_charset() {
-        static_assert(count_characters > 0, "Character array cannot be empty");
-        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+
+    explicit sz_constexpr_if_cpp14 basic_char_set(char_type const *chars, std::size_t count_characters) noexcept
+        : basic_char_set() {
+        for (std::size_t i = 0; i < count_characters; ++i) {
             char_type c = chars[i];
             bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
         }
     }
 
     template <std::size_t count_characters>
-    explicit basic_charset(std::array<char_type, count_characters> const &chars) noexcept : basic_charset() {
+    explicit sz_constexpr_if_cpp14 basic_char_set(std::array<char_type, count_characters> const &chars) noexcept
+        : basic_char_set() {
         static_assert(count_characters > 0, "Character array cannot be empty");
-        for (std::size_t i = 0; i < count_characters - 1; ++i) { // count_characters - 1 to exclude the null terminator
+        for (std::size_t i = 0; i < count_characters; ++i) {
             char_type c = chars[i];
             bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
         }
     }
 
-    basic_charset(basic_charset const &other) noexcept : bitset_(other.bitset_) {}
-    basic_charset &operator=(basic_charset const &other) noexcept {
+    sz_constexpr_if_cpp14 basic_char_set(basic_char_set const &other) noexcept : bitset_(other.bitset_) {}
+    sz_constexpr_if_cpp14 basic_char_set &operator=(basic_char_set const &other) noexcept {
         bitset_ = other.bitset_;
         return *this;
     }
 
-    basic_charset operator|(basic_charset other) const noexcept {
-        basic_charset result = *this;
+    constexpr basic_char_set operator|(basic_char_set other) const noexcept {
+        basic_char_set result = *this;
         result.bitset_._u64s[0] |= other.bitset_._u64s[0], result.bitset_._u64s[1] |= other.bitset_._u64s[1],
             result.bitset_._u64s[2] |= other.bitset_._u64s[2], result.bitset_._u64s[3] |= other.bitset_._u64s[3];
-        return *this;
+        return result;
     }
 
-    inline basic_charset &add(char_type c) noexcept {
+    inline basic_char_set &add(char_type c) noexcept {
         sz_charset_add(&bitset_, sz_bitcast(sz_u8_t, c));
         return *this;
+    }
+    inline std::size_t size() const noexcept {
+        return                                                                      //
+            sz_u64_popcount(bitset_._u64s[0]) + sz_u64_popcount(bitset_._u64s[1]) + //
+            sz_u64_popcount(bitset_._u64s[2]) + sz_u64_popcount(bitset_._u64s[3]);
     }
     inline sz_charset_t &raw() noexcept { return bitset_; }
     inline sz_charset_t const &raw() const noexcept { return bitset_; }
     inline bool contains(char_type c) const noexcept { return sz_charset_contains(&bitset_, sz_bitcast(sz_u8_t, c)); }
-    inline basic_charset inverted() const noexcept {
-        basic_charset result = *this;
+    inline basic_char_set inverted() const noexcept {
+        basic_char_set result = *this;
         sz_charset_invert(&result.bitset_);
         return result;
     }
 };
 
-using char_set = basic_charset<char>;
+using char_set = basic_char_set<char>;
 
-inline char_set ascii_letters_set() { return char_set {ascii_letters()}; }
-inline char_set ascii_lowercase_set() { return char_set {ascii_lowercase()}; }
-inline char_set ascii_uppercase_set() { return char_set {ascii_uppercase()}; }
-inline char_set ascii_printables_set() { return char_set {ascii_printables()}; }
-inline char_set ascii_controls_set() { return char_set {ascii_controls()}; }
-inline char_set digits_set() { return char_set {digits()}; }
-inline char_set hexdigits_set() { return char_set {hexdigits()}; }
-inline char_set octdigits_set() { return char_set {octdigits()}; }
-inline char_set punctuation_set() { return char_set {punctuation()}; }
-inline char_set whitespaces_set() { return char_set {whitespaces()}; }
-inline char_set newlines_set() { return char_set {newlines()}; }
-inline char_set base64_set() { return char_set {base64()}; }
+inline char_set ascii_letters_set() { return char_set {ascii_letters(), sizeof(ascii_letters())}; }
+inline char_set ascii_lowercase_set() { return char_set {ascii_lowercase(), sizeof(ascii_lowercase())}; }
+inline char_set ascii_uppercase_set() { return char_set {ascii_uppercase(), sizeof(ascii_uppercase())}; }
+inline char_set ascii_printables_set() { return char_set {ascii_printables(), sizeof(ascii_printables())}; }
+inline char_set ascii_controls_set() { return char_set {ascii_controls(), sizeof(ascii_controls())}; }
+inline char_set digits_set() { return char_set {digits(), sizeof(digits())}; }
+inline char_set hexdigits_set() { return char_set {hexdigits(), sizeof(hexdigits())}; }
+inline char_set octdigits_set() { return char_set {octdigits(), sizeof(octdigits())}; }
+inline char_set punctuation_set() { return char_set {punctuation(), sizeof(punctuation())}; }
+inline char_set whitespaces_set() { return char_set {whitespaces(), sizeof(whitespaces())}; }
+inline char_set newlines_set() { return char_set {newlines(), sizeof(newlines())}; }
+inline char_set base64_set() { return char_set {base64(), sizeof(base64())}; }
 
 /**
  *  @brief  A look-up table for character replacement operations.
@@ -353,7 +371,7 @@ class basic_look_up_table {
                                           : sizeof(char_type_) == 2 ? 65536ul
                                                                     : 4294967296ul;
     static constexpr std::size_t bytes_k = size_k * sizeof(char_type_);
-    using usnigned_type_ = typename std::make_unsigned<char_type_>::type;
+    using unsigned_type_ = typename std::make_unsigned<char_type_>::type;
 
     char_type_ lut_[size_k];
 
@@ -378,13 +396,13 @@ class basic_look_up_table {
      */
     static basic_look_up_table identity() noexcept {
         basic_look_up_table result;
-        for (std::size_t i = 0; i < size_k; ++i) { result.lut_[i] = static_cast<usnigned_type_>(i); }
+        for (std::size_t i = 0; i < size_k; ++i) { result.lut_[i] = static_cast<unsigned_type_>(i); }
         return result;
     }
 
     inline sz_cptr_t raw() const noexcept { return reinterpret_cast<sz_cptr_t>(&lut_[0]); }
-    inline char_type &operator[](char_type c) noexcept { return lut_[sz_bitcast(usnigned_type_, c)]; }
-    inline char_type const &operator[](char_type c) const noexcept { return lut_[sz_bitcast(usnigned_type_, c)]; }
+    inline char_type &operator[](char_type c) noexcept { return lut_[sz_bitcast(unsigned_type_, c)]; }
+    inline char_type const &operator[](char_type c) const noexcept { return lut_[sz_bitcast(unsigned_type_, c)]; }
 };
 
 using look_up_table = basic_look_up_table<char>;
@@ -397,7 +415,7 @@ struct end_sentinel_type {};
 struct include_overlaps_type {};
 struct exclude_overlaps_type {};
 
-#if SZ_DETECT_CPP_17
+#if _SZ_IS_CPP17
 inline static constexpr end_sentinel_type end_sentinel;
 inline static constexpr include_overlaps_type include_overlaps;
 inline static constexpr exclude_overlaps_type exclude_overlaps;
@@ -1040,7 +1058,8 @@ static void *_call_allocate(sz_size_t n, void *allocator_state) noexcept {
 
 template <typename allocator_type_>
 static void _call_free(void *ptr, sz_size_t n, void *allocator_state) noexcept {
-    return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<char *>(ptr), n);
+    using value_type_ = typename allocator_type_::value_type;
+    return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<value_type_ *>(ptr), n);
 }
 
 template <typename generator_type_>
@@ -1225,8 +1244,8 @@ class basic_string_slice {
         : start_(c_string), length_(null_terminated_length(c_string)) {}
     constexpr basic_string_slice(pointer c_string, size_type length) noexcept : start_(c_string), length_(length) {}
 
-    sz_constexpr_if_cpp20 basic_string_slice(basic_string_slice const &other) noexcept = default;
-    sz_constexpr_if_cpp20 basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
+    basic_string_slice(basic_string_slice const &other) noexcept = default;
+    basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
     basic_string_slice(std::nullptr_t) = delete;
 
     /**  @brief Exchanges the view with that of the `other`. */
@@ -1264,7 +1283,7 @@ class basic_string_slice {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 
     template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
     sz_constexpr_if_cpp20 basic_string_slice(std::string_view const &other) noexcept
@@ -1495,7 +1514,7 @@ class basic_string_slice {
                sz_equal(data() + other.first.size(), other.second.data(), other.second.size()) == sz_true_k;
     }
 
-#if SZ_DETECT_CPP20
+#if _SZ_IS_CPP20
 
     /**  @brief  Computes the lexicographic ordering between this and the ::other string. */
     std::strong_ordering operator<=>(string_view other) const noexcept {
@@ -1907,10 +1926,12 @@ class basic_string_slice {
 #pragma endregion
 
     /**  @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
-    size_type hash() const noexcept { return static_cast<size_type>(sz_hash(start_, length_)); }
+    size_type hash(std::uint64_t seed = 42) const noexcept {
+        return static_cast<size_type>(sz_hash(start_, length_, static_cast<sz_u64_t>(seed)));
+    }
 
     /**  @brief  Aggregates the values of individual bytes of a string. */
-    size_type checksum() const noexcept { return static_cast<size_type>(sz_checksum(start_, length_)); }
+    size_type bytesum() const noexcept { return static_cast<size_type>(sz_bytesum(start_, length_)); }
 
     /**  @brief  Populate a character set with characters present in this string. */
     char_set as_set() const noexcept {
@@ -1920,13 +1941,13 @@ class basic_string_slice {
     }
 
   private:
-    sz_constexpr_if_cpp20 string_slice &assign(string_view const &other) noexcept {
+    sz_constexpr_if_cpp14 string_slice &assign(string_view const &other) noexcept {
         start_ = (pointer)other.data();
         length_ = other.size();
         return *this;
     }
 
-    sz_constexpr_if_cpp20 static size_type null_terminated_length(const_pointer s) noexcept {
+    sz_constexpr_if_cpp14 static size_type null_terminated_length(const_pointer s) noexcept {
         const_pointer p = s;
         while (*p) ++p;
         return p - s;
@@ -2069,11 +2090,11 @@ class basic_string {
      *  @brief  The number of characters that can be stored in the internal buffer.
      *          Depends on the size of the internal buffer for the "Small String Optimization".
      */
-    static constexpr size_type min_capacity = SZ_STRING_INTERNAL_SPACE - 1;
+    static constexpr size_type min_capacity = _SZ_STRING_INTERNAL_SPACE - 1;
 
 #pragma region Constructors and STL Utilities
 
-    sz_constexpr_if_cpp20 basic_string() noexcept {
+    sz_constexpr_if_cpp14 basic_string() noexcept {
         // ! Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
         string_.internal.start = &string_.internal.chars[0];
         string_.words[1] = 0;
@@ -2174,7 +2195,7 @@ class basic_string {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_DETECT_CPP_17 && __cpp_lib_string_view
+#if _SZ_IS_CPP17 && __cpp_lib_string_view
 
     basic_string(std::string_view other) noexcept(false) : basic_string(other.data(), other.size()) {}
     basic_string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
@@ -2420,7 +2441,7 @@ class basic_string {
     bool operator==(string_view other) const noexcept { return view() == other; }
     bool operator==(const_pointer other) const noexcept { return view() == string_view(other); }
 
-#if SZ_DETECT_CPP20
+#if _SZ_IS_CPP20
 
     /**  @brief  Computes the lexicographic ordering between this and the ::other string. */
     std::strong_ordering operator<=>(basic_string const &other) const noexcept { return view() <=> other.view(); }
@@ -2776,7 +2797,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Erases ( @b in-place ) a range of characters defined with signed offsets.
+     *  @brief  Erases @b (in-place) a range of characters defined with signed offsets.
      *  @return Number of characters removed.
      */
     size_type try_erase(difference_type signed_start_offset = 0, difference_type signed_end_offset = npos) noexcept {
@@ -2788,7 +2809,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a range of characters at a given signed offset.
+     *  @brief  Inserts @b (in-place) a range of characters at a given signed offset.
      *  @return `true` if the insertion was successful, `false` otherwise.
      */
     bool try_insert(difference_type signed_offset, string_view string) noexcept {
@@ -2804,7 +2825,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @return `true` if the replacement was successful, `false` otherwise.
      */
     bool try_replace(difference_type signed_start_offset, difference_type signed_end_offset,
@@ -2855,7 +2876,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a ::character multiple times at the given offset.
+     *  @brief  Inserts @b (in-place) a ::character multiple times at the given offset.
      *  @throw  `std::out_of_range` if `offset > size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2871,7 +2892,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a range of characters at the given offset.
+     *  @brief  Inserts @b (in-place) a range of characters at the given offset.
      *  @throw  `std::out_of_range` if `offset > size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2888,7 +2909,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a range of characters at the given offset.
+     *  @brief  Inserts @b (in-place) a range of characters at the given offset.
      *  @throw  `std::out_of_range` if `offset > size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2898,7 +2919,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a slice of another string at the given offset.
+     *  @brief  Inserts @b (in-place) a slice of another string at the given offset.
      *  @throw  `std::out_of_range` if `offset > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2909,7 +2930,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) one ::character at the given iterator position.
+     *  @brief  Inserts @b (in-place) one ::character at the given iterator position.
      *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2921,7 +2942,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a ::character multiple times at the given iterator position.
+     *  @brief  Inserts @b (in-place) a ::character multiple times at the given iterator position.
      *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2933,7 +2954,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) a range at the given iterator position.
+     *  @brief  Inserts @b (in-place) a range at the given iterator position.
      *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2956,7 +2977,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts ( @b in-place ) an initializer list of characters.
+     *  @brief  Inserts @b (in-place) an initializer list of characters.
      *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
@@ -2966,7 +2987,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Erases ( @b in-place ) the given range of characters.
+     *  @brief  Erases @b (in-place) the given range of characters.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @see    `try_erase_slice` for a cleaner exception-less alternative.
      */
@@ -2978,7 +2999,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Erases ( @b in-place ) the given range of characters.
+     *  @brief  Erases @b (in-place) the given range of characters.
      *  @return Iterator pointing following the erased character, or end() if no such character exists.
      */
     iterator erase(const_iterator first, const_iterator last) noexcept {
@@ -2989,13 +3010,13 @@ class basic_string {
     }
 
     /**
-     *  @brief  Erases ( @b in-place ) the one character at a given postion.
+     *  @brief  Erases @b (in-place) the one character at a given postion.
      *  @return Iterator pointing following the erased character, or end() if no such character exists.
      */
     iterator erase(const_iterator pos) noexcept { return erase(pos, pos + 1); }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3009,7 +3030,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3019,7 +3040,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()` or `pos2 > str.size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3030,7 +3051,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3040,7 +3061,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3051,7 +3072,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3061,7 +3082,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3071,7 +3092,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a repetition of given characters.
+     *  @brief  Replaces @b (in-place) a range of characters with a repetition of given characters.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3085,7 +3106,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a repetition of given characters.
+     *  @brief  Replaces @b (in-place) a range of characters with a repetition of given characters.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3096,7 +3117,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
+     *  @brief  Replaces @b (in-place) a range of characters with a given string.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3115,7 +3136,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) a range of characters with a given initializer list.
+     *  @brief  Replaces @b (in-place) a range of characters with a given initializer list.
      *  @throws `std::out_of_range` if `pos > size()`.
      *  @throws `std::length_error` if the string is too long.
      *  @see    `try_replace` for a cleaner exception-less alternative.
@@ -3295,45 +3316,41 @@ class basic_string {
     concatenation<string_view, string_view> operator|(string_view other) const noexcept { return {view(), other}; }
 
     size_type edit_distance(string_view other, size_type bound = 0) const noexcept {
-        size_type distance;
+        size_type result;
         _with_alloc([&](sz_alloc_type &alloc) {
-            distance = sz_edit_distance(data(), size(), other.data(), other.size(), bound, &alloc);
-            return true;
+            return sz_levenshtein_distance(data(), size(), other.data(), other.size(), bound, &alloc, &result) !=
+                   sz_bad_alloc_k;
         });
-        return distance;
+        return result;
     }
 
     /**  @brief  Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     size_type hash() const noexcept { return view().hash(); }
 
     /**  @brief  Aggregates the values of individual bytes of a string. */
-    size_type checksum() const noexcept { return view().checksum(); }
+    size_type bytesum() const noexcept { return view().bytesum(); }
 
     /**
-     *  @brief  Overwrites the string with random characters from the given alphabet using the random generator.
+     *  @brief  Overwrites the string with random binary data.
      *
-     *  @param  generator  A random generator function object that returns a random number in the range [0, 2^64).
-     *  @param  alphabet   A string of characters to choose from.
+     *  @param  nonce   "Number used ONCE" to initialize the random number generator, @b don't repeat it!
      */
-    template <typename generator_type>
-    basic_string &randomize(generator_type &generator, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+    basic_string &randomize(sz_u64_t nonce) noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        sz_random_generator_t generator_callback = &_call_random_generator<generator_type>;
-        sz_generate(alphabet.data(), alphabet.size(), start, length, generator_callback, &generator);
+        sz_generate(start, length, nonce);
         return *this;
     }
 
     /**
-     *  @brief  Overwrites the string with random characters from the given alphabet
-     *          using `std::rand` as the random generator.
-     *
-     *  @param  alphabet   A string of characters to choose from.
+     *  @brief  Overwrites the string with random binary data.
+     *          Produces the nonce from a static variable, incrementing it each time.
+     *          In this case the undefined behaviour in concurrent environments plays in our favor.
      */
-    basic_string &randomize(string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
-        auto generator = []() { return static_cast<sz_u64_t>(std::rand()); };
-        return randomize(generator, alphabet);
+    basic_string &randomize() noexcept {
+        static sz_u64_t nonce = 42;
+        return randomize(nonce++);
     }
 
     /**
@@ -3341,28 +3358,22 @@ class basic_string {
      *          May throw exceptions if the memory allocation fails.
      *
      *  @param  length     The length of the generated string.
-     *  @param  alphabet   A string of characters to choose from.
+     *  @param  nonce   "Number used ONCE" to initialize the random number generator, @b don't repeat it!
      */
-    static basic_string random(size_type length, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept(false) {
-        return basic_string(length, '\0').randomize(alphabet);
+    static basic_string random(size_type length, sz_u64_t nonce) noexcept(false) {
+        return basic_string(length, '\0').randomize(nonce);
     }
 
     /**
      *  @brief  Generate a new random string of given length using the provided random number generator.
      *          May throw exceptions if the memory allocation fails.
      *
-     *  @param  generator  A random generator function object that returns a random number in the range [0, 2^64).
      *  @param  length     The length of the generated string.
-     *  @param  alphabet   A string of characters to choose from.
      */
-    template <typename generator_type>
-    static basic_string random(generator_type &generator, size_type length,
-                               string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept(false) {
-        return basic_string(length, '\0').randomize(generator, alphabet);
-    }
+    static basic_string random(size_type length) noexcept(false) { return basic_string(length, '\0').randomize(); }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurrences of a given string with the ::replacement string.
+     *  @brief  Replaces @b (in-place) all occurrences of a given string with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3375,7 +3386,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurrences of a given character set with the ::replacement string.
+     *  @brief  Replaces @b (in-place) all occurrences of a given character set with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3388,7 +3399,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurrences of a given string with the ::replacement string.
+     *  @brief  Replaces @b (in-place) all occurrences of a given string with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3400,7 +3411,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all occurrences of a given character set with the ::replacement string.
+     *  @brief  Replaces @b (in-place) all occurrences of a given character set with the ::replacement string.
      *          Similar to `boost::algorithm::replace_all` and Python's `str.replace`.
      *
      *  The implementation is not as composable, as using search ranges combined with a replacing mapping for matches,
@@ -3412,7 +3423,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces ( @b in-place ) all characters in the string using the provided lookup table.
+     *  @brief  Replaces @b (in-place) all characters in the string using the provided lookup table.
      */
     basic_string &transform(look_up_table const &table) noexcept {
         transform(table, data());
@@ -3427,7 +3438,7 @@ class basic_string {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        sz_look_up_transform((sz_cptr_t)start, (sz_size_t)length, (sz_cptr_t)table.raw(), (sz_ptr_t)output);
+        sz_lookup((sz_ptr_t)output, (sz_size_t)length, (sz_cptr_t)start, (sz_cptr_t)table.raw());
     }
 
   private:
@@ -3446,7 +3457,10 @@ using string = basic_string<char, std::allocator<char>>;
 static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 pointers.");
 
 namespace literals {
-constexpr string_view operator""_sz(char const *str, std::size_t length) noexcept { return {str, length}; }
+constexpr string_view operator""_sv(char const *str, std::size_t length) noexcept { return {str, length}; }
+sz_constexpr_if_cpp14 char_set operator""_cs(char const *str, std::size_t length) noexcept {
+    return char_set {str, length};
+}
 } // namespace literals
 
 template <typename char_type_, typename allocator_>
@@ -3663,8 +3677,9 @@ bool basic_string<char_type_, allocator_>::try_assign(concatenation<first_type, 
 }
 
 template <typename char_type_, typename allocator_>
-bool basic_string<char_type_, allocator_>::try_preparing_replacement(size_type offset, size_type length,
-                                                                     size_type replacement_length) noexcept {
+bool basic_string<char_type_, allocator_>::try_preparing_replacement( //
+    size_type offset, size_type length, size_type replacement_length) noexcept {
+
     // There are three cases:
     // 1. The replacement is the same length as the replaced range.
     // 2. The replacement is shorter than the replaced range.
@@ -3759,29 +3774,34 @@ typename concatenation_result<first_type, second_type, following_types...>::type
     //      std::string result;
     //      result.reserve(total_size);
     //      (result.append(strings), ...);
-    return ashvardanian::stringzilla::concatenate(
+    return ashvardanian::stringzilla::concatenate( //
         std::forward<first_type>(first),
-        ashvardanian::stringzilla::concatenate(std::forward<second_type>(second),
-                                               std::forward<following_types>(following)...));
+        ashvardanian::stringzilla::concatenate( //
+            std::forward<second_type>(second),  //
+            std::forward<following_types>(following)...));
 }
 
 /**
  *  @brief  Calculates the Hamming edit distance in @b bytes between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_>
-std::size_t hamming_distance(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                             std::size_t bound = 0) noexcept {
-    return sz_hamming_distance(a.data(), a.size(), b.data(), b.size(), bound);
+std::size_t hamming_distance(                                                         //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
+    std::size_t bound = 0) noexcept {
+    std::size_t result;
+    sz_hamming_distance(a.data(), a.size(), b.data(), b.size(), bound, &result);
+    return result;
 }
 
 /**
  *  @brief  Calculates the Hamming edit distance in @b bytes between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t hamming_distance(basic_string<char_type_, allocator_type_> const &a,
-                             basic_string<char_type_, allocator_type_> const &b, std::size_t bound = 0) noexcept {
+std::size_t hamming_distance(                                                                               //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
+    std::size_t bound = 0) noexcept {
     return ashvardanian::stringzilla::hamming_distance(a.view(), b.view(), bound);
 }
 
@@ -3790,32 +3810,36 @@ std::size_t hamming_distance(basic_string<char_type_, allocator_type_> const &a,
  *  @see    sz_hamming_distance_utf8
  */
 template <typename char_type_>
-std::size_t hamming_distance_utf8(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                                  std::size_t bound = 0) noexcept {
-    return sz_hamming_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound);
+std::size_t hamming_distance_utf8( //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, std::size_t bound = 0) noexcept {
+    std::size_t result;
+    sz_hamming_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &result);
+    return result;
 }
 
 /**
  *  @brief  Calculates the Hamming edit distance in @b unicode codepoints between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t hamming_distance_utf8(basic_string<char_type_, allocator_type_> const &a,
-                                  basic_string<char_type_, allocator_type_> const &b, std::size_t bound = 0) noexcept {
+std::size_t hamming_distance_utf8( //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b,
+    std::size_t bound = 0) noexcept {
     return ashvardanian::stringzilla::hamming_distance_utf8(a.view(), b.view(), bound);
 }
 
 /**
  *  @brief  Calculates the Levenshtein edit distance in @b bytes between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t edit_distance(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                          std::size_t bound = 0, allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
+std::size_t edit_distance( //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, std::size_t bound = SZ_SIZE_MAX,
+    allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
     std::size_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            result = sz_edit_distance(a.data(), a.size(), b.data(), b.size(), bound, &alloc);
-            return result != SZ_SIZE_MAX;
+            return sz_levenshtein_distance(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result) !=
+                   sz_bad_alloc_k;
         }))
         throw std::bad_alloc();
     return result;
@@ -3823,26 +3847,27 @@ std::size_t edit_distance(basic_string_slice<char_type_> const &a, basic_string_
 
 /**
  *  @brief  Calculates the Levenshtein edit distance in @b bytes between two strings.
- *  @see    sz_edit_distance
+ *  @see    sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::size_t edit_distance(basic_string<char_type_, allocator_type_> const &a,
-                          basic_string<char_type_, allocator_type_> const &b, std::size_t bound = 0) noexcept(false) {
+std::size_t edit_distance(                                                                                  //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
+    std::size_t bound = SZ_SIZE_MAX) noexcept(false) {
     return ashvardanian::stringzilla::edit_distance(a.view(), b.view(), bound, a.get_allocator());
 }
 
 /**
  *  @brief  Calculates the Levenshtein edit distance in @b unicode codepoints between two strings.
- *  @see    sz_edit_distance_utf8
+ *  @see    sz_levenshtein_distance_utf8
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t edit_distance_utf8(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                               std::size_t bound = 0,
-                               allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
+std::size_t edit_distance_utf8(                                                       //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
+    std::size_t bound = SZ_SIZE_MAX, allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
     std::size_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            result = sz_edit_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &alloc);
-            return result != SZ_SIZE_MAX;
+            return sz_levenshtein_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result) !=
+                   sz_bad_alloc_k;
         }))
         throw std::bad_alloc();
     return result;
@@ -3850,23 +3875,24 @@ std::size_t edit_distance_utf8(basic_string_slice<char_type_> const &a, basic_st
 
 /**
  *  @brief  Calculates the Levenshtein edit distance in @b unicode codepoints between two strings.
- *  @see    sz_edit_distance_utf8
+ *  @see    sz_levenshtein_distance_utf8
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::size_t edit_distance_utf8(basic_string<char_type_, allocator_type_> const &a,
-                               basic_string<char_type_, allocator_type_> const &b,
-                               std::size_t bound = 0) noexcept(false) {
+std::size_t edit_distance_utf8(                                                                             //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
+    std::size_t bound = SZ_SIZE_MAX) noexcept(false) {
     return ashvardanian::stringzilla::edit_distance_utf8(a.view(), b.view(), bound, a.get_allocator());
 }
 
 /**
  *  @brief  Calculates the Needleman-Wunsch alignment score between two strings.
- *  @see    sz_alignment_score
+ *  @see    sz_needleman_wunsch_score
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-                               std::int8_t const (&subs)[256][256], std::int8_t gap = -1,
-                               allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
+std::ptrdiff_t alignment_score(                                                       //
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
+    std::int8_t const (&subs)[256][256], std::int8_t gap = -1,
+    allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
 
     static_assert(sizeof(sz_error_cost_t) == sizeof(std::int8_t), "sz_error_cost_t must be 8-bit.");
     static_assert(std::is_signed<sz_error_cost_t>() == std::is_signed<std::int8_t>(),
@@ -3874,8 +3900,8 @@ std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_st
 
     std::ptrdiff_t result;
     if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            result = sz_alignment_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc);
-            return result != SZ_SSIZE_MAX;
+            return sz_needleman_wunsch_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc,
+                                             &result) != sz_bad_alloc_k;
         }))
         throw std::bad_alloc();
     return result;
@@ -3883,12 +3909,12 @@ std::ptrdiff_t alignment_score(basic_string_slice<char_type_> const &a, basic_st
 
 /**
  *  @brief  Calculates the Needleman-Wunsch alignment score between two strings.
- *  @see    sz_alignment_score
+ *  @see    sz_needleman_wunsch_score
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::ptrdiff_t alignment_score(basic_string<char_type_, allocator_type_> const &a,
-                               basic_string<char_type_, allocator_type_> const &b, //
-                               std::int8_t const (&subs)[256][256], std::int8_t gap = -1) noexcept(false) {
+std::ptrdiff_t alignment_score(                                                                             //
+    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
+    std::int8_t const (&subs)[256][256], std::int8_t gap = -1) noexcept(false) {
     return ashvardanian::stringzilla::alignment_score(a.view(), b.view(), subs, gap, a.get_allocator());
 }
 
@@ -3896,35 +3922,32 @@ std::ptrdiff_t alignment_score(basic_string<char_type_, allocator_type_> const &
  *  @brief  Overwrites the string slice with random characters from the given alphabet using the random generator.
  *
  *  @param  string     The string to overwrite.
- *  @param  generator  A random generator function object that returns a random number in the range [0, 2^64).
- *  @param  alphabet   A string of characters to choose from.
+ *  @param  nonce      "Number used ONCE" to initialize the random number generator, @b don't repeat it!
  */
-template <typename char_type_, typename generator_type_>
-void randomize(basic_string_slice<char_type_> string, generator_type_ &generator,
-               string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
+template <typename char_type_>
+void randomize(basic_string_slice<char_type_> string, sz_u64_t nonce) noexcept {
     static_assert(!std::is_const<char_type_>::value, "The string must be mutable.");
-    sz_random_generator_t generator_callback = &_call_random_generator<generator_type_>;
-    sz_generate(alphabet.data(), alphabet.size(), string.data(), string.size(), generator_callback, &generator);
+    sz_generate(string.data(), string.size(), nonce);
 }
 
 /**
- *  @brief  Replaces ( @b in-place ) all characters in the string using the provided lookup table.
+ *  @brief  Replaces @b (in-place) all characters in the string using the provided lookup table.
  */
 template <typename char_type_>
-void transform(basic_string_slice<char_type_> string, basic_look_up_table<char_type_> const &table) noexcept {
+void lookup(basic_string_slice<char_type_> string, basic_look_up_table<char_type_> const &table) noexcept {
     static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
-    sz_look_up_transform((sz_cptr_t)string.data(), (sz_size_t)string.size(), (sz_cptr_t)table.raw(),
-                         (sz_ptr_t)string.data());
+    sz_lookup((sz_ptr_t)string.data(), (sz_size_t)string.size(), (sz_cptr_t)string.data(), (sz_cptr_t)table.raw());
 }
 
 /**
  *  @brief  Maps all characters in the current string into another buffer using the provided lookup table.
  */
 template <typename char_type_>
-void transform(basic_string_slice<char_type_ const> source, basic_look_up_table<char_type_> const &table,
-               char_type_ *target) noexcept {
+void lookup( //
+    basic_string_slice<char_type_ const> source, basic_look_up_table<char_type_> const &table,
+    char_type_ *target) noexcept {
     static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
-    sz_look_up_transform((sz_cptr_t)source.data(), (sz_size_t)source.size(), (sz_cptr_t)table.raw(), (sz_ptr_t)target);
+    sz_lookup((sz_ptr_t)target, (sz_size_t)source.size(), (sz_cptr_t)source.data(), (sz_cptr_t)table.raw());
 }
 
 /**
@@ -3942,8 +3965,8 @@ void randomize(basic_string_slice<char_type_> string, string_view alphabet = "ab
 using sorted_idx_t = sz_sorted_idx_t;
 
 /**
- *  @brief  Internal data-structure used to forward the arguments to the `sz_sort` function.
- *  @see    sorted_order
+ *  @brief  Internal data-structure used to forward the arguments to the `sz_sequence_argsort` function.
+ *  @see    argsort
  */
 template <typename objects_type_, typename string_extractor_>
 struct _sequence_args {
@@ -3954,17 +3977,17 @@ struct _sequence_args {
 };
 
 template <typename objects_type_, typename string_extractor_>
-sz_cptr_t _call_sequence_member_start(struct sz_sequence_t const *sequence, sz_size_t i) {
+sz_cptr_t _call_sequence_member_start(void const *sequence, sz_size_t i) {
     using handle_type = _sequence_args<objects_type_, string_extractor_>;
-    handle_type const *args = reinterpret_cast<handle_type const *>(sequence->handle);
+    handle_type const *args = reinterpret_cast<handle_type const *>(sequence);
     string_view member = args->extractor(args->begin[i]);
     return member.data();
 }
 
 template <typename objects_type_, typename string_extractor_>
-sz_size_t _call_sequence_member_length(struct sz_sequence_t const *sequence, sz_size_t i) {
+sz_size_t _call_sequence_member_length(void const *sequence, sz_size_t i) {
     using handle_type = _sequence_args<objects_type_, string_extractor_>;
-    handle_type const *args = reinterpret_cast<handle_type const *>(sequence->handle);
+    handle_type const *args = reinterpret_cast<handle_type const *>(sequence);
     string_view member = args->extractor(args->begin[i]);
     return static_cast<sz_size_t>(member.size());
 }
@@ -3972,18 +3995,18 @@ sz_size_t _call_sequence_member_length(struct sz_sequence_t const *sequence, sz_
 /**
  *  @brief  Computes the permutation of an array, that would lead to sorted order.
  *          The elements of the array must be convertible to a `string_view` with the given extractor.
- *          Unlike the `sz_sort` C interface, overwrites the output array.
+ *          Unlike the `sz_sequence_argsort` C interface, overwrites the output array.
  *
  *  @param[in] begin       The pointer to the first element of the array.
  *  @param[in] end         The pointer to the element after the last element of the array.
  *  @param[out] order      The pointer to the output array of indices, that will be populated with the permutation.
  *  @param[in] extractor   The function object that extracts the string from the object.
  *
- *  @see    sz_sort
+ *  @see    sz_sequence_argsort
  */
 template <typename objects_type_, typename string_extractor_>
-void sorted_order(objects_type_ const *begin, objects_type_ const *end, sorted_idx_t *order,
-                  string_extractor_ &&extractor) noexcept {
+void argsort(objects_type_ const *begin, objects_type_ const *end, sorted_idx_t *order,
+             string_extractor_ &&extractor) noexcept {
 
     // Pack the arguments into a single structure to reference it from the callback.
     _sequence_args<objects_type_, string_extractor_> args = {begin, static_cast<std::size_t>(end - begin), order,
@@ -3992,23 +4015,26 @@ void sorted_order(objects_type_ const *begin, objects_type_ const *end, sorted_i
     for (std::size_t i = 0; i != args.count; ++i) order[i] = static_cast<sorted_idx_t>(i);
 
     sz_sequence_t array;
-    array.order = reinterpret_cast<sorted_idx_t *>(order);
     array.count = args.count;
     array.handle = &args;
     array.get_start = _call_sequence_member_start<objects_type_, string_extractor_>;
     array.get_length = _call_sequence_member_length<objects_type_, string_extractor_>;
-    sz_sort(&array);
+
+    using sz_alloc_type = sz_memory_allocator_t;
+    _with_alloc<std::allocator<sz_u8_t>>(
+        [&](sz_alloc_type &alloc) { return sz_sequence_argsort(&array, &alloc, order); });
 }
 
 #if !SZ_AVOID_STL
-
+#if _SZ_DEPRECATED_FINGERPRINTS
 /**
  *  @brief  Computes the Rabin-Karp-like rolling binary fingerprint of a string.
  *  @see    sz_hashes
  */
 template <std::size_t bitset_bits_, typename char_type_>
-void hashes_fingerprint(basic_string_slice<char_type_> const &str, std::size_t window_length,
-                        std::bitset<bitset_bits_> &fingerprint) noexcept {
+void hashes_fingerprint( //
+    basic_string_slice<char_type_> const &str, std::size_t window_length,
+    std::bitset<bitset_bits_> &fingerprint) noexcept {
     constexpr std::size_t fingerprint_bytes = sizeof(std::bitset<bitset_bits_>);
     return sz_hashes_fingerprint(str.data(), str.size(), window_length, (sz_ptr_t)&fingerprint, fingerprint_bytes);
 }
@@ -4018,8 +4044,8 @@ void hashes_fingerprint(basic_string_slice<char_type_> const &str, std::size_t w
  *  @see    sz_hashes
  */
 template <std::size_t bitset_bits_, typename char_type_>
-std::bitset<bitset_bits_> hashes_fingerprint(basic_string_slice<char_type_> const &str,
-                                             std::size_t window_length) noexcept {
+std::bitset<bitset_bits_> hashes_fingerprint( //
+    basic_string_slice<char_type_> const &str, std::size_t window_length) noexcept {
     std::bitset<bitset_bits_> fingerprint;
     ashvardanian::stringzilla::hashes_fingerprint(str, window_length, fingerprint);
     return fingerprint;
@@ -4033,6 +4059,7 @@ template <std::size_t bitset_bits_, typename char_type_>
 std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str, std::size_t window_length) noexcept {
     return ashvardanian::stringzilla::hashes_fingerprint<bitset_bits_>(str.view(), window_length);
 }
+#endif
 
 /**
  *  @brief  Computes the permutation of an array, that would lead to sorted order.
@@ -4040,10 +4067,10 @@ std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename objects_type_, typename string_extractor_>
-std::vector<sorted_idx_t> sorted_order(objects_type_ const *begin, objects_type_ const *end,
-                                       string_extractor_ &&extractor) noexcept(false) {
+std::vector<sorted_idx_t> argsort( //
+    objects_type_ const *begin, objects_type_ const *end, string_extractor_ &&extractor) noexcept(false) {
     std::vector<sorted_idx_t> order(end - begin);
-    sorted_order(begin, end, order.data(), std::forward<string_extractor_>(extractor));
+    argsort(begin, end, order.data(), std::forward<string_extractor_>(extractor));
     return order;
 }
 
@@ -4053,10 +4080,10 @@ std::vector<sorted_idx_t> sorted_order(objects_type_ const *begin, objects_type_
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename string_like_type_>
-std::vector<sorted_idx_t> sorted_order(string_like_type_ const *begin, string_like_type_ const *end) noexcept(false) {
-    static_assert(std::is_convertible<string_like_type_, string_view>::value,
-                  "The type must be convertible to string_view.");
-    return sorted_order(begin, end, [](string_like_type_ const &s) -> string_view { return s; });
+std::vector<sorted_idx_t> argsort(string_like_type_ const *begin, string_like_type_ const *end) noexcept(false) {
+    static_assert( //
+        std::is_convertible<string_like_type_, string_view>::value, "The type must be convertible to string_view.");
+    return argsort(begin, end, [](string_like_type_ const &s) -> string_view { return s; });
 }
 
 /**
@@ -4065,11 +4092,11 @@ std::vector<sorted_idx_t> sorted_order(string_like_type_ const *begin, string_li
  *  @throw  `std::bad_alloc` if the allocation fails.
  */
 template <typename string_like_type_>
-std::vector<sorted_idx_t> sorted_order(std::vector<string_like_type_> const &array) noexcept(false) {
-    static_assert(std::is_convertible<string_like_type_, string_view>::value,
-                  "The type must be convertible to string_view.");
-    return sorted_order(array.data(), array.data() + array.size(),
-                        [](string_like_type_ const &s) -> string_view { return s; });
+std::vector<sorted_idx_t> argsort(std::vector<string_like_type_> const &array) noexcept(false) {
+    static_assert( //
+        std::is_convertible<string_like_type_, string_view>::value, "The type must be convertible to string_view.");
+    return argsort(array.data(), array.data() + array.size(),
+                   [](string_like_type_ const &s) -> string_view { return s; });
 }
 
 #endif

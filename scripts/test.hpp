@@ -1,5 +1,5 @@
 /**
- *  @brief  Helper structures and functions for C++ tests.
+ *  @brief  Helper structures and functions for C++ unit- and stress-tests.
  */
 #pragma once
 #include <fstream>  // `std::ifstream`
@@ -52,8 +52,13 @@ struct uniform_uint8_distribution_t {
 };
 
 inline void randomize_string(char *string, std::size_t length, char const *alphabet, std::size_t cardinality) {
-    uniform_uint8_distribution_t distribution(cardinality);
+    uniform_uint8_distribution_t distribution(0, cardinality - 1);
     std::generate(string, string + length, [&]() -> char { return alphabet[distribution(global_random_generator())]; });
+}
+
+inline void randomize_string(char *string, std::size_t length) {
+    uniform_uint8_distribution_t distribution;
+    std::generate(string, string + length, [&]() -> char { return distribution(global_random_generator()); });
 }
 
 inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
@@ -62,34 +67,53 @@ inline std::string random_string(std::size_t length, char const *alphabet, std::
     return result;
 }
 
+inline std::string repeat(std::string const &patten, std::size_t count) {
+    std::string result(patten.size() * count, '\0');
+    for (std::size_t i = 0; i < count; ++i) std::copy(patten.begin(), patten.end(), result.begin() + i * patten.size());
+    return result;
+}
+
+/**
+ *  @brief  A callback type for iterating over consecutive random-length slices of a string.
+ */
+template <typename slice_callback_type_>
+inline void iterate_in_random_slices(std::string const &text, slice_callback_type_ &&slice_callback) {
+    std::size_t remaining = text.size();
+    while (remaining > 0) {
+        std::size_t slice_length = std::uniform_int_distribution<std::size_t>(1, remaining)(global_random_generator());
+        slice_callback({text.data() + text.size() - remaining, slice_length});
+        remaining -= slice_length;
+    }
+}
+
 /**
  *  @brief  Inefficient baseline Levenshtein distance computation, as implemented in most codebases.
  *          Allocates a new matrix on every call, with rows potentially scattered around memory.
  */
 inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2) {
-    std::vector<std::vector<std::size_t>> dp(len1 + 1, std::vector<std::size_t>(len2 + 1));
+    std::size_t const rows = len1 + 1;
+    std::size_t const cols = len2 + 1;
+    std::vector<std::size_t> matrix_buffer(rows * cols);
 
     // Initialize the borders of the matrix.
-    for (std::size_t i = 0; i <= len1; ++i) dp[i][0] = i;
-    for (std::size_t j = 0; j <= len2; ++j) dp[0][j] = j;
+    for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = i;
+    for (std::size_t j = 0; j < cols; ++j) matrix_buffer[0 * cols + j] /* [0][j] in 2D */ = j;
 
-    for (std::size_t i = 1; i <= len1; ++i) {
-        for (std::size_t j = 1; j <= len2; ++j) {
+    for (std::size_t i = 1; i < rows; ++i) {
+        std::size_t const *last_row = &matrix_buffer[(i - 1) * cols];
+        std::size_t *row = &matrix_buffer[i * cols];
+        for (std::size_t j = 1; j < cols; ++j) {
             std::size_t cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
-            // dp[i][j] is the minimum of deletion, insertion, or substitution
-            dp[i][j] = std::min({
-                dp[i - 1][j] + 1,       // Deletion
-                dp[i][j - 1] + 1,       // Insertion
-                dp[i - 1][j - 1] + cost // Substitution
-            });
+            std::size_t deletion_or_insertion = std::min(last_row[j], row[j - 1]) + 1;
+            row[j] = std::min(deletion_or_insertion, last_row[j - 1] + cost);
         }
     }
 
-    return dp[len1][len2];
+    return matrix_buffer.back();
 }
 
 /**
- *  @brief  Produces a substitution cost matrix for the Needlemann-Wunsch alignment score,
+ *  @brief  Produces a substitution cost matrix for the Needleman-Wunsch alignment score,
  *          that would yield the same result as the negative Levenshtein distance.
  */
 inline std::vector<std::int8_t> unary_substitution_costs() {

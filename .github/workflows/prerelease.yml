@@ -275,7 +275,7 @@ jobs:
         # We can't run the produced builds, but we can make sure they exist
       - name: Test artifacts presense
         run: |
-          test -e build_artifacts/libstringzillite.so
+          test -e build_artifacts/libstringzilla_bare.so
           test -e build_artifacts/libstringzilla_shared.so
           test -e build_artifacts/stringzilla_test_cpp20
 

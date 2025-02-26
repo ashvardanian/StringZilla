@@ -229,7 +229,7 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>13.00</b> s
     </td>
     <td align="center">
-      <code>sz_sort</code><br/>
+      <code>sz_sequence_argsort</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>1.91</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>2.37</b> s
     </td>
@@ -429,7 +429,7 @@ lines: Strs = text.split(separator='\n') # 4 bytes per line overhead for under 4
 batch: Strs = lines.sample(seed=42) # 10x faster than `random.choices`
 lines.shuffle(seed=42) # or shuffle all lines in place and shard with slices
 # WIP: lines.sort() # explodes to 16 bytes per line overhead for any length text
-# WIP: sorted_order: tuple = lines.argsort() # similar to `numpy.argsort`
+# WIP: argsort: tuple = lines.argsort() # similar to `numpy.argsort`
 ```
 
 Working on [RedPajama][redpajama], addressing 20 Billion annotated english documents, one will need only 160 GB of RAM instead of Terabytes.
@@ -622,17 +622,26 @@ Both are companions of the `sz_find`, first for x86 CPUs with AVX-512 support, a
 sz_string_view_t haystack = {your_text, your_text_length};
 sz_string_view_t needle = {your_subtext, your_subtext_length};
 
-// Perform string-level operations
+// Perform string-level operations auto-picking the backend or dispatching manually
 sz_size_t substring_position = sz_find(haystack.start, haystack.length, needle.start, needle.length);
-sz_size_t substring_position = sz_find_avx512(haystack.start, haystack.length, needle.start, needle.length);
+sz_size_t substring_position = sz_find_skylake(haystack.start, haystack.length, needle.start, needle.length);
+sz_size_t substring_position = sz_find_haswell(haystack.start, haystack.length, needle.start, needle.length);
 sz_size_t substring_position = sz_find_neon(haystack.start, haystack.length, needle.start, needle.length);
 
-// Hash strings
-sz_u64_t hash = sz_hash(haystack.start, haystack.length);
+// Hash strings at once
+sz_u64_t hash = sz_hash(haystack.start, haystack.length, 42);    // 42 is the seed
+sz_u64_t checksum = sz_bytesum(haystack.start, haystack.length); // or accumulate byte values
+
+// Hash strings incrementally with "init", "stream", and "fold":
+sz_hash_state_t state; 
+sz_hash_state_init(&state, 42);
+sz_hash_state_stream(&state, haystack.start, 1);                       // first char
+sz_hash_state_stream(&state, haystack.start + 1, haystack.length - 1); // rest of the string
+sz_u64_t hash = sz_hash_state_fold(&state);
 
 // Perform collection level operations
-sz_sequence_t array = {your_order, your_count, your_get_start, your_get_length, your_handle};
-sz_sort(&array, &your_config);
+sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};
+sz_sequence_argsort(&array, &your_config);
 ```
 
 <details>
@@ -724,12 +733,12 @@ haystack.compare(needle) == 1; // Or `haystack <=> needle` in C++ 20 and beyond
 StringZilla also provides string literals for automatic type resolution, [similar to STL][stl-literal]:
 
 ```cpp
-using sz::literals::operator""_sz;
+using sz::literals::operator""_sv;
 using std::literals::operator""sv;
 
 auto a = "some string"; // char const *
 auto b = "some string"sv; // std::string_view
-auto b = "some string"_sz; // sz::string_view
+auto b = "some string"_sv; // sz::string_view
 ```
 
 [stl-literal]: https://en.cppreference.com/w/cpp/string/basic_string_view/operator%22%22sv
@@ -747,7 +756,7 @@ typedef union sz_string_t {
     struct internal {
         sz_ptr_t start;
         sz_u8_t length;
-        char chars[SZ_STRING_INTERNAL_SPACE]; /// Ends with a null-terminator.
+        char chars[_SZ_STRING_INTERNAL_SPACE]; /// Ends with a null-terminator.
     } internal;
 
     struct external {
@@ -887,7 +896,7 @@ str("a:b").back(-2) == ":b"; // similar to Python's `"a:b"[-2:]`
 str("a:b").sub(1, -1) == ":"; // similar to Python's `"a:b"[1:-1]`
 str("a:b").sub(-2, -1) == ":"; // similar to Python's `"a:b"[-2:-1]`
 str("a:b").sub(-2, 1) == ""; // similar to Python's `"a:b"[-2:1]`
-"a:b"_sz[{-2, -1}] == ":"; // works on views and overloads `operator[]`
+"a:b"_sv[{-2, -1}] == ":"; // works on views and overloads `operator[]`
 ```
 
 Assuming StringZilla is a header-only library you can use the full API in some translation units and gradually transition to safer restricted API in others.
@@ -1128,14 +1137,14 @@ C++ generic algorithm is not perfect either.
 There is no guarantee in the standard that `std::sort` won't allocate any memory.
 If you are running on embedded, in real-time or on 100+ CPU cores per node, you may want to avoid that.
 StringZilla doesn't solve the general case, but hopes to improve the performance for strings.
-Use `sz_sort`, or the high-level `sz::sorted_order`, which can be used sort any collection of elements convertible to `sz::string_view`.
+Use `sz_sequence_argsort`, or the high-level `sz::argsort`, which can be used sort any collection of elements convertible to `sz::string_view`.
 
 ```cpp
 std::vector<std::string> data({"c", "b", "a"});
-std::vector<std::size_t> order = sz::sorted_order(data); //< Simple shortcut
+std::vector<std::size_t> order = sz::argsort(data); //< Simple shortcut
 
 // Or, taking care of memory allocation:
-sz::sorted_order(data.begin(), data.end(), order.data(), [](auto const &x) -> sz::string_view { return x; });
+sz::argsort(data.begin(), data.end(), order.data(), [](auto const &x) -> sz::string_view { return x; });
 ```
 
 ### Standard C++ Containers with String Keys
@@ -1172,7 +1181,7 @@ __`SZ_DEBUG`__:
 > If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
-__`SZ_USE_X86_AVX512`, `SZ_USE_X86_AVX2`, `SZ_USE_ARM_NEON`__:
+__`SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_SVE`__:
 
 > One can explicitly disable certain families of SIMD instructions for compatibility purposes.
 > Default values are inferred at compile time.
@@ -1369,6 +1378,20 @@ Other algorithms previously considered and deprecated:
 > [Exact String Matching Algorithms in Java](https://www-igm.univ-mlv.fr/~lecroq/string).
 > [SIMD-friendly algorithms for substring searching](http://0x80.pl/articles/simd-strfind.html).
 
+### Exact Multiple Substring Search
+
+Few algorithms for multiple substring search are known.
+Most are based on the Aho-Corasick automaton, which is a generalization of the KMP algorithm.
+The naive implementation, however:
+
+- Allocates disjoint memory for each Trie node and Automaton state.
+- Requires a lot of pointer chasing, limiting speculative execution.
+- Has a lot of branches and conditional moves, which are hard to predict.
+- Matches text a character at a time, which is slow on modern CPUs.
+
+There are several ways to improve the original algorithm.
+One is to use sparse DFA representation, which is more cache-friendly, but would require extra processing to navigate state transitions.
+
 ### Levenshtein Edit Distance
 
 Levenshtein distance is the best known edit-distance for strings, that checks, how many insertions, deletions, and substitutions are needed to transform one string to another.
@@ -1390,10 +1413,11 @@ It's less known, than the others, derived from the Baeza-Yates-Gonnet algorithm,
 StringZilla introduces a different approach, extensively used in Unum's internal combinatorial optimization libraries.
 The approach doesn't change the number of trivial operations, but performs them in a different order, removing the data dependency, that occurs when computing the insertion costs.
 This results in much better vectorization for intra-core parallelism and potentially multi-core evaluation of a single request.
+Moreover, it's easy to generalize to weighted edit-distances, where the cost of a substitution between two characters may not be the same for all pairs, often used in bioinformatics.
 
 Next design goals:
 
-- [ ] Generalize fast traversals to rectangular matrices.
+- [x] Generalize fast traversals to non-square matrices.
 - [ ] Port x86 AVX-512 solution to Arm NEON.
 
 > § Reading materials.
@@ -1426,6 +1450,10 @@ With that solved, the SIMD implementation will become 5x faster than the serial 
 [faq-pam]: https://en.wikipedia.org/wiki/Point_accepted_mutation
 [faq-dipeptide]: https://en.wikipedia.org/wiki/Dipeptide
 [faq-titin]: https://en.wikipedia.org/wiki/Titin
+
+Next design goals:
+
+- [ ] Needleman-Wunsch Automata
 
 ### Memory Copying, Fills, and Moves
 

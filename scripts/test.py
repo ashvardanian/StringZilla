@@ -777,12 +777,12 @@ def test_translations_random(length: int):
 
 @pytest.mark.repeat(3)
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
-def test_checksums_random(length: int):
+def test_bytesums_random(length: int):
     def sum_bytes(body: str) -> int:
         return sum([ord(c) for c in body])
 
     body = get_random_string(length=length)
-    assert sum_bytes(body) == sz.checksum(body)
+    assert sum_bytes(body) == sz.bytesum(body)
 
 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
