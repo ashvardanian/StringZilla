@@ -38,24 +38,60 @@ tracked_unary_functions_t bytesum_functions() {
     return result;
 }
 
-tracked_unary_functions_t hashing_functions() {
+tracked_unary_functions_t hash_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
         return unary_function_t([function](std::string_view s) { return function(s.data(), s.size(), 42); });
     };
     tracked_unary_functions_t result = {
-        {"std::hash", [](std::string_view s) { return std::hash<std::string_view> {}(s); }},
         {"sz_hash_serial", wrap_sz(sz_hash_serial)},
 #if SZ_USE_HASWELL
-        {"sz_hash_haswell", wrap_sz(sz_hash_haswell)},
+        {"sz_hash_haswell", wrap_sz(sz_hash_haswell), true},
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_hash_skylake", wrap_sz(sz_hash_skylake)},
+        {"sz_hash_skylake", wrap_sz(sz_hash_skylake), true},
 #endif
 #if SZ_USE_ICE
-        {"sz_hash_ice", wrap_sz(sz_hash_ice)},
+        {"sz_hash_ice", wrap_sz(sz_hash_ice), true},
 #endif
 #if SZ_USE_NEON
-        {"sz_hash_neon", wrap_sz(sz_hash_neon)},
+        {"sz_hash_neon", wrap_sz(sz_hash_neon), true},
+#endif
+        {"std::hash", [](std::string_view s) { return std::hash<std::string_view> {}(s); }},
+    };
+    return result;
+}
+
+struct wrapped_incremental_hash {
+    sz_hash_state_t state;
+    sz_hash_state_stream_t stream;
+    sz_hash_state_fold_t fold;
+
+    wrapped_incremental_hash(sz_hash_state_stream_t s, sz_hash_state_fold_t f) : stream(s), fold(f) {
+        sz_hash_state_init(&state, 42);
+    }
+
+    std::size_t operator()(std::string_view s) noexcept {
+        stream(&state, s.data(), s.size());
+        return fold(&state);
+    }
+};
+
+tracked_unary_functions_t hash_stream_functions() {
+    tracked_unary_functions_t result = {
+        {"sz_hash_stream_serial", wrapped_incremental_hash(sz_hash_state_stream_serial, sz_hash_state_fold_serial)},
+#if SZ_USE_HASWELL
+        {"sz_hash_stream_haswell", wrapped_incremental_hash(sz_hash_state_stream_haswell, sz_hash_state_fold_haswell),
+         true},
+#endif
+#if SZ_USE_SKYLAKE
+        {"sz_hash_stream_skylake", wrapped_incremental_hash(sz_hash_state_stream_skylake, sz_hash_state_fold_skylake),
+         true},
+#endif
+#if SZ_USE_ICE
+        {"sz_hash_stream_ice", wrapped_incremental_hash(sz_hash_state_stream_ice, sz_hash_state_fold_ice), true},
+#endif
+#if SZ_USE_NEON
+        {"sz_hash_stream_neon", wrapped_incremental_hash(sz_hash_state_stream_neon, sz_hash_state_fold_neon), true},
 #endif
     };
     return result;
@@ -152,7 +188,8 @@ void bench(strings_type &&strings) {
 
     // Benchmark logical operations
     bench_unary_functions(strings, bytesum_functions());
-    bench_unary_functions(strings, hashing_functions());
+    bench_unary_functions(strings, hash_functions());
+    bench_unary_functions(strings, hash_stream_functions());
     bench_binary_functions(strings, equality_functions());
     bench_binary_functions(strings, ordering_functions());
 
