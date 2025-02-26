@@ -150,8 +150,10 @@ static void test_arithmetical_utilities() {
 }
 
 /**
- *  @brief  Several string processing operations rely on computing integer logarithms.
- *          Failures in such operations will result in wrong `resize` outcomes and heap corruption.
+ *  @brief  Hashes a string and compares the output between a serial and hardware-specific SIMD backend.
+ *
+ *  The test covers increasingly long and complex strings, starting with "abcabc..." repetitions and
+ *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
  */
 static void test_hashing_on_platform(                                   //
     sz_hash_t hash_base, sz_hash_state_init_t init_base,                //
@@ -196,13 +198,40 @@ static void test_hashing_on_platform(                                   //
             test_on_seed(repeat("abc", copies), seed);
 }
 
-static void test_hashing_across_platforms() {
+/**
+ *  @brief  Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
+ *          produces exactly the same output across different SIMD implementations.
+ */
+static void test_random_generator_on_platform(sz_generate_t generate_base, sz_generate_t generate_simd) {
+
+    auto test_on_nonce = [&](std::size_t length, sz_u64_t nonce) {
+        std::string text_base(length, '\0');
+        std::string text_simd(length, '\0');
+        generate_base(&text_base[0], static_cast<sz_size_t>(length), nonce);
+        generate_simd(&text_simd[0], static_cast<sz_size_t>(length), nonce);
+        assert(text_base == text_simd);
+    };
+
+    // Let's try different nonces:
+    std::vector<sz_u64_t> nonces = {
+        0u, 42u,                              //
+        std::numeric_limits<sz_u32_t>::max(), //
+        std::numeric_limits<sz_u64_t>::max(), //
+    };
+    std::vector<std::size_t> lengths = {1, 11, 23, 37, 40, 51, 64, 128, 1000};
+    for (auto nonce : nonces)
+        for (auto length : lengths) //
+            test_on_nonce(length, nonce);
+}
+
+static void test_simd_against_serial() {
 #if SZ_USE_HASWELL
     test_hashing_on_platform(                                   //
         sz_hash_serial, sz_hash_state_init_serial,              //
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
         sz_hash_haswell, sz_hash_state_init_haswell,            //
         sz_hash_state_stream_haswell, sz_hash_state_fold_haswell);
+    test_random_generator_on_platform(sz_generate_serial, sz_generate_haswell);
 #endif
 #if SZ_USE_SKYLAKE
     test_hashing_on_platform(                                   //
@@ -210,6 +239,7 @@ static void test_hashing_across_platforms() {
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
         sz_hash_skylake, sz_hash_state_init_skylake,            //
         sz_hash_state_stream_skylake, sz_hash_state_fold_skylake);
+    test_random_generator_on_platform(sz_generate_serial, sz_generate_skylake);
 #endif
 #if SZ_USE_ICE
     test_hashing_on_platform(                                   //
@@ -217,6 +247,7 @@ static void test_hashing_across_platforms() {
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
         sz_hash_ice, sz_hash_state_init_ice,                    //
         sz_hash_state_stream_ice, sz_hash_state_fold_ice);
+    test_random_generator_on_platform(sz_generate_serial, sz_generate_ice);
 #endif
 #if SZ_USE_NEON
     test_hashing_on_platform(                                   //
@@ -224,6 +255,7 @@ static void test_hashing_across_platforms() {
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
         sz_hash_neon, sz_hash_state_init_neon,                  //
         sz_hash_state_stream_neon, sz_hash_state_fold_neon);
+    test_random_generator_on_platform(sz_generate_serial, sz_generate_neon);
 #endif
 };
 
@@ -1800,9 +1832,7 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
-
-    // Compatibility across hardware-specific implementations
-    test_hashing_across_platforms();
+    test_simd_against_serial();
 
     // Core APIs
     test_ascii_utilities<sz::string>();

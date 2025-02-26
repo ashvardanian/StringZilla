@@ -125,14 +125,14 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
  *  @brief  A Pseudorandom Number Generator (PRNG), inspired the AES-CTR-128 algorithm,
  *          but using only one round of AES mixing as opposed to "NIST SP 800-90A".
  *
- *  CTR_DRBG (CounTeR mode Deterministic Random Bit Generator) appears secure and indistinguishable from a true
- *  random source when AES is used as the underlying block cipher and 112 bits are taken from this PRNG.
+ *  CTR_DRBG (CounTeR mode Deterministic Random Bit Generator) appears secure and indistinguishable from a
+ *  true random source when AES is used as the underlying block cipher and 112 bits are taken from this PRNG.
  *  When AES is used as the underlying block cipher and 128 bits are taken from each instantiation,
  *  the required security level is delivered with the caveat that a 128-bit cipher's output in
  *  counter mode can be distinguished from a true RNG.
  *
  *  In this case, it doesn't apply, as we only use one round of AES mixing. We also don't expose a separate "key",
- *  only a "nonce", to keep the API simple.
+ *  only a "nonce", to keep the API simple, but we mix it with 512 bits of Pi constants to increase randomness.
  *
  *  @param[out] text Output string buffer to be populated.
  *  @param[in] length Number of bytes in the string.
@@ -145,7 +145,7 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
  *      int main() {
  *          char first_buffer[5], second_buffer[5];
  *          sz_generate(first_buffer, 5, 0);
- *          sz_generate(second_buffer, 5, 0); //? Same nonce will produce the same output
+ *          sz_generate(second_buffer, 5, 0); //? Same nonce must produce the same output
  *          return sz_bytesum(first_buffer, 5) == sz_bytesum(second_buffer, 5) ? 0 : 1;
  *      }
  *  @endcode
@@ -705,7 +705,19 @@ SZ_PUBLIC sz_u64_t sz_hash_state_fold_serial(sz_hash_state_t const *state) {
 }
 
 SZ_PUBLIC void sz_generate_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_unused(text && length && nonce);
+    sz_u64_t const *pi_ptr = _sz_hash_pi_constants();
+    sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
+    for (sz_size_t lane_index = 0; length; ++lane_index) {
+        // Each 128-bit block is initialized with the same nonce
+        input_vec.u64s[0] = input_vec.u64s[1] = nonce + lane_index;
+        // We rotate the first 512-bits of the Pi to mix with the nonce
+        pi_vec = ((sz_u128_vec_t const *)pi_ptr)[lane_index % 4];
+        key_vec.u64s[0] = nonce ^ pi_vec.u64s[0];
+        key_vec.u64s[1] = nonce ^ pi_vec.u64s[1];
+        generated_vec = _sz_emulate_aesenc_si128_serial(input_vec, key_vec);
+        // Export back to the user-supplied buffer
+        for (int i = 0; i < 16 && length; ++i, --length) *text++ = generated_vec.u8s[i];
+    }
 }
 
 #pragma endregion // Serial Implementation
@@ -1047,7 +1059,97 @@ SZ_PUBLIC sz_u64_t sz_hash_state_fold_haswell(sz_hash_state_t const *state) {
 }
 
 SZ_PUBLIC void sz_generate_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_generate_serial(text, length, nonce);
+    sz_u64_t const *pi_ptr = _sz_hash_pi_constants();
+    if (length <= 16) {
+        __m128i input = _mm_set1_epi64x(nonce);
+        __m128i pi = _mm_load_si128((__m128i const *)pi_ptr);
+        __m128i key = _mm_xor_si128(_mm_set1_epi64x(nonce), pi);
+        __m128i generated = _mm_aesenc_si128(input, key);
+        // Now the tricky part is outputting this data to the user-supplied buffer
+        // without masked writes, like in AVX-512.
+        for (sz_size_t i = 0; i < length; ++i) text[i] = ((sz_u8_t *)&generated)[i];
+    }
+    // Assuming the YMM register contains two 128-bit blocks, the input to the generator
+    // will be more complex, containing the sum of the nonce and the block number.
+    else if (length <= 32) {
+        __m128i inputs[2], pis[2], keys[2], generated[2];
+        inputs[0] = _mm_set1_epi64x(nonce);
+        inputs[1] = _mm_set1_epi64x(nonce + 1);
+        pis[0] = _mm_load_si128((__m128i const *)(pi_ptr));
+        pis[1] = _mm_load_si128((__m128i const *)(pi_ptr + 2));
+        keys[0] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[0]);
+        keys[1] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[1]);
+        generated[0] = _mm_aesenc_si128(inputs[0], keys[0]);
+        generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
+        // The first store can easily be vectorized, but the second can be serial for now
+        _mm_storeu_si128((__m128i *)text, generated[0]);
+        for (sz_size_t i = 16; i < length; ++i) text[i] = ((sz_u8_t *)&generated[1])[i - 16];
+    }
+    // The last special case we handle outside of the primary loop is for buffers up to 64 bytes long.
+    else if (length <= 48) {
+        __m128i inputs[3], pis[3], keys[3], generated[3];
+        inputs[0] = _mm_set1_epi64x(nonce);
+        inputs[1] = _mm_set1_epi64x(nonce + 1);
+        inputs[2] = _mm_set1_epi64x(nonce + 2);
+        pis[0] = _mm_load_si128((__m128i const *)(pi_ptr));
+        pis[1] = _mm_load_si128((__m128i const *)(pi_ptr + 2));
+        pis[2] = _mm_load_si128((__m128i const *)(pi_ptr + 4));
+        keys[0] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[0]);
+        keys[1] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[1]);
+        keys[2] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[2]);
+        generated[0] = _mm_aesenc_si128(inputs[0], keys[0]);
+        generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
+        generated[2] = _mm_aesenc_si128(inputs[2], keys[2]);
+        // The first store can easily be vectorized, but the second can be serial for now
+        _mm_storeu_si128((__m128i *)text, generated[0]);
+        _mm_storeu_si128((__m128i *)(text + 16), generated[1]);
+        for (sz_size_t i = 32; i < length; ++i) text[i] = ((sz_u8_t *)generated)[i];
+    }
+    // The final part of the function is the primary loop, which processes the buffer in 64-byte chunks.
+    else {
+        __m128i inputs[4], pis[4], keys[4], generated[4];
+        inputs[0] = _mm_set1_epi64x(nonce);
+        inputs[1] = _mm_set1_epi64x(nonce + 1);
+        inputs[2] = _mm_set1_epi64x(nonce + 2);
+        inputs[3] = _mm_set1_epi64x(nonce + 3);
+        // Load parts of PI into the registers
+        pis[0] = _mm_load_si128((__m128i const *)(pi_ptr));
+        pis[1] = _mm_load_si128((__m128i const *)(pi_ptr + 2));
+        pis[2] = _mm_load_si128((__m128i const *)(pi_ptr + 4));
+        pis[3] = _mm_load_si128((__m128i const *)(pi_ptr + 6));
+        // XOR the nonce with the PI constants
+        keys[0] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[0]);
+        keys[1] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[1]);
+        keys[2] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[2]);
+        keys[3] = _mm_xor_si128(_mm_set1_epi64x(nonce), pis[3]);
+
+        // Produce the output, fixing the key and enumerating input chunks.
+        sz_size_t i = 0;
+        __m128i const increment = _mm_set1_epi64x(4);
+        for (; i + 64 <= length; i += 64) {
+            generated[0] = _mm_aesenc_si128(inputs[0], keys[0]);
+            generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
+            generated[2] = _mm_aesenc_si128(inputs[2], keys[2]);
+            generated[3] = _mm_aesenc_si128(inputs[3], keys[3]);
+            _mm_storeu_si128((__m128i *)(text + i), generated[0]);
+            _mm_storeu_si128((__m128i *)(text + i + 16), generated[1]);
+            _mm_storeu_si128((__m128i *)(text + i + 32), generated[2]);
+            _mm_storeu_si128((__m128i *)(text + i + 48), generated[3]);
+            inputs[0] = _mm_add_epi64(inputs[0], increment);
+            inputs[1] = _mm_add_epi64(inputs[1], increment);
+            inputs[2] = _mm_add_epi64(inputs[2], increment);
+            inputs[3] = _mm_add_epi64(inputs[3], increment);
+        }
+
+        // Handle the tail of the buffer.
+        {
+            generated[0] = _mm_aesenc_si128(inputs[0], keys[0]);
+            generated[1] = _mm_aesenc_si128(inputs[1], keys[1]);
+            generated[2] = _mm_aesenc_si128(inputs[2], keys[2]);
+            generated[3] = _mm_aesenc_si128(inputs[3], keys[3]);
+            for (sz_size_t j = 0; i < length; ++i, ++j) text[i] = ((sz_u8_t *)generated)[j];
+        }
+    }
 }
 
 #pragma clang attribute pop
@@ -1280,6 +1382,7 @@ SZ_PUBLIC void sz_hash_state_stream_skylake(sz_hash_state_t *state, sz_cptr_t te
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_skylake(sz_hash_state_t const *state) {
+    //? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
     return sz_hash_state_fold_haswell(state);
 }
 
@@ -1539,58 +1642,62 @@ SZ_PUBLIC void sz_hash_state_stream_ice(sz_hash_state_t *state, sz_cptr_t text, 
     }
 }
 
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_ice(sz_hash_state_t const *state) { return sz_hash_state_fold_haswell(state); }
+SZ_PUBLIC sz_u64_t sz_hash_state_fold_ice(sz_hash_state_t const *state) {
+    //? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
+    return sz_hash_state_fold_haswell(state);
+}
 
 SZ_PUBLIC void sz_generate_ice(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
-    // We can use `_mm512_broadcast_i32x4` and the `vbroadcasti32x4` instruction, but its latency is freaking 8 cycles.
-    // The `_mm512_shuffle_i32x4` and the `vshufi32x4` instruction has a latency of 3 cycles, somewhat better.
-    // The `_mm512_permutex_epi64` and the `vpermq` instruction also has a latency of 3 cycles.
-    // So we want to avoid that, if possible.
-    __m128i nonce_vec = _mm_set1_epi64x(nonce);
-    __m128i key128 = _mm_xor_si128(nonce_vec, _mm_set_epi64x(0x13198a2e03707344ull, 0x243f6a8885a308d3ull));
     if (length <= 16) {
-        __mmask16 mask = _sz_u16_mask_until(length);
         __m128i input = _mm_set1_epi64x(nonce);
-        __m128i generated = _mm_aesenc_si128(input, key128);
-        _mm_mask_storeu_epi8((void *)output, mask, generated);
+        __m128i pi = _mm_load_si128((__m128i const *)_sz_hash_pi_constants());
+        __m128i key = _mm_xor_si128(_mm_set1_epi64x(nonce), pi);
+        __m128i generated = _mm_aesenc_si128(input, key);
+        __mmask16 store_mask = _sz_u16_mask_until(length);
+        _mm_mask_storeu_epi8((void *)output, store_mask, generated);
     }
     // Assuming the YMM register contains two 128-bit blocks, the input to the generator
     // will be more complex, containing the sum of the nonce and the block number.
     else if (length <= 32) {
-        __mmask32 mask = _sz_u32_mask_until(length);
         __m256i input = _mm256_set_epi64x(nonce + 1, nonce + 1, nonce, nonce);
-        __m256i key256 =
-            _mm256_permute2x128_si256(_mm256_castsi128_si256(key128), _mm256_castsi128_si256(key128), 0x00);
-        __m256i generated = _mm256_aesenc_epi128(input, key256);
-        _mm256_mask_storeu_epi8((void *)output, mask, generated);
+        __m256i pi = _mm256_load_si256((__m256i const *)_sz_hash_pi_constants());
+        __m256i key = _mm256_xor_si256(_mm256_set1_epi64x(nonce), pi);
+        __m256i generated = _mm256_aesenc_epi128(input, key);
+        __mmask32 store_mask = _sz_u32_mask_until(length);
+        _mm256_mask_storeu_epi8((void *)output, store_mask, generated);
     }
     // The last special case we handle outside of the primary loop is for buffers up to 64 bytes long.
     else if (length <= 64) {
-        __mmask64 mask = _sz_u64_mask_until(length);
         __m512i input = _mm512_set_epi64(               //
             nonce + 3, nonce + 3, nonce + 2, nonce + 2, //
             nonce + 1, nonce + 1, nonce, nonce);
-        __m512i key512 = _mm512_permutex_epi64(_mm512_castsi128_si512(key128), 0x00);
-        __m512i generated = _mm512_aesenc_epi128(input, key512);
-        _mm512_mask_storeu_epi8((void *)output, mask, generated);
+        __m512i pi = _mm512_load_si512((__m512i const *)_sz_hash_pi_constants());
+        __m512i key = _mm512_xor_si512(_mm512_set1_epi64(nonce), pi);
+        __m512i generated = _mm512_aesenc_epi128(input, key);
+        __mmask64 store_mask = _sz_u64_mask_until(length);
+        _mm512_mask_storeu_epi8((void *)output, store_mask, generated);
     }
     // The final part of the function is the primary loop, which processes the buffer in 64-byte chunks.
     else {
-        __m512i increment = _mm512_set1_epi64(4);
+        __m512i const increment = _mm512_set1_epi64(4);
         __m512i input = _mm512_set_epi64(               //
             nonce + 3, nonce + 3, nonce + 2, nonce + 2, //
             nonce + 1, nonce + 1, nonce, nonce);
-        __m512i key512 = _mm512_permutex_epi64(_mm512_castsi128_si512(key128), 0x00);
+        __m512i const pi = _mm512_load_si512((__m512i const *)_sz_hash_pi_constants());
+        __m512i const key = _mm512_xor_si512(_mm512_set1_epi64(nonce), pi);
+
+        // Produce the output, fixing the key and enumerating input chunks.
         sz_size_t i = 0;
         for (; i + 64 <= length; i += 64) {
-            __m512i generated = _mm512_aesenc_epi128(input, key512);
+            __m512i generated = _mm512_aesenc_epi128(input, key);
             _mm512_storeu_epi8((void *)(output + i), generated);
             input = _mm512_add_epi64(input, increment);
         }
+
         // Handle the tail of the buffer.
-        __mmask64 mask = _sz_u64_mask_until(length - i);
-        __m512i generated = _mm512_aesenc_epi128(input, key512);
-        _mm512_mask_storeu_epi8((void *)(output + i), mask, generated);
+        __m512i generated = _mm512_aesenc_epi128(input, key);
+        __mmask64 store_mask = _sz_u64_mask_until(length - i);
+        _mm512_mask_storeu_epi8((void *)(output + i), store_mask, generated);
     }
 }
 
