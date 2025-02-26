@@ -1,27 +1,43 @@
+/**
+ *  @brief   Extensive @b unit-testing suite for StringZilla, written in C++.
+ *  @note    It tests one target hardware platform at a time and should be compiled and run separately for each.
+ *           To override the default hardware platform, overrides the @b `SZ_USE_*` flags at the top of this file.
+ *
+ *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
+ *
+ *  @file    test.cpp
+ *  @author  Ash Vardanian
+ */
+
+#include <limits>
 #undef NDEBUG // Enable all assertions
 
-// Enable assertions for iterators
+/* The Visual C++ run-time library detects incorrect iterator use,
+ * and asserts and displays a dialog box at run time on Windows.
+ */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
 #include <cassert> // assertions
 
-// Overload the following with caution.
-// Those parameters must never be explicitly set during releases,
-// but they come handy during development, if you want to validate
-// different ISA-specific implementations.
+/**
+ * ! Overload the following with caution.
+ * ! Those parameters must never be explicitly set during releases,
+ * ! but they come handy during development, if you want to validate
+ * ! different ISA-specific implementations.
+ */
 // #define SZ_USE_HASWELL 0
+// #define SZ_USE_SKYLAKE 0
 // #define SZ_USE_ICE 0
 // #define SZ_USE_NEON 0
 // #define SZ_USE_SVE 0
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
-// Put this at the top to make sure it pulls all the right dependencies
 #include <stringzilla/stringzilla.hpp>
 
 #if defined(__SANITIZE_ADDRESS__)
-#include <sanitizer/asan_interface.h> // ASAN
+#include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
 #include <algorithm>     // `std::transform`
@@ -132,6 +148,84 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
 #endif
 }
+
+/**
+ *  @brief  Several string processing operations rely on computing integer logarithms.
+ *          Failures in such operations will result in wrong `resize` outcomes and heap corruption.
+ */
+static void test_hashing_on_platform(                                   //
+    sz_hash_t hash_base, sz_hash_state_init_t init_base,                //
+    sz_hash_state_stream_t stream_base, sz_hash_state_fold_t fold_base, //
+    sz_hash_t hash_simd, sz_hash_state_init_t init_simd,                //
+    sz_hash_state_stream_t stream_simd, sz_hash_state_fold_t fold_simd) {
+
+    auto test_on_seed = [&](std::string text, sz_u64_t seed) {
+        // Compute the entire hash at once, expecting the same output
+        sz_u64_t result_base = hash_base(text.data(), text.size(), seed);
+        sz_u64_t result_simd = hash_simd(text.data(), text.size(), seed);
+        assert(result_base == result_simd);
+
+        // Compare incremental hashing across platforms
+        sz_hash_state_t state_base, state_simd;
+        init_base(&state_base, seed);
+        init_simd(&state_simd, seed);
+        assert(sz_hash_state_equal(&state_base, &state_base) == sz_true_k); // Self-equality
+        assert(sz_hash_state_equal(&state_simd, &state_simd) == sz_true_k); // Self-equality
+        assert(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
+
+        // Try breaking those strings into arbitrary chunks, expecting the same output in the streaming mode.
+        // The length of each chunk and the number of chunks will be determined with a coin toss.
+        iterate_in_random_slices(text, [&](std::string slice) {
+            stream_base(&state_base, slice.data(), slice.size());
+            stream_simd(&state_simd, slice.data(), slice.size());
+            assert(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
+            result_base = fold_base(&state_base);
+            result_simd = fold_simd(&state_simd);
+            assert(result_base == result_simd);
+        });
+    };
+
+    // Let's try different-length strings repeating a "abc" pattern:
+    std::vector<sz_u64_t> seeds = {
+        0u, 42u,                              //
+        std::numeric_limits<sz_u32_t>::max(), //
+        std::numeric_limits<sz_u64_t>::max(), //
+    };
+    for (auto seed : seeds)
+        for (std::size_t copies = 1; copies != 100; ++copies) //
+            test_on_seed(repeat("abc", copies), seed);
+}
+
+static void test_hashing_across_platforms() {
+#if SZ_USE_HASWELL
+    test_hashing_on_platform(                                   //
+        sz_hash_serial, sz_hash_state_init_serial,              //
+        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
+        sz_hash_haswell, sz_hash_state_init_haswell,            //
+        sz_hash_state_stream_haswell, sz_hash_state_fold_haswell);
+#endif
+#if SZ_USE_SKYLAKE
+    test_hashing_on_platform(                                   //
+        sz_hash_serial, sz_hash_state_init_serial,              //
+        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
+        sz_hash_skylake, sz_hash_state_init_skylake,            //
+        sz_hash_state_stream_skylake, sz_hash_state_fold_skylake);
+#endif
+#if SZ_USE_ICE
+    test_hashing_on_platform(                                   //
+        sz_hash_serial, sz_hash_state_init_serial,              //
+        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
+        sz_hash_ice, sz_hash_state_init_ice,                    //
+        sz_hash_state_stream_ice, sz_hash_state_fold_ice);
+#endif
+#if SZ_USE_NEON
+    test_hashing_on_platform(                                   //
+        sz_hash_serial, sz_hash_state_init_serial,              //
+        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
+        sz_hash_neon, sz_hash_state_init_neon,                  //
+        sz_hash_state_stream_neon, sz_hash_state_fold_neon);
+#endif
+};
 
 /**
  *  @brief  Tests various ASCII-based methods (e.g., `is_alpha`, `is_digit`)
@@ -291,10 +385,10 @@ static void test_memory_utilities( //
 #if 0 // TODO:
 
     // We are going to randomly select the "source" and "target" slices of the strings.
-    // For `memcpy` and `memset` the offsets should have uniform ditribution,
+    // For `memcpy` and `memset` the offsets should have uniform distribution,
     // while the length should decay with an exponential distribution.
     // For `memmove` the offset should be uniform, but the "shift" and "length" should
-    // be exponenetial. The exponential distributions should be functions of the cache line width.
+    // be exponential. The exponential distributions should be functions of the cache line width.
     // https://en.cppreference.com/w/cpp/numeric/random/exponential_distribution
     std::string dataset(max_l2_size, '-');
     auto &gen = global_random_generator();
@@ -953,13 +1047,13 @@ static void test_constructors() {
         strings.push_back(alphabet.substr(0, alphabet_slice));
     std::vector<sz::string> copies {strings};
     assert(copies.size() == strings.size());
-    for (size_t i = 0; i < copies.size(); i++) {
+    for (size_t i = 0; i < copies.size(); ++i) {
         assert(copies[i].size() == strings[i].size());
         assert(copies[i] == strings[i]);
         for (size_t j = 0; j < strings[i].size(); j++) { assert(copies[i][j] == strings[i][j]); }
     }
     std::vector<sz::string> assignments = strings;
-    for (size_t i = 0; i < assignments.size(); i++) {
+    for (size_t i = 0; i < assignments.size(); ++i) {
         assert(assignments[i].size() == strings[i].size());
         assert(assignments[i] == strings[i]);
         for (size_t j = 0; j < strings[i].size(); j++) { assert(assignments[i][j] == strings[i][j]); }
@@ -1027,12 +1121,12 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
     using string = sz::basic_string<char, accounting_allocator>;
     string base;
 
-    for (std::size_t i = 0; i < len; i++) base.push_back('c');
+    for (std::size_t i = 0; i < len; ++i) base.push_back('c');
     assert(base.length() == len);
 
     // Do copies leak?
     assert_balanced_memory([&]() {
-        for (std::size_t i = 0; i < iterations; i++) {
+        for (std::size_t i = 0; i < iterations; ++i) {
             string copy(base);
             assert(copy.length() == len);
             assert(copy == base);
@@ -1041,7 +1135,7 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
 
     // How about assignments?
     assert_balanced_memory([&]() {
-        for (std::size_t i = 0; i < iterations; i++) {
+        for (std::size_t i = 0; i < iterations; ++i) {
             string copy;
             copy = base;
             assert(copy.length() == len);
@@ -1051,7 +1145,7 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
 
     // How about the move constructor?
     assert_balanced_memory([&]() {
-        for (std::size_t i = 0; i < iterations; i++) {
+        for (std::size_t i = 0; i < iterations; ++i) {
             string unique_item(base);
             assert(unique_item.length() == len);
             assert(unique_item == base);
@@ -1063,7 +1157,7 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
 
     // And the move assignment operator with an empty target payload?
     assert_balanced_memory([&]() {
-        for (std::size_t i = 0; i < iterations; i++) {
+        for (std::size_t i = 0; i < iterations; ++i) {
             string unique_item(base);
             string copy;
             copy = std::move(unique_item);
@@ -1074,7 +1168,7 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
 
     // And move assignment where the target had a payload?
     assert_balanced_memory([&]() {
-        for (std::size_t i = 0; i < iterations; i++) {
+        for (std::size_t i = 0; i < iterations; ++i) {
             string unique_item(base);
             string copy;
             for (std::size_t j = 0; j < 317; j++) copy.push_back('q');
@@ -1570,7 +1664,7 @@ void test_replacements(std::size_t lookup_tables_to_try = 128, std::size_t slice
     for (std::size_t lookup_table_variation = 0; lookup_table_variation != lookup_tables_to_try;
          ++lookup_table_variation) {
         sz::look_up_table lut;
-        for (std::size_t i = 0; i < 256; i++) lut[(char)i] = (char)(std::rand() % 256);
+        for (std::size_t i = 0; i < 256; ++i) lut[(char)i] = (char)(std::rand() % 256);
 
         for (std::size_t slice_idx = 0; slice_idx != slices_per_table; ++slice_idx) {
             std::size_t slice_offset = std::rand() % (body.length());
@@ -1597,7 +1691,7 @@ static void test_sequence_algorithms() {
         sz_sequence_t sequence;
         sz_cptr_t strings[] = {"banana", "apple", "cherry"};
         sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
-        assert(sequence.size == 3);
+        assert(sequence.count == 3);
         assert(sequence.get_start(sequence.handle, 0) == "banana"_sv);
         assert(sequence.get_start(sequence.handle, 1) == "apple"_sv);
         assert(sequence.get_start(sequence.handle, 2) == "cherry"_sv);
@@ -1687,6 +1781,14 @@ static void test_stl_containers() {
 
 int main(int argc, char const **argv) {
 
+    sz_u128_vec_t some_state, some_key;
+    randomize_string((char *)&some_state.u8s[0], 16);
+    randomize_string((char *)&some_key.u8s[0], 16);
+    sz_u128_vec_t emulated_result = _sz_emulate_aesenc_si128_serial(some_state, some_key);
+    sz_u128_vec_t hardware_result;
+    hardware_result.xmm = _mm_aesenc_si128(some_state.xmm, some_key.xmm);
+    assert(memcmp(&emulated_result, &hardware_result, sizeof(sz_u128_vec_t)) == 0);
+
     // Let's greet the user nicely
     sz_unused(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
@@ -1698,6 +1800,11 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
+
+    // Compatibility across hardware-specific implementations
+    test_hashing_across_platforms();
+
+    // Core APIs
     test_ascii_utilities<sz::string>();
     test_ascii_utilities<sz::string_view>();
     test_memory_utilities();
