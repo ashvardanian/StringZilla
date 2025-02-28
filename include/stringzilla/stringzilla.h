@@ -37,9 +37,9 @@
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
 
-#define STRINGZILLA_VERSION_MAJOR 3
-#define STRINGZILLA_VERSION_MINOR 11
-#define STRINGZILLA_VERSION_PATCH 3
+#define STRINGZILLA_H_VERSION_MAJOR 3
+#define STRINGZILLA_H_VERSION_MINOR 11
+#define STRINGZILLA_H_VERSION_PATCH 3
 
 #include "types.h"        // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`
 #include "compare.h"      // `sz_equal`, `sz_order`
@@ -78,6 +78,20 @@ typedef enum {
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
 SZ_DYNAMIC sz_capability_t sz_capabilities(void);
+
+#if defined(SZ_DYNAMIC_DISPATCH)
+
+SZ_DYNAMIC int sz_version_major(void);
+SZ_DYNAMIC int sz_version_minor(void);
+SZ_DYNAMIC int sz_version_patch(void);
+
+#else
+
+SZ_PUBLIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
+SZ_PUBLIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
+SZ_PUBLIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+
+#endif
 
 #ifdef __cplusplus
 }
