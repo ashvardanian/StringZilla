@@ -1558,7 +1558,7 @@ mod tests {
         sz::fill_random(&mut second_buffer, 42);
 
         // Same nonce will produce the same outputs
-        assert!(first_buffer != second_buffer);
+        assert_eq!(first_buffer, second_buffer);
     }
 
     mod search_split_iterators {
