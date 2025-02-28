@@ -22,7 +22,7 @@
  *  - `sz_string_view_t` - for a C-style `std::string_view`-like structure.
  *  - `sz_memory_allocator_t` - a wrapper for memory-management functions.
  *  - `sz_sequence_t` - a wrapper to access strings forming a sequential container.
- *  - `sz_charset_t` - a bitset for 256 possible byte values.
+ *  - `sz_byteset_t` - a bitset for 256 possible byte values.
  */
 #ifndef STRINGZILLA_TYPES_H_
 #define STRINGZILLA_TYPES_H_
@@ -344,10 +344,13 @@ typedef enum {
      */
     sz_bad_alloc_k = -1,
     /**
-     *  For algorithms that have an upper bound on some parameter, like the maximum number of iterations,
-     *  or the maximum edit distance, this status indicates that the limit was reached.
+     *  For algorithms that require UTF8 input, this status indicates that the input is invalid.
      */
-    sz_reached_limit_k = -2,
+    sz_invalid_utf8_k = -2,
+    /**
+     *  For algorithms that take collections of unique elements, this status indicates presence of duplicates.
+     */
+    sz_contains_duplicates_k = -3,
 } sz_status_t;
 
 /**
@@ -374,33 +377,47 @@ typedef struct sz_string_view_t {
 #pragma region Character Sets
 
 /**
- *  @brief  Bit-set structure for 256 possible byte values. Useful for filtering and search.
- *  @see    sz_charset_init, sz_charset_add, sz_charset_contains, sz_charset_invert
+ *  @brief  Bit-set semi-opaque structure for 256 possible byte values. Useful for filtering and search.
+ *  @sa     sz_byteset_init, sz_byteset_add, sz_byteset_contains, sz_byteset_invert
+ *
+ *  Example usage:
+ *
+ *  @code{.c}
+ *      #include <stringzilla/types.h>
+ *      int main() {
+ *          char const *alphabet = "abcdefghijklmnopqrstuvwxyz";
+ *          sz_byteset_t byteset;
+ *          sz_byteset_init(&byteset);
+ *          for (sz_size_t i = 0; i < 26; ++i)
+ *              sz_byteset_add(&byteset, alphabet[i]);
+ *          return sz_byteset_contains(&byteset, 'a') && !sz_byteset_contains(&byteset, 'A') ? 0 : 1;
+ *      }
+ *  @endcode
  */
-typedef union sz_charset_t {
+typedef union sz_byteset_t {
     sz_u64_t _u64s[4];
     sz_u32_t _u32s[8];
     sz_u16_t _u16s[16];
     sz_u8_t _u8s[32];
-} sz_charset_t;
+} sz_byteset_t;
 
 /** @brief  Initializes a bit-set to an empty collection, meaning - all characters are banned. */
-SZ_PUBLIC void sz_charset_init(sz_charset_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
+SZ_PUBLIC void sz_byteset_init(sz_byteset_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
 
 /** @brief  Initializes a bit-set to all ASCII character. */
-SZ_PUBLIC void sz_charset_init_ascii(sz_charset_t *s) {
+SZ_PUBLIC void sz_byteset_init_ascii(sz_byteset_t *s) {
     s->_u64s[0] = s->_u64s[1] = 0xFFFFFFFFFFFFFFFFull;
     s->_u64s[2] = s->_u64s[3] = 0;
 }
 
 /** @brief  Adds a character to the set and accepts @b unsigned integers. */
-SZ_PUBLIC void sz_charset_add_u8(sz_charset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
+SZ_PUBLIC void sz_byteset_add_u8(sz_byteset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
 
-/** @brief  Adds a character to the set. Consider @b sz_charset_add_u8. */
-SZ_PUBLIC void sz_charset_add(sz_charset_t *s, char c) { sz_charset_add_u8(s, *(sz_u8_t *)(&c)); } // bitcast
+/** @brief  Adds a character to the set. Consider @b sz_byteset_add_u8. */
+SZ_PUBLIC void sz_byteset_add(sz_byteset_t *s, char c) { sz_byteset_add_u8(s, *(sz_u8_t *)(&c)); } // bitcast
 
 /** @brief  Checks if the set contains a given character and accepts @b unsigned integers. */
-SZ_PUBLIC sz_bool_t sz_charset_contains_u8(sz_charset_t const *s, sz_u8_t c) {
+SZ_PUBLIC sz_bool_t sz_byteset_contains_u8(sz_byteset_t const *s, sz_u8_t c) {
     // Checking the bit can be done in different ways:
     // - (s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
     // - (s->_u32s[c >> 5] & (1u << (c & 31u))) != 0
@@ -409,13 +426,13 @@ SZ_PUBLIC sz_bool_t sz_charset_contains_u8(sz_charset_t const *s, sz_u8_t c) {
     return (sz_bool_t)((s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0);
 }
 
-/** @brief  Checks if the set contains a given character. Consider @b sz_charset_contains_u8. */
-SZ_PUBLIC sz_bool_t sz_charset_contains(sz_charset_t const *s, char c) {
-    return sz_charset_contains_u8(s, *(sz_u8_t *)(&c)); // bitcast
+/** @brief  Checks if the set contains a given character. Consider @b sz_byteset_contains_u8. */
+SZ_PUBLIC sz_bool_t sz_byteset_contains(sz_byteset_t const *s, char c) {
+    return sz_byteset_contains_u8(s, *(sz_u8_t *)(&c)); // bitcast
 }
 
 /** @brief  Inverts the contents of the set, so allowed character get disallowed, and vice versa. */
-SZ_PUBLIC void sz_charset_invert(sz_charset_t *s) {
+SZ_PUBLIC void sz_byteset_invert(sz_byteset_t *s) {
     s->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
         s->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
 }
@@ -476,8 +493,8 @@ typedef sz_u64_t (*sz_hash_state_fold_t)(struct sz_hash_state_t const *);
 /** @brief  Signature of `sz_bytesum`. */
 typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of `sz_generate`. */
-typedef void (*sz_generate_t)(sz_ptr_t, sz_size_t, sz_u64_t);
+/** @brief  Signature of `sz_fill_random`. */
+typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
 
 /** @brief  Signature of `sz_equal`. */
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
@@ -486,7 +503,7 @@ typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
 typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /** @brief  Signature of `sz_lookup`. */
-typedef void (*sz_lookup_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_ptr_t);
+typedef void (*sz_lookup_t)(sz_ptr_t, sz_size_t, sz_cptr_t, sz_cptr_t);
 
 /** @brief  Signature of `sz_move`. */
 typedef void (*sz_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
@@ -501,7 +518,7 @@ typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /** @brief  Signature of `sz_find_set`. */
-typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_charset_t const *);
+typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
 
 /** @brief  Signature of `sz_hamming_distance`. */
 typedef sz_status_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_size_t *);
@@ -515,18 +532,14 @@ typedef sz_status_t (*sz_needleman_wunsch_score_t)(sz_cptr_t, sz_size_t, sz_cptr
                                                    sz_error_cost_t, sz_memory_allocator_t *, sz_ssize_t *);
 
 /** @brief  Signature of `sz_sequence_argsort`. */
-typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *,
-                                             sz_bool_t *);
+typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
 
 /** @brief  Signature of `sz_pgrams_sort`. */
-typedef sz_status_t (*sz_pgrams_sort_t)(sz_pgram_t *, sz_size_t, sz_memory_allocator_t *, sz_sorted_idx_t *,
-                                        sz_bool_t *);
+typedef sz_status_t (*sz_pgrams_sort_t)(sz_pgram_t *, sz_size_t, sz_memory_allocator_t *, sz_sorted_idx_t *);
 
-/** @brief  Signature of `sz_sequence_argsort_stable`. */
-typedef sz_sequence_argsort_t sz_sequence_argsort_stable_t;
-
-/** @brief  Signature of `sz_pgrams_sort_stable`. */
-typedef sz_pgrams_sort_t sz_pgrams_sort_stable_t;
+/** @brief  Signature of `sz_sequence_join`. */
+typedef sz_status_t (*sz_sequence_join_t)(struct sz_sequence_t const *, struct sz_sequence_t const *,
+                                          sz_memory_allocator_t *, sz_size_t *, sz_sorted_idx_t *, sz_sorted_idx_t *);
 
 #pragma endregion
 

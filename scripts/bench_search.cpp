@@ -123,11 +123,11 @@ tracked_binary_functions_t rfind_functions() {
     return result;
 }
 
-tracked_binary_functions_t find_charset_functions() {
+tracked_binary_functions_t find_byteset_functions() {
     // ! Despite receiving string-views, following functions are assuming the strings are null-terminated.
     auto wrap_sz = [](auto function) -> binary_function_t {
         return binary_function_t([function](std::string_view h, std::string_view n) {
-            sz::char_set set;
+            sz::byteset set;
             for (auto c : n) set.add(c);
             sz_cptr_t match = function(h.data(), h.size(), &set.raw());
             return (match ? match - h.data() : h.size());
@@ -139,26 +139,26 @@ tracked_binary_functions_t find_charset_functions() {
              auto match = h.find_first_of(n);
              return (match == std::string_view::npos ? h.size() : match);
          }},
-        {"sz_find_charset_serial", wrap_sz(sz_find_charset_serial), true},
+        {"sz_find_byteset_serial", wrap_sz(sz_find_byteset_serial), true},
 #if SZ_USE_HASWELL
-        {"sz_find_charset_haswell", wrap_sz(sz_find_charset_haswell), true},
+        {"sz_find_byteset_haswell", wrap_sz(sz_find_byteset_haswell), true},
 #endif
 #if SZ_USE_ICE
-        {"sz_find_charset_ice", wrap_sz(sz_find_charset_ice), true},
+        {"sz_find_byteset_ice", wrap_sz(sz_find_byteset_ice), true},
 #endif
 #if SZ_USE_NEON
-        {"sz_find_charset_neon", wrap_sz(sz_find_charset_neon), true},
+        {"sz_find_byteset_neon", wrap_sz(sz_find_byteset_neon), true},
 #endif
         {"strcspn", [](std::string_view h, std::string_view n) { return strcspn(h.data(), n.data()); }},
     };
     return result;
 }
 
-tracked_binary_functions_t rfind_charset_functions() {
+tracked_binary_functions_t rfind_byteset_functions() {
     // ! Despite receiving string-views, following functions are assuming the strings are null-terminated.
     auto wrap_sz = [](auto function) -> binary_function_t {
         return binary_function_t([function](std::string_view h, std::string_view n) {
-            sz::char_set set;
+            sz::byteset set;
             for (auto c : n) set.add(c);
             sz_cptr_t match = function(h.data(), h.size(), &set.raw());
             return (match ? match - h.data() : 0);
@@ -170,12 +170,12 @@ tracked_binary_functions_t rfind_charset_functions() {
              auto match = h.find_last_of(n);
              return (match == std::string_view::npos ? 0 : match);
          }},
-        {"sz_rfind_charset_serial", wrap_sz(sz_rfind_charset_serial), true},
+        {"sz_rfind_byteset_serial", wrap_sz(sz_rfind_byteset_serial), true},
 #if SZ_USE_ICE
-        {"sz_rfind_charset_ice", wrap_sz(sz_rfind_charset_ice), true},
+        {"sz_rfind_byteset_ice", wrap_sz(sz_rfind_byteset_ice), true},
 #endif
 #if SZ_USE_NEON
-        {"sz_rfind_charset_neon", wrap_sz(sz_rfind_charset_neon), true},
+        {"sz_rfind_byteset_neon", wrap_sz(sz_rfind_byteset_neon), true},
 #endif
     };
     return result;
@@ -304,25 +304,25 @@ int main(int argc, char const **argv) {
     bench_rfinds(dataset.text, {" "}, rfind_functions());
 
     std::printf("Benchmarking for an [\\n\\r\\v\\f] RegEx:\n");
-    bench_finds(dataset.text, {"\n\r\v\f"}, find_charset_functions());
-    bench_rfinds(dataset.text, {"\n\r\v\f"}, rfind_charset_functions());
+    bench_finds(dataset.text, {"\n\r\v\f"}, find_byteset_functions());
+    bench_rfinds(dataset.text, {"\n\r\v\f"}, rfind_byteset_functions());
 
     // Typical ASCII tokenization and validation benchmarks
     std::printf("Benchmarking for all whitespaces:\n");
-    bench_finds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, find_charset_functions());
-    bench_rfinds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, rfind_charset_functions());
+    bench_finds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, find_byteset_functions());
+    bench_rfinds(dataset.text, {{sz::whitespaces(), sizeof(sz::whitespaces())}}, rfind_byteset_functions());
 
     std::printf("Benchmarking for HTML tag start/end:\n");
-    bench_finds(dataset.text, {"<>"}, find_charset_functions());
-    bench_rfinds(dataset.text, {"<>"}, rfind_charset_functions());
+    bench_finds(dataset.text, {"<>"}, find_byteset_functions());
+    bench_rfinds(dataset.text, {"<>"}, rfind_byteset_functions());
 
     std::printf("Benchmarking for punctuation marks:\n");
-    bench_finds(dataset.text, {{sz::punctuation(), sizeof(sz::punctuation())}}, find_charset_functions());
-    bench_rfinds(dataset.text, {{sz::punctuation(), sizeof(sz::punctuation())}}, rfind_charset_functions());
+    bench_finds(dataset.text, {{sz::punctuation(), sizeof(sz::punctuation())}}, find_byteset_functions());
+    bench_rfinds(dataset.text, {{sz::punctuation(), sizeof(sz::punctuation())}}, rfind_byteset_functions());
 
     std::printf("Benchmarking for non-printable characters:\n");
-    bench_finds(dataset.text, {{sz::ascii_controls(), sizeof(sz::ascii_controls())}}, find_charset_functions());
-    bench_rfinds(dataset.text, {{sz::ascii_controls(), sizeof(sz::ascii_controls())}}, rfind_charset_functions());
+    bench_finds(dataset.text, {{sz::ascii_controls(), sizeof(sz::ascii_controls())}}, find_byteset_functions());
+    bench_rfinds(dataset.text, {{sz::ascii_controls(), sizeof(sz::ascii_controls())}}, rfind_byteset_functions());
 
     // Baseline benchmarks for present tokens, coming in all lengths
     std::printf("Benchmarking on present lines:\n");

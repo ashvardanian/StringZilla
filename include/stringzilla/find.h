@@ -7,14 +7,14 @@
  *
  *  - `sz_find` and reverse-order `sz_rfind`
  *  - `sz_find_byte` and reverse-order `sz_rfind_byte`
- *  - `sz_find_charset` and reverse-order `sz_rfind_charset`
+ *  - `sz_find_byteset` and reverse-order `sz_rfind_byteset`
  *
  *  Convenience functions for character-set matching:
  *
- *  - `sz_find_char_from`
- *  - `sz_find_char_not_from`
- *  - `sz_rfind_char_from`
- *  - `sz_rfind_char_not_from`
+ *  - `sz_find_byte_from` shortcut for `sz_find_byteset`
+ *  - `sz_find_byte_not_from` shortcut for `sz_find_byteset` with inverted set
+ *  - `sz_rfind_byte_from` shortcut for `sz_rfind_byteset`
+ *  - `sz_rfind_byte_not_from` shortcut for `sz_rfind_byteset` with inverted set
  */
 #ifndef STRINGZILLA_FIND_H_
 #define STRINGZILLA_FIND_H_
@@ -35,10 +35,10 @@ extern "C" {
  *  X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memchr.S
  *  Aarch64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/aarch64/memchr.S
  *
- *  @param haystack Haystack - the string to search in.
- *  @param h_length Number of bytes in the haystack.
- *  @param needle   Needle - single-byte substring to find.
- *  @return         Address of the first match.
+ *  @param[in] haystack Haystack - the string to search in.
+ *  @param[in] h_length Number of bytes in the haystack.
+ *  @param[in] needle Needle - single-byte substring to find.
+ *  @return Address of the first match.
  */
 SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
@@ -48,10 +48,10 @@ SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
  *  X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memrchr.S
  *  Aarch64 implementation: missing
  *
- *  @param haystack Haystack - the string to search in.
- *  @param h_length Number of bytes in the haystack.
- *  @param needle   Needle - single-byte substring to find.
- *  @return         Address of the last match.
+ *  @param[in] haystack Haystack - the string to search in.
+ *  @param[in] h_length Number of bytes in the haystack.
+ *  @param[in] needle Needle - single-byte substring to find.
+ *  @return Address of the last match.
  */
 SZ_DYNAMIC sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle);
 
@@ -86,22 +86,22 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t h_length, s
  *          Equivalent to `memmem(haystack, h_length, needle, n_length)` in LibC.
  *          Similar to `strstr(haystack, needle)` in LibC, but requires known length.
  *
- *  @param haystack Haystack - the string to search in.
- *  @param h_length Number of bytes in the haystack.
- *  @param needle   Needle - substring to find.
- *  @param n_length Number of bytes in the needle.
- *  @return         Address of the first match.
+ *  @param[in] haystack Haystack - the string to search in.
+ *  @param[in] h_length Number of bytes in the haystack.
+ *  @param[in] needle Needle - substring to find.
+ *  @param[in] n_length Number of bytes in the needle.
+ *  @return Address of the first match.
  */
 SZ_DYNAMIC sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
 /**
  *  @brief  Locates the last matching substring.
  *
- *  @param haystack Haystack - the string to search in.
- *  @param h_length Number of bytes in the haystack.
- *  @param needle   Needle - substring to find.
- *  @param n_length Number of bytes in the needle.
- *  @return         Address of the last match.
+ *  @param[in] haystack Haystack - the string to search in.
+ *  @param[in] h_length Number of bytes in the haystack.
+ *  @param[in] needle Needle - substring to find.
+ *  @param[in] n_length Number of bytes in the needle.
+ *  @return Address of the last match.
  */
 SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t needle, sz_size_t n_length);
 
@@ -132,9 +132,9 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
 #endif
 
 /**
- *  @brief  Finds the first character present from the ::set, present in ::text.
+ *  @brief  Finds the first character present from the @p set, present in @p text.
  *          Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
- *          May have identical implementation and performance to ::sz_rfind_charset.
+ *          May have identical implementation and performance to ::sz_rfind_byteset.
  *
  *  Useful for parsing, when we want to skip a set of characters. Examples:
  *  - 6 whitespaces: " \t\n\r\v\f".
@@ -142,16 +142,16 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
  *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
  *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
  *
- *  @param text     String to be scanned.
- *  @param set      Set of relevant characters.
- *  @return         Pointer to the first matching character from ::set.
+ *  @param[in] text String to be scanned.
+ *  @param[in] set Set of relevant characters.
+ *  @return Pointer to the first matching character from @p set.
  */
-SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
+SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 /**
- *  @brief  Finds the last character present from the ::set, present in ::text.
+ *  @brief  Finds the last character present from the @p set, present in @p text.
  *          Equivalent to `strspn(text, accepted)` and `strcspn(text, rejected)` in LibC.
- *          May have identical implementation and performance to ::sz_find_charset.
+ *          May have identical implementation and performance to ::sz_find_byteset.
  *
  *  Useful for parsing, when we want to skip a set of characters. Examples:
  *  - 6 whitespaces: " \t\n\r\v\f".
@@ -159,39 +159,73 @@ SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charse
  *  - 5 HTML reserved characters: "\"'&<>", of which "<>" can be useful for parsing.
  *  - 2 JSON string special characters useful to locate the end of the string: "\"\\".
  *
- *  @param text     String to be scanned.
- *  @param set      Set of relevant characters.
- *  @return         Pointer to the last matching character from ::set.
+ *  @param[in] text String to be scanned.
+ *  @param[in] set Set of relevant characters.
+ *  @return Pointer to the last matching character from @p set.
  */
-SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
+SZ_DYNAMIC sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
-/** @copydoc sz_find_charset */
-SZ_PUBLIC sz_cptr_t sz_find_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
-/** @copydoc sz_rfind_charset */
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set);
+/** @copydoc sz_find_byteset */
+SZ_PUBLIC sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_PUBLIC sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
 
 #if SZ_USE_HASWELL
-/** @copydoc sz_find_charset */
-SZ_PUBLIC sz_cptr_t sz_find_charset_haswell(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
-/** @copydoc sz_rfind_charset */
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_haswell(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
+/** @copydoc sz_find_byteset */
+SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_PUBLIC sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_ICE
-/** @copydoc sz_find_charset */
-SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
-/** @copydoc sz_rfind_charset */
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_ice(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
+/** @copydoc sz_find_byteset */
+SZ_PUBLIC sz_cptr_t sz_find_byteset_ice(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_PUBLIC sz_cptr_t sz_rfind_byteset_ice(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #if SZ_USE_NEON
-/** @copydoc sz_find_charset */
-SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
-/** @copydoc sz_rfind_charset */
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t haystack, sz_size_t length, sz_charset_t const *set);
+/** @copydoc sz_find_byteset */
+SZ_PUBLIC sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
+/** @copydoc sz_rfind_byteset */
+SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t length, sz_byteset_t const *set);
 #endif
 
 #pragma endregion // Core API
+
+#pragma region Helper Shortcuts
+
+SZ_PUBLIC sz_cptr_t sz_find_byte_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (; n_length; ++n, --n_length) sz_byteset_add(&set, *n);
+    return sz_find_byteset(h, h_length, &set);
+}
+
+SZ_PUBLIC sz_cptr_t sz_find_byte_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (; n_length; ++n, --n_length) sz_byteset_add(&set, *n);
+    sz_byteset_invert(&set);
+    return sz_find_byteset(h, h_length, &set);
+}
+
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (; n_length; ++n, --n_length) sz_byteset_add(&set, *n);
+    return sz_rfind_byteset(h, h_length, &set);
+}
+
+SZ_PUBLIC sz_cptr_t sz_rfind_byte_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_byteset_t set;
+    sz_byteset_init(&set);
+    for (; n_length; ++n, --n_length) sz_byteset_add(&set, *n);
+    sz_byteset_invert(&set);
+    return sz_rfind_byteset(h, h_length, &set);
+}
+
+#pragma endregion // Helper Shortcuts
 
 #pragma region Serial Implementation
 
@@ -270,18 +304,18 @@ SZ_INTERNAL void _sz_locate_needle_anomalies( //
     }
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
+SZ_PUBLIC sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
     for (sz_cptr_t const end = text + length; text != end; ++text)
-        if (sz_charset_contains(set, *text)) return text;
+        if (sz_byteset_contains(set, *text)) return text;
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_serial(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
+SZ_PUBLIC sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
     sz_cptr_t const end = text;
     for (text += length; text != end;)
-        if (sz_charset_contains(set, *(text -= 1))) return text;
+        if (sz_byteset_contains(set, *(text -= 1))) return text;
     return SZ_NULL_CHAR;
 #pragma GCC diagnostic pop
 }
@@ -893,7 +927,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_haswell(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
     return sz_rfind_serial(h, h_length, n, n_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_charset_haswell(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
+SZ_PUBLIC sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm256_shuffle_epi8` we can use the same mask for both lanes.
@@ -978,11 +1012,11 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_haswell(sz_cptr_t text, sz_size_t length, sz
         else { text += 32, length -= 32; }
     }
 
-    return sz_find_charset_serial(text, length, filter);
+    return sz_find_byteset_serial(text, length, filter);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_haswell(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
-    return sz_rfind_charset_serial(text, length, filter);
+SZ_PUBLIC sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+    return sz_rfind_byteset_serial(text, length, filter);
 }
 
 #pragma clang attribute pop
@@ -1233,13 +1267,13 @@ SZ_PUBLIC sz_cptr_t sz_rfind_skylake(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
     apply_to = function)
 
-SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
+SZ_PUBLIC sz_cptr_t sz_find_byteset_ice(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
 
     // Before initializing the AVX-512 vectors, we may want to run the sequential code for the first few bytes.
     // In practice, that only hurts, even when we have matches every 5-ish bytes.
     //
-    //      if (length < SZ_SWAR_THRESHOLD) return sz_find_charset_serial(text, length, filter);
-    //      sz_cptr_t early_result = sz_find_charset_serial(text, SZ_SWAR_THRESHOLD, filter);
+    //      if (length < SZ_SWAR_THRESHOLD) return sz_find_byteset_serial(text, length, filter);
+    //      sz_cptr_t early_result = sz_find_byteset_serial(text, SZ_SWAR_THRESHOLD, filter);
     //      if (early_result) return early_result;
     //      text += SZ_SWAR_THRESHOLD;
     //      length -= SZ_SWAR_THRESHOLD;
@@ -1348,8 +1382,8 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_ice(sz_cptr_t text, sz_size_t length, sz_cha
     return SZ_NULL_CHAR;
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_ice(sz_cptr_t text, sz_size_t length, sz_charset_t const *filter) {
-    return sz_rfind_charset_serial(text, length, filter);
+SZ_PUBLIC sz_cptr_t sz_rfind_byteset_ice(sz_cptr_t text, sz_size_t length, sz_byteset_t const *filter) {
+    return sz_rfind_byteset_serial(text, length, filter);
 }
 
 #pragma clang attribute pop
@@ -1408,7 +1442,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_
     return sz_rfind_byte_serial(h, h_length, n);
 }
 
-SZ_PUBLIC sz_u64_t _sz_find_charset_neon_register( //
+SZ_PUBLIC sz_u64_t _sz_find_byteset_neon_register( //
     sz_u128_vec_t h_vec, uint8x16_t set_top_vec_u8x16, uint8x16_t set_bottom_vec_u8x16) {
 
     // Once we've read the characters in the haystack, we want to
@@ -1550,7 +1584,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_neon(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, 
     return sz_rfind_serial(h, h_length, n, n_length);
 }
 
-SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
+SZ_PUBLIC sz_cptr_t sz_find_byteset_neon(sz_cptr_t h, sz_size_t h_length, sz_byteset_t const *set) {
     sz_u64_t matches;
     sz_u128_vec_t h_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
@@ -1558,27 +1592,27 @@ SZ_PUBLIC sz_cptr_t sz_find_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_cha
 
     for (; h_length >= 16; h += 16, h_length -= 16) {
         h_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h));
-        matches = _sz_find_charset_neon_register(h_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
+        matches = _sz_find_byteset_neon_register(h_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
         if (matches) return h + sz_u64_ctz(matches) / 4;
     }
 
-    return sz_find_charset_serial(h, h_length, set);
+    return sz_find_byteset_serial(h, h_length, set);
 }
 
-SZ_PUBLIC sz_cptr_t sz_rfind_charset_neon(sz_cptr_t h, sz_size_t h_length, sz_charset_t const *set) {
+SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t h, sz_size_t h_length, sz_byteset_t const *set) {
     sz_u64_t matches;
     sz_u128_vec_t h_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
     uint8x16_t set_bottom_vec_u8x16 = vld1q_u8(&set->_u8s[16]);
 
-    // Check `sz_find_charset_neon` for explanations.
+    // Check `sz_find_byteset_neon` for explanations.
     for (; h_length >= 16; h_length -= 16) {
         h_vec.u8x16 = vld1q_u8((sz_u8_t const *)(h) + h_length - 16);
-        matches = _sz_find_charset_neon_register(h_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
+        matches = _sz_find_byteset_neon_register(h_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
         if (matches) return h + h_length - 1 - sz_u64_clz(matches) / 4;
     }
 
-    return sz_rfind_charset_serial(h, h_length, set);
+    return sz_rfind_byteset_serial(h, h_length, set);
 }
 
 #pragma clang attribute pop
@@ -1656,64 +1690,31 @@ SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t 
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
+SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
 #if SZ_USE_ICE
-    return sz_find_charset_ice(text, length, set);
+    return sz_find_byteset_ice(text, length, set);
 #elif SZ_USE_HASWELL
-    return sz_find_charset_haswell(text, length, set);
+    return sz_find_byteset_haswell(text, length, set);
 #elif SZ_USE_NEON
-    return sz_find_charset_neon(text, length, set);
+    return sz_find_byteset_neon(text, length, set);
 #else
-    return sz_find_charset_serial(text, length, set);
+    return sz_find_byteset_serial(text, length, set);
 #endif
 }
 
-SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
+SZ_DYNAMIC sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
 #if SZ_USE_ICE
-    return sz_rfind_charset_ice(text, length, set);
+    return sz_rfind_byteset_ice(text, length, set);
 #elif SZ_USE_HASWELL
-    return sz_rfind_charset_haswell(text, length, set);
+    return sz_rfind_byteset_haswell(text, length, set);
 #elif SZ_USE_NEON
-    return sz_rfind_charset_neon(text, length, set);
+    return sz_rfind_byteset_neon(text, length, set);
 #else
-    return sz_rfind_charset_serial(text, length, set);
+    return sz_rfind_byteset_serial(text, length, set);
 #endif
 }
 
 #pragma endregion
-#pragma region Helper Shortcuts
-
-SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_charset_t set;
-    sz_charset_init(&set);
-    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
-    return sz_find_charset(h, h_length, &set);
-}
-
-SZ_DYNAMIC sz_cptr_t sz_find_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_charset_t set;
-    sz_charset_init(&set);
-    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
-    sz_charset_invert(&set);
-    return sz_find_charset(h, h_length, &set);
-}
-
-SZ_DYNAMIC sz_cptr_t sz_rfind_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_charset_t set;
-    sz_charset_init(&set);
-    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
-    return sz_rfind_charset(h, h_length, &set);
-}
-
-SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_charset_t set;
-    sz_charset_init(&set);
-    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
-    sz_charset_invert(&set);
-    return sz_rfind_charset(h, h_length, &set);
-}
-
-#pragma endregion // Helper Shortcuts
 #endif            // !SZ_DYNAMIC_DISPATCH
 #pragma endregion // Compile Time Dispatching
 

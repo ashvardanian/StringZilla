@@ -45,7 +45,7 @@
 #include "compare.h"      // `sz_equal`, `sz_order`
 #include "memory.h"       // `sz_copy`, `sz_move`, `sz_fill`
 #include "hash.h"         // `sz_bytesum`, `sz_hash`, `sz_state_init`, `sz_state_stream`, `sz_state_fold`
-#include "find.h"         // `sz_find`, `sz_find_charset`, `sz_rfind`
+#include "find.h"         // `sz_find`, `sz_find_byteset`, `sz_rfind`
 #include "small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
 #include "similarity.h"   // `sz_levenshtein_distance`, `sz_needleman_wunsch_score`
 #include "sort.h"         // `sz_sequence_argsort`, `sz_pgrams_sort`, `sz_pgrams_sort_stable`

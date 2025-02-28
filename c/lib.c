@@ -94,14 +94,12 @@ SZ_INTERNAL sz_capability_t _sz_capabilities_arm(void) {
     //  - 0b0010: SVE2.1 is implemented
     // This value must match the existing indicator obtained from ID_AA64PFR0_EL1:
     unsigned supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
-    unsigned supports_sve2p1 = ((id_aa64zfr0_el1) & 0xF) >= 2;
     unsigned supports_neon = 1; // NEON is always supported
 
-    return (sz_capability_t)(                   //
-        (sz_cap_neon_k * (supports_neon)) |     //
-        (sz_cap_sve_k * (supports_sve)) |       //
-        (sz_cap_sve2_k * (supports_sve2)) |     //
-        (sz_cap_sve2p1_k * (supports_sve2p1)) | //
+    return (sz_capability_t)(               //
+        (sz_cap_neon_k * (supports_neon)) | //
+        (sz_cap_sve_k * (supports_sve)) |   //
+        (sz_cap_sve2_k * (supports_sve2)) | //
         (sz_cap_serial_k));
 
 #else // if !defined(_SZ_IS_APPLE) && !defined(_SZ_IS_LINUX)
@@ -183,7 +181,7 @@ typedef struct sz_implementations_t {
     sz_hash_state_init_t hash_state_init;
     sz_hash_state_stream_t hash_state_stream;
     sz_hash_state_fold_t hash_state_fold;
-    sz_generate_t generate;
+    sz_fill_random_t fill_random;
 
     sz_find_byte_t find_byte;
     sz_find_byte_t rfind_byte;
@@ -196,9 +194,8 @@ typedef struct sz_implementations_t {
     sz_needleman_wunsch_score_t alignment_score;
 
     sz_sequence_argsort_t sequence_argsort;
+    sz_sequence_join_t sequence_join;
     sz_pgrams_sort_t pgrams_sort;
-    sz_sequence_argsort_stable_t sequence_argsort_stable;
-    sz_pgrams_sort_stable_t pgrams_sort_stable;
 
 } sz_implementations_t;
 
@@ -229,22 +226,21 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     impl->hash_state_init = sz_hash_state_init_serial;
     impl->hash_state_stream = sz_hash_state_stream_serial;
     impl->hash_state_fold = sz_hash_state_fold_serial;
-    impl->generate = sz_generate_serial;
+    impl->fill_random = sz_fill_random_serial;
 
     impl->find = sz_find_serial;
     impl->rfind = sz_rfind_serial;
     impl->find_byte = sz_find_byte_serial;
     impl->rfind_byte = sz_rfind_byte_serial;
-    impl->find_from_set = sz_find_charset_serial;
-    impl->rfind_from_set = sz_rfind_charset_serial;
+    impl->find_from_set = sz_find_byteset_serial;
+    impl->rfind_from_set = sz_rfind_byteset_serial;
 
     impl->edit_distance = sz_levenshtein_distance_serial;
     impl->alignment_score = sz_needleman_wunsch_score_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
+    impl->sequence_join = sz_sequence_join_serial;
     impl->pgrams_sort = sz_pgrams_sort_serial;
-    impl->sequence_argsort_stable = sz_sequence_argsort_stable_serial;
-    impl->pgrams_sort_stable = sz_pgrams_sort_stable_serial;
 
 #if SZ_USE_HASWELL
     if (caps & sz_cap_haswell_k) {
@@ -261,14 +257,14 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_init = sz_hash_state_init_haswell;
         impl->hash_state_stream = sz_hash_state_stream_haswell;
         impl->hash_state_fold = sz_hash_state_fold_haswell;
-        impl->generate = sz_generate_haswell;
+        impl->fill_random = sz_fill_random_haswell;
 
         impl->find_byte = sz_find_byte_haswell;
         impl->rfind_byte = sz_rfind_byte_haswell;
         impl->find = sz_find_haswell;
         impl->rfind = sz_rfind_haswell;
-        impl->find_from_set = sz_find_charset_haswell;
-        impl->rfind_from_set = sz_rfind_charset_haswell;
+        impl->find_from_set = sz_find_byteset_haswell;
+        impl->rfind_from_set = sz_rfind_byteset_haswell;
     }
 #endif
 
@@ -286,20 +282,24 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_init = sz_hash_state_init_skylake;
         impl->hash_state_stream = sz_hash_state_stream_skylake;
         impl->hash_state_fold = sz_hash_state_fold_skylake;
-        impl->generate = sz_generate_skylake;
+        impl->fill_random = sz_fill_random_skylake;
 
         impl->find = sz_find_skylake;
         impl->rfind = sz_rfind_skylake;
         impl->find_byte = sz_find_byte_skylake;
         impl->rfind_byte = sz_rfind_byte_skylake;
         impl->bytesum = sz_bytesum_skylake;
+
+        impl->sequence_argsort = sz_sequence_argsort_skylake;
+        impl->sequence_join = sz_sequence_join_skylake;
+        impl->pgrams_sort = sz_pgrams_sort_skylake;
     }
 #endif
 
 #if SZ_USE_ICE
     if (caps & sz_cap_ice_k) {
-        impl->find_from_set = sz_find_charset_ice;
-        impl->rfind_from_set = sz_rfind_charset_ice;
+        impl->find_from_set = sz_find_byteset_ice;
+        impl->rfind_from_set = sz_rfind_byteset_ice;
 
         impl->edit_distance = sz_levenshtein_distance_ice;
         impl->alignment_score = sz_needleman_wunsch_score_ice;
@@ -311,12 +311,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_init = sz_hash_state_init_ice;
         impl->hash_state_stream = sz_hash_state_stream_ice;
         impl->hash_state_fold = sz_hash_state_fold_ice;
-        impl->generate = sz_generate_ice;
-
-        impl->sequence_argsort = sz_sequence_argsort_ice;
-        impl->pgrams_sort = sz_pgrams_sort_ice;
-        impl->sequence_argsort_stable = sz_sequence_argsort_stable_ice;
-        impl->pgrams_sort_stable = sz_pgrams_sort_stable_ice;
+        impl->fill_random = sz_fill_random_ice;
     }
 #endif
 
@@ -334,23 +329,22 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_init = sz_hash_state_init_neon;
         impl->hash_state_stream = sz_hash_state_stream_neon;
         impl->hash_state_fold = sz_hash_state_fold_neon;
-        impl->generate = sz_generate_neon;
+        impl->fill_random = sz_fill_random_neon;
 
         impl->find = sz_find_neon;
         impl->rfind = sz_rfind_neon;
         impl->find_byte = sz_find_byte_neon;
         impl->rfind_byte = sz_rfind_byte_neon;
-        impl->find_from_set = sz_find_charset_neon;
-        impl->rfind_from_set = sz_rfind_charset_neon;
+        impl->find_from_set = sz_find_byteset_neon;
+        impl->rfind_from_set = sz_rfind_byteset_neon;
     }
 #endif
 
 #if SZ_USE_SVE
     if (caps & sz_cap_sve_k) {
         impl->sequence_argsort = sz_sequence_argsort_sve;
+        impl->sequence_join = sz_sequence_join_sve;
         impl->pgrams_sort = sz_pgrams_sort_sve;
-        impl->sequence_argsort_stable = sz_sequence_argsort_stable_sve;
-        impl->pgrams_sort_stable = sz_pgrams_sort_stable_sve;
     }
 #endif
 }
@@ -413,8 +407,8 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_fold(sz_hash_state_t const *state) {
     return sz_dispatch_table.hash_state_fold(state);
 }
 
-SZ_DYNAMIC void sz_generate(sz_ptr_t result, sz_size_t result_length, sz_u64_t nonce) {
-    sz_dispatch_table.generate(result, result_length, nonce);
+SZ_DYNAMIC void sz_fill_random(sz_ptr_t result, sz_size_t result_length, sz_u64_t nonce) {
+    sz_dispatch_table.fill_random(result, result_length, nonce);
 }
 
 SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
@@ -457,51 +451,47 @@ SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t 
     return sz_dispatch_table.rfind(haystack, h_length, needle, n_length);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_find_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
+SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
     return sz_dispatch_table.find_from_set(text, length, set);
 }
 
-SZ_DYNAMIC sz_cptr_t sz_rfind_charset(sz_cptr_t text, sz_size_t length, sz_charset_t const *set) {
+SZ_DYNAMIC sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
     return sz_dispatch_table.rfind_from_set(text, length, set);
 }
 
-SZ_DYNAMIC sz_size_t sz_hamming_distance( //
-    sz_cptr_t a, sz_size_t a_length,      //
-    sz_cptr_t b, sz_size_t b_length,      //
-    sz_size_t bound) {
-    return sz_hamming_distance_serial(a, a_length, b, b_length, bound);
+SZ_DYNAMIC sz_status_t sz_hamming_distance( //
+    sz_cptr_t a, sz_size_t a_length,        //
+    sz_cptr_t b, sz_size_t b_length,        //
+    sz_size_t bound, sz_size_t *result) {
+    return sz_hamming_distance_serial(a, a_length, b, b_length, bound, result);
 }
 
-SZ_DYNAMIC sz_size_t sz_hamming_distance_utf8( //
-    sz_cptr_t a, sz_size_t a_length,           //
-    sz_cptr_t b, sz_size_t b_length,           //
-    sz_size_t bound) {
-    return sz_hamming_distance_utf8_serial(a, a_length, b, b_length, bound);
-}
-
-SZ_DYNAMIC sz_size_t sz_levenshtein_distance( //
-    sz_cptr_t a, sz_size_t a_length,          //
-    sz_cptr_t b, sz_size_t b_length,          //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
-    return sz_dispatch_table.edit_distance(a, a_length, b, b_length, bound, alloc);
-}
-
-SZ_DYNAMIC sz_size_t sz_levenshtein_distance_utf8( //
-    sz_cptr_t a, sz_size_t a_length,               //
-    sz_cptr_t b, sz_size_t b_length,               //
-    sz_size_t bound, sz_memory_allocator_t *alloc) {
-    return _sz_levenshtein_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc);
-}
-
-SZ_DYNAMIC sz_ssize_t sz_needleman_wunsch_score( //
+SZ_DYNAMIC sz_status_t sz_hamming_distance_utf8( //
     sz_cptr_t a, sz_size_t a_length,             //
     sz_cptr_t b, sz_size_t b_length,             //
-    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc) {
-    return sz_dispatch_table.alignment_score(a, a_length, b, b_length, subs, gap, alloc);
+    sz_size_t bound, sz_size_t *result) {
+    return sz_hamming_distance_utf8_serial(a, a_length, b, b_length, bound, result);
 }
 
-SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *array, sz_memory_allocator_t *alloc, sz_size_t *order) {
-    return sz_dispatch_table.sequence_argsort(array, alloc, order);
+SZ_DYNAMIC sz_status_t sz_levenshtein_distance( //
+    sz_cptr_t a, sz_size_t a_length,            //
+    sz_cptr_t b, sz_size_t b_length,            //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result) {
+    return sz_dispatch_table.edit_distance(a, a_length, b, b_length, bound, alloc, result);
+}
+
+SZ_DYNAMIC sz_status_t sz_levenshtein_distance_utf8( //
+    sz_cptr_t a, sz_size_t a_length,                 //
+    sz_cptr_t b, sz_size_t b_length,                 //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result) {
+    return _sz_levenshtein_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc, result);
+}
+
+SZ_DYNAMIC sz_status_t sz_needleman_wunsch_score( //
+    sz_cptr_t a, sz_size_t a_length,              //
+    sz_cptr_t b, sz_size_t b_length,              //
+    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc, sz_ssize_t *result) {
+    return sz_dispatch_table.alignment_score(a, a_length, b, b_length, subs, gap, alloc, result);
 }
 
 SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *array, sz_size_t count, sz_memory_allocator_t *alloc,
@@ -509,44 +499,15 @@ SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *array, sz_size_t count, sz_mem
     return sz_dispatch_table.pgrams_sort(array, count, alloc, order);
 }
 
-SZ_DYNAMIC sz_status_t sz_sequence_argsort_stable(sz_sequence_t const *array, sz_memory_allocator_t *alloc,
-                                                  sz_size_t *order) {
-    return sz_dispatch_table.sequence_argsort_stable(array, alloc, order);
+SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *array, sz_memory_allocator_t *alloc, sz_size_t *order) {
+    return sz_dispatch_table.sequence_argsort(array, alloc, order);
 }
 
-SZ_DYNAMIC sz_status_t sz_pgrams_sort_stable(sz_pgram_t *array, sz_size_t count, sz_memory_allocator_t *alloc,
-                                             sz_size_t *order) {
-    return sz_dispatch_table.pgrams_sort_stable(array, count, alloc, order);
-}
-
-SZ_DYNAMIC sz_cptr_t sz_find_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_charset_t set;
-    sz_charset_init(&set);
-    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
-    return sz_find_charset(h, h_length, &set);
-}
-
-SZ_DYNAMIC sz_cptr_t sz_find_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_charset_t set;
-    sz_charset_init(&set);
-    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
-    sz_charset_invert(&set);
-    return sz_find_charset(h, h_length, &set);
-}
-
-SZ_DYNAMIC sz_cptr_t sz_rfind_char_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_charset_t set;
-    sz_charset_init(&set);
-    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
-    return sz_rfind_charset(h, h_length, &set);
-}
-
-SZ_DYNAMIC sz_cptr_t sz_rfind_char_not_from(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
-    sz_charset_t set;
-    sz_charset_init(&set);
-    for (; n_length; ++n, --n_length) sz_charset_add(&set, *n);
-    sz_charset_invert(&set);
-    return sz_rfind_charset(h, h_length, &set);
+SZ_DYNAMIC sz_status_t sz_sequence_join(sz_sequence_t const *first_array, sz_sequence_t const *second_array,
+                                        sz_memory_allocator_t *alloc, sz_size_t *intersection_size,
+                                        sz_size_t *first_positions, sz_size_t *second_positions) {
+    return sz_dispatch_table.sequence_join(first_array, second_array, alloc, intersection_size, first_positions,
+                                           second_positions);
 }
 
 // Provide overrides for the libc mem* functions
@@ -626,7 +587,7 @@ SZ_DYNAMIC void *memrchr(void const *s, int c_wide, size_t n) {
 
 SZ_DYNAMIC void memfrob(void *s, size_t n) {
     static sz_u64_t nonce = 42;
-    sz_generate(s, n, nonce++);
+    sz_fill_random(s, n, nonce++);
 }
 
 #endif

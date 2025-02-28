@@ -3,12 +3,12 @@
  *  @file   hash.h
  *  @author Ash Vardanian
  *
- *  Includes core APIs:
+ *  Includes core APIs with hardware-specific backends:
  *
  *  - `sz_bytesum` - for byte-level 64-bit unsigned byte-level checksums.
  *  - `sz_hash` - for 64-bit single-shot hashing using AES instructions.
  *  - `sz_hash_state_init`, `sz_hash_state_stream`, `sz_hash_state_fold` - for incremental hashing.
- *  - `sz_generate` - for populating buffers with pseudo-random noise using AES instructions.
+ *  - `sz_fill_random` - for populating buffers with pseudo-random noise using AES instructions.
  *
  *  Why the hell do we need a yet another hashing library?!
  *  Turns out, most existing libraries have noticeable constraints. Try finding a library that:
@@ -31,12 +31,12 @@
  *  - "xxHash" is implemented in C, has an extremely wide set of third-party language bindings, and provides both
  *    32-, 64-, and 128-bit hashes. It is fast, but its dynamic dispatch is limited to x86 with `xxh_x86dispatch.c`.
  *
- *  StringZilla uses a scheme more similar to the "aHash" library, utilizing the AES extensions, that provide
+ *  StringZilla uses a scheme more similar to "aHash" and "GxHash", utilizing the AES extensions, that provide
  *  a remarkable level of "mixing per cycle" and are broadly available on modern CPUs. Similar to "aHash", they
  *  are combined with "shuffle & add" instructions to provide a high level of entropy in the output. That operation
  *  is practically free, as many modern CPUs will dispatch them on different ports. On x86, for example:
  *
- *  - `VAESENC` (ZMM, ZMM, ZMM)`:
+ *  - `VAESENC (ZMM, ZMM, ZMM)` and `VAESDEC (ZMM, ZMM, ZMM)`:
  *    - on Intel Ice Lake: 5 cycles on port 0.
  *    - On AMD Zen4: 4 cycles on ports 0 or 1.
  *  - `VPSHUFB_Z (ZMM, K, ZMM, ZMM)`
@@ -46,12 +46,16 @@
  *    - on Intel Ice Lake: 1 cycle on ports 0 or 5.
  *    - On AMD Zen4: 1 cycle on ports 0, 1, 2, 3.
  *
- *  Unlike "aHash", the length is not mixed into "AES" block at start to allow incremental construction.
- *  Unlike "aHash", on long inputs, we use a heavier procedure that is more vector-friendly on modern servers.
- *  Unlike "aHash", we don't load interleaved memory regions, making vectorized variant more similar to sequential.
- *  Unlike "aHash", on platforms like Intel Skylake-X or AWS Graviton 3, we use masked loads.
- *  Unlike "aHash", in final folding procedure, we use the same `VAESENC` instead of `VAESDEC`, which
- *  still provides the same level of mixing, but allows us to have a lighter serial fallback implementation.
+ *  But there several key differences:
+ *
+ *  - A larger state and a larger block size is used for inputs over 64 bytes longs, benefiting from wider registers
+ *    on current CPUs. Like many other hash functions, the state is initialized with the seed and a set of Pi constants.
+ *    Unlike others, we pull more Pi bits (1024), but only 64-bits of the seed, to keep the API sane.
+ *  - The length of the input is not mixed into the AES block at the start to allow incremental construction,
+ *    when the final length is not known in advance.
+ *  - The vector-loads are not interleaved, meaning that each byte of input has exactly the same weight in the hash.
+ *    On the implementation side it require some extra shuffling on older platforms, but on newer platforms it
+ *    can be done with "masked" loads in AVX-512 and "predicated" instructions in SVE2.
  *
  *  @see Reini Urban's more active fork of SMHasher by Austin Appleby: https://github.com/rurban/smhasher
  *  @see The serial AES routines are based on Morten Jensen's "tiny-AES-c": https://github.com/kokke/tiny-AES-c
@@ -59,6 +63,16 @@
  *  @see The "aHash" Rust implementation by Tom Kaitchuck: https://github.com/tkaitchuck/aHash
  *  @see "Emulating x86 AES Intrinsics on ARMv8-A" by Michael Brase:
  *       https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
+ *
+ *  Moreover, the same AES primitives are reused to implement a fast Pseudo-Random Number Generator @b (PRNG) that
+ *  is consistent between different implementation backends and has reproducible output with the same "nonce".
+ *  Originally, the PRNG was designed to produce random byte sequences, but combining it with @b `sz_lookup`,
+ *  one can produce random strings with a given byteset.
+ *
+ *  Other helpers include: TODO:
+ *
+ *  - `sz_fill_alphabet` - combines `sz_fill_random` & `sz_lookup` to fill buffers with random ASCII characters.
+ *  - `sz_fill_alphabet_utf8` - combines `sz_fill_random` & `sz_lookup` to fill buffers with random UTF-8 characters.
  */
 #ifndef STRINGZILLA_HASH_H_
 #define STRINGZILLA_HASH_H_
@@ -114,7 +128,7 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
  *  @endcode
  *
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa     sz_hash_serial, sz_hash_haswell, sz_hash_skylake, sz_hash_ice, sz_hash_neon
+ *  @sa     sz_hash_serial, sz_hash_haswell, sz_hash_skylake, sz_hash_ice, sz_hash_neon, sz_hash_sve
  *
  *  @note   The algorithm must provide the same output on all platforms in both single-shot and incremental modes.
  *  @sa     sz_hash_state_init, sz_hash_state_stream, sz_hash_state_fold
@@ -144,16 +158,17 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
  *      #include <stringzilla/hash.h>
  *      int main() {
  *          char first_buffer[5], second_buffer[5];
- *          sz_generate(first_buffer, 5, 0);
- *          sz_generate(second_buffer, 5, 0); //? Same nonce must produce the same output
+ *          sz_fill_random(first_buffer, 5, 0);
+ *          sz_fill_random(second_buffer, 5, 0); //? Same nonce must produce the same output
  *          return sz_bytesum(first_buffer, 5) == sz_bytesum(second_buffer, 5) ? 0 : 1;
  *      }
  *  @endcode
  *
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa     sz_generate_serial, sz_generate_haswell, sz_generate_skylake, sz_generate_ice, sz_generate_neon
+ *  @sa     sz_fill_random_serial, sz_fill_random_haswell, sz_fill_random_skylake, sz_fill_random_ice,
+ *          sz_fill_random_neon, sz_fill_random_sve
  */
-SZ_DYNAMIC void sz_generate(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /**
  *  @brief  The state for incremental construction of a hash.
@@ -204,8 +219,8 @@ SZ_PUBLIC sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
-/** @copydoc sz_generate */
-SZ_PUBLIC void sz_generate_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+/** @copydoc sz_fill_random */
+SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed);
@@ -222,8 +237,8 @@ SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
-/** @copydoc sz_generate */
-SZ_PUBLIC void sz_generate_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+/** @copydoc sz_fill_random */
+SZ_PUBLIC void sz_fill_random_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed);
@@ -240,8 +255,8 @@ SZ_PUBLIC sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
-/** @copydoc sz_generate */
-SZ_PUBLIC void sz_generate_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+/** @copydoc sz_fill_random */
+SZ_PUBLIC void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed);
@@ -258,8 +273,8 @@ SZ_PUBLIC sz_u64_t sz_bytesum_ice(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
-/** @copydoc sz_generate */
-SZ_PUBLIC void sz_generate_ice(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+/** @copydoc sz_fill_random */
+SZ_PUBLIC void sz_fill_random_ice(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_ice(sz_hash_state_t *state, sz_u64_t seed);
@@ -276,8 +291,8 @@ SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
 
-/** @copydoc sz_generate */
-SZ_PUBLIC void sz_generate_neon(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+/** @copydoc sz_fill_random */
+SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
 
 /** @copydoc sz_hash_state_init */
 SZ_PUBLIC void sz_hash_state_init_neon(sz_hash_state_t *state, sz_u64_t seed);
@@ -704,7 +719,7 @@ SZ_PUBLIC sz_u64_t sz_hash_state_fold_serial(sz_hash_state_t const *state) {
     }
 }
 
-SZ_PUBLIC void sz_generate_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_PUBLIC void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_ptr = _sz_hash_pi_constants();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
@@ -728,8 +743,8 @@ SZ_PUBLIC void sz_generate_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonc
 #pragma region Haswell Implementation
 #if SZ_USE_HASWELL
 #pragma GCC push_options
-#pragma GCC target("avx2")
-#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#pragma GCC target("avx2", "aes")
+#pragma clang attribute push(__attribute__((target("avx2,aes"))), apply_to = function)
 
 SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
@@ -1058,7 +1073,7 @@ SZ_PUBLIC sz_u64_t sz_hash_state_fold_haswell(sz_hash_state_t const *state) {
     }
 }
 
-SZ_PUBLIC void sz_generate_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_PUBLIC void sz_fill_random_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_ptr = _sz_hash_pi_constants();
     if (length <= 16) {
         __m128i input = _mm_set1_epi64x(nonce);
@@ -1165,8 +1180,8 @@ SZ_PUBLIC void sz_generate_haswell(sz_ptr_t text, sz_size_t length, sz_u64_t non
 #pragma region Skylake Implementation
 #if SZ_USE_SKYLAKE
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2", "aes")
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,aes"))), apply_to = function)
 
 SZ_PUBLIC sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
@@ -1386,8 +1401,8 @@ SZ_PUBLIC sz_u64_t sz_hash_state_fold_skylake(sz_hash_state_t const *state) {
     return sz_hash_state_fold_haswell(state);
 }
 
-SZ_PUBLIC void sz_generate_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_generate_serial(text, length, nonce);
+SZ_PUBLIC void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+    sz_fill_random_serial(text, length, nonce);
 }
 
 #pragma clang attribute pop
@@ -1647,7 +1662,7 @@ SZ_PUBLIC sz_u64_t sz_hash_state_fold_ice(sz_hash_state_t const *state) {
     return sz_hash_state_fold_haswell(state);
 }
 
-SZ_PUBLIC void sz_generate_ice(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
+SZ_PUBLIC void sz_fill_random_ice(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
     if (length <= 16) {
         __m128i input = _mm_set1_epi64x(nonce);
         __m128i pi = _mm_load_si128((__m128i const *)_sz_hash_pi_constants());
@@ -1796,17 +1811,17 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
 #endif
 }
 
-SZ_DYNAMIC void sz_generate(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
 #if SZ_USE_ICE
-    sz_generate_ice(text, length, nonce);
+    sz_fill_random_ice(text, length, nonce);
 #elif SZ_USE_SKYLAKE
-    sz_generate_skylake(text, length, nonce);
+    sz_fill_random_skylake(text, length, nonce);
 #elif SZ_USE_HASWELL
-    sz_generate_haswell(text, length, nonce);
+    sz_fill_random_haswell(text, length, nonce);
 #elif SZ_USE_NEON
-    sz_generate_neon(text, length, nonce);
+    sz_fill_random_neon(text, length, nonce);
 #else
-    sz_generate_serial(text, length, nonce);
+    sz_fill_random_serial(text, length, nonce);
 #endif
 }
 

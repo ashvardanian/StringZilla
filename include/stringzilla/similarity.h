@@ -413,11 +413,11 @@ SZ_INTERNAL sz_status_t _sz_levenshtein_distance_wagner_fisher_serial( //
 
     // If the strings contain Unicode characters, let's estimate the max character width,
     // and use it to allocate a larger buffer to decode UTF8.
-    sz_charset_t ascii_charset;
-    sz_charset_init_ascii(&ascii_charset);
-    sz_charset_invert(&ascii_charset);
-    int const longer_is_ascii = sz_find_charset_serial(longer, longer_length, &ascii_charset) == SZ_NULL_CHAR;
-    int const shorter_is_ascii = sz_find_charset_serial(shorter, shorter_length, &ascii_charset) == SZ_NULL_CHAR;
+    sz_byteset_t ascii_byteset;
+    sz_byteset_init_ascii(&ascii_byteset);
+    sz_byteset_invert(&ascii_byteset);
+    int const longer_is_ascii = sz_find_byteset_serial(longer, longer_length, &ascii_byteset) == SZ_NULL_CHAR;
+    int const shorter_is_ascii = sz_find_byteset_serial(shorter, shorter_length, &ascii_byteset) == SZ_NULL_CHAR;
     int const will_convert_to_unicode = can_be_unicode == sz_true_k && (!longer_is_ascii || !shorter_is_ascii);
     if (will_convert_to_unicode) { buffer_length += (shorter_length + longer_length) * sizeof(sz_rune_t); }
     else { can_be_unicode = sz_false_k; }

@@ -79,7 +79,7 @@ namespace ashvardanian {
 namespace stringzilla {
 
 template <typename>
-class basic_char_set;
+class basic_byteset;
 template <typename>
 class basic_string_slice;
 template <typename, typename>
@@ -278,23 +278,23 @@ inline carray<64> const &base64() noexcept {
  *  @brief  A set of characters represented as a bitset with 256 slots.
  */
 template <typename char_type_ = char>
-class basic_char_set {
-    sz_charset_t bitset_;
+class basic_byteset {
+    sz_byteset_t bitset_;
 
   public:
     using char_type = char_type_;
 
-    sz_constexpr_if_cpp14 basic_char_set() noexcept {
-        // ! Instead of relying on the `sz_charset_init`, we have to reimplement it to support `constexpr`.
+    sz_constexpr_if_cpp14 basic_byteset() noexcept {
+        // ! Instead of relying on the `sz_byteset_init`, we have to reimplement it to support `constexpr`.
         bitset_._u64s[0] = 0, bitset_._u64s[1] = 0, bitset_._u64s[2] = 0, bitset_._u64s[3] = 0;
     }
-    explicit sz_constexpr_if_cpp14 basic_char_set(std::initializer_list<char_type> chars) noexcept : basic_char_set() {
-        // ! Instead of relying on the `sz_charset_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
+    explicit sz_constexpr_if_cpp14 basic_byteset(std::initializer_list<char_type> chars) noexcept : basic_byteset() {
+        // ! Instead of relying on the `sz_byteset_add(&bitset_, c)`, we have to reimplement it to support `constexpr`.
         for (auto c : chars) bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
     }
 
-    explicit sz_constexpr_if_cpp14 basic_char_set(char_type const *chars, std::size_t count_characters) noexcept
-        : basic_char_set() {
+    explicit sz_constexpr_if_cpp14 basic_byteset(char_type const *chars, std::size_t count_characters) noexcept
+        : basic_byteset() {
         for (std::size_t i = 0; i < count_characters; ++i) {
             char_type c = chars[i];
             bitset_._u64s[sz_bitcast(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast(sz_u8_t, c) & 63u));
@@ -302,8 +302,8 @@ class basic_char_set {
     }
 
     template <std::size_t count_characters>
-    explicit sz_constexpr_if_cpp14 basic_char_set(std::array<char_type, count_characters> const &chars) noexcept
-        : basic_char_set() {
+    explicit sz_constexpr_if_cpp14 basic_byteset(std::array<char_type, count_characters> const &chars) noexcept
+        : basic_byteset() {
         static_assert(count_characters > 0, "Character array cannot be empty");
         for (std::size_t i = 0; i < count_characters; ++i) {
             char_type c = chars[i];
@@ -311,21 +311,21 @@ class basic_char_set {
         }
     }
 
-    sz_constexpr_if_cpp14 basic_char_set(basic_char_set const &other) noexcept : bitset_(other.bitset_) {}
-    sz_constexpr_if_cpp14 basic_char_set &operator=(basic_char_set const &other) noexcept {
+    sz_constexpr_if_cpp14 basic_byteset(basic_byteset const &other) noexcept : bitset_(other.bitset_) {}
+    sz_constexpr_if_cpp14 basic_byteset &operator=(basic_byteset const &other) noexcept {
         bitset_ = other.bitset_;
         return *this;
     }
 
-    constexpr basic_char_set operator|(basic_char_set other) const noexcept {
-        basic_char_set result = *this;
+    constexpr basic_byteset operator|(basic_byteset other) const noexcept {
+        basic_byteset result = *this;
         result.bitset_._u64s[0] |= other.bitset_._u64s[0], result.bitset_._u64s[1] |= other.bitset_._u64s[1],
             result.bitset_._u64s[2] |= other.bitset_._u64s[2], result.bitset_._u64s[3] |= other.bitset_._u64s[3];
         return result;
     }
 
-    inline basic_char_set &add(char_type c) noexcept {
-        sz_charset_add(&bitset_, sz_bitcast(sz_u8_t, c));
+    inline basic_byteset &add(char_type c) noexcept {
+        sz_byteset_add(&bitset_, sz_bitcast(sz_u8_t, c));
         return *this;
     }
     inline std::size_t size() const noexcept {
@@ -333,30 +333,30 @@ class basic_char_set {
             sz_u64_popcount(bitset_._u64s[0]) + sz_u64_popcount(bitset_._u64s[1]) + //
             sz_u64_popcount(bitset_._u64s[2]) + sz_u64_popcount(bitset_._u64s[3]);
     }
-    inline sz_charset_t &raw() noexcept { return bitset_; }
-    inline sz_charset_t const &raw() const noexcept { return bitset_; }
-    inline bool contains(char_type c) const noexcept { return sz_charset_contains(&bitset_, sz_bitcast(sz_u8_t, c)); }
-    inline basic_char_set inverted() const noexcept {
-        basic_char_set result = *this;
-        sz_charset_invert(&result.bitset_);
+    inline sz_byteset_t &raw() noexcept { return bitset_; }
+    inline sz_byteset_t const &raw() const noexcept { return bitset_; }
+    inline bool contains(char_type c) const noexcept { return sz_byteset_contains(&bitset_, sz_bitcast(sz_u8_t, c)); }
+    inline basic_byteset inverted() const noexcept {
+        basic_byteset result = *this;
+        sz_byteset_invert(&result.bitset_);
         return result;
     }
 };
 
-using char_set = basic_char_set<char>;
+using byteset = basic_byteset<char>;
 
-inline char_set ascii_letters_set() { return char_set {ascii_letters(), sizeof(ascii_letters())}; }
-inline char_set ascii_lowercase_set() { return char_set {ascii_lowercase(), sizeof(ascii_lowercase())}; }
-inline char_set ascii_uppercase_set() { return char_set {ascii_uppercase(), sizeof(ascii_uppercase())}; }
-inline char_set ascii_printables_set() { return char_set {ascii_printables(), sizeof(ascii_printables())}; }
-inline char_set ascii_controls_set() { return char_set {ascii_controls(), sizeof(ascii_controls())}; }
-inline char_set digits_set() { return char_set {digits(), sizeof(digits())}; }
-inline char_set hexdigits_set() { return char_set {hexdigits(), sizeof(hexdigits())}; }
-inline char_set octdigits_set() { return char_set {octdigits(), sizeof(octdigits())}; }
-inline char_set punctuation_set() { return char_set {punctuation(), sizeof(punctuation())}; }
-inline char_set whitespaces_set() { return char_set {whitespaces(), sizeof(whitespaces())}; }
-inline char_set newlines_set() { return char_set {newlines(), sizeof(newlines())}; }
-inline char_set base64_set() { return char_set {base64(), sizeof(base64())}; }
+inline byteset ascii_letters_set() { return byteset {ascii_letters(), sizeof(ascii_letters())}; }
+inline byteset ascii_lowercase_set() { return byteset {ascii_lowercase(), sizeof(ascii_lowercase())}; }
+inline byteset ascii_uppercase_set() { return byteset {ascii_uppercase(), sizeof(ascii_uppercase())}; }
+inline byteset ascii_printables_set() { return byteset {ascii_printables(), sizeof(ascii_printables())}; }
+inline byteset ascii_controls_set() { return byteset {ascii_controls(), sizeof(ascii_controls())}; }
+inline byteset digits_set() { return byteset {digits(), sizeof(digits())}; }
+inline byteset hexdigits_set() { return byteset {hexdigits(), sizeof(hexdigits())}; }
+inline byteset octdigits_set() { return byteset {octdigits(), sizeof(octdigits())}; }
+inline byteset punctuation_set() { return byteset {punctuation(), sizeof(punctuation())}; }
+inline byteset whitespaces_set() { return byteset {whitespaces(), sizeof(whitespaces())}; }
+inline byteset newlines_set() { return byteset {newlines(), sizeof(newlines())}; }
+inline byteset base64_set() { return byteset {base64(), sizeof(base64())}; }
 
 /**
  *  @brief  A look-up table for character replacement operations.
@@ -1667,10 +1667,10 @@ class basic_string_slice {
     }
 
     /**  @brief  Find the first occurrence of a character from a set. */
-    size_type find(char_set set) const noexcept { return find_first_of(set); }
+    size_type find(byteset set) const noexcept { return find_first_of(set); }
 
     /**  @brief  Find the last occurrence of a character from a set. */
-    size_type rfind(char_set set) const noexcept { return find_last_of(set); }
+    size_type rfind(byteset set) const noexcept { return find_last_of(set); }
 
 #pragma endregion
 #pragma region Returning Partitions
@@ -1682,7 +1682,7 @@ class basic_string_slice {
     partition_type partition(value_type pattern) const noexcept { return partition_(string_view(&pattern, 1), 1); }
 
     /**  @brief  Split the string into three parts, before the match, the match itself, and after it. */
-    partition_type partition(char_set pattern) const noexcept { return partition_(pattern, 1); }
+    partition_type partition(byteset pattern) const noexcept { return partition_(pattern, 1); }
 
     /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
     partition_type rpartition(string_view pattern) const noexcept { return rpartition_(pattern, pattern.length()); }
@@ -1691,7 +1691,7 @@ class basic_string_slice {
     partition_type rpartition(value_type pattern) const noexcept { return rpartition_(string_view(&pattern, 1), 1); }
 
     /**  @brief  Split the string into three parts, before the @b last match, the last match itself, and after it. */
-    partition_type rpartition(char_set pattern) const noexcept { return rpartition_(pattern, 1); }
+    partition_type rpartition(byteset pattern) const noexcept { return rpartition_(pattern, 1); }
 
 #pragma endregion
 #pragma endregion
@@ -1699,7 +1699,7 @@ class basic_string_slice {
 #pragma region Matching Character Sets
 
     // `isascii` is a macro in MSVC headers
-    bool contains_only(char_set set) const noexcept { return find_first_not_of(set) == npos; }
+    bool contains_only(byteset set) const noexcept { return find_first_not_of(set) == npos; }
     bool is_alpha() const noexcept { return !empty() && contains_only(ascii_letters_set()); }
     bool is_alnum() const noexcept { return !empty() && contains_only(ascii_letters_set() | digits_set()); }
     bool is_ascii() const noexcept { return empty() || contains_only(ascii_controls_set() | ascii_printables_set()); }
@@ -1715,8 +1715,8 @@ class basic_string_slice {
      *  @param  skip Number of characters to skip before the search.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
-    size_type find_first_of(char_set set, size_type skip = 0) const noexcept {
-        auto ptr = sz_find_charset(start_ + skip, length_ - skip, &set.raw());
+    size_type find_first_of(byteset set, size_type skip = 0) const noexcept {
+        auto ptr = sz_find_byteset(start_ + skip, length_ - skip, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1725,30 +1725,30 @@ class basic_string_slice {
      *  @param  skip  The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
-    size_type find_first_not_of(char_set set, size_type skip = 0) const noexcept {
+    size_type find_first_not_of(byteset set, size_type skip = 0) const noexcept {
         return find_first_of(set.inverted(), skip);
     }
 
     /**
      *  @brief  Find the last occurrence of a character from a set.
      */
-    size_type find_last_of(char_set set) const noexcept {
-        auto ptr = sz_rfind_charset(start_, length_, &set.raw());
+    size_type find_last_of(byteset set) const noexcept {
+        auto ptr = sz_rfind_byteset(start_, length_, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
     /**
      *  @brief  Find the last occurrence of a character outside a set.
      */
-    size_type find_last_not_of(char_set set) const noexcept { return find_last_of(set.inverted()); }
+    size_type find_last_not_of(byteset set) const noexcept { return find_last_of(set.inverted()); }
 
     /**
      *  @brief  Find the last occurrence of a character from a set.
      *  @param  until  The offset of the last character to be considered.
      */
-    size_type find_last_of(char_set set, size_type until) const noexcept {
+    size_type find_last_of(byteset set, size_type until) const noexcept {
         auto len = sz_min_of_two(until + 1, length_);
-        auto ptr = sz_rfind_charset(start_, len, &set.raw());
+        auto ptr = sz_rfind_byteset(start_, len, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -1756,7 +1756,7 @@ class basic_string_slice {
      *  @brief  Find the last occurrence of a character outside a set.
      *  @param  until  The offset of the last character to be considered.
      */
-    size_type find_last_not_of(char_set set, size_type until) const noexcept {
+    size_type find_last_not_of(byteset set, size_type until) const noexcept {
         return find_last_of(set.inverted(), until);
     }
 
@@ -1839,9 +1839,9 @@ class basic_string_slice {
      *  @brief  Python-like convenience function, dropping prefix formed of given characters.
      *          Similar to `boost::algorithm::trim_left_if(str, is_any_of(set))`.
      */
-    string_slice lstrip(char_set set) const noexcept {
+    string_slice lstrip(byteset set) const noexcept {
         set = set.inverted();
-        auto new_start = (pointer)sz_find_charset(start_, length_, &set.raw());
+        auto new_start = (pointer)sz_find_byteset(start_, length_, &set.raw());
         return new_start ? string_slice {new_start, length_ - static_cast<size_type>(new_start - start_)}
                          : string_slice();
     }
@@ -1850,9 +1850,9 @@ class basic_string_slice {
      *  @brief  Python-like convenience function, dropping suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_right_if(str, is_any_of(set))`.
      */
-    string_slice rstrip(char_set set) const noexcept {
+    string_slice rstrip(byteset set) const noexcept {
         set = set.inverted();
-        auto new_end = (pointer)sz_rfind_charset(start_, length_, &set.raw());
+        auto new_end = (pointer)sz_rfind_byteset(start_, length_, &set.raw());
         return new_end ? string_slice {start_, static_cast<size_type>(new_end - start_ + 1)} : string_slice();
     }
 
@@ -1860,12 +1860,12 @@ class basic_string_slice {
      *  @brief  Python-like convenience function, dropping both the prefix & the suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_if(str, is_any_of(set))`.
      */
-    string_slice strip(char_set set) const noexcept {
+    string_slice strip(byteset set) const noexcept {
         set = set.inverted();
-        auto new_start = (pointer)sz_find_charset(start_, length_, &set.raw());
+        auto new_start = (pointer)sz_find_byteset(start_, length_, &set.raw());
         return new_start ? string_slice {new_start,
                                          static_cast<size_type>(
-                                             sz_rfind_charset(new_start, length_ - (new_start - start_), &set.raw()) -
+                                             sz_rfind_byteset(new_start, length_ - (new_start - start_), &set.raw()) -
                                              new_start + 1)}
                          : string_slice();
     }
@@ -1881,8 +1881,8 @@ class basic_string_slice {
     using find_disjoint_type = range_matches<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rfind_disjoint_type = range_rmatches<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
 
-    using find_all_chars_type = range_matches<string_slice, matcher_find_first_of<string_view, char_set>>;
-    using rfind_all_chars_type = range_rmatches<string_slice, matcher_find_last_of<string_view, char_set>>;
+    using find_all_chars_type = range_matches<string_slice, matcher_find_first_of<string_view, byteset>>;
+    using rfind_all_chars_type = range_rmatches<string_slice, matcher_find_last_of<string_view, byteset>>;
 
     /**  @brief  Find all potentially @b overlapping occurrences of a given string. */
     find_all_type find_all(string_view needle, include_overlaps_type = {}) const noexcept { return {*this, needle}; }
@@ -1897,16 +1897,16 @@ class basic_string_slice {
     rfind_disjoint_type rfind_all(string_view needle, exclude_overlaps_type) const noexcept { return {*this, needle}; }
 
     /**  @brief  Find all occurrences of given characters. */
-    find_all_chars_type find_all(char_set set) const noexcept { return {*this, {set}}; }
+    find_all_chars_type find_all(byteset set) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Find all occurrences of given characters in @b reverse order. */
-    rfind_all_chars_type rfind_all(char_set set) const noexcept { return {*this, {set}}; }
+    rfind_all_chars_type rfind_all(byteset set) const noexcept { return {*this, {set}}; }
 
     using split_type = range_splits<string_slice, matcher_find<string_view, exclude_overlaps_type>>;
     using rsplit_type = range_rsplits<string_slice, matcher_rfind<string_view, exclude_overlaps_type>>;
 
-    using split_chars_type = range_splits<string_slice, matcher_find_first_of<string_view, char_set>>;
-    using rsplit_chars_type = range_rsplits<string_slice, matcher_find_last_of<string_view, char_set>>;
+    using split_chars_type = range_splits<string_slice, matcher_find_first_of<string_view, byteset>>;
+    using rsplit_chars_type = range_rsplits<string_slice, matcher_find_last_of<string_view, byteset>>;
 
     /**  @brief  Split around occurrences of a given string. */
     split_type split(string_view delimiter) const noexcept { return {*this, delimiter}; }
@@ -1915,10 +1915,10 @@ class basic_string_slice {
     rsplit_type rsplit(string_view delimiter) const noexcept { return {*this, delimiter}; }
 
     /**  @brief  Split around occurrences of given characters. */
-    split_chars_type split(char_set set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    split_chars_type split(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Split around occurrences of given characters in @b reverse order. */
-    rsplit_chars_type rsplit(char_set set = whitespaces_set()) const noexcept { return {*this, {set}}; }
+    rsplit_chars_type rsplit(byteset set = whitespaces_set()) const noexcept { return {*this, {set}}; }
 
     /**  @brief  Split around the occurrences of all newline characters. */
     split_chars_type splitlines() const noexcept { return split(newlines_set()); }
@@ -1934,8 +1934,8 @@ class basic_string_slice {
     size_type bytesum() const noexcept { return static_cast<size_type>(sz_bytesum(start_, length_)); }
 
     /**  @brief  Populate a character set with characters present in this string. */
-    char_set as_set() const noexcept {
-        char_set set;
+    byteset as_set() const noexcept {
+        byteset set;
         for (auto c : *this) set.add(c);
         return set;
     }
@@ -2555,17 +2555,17 @@ class basic_string {
     }
 
     /**  @brief  Find the first occurrence of a character from a set. */
-    size_type find(char_set set) const noexcept { return view().find(set); }
+    size_type find(byteset set) const noexcept { return view().find(set); }
 
     /**  @brief  Find the last occurrence of a character from a set. */
-    size_type rfind(char_set set) const noexcept { return view().rfind(set); }
+    size_type rfind(byteset set) const noexcept { return view().rfind(set); }
 
 #pragma endregion
 #pragma endregion
 
 #pragma region Matching Character Sets
 
-    bool contains_only(char_set set) const noexcept { return find_first_not_of(set) == npos; }
+    bool contains_only(byteset set) const noexcept { return find_first_not_of(set) == npos; }
     bool is_alpha() const noexcept { return !empty() && contains_only(ascii_letters_set()); }
     bool is_alnum() const noexcept { return !empty() && contains_only(ascii_letters_set() | digits_set()); }
     bool is_ascii() const noexcept { return empty() || contains_only(ascii_controls_set() | ascii_printables_set()); }
@@ -2583,38 +2583,38 @@ class basic_string {
      *  @param  skip Number of characters to skip before the search.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
-    size_type find_first_of(char_set set, size_type skip = 0) const noexcept { return view().find_first_of(set, skip); }
+    size_type find_first_of(byteset set, size_type skip = 0) const noexcept { return view().find_first_of(set, skip); }
 
     /**
      *  @brief  Find the first occurrence of a character outside a set.
      *  @param  skip  The number of first characters to be skipped.
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
-    size_type find_first_not_of(char_set set, size_type skip = 0) const noexcept {
+    size_type find_first_not_of(byteset set, size_type skip = 0) const noexcept {
         return view().find_first_not_of(set, skip);
     }
 
     /**
      *  @brief  Find the last occurrence of a character from a set.
      */
-    size_type find_last_of(char_set set) const noexcept { return view().find_last_of(set); }
+    size_type find_last_of(byteset set) const noexcept { return view().find_last_of(set); }
 
     /**
      *  @brief  Find the last occurrence of a character outside a set.
      */
-    size_type find_last_not_of(char_set set) const noexcept { return view().find_last_not_of(set); }
+    size_type find_last_not_of(byteset set) const noexcept { return view().find_last_not_of(set); }
 
     /**
      *  @brief  Find the last occurrence of a character from a set.
      *  @param  until  The offset of the last character to be considered.
      */
-    size_type find_last_of(char_set set, size_type until) const noexcept { return view().find_last_of(set, until); }
+    size_type find_last_of(byteset set, size_type until) const noexcept { return view().find_last_of(set, until); }
 
     /**
      *  @brief  Find the last occurrence of a character outside a set.
      *  @param  until  The offset of the last character to be considered.
      */
-    size_type find_last_not_of(char_set set, size_type until) const noexcept {
+    size_type find_last_not_of(byteset set, size_type until) const noexcept {
         return view().find_last_not_of(set, until);
     }
 
@@ -2697,7 +2697,7 @@ class basic_string {
      *  @brief  Python-like convenience function, dropping prefix formed of given characters.
      *          Similar to `boost::algorithm::trim_left_if(str, is_any_of(set))`.
      */
-    basic_string &lstrip(char_set set) noexcept {
+    basic_string &lstrip(byteset set) noexcept {
         auto remaining = view().lstrip(set);
         remove_prefix(size() - remaining.size());
         return *this;
@@ -2707,7 +2707,7 @@ class basic_string {
      *  @brief  Python-like convenience function, dropping suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_right_if(str, is_any_of(set))`.
      */
-    basic_string &rstrip(char_set set) noexcept {
+    basic_string &rstrip(byteset set) noexcept {
         auto remaining = view().rstrip(set);
         remove_suffix(size() - remaining.size());
         return *this;
@@ -2717,7 +2717,7 @@ class basic_string {
      *  @brief  Python-like convenience function, dropping both the prefix & the suffix formed of given characters.
      *          Similar to `boost::algorithm::trim_if(str, is_any_of(set))`.
      */
-    basic_string &strip(char_set set) noexcept { return lstrip(set).rstrip(set); }
+    basic_string &strip(byteset set) noexcept { return lstrip(set).rstrip(set); }
 
 #pragma endregion
 #pragma endregion
@@ -3339,7 +3339,7 @@ class basic_string {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        sz_generate(start, length, nonce);
+        sz_fill_random(start, length, nonce);
         return *this;
     }
 
@@ -3393,7 +3393,7 @@ class basic_string {
      *  and might be suboptimal, if you are exporting the cleaned-up string to another buffer.
      *  The algorithm is suboptimal when this string is made exclusively of the pattern.
      */
-    basic_string &replace_all(char_set pattern, string_view replacement) noexcept(false) {
+    basic_string &replace_all(byteset pattern, string_view replacement) noexcept(false) {
         if (!try_replace_all(pattern, replacement)) throw std::bad_alloc();
         return *this;
     }
@@ -3418,8 +3418,8 @@ class basic_string {
      *  and might be suboptimal, if you are exporting the cleaned-up string to another buffer.
      *  The algorithm is suboptimal when this string is made exclusively of the pattern.
      */
-    bool try_replace_all(char_set pattern, string_view replacement) noexcept {
-        return try_replace_all_<char_set>(pattern, replacement);
+    bool try_replace_all(byteset pattern, string_view replacement) noexcept {
+        return try_replace_all_<byteset>(pattern, replacement);
     }
 
     /**
@@ -3458,8 +3458,8 @@ static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 point
 
 namespace literals {
 constexpr string_view operator""_sv(char const *str, std::size_t length) noexcept { return {str, length}; }
-sz_constexpr_if_cpp14 char_set operator""_cs(char const *str, std::size_t length) noexcept {
-    return char_set {str, length};
+sz_constexpr_if_cpp14 byteset operator""_bs(char const *str, std::size_t length) noexcept {
+    return byteset {str, length};
 }
 } // namespace literals
 
@@ -3565,7 +3565,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
     // 1. The pattern and the replacement are of the same length. Piece of cake!
     // 2. The pattern is longer than the replacement. We need to compact the strings.
     // 3. The pattern is shorter than the replacement. We may have to allocate more memory.
-    using matcher_type = typename std::conditional<std::is_same<pattern_type, char_set>::value,
+    using matcher_type = typename std::conditional<std::is_same<pattern_type, byteset>::value,
                                                    matcher_find_first_of<string_view, pattern_type>,
                                                    matcher_find<string_view, exclude_overlaps_type>>::type;
     matcher_type matcher({pattern});
@@ -3611,7 +3611,7 @@ bool basic_string<char_type_, allocator_>::try_replace_all_(pattern_type pattern
 
     // 3. The pattern is shorter than the replacement. We may have to allocate more memory.
     else {
-        using rmatcher_type = typename std::conditional<std::is_same<pattern_type, char_set>::value,
+        using rmatcher_type = typename std::conditional<std::is_same<pattern_type, byteset>::value,
                                                         matcher_find_last_of<string_view, pattern_type>,
                                                         matcher_rfind<string_view, exclude_overlaps_type>>::type;
         using rmatches_type = range_rmatches<string_view, rmatcher_type>;
@@ -3927,7 +3927,7 @@ std::ptrdiff_t alignment_score(                                                 
 template <typename char_type_>
 void randomize(basic_string_slice<char_type_> string, sz_u64_t nonce) noexcept {
     static_assert(!std::is_const<char_type_>::value, "The string must be mutable.");
-    sz_generate(string.data(), string.size(), nonce);
+    sz_fill_random(string.data(), string.size(), nonce);
 }
 
 /**
