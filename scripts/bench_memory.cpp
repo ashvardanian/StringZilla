@@ -176,7 +176,7 @@ tracked_unary_functions_t transform_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
         return unary_function_t([function](std::string_view slice) {
             char *output = const_cast<char *>(slice.data());
-            function((sz_cptr_t)output, (sz_size_t)slice.size(), (sz_cptr_t)look_up_table, (sz_ptr_t)output);
+            function((sz_ptr_t)output, (sz_size_t)slice.size(), (sz_cptr_t)output, (sz_cptr_t)look_up_table);
             return slice.size();
         });
     };

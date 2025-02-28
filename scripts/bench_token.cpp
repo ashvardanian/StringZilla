@@ -61,12 +61,12 @@ tracked_unary_functions_t hash_functions() {
     return result;
 }
 
-struct wrapped_incremental_hash {
+struct wrap_hash_stream {
     sz_hash_state_t state;
     sz_hash_state_stream_t stream;
     sz_hash_state_fold_t fold;
 
-    wrapped_incremental_hash(sz_hash_state_stream_t s, sz_hash_state_fold_t f) : stream(s), fold(f) {
+    wrap_hash_stream(sz_hash_state_stream_t s, sz_hash_state_fold_t f) : stream(s), fold(f) {
         sz_hash_state_init(&state, 42);
     }
 
@@ -78,20 +78,18 @@ struct wrapped_incremental_hash {
 
 tracked_unary_functions_t hash_stream_functions() {
     tracked_unary_functions_t result = {
-        {"sz_hash_stream_serial", wrapped_incremental_hash(sz_hash_state_stream_serial, sz_hash_state_fold_serial)},
+        {"sz_hash_stream_serial", wrap_hash_stream(sz_hash_state_stream_serial, sz_hash_state_fold_serial)},
 #if SZ_USE_HASWELL
-        {"sz_hash_stream_haswell", wrapped_incremental_hash(sz_hash_state_stream_haswell, sz_hash_state_fold_haswell),
-         true},
+        {"sz_hash_stream_haswell", wrap_hash_stream(sz_hash_state_stream_haswell, sz_hash_state_fold_haswell), true},
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_hash_stream_skylake", wrapped_incremental_hash(sz_hash_state_stream_skylake, sz_hash_state_fold_skylake),
-         true},
+        {"sz_hash_stream_skylake", wrap_hash_stream(sz_hash_state_stream_skylake, sz_hash_state_fold_skylake), true},
 #endif
 #if SZ_USE_ICE
-        {"sz_hash_stream_ice", wrapped_incremental_hash(sz_hash_state_stream_ice, sz_hash_state_fold_ice), true},
+        {"sz_hash_stream_ice", wrap_hash_stream(sz_hash_state_stream_ice, sz_hash_state_fold_ice), true},
 #endif
 #if SZ_USE_NEON
-        {"sz_hash_stream_neon", wrapped_incremental_hash(sz_hash_state_stream_neon, sz_hash_state_fold_neon), true},
+        {"sz_hash_stream_neon", wrap_hash_stream(sz_hash_state_stream_neon, sz_hash_state_fold_neon), true},
 #endif
     };
     return result;

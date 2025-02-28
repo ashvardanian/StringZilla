@@ -18,13 +18,13 @@ import StringZillaC
 
 // We need to link the standard libraries.
 #if os(Linux)
-import Glibc
+    import Glibc
 #else
-import Darwin.C
+    import Darwin.C
 #endif
 
 /// Protocol defining a single-byte data type.
-fileprivate protocol SingleByte {}
+private protocol SingleByte {}
 
 extension UInt8: SingleByte {}
 extension Int8: SingleByte {} // This would match `CChar` as well.
@@ -33,7 +33,7 @@ extension Int8: SingleByte {} // This would match `CChar` as well.
 enum StringZillaError: Error {
     case contiguousStorageUnavailable
     case memoryAllocationFailed
-    
+
     var localizedDescription: String {
         switch self {
         case .contiguousStorageUnavailable:
@@ -54,7 +54,7 @@ enum StringZillaError: Error {
 /// https://developer.apple.com/documentation/swift/stringprotocol/data(using:allowlossyconversion:)
 public protocol StringZillaViewable: Collection {
     /// A type that represents a position in the collection.
-    /// 
+    ///
     /// Executes a closure with a pointer to the string's UTF8 C representation and its length.
     ///
     /// - Parameters:
@@ -62,7 +62,7 @@ public protocol StringZillaViewable: Collection {
     /// - Throws: Can throw an error.
     /// - Returns: Returns a value of type R, which is the result of the closure.
     func withStringZillaScope<R>(_ body: (sz_cptr_t, sz_size_t) throws -> R) rethrows -> R
-    
+
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
     ///
     /// - Parameters:
@@ -74,24 +74,24 @@ public protocol StringZillaViewable: Collection {
 
 extension String: StringZillaViewable {
     public typealias Index = String.Index
-    
+
     @_transparent
     public func withStringZillaScope<R>(_ body: (sz_cptr_t, sz_size_t) throws -> R) rethrows -> R {
         let cLength = sz_size_t(utf8.count)
-        return try self.withCString { cString in
+        return try withCString { cString in
             try body(cString, cLength)
         }
     }
-    
+
     @_transparent
     public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
-        self.utf8.index(self.utf8.startIndex, offsetBy: bytePointer - startPointer)
+        utf8.index(utf8.startIndex, offsetBy: bytePointer - startPointer)
     }
 }
 
 extension Substring.UTF8View: StringZillaViewable {
     public typealias Index = Substring.UTF8View.Index
-    
+
     /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte elements (UTF-8 code units).
     /// - Parameters:
     ///   - body: A closure that takes a pointer to the contiguous storage and its size.
@@ -106,7 +106,7 @@ extension Substring.UTF8View: StringZillaViewable {
             throw StringZillaError.contiguousStorageUnavailable
         }()
     }
-    
+
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
     /// - Parameters:
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
@@ -114,13 +114,13 @@ extension Substring.UTF8View: StringZillaViewable {
     /// - Returns: The calculated index offset.
     @_transparent
     public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
-        return self.index(self.startIndex, offsetBy: bytePointer - startPointer)
+        return index(startIndex, offsetBy: bytePointer - startPointer)
     }
 }
 
 extension String.UTF8View: StringZillaViewable {
     public typealias Index = String.UTF8View.Index
-    
+
     /// Executes a closure with a pointer to the UTF8View's contiguous storage of single-byte elements (UTF-8 code units).
     /// - Parameters:
     ///   - body: A closure that takes a pointer to the contiguous storage and its size.
@@ -134,19 +134,18 @@ extension String.UTF8View: StringZillaViewable {
             throw StringZillaError.contiguousStorageUnavailable
         }()
     }
-    
+
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
     /// - Parameters:
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
     ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
     /// - Returns: The calculated index offset.
     public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
-        return self.index(self.startIndex, offsetBy: bytePointer - startPointer)
+        return index(startIndex, offsetBy: bytePointer - startPointer)
     }
 }
 
 public extension StringZillaViewable {
-    
     /// Finds the first occurrence of the specified substring within the receiver.
     /// - Parameter needle: The substring to search for.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
@@ -163,7 +162,7 @@ public extension StringZillaViewable {
         }
         return result
     }
-    
+
     /// Finds the last occurrence of the specified substring within the receiver.
     /// - Parameter needle: The substring to search for.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
@@ -180,7 +179,7 @@ public extension StringZillaViewable {
         }
         return result
     }
-    
+
     /// Finds the first occurrence of the specified character-set members within the receiver.
     /// - Parameter characters: A string-like collection of characters to match.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
@@ -190,14 +189,14 @@ public extension StringZillaViewable {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_find_char_from(hPointer, hLength, nPointer, nLength) {
+                if let matchPointer = sz_find_byte_from(hPointer, hLength, nPointer, nLength) {
                     result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
         return result
     }
-    
+
     /// Finds the last occurrence of the specified character-set members within the receiver.
     /// - Parameter characters: A string-like collection of characters to match.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
@@ -207,14 +206,14 @@ public extension StringZillaViewable {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_rfind_char_from(hPointer, hLength, nPointer, nLength) {
+                if let matchPointer = sz_rfind_byte_from(hPointer, hLength, nPointer, nLength) {
                     result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
         return result
     }
-    
+
     /// Finds the first occurrence of a character outside of the the given character-set within the receiver.
     /// - Parameter characters: A string-like collection of characters to exclude.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
@@ -224,14 +223,14 @@ public extension StringZillaViewable {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_find_char_not_from(hPointer, hLength, nPointer, nLength) {
+                if let matchPointer = sz_find_byte_not_from(hPointer, hLength, nPointer, nLength) {
                     result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
         return result
     }
-    
+
     /// Finds the last occurrence of a character outside of the the given character-set within the receiver.
     /// - Parameter characters: A string-like collection of characters to exclude.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
@@ -241,40 +240,46 @@ public extension StringZillaViewable {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
-                if let matchPointer = sz_rfind_char_not_from(hPointer, hLength, nPointer, nLength) {
+                if let matchPointer = sz_rfind_byte_not_from(hPointer, hLength, nPointer, nLength) {
                     result = self.stringZillaByteOffset(forByte: matchPointer, after: hPointer)
                 }
             }
         }
         return result
     }
-    
-    /// Computes the Levenshtein edit distance between this and another string.
-    /// - Parameter other: A string-like collection of characters to exclude.
-    /// - Returns: The edit distance, as an unsigned integer.
-    /// - Throws: If a memory allocation error has happened.
-    @_specialize(where Self == String, S == String)
-    @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func editDistance<S: StringZillaViewable>(from other: S, bound: UInt64 = UInt64.max) throws -> UInt64? {
-        var result: UInt64?
-        
-        // Use a do-catch block to handle potential errors
-        do {
-            try withStringZillaScope { hPointer, hLength in
-                try other.withStringZillaScope { nPointer, nLength in
-                    result = UInt64(sz_edit_distance(hPointer, hLength, nPointer, nLength, sz_size_t(bound), nil))
-                    if result == SZ_SIZE_MAX {
-                        result = nil
-                        throw StringZillaError.memoryAllocationFailed
-                    }
-                }
+
+    func levenshteinDistance<S: StringZillaViewable>(
+        from other: S,
+        bound: UInt? = nil
+    ) throws -> UInt {
+        // Prepare a local variable for the result.
+        var computedResult: sz_size_t = 0
+
+        // Swift has a ridiculous issue with casting unsigned 64-bit to unsigned 64-bit
+        // values which results in "Fatal error: Not enough bits to represent the passed value".
+        // Let's just copy the bytes: https://stackoverflow.com/a/68650250/2766161
+        let effectiveBound: sz_size_t = bound.map { sz_size_t($0) } ?? _sz_size_max()
+        let status = try withStringZillaScope { hPointer, hLength in
+            try other.withStringZillaScope { nPointer, nLength in
+                // Pass a mutable pointer for the result.
+                sz_levenshtein_distance(
+                    hPointer,
+                    hLength,
+                    nPointer,
+                    nLength,
+                    effectiveBound,
+                    nil, // default allocator
+                    &computedResult // out-parameter for the computed distance
+                )
             }
-        } catch {
-            // Handle or rethrow the error
-            throw error
         }
-        
-        return result
+
+        // Check the returned status code.
+        guard status == sz_success_k else {
+            // Map the status code to an appropriate Swift error.
+            throw StringZillaError.memoryAllocationFailed
+        }
+
+        return UInt(computedResult)
     }
-    
 }

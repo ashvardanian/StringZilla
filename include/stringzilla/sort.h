@@ -3,10 +3,13 @@
  *  @file   sort.h
  *  @author Ash Vardanian
  *
- *  Includes core APIs for `sz_sequence_t` string collections:
+ *  Includes core APIs for `sz_sequence_t` string collections with hardware-specific backends:
  *
  *  - `sz_sequence_argsort` - to get the sorting permutation of a string collection.
  *  - `sz_sequence_join` - to compute the intersection of two arbitrary string collections.
+ *
+ *  The first can easily be used to implement SORT and GROUPBY operations SQL, while the second can be used to
+ *  implement JOIN operations. Both are essential for implementing efficient database engines.
  *
  *  The core idea of all following string algorithms is to process strings not based on 1 character at a time,
  *  but on a larger "Pointer-sized N-grams" fitting in 4 or 8 bytes at once, on 32-bit or 64-bit architectures,
@@ -21,7 +24,7 @@
  *
  *  Other helpers include:
  *
- *  - `sz_pgrams_sort_stable_with_insertion` - for quadratic-complexity sorting of small continuous integer arrays.
+ *  - `sz_pgrams_sort_with_insertion` - for quadratic-complexity sorting of small continuous integer arrays.
  *  - `sz_sequence_argsort_with_insertion` - for quadratic-complexity sorting of small string collections.
  *  - `sz_sequence_argsort_stabilize` - updates the sorting permutation to be stable.
  */
@@ -45,10 +48,11 @@ extern "C" {
  *
  *  @param[in] sequence Immutable sequence of strings to sort.
  *  @param[in] alloc Optional memory allocator for temporary storage.
- *  @param[out] order Output permutation that sorts the elements. Must fit at least `sequence->count` integers.
+ *  @param[out] order Output permutation that sorts the elements.
  *
  *  @retval `sz_success_k` if the operation was successful.
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
+ *  @pre The @p order array must fit at least `sequence->count` integers.
  *  @post The @p order array will contain a valid permutation of `[0, sequence->count - 1]`.
  *
  *  Example usage:
@@ -60,8 +64,8 @@ extern "C" {
  *          sz_sequence_t sequence;
  *          sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
  *          sz_sorted_idx_t order[3];
- *          sz_sequence_argsort(&sequence, NULL, order);
- *          return order[0] == 1 && order[1] == 0 && order[2] == 2 ? 0 : 1;
+ *          sz_status_t status = sz_sequence_argsort(&sequence, NULL, order);
+ *          return status == sz_success_k && order[0] == 1 && order[1] == 0 && order[2] == 2 ? 0 : 1;
  *      }
  *  @endcode
  *
@@ -69,7 +73,7 @@ extern "C" {
  *  @see    https://en.wikipedia.org/wiki/Quicksort
  *
  *  @note   This algorithm is @b unstable: equal elements may change relative order.
- *  @sa     sz_sequence_argsort_stable
+ *  @sa     sz_sequence_argsort_stabilize
  *
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
  *  @sa     sz_sequence_argsort_serial, sz_sequence_argsort_skylake, sz_sequence_argsort_sve
@@ -84,10 +88,11 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
  *  @param[inout] pgrams Continuous buffer of unsigned integers to sort in place.
  *  @param[in] count Number of elements in the sequence.
  *  @param[in] alloc Optional memory allocator for temporary storage.
- *  @param[out] order Output permutation that sorts the elements. Must fit at least @p count integers.
+ *  @param[out] order Output permutation that sorts the elements.
  *
  *  @retval `sz_success_k` if the operation was successful.
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
+ *  @pre The @p order array must fit at least `count` integers.
  *  @post The @p order array will contain a valid permutation of `[0, count - 1]`.
  *
  *  Example usage:
@@ -97,16 +102,13 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
  *      int main() {
  *          sz_pgram_t pgrams[] = {42, 17, 99, 8};
  *          sz_sorted_idx_t order[4];
- *          sz_pgrams_sort(pgrams, 4, NULL, order);
- *          return order[0] == 3 && order[1] == 1 && order[2] == 0 && order[3] == 2 ? 0 : 1;
+ *          sz_status_t status = sz_pgrams_sort(pgrams, 4, NULL, order);
+ *          return status == sz_success_k && order[0] == 3 && order[1] == 1 && order[2] == 0 && order[3] == 2 ? 0 : 1;
  *      }
  *  @endcode
  *
  *  @note   The algorithm has linear memory complexity, quadratic worst-case and log-linear average time complexity.
  *  @see    https://en.wikipedia.org/wiki/Quicksort
- *
- *  @note   This algorithm is @b unstable: equal elements may change relative order.
- *  @sa     sz_pgrams_sort_stable
  *
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
  *  @sa     sz_pgrams_sort_serial, sz_pgrams_sort_skylake, sz_pgrams_sort_sve
@@ -115,46 +117,51 @@ SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *pgrams, sz_size_t count, sz_me
                                       sz_sorted_idx_t *order);
 
 /**
- *  @brief  Faster @b arg-sort for an arbitrary @b string sequence, using MergeSort.
- *          Outputs the @p order of elements in the immutable @p sequence, that would sort it.
+ *  @brief  Intersects two arbitrary @b string sequences, using a hash table.
+ *          Outputs the @p first_positions from the @p first_sequence and @p second_positions from
+ *          the @p second_sequence, that contain identical strings.
  *
- *  This algorithm guarantees stability, ensuring that the relative order of equal elements is preserved.
- *  It uses more memory than `sz_sequence_argsort`, but its performance is more predictable.
- *  It's preferred for very large inputs, as most memory access happens in a sequential pattern.
  *
- *  @param[in] sequence Immutable sequence of strings to sort.
+ *  @param[in] first_sequence First immutable sequence of strings to intersection.
+ *  @param[in] second_sequence Second immutable sequence of strings to intersection.
  *  @param[in] alloc Optional memory allocator for temporary storage.
- *  @param[out] order Output permutation that sorts the elements. Must fit at least `sequence->count` integers.
+ *  @param[out] intersection_size Number of identical strings in both sequences.
+ *  @param[out] first_positions Offset positions of the identical strings from the @p first_sequence.
+ *  @param[out] second_positions Offset positions of the identical strings from the @p second_sequence.
  *
  *  @retval `sz_success_k` if the operation was successful.
  *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
- *  @post The @p order array will contain a valid permutation of `[0, sequence->count - 1]`.
+ *  @retval `sz_contains_duplicates_k` if any of the sequences contain duplicate strings.
+ *  @pre The @p first_positions arrays must fit at least `min(first_sequence->count, second_sequence->count)` items.
+ *  @pre The @p second_positions arrays must fit at least `min(first_sequence->count, second_sequence->count)` items.
  *
  *  Example usage:
  *
  *  @code{.c}
  *      #include <stringzilla/sort.h>
  *      int main() {
- *          char const *strings[] = {"banana", "apple", "cherry"};
- *          sz_sequence_t sequence;
- *          sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
- *          sz_sorted_idx_t order[3];
- *          sz_sequence_argsort_stable(&sequence, NULL, order);
- *          return order[0] == 1 && order[1] == 0 && order[2] == 2 ? 0 : 1;
+ *          char const *first[] = {"banana", "apple", "cherry"};
+ *          char const *second[] = {"cherry", "orange", "pineapple", "banana"};
+ *          sz_sequence_t first_sequence, second_sequence;
+ *          sz_sequence_from_null_terminated_strings(first, 3, &first_sequence);
+ *          sz_sequence_from_null_terminated_strings(second, 4, &second_sequence);
+ *          sz_size_t intersection_size;
+ *          sz_sorted_idx_t first_positions[3], second_positions[3]; //? 3 is the size of the smaller sequence
+ *          sz_status_t status = sz_sequence_join(&first_sequence, &second_sequence, NULL,
+ *              &intersection_size, first_positions, second_positions);
+ *          return status == sz_success_k && intersection_size == 2 ? 0 : 1;
  *      }
  *  @endcode
  *
- *  @note   The algorithm has linear memory complexity and log-linear time complexity.
- *  @see    https://en.wikipedia.org/wiki/Merge_sort
- *
- *  @note   This algorithm is @b stable: equal elements maintain their relative order.
- *  @sa     sz_sequence_argsort
+ *  @note   The algorithm has linear memory complexity and linear time complexity.
+ *  @see    https://en.wikipedia.org/wiki/Join_(SQL)
  *
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa     sz_sequence_argsort_stable_serial, sz_sequence_argsort_stable_skylake, sz_sequence_argsort_stable_sve
+ *  @sa     sz_sequence_join_serial, sz_sequence_join_skylake, sz_sequence_join_sve
  */
-SZ_DYNAMIC sz_status_t sz_sequence_argsort_stable(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                  sz_sorted_idx_t *order);
+SZ_DYNAMIC sz_status_t sz_sequence_join(sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
+                                        sz_memory_allocator_t *alloc, sz_size_t *intersection_size,
+                                        sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
 /**
  *  @brief  Faster @b inplace `std::stable_sort` for a continuous @b unsigned-integer sequence, using MergeSort.
@@ -180,7 +187,7 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort_stable(sz_sequence_t const *sequence,
  *      int main() {
  *          sz_pgram_t pgrams[] = {42, 17, 99, 8};
  *          sz_sorted_idx_t order[4];
- *          sz_pgrams_sort_stable(pgrams, 4, NULL, order);
+ *          sz_pgrams_join(pgrams, 4, NULL, order);
  *          return order[0] == 3 && order[1] == 1 && order[2] == 0 && order[3] == 2 ? 0 : 1;
  *      }
  *  @endcode
@@ -192,10 +199,10 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort_stable(sz_sequence_t const *sequence,
  *  @sa     sz_pgrams_sort
  *
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa     sz_pgrams_sort_stable_serial, sz_pgrams_sort_stable_skylake, sz_pgrams_sort_stable_sve
+ *  @sa     sz_pgrams_join_serial, sz_pgrams_join_skylake, sz_pgrams_join_sve
  */
-SZ_DYNAMIC sz_status_t sz_pgrams_sort_stable(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                             sz_sorted_idx_t *order);
+SZ_DYNAMIC sz_status_t sz_pgrams_join(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                      sz_sorted_idx_t *order);
 
 /** @copydoc sz_sequence_argsort */
 SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
@@ -205,6 +212,8 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, 
 SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                             sz_sorted_idx_t *order);
 
+#if SZ_USE_SKYLAKE
+
 /** @copydoc sz_sequence_argsort */
 SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                                   sz_sorted_idx_t *order);
@@ -212,6 +221,16 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
 /** @copydoc sz_pgrams_sort */
 SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                              sz_sorted_idx_t *order);
+
+/** @copydoc sz_sequence_join */
+SZ_PUBLIC sz_status_t sz_sequence_join_skylake(                                //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_memory_allocator_t *alloc, sz_size_t *intersection_size,                //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+
+#endif
+
+#if SZ_USE_SVE
 
 /** @copydoc sz_sequence_argsort */
 SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
@@ -221,36 +240,20 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_
 SZ_PUBLIC sz_status_t sz_pgrams_sort_sve(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                          sz_sorted_idx_t *order);
 
-/** @copydoc sz_sequence_argsort_stable */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_stable_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                        sz_sorted_idx_t *order);
+/** @copydoc sz_sequence_join */
+SZ_PUBLIC sz_status_t sz_sequence_join_sve(                                    //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_memory_allocator_t *alloc, sz_size_t *intersection_size,                //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
-/** @copydoc sz_pgrams_sort_stable */
-SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                                   sz_sorted_idx_t *order);
-
-/** @copydoc sz_sequence_argsort_stable */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_stable_skylake(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                         sz_sorted_idx_t *order);
-
-/** @copydoc sz_pgrams_sort_stable */
-SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_skylake(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                                    sz_sorted_idx_t *order);
-
-/** @copydoc sz_sequence_argsort_stable */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_stable_sve(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                     sz_sorted_idx_t *order);
-
-/** @copydoc sz_pgrams_sort_stable */
-SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_sve(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                                sz_sorted_idx_t *order);
+#endif
 
 #pragma endregion
 
 #pragma region Generic Public Helpers
 
 /**
- *  @brief  Quadratic complexity insertion sort adjust for our @b argsort usecase.
+ *  @brief  Quadratic complexity @b stable insertion sort adjust for our @b argsort usecase.
  *          Needs no extra memory and is used as a fallback for small inputs.
  */
 SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence, sz_sorted_idx_t *order) {
@@ -281,11 +284,11 @@ SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence,
 }
 
 /**
- *  @brief  Quadratic complexity insertion sort adjust for our @b pgram-sorting usecase.
+ *  @brief  Quadratic complexity @b stable insertion sort adjust for our @b pgram-sorting usecase.
  *          Needs no extra memory and is used as a fallback for small inputs.
  */
 
-SZ_PUBLIC void sz_pgrams_sort_stable_with_insertion(sz_pgram_t *pgrams, sz_size_t count, sz_sorted_idx_t *order) {
+SZ_PUBLIC void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count, sz_sorted_idx_t *order) {
 
     // Assume `order` is already initialized with 0, 1, 2, ... N.
     for (sz_size_t i = 1; i < count; ++i) {
@@ -714,7 +717,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
  *  @brief  Helper function similar to `std::set_union` over pairs of integers and their original indices.
  *  @see    https://en.cppreference.com/w/cpp/algorithm/set_union
  */
-SZ_INTERNAL void _sz_sequence_argsort_stable_serial_merge(                                          //
+SZ_INTERNAL void _sz_sequence_join_serial_merge(                                                    //
     sz_pgram_t const *first_pgrams, sz_sorted_idx_t const *first_indices, sz_size_t first_count,    //
     sz_pgram_t const *second_pgrams, sz_sorted_idx_t const *second_indices, sz_size_t second_count, //
     sz_pgram_t *result_pgrams, sz_sorted_idx_t *result_indices) {
@@ -761,8 +764,8 @@ SZ_INTERNAL void _sz_sequence_argsort_stable_serial_merge(                      
             _sz_assert(merged_begin[i - 1] <= merged_begin[i] && "The merged pgrams must be in ascending order.");
 }
 
-SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                                   sz_sorted_idx_t *order) {
+SZ_PUBLIC sz_status_t sz_pgrams_join_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                            sz_sorted_idx_t *order) {
 
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t i = 0; i != count; ++i) order[i] = i;
@@ -770,7 +773,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t
     // On very small collections - just use the quadratic-complexity insertion sort
     // without any smart optimizations or memory allocations.
     if (count <= 32) {
-        sz_pgrams_sort_stable_with_insertion(pgrams, count, order);
+        sz_pgrams_sort_with_insertion(pgrams, count, order);
         return sz_success_k;
     }
 
@@ -779,7 +782,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t
 
     // For the tail of the array, sort it with insertion sort.
     sz_size_t const tail_count = count & 7u;
-    sz_pgrams_sort_stable_with_insertion(pgrams + count - tail_count, tail_count, order + count - tail_count);
+    sz_pgrams_sort_with_insertion(pgrams + count - tail_count, tail_count, order + count - tail_count);
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_memory_allocator_t global_alloc;
@@ -821,7 +824,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t
             else if (i + left_count + right_count > count) { right_count = count - (i + left_count); }
 
             // Merge the two runs:
-            _sz_sequence_argsort_stable_serial_merge(                             //
+            _sz_sequence_join_serial_merge(                                       //
                 src_pgrams + i, src_order + i, left_count,                        //
                 src_pgrams + i + run_size, src_order + i + run_size, right_count, //
                 dst_pgrams + i, dst_order + i);
@@ -844,9 +847,11 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_stable_serial(sz_pgram_t *pgrams, sz_size_t
     return sz_success_k;
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_argsort_stable_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                        sz_sorted_idx_t *order) {
-    sz_unused(sequence && alloc && order);
+SZ_PUBLIC sz_status_t sz_sequence_join_serial(                                 //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_memory_allocator_t *alloc, sz_size_t *intersection_size,                //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
+    sz_unused(first_sequence && second_sequence && alloc && intersection_size && first_positions && second_positions);
     return sz_success_k;
 }
 
@@ -967,7 +972,7 @@ SZ_INTERNAL void _sz_sequence_argsort_skylake_3way_partition(                   
  *  @brief  Recursive Quick-Sort implementation backing both the `sz_sequence_argsort_skylake` and
  * `sz_pgrams_sort_skylake`, and using the `_sz_sequence_argsort_skylake_3way_partition` under the hood.
  */
-SZ_INTERNAL void _sz_sequence_argsort_skylake_recursively(          //
+SZ_PUBLIC void _sz_sequence_argsort_skylake_recursively(            //
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,     //
     sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence) {
@@ -977,7 +982,7 @@ SZ_INTERNAL void _sz_sequence_argsort_skylake_recursively(          //
     sz_size_t const count = end_in_sequence - start_in_sequence;
     sz_size_t const pgrams_per_register = sizeof(sz_u512_vec_t) / sizeof(sz_pgram_t);
     if (count <= pgrams_per_register) {
-        sz_pgrams_sort_stable_with_insertion( //
+        sz_pgrams_sort_with_insertion( //
             initial_pgrams + start_in_sequence, count, initial_order + start_in_sequence);
         return;
     }
@@ -1040,12 +1045,12 @@ SZ_PUBLIC void _sz_sequence_argsort_skylake_next_pgrams(                        
     sz_size_t const start_character) {
 
     // Prepare the new range of pgrams
-    _sz_sequence_argsort_serial_export_next_pgrams(sequence, global_pgrams, global_order, start_in_sequence,
-                                                   end_in_sequence, start_character);
+    _sz_sequence_argsort_serial_export_next_pgrams( //
+        sequence, global_pgrams, global_order, start_in_sequence, end_in_sequence, start_character);
 
     // Sort current pgrams with a quicksort
-    _sz_sequence_argsort_skylake_recursively(global_pgrams, global_order, temporary_pgrams, temporary_order,
-                                             start_in_sequence, end_in_sequence);
+    _sz_sequence_argsort_skylake_recursively( //
+        global_pgrams, global_order, temporary_pgrams, temporary_order, start_in_sequence, end_in_sequence);
 
     // Depending on the architecture, we will export a different number of bytes.
     // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
@@ -1064,11 +1069,11 @@ SZ_PUBLIC void _sz_sequence_argsort_skylake_next_pgrams(                        
         sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
-        if (has_multiple_strings && has_more_characters_in_each) {
-            _sz_sequence_argsort_skylake_next_pgrams(sequence, global_pgrams, global_order, temporary_pgrams,
-                                                     temporary_order, nested_start, nested_end,
-                                                     start_character + pgram_capacity);
-        }
+        if (has_multiple_strings && has_more_characters_in_each)
+            _sz_sequence_argsort_skylake_next_pgrams( //
+                sequence, global_pgrams, global_order, temporary_pgrams, temporary_order, nested_start, nested_end,
+                start_character + pgram_capacity);
+
         // Move to the next
         nested_start = nested_end;
     }
@@ -1111,6 +1116,14 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
     return sz_success_k;
 }
 
+SZ_PUBLIC sz_status_t sz_sequence_join_skylake(                                //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_memory_allocator_t *alloc, sz_size_t *intersection_size,                //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
+    sz_unused(first_sequence && second_sequence && alloc && intersection_size && first_positions && second_positions);
+    return sz_success_k;
+}
+
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif            // SZ_USE_SKYLAKE
@@ -1144,25 +1157,24 @@ SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *pgrams, sz_size_t count, sz_me
 #endif
 }
 
-SZ_DYNAMIC sz_status_t sz_sequence_argsort_stable(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                                  sz_sorted_idx_t *order) {
+SZ_DYNAMIC sz_status_t sz_sequence_join(sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
+                                        sz_memory_allocator_t *alloc, sz_size_t *intersection_size,
+                                        sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
 #if SZ_USE_SKYLAKE
-    return sz_sequence_argsort_skylake(sequence, alloc, order);
+    return sz_sequence_join_skylake(     //
+        first_sequence, second_sequence, //
+        alloc, intersection_size,        //
+        first_positions, second_positions);
 #elif SZ_USE_SVE
-    return sz_sequence_argsort_sve(sequence, alloc, order);
+    return sz_sequence_join_sve(         //
+        first_sequence, second_sequence, //
+        alloc, intersection_size,        //
+        first_positions, second_positions);
 #else
-    return sz_sequence_argsort_serial(sequence, alloc, order);
-#endif
-}
-
-SZ_DYNAMIC sz_status_t sz_pgrams_sort_stable(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                             sz_sorted_idx_t *order) {
-#if SZ_USE_SKYLAKE
-    return sz_pgrams_sort_skylake(pgrams, count, alloc, order);
-#elif SZ_USE_SVE
-    return sz_pgrams_sort_sve(pgrams, count, alloc, order);
-#else
-    return sz_pgrams_sort_serial(pgrams, count, alloc, order);
+    return sz_sequence_join_serial(      //
+        first_sequence, second_sequence, //
+        alloc, intersection_size,        //
+        first_positions, second_positions);
 #endif
 }
 

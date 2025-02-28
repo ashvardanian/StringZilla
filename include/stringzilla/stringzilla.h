@@ -64,12 +64,13 @@ typedef enum {
 
     sz_cap_haswell_k = 1 << 10, ///< x86 AVX2 capability with FMA and F16C extensions
     sz_cap_skylake_k = 1 << 11, ///< x86 AVX512 baseline capability
-    sz_cap_ice_k = 1 << 12,     ///< x86 AVX512 capability with advanced integer algos
+    sz_cap_ice_k = 1 << 12,     ///< x86 AVX512 capability with advanced integer algos and AES extensions
 
-    sz_cap_neon_k = 1 << 20,   ///< ARM NEON baseline capability
-    sz_cap_sve_k = 1 << 21,    ///< ARM SVE baseline capability
-    sz_cap_sve2_k = 1 << 22,   ///< ARM SVE2 capability
-    sz_cap_sve2p1_k = 1 << 23, ///< ARM SVE2p1 capability
+    sz_cap_neon_k = 1 << 20,     ///< ARM NEON baseline capability
+    sz_cap_neon_aes_k = 1 << 21, ///< ARM NEON baseline capability with AES extensions
+    sz_cap_sve_k = 1 << 24,      ///< ARM SVE baseline capability
+    sz_cap_sve2_k = 1 << 25,     ///< ARM SVE2 capability
+    sz_cap_sve2_aes_k = 1 << 26, ///< ARM SVE2 capability with AES extensions
 
 } sz_capability_t;
 

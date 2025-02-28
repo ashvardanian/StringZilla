@@ -8,6 +8,61 @@
 
 pub mod sz {
 
+    #[repr(C)]
+    #[derive(Debug, PartialEq)]
+    pub enum Status {
+        Success = 0,
+        BadAlloc = -1,
+        InvalidUtf8 = -2,
+        ContainsDuplicates = -3,
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct Byteset {
+        bits: [u64; 4],
+    }
+
+    impl Byteset {
+        /// Initializes a bit‑set to an empty collection (all characters banned).
+        #[inline]
+        pub fn new() -> Self {
+            Self { bits: [0; 4] }
+        }
+
+        /// Initializes a bit‑set to contain all ASCII characters.
+        #[inline]
+        pub fn new_ascii() -> Self {
+            Self {
+                bits: [u64::MAX, u64::MAX, 0, 0],
+            }
+        }
+
+        /// Adds a byte to the set.
+        #[inline]
+        pub fn add_u8(&mut self, c: u8) {
+            let idx = (c >> 6) as usize; // Divide by 64.
+            let bit = c & 63; // Remainder modulo 64.
+            self.bits[idx] |= 1 << bit;
+        }
+
+        /// Adds a character to the set.
+        ///
+        /// This function assumes the character is in the ASCII range.
+        #[inline]
+        pub fn add(&mut self, c: char) {
+            self.add_u8(c as u8);
+        }
+
+        /// Inverts the bit-set so that all set bits become unset and vice versa.
+        #[inline]
+        pub fn invert(&mut self) {
+            for b in self.bits.iter_mut() {
+                *b = !*b;
+            }
+        }
+    }
+
     use core::{ffi::c_void, usize};
 
     // Import the functions from the StringZilla C library.
@@ -26,83 +81,64 @@ pub mod sz {
             needle_length: usize,
         ) -> *const c_void;
 
-        fn sz_find_char_from(
-            haystack: *const c_void,
-            haystack_length: usize,
-            needle: *const c_void,
-            needle_length: usize,
-        ) -> *const c_void;
+        fn sz_find_byteset(haystack: *const c_void, haystack_length: usize, byteset: *const c_void) -> *const c_void;
 
-        fn sz_rfind_char_from(
-            haystack: *const c_void,
-            haystack_length: usize,
-            needle: *const c_void,
-            needle_length: usize,
-        ) -> *const c_void;
-
-        fn sz_find_char_not_from(
-            haystack: *const c_void,
-            haystack_length: usize,
-            needle: *const c_void,
-            needle_length: usize,
-        ) -> *const c_void;
-
-        fn sz_rfind_char_not_from(
-            haystack: *const c_void,
-            haystack_length: usize,
-            needle: *const c_void,
-            needle_length: usize,
-        ) -> *const c_void;
+        fn sz_rfind_byteset(haystack: *const c_void, haystack_length: usize, byteset: *const c_void) -> *const c_void;
 
         fn sz_bytesum(text: *const c_void, length: usize) -> u64;
 
         fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
 
-        fn sz_generate(text: *mut c_void, length: usize, seed: u64) -> u64;
+        fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
 
-        fn sz_edit_distance(
-            haystack1: *const c_void,
-            haystack1_length: usize,
-            haystack2: *const c_void,
-            haystack2_length: usize,
+        pub fn sz_levenshtein_distance(
+            a: *const c_void,
+            a_length: usize,
+            b: *const c_void,
+            b_length: usize,
             bound: usize,
-            allocator: *const c_void,
-        ) -> usize;
+            alloc: *const c_void,
+            result: *mut usize,
+        ) -> Status;
 
-        fn sz_edit_distance_utf8(
-            haystack1: *const c_void,
-            haystack1_length: usize,
-            haystack2: *const c_void,
-            haystack2_length: usize,
+        pub fn sz_levenshtein_distance_utf8(
+            a: *const c_void,
+            a_length: usize,
+            b: *const c_void,
+            b_length: usize,
             bound: usize,
-            allocator: *const c_void,
-        ) -> usize;
+            alloc: *const c_void,
+            result: *mut usize,
+        ) -> Status;
 
-        fn sz_hamming_distance(
-            haystack1: *const c_void,
-            haystack1_length: usize,
-            haystack2: *const c_void,
-            haystack2_length: usize,
+        pub fn sz_hamming_distance(
+            a: *const c_void,
+            a_length: usize,
+            b: *const c_void,
+            b_length: usize,
             bound: usize,
-        ) -> usize;
+            result: *mut usize,
+        ) -> Status;
 
-        fn sz_hamming_distance_utf8(
-            haystack1: *const c_void,
-            haystack1_length: usize,
-            haystack2: *const c_void,
-            haystack2_length: usize,
+        pub fn sz_hamming_distance_utf8(
+            a: *const c_void,
+            a_length: usize,
+            b: *const c_void,
+            b_length: usize,
             bound: usize,
-        ) -> usize;
+            result: *mut usize,
+        ) -> Status;
 
-        fn sz_alignment_score(
-            haystack1: *const c_void,
-            haystack1_length: usize,
-            haystack2: *const c_void,
-            haystack2_length: usize,
-            matrix: *const c_void,
+        pub fn sz_needleman_wunsch_score(
+            a: *const c_void,
+            a_length: usize,
+            b: *const c_void,
+            b_length: usize,
+            subs: *const i8,
             gap: i8,
-            allocator: *const c_void,
-        ) -> isize;
+            alloc: *const c_void,
+            result: *mut isize,
+        ) -> Status;
 
     }
 
@@ -136,6 +172,30 @@ pub mod sz {
     /// # Arguments
     ///
     /// * `text`: The byte slice to compute the checksum for.
+    /// * `seed` - A 64-bit value that acts as the seed for the hash function.
+    ///
+    /// # Returns
+    ///
+    /// A `u64` representing the hash value of the input byte slice.
+    pub fn hash_with_seed<T>(text: T, seed: u64) -> u64
+    where
+        T: AsRef<[u8]>,
+    {
+        let text_ref = text.as_ref();
+        let text_pointer = text_ref.as_ptr() as _;
+        let text_length = text_ref.len();
+        let result = unsafe { sz_hash(text_pointer, text_length, seed) };
+        return result;
+    }
+
+    /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
+    /// This function is designed to provide a high-quality hash value for use in
+    /// hash tables, data structures, and cryptographic applications.
+    /// Unlike the bytesum function, the hash function is order-sensitive.
+    ///
+    /// # Arguments
+    ///
+    /// * `text`: The byte slice to compute the checksum for.
     ///
     /// # Returns
     ///
@@ -144,11 +204,7 @@ pub mod sz {
     where
         T: AsRef<[u8]>,
     {
-        let text_ref = text.as_ref();
-        let text_pointer = text_ref.as_ptr() as _;
-        let text_length = text_ref.len();
-        let result = unsafe { sz_hash(text_pointer, text_length) };
-        return result;
+        hash_with_seed(text, 0)
     }
 
     /// Locates the first matching substring within `haystack` that equals `needle`.
@@ -175,14 +231,7 @@ pub mod sz {
         let haystack_length = haystack_ref.len();
         let needle_pointer = needle_ref.as_ptr() as _;
         let needle_length = needle_ref.len();
-        let result = unsafe {
-            sz_find(
-                haystack_pointer,
-                haystack_length,
-                needle_pointer,
-                needle_length,
-            )
-        };
+        let result = unsafe { sz_find(haystack_pointer, haystack_length, needle_pointer, needle_length) };
 
         if result.is_null() {
             None
@@ -215,14 +264,7 @@ pub mod sz {
         let haystack_length = haystack_ref.len();
         let needle_pointer = needle_ref.as_ptr() as _;
         let needle_length = needle_ref.len();
-        let result = unsafe {
-            sz_rfind(
-                haystack_pointer,
-                haystack_length,
-                needle_pointer,
-                needle_length,
-            )
-        };
+        let result = unsafe { sz_rfind(haystack_pointer, haystack_length, needle_pointer, needle_length) };
 
         if result.is_null() {
             None
@@ -244,7 +286,7 @@ pub mod sz {
     ///
     /// An `Option<usize>` representing the index of the first occurrence of any byte from
     /// `needles` within `haystack`, if found, otherwise `None`.
-    pub fn find_char_from<H, N>(haystack: H, needles: N) -> Option<usize>
+    pub fn find_byte_from<H, N>(haystack: H, needles: N) -> Option<usize>
     where
         H: AsRef<[u8]>,
         N: AsRef<[u8]>,
@@ -253,16 +295,13 @@ pub mod sz {
         let needles_ref = needles.as_ref();
         let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as _;
-        let needles_length = needles_ref.len();
-        let result = unsafe {
-            sz_find_char_from(
-                haystack_pointer,
-                haystack_length,
-                needles_pointer,
-                needles_length,
-            )
-        };
+        let mut byteset = Byteset::new();
+        for &b in needles_ref {
+            byteset.add_u8(b);
+        }
+
+        let result =
+            unsafe { sz_find_byteset(haystack_pointer, haystack_length, &byteset as *const _ as *const c_void) };
         if result.is_null() {
             None
         } else {
@@ -283,7 +322,7 @@ pub mod sz {
     ///
     /// An `Option<usize>` representing the index of the last occurrence of any byte from
     /// `needles` within `haystack`, if found, otherwise `None`.
-    pub fn rfind_char_from<H, N>(haystack: H, needles: N) -> Option<usize>
+    pub fn rfind_byte_from<H, N>(haystack: H, needles: N) -> Option<usize>
     where
         H: AsRef<[u8]>,
         N: AsRef<[u8]>,
@@ -292,16 +331,13 @@ pub mod sz {
         let needles_ref = needles.as_ref();
         let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as _;
-        let needles_length = needles_ref.len();
-        let result = unsafe {
-            sz_rfind_char_from(
-                haystack_pointer,
-                haystack_length,
-                needles_pointer,
-                needles_length,
-            )
-        };
+        let mut byteset = Byteset::new();
+        for &b in needles_ref {
+            byteset.add_u8(b);
+        }
+
+        let result =
+            unsafe { sz_rfind_byteset(haystack_pointer, haystack_length, &byteset as *const _ as *const c_void) };
         if result.is_null() {
             None
         } else {
@@ -322,7 +358,7 @@ pub mod sz {
     ///
     /// An `Option<usize>` representing the index of the first occurrence of any byte not in
     /// `needles` within `haystack`, if found, otherwise `None`.
-    pub fn find_char_not_from<H, N>(haystack: H, needles: N) -> Option<usize>
+    pub fn find_byte_not_from<H, N>(haystack: H, needles: N) -> Option<usize>
     where
         H: AsRef<[u8]>,
         N: AsRef<[u8]>,
@@ -331,16 +367,14 @@ pub mod sz {
         let needles_ref = needles.as_ref();
         let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as _;
-        let needles_length = needles_ref.len();
-        let result = unsafe {
-            sz_find_char_not_from(
-                haystack_pointer,
-                haystack_length,
-                needles_pointer,
-                needles_length,
-            )
-        };
+        let mut byteset = Byteset::new();
+        for &b in needles_ref {
+            byteset.add_u8(b);
+        }
+        byteset.invert();
+
+        let result =
+            unsafe { sz_find_byteset(haystack_pointer, haystack_length, &byteset as *const _ as *const c_void) };
         if result.is_null() {
             None
         } else {
@@ -361,7 +395,7 @@ pub mod sz {
     ///
     /// An `Option<usize>` representing the index of the last occurrence of any byte not in
     /// `needles` within `haystack`, if found, otherwise `None`.
-    pub fn rfind_char_not_from<H, N>(haystack: H, needles: N) -> Option<usize>
+    pub fn rfind_byte_not_from<H, N>(haystack: H, needles: N) -> Option<usize>
     where
         H: AsRef<[u8]>,
         N: AsRef<[u8]>,
@@ -370,16 +404,14 @@ pub mod sz {
         let needles_ref = needles.as_ref();
         let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let needles_pointer = needles_ref.as_ptr() as _;
-        let needles_length = needles_ref.len();
-        let result = unsafe {
-            sz_rfind_char_not_from(
-                haystack_pointer,
-                haystack_length,
-                needles_pointer,
-                needles_length,
-            )
-        };
+        let mut byteset = Byteset::new();
+        for &b in needles_ref {
+            byteset.add_u8(b);
+        }
+        byteset.invert();
+
+        let result =
+            unsafe { sz_rfind_byteset(haystack_pointer, haystack_length, &byteset as *const _ as *const c_void) };
         if result.is_null() {
             None
         } else {
@@ -401,7 +433,7 @@ pub mod sz {
     ///
     /// A `usize` representing the minimum number of single-character edits (insertions,
     /// deletions, or substitutions) required to change `first` into `second`.
-    pub fn edit_distance_bounded<F, S>(first: F, second: S, bound: usize) -> usize
+    pub fn levenshtein_distance_bounded<F, S>(first: F, second: S, bound: usize) -> Result<usize, Status>
     where
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
@@ -412,19 +444,22 @@ pub mod sz {
         let second_length = second_ref.len();
         let first_pointer = first_ref.as_ptr() as _;
         let second_pointer = second_ref.as_ptr() as _;
-        unsafe {
-            sz_edit_distance(
+        let mut result: usize = 0;
+        let status = unsafe {
+            sz_levenshtein_distance(
                 first_pointer,
                 first_length,
                 second_pointer,
                 second_length,
-                // Upper bound on the distance, that allows us to exit early. If zero is
-                // passed, the maximum possible distance will be equal to the length of
-                // the longer input.
                 bound,
-                // Uses the default allocator
-                core::ptr::null(),
+                core::ptr::null(), // Uses the default allocator
+                &mut result as *mut _,
             )
+        };
+        if status == Status::Success {
+            Ok(result)
+        } else {
+            Err(status)
         }
     }
 
@@ -441,7 +476,7 @@ pub mod sz {
     ///
     /// A `usize` representing the minimum number of single-character edits (insertions,
     /// deletions, or substitutions) required to change `first` into `second`.
-    pub fn edit_distance_utf8_bounded<F, S>(first: F, second: S, bound: usize) -> usize
+    pub fn levenshtein_distance_utf8_bounded<F, S>(first: F, second: S, bound: usize) -> Result<usize, Status>
     where
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
@@ -452,19 +487,22 @@ pub mod sz {
         let second_length = second_ref.len();
         let first_pointer = first_ref.as_ptr() as _;
         let second_pointer = second_ref.as_ptr() as _;
-        unsafe {
-            sz_edit_distance_utf8(
+        let mut result: usize = 0;
+        let status = unsafe {
+            sz_levenshtein_distance_utf8(
                 first_pointer,
                 first_length,
                 second_pointer,
                 second_length,
-                // Upper bound on the distance, that allows us to exit early. If zero is
-                // passed, the maximum possible distance will be equal to the length of
-                // the longer input.
                 bound,
-                // Uses the default allocator
-                core::ptr::null(),
+                core::ptr::null(), // Uses the default allocator
+                &mut result as *mut _,
             )
+        };
+        if status == Status::Success {
+            Ok(result)
+        } else {
+            Err(status)
         }
     }
 
@@ -481,12 +519,12 @@ pub mod sz {
     ///
     /// A `usize` representing the minimum number of single-character edits (insertions,
     /// deletions, or substitutions) required to change `first` into `second`.
-    pub fn edit_distance<F, S>(first: F, second: S) -> usize
+    pub fn levenshtein_distance<F, S>(first: F, second: S) -> Result<usize, Status>
     where
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
     {
-        edit_distance_bounded(first, second, usize::MAX)
+        levenshtein_distance_bounded(first, second, usize::MAX)
     }
 
     /// Computes the Levenshtein edit distance between two UTF8 strings, using the Wagner-Fisher
@@ -501,12 +539,12 @@ pub mod sz {
     ///
     /// A `usize` representing the minimum number of single-character edits (insertions,
     /// deletions, or substitutions) required to change `first` into `second`.
-    pub fn edit_distance_utf8<F, S>(first: F, second: S) -> usize
+    pub fn levenshtein_distance_utf8<F, S>(first: F, second: S) -> Result<usize, Status>
     where
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
     {
-        edit_distance_utf8_bounded(first, second, usize::MAX)
+        levenshtein_distance_utf8_bounded(first, second, usize::MAX)
     }
 
     /// Computes the Hamming edit distance between two strings, counting the number of substituted characters.
@@ -522,7 +560,7 @@ pub mod sz {
     ///
     /// A `usize` representing the minimum number of single-character edits (substitutions) required to
     /// change `first` into `second`.
-    pub fn hamming_distance_bounded<F, S>(first: F, second: S, bound: usize) -> usize
+    pub fn hamming_distance_bounded<F, S>(first: F, second: S, bound: usize) -> Result<usize, Status>
     where
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
@@ -533,17 +571,21 @@ pub mod sz {
         let second_length = second_ref.len();
         let first_pointer = first_ref.as_ptr() as _;
         let second_pointer = second_ref.as_ptr() as _;
-        unsafe {
+        let mut result: usize = 0;
+        let status = unsafe {
             sz_hamming_distance(
                 first_pointer,
                 first_length,
                 second_pointer,
                 second_length,
-                // Upper bound on the distance, that allows us to exit early. If zero is
-                // passed, the maximum possible distance will be equal to the length of
-                // the longer input.
                 bound,
+                &mut result as *mut _,
             )
+        };
+        if status == Status::Success {
+            Ok(result)
+        } else {
+            Err(status)
         }
     }
 
@@ -560,7 +602,7 @@ pub mod sz {
     ///
     /// A `usize` representing the minimum number of single-character edits (substitutions) required to
     /// change `first` into `second`.
-    pub fn hamming_distance_utf8_bounded<F, S>(first: F, second: S, bound: usize) -> usize
+    pub fn hamming_distance_utf8_bounded<F, S>(first: F, second: S, bound: usize) -> Result<usize, Status>
     where
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
@@ -571,17 +613,21 @@ pub mod sz {
         let second_length = second_ref.len();
         let first_pointer = first_ref.as_ptr() as _;
         let second_pointer = second_ref.as_ptr() as _;
-        unsafe {
+        let mut result: usize = 0;
+        let status = unsafe {
             sz_hamming_distance_utf8(
                 first_pointer,
                 first_length,
                 second_pointer,
                 second_length,
-                // Upper bound on the distance, that allows us to exit early. If zero is
-                // passed, the maximum possible distance will be equal to the length of
-                // the longer input.
                 bound,
+                &mut result as *mut _,
             )
+        };
+        if status == Status::Success {
+            Ok(result)
+        } else {
+            Err(status)
         }
     }
 
@@ -597,7 +643,7 @@ pub mod sz {
     ///
     /// A `usize` representing the minimum number of single-character edits (substitutions) required to
     /// change `first` into `second`.
-    pub fn hamming_distance<F, S>(first: F, second: S) -> usize
+    pub fn hamming_distance<F, S>(first: F, second: S) -> Result<usize, Status>
     where
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
@@ -617,7 +663,7 @@ pub mod sz {
     ///
     /// A `usize` representing the minimum number of single-character edits (substitutions) required to
     /// change `first` into `second`.
-    pub fn hamming_distance_utf8<F, S>(first: F, second: S) -> usize
+    pub fn hamming_distance_utf8<F, S>(first: F, second: S) -> Result<usize, Status>
     where
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
@@ -642,7 +688,7 @@ pub mod sz {
     /// An `isize` representing the total alignment score, where higher scores indicate better
     /// alignment between the two strings, considering the specified gap penalties and
     /// substitution matrix.
-    pub fn alignment_score<F, S>(first: F, second: S, matrix: [[i8; 256]; 256], gap: i8) -> isize
+    pub fn alignment_score<F, S>(first: F, second: S, matrix: [[i8; 256]; 256], gap: i8) -> Result<isize, Status>
     where
         F: AsRef<[u8]>,
         S: AsRef<[u8]>,
@@ -653,16 +699,23 @@ pub mod sz {
         let second_length = second_ref.len();
         let first_pointer = first_ref.as_ptr() as _;
         let second_pointer = second_ref.as_ptr() as _;
-        unsafe {
-            sz_alignment_score(
+        let mut result: isize = 0;
+        let status = unsafe {
+            sz_needleman_wunsch_score(
                 first_pointer,
                 first_length,
                 second_pointer,
                 second_length,
                 matrix.as_ptr() as _,
                 gap,
-                core::ptr::null(),
+                core::ptr::null(), // Uses the default allocator
+                &mut result as *mut _,
             )
+        };
+        if status == Status::Success {
+            Ok(result)
+        } else {
+            Err(status)
         }
     }
 
@@ -697,42 +750,27 @@ pub mod sz {
     /// you need to generate random strings or data sequences based on a specific set
     /// of characters, such as generating random DNA sequences or testing inputs.
     ///
-    /// # Type Parameters
-    ///
-    /// * `T`: The type of the text to be randomized. Must be mutable and convertible to a byte slice.
-    /// * `A`: The type of the alphabet. Must be convertible to a byte slice.
-    ///
     /// # Arguments
     ///
-    /// * `text`: A mutable reference to the data to randomize. This data will be mutated in place.
-    /// * `alphabet`: A reference to the byte slice representing the alphabet to use for randomization.
+    /// * `buffer`: A mutable reference to the data to randomize. This data will be mutated in place.
+    /// * `nonce`: A 64-bit "number used once" (nonce) value to seed the random number generator.
     ///
     /// # Examples
     ///
     /// ```
     /// use stringzilla::sz;
-    /// let mut my_text = vec![0; 10]; // A buffer to randomize
-    /// let alphabet = b"ACTG"; // Using a DNA alphabet
-    /// sz::randomize(&mut my_text, &alphabet);
+    /// let mut buffer = vec![0; 10];
+    /// sz::fill_random(&mut buffer, 42);
     /// ```
     ///
-    /// After than,  `my_text` is filled with random 'A', 'C', 'T', or 'G' values.
-    pub fn randomize<T, A>(text: &mut T, alphabet: &A)
+    /// After than,  `buffer` is filled with random byte values from 0 to 255.
+    pub fn fill_random<T>(buffer: &mut T, nonce: u64)
     where
         T: AsMut<[u8]> + ?Sized, // Allows for mutable references to dynamically sized types.
-        A: AsRef<[u8]> + ?Sized, // Allows for references to dynamically sized types.
     {
-        let text_slice = text.as_mut();
-        let alphabet_slice = alphabet.as_ref();
+        let buffer_slice = buffer.as_mut();
         unsafe {
-            sz_generate(
-                alphabet_slice.as_ptr() as *const c_void,
-                alphabet_slice.len(),
-                text_slice.as_mut_ptr() as *mut c_void,
-                text_slice.len(),
-                core::ptr::null(),
-                core::ptr::null_mut(),
-            );
+            sz_fill_random(buffer_slice.as_ptr() as _, buffer_slice.len(), nonce);
         }
     }
 }
@@ -757,10 +795,10 @@ impl<'a> Matcher<'a> for MatcherType<'a> {
         match self {
             MatcherType::Find(needle) => sz::find(haystack, needle),
             MatcherType::RFind(needle) => sz::rfind(haystack, needle),
-            MatcherType::FindFirstOf(needles) => sz::find_char_from(haystack, needles),
-            MatcherType::FindLastOf(needles) => sz::rfind_char_from(haystack, needles),
-            MatcherType::FindFirstNotOf(needles) => sz::find_char_not_from(haystack, needles),
-            MatcherType::FindLastNotOf(needles) => sz::rfind_char_not_from(haystack, needles),
+            MatcherType::FindFirstOf(needles) => sz::find_byte_from(haystack, needles),
+            MatcherType::FindLastOf(needles) => sz::rfind_byte_from(haystack, needles),
+            MatcherType::FindFirstNotOf(needles) => sz::find_byte_not_from(haystack, needles),
+            MatcherType::FindLastNotOf(needles) => sz::rfind_byte_not_from(haystack, needles),
         }
     }
 
@@ -1088,9 +1126,9 @@ where
     /// use stringzilla::StringZilla;
     ///
     /// let haystack = "Hello, world!";
-    /// assert_eq!(haystack.sz_find_char_from("aeiou".as_bytes()), Some(1));
+    /// assert_eq!(haystack.sz_find_byte_from("aeiou".as_bytes()), Some(1));
     /// ```
-    fn sz_find_char_from(&self, needles: N) -> Option<usize>;
+    fn sz_find_byte_from(&self, needles: N) -> Option<usize>;
 
     /// Finds the index of the last character in `self` that is also present in `needles`.
     ///
@@ -1100,9 +1138,9 @@ where
     /// use stringzilla::StringZilla;
     ///
     /// let haystack = "Hello, world!";
-    /// assert_eq!(haystack.sz_rfind_char_from("aeiou".as_bytes()), Some(8));
+    /// assert_eq!(haystack.sz_rfind_byte_from("aeiou".as_bytes()), Some(8));
     /// ```
-    fn sz_rfind_char_from(&self, needles: N) -> Option<usize>;
+    fn sz_rfind_byte_from(&self, needles: N) -> Option<usize>;
 
     /// Finds the index of the first character in `self` that is not present in `needles`.
     ///
@@ -1112,9 +1150,9 @@ where
     /// use stringzilla::StringZilla;
     ///
     /// let haystack = "Hello, world!";
-    /// assert_eq!(haystack.sz_find_char_not_from("aeiou".as_bytes()), Some(0));
+    /// assert_eq!(haystack.sz_find_byte_not_from("aeiou".as_bytes()), Some(0));
     /// ```
-    fn sz_find_char_not_from(&self, needles: N) -> Option<usize>;
+    fn sz_find_byte_not_from(&self, needles: N) -> Option<usize>;
 
     /// Finds the index of the last character in `self` that is not present in `needles`.
     ///
@@ -1124,9 +1162,9 @@ where
     /// use stringzilla::StringZilla;
     ///
     /// let haystack = "Hello, world!";
-    /// assert_eq!(haystack.sz_rfind_char_not_from("aeiou".as_bytes()), Some(12));
+    /// assert_eq!(haystack.sz_rfind_byte_not_from("aeiou".as_bytes()), Some(12));
     /// ```
-    fn sz_rfind_char_not_from(&self, needles: N) -> Option<usize>;
+    fn sz_rfind_byte_not_from(&self, needles: N) -> Option<usize>;
 
     /// Computes the Levenshtein edit distance between `self` and `other`.
     ///
@@ -1137,9 +1175,9 @@ where
     ///
     /// let first = "kitten";
     /// let second = "sitting";
-    /// assert_eq!(first.sz_edit_distance(second.as_bytes()), 3);
+    /// assert_eq!(first.sz_levenshtein_distance(second.as_bytes()), Ok(3));
     /// ```
-    fn sz_edit_distance(&self, other: N) -> usize;
+    fn sz_levenshtein_distance(&self, other: N) -> Result<usize, sz::Status>;
 
     /// Computes the Levenshtein edit distance between `self` and `other`.
     ///
@@ -1150,9 +1188,9 @@ where
     ///
     /// let first = "kitten";
     /// let second = "sitting";
-    /// assert_eq!(first.sz_edit_distance_utf8(second.as_bytes()), 3);
+    /// assert_eq!(first.sz_levenshtein_distance_utf8(second.as_bytes()), Ok(3));
     /// ```
-    fn sz_edit_distance_utf8(&self, other: N) -> usize;
+    fn sz_levenshtein_distance_utf8(&self, other: N) -> Result<usize, sz::Status>;
 
     /// Computes the bounded Levenshtein edit distance between `self` and `other`.
     ///
@@ -1163,9 +1201,9 @@ where
     ///
     /// let first = "kitten";
     /// let second = "sitting";
-    /// assert_eq!(first.sz_edit_distance_bounded(second.as_bytes()), 3);
+    /// assert_eq!(first.sz_levenshtein_distance_bounded(second.as_bytes()), Ok(3));
     /// ```
-    fn sz_edit_distance_bounded(&self, other: N, bound: usize) -> usize;
+    fn sz_levenshtein_distance_bounded(&self, other: N, bound: usize) -> Result<usize, sz::Status>;
 
     /// Computes the bounded Levenshtein edit distance between `self` and `other`.
     ///
@@ -1176,9 +1214,9 @@ where
     ///
     /// let first = "kitten";
     /// let second = "sitting";
-    /// assert_eq!(first.sz_edit_distance_utf8_bounded(second.as_bytes()), 3);
+    /// assert_eq!(first.sz_levenshtein_distance_utf8_bounded(second.as_bytes()), Ok(3));
     /// ```
-    fn sz_edit_distance_utf8_bounded(&self, other: N, bound: usize) -> usize;
+    fn sz_levenshtein_distance_utf8_bounded(&self, other: N, bound: usize) -> Result<usize, sz::Status>;
 
     /// Computes the alignment score between `self` and `other` using the specified
     /// substitution matrix and gap penalty.
@@ -1192,9 +1230,9 @@ where
     /// let second = "sitting";
     /// let matrix = sz::unary_substitution_costs();
     /// let gap_penalty = -1;
-    /// assert_eq!(first.sz_alignment_score(second.as_bytes(), matrix, gap_penalty), -3);
+    /// assert_eq!(first.sz_needleman_wunsch_score(second.as_bytes(), matrix, gap_penalty), Ok(-3));
     /// ```
-    fn sz_alignment_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> isize;
+    fn sz_needleman_wunsch_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> Result<isize, sz::Status>;
 
     /// Returns an iterator over all non-overlapping matches of the given `needle` in `self`.
     ///
@@ -1362,39 +1400,39 @@ where
         sz::rfind(self, needle)
     }
 
-    fn sz_find_char_from(&self, needles: N) -> Option<usize> {
-        sz::find_char_from(self, needles)
+    fn sz_find_byte_from(&self, needles: N) -> Option<usize> {
+        sz::find_byte_from(self, needles)
     }
 
-    fn sz_rfind_char_from(&self, needles: N) -> Option<usize> {
-        sz::rfind_char_from(self, needles)
+    fn sz_rfind_byte_from(&self, needles: N) -> Option<usize> {
+        sz::rfind_byte_from(self, needles)
     }
 
-    fn sz_find_char_not_from(&self, needles: N) -> Option<usize> {
-        sz::find_char_not_from(self, needles)
+    fn sz_find_byte_not_from(&self, needles: N) -> Option<usize> {
+        sz::find_byte_not_from(self, needles)
     }
 
-    fn sz_rfind_char_not_from(&self, needles: N) -> Option<usize> {
-        sz::rfind_char_not_from(self, needles)
+    fn sz_rfind_byte_not_from(&self, needles: N) -> Option<usize> {
+        sz::rfind_byte_not_from(self, needles)
     }
 
-    fn sz_edit_distance(&self, other: N) -> usize {
-        sz::edit_distance(self, other)
+    fn sz_levenshtein_distance(&self, other: N) -> Result<usize, sz::Status> {
+        sz::levenshtein_distance(self, other)
     }
 
-    fn sz_edit_distance_utf8(&self, other: N) -> usize {
-        sz::edit_distance_utf8(self, other)
+    fn sz_levenshtein_distance_utf8(&self, other: N) -> Result<usize, sz::Status> {
+        sz::levenshtein_distance_utf8(self, other)
     }
 
-    fn sz_edit_distance_bounded(&self, other: N, bound: usize) -> usize {
-        sz::edit_distance_bounded(self, other, bound)
+    fn sz_levenshtein_distance_bounded(&self, other: N, bound: usize) -> Result<usize, sz::Status> {
+        sz::levenshtein_distance_bounded(self, other, bound)
     }
 
-    fn sz_edit_distance_utf8_bounded(&self, other: N, bound: usize) -> usize {
-        sz::edit_distance_utf8_bounded(self, other, bound)
+    fn sz_levenshtein_distance_utf8_bounded(&self, other: N, bound: usize) -> Result<usize, sz::Status> {
+        sz::levenshtein_distance_utf8_bounded(self, other, bound)
     }
 
-    fn sz_alignment_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> isize {
+    fn sz_needleman_wunsch_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> Result<isize, sz::Status> {
         sz::alignment_score(self, other, matrix, gap)
     }
 
@@ -1415,84 +1453,19 @@ where
     }
 
     fn sz_find_first_of(&'a self, needles: &'a N) -> RangeMatches<'a> {
-        RangeMatches::new(
-            self.as_ref(),
-            MatcherType::FindFirstOf(needles.as_ref()),
-            true,
-        )
+        RangeMatches::new(self.as_ref(), MatcherType::FindFirstOf(needles.as_ref()), true)
     }
 
     fn sz_find_last_of(&'a self, needles: &'a N) -> RangeRMatches<'a> {
-        RangeRMatches::new(
-            self.as_ref(),
-            MatcherType::FindLastOf(needles.as_ref()),
-            true,
-        )
+        RangeRMatches::new(self.as_ref(), MatcherType::FindLastOf(needles.as_ref()), true)
     }
 
     fn sz_find_first_not_of(&'a self, needles: &'a N) -> RangeMatches<'a> {
-        RangeMatches::new(
-            self.as_ref(),
-            MatcherType::FindFirstNotOf(needles.as_ref()),
-            true,
-        )
+        RangeMatches::new(self.as_ref(), MatcherType::FindFirstNotOf(needles.as_ref()), true)
     }
 
     fn sz_find_last_not_of(&'a self, needles: &'a N) -> RangeRMatches<'a> {
-        RangeRMatches::new(
-            self.as_ref(),
-            MatcherType::FindLastNotOf(needles.as_ref()),
-            true,
-        )
-    }
-}
-
-/// Provides a tool for mutating a byte slice by filling it with random data from a specified alphabet.
-/// This trait is especially useful for types that need to be mutable and can reference or be converted to byte slices.
-///
-/// # Examples
-///
-/// Filling a mutable byte buffer with random ASCII letters:
-///
-/// ```
-/// use stringzilla::MutableStringZilla;
-///
-/// let mut buffer = vec![0u8; 10]; // A buffer to randomize
-/// let alphabet = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"; // Alphabet to use
-/// buffer.sz_randomize(alphabet);
-///
-/// println!("Random buffer: {:?}", buffer);
-/// // The buffer will now contain random ASCII letters.
-/// ```
-pub trait MutableStringZilla<A>
-where
-    A: AsRef<[u8]>,
-{
-    /// Fills the implementing byte slice with random bytes from the specified `alphabet`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use stringzilla::MutableStringZilla;
-    ///
-    /// let mut text = vec![0; 1000]; // A buffer to randomize
-    /// let alphabet = b"AGTC"; // Using a DNA alphabet
-    /// text.sz_randomize(alphabet);
-    ///
-    /// // `text` is now filled with random 'A', 'G', 'T', or 'C' values.
-    /// ```
-    fn sz_randomize(&mut self, alphabet: A);
-}
-
-impl<T, A> MutableStringZilla<A> for T
-where
-    T: AsMut<[u8]>,
-    A: AsRef<[u8]>,
-{
-    fn sz_randomize(&mut self, alphabet: A) {
-        let self_mut = self.as_mut();
-        let alphabet_ref = alphabet.as_ref();
-        sz::randomize(self_mut, alphabet_ref);
+        RangeRMatches::new(self.as_ref(), MatcherType::FindLastNotOf(needles.as_ref()), true)
     }
 }
 
@@ -1500,50 +1473,46 @@ where
 mod tests {
     use std::borrow::Cow;
 
-    use crate::sz;
-    use crate::MutableStringZilla;
-    use crate::StringZilla;
+    use crate::sz; // For global functions
+    use crate::StringZilla; // For member functions
 
     #[test]
     fn hamming() {
-        assert_eq!(sz::hamming_distance("hello", "hello"), 0);
-        assert_eq!(sz::hamming_distance("hello", "hell"), 1);
-        assert_eq!(sz::hamming_distance("abc", "adc"), 1);
+        assert_eq!(sz::hamming_distance("hello", "hello"), Ok(0));
+        assert_eq!(sz::hamming_distance("hello", "hell"), Ok(1));
+        assert_eq!(sz::hamming_distance("abc", "adc"), Ok(1));
 
-        assert_eq!(sz::hamming_distance_bounded("abcdefgh", "ABCDEFGH", 2), 2);
-        assert_eq!(sz::hamming_distance_utf8("αβγδ", "αγγδ"), 1);
+        assert_eq!(sz::hamming_distance_bounded("abcdefgh", "ABCDEFGH", 2), Ok(2));
+        assert_eq!(sz::hamming_distance_utf8("αβγδ", "αγγδ"), Ok(1));
     }
 
     #[test]
     fn levenshtein() {
-        assert_eq!(sz::edit_distance("hello", "hell"), 1);
-        assert_eq!(sz::edit_distance("hello", "hell"), 1);
-        assert_eq!(sz::edit_distance("abc", ""), 3);
-        assert_eq!(sz::edit_distance("abc", "ac"), 1);
-        assert_eq!(sz::edit_distance("abc", "a_bc"), 1);
-        assert_eq!(sz::edit_distance("abc", "adc"), 1);
-        assert_eq!(sz::edit_distance("fitting", "kitty"), 4);
-        assert_eq!(sz::edit_distance("smitten", "mitten"), 1);
-        assert_eq!(sz::edit_distance("ggbuzgjux{}l", "gbuzgjux{}l"), 1);
-        assert_eq!(sz::edit_distance("abcdefgABCDEFG", "ABCDEFGabcdefg"), 14);
+        assert_eq!(sz::levenshtein_distance("hello", "hell"), Ok(1));
+        assert_eq!(sz::levenshtein_distance("hello", "hell"), Ok(1));
+        assert_eq!(sz::levenshtein_distance("abc", ""), Ok(3));
+        assert_eq!(sz::levenshtein_distance("abc", "ac"), Ok(1));
+        assert_eq!(sz::levenshtein_distance("abc", "a_bc"), Ok(1));
+        assert_eq!(sz::levenshtein_distance("abc", "adc"), Ok(1));
+        assert_eq!(sz::levenshtein_distance("fitting", "kitty"), Ok(4));
+        assert_eq!(sz::levenshtein_distance("smitten", "mitten"), Ok(1));
+        assert_eq!(sz::levenshtein_distance("ggbuzgjux{}l", "gbuzgjux{}l"), Ok(1));
+        assert_eq!(sz::levenshtein_distance("abcdefgABCDEFG", "ABCDEFGabcdefg"), Ok(14));
 
-        assert_eq!(sz::edit_distance_bounded("fitting", "kitty", 2), 2);
-        assert_eq!(sz::edit_distance_utf8("façade", "facade"), 1);
+        assert_eq!(sz::levenshtein_distance_bounded("fitting", "kitty", 2), Ok(2));
+        assert_eq!(sz::levenshtein_distance_utf8("façade", "facade"), Ok(1));
     }
 
     #[test]
     fn needleman() {
         let costs_vector = sz::unary_substitution_costs();
-        assert_eq!(
-            sz::alignment_score("listen", "silent", costs_vector, -1),
-            -4
-        );
+        assert_eq!(sz::alignment_score("listen", "silent", costs_vector, -1), Ok(-4));
         assert_eq!(
             sz::alignment_score("abcdefgABCDEFG", "ABCDEFGabcdefg", costs_vector, -1),
-            -14
+            Ok(-14)
         );
-        assert_eq!(sz::alignment_score("hello", "hello", costs_vector, -1), 0);
-        assert_eq!(sz::alignment_score("hello", "hell", costs_vector, -1), -1);
+        assert_eq!(sz::alignment_score("hello", "hello", costs_vector, -1), Ok(0));
+        assert_eq!(sz::alignment_score("hello", "hell", costs_vector, -1), Ok(-1));
     }
 
     #[test]
@@ -1559,41 +1528,37 @@ mod tests {
         // Use the generic function with a String
         assert_eq!(my_string.sz_find("world"), Some(7));
         assert_eq!(my_string.sz_rfind("world"), Some(7));
-        assert_eq!(my_string.sz_find_char_from("world"), Some(2));
-        assert_eq!(my_string.sz_rfind_char_from("world"), Some(11));
-        assert_eq!(my_string.sz_find_char_not_from("world"), Some(0));
-        assert_eq!(my_string.sz_rfind_char_not_from("world"), Some(12));
+        assert_eq!(my_string.sz_find_byte_from("world"), Some(2));
+        assert_eq!(my_string.sz_rfind_byte_from("world"), Some(11));
+        assert_eq!(my_string.sz_find_byte_not_from("world"), Some(0));
+        assert_eq!(my_string.sz_rfind_byte_not_from("world"), Some(12));
 
         // Use the generic function with a &str
         assert_eq!(my_str.sz_find("world"), Some(7));
         assert_eq!(my_str.sz_find("world"), Some(7));
-        assert_eq!(my_str.sz_find_char_from("world"), Some(2));
-        assert_eq!(my_str.sz_rfind_char_from("world"), Some(11));
-        assert_eq!(my_str.sz_find_char_not_from("world"), Some(0));
-        assert_eq!(my_str.sz_rfind_char_not_from("world"), Some(12));
+        assert_eq!(my_str.sz_find_byte_from("world"), Some(2));
+        assert_eq!(my_str.sz_rfind_byte_from("world"), Some(11));
+        assert_eq!(my_str.sz_find_byte_not_from("world"), Some(0));
+        assert_eq!(my_str.sz_rfind_byte_not_from("world"), Some(12));
 
         // Use the generic function with a Cow<'_, str>
         assert_eq!(my_cow_str.as_ref().sz_find("world"), Some(7));
         assert_eq!(my_cow_str.as_ref().sz_find("world"), Some(7));
-        assert_eq!(my_cow_str.as_ref().sz_find_char_from("world"), Some(2));
-        assert_eq!(my_cow_str.as_ref().sz_rfind_char_from("world"), Some(11));
-        assert_eq!(my_cow_str.as_ref().sz_find_char_not_from("world"), Some(0));
-        assert_eq!(
-            my_cow_str.as_ref().sz_rfind_char_not_from("world"),
-            Some(12)
-        );
+        assert_eq!(my_cow_str.as_ref().sz_find_byte_from("world"), Some(2));
+        assert_eq!(my_cow_str.as_ref().sz_rfind_byte_from("world"), Some(11));
+        assert_eq!(my_cow_str.as_ref().sz_find_byte_not_from("world"), Some(0));
+        assert_eq!(my_cow_str.as_ref().sz_rfind_byte_not_from("world"), Some(12));
     }
 
     #[test]
-    fn randomize() {
-        let mut text: Vec<u8> = vec![0; 10]; // A buffer of ten zeros
-        let alphabet: &[u8] = b"abcd"; // A byte slice alphabet
-        text.sz_randomize(alphabet);
+    fn fill_random() {
+        let mut first_buffer: Vec<u8> = vec![0; 10]; // Ten zeros
+        let mut second_buffer: Vec<u8> = vec![1; 10]; // Ten ones
+        sz::fill_random(&mut first_buffer, 42);
+        sz::fill_random(&mut second_buffer, 42);
 
-        // Iterate throught text and check that it only contains letters from the alphabet
-        assert!(text
-            .iter()
-            .all(|&b| b == b'd' || b == b'c' || b == b'b' || b == b'a'));
+        // Same nonce will produce the same outputs
+        assert!(first_buffer != second_buffer);
     }
 
     mod search_split_iterators {

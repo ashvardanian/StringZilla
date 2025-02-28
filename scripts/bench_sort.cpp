@@ -23,13 +23,13 @@ using permute_t = std::vector<sz_sorted_idx_t>;
 
 #pragma region C callbacks
 
-static char const *get_start(sz_sequence_t const *array_c, sz_size_t i) {
-    strings_t const &array = *reinterpret_cast<strings_t const *>(array_c->handle);
+static sz_cptr_t get_start(void const *handle, sz_size_t i) {
+    strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
     return array[i].c_str();
 }
 
-static sz_size_t get_length(sz_sequence_t const *array_c, sz_size_t i) {
-    strings_t const &array = *reinterpret_cast<strings_t const *>(array_c->handle);
+static sz_size_t get_length(void const *handle, sz_size_t i) {
+    strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
     return array[i].size();
 }
 
@@ -112,21 +112,11 @@ int main(int argc, char const **argv) {
     });
     expect_sorted(pgrams, permute);
 
-    bench_permute("sz_pgrams_sort_ice", [&]() {
+    bench_permute("sz_pgrams_sort_skylake", [&]() {
         std::copy(pgrams.begin(), pgrams.end(), pgrams_sorted.begin());
         std::iota(permute.begin(), permute.end(), 0);
         sz::_with_alloc<allocator_t>([&](sz_memory_allocator_t &alloc) {
-            return sz_pgrams_sort_ice(pgrams_sorted.data(), pgrams_sorted.size(), &alloc, permute.data());
-        });
-    });
-    expect_sorted(pgrams, permute);
-
-    // Unlike the `std::sort` adaptation above, the `sz_pgrams_sort_stable_serial` also sorts the input array inplace
-    bench_permute("sz_pgrams_sort_stable_serial", [&]() {
-        std::copy(pgrams.begin(), pgrams.end(), pgrams_sorted.begin());
-        std::iota(permute.begin(), permute.end(), 0);
-        sz::_with_alloc<allocator_t>([&](sz_memory_allocator_t &alloc) {
-            return sz_pgrams_sort_stable_serial(pgrams_sorted.data(), pgrams_sorted.size(), &alloc, permute.data());
+            return sz_pgrams_sort_skylake(pgrams_sorted.data(), pgrams_sorted.size(), &alloc, permute.data());
         });
     });
     expect_sorted(pgrams, permute);
@@ -151,7 +141,7 @@ int main(int argc, char const **argv) {
     });
     expect_sorted(strings, permute);
 
-    bench_permute("sz_sequence_argsort_ice", [&]() {
+    bench_permute("sz_sequence_argsort_skylake", [&]() {
         std::iota(permute.begin(), permute.end(), 0);
         sz_sequence_t array;
         array.count = strings.size();
@@ -159,7 +149,7 @@ int main(int argc, char const **argv) {
         array.get_start = get_start;
         array.get_length = get_length;
         sz::_with_alloc<allocator_t>(
-            [&](sz_memory_allocator_t &alloc) { return sz_sequence_argsort_ice(&array, &alloc, permute.data()); });
+            [&](sz_memory_allocator_t &alloc) { return sz_sequence_argsort_skylake(&array, &alloc, permute.data()); });
     });
     expect_sorted(strings, permute);
 

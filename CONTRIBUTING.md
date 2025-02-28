@@ -432,6 +432,13 @@ npm ci && npm test
 swift build && swift test
 ```
 
+To format, consider using [SwiftFormat](https://github.com/nicklockwood/SwiftFormat):
+
+```bash
+brew install swiftformat
+swiftformat .
+```
+
 Running Swift on Linux requires a couple of extra steps, as the Swift compiler is not available in the default repositories.
 Please get the most recent Swift tarball from the [official website](https://www.swift.org/install/).
 At the time of writing, for 64-bit Arm CPU running Ubuntu 22.04, the following commands would work:
@@ -465,6 +472,13 @@ sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:5.9 /bin/bash -cl 
 
 ```bash
 cargo test
+```
+
+If you need to isolate a failing test:
+
+```bash
+export RUST_BACKTRACE=full
+cargo test -- --test-threads=1 --nocapture
 ```
 
 If you are updating the package contents, you can validate the list of included files using the following command:

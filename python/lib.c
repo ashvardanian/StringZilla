@@ -208,12 +208,12 @@ static sz_ptr_t temporary_memory_allocate(sz_size_t size, sz_string_view_t *exis
 
 static void temporary_memory_free(sz_ptr_t start, sz_size_t size, sz_string_view_t *existing) {}
 
-static sz_cptr_t parts_get_start(sz_sequence_t *seq, sz_size_t i) {
-    return ((sz_string_view_t const *)seq->handle)[i].start;
+static sz_cptr_t parts_get_start(void const *handle, sz_size_t i) {
+    return ((sz_string_view_t const *)handle)[i].start;
 }
 
-static sz_size_t parts_get_length(sz_sequence_t *seq, sz_size_t i) {
-    return ((sz_string_view_t const *)seq->handle)[i].length;
+static sz_size_t parts_get_length(void const *handle, sz_size_t i) {
+    return ((sz_string_view_t const *)handle)[i].length;
 }
 
 void reverse_offsets(sz_sorted_idx_t *array, size_t length) {
@@ -236,7 +236,7 @@ void reverse_haystacks(sz_string_view_t *array, size_t length) {
     }
 }
 
-void apply_order(sz_string_view_t *array, sz_sorted_idx_t *order, size_t length) {
+void permute(sz_string_view_t *array, sz_sorted_idx_t *order, size_t length) {
     for (size_t i = 0; i < length; ++i) {
         if (i == order[i]) continue;
         sz_string_view_t temp = array[i];
@@ -682,7 +682,7 @@ static PyObject *Str_repr(Str *self) {
     }
 }
 
-static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->memory.start, self->memory.length); }
+static Py_hash_t Str_hash(Str *self) { return (Py_hash_t)sz_hash(self->memory.start, self->memory.length, 0); }
 
 static char const doc_like_hash[] = //
     "Compute the hash value of the string.\n"
@@ -713,7 +713,7 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
-    sz_u64_t result = sz_hash(text.start, text.length);
+    sz_u64_t result = sz_hash(text.start, text.length, 0);
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
@@ -1837,7 +1837,8 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSize_t(count);
 }
 
-static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwargs, sz_edit_distance_t function) {
+static PyObject *_Str_levenshtein_distance(PyObject *self, PyObject *args, PyObject *kwargs,
+                                           sz_levenshtein_distance_t function) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 2) {
@@ -1877,10 +1878,12 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
     reusing_allocator.free = &temporary_memory_free;
     reusing_allocator.handle = &temporary_memory;
 
-    sz_size_t distance = function(str1.start, str1.length, str2.start, str2.length, bound, &reusing_allocator);
+    sz_size_t distance;
+    sz_status_t status =
+        function(str1.start, str1.length, str2.start, str2.length, bound, &reusing_allocator, &distance);
 
     // Check for memory allocation issues
-    if (distance == SZ_SIZE_MAX) {
+    if (status != sz_success_k) {
         PyErr_NoMemory();
         return NULL;
     }
@@ -1888,7 +1891,7 @@ static PyObject *_Str_edit_distance(PyObject *self, PyObject *args, PyObject *kw
     return PyLong_FromSize_t(distance);
 }
 
-static char const doc_edit_distance[] = //
+static char const doc_levenshtein_distance[] = //
     "Compute the Levenshtein edit distance between two strings.\n"
     "\n"
     "Args:\n"
@@ -1898,11 +1901,11 @@ static char const doc_edit_distance[] = //
     "Returns:\n"
     "  int: The edit distance (number of insertions, deletions, substitutions).";
 
-static PyObject *Str_edit_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_edit_distance(self, args, kwargs, &sz_edit_distance);
+static PyObject *Str_levenshtein_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return _Str_levenshtein_distance(self, args, kwargs, &sz_levenshtein_distance);
 }
 
-static char const doc_edit_distance_unicode[] = //
+static char const doc_levenshtein_distance_unicode[] = //
     "Compute the Levenshtein edit distance between two Unicode strings.\n"
     "\n"
     "Args:\n"
@@ -1912,8 +1915,8 @@ static char const doc_edit_distance_unicode[] = //
     "Returns:\n"
     "  int: The edit distance in Unicode characters.";
 
-static PyObject *Str_edit_distance_unicode(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_edit_distance(self, args, kwargs, &sz_edit_distance_utf8);
+static PyObject *Str_levenshtein_distance_unicode(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return _Str_levenshtein_distance(self, args, kwargs, &sz_levenshtein_distance_utf8);
 }
 
 static PyObject *_Str_hamming_distance(PyObject *self, PyObject *args, PyObject *kwargs,
@@ -1951,10 +1954,11 @@ static PyObject *_Str_hamming_distance(PyObject *self, PyObject *args, PyObject 
         return NULL;
     }
 
-    sz_size_t distance = function(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound);
+    sz_size_t distance;
+    sz_status_t status = function(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &distance);
 
     // Check for memory allocation issues
-    if (distance == SZ_SIZE_MAX) {
+    if (status != sz_success_k) {
         PyErr_NoMemory();
         return NULL;
     }
@@ -1990,7 +1994,7 @@ static PyObject *Str_hamming_distance_unicode(PyObject *self, PyObject *args, Py
     return _Str_hamming_distance(self, args, kwargs, &sz_hamming_distance_utf8);
 }
 
-static char const doc_alignment_score[] = //
+static char const doc_needleman_wunsch_score[] = //
     "Compute the Needleman-Wunsch alignment score between two strings.\n"
     "\n"
     "Args:\n"
@@ -2002,7 +2006,7 @@ static char const doc_alignment_score[] = //
     "Returns:\n"
     "  int: The alignment score.";
 
-static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_needleman_wunsch_score(PyObject *self, PyObject *args, PyObject *kwargs) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs < !is_member + 1 || nargs > !is_member + 2) {
@@ -2074,14 +2078,15 @@ static PyObject *Str_alignment_score(PyObject *self, PyObject *args, PyObject *k
     reusing_allocator.free = &temporary_memory_free;
     reusing_allocator.handle = &temporary_memory;
 
-    sz_ssize_t score = sz_alignment_score(str1.start, str1.length, str2.start, str2.length, substitutions,
-                                          (sz_error_cost_t)gap, &reusing_allocator);
+    sz_ssize_t score;
+    sz_status_t status = sz_needleman_wunsch_score(str1.start, str1.length, str2.start, str2.length, substitutions,
+                                                   (sz_error_cost_t)gap, &reusing_allocator, &score);
 
     // Don't forget to release the buffer view
     PyBuffer_Release(&substitutions_view);
 
     // Check for memory allocation issues
-    if (score == SZ_SSIZE_MAX) {
+    if (status != sz_success_k) {
         PyErr_NoMemory();
         return NULL;
     }
@@ -2259,11 +2264,11 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
     }
 
     sz_string_view_t look_up_table_str;
-    SZ_ALIGN64 char look_up_table[256];
+    _SZ_ALIGN64 char look_up_table[256];
     if (PyDict_Check(look_up_table_obj)) {
 
         // If any character is not defined, it will be replaced with itself:
-        for (int i = 0; i < 256; i++) { look_up_table[i] = (char)i; }
+        for (int i = 0; i < 256; i++) look_up_table[i] = (char)i;
 
         // Process the dictionary into the look-up table
         PyObject *key, *value;
@@ -2305,7 +2310,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
 
     // Perform the translation using the look-up table
     if (is_inplace) {
-        sz_look_up_transform(str.start, str.length, look_up_table, str.start);
+        sz_lookup(str.start, str.length, str.start, look_up_table);
         Py_RETURN_NONE;
     }
     // Allocate a string of the same size, get it's raw pointer and transform the data into it
@@ -2321,7 +2326,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
             }
 
             sz_ptr_t new_buffer = (sz_ptr_t)PyUnicode_DATA(new_unicode_obj);
-            sz_look_up_transform(str.start, str.length, look_up_table, new_buffer);
+            sz_lookup(new_buffer, str.length, str.start, look_up_table);
             return new_unicode_obj;
         }
         else {
@@ -2333,7 +2338,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
 
             // Get the buffer and perform the transformation
             sz_ptr_t new_buffer = (sz_ptr_t)PyBytes_AS_STRING(new_bytes_obj);
-            sz_look_up_transform(str.start, str.length, look_up_table, new_buffer);
+            sz_lookup(new_buffer, str.length, str.start, look_up_table);
             return new_bytes_obj;
         }
     }
@@ -2354,7 +2359,7 @@ static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwa
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_from, sz_false_k, &signed_offset, &text,
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_byte_from, sz_false_k, &signed_offset, &text,
                                    &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
@@ -2375,7 +2380,7 @@ static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject 
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_char_not_from, sz_false_k, &signed_offset, &text,
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_byte_not_from, sz_false_k, &signed_offset, &text,
                                    &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
@@ -2396,7 +2401,7 @@ static PyObject *Str_find_last_of(PyObject *self, PyObject *args, PyObject *kwar
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_from, sz_true_k, &signed_offset, &text,
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_byte_from, sz_true_k, &signed_offset, &text,
                                    &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
@@ -2417,7 +2422,7 @@ static PyObject *Str_find_last_not_of(PyObject *self, PyObject *args, PyObject *
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_char_not_from, sz_true_k, &signed_offset, &text,
+    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_byte_not_from, sz_true_k, &signed_offset, &text,
                                    &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
@@ -2456,7 +2461,7 @@ static SplitIterator *Str_split_iter_(PyObject *text_obj, PyObject *separator_ob
 
 /**
  *  @brief  Implements the normal order split logic for both string-delimiters and character sets.
- *          Produuces one of the consecutive layouts - `STRS_CONSECUTIVE_64` or `STRS_CONSECUTIVE_32`.
+ *          Produces one of the consecutive layouts - `STRS_CONSECUTIVE_64` or `STRS_CONSECUTIVE_32`.
  */
 static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
                         int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length) {
@@ -2544,7 +2549,7 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
 
 /**
  *  @brief  Implements the reverse order split logic for both string-delimiters and character sets.
- *          Unlike the `Str_split_` can't use consecutive layouts and produces a `REAORDERED` one.
+ *          Unlike the `Str_split_` can't use consecutive layouts and produces a `REORDERED` one.
  */
 static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
                          int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length) {
@@ -2622,7 +2627,7 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
 }
 
 /**
- *  @brief  Proxy routing requests like `Str.split`, `Str.rsplit`, `Str.split_charset` and `Str.rsplit_charset`
+ *  @brief  Proxy routing requests like `Str.split`, `Str.rsplit`, `Str.split_byteset` and `Str.rsplit_byteset`
  *          to `Str_split_` and `Str_rsplit_` implementations, parsing function arguments.
  */
 static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, PyObject *kwargs, //
@@ -2747,7 +2752,7 @@ static PyObject *Str_rsplit(PyObject *self, PyObject *args, PyObject *kwargs) {
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_false_k);
 }
 
-static char const doc_split_charset[] = //
+static char const doc_split_byteset[] = //
     "Split a string by a set of character separators.\n"
     "\n"
     "Args:\n"
@@ -2758,11 +2763,11 @@ static char const doc_split_charset[] = //
     "Returns:\n"
     "  Strs: A list of strings split by the character set.";
 
-static PyObject *Str_split_charset(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_find_char_from, 1, sz_false_k, sz_false_k);
+static PyObject *Str_split_byteset(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_find_byte_from, 1, sz_false_k, sz_false_k);
 }
 
-static char const doc_rsplit_charset[] = //
+static char const doc_rsplit_byteset[] = //
     "Split a string by a set of character separators in reverse order.\n"
     "\n"
     "Args:\n"
@@ -2773,8 +2778,8 @@ static char const doc_rsplit_charset[] = //
     "Returns:\n"
     "  Strs: A list of strings split by the character set.";
 
-static PyObject *Str_rsplit_charset(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_char_from, 1, sz_true_k, sz_false_k);
+static PyObject *Str_rsplit_byteset(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_byte_from, 1, sz_true_k, sz_false_k);
 }
 
 static char const doc_split_iter[] = //
@@ -2809,7 +2814,7 @@ static PyObject *Str_rsplit_iter(PyObject *self, PyObject *args, PyObject *kwarg
     return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_true_k);
 }
 
-static char const doc_split_charset_iter[] = //
+static char const doc_split_byteset_iter[] = //
     "Create an iterator for splitting a string by a set of character separators.\n"
     "\n"
     "Args:\n"
@@ -2819,11 +2824,11 @@ static char const doc_split_charset_iter[] = //
     "Returns:\n"
     "  iterator: An iterator yielding split substrings.";
 
-static PyObject *Str_split_charset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_find_char_from, 1, sz_false_k, sz_true_k);
+static PyObject *Str_split_byteset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_find_byte_from, 1, sz_false_k, sz_true_k);
 }
 
-static char const doc_rsplit_charset_iter[] = //
+static char const doc_rsplit_byteset_iter[] = //
     "Create an iterator for splitting a string by a set of character separators in reverse order.\n"
     "\n"
     "Args:\n"
@@ -2833,8 +2838,8 @@ static char const doc_rsplit_charset_iter[] = //
     "Returns:\n"
     "  iterator: An iterator yielding split substrings in reverse.";
 
-static PyObject *Str_rsplit_charset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_char_from, 1, sz_true_k, sz_true_k);
+static PyObject *Str_rsplit_byteset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
+    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_byte_from, 1, sz_true_k, sz_true_k);
 }
 
 static char const doc_splitlines[] = //
@@ -2924,7 +2929,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs
     sz_string_view_t separator;
     separator.start = "\x0A\x0B\x0C\x0D\x85\x1C\x1D\x1E";
     separator.length = 8;
-    return Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit, &sz_find_char_from, 1);
+    return Str_split_(text_obj, text, separator, keeplinebreaks, maxsplit, &sz_find_byte_from, 1);
 }
 
 static PyObject *Str_concat(PyObject *self, PyObject *other) {
@@ -3011,23 +3016,24 @@ static PyMethodDef Str_methods[] = {
     {"hamming_distance", (PyCFunction)Str_hamming_distance, SZ_METHOD_FLAGS, doc_hamming_distance},
     {"hamming_distance_unicode", (PyCFunction)Str_hamming_distance_unicode, SZ_METHOD_FLAGS,
      doc_hamming_distance_unicode},
-    {"edit_distance", (PyCFunction)Str_edit_distance, SZ_METHOD_FLAGS, doc_edit_distance},
-    {"edit_distance_unicode", (PyCFunction)Str_edit_distance_unicode, SZ_METHOD_FLAGS, doc_edit_distance_unicode},
-    {"alignment_score", (PyCFunction)Str_alignment_score, SZ_METHOD_FLAGS, doc_alignment_score},
+    {"levenshtein_distance", (PyCFunction)Str_levenshtein_distance, SZ_METHOD_FLAGS, doc_levenshtein_distance},
+    {"levenshtein_distance_unicode", (PyCFunction)Str_levenshtein_distance_unicode, SZ_METHOD_FLAGS,
+     doc_levenshtein_distance_unicode},
+    {"needleman_wunsch_score", (PyCFunction)Str_needleman_wunsch_score, SZ_METHOD_FLAGS, doc_needleman_wunsch_score},
 
     // Character search extensions
     {"find_first_of", (PyCFunction)Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
     {"find_last_of", (PyCFunction)Str_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
     {"find_first_not_of", (PyCFunction)Str_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
     {"find_last_not_of", (PyCFunction)Str_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
-    {"split_charset", (PyCFunction)Str_split_charset, SZ_METHOD_FLAGS, doc_split_charset},
-    {"rsplit_charset", (PyCFunction)Str_rsplit_charset, SZ_METHOD_FLAGS, doc_rsplit_charset},
+    {"split_byteset", (PyCFunction)Str_split_byteset, SZ_METHOD_FLAGS, doc_split_byteset},
+    {"rsplit_byteset", (PyCFunction)Str_rsplit_byteset, SZ_METHOD_FLAGS, doc_rsplit_byteset},
 
     // Lazily evaluated iterators
     {"split_iter", (PyCFunction)Str_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
     {"rsplit_iter", (PyCFunction)Str_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
-    {"split_charset_iter", (PyCFunction)Str_split_charset_iter, SZ_METHOD_FLAGS, doc_split_charset_iter},
-    {"rsplit_charset_iter", (PyCFunction)Str_rsplit_charset_iter, SZ_METHOD_FLAGS, doc_rsplit_charset_iter},
+    {"split_byteset_iter", (PyCFunction)Str_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
+    {"rsplit_byteset_iter", (PyCFunction)Str_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
@@ -3181,8 +3187,8 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
     Py_RETURN_NONE;
 }
 
-static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_sorted_idx_t **order_output,
-                            sz_size_t *count_output) {
+static sz_bool_t Strs_argsort_(Strs *self, sz_string_view_t **parts_output, sz_sorted_idx_t **order_output,
+                               sz_size_t *count_output) {
     // Change the layout
     if (!prepare_strings_for_reordering(self)) {
         PyErr_Format(PyExc_TypeError, "Failed to prepare the sequence for sorting");
@@ -3208,17 +3214,15 @@ static sz_bool_t Strs_sort_(Strs *self, sz_string_view_t **parts_output, sz_sort
     // Call our sorting algorithm
     sz_sequence_t sequence;
     sz_fill(&sequence, sizeof(sequence), 0);
-    sequence.order = (sz_sorted_idx_t *)temporary_memory.start;
     sequence.count = count;
     sequence.handle = parts;
     sequence.get_start = parts_get_start;
     sequence.get_length = parts_get_length;
-    for (sz_sorted_idx_t i = 0; i != sequence.count; ++i) sequence.order[i] = i;
-    sz_sequence_argsort(&sequence);
+    sz_status_t status = sz_sequence_argsort(&sequence, NULL, (sz_sorted_idx_t *)temporary_memory.start);
 
     // Export results
     *parts_output = parts;
-    *order_output = sequence.order;
+    *order_output = (sz_sorted_idx_t *)temporary_memory.start;
     *count_output = sequence.count;
     return 1;
 }
@@ -3256,18 +3260,18 @@ static PyObject *Strs_sort(Strs *self, PyObject *args, PyObject *kwargs) {
     sz_string_view_t *parts = NULL;
     sz_size_t *order = NULL;
     sz_size_t count = 0;
-    if (!Strs_sort_(self, &parts, &order, &count)) return NULL;
+    if (!Strs_argsort_(self, &parts, &order, &count)) return NULL;
 
     // Apply the sorting algorithm here, considering the `reverse` value
     if (reverse) reverse_offsets(order, count);
 
     // Apply the new order.
-    apply_order(parts, order, count);
+    permute(parts, order, count);
 
     Py_RETURN_NONE;
 }
 
-static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Strs_argsort(Strs *self, PyObject *args, PyObject *kwargs) {
     PyObject *reverse_obj = NULL; // Default is not reversed
 
     // Check for positional arguments
@@ -3300,7 +3304,7 @@ static PyObject *Strs_order(Strs *self, PyObject *args, PyObject *kwargs) {
     sz_string_view_t *parts = NULL;
     sz_sorted_idx_t *order = NULL;
     sz_size_t count = 0;
-    if (!Strs_sort_(self, &parts, &order, &count)) return NULL;
+    if (!Strs_argsort_(self, &parts, &order, &count)) return NULL;
 
     // Apply the sorting algorithm here, considering the `reverse` value
     if (reverse) reverse_offsets(order, count);
@@ -3606,11 +3610,11 @@ static PyGetSetDef Strs_getsetters[] = {
 static PyMethodDef Strs_methods[] = {
     {"shuffle", Strs_shuffle, SZ_METHOD_FLAGS, "Shuffle (in-place) the elements of the Strs object."}, //
     {"sort", Strs_sort, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},          //
-    {"order", Strs_order, SZ_METHOD_FLAGS, "Provides the indexes to achieve sorted order."},           //
+    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, "Provides the permutation to achieve sorted order."},   //
     {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},             //
-    // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."},
-    // //
-    {NULL, NULL, 0, NULL}};
+    // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
+    {NULL, NULL, 0, NULL} // Sentinel
+};
 
 static PyTypeObject StrsType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Strs",
@@ -3660,23 +3664,24 @@ static PyMethodDef stringzilla_methods[] = {
     // Edit distance extensions
     {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS, doc_hamming_distance},
     {"hamming_distance_unicode", Str_hamming_distance_unicode, SZ_METHOD_FLAGS, doc_hamming_distance_unicode},
-    {"edit_distance", Str_edit_distance, SZ_METHOD_FLAGS, doc_edit_distance},
-    {"edit_distance_unicode", Str_edit_distance_unicode, SZ_METHOD_FLAGS, doc_edit_distance_unicode},
-    {"alignment_score", Str_alignment_score, SZ_METHOD_FLAGS, doc_alignment_score},
+    {"levenshtein_distance", Str_levenshtein_distance, SZ_METHOD_FLAGS, doc_levenshtein_distance},
+    {"levenshtein_distance_unicode", Str_levenshtein_distance_unicode, SZ_METHOD_FLAGS,
+     doc_levenshtein_distance_unicode},
+    {"needleman_wunsch_score", Str_needleman_wunsch_score, SZ_METHOD_FLAGS, doc_needleman_wunsch_score},
 
     // Character search extensions
     {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
     {"find_last_of", Str_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
     {"find_first_not_of", Str_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
     {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
-    {"split_charset", Str_split_charset, SZ_METHOD_FLAGS, doc_split_charset},
-    {"rsplit_charset", Str_rsplit_charset, SZ_METHOD_FLAGS, doc_rsplit_charset},
+    {"split_byteset", Str_split_byteset, SZ_METHOD_FLAGS, doc_split_byteset},
+    {"rsplit_byteset", Str_rsplit_byteset, SZ_METHOD_FLAGS, doc_rsplit_byteset},
 
     // Lazily evaluated iterators
     {"split_iter", Str_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
     {"rsplit_iter", Str_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
-    {"split_charset_iter", Str_split_charset_iter, SZ_METHOD_FLAGS, doc_split_charset_iter},
-    {"rsplit_charset_iter", Str_rsplit_charset_iter, SZ_METHOD_FLAGS, doc_rsplit_charset_iter},
+    {"split_byteset_iter", Str_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
+    {"rsplit_byteset_iter", Str_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
 
     // Dealing with larger-than-memory datasets
     {"offset_within", Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
@@ -3714,8 +3719,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     // Add version metadata
     {
         char version_str[50];
-        sprintf(version_str, "%d.%d.%d", STRINGZILLA_VERSION_MAJOR, STRINGZILLA_VERSION_MINOR,
-                STRINGZILLA_VERSION_PATCH);
+        sprintf(version_str, "%d.%d.%d", sz_version_major(), sz_version_minor(), sz_version_patch());
         PyModule_AddStringConstant(m, "__version__", version_str);
     }
 
@@ -3724,17 +3728,18 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         sz_capability_t caps = sz_capabilities();
         char caps_str[512];
         char const *serial = (caps & sz_cap_serial_k) ? "serial," : "";
-        char const *neon = (caps & sz_cap_arm_neon_k) ? "neon," : "";
-        char const *sve = (caps & sz_cap_arm_sve_k) ? "sve," : "";
-        char const *avx2 = (caps & sz_cap_x86_avx2_k) ? "avx2," : "";
-        char const *avx512f = (caps & sz_cap_x86_avx512f_k) ? "avx512f," : "";
-        char const *avx512vl = (caps & sz_cap_x86_avx512vl_k) ? "avx512vl," : "";
-        char const *avx512bw = (caps & sz_cap_x86_avx512bw_k) ? "avx512bw," : "";
-        char const *avx512vbmi = (caps & sz_cap_x86_avx512vbmi_k) ? "avx512vbmi," : "";
-        char const *gfni = (caps & sz_cap_x86_gfni_k) ? "gfni," : "";
-        char const *avx512vbmi2 = (caps & sz_cap_x86_avx512vbmi2_k) ? "avx512vbmi2," : "";
-        sprintf(caps_str, "%s%s%s%s%s%s%s%s%s%s", serial, neon, sve, avx2, avx512f, avx512vl, avx512bw, avx512vbmi,
-                avx512vbmi2, gfni);
+        char const *neon = (caps & sz_cap_neon_k) ? "neon," : "";
+        char const *neon_aes = (caps & sz_cap_neon_aes_k) ? "neon_aes," : "";
+        char const *sve = (caps & sz_cap_sve_k) ? "sve," : "";
+        char const *sve2 = (caps & sz_cap_sve2_k) ? "sve2," : "";
+        char const *sve2_aes = (caps & sz_cap_sve2_aes_k) ? "sve2_aes," : "";
+        char const *haswell = (caps & sz_cap_haswell_k) ? "haswell," : "";
+        char const *skylake = (caps & sz_cap_skylake_k) ? "skylake," : "";
+        char const *ice = (caps & sz_cap_ice_k) ? "ice," : "";
+        sprintf(caps_str, "%s%s%s%s%s%s%s%s%s",      //
+                serial,                              //
+                neon, neon_aes, sve, sve2, sve2_aes, //
+                haswell, skylake, ice);
         PyModule_AddStringConstant(m, "__capabilities__", caps_str);
     }
 

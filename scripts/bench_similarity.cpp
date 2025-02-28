@@ -38,25 +38,28 @@ tracked_binary_functions_t distance_functions() {
     });
     auto wrap_sz_distance = [alloc](auto function) mutable -> binary_function_t {
         return binary_function_t([function, alloc](std::string_view a, std::string_view b) mutable -> std::size_t {
-            return function(a.data(), a.length(), b.data(), b.length(), SZ_SIZE_MAX, &alloc);
+            sz_size_t result;
+            function(a.data(), a.length(), b.data(), b.length(), SZ_SIZE_MAX, &alloc, &result);
+            return result;
         });
     };
     auto wrap_sz_scoring = [alloc, costs_ptr](auto function) mutable -> binary_function_t {
         return binary_function_t(
             [function, alloc, costs_ptr](std::string_view a, std::string_view b) mutable -> std::size_t {
                 sz_memory_allocator_t *alloc_ptr = &alloc;
-                sz_ssize_t signed_result =
-                    function(a.data(), a.length(), b.data(), b.length(), costs_ptr, (sz_error_cost_t)-1, alloc_ptr);
+                sz_ssize_t signed_result;
+                function(a.data(), a.length(), b.data(), b.length(), costs_ptr, (sz_error_cost_t)-1, alloc_ptr,
+                         &signed_result);
                 return (std::size_t)(-signed_result);
             });
     };
     tracked_binary_functions_t result = {
         {"naive", wrap_baseline},
-        {"sz_edit_distance_serial", wrap_sz_distance(sz_edit_distance_serial), true},
-        {"sz_alignment_score_serial", wrap_sz_scoring(sz_alignment_score_serial), true},
+        {"sz_levenshtein_distance_serial", wrap_sz_distance(sz_levenshtein_distance_serial), true},
+        {"sz_needleman_wunsch_score_serial", wrap_sz_scoring(sz_needleman_wunsch_score_serial), true},
 #if SZ_USE_ICE
-        {"sz_edit_distance_ice", wrap_sz_distance(sz_edit_distance_ice), true},
-        {"sz_alignment_score_ice", wrap_sz_scoring(sz_alignment_score_ice), true},
+        {"sz_levenshtein_distance_ice", wrap_sz_distance(sz_levenshtein_distance_ice), true},
+        {"sz_needleman_wunsch_score_ice", wrap_sz_scoring(sz_needleman_wunsch_score_ice), true},
 #endif
     };
     return result;

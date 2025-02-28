@@ -178,10 +178,10 @@ def test_unit_split():
     assert letters == ["a", "b", "c", "d"]
 
     # Splitting using character sets
-    letters = sz.split_charset("a b_c d", " _")
+    letters = sz.split_byteset("a b_c d", " _")
     assert letters == ["a", "b", "c", "d"]
 
-    letters = sz.rsplit_charset("a b_c d", " _")
+    letters = sz.rsplit_byteset("a b_c d", " _")
     assert letters == ["a", "b", "c", "d"]
 
     # Check for equivalence with native Python strings for newline separators
@@ -212,17 +212,17 @@ def test_unit_split():
     with pytest.raises(ValueError):
         sz.rsplit(big, "")
     with pytest.raises(ValueError):
-        sz.split_charset(big, "")
+        sz.split_byteset(big, "")
     with pytest.raises(ValueError):
-        sz.rsplit_charset(big, "")
+        sz.rsplit_byteset(big, "")
 
 
 def test_unit_split_iterators():
     """
     Test the iterator-based split methods.
     This is slightly different from `split` and `rsplit` in that it returns an iterator instead of a list.
-    Moreover, the native `rsplit` and even `rsplit_charset` report results in the identical order to `split`
-    and `split_charset`. Here `rsplit_iter` reports elements in the reverse order, compared to `split_iter`.
+    Moreover, the native `rsplit` and even `rsplit_byteset` report results in the identical order to `split`
+    and `split_byteset`. Here `rsplit_iter` reports elements in the reverse order, compared to `split_iter`.
     """
     native = "line1\nline2\nline3"
     big = Str(native)
@@ -244,10 +244,10 @@ def test_unit_split_iterators():
     assert letters == ["a", "b", "c", "d"]
 
     # Splitting using character sets
-    letters = list(sz.split_charset_iter("a-b_c-d", "-_"))
+    letters = list(sz.split_byteset_iter("a-b_c-d", "-_"))
     assert letters == ["a", "b", "c", "d"]
 
-    letters = list(sz.rsplit_charset_iter("a-b_c-d", "-_"))
+    letters = list(sz.rsplit_byteset_iter("a-b_c-d", "-_"))
     assert letters == ["d", "c", "b", "a"]
 
     # Check for equivalence with native Python strings, including boundary conditions
@@ -279,9 +279,9 @@ def test_unit_split_iterators():
     with pytest.raises(ValueError):
         sz.rsplit_iter(big, "")
     with pytest.raises(ValueError):
-        sz.split_charset_iter(big, "")
+        sz.split_byteset_iter(big, "")
     with pytest.raises(ValueError):
-        sz.rsplit_charset_iter(big, "")
+        sz.rsplit_byteset_iter(big, "")
 
 
 def test_unit_strs_sequence():
@@ -289,7 +289,7 @@ def test_unit_strs_sequence():
     big = Str(native)
 
     lines = big.splitlines()
-    assert [2, 1, 0] == list(lines.order())
+    assert [2, 1, 0] == list(lines.argsort())
     assert "p3" in lines
     assert "p4" not in lines
 
@@ -301,11 +301,11 @@ def test_unit_strs_sequence():
     assert str(Str("a" * 1_000_000).split()).endswith("aaa']")
 
     lines.sort()
-    assert [0, 1, 2] == list(lines.order())
+    assert [0, 1, 2] == list(lines.argsort())
     assert ["p1", "p2", "p3"] == list(lines)
 
     # Reverse order
-    assert [2, 1, 0] == list(lines.order(reverse=True))
+    assert [2, 1, 0] == list(lines.argsort(reverse=True))
     lines.sort(reverse=True)
     assert ["p3", "p2", "p1"] == list(lines)
 
@@ -798,7 +798,7 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
     big_list = big_joined.split(".")
 
     native_ordered = sorted(native_list)
-    native_order = big_list.order()
+    native_order = big_list.argsort()
     for i in range(list_length):
         assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
         assert native_ordered[i] == str(
@@ -826,7 +826,7 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
     big_list = big_joined.split(".")
 
     native_ordered = sorted(native_list)
-    native_order = big_list.order()
+    native_order = big_list.argsort()
     for i in range(list_length):
         assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
         assert native_ordered[i] == str(

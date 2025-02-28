@@ -82,12 +82,8 @@
  */
 #if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
 #define _SZ_IS_64_BIT (1)
-#define SZ_SIZE_MAX (0xFFFFFFFFFFFFFFFFull)  // Largest unsigned integer that fits into 64 bits.
-#define SZ_SSIZE_MAX (0x7FFFFFFFFFFFFFFFull) // Largest signed integer that fits into 64 bits.
 #else
 #define _SZ_IS_64_BIT (0)
-#define SZ_SIZE_MAX (0xFFFFFFFFu)  // Largest unsigned integer that fits into 32 bits.
-#define SZ_SSIZE_MAX (0x7FFFFFFFu) // Largest signed integer that fits into 32 bits.
 #endif
 
 /**
@@ -302,10 +298,9 @@ typedef unsigned long long sz_u64_t; // Always 64 bits
 typedef unsigned long long sz_size_t; // 64-bit.
 typedef long long sz_ssize_t;         // 64-bit.
 #else
-typedef unsigned sz_size_t;  // 32-bit.
-typedef unsigned sz_ssize_t; // 32-bit.
+typedef unsigned int sz_size_t; // 32-bit.
+typedef int sz_ssize_t;         // 32-bit.
 #endif // _SZ_IS_64_BIT
-
 #endif // SZ_AVOID_LIBC
 
 /**
@@ -774,6 +769,11 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
  *          like equality checks and relative order computing.
  */
 #define SZ_CACHE_LINE_WIDTH (64) // bytes
+#define SZ_SIZE_MAX ((sz_size_t)(-1))
+#define SZ_SSIZE_MAX ((sz_ssize_t)(SZ_SIZE_MAX >> 1))
+
+SZ_INTERNAL sz_size_t _sz_size_max(void) { return SZ_SIZE_MAX; }
+SZ_INTERNAL sz_ssize_t _sz_ssize_max(void) { return SZ_SSIZE_MAX; }
 
 /**
  *  @brief  Similar to `assert`, the `_sz_assert` is used in the `SZ_DEBUG` mode
