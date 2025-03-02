@@ -10,7 +10,7 @@ checksum = "d32a725bc159af97c3e629873bb9f88fb8cf8a4867175f76dc987815ea07c83b"
 
 [[package]]
 name = "stringzilla"
-version = "3.12.1"
+version = "3.12.2"
 dependencies = [
  "cc",
 ]
