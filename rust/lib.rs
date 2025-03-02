@@ -12,6 +12,10 @@ pub mod sz {
 
     // Import the functions from the StringZilla C library.
     extern "C" {
+        fn sz_copy(target: *const c_void, source: *const c_void, length: usize);
+        fn sz_fill(target: *const c_void, length: usize, value: u8);
+        fn sz_move(target: *const c_void, source: *const c_void, length: usize);
+
         fn sz_find(
             haystack: *const c_void,
             haystack_length: usize,
@@ -108,6 +112,61 @@ pub mod sz {
             generate: *const c_void,
             generator: *mut c_void,
         );
+    }
+
+    /// Moves the contents of `source` into `target`, overwriting the existing contents of `target`.
+    /// This function is useful for scenarios where you need to replace the contents of a byte slice
+    /// with the contents of another byte slice.
+    pub fn move_bytes<T, S>(target: &mut T, source: &S)
+    where
+        T: AsMut<[u8]> + ?Sized,
+        S: AsRef<[u8]> + ?Sized,
+    {
+        let target_slice = target.as_mut();
+        let source_slice = source.as_ref();
+        unsafe {
+            sz_move(
+                target_slice.as_mut_ptr() as *const c_void,
+                source_slice.as_ptr() as *const c_void,
+                source_slice.len(),
+            );
+        }
+    }
+
+    /// Fills the contents of `target` with the specified `value`. This function is useful for
+    /// scenarios where you need to set all bytes in a byte slice to a specific value, such as
+    /// zeroing out a buffer or initializing a buffer with a specific byte pattern.
+    pub fn fill<T>(target: &mut T, value: u8)
+    where
+        T: AsMut<[u8]> + ?Sized,
+    {
+        let target_slice = target.as_mut();
+        unsafe {
+            sz_fill(
+                target_slice.as_ptr() as *const c_void,
+                target_slice.len(),
+                value,
+            );
+        }
+    }
+
+    /// Copies the contents of `source` into `target`, overwriting the existing contents of `target`.
+    /// This function is useful for scenarios where you need to replace the contents of a byte slice
+    /// with the contents of another byte slice.
+    pub fn copy<T, S>(target: &mut T, source: &S)
+    where
+        T: AsMut<[u8]> + ?Sized,
+        S: AsRef<[u8]> + ?Sized,
+    {
+        let target_slice = target.as_mut();
+        let source_slice = source.as_ref();
+        unsafe {
+            sz_copy(
+                target_slice.as_mut_ptr() as *mut c_void,
+                source_slice.as_ptr() as *const c_void,
+                source_slice.len(),
+            );
+        }
     }
 
     /// Locates the first matching substring within `haystack` that equals `needle`.
@@ -1231,7 +1290,6 @@ where
     /// assert_eq!(matches, vec![b"!", b"d", b"l", b"r", b"w", b" ", b",", b"l", b"l", b"H"]);
     /// ```
     fn sz_find_last_not_of(&'a self, needles: &'a N) -> RangeRMatches<'a>;
-
 }
 
 impl<'a, T, N> StringZilla<'a, N> for T
