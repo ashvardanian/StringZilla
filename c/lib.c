@@ -158,9 +158,9 @@ SZ_INTERNAL sz_capability_t _sz_capabilities_x86(void) {
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
 SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
-#if _SZ_IS_X86
+#if _SZ_IS_X86_64
     return _sz_capabilities_x86();
-#elif _SZ_IS_ARM
+#elif _SZ_IS_ARM64
     return _sz_capabilities_arm();
 #else
     return sz_cap_serial_k;

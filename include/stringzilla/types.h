@@ -106,6 +106,25 @@
 #endif
 
 /**
+ *  @brief  Infer the target architecture.
+ *          At this point we only provide optimized backends for x86_64 and ARM64.
+ */
+#ifndef _SZ_IS_X86_64
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#define _SZ_IS_X86_64 (1)
+#else
+#define _SZ_IS_X86_64 (0)
+#endif
+#endif
+#ifndef _SZ_IS_ARM64
+#if defined(__aarch64__) || defined(__arm64__) || defined(__arm64) || defined(_M_ARM64)
+#define _SZ_IS_ARM64 (1)
+#else
+#define _SZ_IS_ARM64 (0)
+#endif
+#endif
+
+/**
  *  @brief  Threshold for switching to SWAR (8-bytes at a time) backend over serial byte-level for-loops.
  *          On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
  *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
@@ -230,7 +249,7 @@
  */
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 #include <immintrin.h>
-#endif // SZ_USE_X86...
+#endif // SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 #if SZ_USE_NEON
 #if !defined(_MSC_VER)
 #include <arm_acle.h>
