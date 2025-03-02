@@ -153,6 +153,7 @@ pub mod sz {
     /// # Returns
     ///
     /// A `u64` representing the checksum value of the input byte slice.
+    #[inline(always)]
     pub fn bytesum<T>(text: T) -> u64
     where
         T: AsRef<[u8]>,
@@ -177,6 +178,7 @@ pub mod sz {
     /// # Returns
     ///
     /// A `u64` representing the hash value of the input byte slice.
+    #[inline(always)]
     pub fn hash_with_seed<T>(text: T, seed: u64) -> u64
     where
         T: AsRef<[u8]>,
@@ -200,6 +202,7 @@ pub mod sz {
     /// # Returns
     ///
     /// A `u64` representing the hash value of the input byte slice.
+    #[inline(always)]
     pub fn hash<T>(text: T) -> u64
     where
         T: AsRef<[u8]>,
@@ -253,6 +256,7 @@ pub mod sz {
     ///
     /// An `Option<usize>` representing the starting index of the last occurrence of `needle`
     /// within `haystack` if found, otherwise `None`.
+    #[inline(always)]
     pub fn rfind<H, N>(haystack: H, needle: N) -> Option<usize>
     where
         H: AsRef<[u8]>,
@@ -286,6 +290,7 @@ pub mod sz {
     ///
     /// An `Option<usize>` representing the index of the first occurrence of any byte from
     /// `needles` within `haystack`, if found, otherwise `None`.
+    #[inline(always)]
     pub fn find_byte_from<H, N>(haystack: H, needles: N) -> Option<usize>
     where
         H: AsRef<[u8]>,
