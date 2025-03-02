@@ -1,7 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 
 /// The `sz` module provides a collection of string searching and manipulation functionality,
-/// designed for high efficiency and compatibility with no_std environments. This module offers
+/// designed for high efficiency and compatibility with `no_std` environments. This module offers
 /// various utilities for byte string manipulation, including search, reverse search, and
 /// edit-distance calculations, suitable for a wide range of applications from basic string
 /// processing to complex text analysis tasks.
@@ -63,10 +63,19 @@ pub mod sz {
         }
     }
 
-    use core::{ffi::c_void, usize};
+    use core::fmt::{self, Write};
+    use core::{ffi::c_void, ffi::CStr, usize};
 
     // Import the functions from the StringZilla C library.
     extern "C" {
+
+        fn sz_dynamic_dispatch() -> i32;
+        fn sz_version_major() -> i32;
+        fn sz_version_minor() -> i32;
+        fn sz_version_patch() -> i32;
+        fn sz_capabilities() -> u32;
+        fn sz_capabilities_to_string(caps: u32) -> *const c_void;
+
         fn sz_find(
             haystack: *const c_void,
             haystack_length: usize,
@@ -90,6 +99,8 @@ pub mod sz {
         fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
 
         fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
+
+        // fn sz_sort() -> Status;
 
         pub fn sz_levenshtein_distance(
             a: *const c_void,
@@ -140,6 +151,103 @@ pub mod sz {
             result: *mut isize,
         ) -> Status;
 
+    }
+
+    /// A simple semantic version structure.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    pub struct SemVer {
+        pub major: i32,
+        pub minor: i32,
+        pub patch: i32,
+    }
+
+    impl SemVer {
+        pub const fn new(major: i32, minor: i32, patch: i32) -> Self {
+            Self { major, minor, patch }
+        }
+    }
+
+    /// Checks if the library was compiled with dynamic dispatch enabled.
+    pub fn dynamic_dispatch() -> bool {
+        unsafe { sz_dynamic_dispatch() != 0 }
+    }
+
+    /// Returns the semantic version information.
+    pub fn version() -> SemVer {
+        SemVer {
+            major: unsafe { sz_version_major() },
+            minor: unsafe { sz_version_minor() },
+            patch: unsafe { sz_version_patch() },
+        }
+    }
+
+    /// A fixed-size, compile-time known C-string buffer type.
+    /// It keeps track of the number of written bytes (excluding the null terminator).
+    pub struct FixedCString<const N: usize> {
+        buf: [u8; N],
+        len: usize,
+    }
+
+    impl<const N: usize> FixedCString<N> {
+        /// Create a new, empty buffer.
+        /// The buffer always has a terminating NUL (0) byte at position `len`.
+        pub const fn new() -> Self {
+            Self { buf: [0u8; N], len: 0 }
+        }
+
+        /// Returns the raw pointer to the C string.
+        pub fn as_ptr(&self) -> *const u8 {
+            self.buf.as_ptr()
+        }
+
+        /// Returns a reference as a CStr.
+        /// # Safety
+        /// The buffer must be correctly NUL terminated.
+        pub fn as_c_str(&self) -> &CStr {
+            // We know buf[..=len] is NUL-terminated because write_str() always sets it.
+            unsafe { CStr::from_bytes_with_nul_unchecked(&self.buf[..=self.len]) }
+        }
+
+        /// Returns the current content as a &str.
+        /// Returns an empty string if the content isn’t valid UTF‑8.
+        pub fn as_str(&self) -> &str {
+            core::str::from_utf8(&self.buf[..self.len]).unwrap_or("")
+        }
+    }
+
+    impl<const N: usize> Write for FixedCString<N> {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            let bytes = s.as_bytes();
+            // Ensure we have room for the new bytes and a NUL terminator.
+            if self.len + bytes.len() >= N {
+                return Err(fmt::Error);
+            }
+            self.buf[self.len..self.len + bytes.len()].copy_from_slice(bytes);
+            self.len += bytes.len();
+            // Always set a null terminator.
+            self.buf[self.len] = 0;
+            Ok(())
+        }
+    }
+
+    pub type SmallCString = FixedCString<256>;
+
+    /// Copies the capabilities C-string into a fixed buffer and returns it.
+    /// The returned SmallCString is guaranteed to be null-terminated.
+    pub fn capabilities() -> SmallCString {
+        let caps = unsafe { sz_capabilities() };
+        let caps_ptr = unsafe { sz_capabilities_to_string(caps) };
+        // Assume that the external function returns a valid null-terminated C string.
+        let cstr = unsafe { CStr::from_ptr(caps_ptr as *const i8) };
+        let bytes = cstr.to_bytes();
+
+        let mut buf = SmallCString::new();
+        // Use core::fmt::Write to copy the bytes.
+        // If the string is too long, it will fail. You might want to truncate in a real-world use.
+        // Here, we assume it fits.
+        let s = core::str::from_utf8(bytes).unwrap_or("");
+        let _ = buf.write_str(s);
+        buf
     }
 
     /// Computes the checksum value of unsigned bytes in a given byte slice `text`.
@@ -1480,6 +1588,12 @@ mod tests {
 
     use crate::sz; // For global functions
     use crate::StringZilla; // For member functions
+
+    #[test]
+    fn metadata() {
+        assert!(sz::dynamic_dispatch());
+        assert!(sz::capabilities().as_str().len() > 0);
+    }
 
     #[test]
     fn hamming() {

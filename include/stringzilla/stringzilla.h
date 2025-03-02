@@ -80,17 +80,72 @@ typedef enum {
  */
 SZ_DYNAMIC sz_capability_t sz_capabilities(void);
 
+/**
+ *  @brief Internal helper function to convert SIMD capabilities to a string.
+ *  @sa    sz_capabilities_to_string, sz_capabilities
+ */
+SZ_INTERNAL sz_cptr_t _sz_capabilities_to_string_implementation(sz_capability_t caps) {
+
+    static char buf[256];
+    char *p = buf;
+    char *const end = buf + sizeof(buf);
+
+    // Mapping each flag to its string literal.
+    struct {
+        sz_capability_t flag;
+        char const *name;
+    } capability_map[] = {
+        {sz_cap_serial_k, "serial"}, {sz_cap_haswell_k, "haswell"}, {sz_cap_skylake_k, "skylake"},
+        {sz_cap_ice_k, "ice"},       {sz_cap_neon_k, "neon"},       {sz_cap_neon_aes_k, "neon+aes"},
+        {sz_cap_sve_k, "sve"},       {sz_cap_sve2_k, "sve2"},       {sz_cap_sve2_aes_k, "sve2+aes"},
+    };
+    int const capabilities_count = sizeof(capability_map) / sizeof(capability_map[0]);
+
+    // Iterate over each capability flag.
+    for (int i = 0; i < capabilities_count; i++) {
+        if (caps & capability_map[i].flag) {
+            int const is_first = p == buf;
+            // Add separator if this is not the first capability.
+            if (!is_first) {
+                char const sep[3] = {',', ' ', '\0'};
+                char const *s = sep;
+                while (*s && p < end - 1) *p++ = *s++;
+            }
+            // Append the capability name character by character.
+            char const *s = capability_map[i].name;
+            while (*s && p < end - 1) *p++ = *s++;
+        }
+    }
+
+    // If no capability was added, write "none".
+    int const nothing_detected = p == buf;
+    if (nothing_detected) {
+        char const *s = "none";
+        while (*s && p < end - 1) *p++ = *s++;
+    }
+
+    // Null-terminate the string.
+    *p = '\0';
+    return buf;
+}
+
 #if defined(SZ_DYNAMIC_DISPATCH)
 
+SZ_DYNAMIC int sz_dynamic_dispatch(void);
 SZ_DYNAMIC int sz_version_major(void);
 SZ_DYNAMIC int sz_version_minor(void);
 SZ_DYNAMIC int sz_version_patch(void);
+SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
 
 #else
 
+SZ_DYNAMIC int sz_dynamic_dispatch(void) { return 0; }
 SZ_PUBLIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
 SZ_PUBLIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_PUBLIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+SZ_PUBLIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
+    return _sz_capabilities_to_string_implementation(caps);
+}
 
 #endif
 

@@ -3726,20 +3726,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     // Define SIMD capabilities
     {
         sz_capability_t caps = sz_capabilities();
-        char caps_str[512];
-        char const *serial = (caps & sz_cap_serial_k) ? "serial," : "";
-        char const *neon = (caps & sz_cap_neon_k) ? "neon," : "";
-        char const *neon_aes = (caps & sz_cap_neon_aes_k) ? "neon_aes," : "";
-        char const *sve = (caps & sz_cap_sve_k) ? "sve," : "";
-        char const *sve2 = (caps & sz_cap_sve2_k) ? "sve2," : "";
-        char const *sve2_aes = (caps & sz_cap_sve2_aes_k) ? "sve2_aes," : "";
-        char const *haswell = (caps & sz_cap_haswell_k) ? "haswell," : "";
-        char const *skylake = (caps & sz_cap_skylake_k) ? "skylake," : "";
-        char const *ice = (caps & sz_cap_ice_k) ? "ice," : "";
-        sprintf(caps_str, "%s%s%s%s%s%s%s%s%s",      //
-                serial,                              //
-                neon, neon_aes, sve, sve2, sve2_aes, //
-                haswell, skylake, ice);
+        sz_cptr_t caps_str = sz_capability_to_string(caps);
         PyModule_AddStringConstant(m, "__capabilities__", caps_str);
     }
 
