@@ -161,6 +161,8 @@ pub mod sz {
 
         /// Finalizes the hash state and returns the computed hash value.
         fn sz_hash_state_fold(state: *const c_void) -> u64;
+
+        fn sz_lookup(target: *const c_void, length: usize, source: *const c_void, lut: *const u8) -> *const c_void;
     }
 
     /// A simple semantic version structure.
