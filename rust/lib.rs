@@ -153,13 +153,10 @@ pub mod sz {
             result: *mut isize,
         ) -> Status;
 
-        /// Initializes a hash state with a given seed value.
         fn sz_hash_state_init(state: *const c_void, seed: u64);
 
-        /// Updates the hash state with a new byte slice.
         fn sz_hash_state_stream(state: *const c_void, text: *const c_void, length: usize);
 
-        /// Finalizes the hash state and returns the computed hash value.
         fn sz_hash_state_fold(state: *const c_void) -> u64;
 
         fn sz_lookup(target: *const c_void, length: usize, source: *const c_void, lut: *const u8) -> *const c_void;
