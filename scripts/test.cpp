@@ -1191,6 +1191,18 @@ static void test_search() {
     assert(rsplits[0] == "");
     assert(rsplits[1] == "c");
     assert(rsplits[4] == "");
+
+    // Testing the corner case for a needle length of 256
+    // the test will fail if this causes an infinite loop
+    {
+        std::string s1(258, '0');
+        std::string s2(256, '1');
+
+        sz::string_view haystack = s1;
+        sz::string_view needle = s2;
+
+        assert(haystack.find(needle) == sz::string_view::npos);
+    }
 }
 
 #if SZ_DETECT_CPP_17 && __cpp_lib_string_view
