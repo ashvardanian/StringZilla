@@ -6,77 +6,18 @@ fn main() {
         .file("c/lib.c")
         .include("include")
         .warnings(false)
-        .flag_if_supported("-std=c99")
+        .define("SZ_DYNAMIC_DISPATCH", "1")
+        .define("SZ_AVOID_LIBC", "0")
+        .define("SZ_DEBUG", "0")
+        .flag("-O3")
+        .flag("-std=c99") // Enforce C99 standard
+        .flag_if_supported("-fdiagnostics-color=always")
         .flag_if_supported("-fPIC");
 
     // Cargo will set different environment variables that we can use to properly configure the build.
     // https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_endian = env::var("CARGO_CFG_TARGET_ENDIAN").unwrap_or_default();
-
-    // To get the operating system we can use the TARGET environment variable.
-    // To check the list of available targets, run `rustc --print target-list`.
-    let target = env::var("TARGET").unwrap_or_default();
-
-    if target.contains("linux") {
-        build.flag_if_supported("-fdiagnostics-color=always");
-        build.flag_if_supported("-O3");
-        build.flag_if_supported("-pedantic");
-
-        // Set architecture-specific flags and macros
-        if target_arch == "x86_64" {
-            build.define("SZ_USE_HASWELL", "1");
-            build.define("SZ_USE_SKYLAKE", "1");
-            build.define("SZ_USE_ICE", "1");
-        } else {
-            build.define("SZ_USE_HASWELL", "0");
-            build.define("SZ_USE_SKYLAKE", "0");
-            build.define("SZ_USE_ICE", "0");
-        }
-
-        if target_arch == "aarch64" {
-            build.flag_if_supported("-march=armv8-a+simd");
-            build.define("SZ_USE_NEON", "1");
-            build.define("SZ_USE_SVE", "1");
-        } else {
-            build.define("SZ_USE_NEON", "0");
-            build.define("SZ_USE_SVE", "0");
-        }
-    } else if target.contains("darwin") {
-        build.flag_if_supported("-fcolor-diagnostics");
-        build.flag_if_supported("-O3");
-        build.flag_if_supported("-pedantic");
-
-        if target_arch == "x86_64" {
-            // Assuming no AVX-512 support for Darwin as per setup.py logic
-            build.define("SZ_USE_HASWELL", "1");
-            build.define("SZ_USE_SKYLAKE", "0");
-            build.define("SZ_USE_ICE", "0");
-        } else {
-            build.define("SZ_USE_HASWELL", "0");
-            build.define("SZ_USE_SKYLAKE", "0");
-            build.define("SZ_USE_ICE", "0");
-        }
-
-        if target_arch == "aarch64" {
-            build.define("SZ_USE_NEON", "1");
-            build.define("SZ_USE_SVE", "0"); // Assuming no SVE support for Darwin
-        } else {
-            build.define("SZ_USE_NEON", "0");
-            build.define("SZ_USE_SVE", "0");
-        }
-    } else if target.contains("windows") {
-        // Set architecture-specific flags and macros
-        if target_arch == "x86_64" {
-            build.define("SZ_USE_HASWELL", "1");
-            build.define("SZ_USE_SKYLAKE", "1");
-            build.define("SZ_USE_ICE", "1");
-        } else {
-            build.define("SZ_USE_HASWELL", "0");
-            build.define("SZ_USE_SKYLAKE", "0");
-            build.define("SZ_USE_ICE", "0");
-        }
-    }
 
     // Set endian-specific macro
     if target_endian == "big" {
@@ -85,9 +26,62 @@ fn main() {
         build.define("SZ_DETECT_BIG_ENDIAN", "0");
     }
 
-    build.compile("stringzilla");
+    if target_arch == "x86_64" {
+        build.define("_SZ_IS_X86_64", "1");
+        build.define("_SZ_IS_ARM64", "0");
+    } else if target_arch == "aarch64" {
+        build.define("_SZ_IS_X86_64", "0");
+        build.define("_SZ_IS_ARM64", "1");
+    }
+
+    // At start we will try compiling with all SIMD backends enabled
+    let flags_to_try = match target_arch.as_str() {
+        "arm" | "aarch64" => vec![
+            //
+            "SZ_USE_SVE2",
+            "SZ_USE_SVE",
+            "SZ_USE_NEON",
+        ],
+        _ => vec![
+            //
+            "SZ_USE_ICE",
+            "SZ_USE_SKYLAKE",
+            "SZ_USE_HASWELL",
+        ],
+    };
+    for flag in flags_to_try.iter() {
+        build.define(flag, "1");
+    }
+
+    // If that fails, we will try disabling them one by one
+    if build.try_compile("stringzilla").is_err() {
+        print!("cargo:warning=Failed to compile with all SIMD backends...");
+
+        for flag in flags_to_try.iter() {
+            build.define(flag, "0");
+            if build.try_compile("stringzilla").is_ok() {
+                break;
+            }
+
+            // Print the failed configuration
+            println!(
+                "cargo:warning=Failed to compile after disabling {}, trying next configuration...",
+                flag
+            );
+        }
+    }
 
     println!("cargo:rerun-if-changed=c/lib.c");
     println!("cargo:rerun-if-changed=rust/lib.rs");
     println!("cargo:rerun-if-changed=include/stringzilla/stringzilla.h");
+
+    // Constituent parts:
+    println!("cargo:rerun-if-changed=include/stringzilla/compare.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/find.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/hash.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/memory.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/similarity.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/small_string.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/sort.h");
+    println!("cargo:rerun-if-changed=include/stringzilla/types.h");
 }
