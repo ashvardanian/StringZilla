@@ -264,10 +264,10 @@ SZ_PUBLIC void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence,
         while (j > 0) {
             // Get the two strings to compare.
             sz_sorted_idx_t previous_idx = order[j - 1];
-            sz_cptr_t previous_start = sequence->get_start(sequence, previous_idx);
-            sz_cptr_t current_start = sequence->get_start(sequence, current_idx);
-            sz_size_t previous_length = sequence->get_length(sequence, previous_idx);
-            sz_size_t current_length = sequence->get_length(sequence, current_idx);
+            sz_cptr_t previous_start = sequence->get_start(sequence->handle, previous_idx);
+            sz_cptr_t current_start = sequence->get_start(sequence->handle, current_idx);
+            sz_size_t previous_length = sequence->get_length(sequence->handle, previous_idx);
+            sz_size_t current_length = sequence->get_length(sequence->handle, current_idx);
 
             // Use the provided sz_order to compare.
             sz_ordering_t ordering = sz_order(previous_start, previous_length, current_start, current_length);
@@ -470,8 +470,8 @@ SZ_INTERNAL void _sz_sequence_argsort_serial_export_next_pgrams(                
             _sz_assert(partial_order_index == i && "At start this must be an identity permutation.");
 
         // Get the string slice in global memory.
-        sz_cptr_t const source_str = sequence->get_start(sequence, partial_order_index);
-        sz_size_t const length = sequence->get_length(sequence, partial_order_index);
+        sz_cptr_t const source_str = sequence->get_start(sequence->handle, partial_order_index);
+        sz_size_t const length = sequence->get_length(sequence->handle, partial_order_index);
         sz_size_t const remaining_length = length > start_character ? length - start_character : 0;
         sz_size_t const exported_length = remaining_length > pgram_capacity ? pgram_capacity : remaining_length;
 
@@ -497,10 +497,10 @@ SZ_INTERNAL void _sz_sequence_argsort_serial_export_next_pgrams(                
         for (sz_size_t i = start_in_sequence + 1; i < end_in_sequence; ++i) {
             sz_pgram_t const previous_pgram = global_pgrams[i - 1];
             sz_pgram_t const current_pgram = global_pgrams[i];
-            sz_cptr_t const previous_str = sequence->get_start(sequence, i - 1);
-            sz_size_t const previous_length = sequence->get_length(sequence, i - 1);
-            sz_cptr_t const current_str = sequence->get_start(sequence, i);
-            sz_size_t const current_length = sequence->get_length(sequence, i);
+            sz_cptr_t const previous_str = sequence->get_start(sequence->handle, i - 1);
+            sz_size_t const previous_length = sequence->get_length(sequence->handle, i - 1);
+            sz_cptr_t const current_str = sequence->get_start(sequence->handle, i);
+            sz_size_t const current_length = sequence->get_length(sequence->handle, i);
             sz_ordering_t const ordering = sz_order(                                               //
                 previous_str, previous_length > pgram_capacity ? pgram_capacity : previous_length, //
                 current_str, current_length > pgram_capacity ? pgram_capacity : current_length);

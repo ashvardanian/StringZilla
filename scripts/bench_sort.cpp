@@ -42,10 +42,10 @@ static int _get_qsort_order(const void *a, const void *b, void *arg) {
     sz_size_t idx_a = *(sz_size_t *)a;
     sz_size_t idx_b = *(sz_size_t *)b;
 
-    char const *str_a = sequence->get_start(sequence, idx_a);
-    char const *str_b = sequence->get_start(sequence, idx_b);
-    sz_size_t len_a = sequence->get_length(sequence, idx_a);
-    sz_size_t len_b = sequence->get_length(sequence, idx_b);
+    char const *str_a = sequence->get_start(sequence->handle, idx_a);
+    char const *str_b = sequence->get_start(sequence->handle, idx_b);
+    sz_size_t len_a = sequence->get_length(sequence->handle, idx_a);
+    sz_size_t len_b = sequence->get_length(sequence->handle, idx_b);
 
     int res = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
     return res ? res : (int)(len_a - len_b);
