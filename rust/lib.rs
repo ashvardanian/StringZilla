@@ -68,7 +68,9 @@ pub mod sz {
 
     // Import the functions from the StringZilla C library.
     extern "C" {
-
+        fn sz_copy(target: *const c_void, source: *const c_void, length: usize);
+        fn sz_fill(target: *const c_void, length: usize, value: u8);
+        fn sz_move(target: *const c_void, source: *const c_void, length: usize);
         fn sz_dynamic_dispatch() -> i32;
         fn sz_version_major() -> i32;
         fn sz_version_minor() -> i32;
@@ -151,6 +153,13 @@ pub mod sz {
             result: *mut isize,
         ) -> Status;
 
+        fn sz_hash_state_init(state: *const c_void, seed: u64);
+
+        fn sz_hash_state_stream(state: *const c_void, text: *const c_void, length: usize);
+
+        fn sz_hash_state_fold(state: *const c_void) -> u64;
+
+        fn sz_lookup(target: *const c_void, length: usize, source: *const c_void, lut: *const u8) -> *const c_void;
     }
 
     /// A simple semantic version structure.
@@ -271,6 +280,57 @@ pub mod sz {
         let text_length = text_ref.len();
         let result = unsafe { sz_bytesum(text_pointer, text_length) };
         return result;
+    }
+
+    /// Moves the contents of `source` into `target`, overwriting the existing contents of `target`.
+    /// This function is useful for scenarios where you need to replace the contents of a byte slice
+    /// with the contents of another byte slice.
+    pub fn move_bytes<T, S>(target: &mut T, source: &S)
+    where
+        T: AsMut<[u8]> + ?Sized,
+        S: AsRef<[u8]> + ?Sized,
+    {
+        let target_slice = target.as_mut();
+        let source_slice = source.as_ref();
+        unsafe {
+            sz_move(
+                target_slice.as_mut_ptr() as *const c_void,
+                source_slice.as_ptr() as *const c_void,
+                source_slice.len(),
+            );
+        }
+    }
+
+    /// Fills the contents of `target` with the specified `value`. This function is useful for
+    /// scenarios where you need to set all bytes in a byte slice to a specific value, such as
+    /// zeroing out a buffer or initializing a buffer with a specific byte pattern.
+    pub fn fill<T>(target: &mut T, value: u8)
+    where
+        T: AsMut<[u8]> + ?Sized,
+    {
+        let target_slice = target.as_mut();
+        unsafe {
+            sz_fill(target_slice.as_ptr() as *const c_void, target_slice.len(), value);
+        }
+    }
+
+    /// Copies the contents of `source` into `target`, overwriting the existing contents of `target`.
+    /// This function is useful for scenarios where you need to replace the contents of a byte slice
+    /// with the contents of another byte slice.
+    pub fn copy<T, S>(target: &mut T, source: &S)
+    where
+        T: AsMut<[u8]> + ?Sized,
+        S: AsRef<[u8]> + ?Sized,
+    {
+        let target_slice = target.as_mut();
+        let source_slice = source.as_ref();
+        unsafe {
+            sz_copy(
+                target_slice.as_mut_ptr() as *mut c_void,
+                source_slice.as_ptr() as *const c_void,
+                source_slice.len(),
+            );
+        }
     }
 
     /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
