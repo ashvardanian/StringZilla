@@ -28,12 +28,36 @@
 /*  We need to detect the version of the C++ language we are compiled with.
  *  This will affect recent features like `operator<=>` and tests against STL.
  */
-#define _SZ_IS_CPP23 (__cplusplus >= 202101L)
-#define _SZ_IS_CPP20 (__cplusplus >= 202002L)
-#define _SZ_IS_CPP17 (__cplusplus >= 201703L)
-#define _SZ_IS_CPP14 (__cplusplus >= 201402L)
-#define _SZ_IS_CPP11 (__cplusplus >= 201103L)
-#define _SZ_IS_CPP98 (__cplusplus >= 199711L)
+#if __cplusplus >= 202101L
+#define _SZ_IS_CPP23 1
+#else
+#define _SZ_IS_CPP23 0
+#endif
+#if __cplusplus >= 202002L
+#define _SZ_IS_CPP20 1
+#else
+#define _SZ_IS_CPP20 0
+#endif
+#if __cplusplus >= 201703L
+#define _SZ_IS_CPP17 1
+#else
+#define _SZ_IS_CPP17 0
+#endif
+#if __cplusplus >= 201402L
+#define _SZ_IS_CPP14 1
+#else
+#define _SZ_IS_CPP14 0
+#endif
+#if __cplusplus >= 201103L
+#define _SZ_IS_CPP11 1
+#else
+#define _SZ_IS_CPP11 0
+#endif
+#if __cplusplus >= 199711L
+#define _SZ_IS_CPP98 1
+#else
+#define _SZ_IS_CPP98 0
+#endif
 
 /**
  *  @brief  Expands to `constexpr` in C++20 and later, and to nothing in older C++ versions.
