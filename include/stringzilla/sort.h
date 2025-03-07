@@ -1,15 +1,10 @@
 /**
- *  @brief  Hardware-accelerated string collection sorting & joins.
+ *  @brief  Hardware-accelerated string collection sorting.
  *  @file   sort.h
  *  @author Ash Vardanian
  *
- *  Includes core APIs for `sz_sequence_t` string collections with hardware-specific backends:
- *
- *  - `sz_sequence_argsort` - to get the sorting permutation of a string collection.
- *  - `sz_sequence_join` - to compute the intersection of two arbitrary string collections.
- *
- *  The first can easily be used to implement SORT and GROUPBY operations SQL, while the second can be used to
- *  implement JOIN operations. Both are essential for implementing efficient database engines.
+ *  Provides the @b `sz_sequence_argsort` API to get the sorting permutation of `sz_sequence_t` binary
+ *  string collections in lexicographical order.
  *
  *  The core idea of all following string algorithms is to process strings not based on 1 character at a time,
  *  but on a larger "Pointer-sized N-grams" fitting in 4 or 8 bytes at once, on 32-bit or 64-bit architectures,
@@ -17,7 +12,7 @@
  *  rest for some metadata.
  *
  *  That, however, means, that unsigned integer sorting & matching is a constituent part of our sequence
- *  algorithms and we can expose them as an additional set of APIs for the users:
+ *  algorithms and we can expose them as an additional APIs for the users:
  *
  *  - `sz_pgrams_sort` - to inplace sort continuous pointer-sized integers.
  *  - `sz_pgrams_join` - to compute the intersection of two arbitrary integer collections.
@@ -116,94 +111,6 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *sequence, sz_mem
 SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                       sz_sorted_idx_t *order);
 
-/**
- *  @brief  Intersects two arbitrary @b string sequences, using a hash table.
- *          Outputs the @p first_positions from the @p first_sequence and @p second_positions from
- *          the @p second_sequence, that contain identical strings.
- *
- *
- *  @param[in] first_sequence First immutable sequence of strings to intersection.
- *  @param[in] second_sequence Second immutable sequence of strings to intersection.
- *  @param[in] alloc Optional memory allocator for temporary storage.
- *  @param[out] intersection_size Number of identical strings in both sequences.
- *  @param[out] first_positions Offset positions of the identical strings from the @p first_sequence.
- *  @param[out] second_positions Offset positions of the identical strings from the @p second_sequence.
- *
- *  @retval `sz_success_k` if the operation was successful.
- *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
- *  @retval `sz_contains_duplicates_k` if any of the sequences contain duplicate strings.
- *  @pre The @p first_positions arrays must fit at least `min(first_sequence->count, second_sequence->count)` items.
- *  @pre The @p second_positions arrays must fit at least `min(first_sequence->count, second_sequence->count)` items.
- *
- *  Example usage:
- *
- *  @code{.c}
- *      #include <stringzilla/sort.h>
- *      int main() {
- *          char const *first[] = {"banana", "apple", "cherry"};
- *          char const *second[] = {"cherry", "orange", "pineapple", "banana"};
- *          sz_sequence_t first_sequence, second_sequence;
- *          sz_sequence_from_null_terminated_strings(first, 3, &first_sequence);
- *          sz_sequence_from_null_terminated_strings(second, 4, &second_sequence);
- *          sz_size_t intersection_size;
- *          sz_sorted_idx_t first_positions[3], second_positions[3]; //? 3 is the size of the smaller sequence
- *          sz_status_t status = sz_sequence_join(&first_sequence, &second_sequence, NULL,
- *              &intersection_size, first_positions, second_positions);
- *          return status == sz_success_k && intersection_size == 2 ? 0 : 1;
- *      }
- *  @endcode
- *
- *  @note   The algorithm has linear memory complexity and linear time complexity.
- *  @see    https://en.wikipedia.org/wiki/Join_(SQL)
- *
- *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa     sz_sequence_join_serial, sz_sequence_join_skylake, sz_sequence_join_sve
- */
-SZ_DYNAMIC sz_status_t sz_sequence_join(sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
-                                        sz_memory_allocator_t *alloc, sz_size_t *intersection_size,
-                                        sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
-
-/**
- *  @brief  Faster @b inplace `std::stable_sort` for a continuous @b unsigned-integer sequence, using MergeSort.
- *          Overwrites the input @p pgrams with the sorted sequence and exports the @p order permutation.
- *
- *  This algorithm guarantees stability, ensuring that the relative order of equal elements is preserved.
- *  It uses more memory than `sz_pgrams_sort`, but its performance is more predictable.
- *  It's preferred for very large inputs, as most memory access happens in a sequential pattern.
- *
- *  @param[inout] pgrams Continuous buffer of unsigned integers to sort in place.
- *  @param[in] count Number of elements in the sequence.
- *  @param[in] alloc Optional memory allocator for temporary storage.
- *  @param[out] order Output permutation that sorts the elements. Must fit at least @p count integers.
- *
- *  @retval `sz_success_k` if the operation was successful.
- *  @retval `sz_bad_alloc_k` if the operation failed due to memory allocation failure.
- *  @post The @p order array will contain a valid permutation of `[0, count - 1]`.
- *
- *  Example usage:
- *
- *  @code{.c}
- *      #include <stringzilla/sort.h>
- *      int main() {
- *          sz_pgram_t pgrams[] = {42, 17, 99, 8};
- *          sz_sorted_idx_t order[4];
- *          sz_pgrams_join(pgrams, 4, NULL, order);
- *          return order[0] == 3 && order[1] == 1 && order[2] == 0 && order[3] == 2 ? 0 : 1;
- *      }
- *  @endcode
- *
- *  @note   The algorithm has linear memory complexity and log-linear time complexity.
- *  @see    [MergeSort Algorithm](https://en.wikipedia.org/wiki/Merge_sort)
- *
- *  @note   This algorithm is @b stable: equal elements maintain their relative order.
- *  @sa     sz_pgrams_sort
- *
- *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa     sz_pgrams_join_serial, sz_pgrams_join_skylake, sz_pgrams_join_sve
- */
-SZ_DYNAMIC sz_status_t sz_pgrams_join(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                      sz_sorted_idx_t *order);
-
 /** @copydoc sz_sequence_argsort */
 SZ_PUBLIC sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
                                                  sz_sorted_idx_t *order);
@@ -222,12 +129,6 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
 SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                              sz_sorted_idx_t *order);
 
-/** @copydoc sz_sequence_join */
-SZ_PUBLIC sz_status_t sz_sequence_join_skylake(                                //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
-    sz_memory_allocator_t *alloc, sz_size_t *intersection_size,                //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
-
 #endif
 
 #if SZ_USE_SVE
@@ -239,12 +140,6 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_
 /** @copydoc sz_pgrams_sort */
 SZ_PUBLIC sz_status_t sz_pgrams_sort_sve(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                          sz_sorted_idx_t *order);
-
-/** @copydoc sz_sequence_join */
-SZ_PUBLIC sz_status_t sz_sequence_join_sve(                                    //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
-    sz_memory_allocator_t *alloc, sz_size_t *intersection_size,                //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
 
 #endif
 
@@ -717,7 +612,7 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
  *  @brief  Helper function similar to `std::set_union` over pairs of integers and their original indices.
  *  @see    https://en.cppreference.com/w/cpp/algorithm/set_union
  */
-SZ_INTERNAL void _sz_sequence_join_serial_merge(                                                    //
+SZ_INTERNAL void _sz_pgrams_union_serial(                                                           //
     sz_pgram_t const *first_pgrams, sz_sorted_idx_t const *first_indices, sz_size_t first_count,    //
     sz_pgram_t const *second_pgrams, sz_sorted_idx_t const *second_indices, sz_size_t second_count, //
     sz_pgram_t *result_pgrams, sz_sorted_idx_t *result_indices) {
@@ -762,167 +657,6 @@ SZ_INTERNAL void _sz_sequence_join_serial_merge(                                
     if (SZ_DEBUG)
         for (sz_size_t i = 1; i < first_count + second_count; ++i)
             _sz_assert(merged_begin[i - 1] <= merged_begin[i] && "The merged pgrams must be in ascending order.");
-}
-
-SZ_PUBLIC sz_status_t sz_pgrams_join_serial(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
-                                            sz_sorted_idx_t *order) {
-
-    // First, initialize the `order` with `std::iota`-like behavior.
-    for (sz_size_t i = 0; i != count; ++i) order[i] = i;
-
-    // On very small collections - just use the quadratic-complexity insertion sort
-    // without any smart optimizations or memory allocations.
-    if (count <= 32) {
-        sz_pgrams_sort_with_insertion(pgrams, count, order);
-        return sz_success_k;
-    }
-
-    // Go through short chunks of 8 elements and sort them with a sorting network.
-    for (sz_size_t i = 0; i + 8u <= count; i += 8u) _sz_sequence_sorting_network_8x(pgrams + i, order + i);
-
-    // For the tail of the array, sort it with insertion sort.
-    sz_size_t const tail_count = count & 7u;
-    sz_pgrams_sort_with_insertion(pgrams + count - tail_count, tail_count, order + count - tail_count);
-
-    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
-    sz_memory_allocator_t global_alloc;
-    if (!alloc) {
-        sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
-    }
-
-    // At this point, the array is partitioned into sorted runs.
-    // We'll now merge these runs until the whole array is sorted.
-    // Allocate temporary memory to hold merged results:
-    //    - one block for keys (`sz_pgram_t`)
-    //    - one block for indices (`sz_sorted_idx_t`)
-    sz_size_t memory_usage = sizeof(sz_pgram_t) * count + sizeof(sz_sorted_idx_t) * count;
-    sz_pgram_t *pgrams_temporary = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
-    sz_sorted_idx_t *order_temporary = (sz_sorted_idx_t *)(pgrams_temporary + count);
-    if (!pgrams_temporary) return sz_bad_alloc_k;
-
-    // Set initial run size (the sorted chunks).
-    sz_size_t run_size = 8;
-
-    // Pointers for current source and destination arrays.
-    sz_pgram_t *src_pgrams = pgrams;
-    sz_sorted_idx_t *src_order = order;
-    sz_pgram_t *dst_pgrams = pgrams_temporary;
-    sz_sorted_idx_t *dst_order = order_temporary;
-
-    // Merge sorted runs in a bottom-up manner until the run size covers the whole array.
-    while (run_size < count) {
-        // Process adjacent runs.
-        for (sz_size_t i = 0; i < count; i += run_size * 2) {
-            // Determine the number of elements in the left run.
-            sz_size_t left_count = run_size;
-            if (i + left_count > count) { left_count = count - i; }
-
-            // Determine the number of elements in the right run.
-            sz_size_t right_count = run_size;
-            if (i + left_count >= count) { right_count = 0; }
-            else if (i + left_count + right_count > count) { right_count = count - (i + left_count); }
-
-            // Merge the two runs:
-            _sz_sequence_join_serial_merge(                                       //
-                src_pgrams + i, src_order + i, left_count,                        //
-                src_pgrams + i + run_size, src_order + i + run_size, right_count, //
-                dst_pgrams + i, dst_order + i);
-        }
-
-        // Swap the roles of the source and destination arrays.
-        _sz_swap(sz_pgram_t *, src_pgrams, dst_pgrams);
-        _sz_swap(sz_sorted_idx_t *, src_order, dst_order);
-
-        // Double the run size for the next pass.
-        run_size *= 2;
-    }
-
-    // If the final sorted result is not in the original array, copy the sorted results back.
-    if (src_pgrams != pgrams)
-        for (sz_size_t i = 0; i < count; ++i) pgrams[i] = src_pgrams[i], order[i] = src_order[i];
-
-    // Free the temporary memory used for merging.
-    alloc->free(pgrams_temporary, memory_usage, alloc);
-    return sz_success_k;
-}
-
-SZ_PUBLIC sz_status_t sz_sequence_join_serial(                                      //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
-    sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
-
-    // To join to unordered sets of strings, the simplest approach would be to hash them into a dynamically
-    // allocated hash table and then iterate over the second set, checking for the presence of each element in the
-    // hash table. This would require O(N) memory and O(N) time complexity, where N is the smaller set.
-    sz_sequence_t const *small_sequence, *large_sequence;
-    sz_sorted_idx_t *small_positions, *large_positions;
-    if (first_sequence->count <= second_sequence->count) {
-        small_sequence = first_sequence, large_sequence = second_sequence;
-        small_positions = first_positions, large_positions = second_positions;
-    }
-    else {
-        small_sequence = second_sequence, large_sequence = first_sequence;
-        small_positions = second_positions, large_positions = first_positions;
-    }
-
-    // We may very well have nothing to join
-    if (small_sequence->count == 0) {
-        *intersection_count_ptr = 0;
-        return sz_success_k;
-    }
-
-    // Allocate memory for the hash table and initialize it with 0xFF.
-    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count * 2);
-    sz_size_t const bytes_per_entry = sizeof(sz_size_t) + sizeof(sz_u64_t);
-    sz_size_t *table_positions = (sz_size_t *)alloc->allocate(hash_table_slots * bytes_per_entry, alloc);
-    if (!table_positions) return sz_bad_alloc_k;
-    sz_u64_t *table_fingerprints = (sz_u64_t *)(table_positions + hash_table_slots);
-    sz_fill((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
-
-    // Hash the smaller set into the hash table using the default available backend.
-    for (sz_size_t small_position = 0; small_position < small_sequence->count; ++small_position) {
-        sz_cptr_t const str = small_sequence->get_start(small_sequence->handle, small_position);
-        sz_size_t const length = small_sequence->get_length(small_sequence->handle, small_position);
-        sz_u64_t const hash = sz_hash(str, length, seed);
-        sz_size_t hash_slot = hash;
-        // Implement linear probing to resolve collisions.
-        while (table_positions[hash_slot & (hash_table_slots - 1)] != SZ_SIZE_MAX) ++hash_slot;
-        table_positions[hash_slot & (hash_table_slots - 1)] = small_position;
-        table_fingerprints[hash_slot & (hash_table_slots - 1)] = hash;
-    }
-
-    // Iterate over the larger set and check for the presence of each element in the hash table.
-    sz_size_t intersection_count = 0;
-    for (sz_size_t large_position = 0; large_position < large_sequence->count; ++large_position) {
-        sz_cptr_t const str = large_sequence->get_start(large_sequence->handle, large_position);
-        sz_size_t const length = large_sequence->get_length(large_sequence->handle, large_position);
-        sz_u64_t const hash = sz_hash(str, length, seed);
-        sz_size_t hash_slot = hash;
-        // Implement linear probing to resolve collisions.
-        for (; table_positions[hash_slot & (hash_table_slots - 1)] != SZ_SIZE_MAX; ++hash_slot) {
-            sz_u64_t small_hash = table_fingerprints[hash_slot & (hash_table_slots - 1)];
-            if (small_hash != hash) continue;
-
-            // The hash matches, compare the strings.
-            sz_size_t const small_position = table_positions[hash_slot & (hash_table_slots - 1)];
-            sz_size_t const small_length = small_sequence->get_length(small_sequence->handle, small_position);
-            if (length != small_length) continue;
-
-            sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
-            sz_bool_t const same = sz_equal(str, small_str, length);
-            if (same != sz_true_k) continue;
-
-            // Finally, there is a match, store the positions.
-            small_positions[intersection_count] = small_position;
-            large_positions[intersection_count] = large_position;
-            ++intersection_count;
-            break;
-        }
-    }
-
-    *intersection_count_ptr = intersection_count;
-    return sz_success_k;
 }
 
 #pragma endregion // Serial MergeSort Implementation
@@ -1186,14 +920,6 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
     return sz_success_k;
 }
 
-SZ_PUBLIC sz_status_t sz_sequence_join_skylake(                                //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
-    sz_memory_allocator_t *alloc, sz_size_t *intersection_size,                //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
-    sz_unused(first_sequence && second_sequence && alloc && intersection_size && first_positions && second_positions);
-    return sz_success_k;
-}
-
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif            // SZ_USE_SKYLAKE
@@ -1224,27 +950,6 @@ SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *pgrams, sz_size_t count, sz_me
     return sz_pgrams_sort_sve(pgrams, count, alloc, order);
 #else
     return sz_pgrams_sort_serial(pgrams, count, alloc, order);
-#endif
-}
-
-SZ_DYNAMIC sz_status_t sz_sequence_join(sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
-                                        sz_memory_allocator_t *alloc, sz_size_t *intersection_size,
-                                        sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
-#if SZ_USE_SKYLAKE
-    return sz_sequence_join_skylake(     //
-        first_sequence, second_sequence, //
-        alloc, intersection_size,        //
-        first_positions, second_positions);
-#elif SZ_USE_SVE
-    return sz_sequence_join_sve(         //
-        first_sequence, second_sequence, //
-        alloc, intersection_size,        //
-        first_positions, second_positions);
-#else
-    return sz_sequence_join_serial(      //
-        first_sequence, second_sequence, //
-        alloc, intersection_size,        //
-        first_positions, second_positions);
 #endif
 }
 

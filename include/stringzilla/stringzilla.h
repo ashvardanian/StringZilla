@@ -48,7 +48,8 @@
 #include "find.h"         // `sz_find`, `sz_find_byteset`, `sz_rfind`
 #include "small_string.h" // `sz_string_t`, `sz_string_init`, `sz_string_free`
 #include "similarity.h"   // `sz_levenshtein_distance`, `sz_needleman_wunsch_score`
-#include "sort.h"         // `sz_sequence_argsort`, `sz_pgrams_sort`, `sz_pgrams_sort_stable`
+#include "sort.h"         // `sz_sequence_argsort`, `sz_pgrams_sort`
+#include "intersect.h"    // `sz_sequence_intersect`
 
 #ifdef __cplusplus
 extern "C" {
