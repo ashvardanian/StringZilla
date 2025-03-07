@@ -368,7 +368,8 @@ typedef enum {
 } sz_status_t;
 
 /**
- *  @brief  Describes the length of a UTF8 @b rune / character / codepoint in bytes.
+ *  @brief Describes the length of a UTF-8 @b rune / character / codepoint in bytes, which can be 1 to 4.
+ *  @see https://en.wikipedia.org/wiki/UTF-8
  */
 typedef enum {
     sz_utf8_invalid_k = 0,     //!< Invalid UTF8 character.
@@ -378,6 +379,16 @@ typedef enum {
     sz_utf8_rune_4bytes_k = 4, //!< 4-byte UTF8 character.
 } sz_rune_length_t;
 
+/**
+ *  @brief Stores a single UTF-8 @b rune / character / codepoint unpacked into @b UTF-32.
+ *  @see https://en.wikipedia.org/wiki/UTF-32
+ *
+ *  The theoretical capacity of the underlying numeric type is 4 bytes, with over 4 billion possible states, but:
+ *  - UTF-8, however, in its' largest 4-byte form has only 3+6+6+6 = 21 bits of usable space for 2 million states.
+ *  - Unicode, in turn, has only @b 1'114'112 possible code points from U+0000 to U+10FFFF.
+ *  - Of those, in Unicode 16, only @b 155'063 are assigned characters ~ a little over 17 bits of content.
+ *  That's @b 0.004% of the 32-bit space, so sparse data-structures are encouraged for UTF-8 oriented algorithms.
+ */
 typedef sz_u32_t sz_rune_t;
 
 /**
