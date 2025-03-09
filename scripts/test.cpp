@@ -1079,9 +1079,9 @@ void test_non_stl_extensions_for_updates() {
     sz::look_up_table invert_case = sz::look_up_table::identity();
     for (char c = 'a'; c <= 'z'; c++) invert_case[c] = c - 'a' + 'A';
     for (char c = 'A'; c <= 'Z'; c++) invert_case[c] = c - 'A' + 'a';
-    assert_scoped(str s = "hello", s.transform(invert_case), s == "HELLO");
-    assert_scoped(str s = "HeLLo", s.transform(invert_case), s == "hEllO");
-    assert_scoped(str s = "H-lL0", s.transform(invert_case), s == "h-Ll0");
+    assert_scoped(str s = "hello", s.lookup(invert_case), s == "HELLO");
+    assert_scoped(str s = "HeLLo", s.lookup(invert_case), s == "hEllO");
+    assert_scoped(str s = "H-lL0", s.lookup(invert_case), s == "h-Ll0");
 
     // Concatenation.
     assert(str(str("a") | str("b")) == "ab");

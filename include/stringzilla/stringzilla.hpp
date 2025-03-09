@@ -3395,9 +3395,9 @@ class basic_string {
      *  In this case the undefined behaviour in concurrent environments may play in our favor,
      *  but it's recommended to use the other overload in such cases.
      */
-    basic_string &randomize() noexcept {
+    basic_string &fill_random() noexcept {
         static sz_u64_t nonce = 42;
-        return randomize(nonce++);
+        return fill_random(nonce++);
     }
 
     /**
@@ -3407,7 +3407,7 @@ class basic_string {
      *  @throw `std::bad_alloc` if the allocation fails.
      */
     static basic_string random(size_type length, sz_u64_t nonce) noexcept(false) {
-        return basic_string(length, '\0').randomize(nonce);
+        return basic_string(length, '\0').fill_random(nonce);
     }
 
     /**
@@ -3415,7 +3415,7 @@ class basic_string {
      *  @param[in] length The length of the generated string.
      *  @throw `std::bad_alloc` if the allocation fails.
      */
-    static basic_string random(size_type length) noexcept(false) { return basic_string(length, '\0').randomize(); }
+    static basic_string random(size_type length) noexcept(false) { return basic_string(length, '\0').fill_random(); }
 
     /**
      *  @brief Replaces @b (in-place) all occurrences of a given string with the ::replacement string.
@@ -3471,8 +3471,8 @@ class basic_string {
      *  @brief Replaces @b (in-place) all characters in the string using the provided lookup @p table.
      *  @sa sz_lookup
      */
-    basic_string &transform(look_up_table const &table) noexcept {
-        transform(table, data());
+    basic_string &lookup(look_up_table const &table) noexcept {
+        lookup(table, data());
         return *this;
     }
 
@@ -3481,7 +3481,7 @@ class basic_string {
      *  @param[in] output The buffer to write the transformed string into.
      *  @sa sz_lookup
      */
-    void transform(look_up_table const &table, pointer output) const noexcept {
+    void lookup(look_up_table const &table, pointer output) const noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
@@ -3971,7 +3971,7 @@ std::ptrdiff_t alignment_score(                                                 
  *  @sa sz_fill_random
  */
 template <typename char_type_>
-void randomize(basic_string_slice<char_type_> string, sz_u64_t nonce) noexcept {
+void fill_random(basic_string_slice<char_type_> string, sz_u64_t nonce) noexcept {
     static_assert(!std::is_const<char_type_>::value, "The string must be mutable.");
     sz_fill_random(string.data(), string.size(), nonce);
 }
@@ -3982,9 +3982,8 @@ void randomize(basic_string_slice<char_type_> string, sz_u64_t nonce) noexcept {
  *  @sa sz_fill_random
  */
 template <typename char_type_>
-void lookup(basic_string_slice<char_type_> string, basic_look_up_table<char_type_> const &table) noexcept {
-    static_assert(sizeof(char_type_) == 1, "The character type must be 1 byte long.");
-    sz_lookup((sz_ptr_t)string.data(), (sz_size_t)string.size(), (sz_cptr_t)string.data(), (sz_cptr_t)table.raw());
+void fill_random(basic_string_slice<char_type_> string) noexcept {
+    fill_random(string, std::rand());
 }
 
 /**
@@ -4004,11 +4003,9 @@ void lookup( //
  *  @sa sz_lookup
  */
 template <typename char_type_>
-void randomize(basic_string_slice<char_type_> string, string_view alphabet = "abcdefghijklmnopqrstuvwxyz") noexcept {
-    randomize(string, std::rand, alphabet);
+void lookup(basic_string_slice<char_type_> string, basic_look_up_table<char_type_> const &table) noexcept {
+    lookup(string, table, string.data());
 }
-
-using sorted_idx_t = sz_sorted_idx_t;
 
 /**
  *  @brief Internal data-structure used to wrap arbitrary sequential containers with a random-order lookup.
