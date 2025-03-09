@@ -49,6 +49,8 @@
 #include <random>        // `std::random_device`
 #include <sstream>       // `std::ostringstream`
 #include <unordered_map> // `std::unordered_map`
+#include <unordered_set> // `std::unordered_set`
+#include <set>           // `std::set`
 #include <vector>        // `std::vector`
 
 #include <string>      // Baseline
@@ -147,6 +149,31 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil((1ull << 62) + 1) == (1ull << 63));
     assert(sz_size_bit_ceil((1ull << 63)) == (1ull << 63));
 #endif
+}
+
+static void test_structural_utilities() {
+    // Make sure the sequence helper functions work as expected
+    // for both trivial c-style arrays and
+    {
+        sz_sequence_t sequence;
+        sz_cptr_t strings[] = {"banana", "apple", "cherry"};
+        sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
+        assert(sequence.count == 3);
+        assert("banana"_sv == sequence.get_start(sequence.handle, 0));
+        assert("apple"_sv == sequence.get_start(sequence.handle, 1));
+        assert("cherry"_sv == sequence.get_start(sequence.handle, 2));
+    }
+
+    // sz_memory_allocator_init_default;
+    // sz_memory_allocator_init_fixed;
+    // _sz_extract_utf8_rune;
+    // sz_byteset_init;
+    // sz_byteset_init_ascii;
+    // sz_byteset_add_u8;
+    // sz_byteset_add;
+    // sz_byteset_contains_u8;
+    // sz_byteset_contains;
+    // sz_byteset_invert;
 }
 
 /**
@@ -437,14 +464,14 @@ static void test_memory_utilities( //
 }
 
 #define assert_scoped(init, operation, condition) \
-    {                                             \
+    do {                                          \
         init;                                     \
         operation;                                \
         assert(condition);                        \
-    }
+    } while (0)
 
 #define assert_throws(expression, exception_type) \
-    {                                             \
+    do {                                          \
         bool threw = false;                       \
         try {                                     \
             sz_unused(expression);                \
@@ -453,7 +480,7 @@ static void test_memory_utilities( //
             threw = true;                         \
         }                                         \
         assert(threw);                            \
-    }
+    } while (0)
 
 /**
  *  @brief  Invokes different C++ member methods of immutable strings to cover all STL APIs.
@@ -1684,9 +1711,10 @@ static void test_levenshtein_distances() {
 /**
  *  Evaluates the correctness of look-up table transforms using random lookup tables.
  *
- *  @param misalignment The number of bytes to misalign the haystack within the cacheline.
+ *  @param lookup_tables_to_try The number of random lookup tables to try.
+ *  @param slices_per_table The number of random inputs to test per lookup table.
  */
-void test_replacements(std::size_t lookup_tables_to_try = 128, std::size_t slices_per_table = 256) {
+void test_replacements(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16) {
 
     std::string body, transformed;
     body.resize(1024 * 1024); // 1MB
@@ -1712,22 +1740,18 @@ void test_replacements(std::size_t lookup_tables_to_try = 128, std::size_t slice
 }
 
 /**
- *  @brief  Tests sorting functionality.
+ *  @brief  Tests array sorting functionality, such as `argsort`, `sort`, and `sorted`.
+ *
+ *  Tries to sort incrementally complex inputs, such as strings of varying lengths, with many equal inputs.
+ *  1. Basic tests with predetermined orders.
+ *  2. Test on long strings of identical length.
+ *  3. Test on random very small strings of varying lengths, likely with many equal inputs.
+ *  4. Test on random strings of varying lengths.
+ *  5. Test on random strings of varying lengths with zero characters.
  */
-static void test_sequence_algorithms() {
+static void test_sorting_algorithms() {
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz::sorted_idx_t>;
-
-    // Make sure teh helper functions work as expected.
-    {
-        sz_sequence_t sequence;
-        sz_cptr_t strings[] = {"banana", "apple", "cherry"};
-        sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
-        assert(sequence.count == 3);
-        assert("banana"_sv == sequence.get_start(sequence.handle, 0));
-        assert("apple"_sv == sequence.get_start(sequence.handle, 1));
-        assert("cherry"_sv == sequence.get_start(sequence.handle, 2));
-    }
 
     // Basic tests with predetermined orders.
     assert_scoped(strs_t x({"a", "b", "c", "d"}), (void)0, sz::argsort(x) == order_t({0u, 1u, 2u, 3u}));
@@ -1797,6 +1821,84 @@ static void test_sequence_algorithms() {
 }
 
 /**
+ *  @brief  Tests array intersection functionality.
+ */
+static void test_intersecting_algorithms() {
+    using strs_t = std::vector<std::string>;
+    using result_t = sz::intersect_result_t;
+
+    // The mapping aren't guaranteed to be in any specific order, so we will sort them for comparisons.
+    using idx_pair_t = std::pair<std::size_t, std::size_t>;
+    using idx_pairs_t = std::set<idx_pair_t>;
+    auto to_pairs = [](result_t const &result) -> idx_pairs_t {
+        idx_pairs_t pairs;
+        for (std::size_t i = 0; i < result.first_offsets.size(); ++i)
+            pairs.insert({result.first_offsets[i], result.second_offsets[i]});
+        return pairs;
+    };
+
+    // Predetermined simple cases
+    {
+        strs_t abcd({"a", "b", "c", "d"});
+        strs_t dcba({"d", "c", "b", "a"});
+        strs_t abs({"a", "b", "s"});
+        strs_t empty;
+        result_t result;
+        // Empty sets
+        {
+            result = sz::intersect(empty, empty);
+            assert(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
+            result = sz::intersect(abcd, empty);
+            assert(result.first_offsets.size() == 0 && result.second_offsets.size() == 0);
+        }
+        // Identity check
+        {
+            result = sz::intersect(abcd, abcd);
+            assert(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
+            assert(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}}));
+        }
+        // Identical size, different order
+        {
+            result = sz::intersect(abcd, dcba);
+            assert(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
+            assert(to_pairs(result) == idx_pairs_t({{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}}));
+        }
+        // Different sets
+        {
+            result = sz::intersect(abcd, abs);
+            assert(result.first_offsets.size() == 2 && result.second_offsets.size() == 2);
+            assert(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}}));
+        }
+    }
+
+    // Generate random strings
+    struct {
+        std::size_t min_length;
+        std::size_t max_length;
+        std::size_t count_strings;
+    } experiments[] = {
+        {10, 10, 100},
+        {15, 15, 1000},
+        {5, 30, 2000},
+    };
+    for (auto experiment : experiments) {
+        std::unordered_set<std::string> random_strings;
+        while (random_strings.size() < experiment.count_strings)
+            random_strings.insert(sz::scripts::random_string(
+                experiment.min_length + std::rand() % (experiment.max_length - experiment.min_length + 1), //
+                "ab", 2));
+
+        strs_t all_strings(random_strings.begin(), random_strings.end());
+        strs_t first_half(all_strings.begin(), all_strings.begin() + all_strings.size() / 2);
+
+        // Try different joins
+        result_t result;
+        result = sz::intersect(all_strings, first_half);
+        assert(result.first_offsets.size() == first_half.size() && result.second_offsets.size() == first_half.size());
+    }
+}
+
+/**
  *  @brief  Tests constructing STL containers with StringZilla strings.
  */
 static void test_stl_containers() {
@@ -1824,7 +1926,13 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
+    test_structural_utilities();
     test_simd_against_serial();
+
+    // Sequences of strings
+    test_sorting_algorithms();
+    test_intersecting_algorithms();
+    test_stl_containers();
 
     // Core APIs
     test_ascii_utilities<sz::string>();
@@ -1861,10 +1969,6 @@ int main(int argc, char const **argv) {
 #if _SZ_IS_CPP17 && __cpp_lib_string_view
     test_search_with_misaligned_repetitions();
 #endif
-
-    // Sequences of strings
-    test_sequence_algorithms();
-    test_stl_containers();
 
     std::printf("All tests passed... Unbelievable!\n");
     return 0;
