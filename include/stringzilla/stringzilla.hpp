@@ -2030,7 +2030,7 @@ class basic_string_slice {
  *      * `replace`, `insert`, `erase`, `append`, `push_back`, `pop_back`, `resize`, `shrink_to_fit`... from STL,
  *      * `try_` exception-free "try" operations that returning non-zero values on success,
  *      * `replace_all` and `erase_all` similar to Boost,
- *      * `edit_distance` - Levenshtein distance computation reusing the allocator,
+ *      * `levenshtein_distance` - Levenshtein distance computation reusing the allocator,
  *      * `translate` - character mapping,
  *      * `randomize`, `random` - for fast random string generation.
  *
@@ -3360,11 +3360,12 @@ class basic_string {
 
     concatenation<string_view, string_view> operator|(string_view other) const noexcept { return {view(), other}; }
 
-    size_type edit_distance(string_view other, size_type bound = 0) const noexcept {
-        size_type result;
-        _with_alloc([&](sz_alloc_type &alloc) {
+    size_type levenshtein_distance(string_view other, size_type bound = std::numeric_limits<size_type>::max()) const
+        noexcept(false) {
+        size_type result = std::numeric_limits<size_type>::max();
+        raise(_with_alloc([&](sz_alloc_type &alloc) {
             return sz_levenshtein_distance(data(), size(), other.data(), other.size(), bound, &alloc, &result);
-        });
+        }));
         return result;
     }
 
@@ -3839,7 +3840,7 @@ typename concatenation_result<first_type, second_type, following_types...>::type
 template <typename char_type_>
 std::size_t hamming_distance(                                                         //
     basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
-    std::size_t bound = 0) noexcept {
+    std::size_t bound = SZ_SIZE_MAX) noexcept {
     std::size_t result;
     sz_hamming_distance(a.data(), a.size(), b.data(), b.size(), bound, &result);
     return result;
@@ -3852,7 +3853,7 @@ std::size_t hamming_distance(                                                   
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
 std::size_t hamming_distance(                                                                               //
     basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
-    std::size_t bound = 0) noexcept {
+    std::size_t bound = SZ_SIZE_MAX) noexcept {
     return ashvardanian::stringzilla::hamming_distance(a.view(), b.view(), bound);
 }
 
@@ -3862,7 +3863,8 @@ std::size_t hamming_distance(                                                   
  */
 template <typename char_type_>
 std::size_t hamming_distance_utf8( //
-    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, std::size_t bound = 0) noexcept {
+    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
+    std::size_t bound = SZ_SIZE_MAX) noexcept {
     std::size_t result;
     sz_hamming_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &result);
     return result;
@@ -3875,7 +3877,7 @@ std::size_t hamming_distance_utf8( //
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
 std::size_t hamming_distance_utf8( //
     basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b,
-    std::size_t bound = 0) noexcept {
+    std::size_t bound = SZ_SIZE_MAX) noexcept {
     return ashvardanian::stringzilla::hamming_distance_utf8(a.view(), b.view(), bound);
 }
 
@@ -3884,10 +3886,10 @@ std::size_t hamming_distance_utf8( //
  *  @sa sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t edit_distance( //
+std::size_t levenshtein_distance( //
     basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, std::size_t bound = SZ_SIZE_MAX,
     allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
-    std::size_t result;
+    std::size_t result = SZ_SIZE_MAX;
     raise(_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
         return sz_levenshtein_distance(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result);
     }));
@@ -3899,10 +3901,10 @@ std::size_t edit_distance( //
  *  @sa sz_levenshtein_distance
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::size_t edit_distance(                                                                                  //
+std::size_t levenshtein_distance(                                                                           //
     basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
     std::size_t bound = SZ_SIZE_MAX) noexcept(false) {
-    return ashvardanian::stringzilla::edit_distance(a.view(), b.view(), bound, a.get_allocator());
+    return ashvardanian::stringzilla::levenshtein_distance(a.view(), b.view(), bound, a.get_allocator());
 }
 
 /**
@@ -3910,10 +3912,10 @@ std::size_t edit_distance(                                                      
  *  @sa sz_levenshtein_distance_utf8
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t edit_distance_utf8(                                                       //
+std::size_t levenshtein_distance_utf8(                                                //
     basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
     std::size_t bound = SZ_SIZE_MAX, allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
-    std::size_t result;
+    std::size_t result = SZ_SIZE_MAX;
     raise(_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
         return sz_levenshtein_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result);
     }));
@@ -3925,10 +3927,10 @@ std::size_t edit_distance_utf8(                                                 
  *  @sa sz_levenshtein_distance_utf8
  */
 template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::size_t edit_distance_utf8(                                                                             //
+std::size_t levenshtein_distance_utf8(                                                                      //
     basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
     std::size_t bound = SZ_SIZE_MAX) noexcept(false) {
-    return ashvardanian::stringzilla::edit_distance_utf8(a.view(), b.view(), bound, a.get_allocator());
+    return ashvardanian::stringzilla::levenshtein_distance_utf8(a.view(), b.view(), bound, a.get_allocator());
 }
 
 /**
@@ -3945,7 +3947,7 @@ std::ptrdiff_t alignment_score(                                                 
     static_assert(std::is_signed<sz_error_cost_t>() == std::is_signed<std::int8_t>(),
                   "sz_error_cost_t must be signed.");
 
-    std::ptrdiff_t result;
+    std::ptrdiff_t result = SZ_SSIZE_MIN;
     raise(_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
         return sz_needleman_wunsch_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc, &result);
     }));

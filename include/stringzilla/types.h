@@ -811,6 +811,7 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #define SZ_CACHE_LINE_WIDTH (64) // bytes
 #define SZ_SIZE_MAX ((sz_size_t)(-1))
 #define SZ_SSIZE_MAX ((sz_ssize_t)(SZ_SIZE_MAX >> 1))
+#define SZ_SSIZE_MIN ((sz_ssize_t)(-SZ_SSIZE_MAX - 1))
 
 SZ_INTERNAL sz_size_t _sz_size_max(void) { return SZ_SIZE_MAX; }
 SZ_INTERNAL sz_ssize_t _sz_ssize_max(void) { return SZ_SSIZE_MAX; }

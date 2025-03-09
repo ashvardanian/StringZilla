@@ -975,27 +975,28 @@ static void test_non_stl_extensions_for_reads() {
     assert(sz::hamming_distance_utf8(str("abcdefgh"), str("_bcdefg_")) == 2); // replace ASCI prefix and suffix
     assert(sz::hamming_distance_utf8(str("αβγδ"), str("αγγδ")) == 1);         // replace Beta UTF8 codepoint
 
-    assert(sz::edit_distance(str("hello"), str("hello")) == 0);
-    assert(sz::edit_distance(str("hello"), str("hell")) == 1);
-    assert(sz::edit_distance(str(""), str("")) == 0);
-    assert(sz::edit_distance(str(""), str("abc")) == 3);
-    assert(sz::edit_distance(str("abc"), str("")) == 3);
-    assert(sz::edit_distance(str("abc"), str("ac")) == 1);                   // one deletion
-    assert(sz::edit_distance(str("abc"), str("a_bc")) == 1);                 // one insertion
-    assert(sz::edit_distance(str("abc"), str("adc")) == 1);                  // one substitution
-    assert(sz::edit_distance(str("ggbuzgjux{}l"), str("gbuzgjux{}l")) == 1); // one insertion (prepended)
-    assert(sz::edit_distance(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg")) == 14);
+    assert(sz::levenshtein_distance(str("hello"), str("hello")) == 0);
+    assert(sz::levenshtein_distance(str("hello"), str("hell")) == 1);
+    assert(sz::levenshtein_distance(str(""), str("")) == 0);
+    assert(sz::levenshtein_distance(str(""), str("abc")) == 3);
+    assert(sz::levenshtein_distance(str("abc"), str("")) == 3);
+    assert(sz::levenshtein_distance(str("abc"), str("ac")) == 1);                   // one deletion
+    assert(sz::levenshtein_distance(str("abc"), str("a_bc")) == 1);                 // one insertion
+    assert(sz::levenshtein_distance(str("abc"), str("adc")) == 1);                  // one substitution
+    assert(sz::levenshtein_distance(str("ggbuzgjux{}l"), str("gbuzgjux{}l")) == 1); // one insertion (prepended)
+    assert(sz::levenshtein_distance(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg")) == 14);
 
-    assert(sz::edit_distance_utf8(str("hello"), str("hell")) == 1);           // no unicode symbols, just ASCII
-    assert(sz::edit_distance_utf8(str("𠜎 𠜱 𠝹 𠱓"), str("𠜎𠜱𠝹𠱓")) == 3); // add 3 whitespaces in Chinese
-    assert(sz::edit_distance_utf8(str("💖"), str("💗")) == 1);
+    assert(sz::levenshtein_distance_utf8(str("hello"), str("hell")) == 1);           // no unicode symbols, just ASCII
+    assert(sz::levenshtein_distance_utf8(str("𠜎 𠜱 𠝹 𠱓"), str("𠜎𠜱𠝹𠱓")) == 3); // add 3 whitespaces in Chinese
+    assert(sz::levenshtein_distance_utf8(str("💖"), str("💗")) == 1);
 
-    assert(sz::edit_distance_utf8(str("αβγδ"), str("αγδ")) == 1);      // insert Beta
-    assert(sz::edit_distance_utf8(str("école"), str("école")) == 2);   // etter "é" as a single character vs "e" + "´"
-    assert(sz::edit_distance_utf8(str("façade"), str("facade")) == 1); // "ç" with cedilla vs. plain
-    assert(sz::edit_distance_utf8(str("Schön"), str("Scho\u0308n")) == 2); // "ö" represented as "o" + "¨"
-    assert(sz::edit_distance_utf8(str("München"), str("Muenchen")) == 2);  // German with umlaut vs. transcription
-    assert(sz::edit_distance_utf8(str("こんにちは世界"), str("こんばんは世界")) == 2);
+    assert(sz::levenshtein_distance_utf8(str("αβγδ"), str("αγδ")) == 1); // insert Beta
+    assert(sz::levenshtein_distance_utf8(str("école"), str("école")) ==
+           2); // etter "é" as a single character vs "e" + "´"
+    assert(sz::levenshtein_distance_utf8(str("façade"), str("facade")) == 1);     // "ç" with cedilla vs. plain
+    assert(sz::levenshtein_distance_utf8(str("Schön"), str("Scho\u0308n")) == 2); // "ö" represented as "o" + "¨"
+    assert(sz::levenshtein_distance_utf8(str("München"), str("Muenchen")) == 2); // German with umlaut vs. transcription
+    assert(sz::levenshtein_distance_utf8(str("こんにちは世界"), str("こんばんは世界")) == 2);
 
     // Computing alignment scores.
     using matrix_t = std::int8_t[256][256];
@@ -1645,20 +1646,20 @@ static void test_levenshtein_distances() {
     };
 
     auto test_distance = [&](sz::string const &l, sz::string const &r, std::size_t expected) {
-        auto received = sz::edit_distance(l, r);
+        auto received = sz::levenshtein_distance(l, r);
         auto received_score = sz::alignment_score(l, r, costs, -1);
         if (received != expected) print_failure("Levenshtein", l, r, expected, received);
         if ((std::size_t)(-received_score) != expected) print_failure("Scoring", l, r, expected, received_score);
         // The distance relation commutes
-        received = sz::edit_distance(r, l);
+        received = sz::levenshtein_distance(r, l);
         received_score = sz::alignment_score(r, l, costs, -1);
         if (received != expected) print_failure("Levenshtein", r, l, expected, received);
         if ((std::size_t)(-received_score) != expected) print_failure("Scoring", r, l, expected, received_score);
 
         // Validate the bounded variants:
         if (received > 1) {
-            assert(sz::edit_distance(l, r, received) == received);
-            assert(sz::edit_distance(r, l, received - 1) >= (std::max)(l.size(), r.size()));
+            assert(sz::levenshtein_distance(l, r, received) == received);
+            assert(sz::levenshtein_distance(r, l, received - 1) >= (std::max)(l.size(), r.size()));
         }
     };
 
