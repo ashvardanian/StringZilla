@@ -652,9 +652,10 @@ class range_rmatches {
 
         iterator(string_type haystack, matcher_type matcher) noexcept : matcher_(matcher), remaining_(haystack) {
             auto position = matcher_(remaining_);
-            remaining_.remove_suffix(position != string_type::npos
-                                         ? remaining_.size() - position - matcher_.needle_length()
-                                         : remaining_.size());
+            remaining_.remove_suffix(         //
+                position != string_type::npos //
+                    ? remaining_.size() - position - matcher_.needle_length()
+                    : remaining_.size());
         }
 
         pointer operator->() const noexcept = delete;
@@ -665,9 +666,10 @@ class range_rmatches {
         iterator &operator++() noexcept {
             remaining_.remove_suffix(matcher_.skip_length());
             auto position = matcher_(remaining_);
-            remaining_.remove_suffix(position != string_type::npos
-                                         ? remaining_.size() - position - matcher_.needle_length()
-                                         : remaining_.size());
+            remaining_.remove_suffix(         //
+                position != string_type::npos //
+                    ? remaining_.size() - position - matcher_.needle_length()
+                    : remaining_.size());
             return *this;
         }
 
@@ -1100,12 +1102,10 @@ static void _call_free(void *ptr, sz_size_t n, void *allocator_state) noexcept {
     return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<value_type_ *>(ptr), n);
 }
 
-template <typename generator_type_>
-static sz_u64_t _call_random_generator(void *state) noexcept {
-    generator_type_ &generator = *reinterpret_cast<generator_type_ *>(state);
-    return generator();
-}
-
+/**
+ *  @brief Helper function, wrapping a C++ allocator into a C-style allocator.
+ *  @return Error code or success. All allocating functions may fail.
+ */
 template <typename allocator_type_, typename allocator_callback_>
 static status_t _with_alloc(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
     sz_memory_allocator_t alloc;
@@ -2018,7 +2018,7 @@ class basic_string_slice {
 #pragma endregion
 
 /**
- *  @brief  Memory-owning string class with a Small String Optimization.
+ *  @brief Memory-owning string class with a Small String Optimization.
  *
  *  @section API
  *
@@ -2873,7 +2873,7 @@ class basic_string {
     }
 
     /**
-     *  @brief  Replaces @b (in-place) a range of characters with a given string.
+     *  @brief Replaces @b (in-place) a range of characters with a given string.
      *  @return `true` if the replacement was successful, `false` otherwise.
      */
     bool try_replace(difference_type signed_start_offset, difference_type signed_end_offset,
@@ -2929,9 +2929,9 @@ class basic_string {
     basic_string &insert(size_type offset, size_type repeats, char_type character) noexcept(false) {
         if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
         if (size() + repeats > max_size()) throw std::length_error("sz::basic_string::insert");
-        if (!_with_alloc([&](sz_alloc_type &alloc) { return sz_string_expand(&string_, offset, repeats, &alloc); }))
-            throw std::bad_alloc();
-
+        raise(_with_alloc([&](sz_alloc_type &alloc) {
+            return sz_string_expand(&string_, offset, repeats, &alloc) ? sz_success_k : sz_bad_alloc_k;
+        }));
         sz_fill(data() + offset, repeats, character);
         return *this;
     }
@@ -2974,10 +2974,10 @@ class basic_string {
     }
 
     /**
-     *  @brief  Inserts @b (in-place) one ::character at the given iterator position.
-     *  @throw  `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
-     *  @throw  `std::length_error` if the string is too long.
-     *  @throw  `std::bad_alloc` if the allocation fails.
+     *  @brief Inserts @b (in-place) one ::character at the given iterator position.
+     *  @throw `std::out_of_range` if `pos > size()` or `other_index > other.size()`.
+     *  @throw `std::length_error` if the string is too long.
+     *  @throw `std::bad_alloc` if the allocation fails.
      */
     iterator insert(const_iterator it, char_type character) noexcept(false) {
         auto pos = range_length(cbegin(), it);
@@ -3375,11 +3375,10 @@ class basic_string {
     size_type bytesum() const noexcept { return view().bytesum(); }
 
     /**
-     *  @brief  Overwrites the string with random binary data.
-     *
+     *  @brief Overwrites the string with random binary data.
      *  @param[in] nonce "Number used ONCE" to initialize the random number generator, @b don't repeat it!
      */
-    basic_string &randomize(sz_u64_t nonce) noexcept {
+    basic_string &fill_random(sz_u64_t nonce) noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
@@ -3755,8 +3754,8 @@ bool basic_string<char_type_, allocator_>::try_preparing_replacement( //
 }
 
 /**
- *  @brief  Helper function-like object to order string-view convertible objects with StringZilla.
- *  @see    Similar to `std::less<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/less
+ *  @brief Helper function-like object to order string-view convertible objects with StringZilla.
+ *  @see Similar to `std::less<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/less
  *
  *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
  *  Can be used to combine STL classes with StringZilla logic, like: `std::map<std::string, int, sz::string_view_less>`.

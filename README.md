@@ -1072,11 +1072,11 @@ Similar to Python it also defines the commonly used character sets.
 auto protein = sz::string::random(300, "ARNDCQEGHILKMFPSTWYV"); // static method
 auto dna = sz::basic_string<custom_allocator>::random(3_000_000_000, "ACGT");
 
-dna.randomize("ACGT"); // `noexcept` pre-allocated version
-dna.randomize(&std::rand, "ACGT"); // pass any generator, like `std::mt19937`
+dna.fill_random("ACGT"); // `noexcept` pre-allocated version
+dna.fill_random(&std::rand, "ACGT"); // pass any generator, like `std::mt19937`
 
 char uuid[36];
-sz::randomize(sz::string_span(uuid, 36), "0123456789abcdef-"); // Overwrite any buffer
+sz::fill_random(sz::string_span(uuid, 36), "0123456789abcdef-"); // Overwrite any buffer
 ```
 
 ### Bulk Replacements

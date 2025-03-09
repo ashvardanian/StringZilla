@@ -309,7 +309,7 @@ SZ_INTERNAL sz_status_t _sz_levenshtein_distance_skewed_diagonals_serial( //
     }
 
     // TODO: Generalize to remove the following asserts!
-    _sz_assert(!bound && "For bounded search the method should only evaluate one band of the matrix.");
+    _sz_assert(bound >= longer_length && "For bounded search the method should only evaluate one band of the matrix.");
     _sz_assert(shorter_length == longer_length && "The method hasn't been generalized to different length inputs yet.");
     sz_unused(longer_length && bound);
 
@@ -860,7 +860,7 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto63_ice( //
 
         // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
         __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
-        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return longer_length + 1;
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return bound;
     }
 
     // Now let's handle the anti-diagonal band of the matrix, between the top and bottom triangles.
@@ -891,7 +891,7 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto63_ice( //
 
         // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
         __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
-        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return longer_length + 1;
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return bound;
     }
 
     // Now let's handle the bottom right triangle.
@@ -915,7 +915,7 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto63_ice( //
 
         // Check if we can exit early - if none of the diagonals values are smaller than the upper distance bound.
         __mmask64 within_bound_mask = _mm512_cmple_epu8_mask(next_vec.zmm, bound_vec.zmm);
-        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return longer_length + 1;
+        if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return bound;
 
         // In every following iterations we take use a shorter prefix of each register,
         // but we don't need to update the `next_diagonal_mask` anymore... except for the early exit.

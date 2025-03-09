@@ -843,7 +843,7 @@ SZ_INTERNAL void _sz_hash_minimal_init_haswell(_sz_hash_minimal_t *state, sz_u64
     __m128i k1 = _mm_xor_si128(seed_vec, pi0);
     __m128i k2 = _mm_xor_si128(seed_vec, pi1);
 
-    // The first 128 bits of the "sum" and "AES" blocks are the same
+    // The first 128 bits of the "sum" and "AES" blocks are the same for the "minimal" and full state
     state->aes.xmm = k1;
     state->sum.xmm = k2;
 }
@@ -1559,6 +1559,8 @@ SZ_INTERNAL void _sz_hash_state_update_ice(sz_hash_state_t *state) {
 
 SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
 
+    // For short strings the "masked loads" are identical to Skylake-X and
+    // the "logic" is identical to Haswell.
     if (length <= 16) {
         // Initialize the AES block with a given seed
         _sz_hash_minimal_t state;
@@ -1611,6 +1613,7 @@ SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed)
         _sz_hash_minimal_update_haswell(&state, data3_vec.xmm);
         return _sz_hash_minimal_finalize_haswell(&state, length);
     }
+    // This is where the logic differs from Skylake-X and other pre-Ice Lake CPUs:
     else {
         // Use a larger state to handle the main loop and add different offsets
         // to different lanes of the register
@@ -1714,6 +1717,64 @@ SZ_PUBLIC void sz_fill_random_ice(sz_ptr_t output, sz_size_t length, sz_u64_t no
         __mmask64 store_mask = _sz_u64_mask_until(length - i);
         _mm512_mask_storeu_epi8((void *)(output + i), store_mask, generated);
     }
+}
+
+/**
+ *  @brief  A wider parallel analog of `_sz_hash_minimal_t`, which is not used for computing individual hashes,
+ *          but for parallel hashing of @b short 4x separate strings under 16 bytes long.
+ *          Useful for higher-level Database and Machine Learning operations.
+ */
+typedef struct _sz_hash_minimal_x4_t {
+    sz_u512_vec_t aes;
+    sz_u512_vec_t sum;
+    sz_u512_vec_t key;
+} _sz_hash_minimal_x4_t;
+
+SZ_INTERNAL void _sz_hash_minimal_x4_init_ice(_sz_hash_minimal_x4_t *state, sz_u64_t seed) {
+
+    // The key is made from the seed and half of it will be mixed with the length in the end
+    __m512i seed_vec = _mm512_set1_epi64(seed);
+    state->key.zmm = seed_vec;
+
+    // XOR the user-supplied keys with the two "pi" constants
+    sz_u64_t const *pi = _sz_hash_pi_constants();
+    __m512i pi0 = _mm512_load_si512((__m512i const *)(pi));
+    __m512i pi1 = _mm512_load_si512((__m512i const *)(pi + 8));
+    // We will load the entire 512-bit values, but will only use the first 128 bits,
+    // replicating it 4x times across the register. The `_mm512_shuffle_i64x2` is supposed to
+    // be faster than `_mm512_broadcast_i64x2` on Ice Lake.
+    pi0 = _mm512_shuffle_i64x2(pi0, pi0, 0);
+    pi1 = _mm512_shuffle_i64x2(pi1, pi1, 0);
+    __m512i k1 = _mm512_xor_si512(seed_vec, pi0);
+    __m512i k2 = _mm512_xor_si512(seed_vec, pi1);
+
+    // The first 128 bits of the "sum" and "AES" blocks are the same for the "minimal" and full state
+    state->aes.zmm = k1;
+    state->sum.zmm = k2;
+}
+
+SZ_INTERNAL __m256i _sz_hash_minimal_x4_finalize_ice(_sz_hash_minimal_x4_t const *state, //
+                                                     sz_size_t length0, sz_size_t length1, sz_size_t length2,
+                                                     sz_size_t length3) {
+    __m512i const padded_lengths = _mm512_set_epi64(0, length3, 0, length2, 0, length1, 0, length0);
+    // Mix the length into the key
+    __m512i key_with_length = _mm512_add_epi64(state->key.zmm, padded_lengths);
+    // Combine the "sum" and the "AES" blocks
+    __m512i mixed_registers = _mm512_aesenc_epi128(state->sum.zmm, state->aes.zmm);
+    // Make sure the "key" mixes enough with the state,
+    // as with less than 2 rounds - SMHasher fails
+    __m512i mixed_within_register =
+        _mm512_aesenc_epi128(_mm512_aesenc_epi128(mixed_registers, key_with_length), mixed_registers);
+    // Extract the low 64 bits from each 128-bit lane - weirdly using the `permutexvar` instruction
+    // is cheaper than compressing instructions like `_mm512_maskz_compress_epi64`.
+    return _mm512_castsi512_si256(
+        _mm512_permutexvar_epi64(_mm512_set_epi64(0, 0, 0, 0, 6, 4, 2, 0), mixed_within_register));
+}
+
+SZ_INTERNAL void _sz_hash_minimal_x4_update_ice(_sz_hash_minimal_x4_t *state, __m512i blocks) {
+    __m512i const shuffle_mask = _mm512_load_si512((__m512i const *)_sz_hash_u8x16x4_shuffle());
+    state->aes.zmm = _mm512_aesenc_epi128(state->aes.zmm, blocks);
+    state->sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state->sum.zmm, shuffle_mask), blocks);
 }
 
 #pragma clang attribute pop

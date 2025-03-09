@@ -23,6 +23,24 @@ pub mod sz {
         bits: [u64; 4],
     }
 
+    pub type SortedIdx = usize;
+
+    #[repr(C)]
+    pub struct Sequence {
+        pub handle: *const c_void,
+        pub count: usize,
+        pub get_start: Option<unsafe extern "C" fn(handle: *const c_void, idx: usize) -> *const c_void>,
+        pub get_length: Option<unsafe extern "C" fn(handle: *const c_void, idx: usize) -> usize>,
+    }
+
+    /// A simple semantic version structure.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    pub struct SemVer {
+        pub major: i32,
+        pub minor: i32,
+        pub patch: i32,
+    }
+
     impl Byteset {
         /// Initializes a bit‑set to an empty collection (all characters banned).
         #[inline]
@@ -102,7 +120,17 @@ pub mod sz {
 
         fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
 
-        // fn sz_sort() -> Status;
+        pub fn sz_sequence_argsort(sequence: *const Sequence, alloc: *const c_void, order: *mut SortedIdx) -> Status;
+
+        pub fn sz_sequence_intersect(
+            first_sequence: *const Sequence,
+            second_sequence: *const Sequence,
+            alloc: *const c_void,
+            seed: u64,
+            intersection_size: *mut usize,
+            first_positions: *mut SortedIdx,
+            second_positions: *mut SortedIdx,
+        ) -> Status;
 
         pub fn sz_levenshtein_distance(
             a: *const c_void,
@@ -160,14 +188,6 @@ pub mod sz {
         fn sz_hash_state_fold(state: *const c_void) -> u64;
 
         fn sz_lookup(target: *const c_void, length: usize, source: *const c_void, lut: *const u8) -> *const c_void;
-    }
-
-    /// A simple semantic version structure.
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-    pub struct SemVer {
-        pub major: i32,
-        pub minor: i32,
-        pub patch: i32,
     }
 
     impl SemVer {

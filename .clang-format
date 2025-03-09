@@ -6,6 +6,7 @@ NamespaceIndentation: None
 ColumnLimit: 120
 ReflowComments: true
 UseTab: Never
+IndentPPDirectives: None
 
 AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false

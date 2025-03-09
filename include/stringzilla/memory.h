@@ -5,12 +5,11 @@
  *
  *  Includes core APIs for contiguous memory operations:
  *
- *  - @b `sz_copy` - analog to `memcpy`, probably the most common operation in a computer
- *  - @b `sz_move` - analog to `memmove`, allowing overlapping memory regions, often used in string manipulation
- *  - @b `sz_fill` - analog to `memset`, often used to initialize memory with a constant value, like zero
+ *  - @b `sz_copy` - analog to @b `memcpy`, probably the most common operation in a computer
+ *  - @b `sz_move` - analog to @b `memmove`, allowing overlapping memory regions, often used in string manipulation
+ *  - @b `sz_fill` - analog to @b `memset`, often used to initialize memory with a constant value, like zero
  *  - @b `sz_lookup` - Look-Up Table @b (LUT) transformation of a string, mapping each byte to a new value
  *  - TODO: @b `sz_lookup_utf8` - LUT transformation of a UTF8 string, which can be used for normalization
- *  - TODO: @b `sz_detect_encoding` - detects the character encoding similar to "iconv" or "chardet" tools
  *
  *  All of the core APIs receive the target output buffer as the first argument,
  *  and aim to minimize the number of "store" instructions, especially unaligned ones,
@@ -1082,62 +1081,6 @@ SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source
         _mm512_mask_storeu_epi8(target, tail_mask, blended_0_to_255_vec.zmm);
         source += tail_length, target += tail_length, length -= tail_length;
     }
-}
-
-enum sz_encoding_t {
-    sz_encoding_unknown_k = 0,
-    sz_encoding_ascii_k = 1,
-    sz_encoding_utf8_k = 2,
-    sz_encoding_utf16_k = 3,
-    sz_encoding_utf32_k = 4,
-    sz_encoding_jwt_k = 5,
-    sz_encoding_base64_k = 6,
-    // Low priority encodings:
-    sz_encoding_utf8bom_k = 7,
-    sz_encoding_utf16le_k = 8,
-    sz_encoding_utf16be_k = 9,
-    sz_encoding_utf32le_k = 10,
-    sz_encoding_utf32be_k = 11,
-};
-
-// Character Set Detection is one of the most commonly performed operations in data processing with
-// [Chardet](https://github.com/chardet/chardet), [Charset Normalizer](https://github.com/jawah/charset_normalizer),
-// [cChardet](https://github.com/PyYoshi/cChardet) being the most commonly used options in the Python ecosystem.
-// All of them are notoriously slow.
-//
-// Moreover, as of October 2024, UTF-8 is the dominant character encoding on the web, used by 98.4% of websites.
-// Other have minimal usage, according to [W3Techs](https://w3techs.com/technologies/overview/character_encoding):
-// - ISO-8859-1: 1.2%
-// - Windows-1252: 0.3%
-// - Windows-1251: 0.2%
-// - EUC-JP: 0.1%
-// - Shift JIS: 0.1%
-// - EUC-KR: 0.1%
-// - GB2312: 0.1%
-// - Windows-1250: 0.1%
-// Within programming language implementations and database management systems, 16-bit and 32-bit fixed-width encodings
-// are also very popular and we need a way to efficienly differentiate between the most common UTF flavors, ASCII, and
-// the rest.
-//
-// One good solution is the [simdutf](https://github.com/simdutf/simdutf) library, but it depends on the C++ runtime
-// and focuses more on incremental validation & transcoding, rather than detection.
-//
-// So we need a very fast and efficient way of determining
-SZ_PUBLIC sz_bool_t sz_detect_encoding(sz_cptr_t text, sz_size_t length) {
-    // https://github.com/simdutf/simdutf/blob/master/src/icelake/icelake_utf8_validation.inl.cpp
-    // https://github.com/simdutf/simdutf/blob/603070affe68101e9e08ea2de19ea5f3f154cf5d/src/icelake/icelake_from_utf8.inl.cpp#L81
-    // https://github.com/simdutf/simdutf/blob/603070affe68101e9e08ea2de19ea5f3f154cf5d/src/icelake/icelake_utf8_common.inl.cpp#L661
-    // https://github.com/simdutf/simdutf/blob/603070affe68101e9e08ea2de19ea5f3f154cf5d/src/icelake/icelake_utf8_common.inl.cpp#L788
-
-    // We can implement this operation simpler & differently, assuming most of the time continuous chunks of memory
-    // have identical encoding. With Russian and many European languages, we generally deal with 2-byte codepoints
-    // with occasional 1-byte punctuation marks. In the case of Chinese, Japanese, and Korean, we deal with 3-byte
-    // codepoints. In the case of emojis, we deal with 4-byte codepoints.
-    // We can also use the idea, that misaligned reads are quite cheap on modern CPUs.
-    int can_be_ascii = 1, can_be_utf8 = 1, can_be_utf16 = 1, can_be_utf32 = 1;
-    sz_unused(can_be_ascii + can_be_utf8 + can_be_utf16 + can_be_utf32);
-    sz_unused(text && length);
-    return sz_false_k;
 }
 
 #pragma clang attribute pop
