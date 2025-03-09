@@ -401,14 +401,25 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_2byte_equal(sz_u64_vec_t a, sz_u64_vec_t b
     return vec;
 }
 
+SZ_INTERNAL sz_cptr_t _sz_find_1byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_unused(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
+    return sz_find_byte_serial(h, h_length, n);
+}
+
+SZ_INTERNAL sz_cptr_t _sz_rfind_1byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
+    sz_unused(n_length); //? We keep this argument only for `sz_rfind_t` signature compatibility.
+    return sz_rfind_byte_serial(h, h_length, n);
+}
+
 /**
  *  @brief  Find the first occurrence of a @b two-character needle in an arbitrary length haystack.
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t _sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_INTERNAL sz_cptr_t _sz_find_2byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 2 bytes long.
     _sz_assert(h_length >= 2 && "The haystack is too short.");
+    sz_unused(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
     sz_cptr_t const h_end = h + h_length;
 
 #if !SZ_USE_MISALIGNED_LOADS
@@ -459,10 +470,11 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_4byte_equal(sz_u64_vec_t a, sz_u64_vec_t b
  *  @brief  Find the first occurrence of a @b four-character needle in an arbitrary length haystack.
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_INTERNAL sz_cptr_t _sz_find_4byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
     _sz_assert(h_length >= 4 && "The haystack is too short.");
+    sz_unused(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
     sz_cptr_t const h_end = h + h_length;
 
 #if !SZ_USE_MISALIGNED_LOADS
@@ -523,10 +535,11 @@ SZ_INTERNAL sz_u64_vec_t _sz_u64_each_3byte_equal(sz_u64_vec_t a, sz_u64_vec_t b
  *  @brief  Find the first occurrence of a @b three-character needle in an arbitrary length haystack.
  *          This implementation uses hardware-agnostic SWAR technique, to process 8 possible offsets at a time.
  */
-SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n) {
+SZ_INTERNAL sz_cptr_t _sz_find_3byte_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz_size_t n_length) {
 
     // This is an internal method, and the haystack is guaranteed to be at least 4 bytes long.
     _sz_assert(h_length >= 3 && "The haystack is too short.");
+    sz_unused(n_length); //? We keep this argument only for `sz_find_t` signature compatibility.
     sz_cptr_t const h_end = h + h_length;
 
 #if !SZ_USE_MISALIGNED_LOADS
@@ -753,24 +766,24 @@ SZ_PUBLIC sz_cptr_t sz_find_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n,
 
 #if _SZ_IS_BIG_ENDIAN
     sz_find_t backends[] = {
-        (sz_find_t)sz_find_byte_serial,
-        (sz_find_t)_sz_find_horspool_upto_256bytes_serial,
-        (sz_find_t)_sz_find_horspool_over_256bytes_serial,
+        _sz_find_1byte_serial,
+        _sz_find_horspool_upto_256bytes_serial,
+        _sz_find_horspool_over_256bytes_serial,
     };
 
     return backends[(n_length > 1) + (n_length > 256)](h, h_length, n, n_length);
 #else
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
-        (sz_find_t)sz_find_byte_serial,
-        (sz_find_t)_sz_find_2byte_serial,
-        (sz_find_t)_sz_find_3byte_serial,
-        (sz_find_t)_sz_find_4byte_serial,
+        _sz_find_1byte_serial,
+        _sz_find_2byte_serial,
+        _sz_find_3byte_serial,
+        _sz_find_4byte_serial,
         // To avoid constructing the skip-table, let's use the prefixed approach.
-        (sz_find_t)_sz_find_over_4bytes_serial,
+        _sz_find_over_4bytes_serial,
         // For longer needles - use skip tables.
-        (sz_find_t)_sz_find_horspool_upto_256bytes_serial,
-        (sz_find_t)_sz_find_horspool_over_256bytes_serial,
+        _sz_find_horspool_upto_256bytes_serial,
+        _sz_find_horspool_over_256bytes_serial,
     };
 
     return backends[
@@ -790,16 +803,16 @@ SZ_PUBLIC sz_cptr_t sz_rfind_serial(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n
 
     sz_find_t backends[] = {
         // For very short strings brute-force SWAR makes sense.
-        (sz_find_t)sz_rfind_byte_serial,
+        _sz_rfind_1byte_serial,
         //  TODO: implement reverse-order SWAR for 2/3/4 byte variants.
-        //  TODO: (sz_find_t)_sz_rfind_2byte_serial,
-        //  TODO: (sz_find_t)_sz_rfind_3byte_serial,
-        //  TODO: (sz_find_t)_sz_rfind_4byte_serial,
+        //  TODO: _sz_rfind_2byte_serial,
+        //  TODO: _sz_rfind_3byte_serial,
+        //  TODO: _sz_rfind_4byte_serial,
         // To avoid constructing the skip-table, let's use the prefixed approach.
-        // (sz_find_t)_sz_rfind_over_4bytes_serial,
+        // _sz_rfind_over_4bytes_serial,
         // For longer needles - use skip tables.
-        (sz_find_t)_sz_rfind_horspool_upto_256bytes_serial,
-        (sz_find_t)_sz_rfind_horspool_over_256bytes_serial,
+        _sz_rfind_horspool_upto_256bytes_serial,
+        _sz_rfind_horspool_over_256bytes_serial,
     };
 
     return backends[
