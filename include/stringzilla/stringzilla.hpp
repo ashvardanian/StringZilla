@@ -4011,27 +4011,25 @@ void lookup(basic_string_slice<char_type_> string, basic_look_up_table<char_type
  *  @brief Internal data-structure used to wrap arbitrary sequential containers with a random-order lookup.
  *  @sa try_argsort, argsort, try_join, join
  */
-template <typename objects_type_, typename string_extractor_>
+template <typename container_type_, typename string_extractor_>
 struct _sequence_args {
-    objects_type_ const *begin;
-    std::size_t count;
-    sorted_idx_t *order;
-    string_extractor_ extractor;
+    container_type_ const &container;
+    string_extractor_ const &extractor;
 };
 
-template <typename objects_type_, typename string_extractor_>
-sz_cptr_t _call_sequence_member_start(void const *sequence, sz_size_t i) {
-    using handle_type = _sequence_args<objects_type_, string_extractor_>;
-    handle_type const *args = reinterpret_cast<handle_type const *>(sequence);
-    string_view member = args->extractor(args->begin[i]);
+template <typename container_type_, typename string_extractor_>
+sz_cptr_t _call_sequence_member_start(void const *sequence_args_ptr, sz_size_t i) {
+    using sequence_args_t = _sequence_args<container_type_, string_extractor_>;
+    sequence_args_t const *args = reinterpret_cast<sequence_args_t const *>(sequence_args_ptr);
+    string_view member = args->extractor(args->container[i]);
     return member.data();
 }
 
-template <typename objects_type_, typename string_extractor_>
-sz_size_t _call_sequence_member_length(void const *sequence, sz_size_t i) {
-    using handle_type = _sequence_args<objects_type_, string_extractor_>;
-    handle_type const *args = reinterpret_cast<handle_type const *>(sequence);
-    string_view member = args->extractor(args->begin[i]);
+template <typename container_type_, typename string_extractor_>
+sz_size_t _call_sequence_member_length(void const *sequence_args_ptr, sz_size_t i) {
+    using sequence_args_t = _sequence_args<container_type_, string_extractor_>;
+    sequence_args_t const *args = reinterpret_cast<sequence_args_t const *>(sequence_args_ptr);
+    string_view member = args->extractor(args->container[i]);
     return static_cast<sz_size_t>(member.size());
 }
 
@@ -4039,40 +4037,79 @@ sz_size_t _call_sequence_member_length(void const *sequence, sz_size_t i) {
  *  @brief  Computes the permutation of an array, that would lead to sorted order.
  *          The elements of the array must be convertible to a `string_view` with the given extractor.
  *          Unlike the `sz_sequence_argsort` C interface, overwrites the output array.
+ *  @sa     sz_sequence_argsort
  *
- *  @param[in] begin       The pointer to the first element of the array.
- *  @param[in] end         The pointer to the element after the last element of the array.
- *  @param[out] order      The pointer to the output array of indices, that will be populated with the permutation.
- *  @param[in] extractor   The function object that extracts the string from the object.
- *
- *  @see    sz_sequence_argsort
+ *  @param[in] begin The pointer to the first element of the array.
+ *  @param[in] end The pointer to the element after the last element of the array.
+ *  @param[in] extractor The function object that extracts the string from the object.
+ *  @param[out] order The pointer to the output array of indices, that will be populated with the permutation.
  */
-template <typename objects_type_, typename string_extractor_>
-void argsort(objects_type_ const *begin, objects_type_ const *end, sorted_idx_t *order,
-             string_extractor_ &&extractor) noexcept {
+template <typename container_type_, typename string_extractor_>
+status_t try_argsort(container_type_ const &container, string_extractor_ const &extractor,
+                     sorted_idx_t *order) noexcept {
 
     // Pack the arguments into a single structure to reference it from the callback.
-    _sequence_args<objects_type_, string_extractor_> args = {begin, static_cast<std::size_t>(end - begin), order,
-                                                             std::forward<string_extractor_>(extractor)};
-    // Populate the array with `iota`-style order.
-    for (std::size_t i = 0; i != args.count; ++i) order[i] = static_cast<sorted_idx_t>(i);
-
-    sz_sequence_t array;
-    array.count = args.count;
-    array.handle = &args;
-    array.get_start = _call_sequence_member_start<objects_type_, string_extractor_>;
-    array.get_length = _call_sequence_member_length<objects_type_, string_extractor_>;
+    using args_t = _sequence_args<container_type_, string_extractor_>;
+    args_t args {container, extractor};
+    sz_sequence_t sequence;
+    sequence.handle = &args;
+    sequence.count = container.size();
+    sequence.get_start = _call_sequence_member_start<container_type_, string_extractor_>;
+    sequence.get_length = _call_sequence_member_length<container_type_, string_extractor_>;
 
     using sz_alloc_type = sz_memory_allocator_t;
-    _with_alloc<std::allocator<sz_u8_t>>(
-        [&](sz_alloc_type &alloc) { return sz_sequence_argsort(&array, &alloc, order); });
+    return _with_alloc<std::allocator<sz_u8_t>>(
+        [&](sz_alloc_type &alloc) { return sz_sequence_argsort(&sequence, &alloc, order); });
+}
+
+/**
+ *  @brief Locates the positions of the elements in 2 deduplicated string arrays that have identical values.
+ *  @sa sz_sequence_join
+ *
+ *  @param[in] first_begin The pointer to the first element of the first array.
+ *  @param[in] first_end The pointer to the element after the last element of the first array.
+ *  @param[in] second_begin The pointer to the first element of the second array.
+ *  @param[in] second_end The pointer to the element after the last element of the second array.
+ *  @param[out] first_positions The pointer to the output array of indices from the first array.
+ *  @param[out] second_positions The pointer to the output array of indices from the second array.
+ *  @param[in] first_extractor The function object that extracts the string from the object in the first array.
+ *  @param[in] second_extractor The function object that extracts the string from the object in the second array.
+ */
+template <typename first_container_, typename second_container_, typename first_extractor_, typename second_extractor_>
+status_t try_intersect(                                                                   //
+    first_container_ const &first_container, first_extractor_ const &first_extractor,     //
+    second_container_ const &second_container, second_extractor_ const &second_extractor, //
+    std::uint64_t seed, std::size_t *intersection_size_ptr,                               //
+    sorted_idx_t *first_positions, sorted_idx_t *second_positions) noexcept {
+
+    // Pack the arguments into a single structure to reference it from the callback.
+    using first_t = _sequence_args<first_container_, first_extractor_>;
+    using second_t = _sequence_args<second_container_, second_extractor_>;
+    first_t first_args {first_container, first_extractor};
+    second_t second_args {second_container, second_extractor};
+
+    sz_sequence_t first_sequence, second_sequence;
+    first_sequence.count = first_container.size(), second_sequence.count = second_container.size();
+    first_sequence.handle = &first_args, second_sequence.handle = &second_args;
+    first_sequence.get_start = _call_sequence_member_start<first_container_, first_extractor_>;
+    first_sequence.get_length = _call_sequence_member_length<first_container_, first_extractor_>;
+    second_sequence.get_start = _call_sequence_member_start<second_container_, second_extractor_>;
+    second_sequence.get_length = _call_sequence_member_length<second_container_, second_extractor_>;
+
+    using sz_alloc_type = sz_memory_allocator_t;
+    return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
+        static_assert(sizeof(sz_size_t) == sizeof(std::size_t), "sz_size_t must be the same size as std::size_t.");
+        return sz_sequence_intersect(&first_sequence, &second_sequence, &alloc, static_cast<sz_u64_t>(seed),
+                                     reinterpret_cast<sz_size_t *>(intersection_size_ptr), first_positions,
+                                     second_positions);
+    });
 }
 
 #if !SZ_AVOID_STL
 #if _SZ_DEPRECATED_FINGERPRINTS
 /**
- *  @brief  Computes the Rabin-Karp-like rolling binary fingerprint of a string.
- *  @see    sz_hashes
+ *  @brief Computes the Rabin-Karp-like rolling binary fingerprint of a string.
+ *  @sa sz_hashes
  */
 template <std::size_t bitset_bits_, typename char_type_>
 void hashes_fingerprint( //
@@ -4105,41 +4142,80 @@ std::bitset<bitset_bits_> hashes_fingerprint(basic_string<char_type_> const &str
 #endif
 
 /**
- *  @brief  Computes the permutation of an array, that would lead to sorted order.
+ *  @brief Computes the permutation of an array, that would lead to sorted order.
  *  @return The array of indices, that will be populated with the permutation.
- *  @throw  `std::bad_alloc` if the allocation fails.
+ *  @throw `std::bad_alloc` if the allocation fails.
  */
-template <typename objects_type_, typename string_extractor_>
+template <typename container_type_, typename string_extractor_>
 std::vector<sorted_idx_t> argsort( //
-    objects_type_ const *begin, objects_type_ const *end, string_extractor_ &&extractor) noexcept(false) {
-    std::vector<sorted_idx_t> order(end - begin);
-    argsort(begin, end, order.data(), std::forward<string_extractor_>(extractor));
+    container_type_ const &container, string_extractor_ const &extractor) noexcept(false) {
+    std::vector<sorted_idx_t> order(container.size());
+    status_t status = try_argsort(container, extractor, order.data());
+    raise(status);
     return order;
 }
 
 /**
- *  @brief  Computes the permutation of an array, that would lead to sorted order.
+ *  @brief Computes the permutation of an array, that would lead to sorted order.
  *  @return The array of indices, that will be populated with the permutation.
- *  @throw  `std::bad_alloc` if the allocation fails.
+ *  @throw `std::bad_alloc` if the allocation fails.
  */
-template <typename string_like_type_>
-std::vector<sorted_idx_t> argsort(string_like_type_ const *begin, string_like_type_ const *end) noexcept(false) {
+template <typename container_type_>
+std::vector<sorted_idx_t> argsort(container_type_ const &container) noexcept(false) {
+    using string_like_type = typename container_type_::value_type;
     static_assert( //
-        std::is_convertible<string_like_type_, string_view>::value, "The type must be convertible to string_view.");
-    return argsort(begin, end, [](string_like_type_ const &s) -> string_view { return s; });
+        std::is_convertible<string_like_type, string_view>::value, "The type must be convertible to string_view.");
+    return argsort(container, [](string_like_type const &s) -> string_view { return s; });
+}
+
+struct intersect_result_t {
+    std::vector<std::size_t> first_offsets;
+    std::vector<std::size_t> second_offsets;
+};
+
+/**
+ *  @brief Locates identical elements in two arrays.
+ *  @return Two arrays of indicies, mapping the elements of the first and the second array that have identical values.
+ *  @throw `std::bad_alloc` if the allocation fails.
+ */
+template <typename first_type_, typename second_type_, typename first_extractor_, typename second_extractor_>
+intersect_result_t intersect(first_type_ const &first, second_type_ const &second,
+                             first_extractor_ const &first_extractor, second_extractor_ const &second_extractor,
+                             std::uint64_t seed = 0) noexcept(false) {
+
+    std::size_t const max_count = (std::min)(first.size(), second.size());
+    std::vector<sorted_idx_t> first_positions(max_count);
+    std::vector<sorted_idx_t> second_positions(max_count);
+    std::size_t count;
+    status_t status = try_intersect( //
+        first, first_extractor,      //
+        second, second_extractor,    //
+        seed, &count, first_positions.data(), second_positions.data());
+    raise(status);
+    first_positions.resize(count);
+    second_positions.resize(count);
+    return {std::move(first_positions), std::move(second_positions)};
 }
 
 /**
- *  @brief  Computes the permutation of an array, that would lead to sorted order.
- *  @return The array of indices, that will be populated with the permutation.
- *  @throw  `std::bad_alloc` if the allocation fails.
+ *  @brief Locates identical elements in two arrays.
+ *  @return Two arrays of indicies, mapping the elements of the first and the second array that have identical values.
+ *  @throw `std::bad_alloc` if the allocation fails.
  */
-template <typename string_like_type_>
-std::vector<sorted_idx_t> argsort(std::vector<string_like_type_> const &array) noexcept(false) {
+template <typename first_type_, typename second_type_>
+intersect_result_t intersect(first_type_ const &first, second_type_ const &second,
+                             std::uint64_t seed = 0) noexcept(false) {
+    using first_string_type = typename first_type_::value_type;
+    using second_string_type = typename second_type_::value_type;
     static_assert( //
-        std::is_convertible<string_like_type_, string_view>::value, "The type must be convertible to string_view.");
-    return argsort(array.data(), array.data() + array.size(),
-                   [](string_like_type_ const &s) -> string_view { return s; });
+        std::is_convertible<first_string_type, string_view>::value, "The type must be convertible to string_view.");
+    static_assert( //
+        std::is_convertible<second_string_type, string_view>::value, "The type must be convertible to string_view.");
+    return intersect(
+        first, second,                                                //
+        [](first_string_type const &s) -> string_view { return s; },  //
+        [](second_string_type const &s) -> string_view { return s; }, //
+        seed);
 }
 
 #endif
