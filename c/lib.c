@@ -194,7 +194,7 @@ typedef struct sz_implementations_t {
     sz_needleman_wunsch_score_t alignment_score;
 
     sz_sequence_argsort_t sequence_argsort;
-    sz_sequence_join_t sequence_join;
+    sz_sequence_intersect_t sequence_intersect;
     sz_pgrams_sort_t pgrams_sort;
 
 } sz_implementations_t;
@@ -239,7 +239,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     impl->alignment_score = sz_needleman_wunsch_score_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
-    impl->sequence_join = sz_sequence_join_serial;
+    impl->sequence_intersect = sz_sequence_intersect_serial;
     impl->pgrams_sort = sz_pgrams_sort_serial;
 
 #if SZ_USE_HASWELL
@@ -291,7 +291,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->bytesum = sz_bytesum_skylake;
 
         impl->sequence_argsort = sz_sequence_argsort_skylake;
-        impl->sequence_join = sz_sequence_join_skylake;
+        impl->sequence_intersect = sz_sequence_intersect_skylake;
         impl->pgrams_sort = sz_pgrams_sort_skylake;
     }
 #endif
@@ -343,7 +343,7 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
 #if SZ_USE_SVE
     if (caps & sz_cap_sve_k) {
         impl->sequence_argsort = sz_sequence_argsort_sve;
-        impl->sequence_join = sz_sequence_join_sve;
+        impl->sequence_intersect = sz_sequence_intersect_sve;
         impl->pgrams_sort = sz_pgrams_sort_sve;
     }
 #endif
@@ -507,11 +507,11 @@ SZ_DYNAMIC sz_status_t sz_sequence_argsort(sz_sequence_t const *array, sz_memory
     return sz_dispatch_table.sequence_argsort(array, alloc, order);
 }
 
-SZ_DYNAMIC sz_status_t sz_sequence_join(sz_sequence_t const *first_array, sz_sequence_t const *second_array,
-                                        sz_memory_allocator_t *alloc, sz_size_t *intersection_size,
-                                        sz_size_t *first_positions, sz_size_t *second_positions) {
-    return sz_dispatch_table.sequence_join(first_array, second_array, alloc, intersection_size, first_positions,
-                                           second_positions);
+SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_array, sz_sequence_t const *second_array,
+                                             sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size,
+                                             sz_size_t *first_positions, sz_size_t *second_positions) {
+    return sz_dispatch_table.sequence_intersect(first_array, second_array, alloc, seed, intersection_size,
+                                                first_positions, second_positions);
 }
 
 // Provide overrides for the libc mem* functions

@@ -565,9 +565,10 @@ typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_me
 /** @brief Signature of `sz_pgrams_sort`. */
 typedef sz_status_t (*sz_pgrams_sort_t)(sz_pgram_t *, sz_size_t, sz_memory_allocator_t *, sz_sorted_idx_t *);
 
-/** @brief Signature of `sz_sequence_join`. */
-typedef sz_status_t (*sz_sequence_join_t)(struct sz_sequence_t const *, struct sz_sequence_t const *,
-                                          sz_memory_allocator_t *, sz_size_t *, sz_sorted_idx_t *, sz_sorted_idx_t *);
+/** @brief Signature of `sz_sequence_intersect`. */
+typedef sz_status_t (*sz_sequence_intersect_t)(struct sz_sequence_t const *, struct sz_sequence_t const *,
+                                               sz_memory_allocator_t *, sz_u64_t, sz_size_t *, sz_sorted_idx_t *,
+                                               sz_sorted_idx_t *);
 
 #pragma endregion
 
@@ -726,9 +727,9 @@ SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_le
 #pragma region String Sequences API
 
 /** @brief Signature of `sz_sequence_t::get_start` used to get the start of a member string at a given index. */
-typedef sz_cptr_t (*sz_sequence_member_start_t)(void const *, sz_size_t);
+typedef sz_cptr_t (*sz_sequence_member_start_t)(void const *, sz_sorted_idx_t);
 /** @brief Signature of `sz_sequence_t::get_length` used to get the length of a member string at a given index. */
-typedef sz_size_t (*sz_sequence_member_length_t)(void const *, sz_size_t);
+typedef sz_size_t (*sz_sequence_member_length_t)(void const *, sz_sorted_idx_t);
 
 /**
  *  @brief  Structure to represent an ordered collection of strings.
