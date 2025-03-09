@@ -132,7 +132,7 @@ tracked_unary_functions_t random_generation_functions() {
          })},
         {"std::uniform_int<uint8>", unary_function_t([](std::string_view token) -> std::size_t {
              if (buffer.size() < token.size()) buffer.resize(token.size());
-             randomize_string(buffer.data(), token.size());
+             randomize_string(&buffer[0], token.size());
              return token.size();
          })},
     };

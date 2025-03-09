@@ -223,6 +223,13 @@ static void test_hashing_on_platform(                                   //
     for (auto seed : seeds)
         for (std::size_t copies = 1; copies != 100; ++copies) //
             test_on_seed(repeat("abc", copies), seed);
+
+    // Let's try truly random inputs of different lengths:
+    for (std::size_t length = 0; length != 200; ++length) {
+        std::string text(length, '\0');
+        randomize_string(&text[0], length);
+        for (auto seed : seeds) test_on_seed(text, seed);
+    }
 }
 
 /**
