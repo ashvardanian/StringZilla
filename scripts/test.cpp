@@ -1970,6 +1970,8 @@ int main(int argc, char const **argv) {
     test_search_with_misaligned_repetitions();
 #endif
 
+    test_levenshtein_distances();
+
     std::printf("All tests passed... Unbelievable!\n");
     return 0;
 }
