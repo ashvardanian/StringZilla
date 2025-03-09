@@ -713,6 +713,28 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
 #endif            // SZ_USE_ICE
 #pragma endregion // Ice Lake Implementation
 
+#pragma region SVE Implementation
+#if SZ_USE_SVE
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+sve")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+
+SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_sequence,
+                                                sz_sequence_t const *second_sequence, //
+                                                sz_memory_allocator_t *alloc, sz_u64_t seed,
+                                                sz_size_t *intersection_size, sz_sorted_idx_t *first_positions,
+                                                sz_sorted_idx_t *second_positions) {
+    return sz_sequence_intersect_serial( //
+        first_sequence, second_sequence, //
+        alloc, seed, intersection_size,  //
+        first_positions, second_positions);
+}
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+#endif            // SZ_USE_SVE
+#pragma endregion // SVE Implementation
+
 /*  Pick the right implementation for the string search algorithms.
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
  */

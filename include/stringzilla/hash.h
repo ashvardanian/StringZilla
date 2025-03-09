@@ -1833,6 +1833,24 @@ SZ_PUBLIC sz_u64_t sz_hash_state_fold_neon(sz_hash_state_t const *state) { retur
 #pragma GCC target("arch=armv8.2-a+sve")
 #pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
 
+SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) { return sz_bytesum_serial(text, length); }
+
+SZ_PUBLIC void sz_hash_state_init_sve(sz_hash_state_t *state, sz_u64_t seed) { sz_hash_state_init_serial(state, seed); }
+
+SZ_PUBLIC void sz_hash_state_stream_sve(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+    sz_hash_state_stream_serial(state, text, length);
+}
+
+SZ_PUBLIC sz_u64_t sz_hash_state_fold_sve(sz_hash_state_t const *state) { return sz_hash_state_fold_serial(state); }
+
+SZ_PUBLIC sz_u64_t sz_hash_sve(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+    return sz_hash_serial(text, length, seed);
+}
+
+SZ_PUBLIC void sz_fill_random_sve(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+    sz_fill_random_serial(text, length, nonce);
+}
+
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif            // SZ_USE_SVE

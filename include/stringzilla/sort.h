@@ -925,6 +925,29 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
 #endif            // SZ_USE_SKYLAKE
 #pragma endregion // Ice Lake Implementation
 
+#pragma region SVE Implementation
+#if SZ_USE_SVE
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+sve")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+
+/** @copydoc sz_sequence_argsort */
+SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                              sz_sorted_idx_t *order) {
+    return sz_sequence_argsort_serial(sequence, alloc, order);
+}
+
+/** @copydoc sz_pgrams_sort */
+SZ_PUBLIC sz_status_t sz_pgrams_sort_sve(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
+                                         sz_sorted_idx_t *order) {
+    return sz_pgrams_sort_serial(pgrams, count, alloc, order);
+}
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+#endif            // SZ_USE_SVE
+#pragma endregion // SVE Implementation
+
 /*  Pick the right implementation for the string search algorithms.
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
  */
