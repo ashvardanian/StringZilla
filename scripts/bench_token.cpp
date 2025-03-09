@@ -95,27 +95,25 @@ tracked_unary_functions_t hash_stream_functions() {
     return result;
 }
 
-tracked_unary_functions_t random_generation_functions(std::size_t token_length) {
+tracked_unary_functions_t random_generation_functions() {
     static std::vector<char> buffer;
-    if (buffer.size() < token_length) buffer.resize(token_length);
-
-    auto suffix = ", " + std::to_string(token_length) + " chars";
     tracked_unary_functions_t result = {
-        {"std::rand % uint8" + suffix, unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
-             using max_alphabet_size_t = std::uint8_t;
-             auto max_alphabet_size = static_cast<max_alphabet_size_t>(alphabet.size());
-             for (std::size_t i = 0; i < token_length; ++i) { buffer[i] = alphabet[std::rand() % max_alphabet_size]; }
-             return token_length;
+        {"std::rand() & 0xFF", unary_function_t([](std::string_view token) -> std::size_t {
+             if (buffer.size() < token.size()) buffer.resize(token.size());
+             for (std::size_t i = 0; i < token.size(); ++i) buffer[i] = static_cast<char>(std::rand() & 0xFF);
+             return token.size();
          })},
-        {"std::uniform_int<uint8>" + suffix, unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
-             randomize_string(buffer.data(), token_length, alphabet.data(), alphabet.size());
-             return token_length;
+        {"std::uniform_int<uint8>", unary_function_t([](std::string_view token) -> std::size_t {
+             if (buffer.size() < token.size()) buffer.resize(token.size());
+             randomize_string(buffer.data(), token.size());
+             return token.size();
          })},
-        // {"sz::randomize" + suffix, unary_function_t([token_length](std::string_view alphabet) -> std::size_t {
-        //      sz::string_span span(buffer.data(), token_length);
-        //      sz::randomize(span, global_random_generator(), alphabet);
-        //      return token_length;
-        //  })},
+        {"sz::randomize", unary_function_t([](std::string_view token) -> std::size_t {
+             if (buffer.size() < token.size()) buffer.resize(token.size());
+             sz::string_span span(buffer.data(), token.size());
+             sz::fill_random(span);
+             return token.size();
+         })},
     };
     return result;
 }
@@ -123,11 +121,11 @@ tracked_unary_functions_t random_generation_functions(std::size_t token_length) 
 tracked_binary_functions_t equality_functions() {
     auto wrap_sz = [](auto function) -> binary_function_t {
         return binary_function_t([function](std::string_view a, std::string_view b) {
-            return (a.size() == b.size() && function(a.data(), b.data(), a.size()));
+            return a.size() == b.size() && function(a.data(), b.data(), a.size());
         });
     };
     tracked_binary_functions_t result = {
-        {"std::string_view.==", [](std::string_view a, std::string_view b) { return (a == b); }},
+        {"std::string_view.==", [](std::string_view a, std::string_view b) { return a == b; }},
         {"sz_equal_serial", wrap_sz(sz_equal_serial), true},
 #if SZ_USE_HASWELL
         {"sz_equal_haswell", wrap_sz(sz_equal_haswell), true},
@@ -190,6 +188,7 @@ void bench(strings_type &&strings) {
     bench_unary_functions(strings, hash_stream_functions());
     bench_binary_functions(strings, equality_functions());
     bench_binary_functions(strings, ordering_functions());
+    bench_unary_functions(strings, random_generation_functions());
 
     // Benchmark the cost of converting `std::string` and `sz::string` to `std::string_view`.
     // ! The results on a mixture of short and long strings should be similar.
@@ -208,7 +207,9 @@ void bench_on_input_data(int argc, char const **argv) {
     std::printf("Benchmarking on real lines:\n");
     bench(dataset.lines);
     std::printf("Benchmarking on entire dataset:\n");
-    bench<std::vector<std::string_view>>({dataset.text});
+    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, bytesum_functions());
+    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, hash_functions());
+    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, hash_stream_functions());
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
