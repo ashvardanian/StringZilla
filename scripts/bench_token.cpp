@@ -63,14 +63,15 @@ tracked_unary_functions_t hash_functions() {
 
 struct wrap_hash_stream {
     sz_hash_state_t state;
+    sz_hash_state_init_t init;
     sz_hash_state_stream_t stream;
     sz_hash_state_fold_t fold;
 
-    wrap_hash_stream(sz_hash_state_stream_t s, sz_hash_state_fold_t f) : stream(s), fold(f) {
-        sz_hash_state_init(&state, 42);
-    }
+    wrap_hash_stream(sz_hash_state_init_t i, sz_hash_state_stream_t s, sz_hash_state_fold_t f)
+        : init(i), stream(s), fold(f) {}
 
     std::size_t operator()(std::string_view s) noexcept {
+        init(&state, 42);
         stream(&state, s.data(), s.size());
         return fold(&state);
     }
@@ -78,18 +79,23 @@ struct wrap_hash_stream {
 
 tracked_unary_functions_t hash_stream_functions() {
     tracked_unary_functions_t result = {
-        {"sz_hash_stream_serial", wrap_hash_stream(sz_hash_state_stream_serial, sz_hash_state_fold_serial)},
+        {"sz_hash_stream_serial",
+         wrap_hash_stream(sz_hash_state_init_serial, sz_hash_state_stream_serial, sz_hash_state_fold_serial)},
 #if SZ_USE_HASWELL
-        {"sz_hash_stream_haswell", wrap_hash_stream(sz_hash_state_stream_haswell, sz_hash_state_fold_haswell), true},
+        {"sz_hash_stream_haswell",
+         wrap_hash_stream(sz_hash_state_init_haswell, sz_hash_state_stream_haswell, sz_hash_state_fold_haswell), true},
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_hash_stream_skylake", wrap_hash_stream(sz_hash_state_stream_skylake, sz_hash_state_fold_skylake), true},
+        {"sz_hash_stream_skylake",
+         wrap_hash_stream(sz_hash_state_init_skylake, sz_hash_state_stream_skylake, sz_hash_state_fold_skylake), true},
 #endif
 #if SZ_USE_ICE
-        {"sz_hash_stream_ice", wrap_hash_stream(sz_hash_state_stream_ice, sz_hash_state_fold_ice), true},
+        {"sz_hash_stream_ice",
+         wrap_hash_stream(sz_hash_state_init_ice, sz_hash_state_stream_ice, sz_hash_state_fold_ice), true},
 #endif
 #if SZ_USE_NEON
-        {"sz_hash_stream_neon", wrap_hash_stream(sz_hash_state_stream_neon, sz_hash_state_fold_neon), true},
+        {"sz_hash_stream_neon",
+         wrap_hash_stream(sz_hash_state_init_neon, sz_hash_state_stream_neon, sz_hash_state_fold_neon), true},
 #endif
     };
     return result;
