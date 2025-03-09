@@ -51,6 +51,8 @@ extern void *malloc(size_t length);
 #include <windows.h> // `DllMain`
 #endif
 
+#if _SZ_IS_ARM64
+
 /**
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
@@ -65,8 +67,8 @@ SZ_INTERNAL sz_capability_t _sz_capabilities_arm(void) {
     size_t size = sizeof(supports_neon);
     if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 0;
 
-    return (sz_capability_t)(                   //
-        (sz_cap_arm_neon_k * (supports_neon)) | //
+    return (sz_capability_t)(               //
+        (sz_cap_neon_k * (supports_neon)) | //
         (sz_cap_serial_k));
 
 #elif defined(_SZ_IS_LINUX)
@@ -106,6 +108,10 @@ SZ_INTERNAL sz_capability_t _sz_capabilities_arm(void) {
     return sz_cap_serial_k;
 #endif
 }
+
+#endif // _SZ_IS_ARM64
+
+#if _SZ_IS_X86_64
 
 SZ_INTERNAL sz_capability_t _sz_capabilities_x86(void) {
 
@@ -152,6 +158,7 @@ SZ_INTERNAL sz_capability_t _sz_capabilities_x86(void) {
     return sz_cap_serial_k;
 #endif
 }
+#endif // _SZ_IS_X86_64
 
 /**
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit x86 machine at @b runtime.
