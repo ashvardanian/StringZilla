@@ -391,8 +391,15 @@ typedef enum {
  */
 typedef sz_u32_t sz_rune_t;
 
+SZ_PUBLIC sz_rune_t sz_rune_perfect_hash(sz_rune_t rune) {
+    // TODO: A perfect hashing scheme can be constructed to map a 32-bit rune into an 18-bit representation,
+    // TODO: that can fit all of the unique values in the Unicode 16 standard.
+    return rune;
+}
+
 /**
- *  @brief  Tiny string-view structure. It's POD type, unlike the `std::string_view`.
+ *  @brief Tiny string-view structure. It's Plain-Old Datatype @b (POD) type, unlike the `std::string_view`.
+ *  @see https://en.cppreference.com/w/cpp/named_req/PODType
  */
 typedef struct sz_string_view_t {
     sz_cptr_t start;
@@ -402,8 +409,8 @@ typedef struct sz_string_view_t {
 #pragma region Character Sets
 
 /**
- *  @brief  Bit-set semi-opaque structure for 256 possible byte values. Useful for filtering and search.
- *  @sa     sz_byteset_init, sz_byteset_add, sz_byteset_contains, sz_byteset_invert
+ *  @brief Bit-set semi-opaque structure for 256 possible byte values. Useful for filtering and search.
+ *  @sa sz_byteset_init, sz_byteset_add, sz_byteset_contains, sz_byteset_invert
  *
  *  Example usage:
  *
@@ -426,22 +433,22 @@ typedef union sz_byteset_t {
     sz_u8_t _u8s[32];
 } sz_byteset_t;
 
-/** @brief  Initializes a bit-set to an empty collection, meaning - all characters are banned. */
+/** @brief Initializes a bit-set to an empty collection, meaning - all characters are banned. */
 SZ_PUBLIC void sz_byteset_init(sz_byteset_t *s) { s->_u64s[0] = s->_u64s[1] = s->_u64s[2] = s->_u64s[3] = 0; }
 
-/** @brief  Initializes a bit-set to all ASCII character. */
+/** @brief Initializes a bit-set to all ASCII character. */
 SZ_PUBLIC void sz_byteset_init_ascii(sz_byteset_t *s) {
     s->_u64s[0] = s->_u64s[1] = 0xFFFFFFFFFFFFFFFFull;
     s->_u64s[2] = s->_u64s[3] = 0;
 }
 
-/** @brief  Adds a character to the set and accepts @b unsigned integers. */
+/** @brief Adds a character to the set and accepts @b unsigned integers. */
 SZ_PUBLIC void sz_byteset_add_u8(sz_byteset_t *s, sz_u8_t c) { s->_u64s[c >> 6] |= (1ull << (c & 63u)); }
 
-/** @brief  Adds a character to the set. Consider @b sz_byteset_add_u8. */
+/** @brief Adds a character to the set. Consider @b sz_byteset_add_u8. */
 SZ_PUBLIC void sz_byteset_add(sz_byteset_t *s, char c) { sz_byteset_add_u8(s, *(sz_u8_t *)(&c)); } // bitcast
 
-/** @brief  Checks if the set contains a given character and accepts @b unsigned integers. */
+/** @brief Checks if the set contains a given character and accepts @b unsigned integers. */
 SZ_PUBLIC sz_bool_t sz_byteset_contains_u8(sz_byteset_t const *s, sz_u8_t c) {
     // Checking the bit can be done in different ways:
     // - (s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0
@@ -451,12 +458,12 @@ SZ_PUBLIC sz_bool_t sz_byteset_contains_u8(sz_byteset_t const *s, sz_u8_t c) {
     return (sz_bool_t)((s->_u64s[c >> 6] & (1ull << (c & 63u))) != 0);
 }
 
-/** @brief  Checks if the set contains a given character. Consider @b sz_byteset_contains_u8. */
+/** @brief Checks if the set contains a given character. Consider @b sz_byteset_contains_u8. */
 SZ_PUBLIC sz_bool_t sz_byteset_contains(sz_byteset_t const *s, char c) {
     return sz_byteset_contains_u8(s, *(sz_u8_t *)(&c)); // bitcast
 }
 
-/** @brief  Inverts the contents of the set, so allowed character get disallowed, and vice versa. */
+/** @brief Inverts the contents of the set, so allowed character get disallowed, and vice versa. */
 SZ_PUBLIC void sz_byteset_invert(sz_byteset_t *s) {
     s->_u64s[0] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[1] ^= 0xFFFFFFFFFFFFFFFFull, //
         s->_u64s[2] ^= 0xFFFFFFFFFFFFFFFFull, s->_u64s[3] ^= 0xFFFFFFFFFFFFFFFFull;
@@ -472,7 +479,7 @@ typedef void (*sz_memory_free_t)(void *, sz_size_t, void *);
 /**
  *  @brief  Some complex pattern matching algorithms may require memory allocations.
  *          This structure is used to pass the memory allocator to those functions.
- *  @see    sz_memory_allocator_init_fixed
+ *  @sa     sz_memory_allocator_init_fixed
  */
 typedef struct sz_memory_allocator_t {
     sz_memory_allocate_t allocate;
@@ -481,21 +488,17 @@ typedef struct sz_memory_allocator_t {
 } sz_memory_allocator_t;
 
 /**
- *  @brief  Initializes a memory allocator to use the system default `malloc` and `free`.
- *          ! The function is not available if the library was compiled with `SZ_AVOID_LIBC`.
- *
- *  @param alloc    Memory allocator to initialize.
+ *  @brief Initializes a memory allocator to use the system default `malloc` and `free`.
+ *  @warning The function is not available if the library was compiled with `SZ_AVOID_LIBC`.
+ *  @param[in] alloc Memory allocator to initialize.
  */
 SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
 
 /**
- *  @brief  Initializes a memory allocator to use a static-capacity buffer.
- *          No dynamic allocations will be performed.
- *
- *  @param alloc    Memory allocator to initialize.
- *  @param buffer   Buffer to use for allocations.
- *  @param length   Length of the buffer. @b Must be greater than 8 bytes. Different values would be optimal for
- *                  different algorithms and input lengths, but 4096 bytes (one RAM page) is a good default.
+ *  @brief Initializes a memory allocator to use only a static-capacity buffer @b w/out any dynamic allocations.
+ *  @param[in] alloc Memory allocator to initialize.
+ *  @param[in] buffer Buffer to use for allocations.
+ *  @param[in] length Length of the buffer. @b Must be greater than 8, at least 4KB (one RAM page) is recommended.
  */
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
 
@@ -503,66 +506,66 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
 
 #pragma region API Signature Types
 
-/** @brief  Signature of `sz_hash`. */
+/** @brief Signature of `sz_hash`. */
 typedef sz_u64_t (*sz_hash_t)(sz_cptr_t, sz_size_t, sz_u64_t);
 
-/** @brief  Signature of `sz_hash_state_init`. */
+/** @brief Signature of `sz_hash_state_init`. */
 typedef void (*sz_hash_state_init_t)(struct sz_hash_state_t *, sz_u64_t);
 
-/** @brief  Signature of `sz_hash_state_stream`. */
+/** @brief Signature of `sz_hash_state_stream`. */
 typedef void (*sz_hash_state_stream_t)(struct sz_hash_state_t *, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of `sz_hash_state_fold`. */
+/** @brief Signature of `sz_hash_state_fold`. */
 typedef sz_u64_t (*sz_hash_state_fold_t)(struct sz_hash_state_t const *);
 
-/** @brief  Signature of `sz_bytesum`. */
+/** @brief Signature of `sz_bytesum`. */
 typedef sz_u64_t (*sz_bytesum_t)(sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of `sz_fill_random`. */
+/** @brief Signature of `sz_fill_random`. */
 typedef void (*sz_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t);
 
-/** @brief  Signature of `sz_equal`. */
+/** @brief Signature of `sz_equal`. */
 typedef sz_bool_t (*sz_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of `sz_order`. */
+/** @brief Signature of `sz_order`. */
 typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of `sz_lookup`. */
+/** @brief Signature of `sz_lookup`. */
 typedef void (*sz_lookup_t)(sz_ptr_t, sz_size_t, sz_cptr_t, sz_cptr_t);
 
-/** @brief  Signature of `sz_move`. */
+/** @brief Signature of `sz_move`. */
 typedef void (*sz_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of `sz_fill`. */
+/** @brief Signature of `sz_fill`. */
 typedef void (*sz_fill_t)(sz_ptr_t, sz_size_t, sz_u8_t);
 
-/** @brief  Signature of `sz_find_byte`. */
+/** @brief Signature of `sz_find_byte`. */
 typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 
-/** @brief  Signature of `sz_find`. */
+/** @brief Signature of `sz_find`. */
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
-/** @brief  Signature of `sz_find_set`. */
+/** @brief Signature of `sz_find_set`. */
 typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
 
-/** @brief  Signature of `sz_hamming_distance`. */
+/** @brief Signature of `sz_hamming_distance`. */
 typedef sz_status_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_size_t *);
 
-/** @brief  Signature of `sz_levenshtein_distance`. */
+/** @brief Signature of `sz_levenshtein_distance`. */
 typedef sz_status_t (*sz_levenshtein_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t,
                                                  sz_memory_allocator_t *, sz_size_t *);
 
-/** @brief  Signature of `sz_needleman_wunsch_score`. */
+/** @brief Signature of `sz_needleman_wunsch_score`. */
 typedef sz_status_t (*sz_needleman_wunsch_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_error_cost_t const *,
                                                    sz_error_cost_t, sz_memory_allocator_t *, sz_ssize_t *);
 
-/** @brief  Signature of `sz_sequence_argsort`. */
+/** @brief Signature of `sz_sequence_argsort`. */
 typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
 
-/** @brief  Signature of `sz_pgrams_sort`. */
+/** @brief Signature of `sz_pgrams_sort`. */
 typedef sz_status_t (*sz_pgrams_sort_t)(sz_pgram_t *, sz_size_t, sz_memory_allocator_t *, sz_sorted_idx_t *);
 
-/** @brief  Signature of `sz_sequence_join`. */
+/** @brief Signature of `sz_sequence_join`. */
 typedef sz_status_t (*sz_sequence_join_t)(struct sz_sequence_t const *, struct sz_sequence_t const *,
                                           sz_memory_allocator_t *, sz_size_t *, sz_sorted_idx_t *, sz_sorted_idx_t *);
 
@@ -571,8 +574,8 @@ typedef sz_status_t (*sz_sequence_join_t)(struct sz_sequence_t const *, struct s
 #pragma region Helper Structures
 
 /**
- *  @brief  Helper structure to simplify work with 16-bit words.
- *  @see    sz_u16_load
+ *  @brief Helper structure to simplify work with 16-bit words.
+ *  @sa sz_u16_load
  */
 typedef union sz_u16_vec_t {
     sz_u16_t u16;
@@ -580,8 +583,8 @@ typedef union sz_u16_vec_t {
 } sz_u16_vec_t;
 
 /**
- *  @brief  Helper structure to simplify work with 32-bit words.
- *  @see    sz_u32_load
+ *  @brief Helper structure to simplify work with 32-bit words.
+ *  @sa sz_u32_load
  */
 typedef union sz_u32_vec_t {
     sz_u32_t u32;
@@ -590,8 +593,8 @@ typedef union sz_u32_vec_t {
 } sz_u32_vec_t;
 
 /**
- *  @brief  Helper structure to simplify work with 64-bit words.
- *  @see    sz_u64_load
+ *  @brief Helper structure to simplify work with 64-bit words.
+ *  @sa sz_u64_load
  */
 typedef union sz_u64_vec_t {
     sz_u64_t u64;
@@ -662,9 +665,7 @@ typedef union sz_u512_vec_t {
 
 #pragma region UTF8
 
-/**
- *  @brief  Extracts just one UTF8 codepoint from a UTF8 string into a 32-bit unsigned integer.
- */
+/** @brief Extracts just one UTF8 codepoint from a UTF8 string into a 32-bit unsigned integer. */
 SZ_INTERNAL void _sz_extract_utf8_rune(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *code_length) {
     sz_u8_t const *current = (sz_u8_t const *)utf8;
     sz_u8_t leading_byte = *current++;
@@ -708,8 +709,8 @@ SZ_INTERNAL void _sz_extract_utf8_rune(sz_cptr_t utf8, sz_rune_t *code, sz_rune_
 }
 
 /**
- *  @brief  Exports a UTF8 string into a UTF32 buffer.
- *          ! The result is undefined id the UTF8 string is corrupted.
+ *  @brief Exports a UTF8 string into a UTF32 buffer.
+ *  @warning The result is undefined id the UTF8 string is corrupted.
  *  @return The length in the number of codepoints.
  */
 SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_length, sz_rune_t *utf32) {
@@ -771,14 +772,10 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
  **********************************************************************************************************************
  */
 
-/**
- *  @brief  Helper-macro to mark potentially unused variables.
- */
+/** @brief Helper-macro to mark potentially unused variables. */
 #define sz_unused(x) ((void)(x))
 
-/**
- *  @brief  Helper-macro casting a variable to another type of the same size.
- */
+/** @brief Helper-macro casting a variable to another type of the same size. */
 #define sz_bitcast(type, value) (*((type *)&(value)))
 
 /**
@@ -1024,7 +1021,8 @@ SZ_INTERNAL void sz_ssize_clamp_interval( //
 }
 
 /**
- *  @brief  Compute the logarithm base 2 of a positive integer, rounding down.
+ *  @brief Compute the logarithm base 2 of a positive integer, rounding down.
+ *  @pre Input must be a positive number, as the logarithm of zero is undefined.
  */
 SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
     _sz_assert(x > 0 && "Non-positive numbers have no defined logarithm");
@@ -1033,11 +1031,11 @@ SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
 }
 
 /**
- *  @brief  Compute the smallest power of two greater than or equal to @p x.
+ *  @brief Compute the smallest power of two greater than or equal to @p x.
+ *  @pre Unlike the commonly used trick with `clz` intrinsics, is valid across the whole range of `x`, @b including 0.
+ *  @see https://stackoverflow.com/a/10143264
  */
 SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
-    // Unlike the commonly used trick with `clz` intrinsics, is valid across the whole range of `x`.
-    // https://stackoverflow.com/a/10143264
     x--;
     x |= x >> 1;
     x |= x >> 2;
@@ -1052,7 +1050,7 @@ SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
 }
 
 /**
- *  @brief  Transposes an 8x8 bit matrix packed in a `sz_u64_t`.
+ *  @brief Transposes an 8x8 bit matrix packed in a `sz_u64_t`.
  *
  *  There is a well known SWAR sequence for that known to chess programmers,
  *  willing to flip a bit-matrix of pieces along the main A1-H8 diagonal.
@@ -1070,9 +1068,7 @@ SZ_INTERNAL sz_u64_t sz_u64_transpose(sz_u64_t x) {
     return x;
 }
 
-/**
- *  @brief Load a 16-bit unsigned integer from a potentially unaligned pointer, can be expensive on some platforms.
- */
+/** @brief Load a 16-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms. */
 SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u16_vec_t result;
@@ -1080,7 +1076,7 @@ SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
     result.u8s[1] = ptr[1];
     return result;
 #elif defined(_MSC_VER) && !defined(__clang__)
-#if defined(_M_IX86) //< The __unaligned modifier isn't valid for the x86 platform.
+#if defined(_M_IX86) //< The `__unaligned` modifier isn't valid for the x86 platform.
     return *((sz_u16_vec_t *)ptr);
 #else
     return *((__unaligned sz_u16_vec_t *)ptr);
@@ -1091,9 +1087,7 @@ SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #endif
 }
 
-/**
- *  @brief Load a 32-bit unsigned integer from a potentially unaligned pointer, can be expensive on some platforms.
- */
+/** @brief Load a 32-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms. */
 SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u32_vec_t result;
@@ -1103,7 +1097,7 @@ SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
     result.u8s[3] = ptr[3];
     return result;
 #elif defined(_MSC_VER) && !defined(__clang__)
-#if defined(_M_IX86) //< The __unaligned modifier isn't valid for the x86 platform.
+#if defined(_M_IX86) //< The `__unaligned` modifier isn't valid for the x86 platform.
     return *((sz_u32_vec_t *)ptr);
 #else
     return *((__unaligned sz_u32_vec_t *)ptr);
@@ -1114,9 +1108,7 @@ SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #endif
 }
 
-/**
- *  @brief Load a 64-bit unsigned integer from a potentially unaligned pointer, can be expensive on some platforms.
- */
+/** @brief Load a 64-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms. */
 SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u64_vec_t result;
@@ -1130,7 +1122,7 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
     result.u8s[7] = ptr[7];
     return result;
 #elif defined(_MSC_VER) && !defined(__clang__)
-#if defined(_M_IX86) //< The __unaligned modifier isn't valid for the x86 platform.
+#if defined(_M_IX86) //< The `__unaligned` modifier isn't valid for the x86 platform.
     return *((sz_u64_vec_t *)ptr);
 #else
     return *((__unaligned sz_u64_vec_t *)ptr);
@@ -1141,7 +1133,7 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #endif
 }
 
-/** @brief  Helper function, using the supplied fixed-capacity buffer to allocate memory. */
+/** @brief Helper function, using the supplied fixed-capacity buffer to allocate memory. */
 SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
     sz_size_t capacity;
     *(sz_ptr_t)&capacity = *(sz_cptr_t)handle;
@@ -1150,7 +1142,7 @@ SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
     return (sz_ptr_t)handle + consumed_capacity;
 }
 
-/** @brief  Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
+/** @brief Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
 SZ_INTERNAL void _sz_memory_free_fixed(sz_ptr_t start, sz_size_t length, void *handle) {
     sz_unused(start && length && handle);
 }
