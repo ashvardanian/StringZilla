@@ -1062,6 +1062,31 @@ std::size_t range_length(iterator_type first, iterator_type last) {
 
 #pragma endregion
 
+#pragma region Helper Types
+
+enum class status_t {
+    success_k = sz_success_k,
+    bad_alloc_k = sz_bad_alloc_k,
+    invalid_utf8_k = sz_invalid_utf8_k,
+    contains_duplicates_k = sz_contains_duplicates_k,
+};
+
+#if !SZ_AVOID_STL
+void raise(status_t status) noexcept(false) {
+    switch (status) {
+    case status_t::bad_alloc_k: throw std::bad_alloc();
+    case status_t::invalid_utf8_k: throw std::invalid_argument("Invalid UTF-8 string");
+    case status_t::contains_duplicates_k: throw std::invalid_argument("Array contains identical strings");
+    default: break;
+    }
+}
+
+using sorted_idx_t = sz_sorted_idx_t;
+
+#endif
+
+#pragma endregion
+
 #pragma region Global Operations with Dynamic Memory
 
 template <typename allocator_type_>
@@ -1082,16 +1107,20 @@ static sz_u64_t _call_random_generator(void *state) noexcept {
 }
 
 template <typename allocator_type_, typename allocator_callback_>
-static bool _with_alloc(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
+static status_t _with_alloc(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
     sz_memory_allocator_t alloc;
     alloc.allocate = &_call_allocate<allocator_type_>;
     alloc.free = &_call_free<allocator_type_>;
     alloc.handle = &allocator;
-    return callback(alloc);
+    return static_cast<status_t>(callback(alloc));
 }
 
+/**
+ *  @brief Helper function, wrapping a C++ allocator into a C-style allocator.
+ *  @return Error code or success. All allocating functions may fail.
+ */
 template <typename allocator_type_, typename allocator_callback_>
-static bool _with_alloc(allocator_callback_ &&callback) noexcept {
+static status_t _with_alloc(allocator_callback_ &&callback) noexcept {
     allocator_type_ allocator;
     return _with_alloc(allocator, std::forward<allocator_callback_>(callback));
 }
@@ -2038,23 +2067,23 @@ class basic_string {
     static_assert(std::is_empty<allocator_type_>::value, "We currently only support stateless allocators");
 
     template <typename allocator_callback>
-    static bool _with_alloc(allocator_callback &&callback) noexcept {
+    static status_t _with_alloc(allocator_callback &&callback) noexcept {
         return ashvardanian::stringzilla::_with_alloc<allocator_type_>(callback);
     }
 
     void init(std::size_t length, char_type value) noexcept(false) {
         sz_ptr_t start;
-        if (!_with_alloc(
-                [&](sz_alloc_type &alloc) { return (start = sz_string_init_length(&string_, length, &alloc)); }))
-            throw std::bad_alloc();
+        raise(_with_alloc([&](sz_alloc_type &alloc) {
+            return (start = sz_string_init_length(&string_, length, &alloc)) ? sz_success_k : sz_bad_alloc_k;
+        }));
         sz_fill(start, length, *(sz_u8_t *)&value);
     }
 
     void init(string_view other) noexcept(false) {
         sz_ptr_t start;
-        if (!_with_alloc(
-                [&](sz_alloc_type &alloc) { return (start = sz_string_init_length(&string_, other.size(), &alloc)); }))
-            throw std::bad_alloc();
+        raise(_with_alloc([&](sz_alloc_type &alloc) {
+            return (start = sz_string_init_length(&string_, other.size(), &alloc)) ? sz_success_k : sz_bad_alloc_k;
+        }));
         sz_copy(start, (sz_cptr_t)other.data(), other.size());
     }
 
@@ -2121,7 +2150,7 @@ class basic_string {
     ~basic_string() noexcept {
         _with_alloc([&](sz_alloc_type &alloc) {
             sz_string_free(&string_, &alloc);
-            return true;
+            return sz_success_k;
         });
     }
 
@@ -2130,7 +2159,7 @@ class basic_string {
         if (!is_internal()) {
             _with_alloc([&](sz_alloc_type &alloc) {
                 sz_string_free(&string_, &alloc);
-                return true;
+                return sz_success_k;
             });
         }
         move(other);
@@ -2750,7 +2779,10 @@ class basic_string {
      *  @return `true` if the operation was successful and potentially reduced the memory footprint, `false` otherwise.
      */
     bool try_shrink_to_fit() noexcept {
-        return _with_alloc([&](sz_alloc_type &alloc) { return sz_string_shrink_to_fit(&string_, &alloc); });
+        auto status = _with_alloc([&](sz_alloc_type &alloc) {
+            return sz_string_shrink_to_fit(&string_, &alloc) ? sz_success_k : sz_bad_alloc_k;
+        });
+        return status == status_t::success_k;
     }
 
     /**
@@ -2759,7 +2791,10 @@ class basic_string {
      *  @return `true` if the reservation was successful, `false` otherwise.
      */
     bool try_reserve(size_type capacity) noexcept {
-        return _with_alloc([&](sz_alloc_type &alloc) { return sz_string_reserve(&string_, capacity, &alloc); });
+        auto status = _with_alloc([&](sz_alloc_type &alloc) {
+            return sz_string_reserve(&string_, capacity, &alloc) ? sz_success_k : sz_bad_alloc_k;
+        });
+        return status == status_t::success_k;
     }
 
     /**
@@ -2827,9 +2862,10 @@ class basic_string {
     bool try_insert(difference_type signed_offset, string_view string) noexcept {
         sz_size_t normalized_offset, normalized_length;
         sz_ssize_clamp_interval(size(), signed_offset, 0, &normalized_offset, &normalized_length);
-        if (!_with_alloc([&](sz_alloc_type &alloc) {
-                return sz_string_expand(&string_, normalized_offset, string.size(), &alloc);
-            }))
+        if (_with_alloc([&](sz_alloc_type &alloc) {
+                return sz_string_expand(&string_, normalized_offset, string.size(), &alloc) ? sz_success_k
+                                                                                            : sz_bad_alloc_k;
+            }) != status_t::success_k)
             return false;
 
         sz_copy(data() + normalized_offset, string.data(), string.size());
@@ -2909,10 +2945,9 @@ class basic_string {
     basic_string &insert(size_type offset, string_view other) noexcept(false) {
         if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
         if (size() + other.size() > max_size()) throw std::length_error("sz::basic_string::insert");
-        if (!_with_alloc(
-                [&](sz_alloc_type &alloc) { return sz_string_expand(&string_, offset, other.size(), &alloc); }))
-            throw std::bad_alloc();
-
+        raise(_with_alloc([&](sz_alloc_type &alloc) {
+            return sz_string_expand(&string_, offset, other.size(), &alloc) ? sz_success_k : sz_bad_alloc_k;
+        }));
         sz_copy(data() + offset, other.data(), other.size());
         return *this;
     }
@@ -2977,8 +3012,9 @@ class basic_string {
         auto added_length = range_length(first, last);
         if (size() + added_length > max_size()) throw std::length_error("sz::basic_string::insert");
 
-        if (!_with_alloc([&](sz_alloc_type &alloc) { return sz_string_expand(&string_, pos, added_length, &alloc); }))
-            throw std::bad_alloc();
+        raise(_with_alloc([&](sz_alloc_type &alloc) {
+            return sz_string_expand(&string_, pos, added_length, &alloc) ? sz_success_k : sz_bad_alloc_k;
+        }));
 
         iterator result = begin() + pos;
         for (iterator output = result; first != last; ++first, ++output) *output = *first;
@@ -3327,8 +3363,7 @@ class basic_string {
     size_type edit_distance(string_view other, size_type bound = 0) const noexcept {
         size_type result;
         _with_alloc([&](sz_alloc_type &alloc) {
-            return sz_levenshtein_distance(data(), size(), other.data(), other.size(), bound, &alloc, &result) !=
-                   sz_bad_alloc_k;
+            return sz_levenshtein_distance(data(), size(), other.data(), other.size(), bound, &alloc, &result);
         });
         return result;
     }
@@ -3485,9 +3520,10 @@ bool basic_string<char_type_, allocator_>::try_resize(size_type count, value_typ
 
     // Allocate more space if needed.
     if (count >= string_space) {
-        if (!_with_alloc([&](sz_alloc_type &alloc) {
-                return sz_string_expand(&string_, SZ_SIZE_MAX, count - string_length, &alloc) != NULL;
-            }))
+        if (_with_alloc([&](sz_alloc_type &alloc) {
+                return sz_string_expand(&string_, SZ_SIZE_MAX, count - string_length, &alloc) ? sz_success_k
+                                                                                              : sz_bad_alloc_k;
+            }) != status_t::success_k)
             return false;
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
     }
@@ -3525,12 +3561,12 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
     }
     // In the common case, however, we need to allocate.
     else {
-        if (!_with_alloc([&](sz_alloc_type &alloc) {
+        if (_with_alloc([&](sz_alloc_type &alloc) {
                 string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length() - string_length, &alloc);
-                if (!string_start) return false;
+                if (!string_start) return sz_bad_alloc_k;
                 other.copy(string_start, other.length());
-                return true;
-            }))
+                return sz_success_k;
+            }) != status_t::success_k)
             return false;
     }
     return true;
@@ -3538,18 +3574,19 @@ bool basic_string<char_type_, allocator_>::try_assign(string_view other) noexcep
 
 template <typename char_type_, typename allocator_>
 bool basic_string<char_type_, allocator_>::try_push_back(char_type c) noexcept {
-    return _with_alloc([&](sz_alloc_type &alloc) {
+    auto result = _with_alloc([&](sz_alloc_type &alloc) {
         auto old_size = size();
         sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, 1, &alloc);
-        if (!start) return false;
+        if (!start) return sz_bad_alloc_k;
         start[old_size] = c;
-        return true;
+        return sz_success_k;
     });
+    return result == status_t::success_k;
 }
 
 template <typename char_type_, typename allocator_>
 bool basic_string<char_type_, allocator_>::try_append(const_pointer str, size_type length) noexcept {
-    return _with_alloc([&](sz_alloc_type &alloc) {
+    auto result = _with_alloc([&](sz_alloc_type &alloc) {
         // Sometimes we are inserting part of this string into itself.
         // By the time `sz_string_expand` finished, the old `str` pointer may be invalidated,
         // so we need to handle that special case separately.
@@ -3557,16 +3594,17 @@ bool basic_string<char_type_, allocator_>::try_append(const_pointer str, size_ty
         if (str >= this_span.begin() && str < this_span.end()) {
             auto str_offset_in_this = str - data();
             sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
-            if (!start) return false;
+            if (!start) return sz_bad_alloc_k;
             sz_copy(start + this_span.size(), start + str_offset_in_this, length);
         }
         else {
             sz_ptr_t start = sz_string_expand(&string_, SZ_SIZE_MAX, length, &alloc);
-            if (!start) return false;
+            if (!start) return sz_bad_alloc_k;
             sz_copy(start + this_span.size(), str, length);
         }
-        return true;
+        return sz_success_k;
     });
+    return result == status_t::success_k;
 }
 
 template <typename char_type_, typename allocator_>
@@ -3677,12 +3715,12 @@ bool basic_string<char_type_, allocator_>::try_assign(concatenation<first_type, 
         other.copy(string_start, other.length());
     }
     else {
-        if (!_with_alloc([&](sz_alloc_type &alloc) {
+        if (_with_alloc([&](sz_alloc_type &alloc) {
                 string_start = sz_string_expand(&string_, SZ_SIZE_MAX, other.length(), &alloc);
                 if (!string_start) return false;
                 other.copy(string_start, other.length());
                 return true;
-            }))
+            }) != status_t::success_k)
             return false;
     }
     return true;
@@ -3699,7 +3737,7 @@ bool basic_string<char_type_, allocator_>::try_preparing_replacement( //
     assert(offset + length <= size());
 
     // 1. The replacement is the same length as the replaced range.
-    if (replacement_length == length) { return true; }
+    if (replacement_length == length) return true;
 
     // 2. The replacement is shorter than the replaced range.
     else if (replacement_length < length) {
@@ -3708,9 +3746,11 @@ bool basic_string<char_type_, allocator_>::try_preparing_replacement( //
     }
     // 3. The replacement is longer than the replaced range. An allocation may occur.
     else {
-        return _with_alloc([&](sz_alloc_type &alloc) {
-            return sz_string_expand(&string_, offset + length, replacement_length - length, &alloc);
+        auto result = _with_alloc([&](sz_alloc_type &alloc) {
+            return sz_string_expand(&string_, offset + length, replacement_length - length, &alloc) ? sz_success_k
+                                                                                                    : sz_bad_alloc_k;
         });
+        return result == status_t::success_k;
     }
 }
 
@@ -3849,11 +3889,9 @@ std::size_t edit_distance( //
     basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, std::size_t bound = SZ_SIZE_MAX,
     allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
     std::size_t result;
-    if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            return sz_levenshtein_distance(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result) !=
-                   sz_bad_alloc_k;
-        }))
-        throw std::bad_alloc();
+    raise(_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
+        return sz_levenshtein_distance(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result);
+    }));
     return result;
 }
 
@@ -3877,11 +3915,9 @@ std::size_t edit_distance_utf8(                                                 
     basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
     std::size_t bound = SZ_SIZE_MAX, allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
     std::size_t result;
-    if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            return sz_levenshtein_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result) !=
-                   sz_bad_alloc_k;
-        }))
-        throw std::bad_alloc();
+    raise(_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
+        return sz_levenshtein_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result);
+    }));
     return result;
 }
 
@@ -3911,11 +3947,9 @@ std::ptrdiff_t alignment_score(                                                 
                   "sz_error_cost_t must be signed.");
 
     std::ptrdiff_t result;
-    if (!_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-            return sz_needleman_wunsch_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc,
-                                             &result) != sz_bad_alloc_k;
-        }))
-        throw std::bad_alloc();
+    raise(_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
+        return sz_needleman_wunsch_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc, &result);
+    }));
     return result;
 }
 
