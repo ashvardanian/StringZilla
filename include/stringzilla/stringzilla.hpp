@@ -44,6 +44,23 @@
 #define sz_constexpr_if_cpp20
 #endif
 
+/**
+ *  @brief  For higher safety, we annotate the lifetime bound of the returned string slices.
+ *          https://clang.llvm.org/docs/AttributeReference.html#id11
+ *          https://lemire.me/blog/2024/07/26/safer-code-in-c-with-lifetime-bounds/
+ */
+#if !defined(__has_cpp_attribute)
+#define sz_lifetime_bound
+#elif __has_cpp_attribute(msvc::lifetimebound)
+#define sz_lifetime_bound [[msvc::lifetimebound]]
+#elif __has_cpp_attribute(clang::lifetimebound)
+#define sz_lifetime_bound [[clang::lifetimebound]]
+#elif __has_cpp_attribute(lifetimebound)
+#define sz_lifetime_bound [[lifetimebound]]
+#else
+#define sz_lifetime_bound
+#endif
+
 #if !SZ_AVOID_STL
 #include <array>
 #include <bitset>
@@ -2204,41 +2221,41 @@ class basic_string {
 
 #pragma region Iterators and Accessors
 
-    iterator begin() noexcept { return iterator(data()); }
-    const_iterator begin() const noexcept { return const_iterator(data()); }
-    const_iterator cbegin() const noexcept { return const_iterator(data()); }
+    iterator begin() noexcept sz_lifetime_bound { return iterator(data()); }
+    const_iterator begin() const noexcept sz_lifetime_bound { return const_iterator(data()); }
+    const_iterator cbegin() const noexcept sz_lifetime_bound { return const_iterator(data()); }
 
     // As we are need both `data()` and `size()`, going through `operator string_view()`
     // and `sz_string_unpack` is faster than separate invocations.
-    iterator end() noexcept { return span().end(); }
-    const_iterator end() const noexcept { return view().end(); }
-    const_iterator cend() const noexcept { return view().end(); }
+    iterator end() noexcept sz_lifetime_bound { return span().end(); }
+    const_iterator end() const noexcept sz_lifetime_bound { return view().end(); }
+    const_iterator cend() const noexcept sz_lifetime_bound { return view().end(); }
 
-    reverse_iterator rbegin() noexcept { return span().rbegin(); }
-    const_reverse_iterator rbegin() const noexcept { return view().rbegin(); }
-    const_reverse_iterator crbegin() const noexcept { return view().crbegin(); }
+    reverse_iterator rbegin() noexcept sz_lifetime_bound { return span().rbegin(); }
+    const_reverse_iterator rbegin() const noexcept sz_lifetime_bound { return view().rbegin(); }
+    const_reverse_iterator crbegin() const noexcept sz_lifetime_bound { return view().crbegin(); }
 
-    reverse_iterator rend() noexcept { return span().rend(); }
-    const_reverse_iterator rend() const noexcept { return view().rend(); }
-    const_reverse_iterator crend() const noexcept { return view().crend(); }
+    reverse_iterator rend() noexcept sz_lifetime_bound { return span().rend(); }
+    const_reverse_iterator rend() const noexcept sz_lifetime_bound { return view().rend(); }
+    const_reverse_iterator crend() const noexcept sz_lifetime_bound { return view().crend(); }
 
-    reference operator[](size_type pos) noexcept { return string_.internal.start[pos]; }
-    const_reference operator[](size_type pos) const noexcept { return string_.internal.start[pos]; }
+    reference operator[](size_type pos) noexcept sz_lifetime_bound { return string_.internal.start[pos]; }
+    const_reference operator[](size_type pos) const noexcept sz_lifetime_bound { return string_.internal.start[pos]; }
 
-    reference front() noexcept { return string_.internal.start[0]; }
-    const_reference front() const noexcept { return string_.internal.start[0]; }
-    reference back() noexcept { return string_.internal.start[size() - 1]; }
-    const_reference back() const noexcept { return string_.internal.start[size() - 1]; }
-    pointer data() noexcept { return string_.internal.start; }
-    const_pointer data() const noexcept { return string_.internal.start; }
-    pointer c_str() noexcept { return string_.internal.start; }
-    const_pointer c_str() const noexcept { return string_.internal.start; }
+    reference front() noexcept sz_lifetime_bound { return string_.internal.start[0]; }
+    const_reference front() const noexcept sz_lifetime_bound { return string_.internal.start[0]; }
+    reference back() noexcept sz_lifetime_bound { return string_.internal.start[size() - 1]; }
+    const_reference back() const noexcept sz_lifetime_bound { return string_.internal.start[size() - 1]; }
+    pointer data() noexcept sz_lifetime_bound { return string_.internal.start; }
+    const_pointer data() const noexcept sz_lifetime_bound { return string_.internal.start; }
+    pointer c_str() noexcept sz_lifetime_bound { return string_.internal.start; }
+    const_pointer c_str() const noexcept sz_lifetime_bound { return string_.internal.start; }
 
-    reference at(size_type pos) noexcept(false) {
+    reference at(size_type pos) noexcept(false) sz_lifetime_bound {
         if (pos >= size()) throw std::out_of_range("sz::basic_string::at");
         return string_.internal.start[pos];
     }
-    const_reference at(size_type pos) const noexcept(false) {
+    const_reference at(size_type pos) const noexcept(false) sz_lifetime_bound {
         if (pos >= size()) throw std::out_of_range("sz::basic_string::at");
         return string_.internal.start[pos];
     }
@@ -2269,36 +2286,44 @@ class basic_string {
      *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
      *          Supports signed and unsigned intervals.
      */
-    string_view operator[](std::initializer_list<difference_type> offsets) const noexcept { return view()[offsets]; }
-    string_span operator[](std::initializer_list<difference_type> offsets) noexcept { return span()[offsets]; }
+    string_view operator[](std::initializer_list<difference_type> offsets) const noexcept sz_lifetime_bound {
+        return view()[offsets];
+    }
+    string_span operator[](std::initializer_list<difference_type> offsets) noexcept sz_lifetime_bound {
+        return span()[offsets];
+    }
 
     /**
      *  @brief  Signed alternative to `at()`. Handy if you often write `str[str.size() - 2]`.
      *  @warning The behavior is @b undefined if the position is beyond bounds.
      */
-    value_type sat(difference_type offset) const noexcept { return view().sat(offset); }
-    reference sat(difference_type offset) noexcept { return span().sat(offset); }
+    value_type sat(difference_type offset) const noexcept sz_lifetime_bound { return view().sat(offset); }
+    reference sat(difference_type offset) noexcept sz_lifetime_bound { return span().sat(offset); }
 
     /**
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_view front(difference_type n) const noexcept { return view().front(n); }
-    string_span front(difference_type n) noexcept { return span().front(n); }
+    string_view front(difference_type n) const noexcept sz_lifetime_bound { return view().front(n); }
+    string_span front(difference_type n) noexcept sz_lifetime_bound { return span().front(n); }
 
     /**
      *  @brief  The opposite operation to `remove_prefix`, that does no bounds checking.
      *  @warning The behavior is @b undefined if `n > size()`.
      */
-    string_view back(difference_type n) const noexcept { return view().back(n); }
-    string_span back(difference_type n) noexcept { return span().back(n); }
+    string_view back(difference_type n) const noexcept sz_lifetime_bound { return view().back(n); }
+    string_span back(difference_type n) noexcept sz_lifetime_bound { return span().back(n); }
 
     /**
      *  @brief  Equivalent to Python's `"abc"[-3:-1]`. Exception-safe, unlike STL's `substr`.
      *          Supports signed and unsigned intervals. @b Doesn't copy or allocate memory!
      */
-    string_view sub(difference_type start, difference_type end = npos) const noexcept { return view().sub(start, end); }
-    string_span sub(difference_type start, difference_type end = npos) noexcept { return span().sub(start, end); }
+    string_view sub(difference_type start, difference_type end = npos) const noexcept sz_lifetime_bound {
+        return view().sub(start, end);
+    }
+    string_span sub(difference_type start, difference_type end = npos) noexcept sz_lifetime_bound {
+        return span().sub(start, end);
+    }
 
     /**
      *  @brief  Exports this entire view. Not an STL function, but useful for concatenations.
@@ -2914,7 +2939,7 @@ class basic_string {
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
      */
-    iterator insert(const_iterator it, char_type character) noexcept(false) {
+    iterator insert(const_iterator it, char_type character) noexcept(false) sz_lifetime_bound {
         auto pos = range_length(cbegin(), it);
         insert(pos, string_view(&character, 1));
         return begin() + pos;
@@ -2926,7 +2951,7 @@ class basic_string {
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
      */
-    iterator insert(const_iterator it, size_type repeats, char_type character) noexcept(false) {
+    iterator insert(const_iterator it, size_type repeats, char_type character) noexcept(false) sz_lifetime_bound {
         auto pos = range_length(cbegin(), it);
         insert(pos, repeats, character);
         return begin() + pos;
@@ -2939,7 +2964,7 @@ class basic_string {
      *  @throw  `std::bad_alloc` if the allocation fails.
      */
     template <typename input_iterator>
-    iterator insert(const_iterator it, input_iterator first, input_iterator last) noexcept(false) {
+    iterator insert(const_iterator it, input_iterator first, input_iterator last) noexcept(false) sz_lifetime_bound {
 
         auto pos = range_length(cbegin(), it);
         if (pos > size()) throw std::out_of_range("sz::basic_string::insert");
@@ -2961,7 +2986,7 @@ class basic_string {
      *  @throw  `std::length_error` if the string is too long.
      *  @throw  `std::bad_alloc` if the allocation fails.
      */
-    iterator insert(const_iterator it, std::initializer_list<char_type> list) noexcept(false) {
+    iterator insert(const_iterator it, std::initializer_list<char_type> list) noexcept(false) sz_lifetime_bound {
         return insert(it, list.begin(), list.end());
     }
 
@@ -2981,7 +3006,7 @@ class basic_string {
      *  @brief  Erases ( @b in-place ) the given range of characters.
      *  @return Iterator pointing following the erased character, or end() if no such character exists.
      */
-    iterator erase(const_iterator first, const_iterator last) noexcept {
+    iterator erase(const_iterator first, const_iterator last) noexcept sz_lifetime_bound {
         auto start = begin();
         auto offset = first - start;
         sz_string_erase(&string_, offset, last - first);
@@ -2992,7 +3017,7 @@ class basic_string {
      *  @brief  Erases ( @b in-place ) the one character at a given postion.
      *  @return Iterator pointing following the erased character, or end() if no such character exists.
      */
-    iterator erase(const_iterator pos) noexcept { return erase(pos, pos + 1); }
+    iterator erase(const_iterator pos) noexcept sz_lifetime_bound { return erase(pos, pos + 1); }
 
     /**
      *  @brief  Replaces ( @b in-place ) a range of characters with a given string.
