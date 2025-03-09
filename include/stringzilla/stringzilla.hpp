@@ -341,8 +341,8 @@ class basic_byteset {
         return *this;
     }
 
-    constexpr basic_byteset operator|(basic_byteset other) const noexcept {
-        basic_byteset result = *this;
+    sz_constexpr_if_cpp14 basic_byteset operator|(basic_byteset other) const noexcept {
+        basic_byteset result = *this; //? Variable declaration in a `constexpr` function is a C++14 extension
         result.bitset_._u64s[0] |= other.bitset_._u64s[0], result.bitset_._u64s[1] |= other.bitset_._u64s[1],
             result.bitset_._u64s[2] |= other.bitset_._u64s[2], result.bitset_._u64s[3] |= other.bitset_._u64s[3];
         return result;
