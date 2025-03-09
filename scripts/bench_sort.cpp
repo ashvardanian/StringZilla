@@ -112,6 +112,7 @@ int main(int argc, char const **argv) {
     });
     expect_sorted(pgrams, permute);
 
+#if SZ_USE_SKYLAKE
     bench_permute("sz_pgrams_sort_skylake", [&]() {
         std::copy(pgrams.begin(), pgrams.end(), pgrams_sorted.begin());
         std::iota(permute.begin(), permute.end(), 0);
@@ -120,6 +121,7 @@ int main(int argc, char const **argv) {
         });
     });
     expect_sorted(pgrams, permute);
+#endif
 
     // Sorting strings
     bench_permute("std::sort(positions)", [&]() {
@@ -140,7 +142,7 @@ int main(int argc, char const **argv) {
             [&](sz_memory_allocator_t &alloc) { return sz_sequence_argsort_serial(&array, &alloc, permute.data()); });
     });
     expect_sorted(strings, permute);
-
+#if SZ_USE_SKYLAKE
     bench_permute("sz_sequence_argsort_skylake", [&]() {
         std::iota(permute.begin(), permute.end(), 0);
         sz_sequence_t array;
@@ -152,6 +154,7 @@ int main(int argc, char const **argv) {
             [&](sz_memory_allocator_t &alloc) { return sz_sequence_argsort_skylake(&array, &alloc, permute.data()); });
     });
     expect_sorted(strings, permute);
+#endif
 
 #if __linux__ && defined(_GNU_SOURCE) && !defined(__BIONIC__)
     bench_permute("qsort_r", [&]() {
