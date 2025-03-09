@@ -97,7 +97,28 @@ tracked_unary_functions_t hash_stream_functions() {
 
 tracked_unary_functions_t random_generation_functions() {
     static std::vector<char> buffer;
+    auto wrap_sz = [](auto function) -> unary_function_t {
+        return unary_function_t([function](std::string_view s) {
+            if (buffer.size() < s.size()) buffer.resize(s.size());
+            function(buffer.data(), s.size(), 0);
+            return s.size();
+        });
+    };
+
     tracked_unary_functions_t result = {
+        {"sz_fill_random_serial", wrap_sz(sz_fill_random_serial)},
+#if SZ_USE_HASWELL
+        {"sz_fill_random_haswell", wrap_sz(sz_fill_random_haswell), true},
+#endif
+#if SZ_USE_SKYLAKE
+        {"sz_fill_random_skylake", wrap_sz(sz_fill_random_skylake), true},
+#endif
+#if SZ_USE_ICE
+        {"sz_fill_random_ice", wrap_sz(sz_fill_random_ice), true},
+#endif
+#if SZ_USE_NEON
+        {"sz_fill_random_neon", wrap_sz(sz_fill_random_neon), true},
+#endif
         {"std::rand() & 0xFF", unary_function_t([](std::string_view token) -> std::size_t {
              if (buffer.size() < token.size()) buffer.resize(token.size());
              for (std::size_t i = 0; i < token.size(); ++i) buffer[i] = static_cast<char>(std::rand() & 0xFF);
@@ -106,12 +127,6 @@ tracked_unary_functions_t random_generation_functions() {
         {"std::uniform_int<uint8>", unary_function_t([](std::string_view token) -> std::size_t {
              if (buffer.size() < token.size()) buffer.resize(token.size());
              randomize_string(buffer.data(), token.size());
-             return token.size();
-         })},
-        {"sz::randomize", unary_function_t([](std::string_view token) -> std::size_t {
-             if (buffer.size() < token.size()) buffer.resize(token.size());
-             sz::string_span span(buffer.data(), token.size());
-             sz::fill_random(span);
              return token.size();
          })},
     };
