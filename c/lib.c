@@ -298,7 +298,6 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->bytesum = sz_bytesum_skylake;
 
         impl->sequence_argsort = sz_sequence_argsort_skylake;
-        impl->sequence_intersect = sz_sequence_intersect_skylake;
         impl->pgrams_sort = sz_pgrams_sort_skylake;
     }
 #endif
@@ -319,6 +318,8 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->hash_state_stream = sz_hash_state_stream_ice;
         impl->hash_state_fold = sz_hash_state_fold_ice;
         impl->fill_random = sz_fill_random_ice;
+
+        impl->sequence_intersect = sz_sequence_intersect_ice;
     }
 #endif
 
