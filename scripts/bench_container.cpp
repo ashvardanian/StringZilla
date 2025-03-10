@@ -51,22 +51,23 @@ void bench_tokens(strings_type const &strings) {
     auto const &s = strings;
 
     // StringZilla structures
-    bench<std::map<sz::string, int>>("map<sz::string>", s);
-    bench<std::map<sz::string_view, int>>("map<sz::string_view>", s);
-    bench<std::unordered_map<sz::string, int>>("unordered_map<sz::string>", s);
-    bench<std::unordered_map<sz::string_view, int>>("unordered_map<sz::string_view>", s);
+    bench<std::map<sz::string, int>>("std::map<sz::string>", s);
+    bench<std::map<sz::string_view, int>>("std::map<sz::string_view>", s);
+    bench<std::unordered_map<sz::string, int>>("std::umap<sz::string>", s);
+    bench<std::unordered_map<sz::string_view, int>>("std::umap<sz::string_view>", s);
 
     // Pure STL
-    bench<std::map<std::string, int>>("map<std::string>", s);
-    bench<std::map<std::string_view, int>>("map<std::string_view>", s);
-    bench<std::unordered_map<std::string, int>>("unordered_map<std::string>", s);
-    bench<std::unordered_map<std::string_view, int>>("unordered_map<std::string_view>", s);
+    bench<std::map<std::string, int>>("std::map<std::string>", s);
+    bench<std::map<std::string_view, int>>("std::map<std::string_view>", s);
+    bench<std::unordered_map<std::string, int>>("std::umap<std::string>", s);
+    bench<std::unordered_map<std::string_view, int>>("std::umap<std::string_view>", s);
 
     // STL structures with StringZilla operations
-    // bench<std::map<std::string, int, sz::less>>("map<std::string>", s);
-    // bench<std::map<std::string_view, int, sz::less>>("map<std::string_view>", s);
-    // bench<std::unordered_map<std::string, int, sz::hash, sz::equal_to>>("unordered_map<std::string>", s);
-    // bench<std::unordered_map<std::string_view, int, sz::hash, sz::equal_to>>("unordered_map<std::string_view>", s);
+    bench<std::map<std::string, int, sz::less>>("std::map<std::string, sz::less>", s);
+    bench<std::map<std::string_view, int, sz::less>>("std::map<std::string_view, sz::less>", s);
+    bench<std::unordered_map<std::string, int, sz::hash, sz::equal_to>>("std::umap<std::string, sz::hash>", s);
+    bench<std::unordered_map<std::string_view, int, sz::hash, sz::equal_to>>("std::umap<std::string_view, sz::hash>",
+                                                                             s);
 }
 
 int main(int argc, char const **argv) {
@@ -77,6 +78,8 @@ int main(int argc, char const **argv) {
     // Baseline benchmarks for real words, coming in all lengths
     std::printf("Benchmarking on real words:\n");
     bench_tokens(dataset.tokens);
+    std::printf("Benchmarking on real lines:\n");
+    bench_tokens(dataset.lines);
 
     // Run benchmarks on tokens of different length
     for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {

@@ -1915,8 +1915,8 @@ static void test_stl_containers() {
     assert(sorted_words_sz.empty());
     assert(words_sz.empty());
 
-    std::map<std::string, int, sz::string_view_less> sorted_words_stl;
-    std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to> words_stl;
+    std::map<std::string, int, sz::less> sorted_words_stl;
+    std::unordered_map<std::string, int, sz::hash, sz::equal_to> words_stl;
     assert(sorted_words_stl.empty());
     assert(words_stl.empty());
 }
