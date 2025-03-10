@@ -209,11 +209,11 @@ inline dataset_t make_dataset_from_path(std::string path) {
     mean_line_bytes /= data.lines.size();
 
     std::setlocale(LC_NUMERIC, "");
-    std::printf(                                     //
-        "Parsed the dataset with:\n"                 //
-        "- %zu words of mean length ~ %.2f bytes\n"  //
-        "- %zu lines of mean length ~ %.2f bytes\n", //
-        "- %zu bytes in total\n",                    //
+    std::printf(                                    //
+        "Parsed the dataset with:\n"                //
+        "- %zu words of mean length ~ %.2f bytes\n" //
+        "- %zu lines of mean length ~ %.2f bytes\n" //
+        "- %zu bytes in total\n",                   //
         data.tokens.size(), mean_token_bytes, data.lines.size(), mean_line_bytes, data.text.size());
 
     return data;
