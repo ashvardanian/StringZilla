@@ -875,7 +875,7 @@ SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed)
     for (int i = 0; i < 4; ++i)
         state->aes.xmms[i] = _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2)));
     for (int i = 0; i < 4; ++i)
-        state->sum.u64x2s[i] = _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2 + 8)));
+        state->sum.xmms[i] = _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2 + 8)));
 
     // The inputs are zeroed out at the beginning
     state->ins.xmms[0] = state->ins.xmms[1] = state->ins.xmms[2] = state->ins.xmms[3] = _mm_setzero_si128();
@@ -885,23 +885,23 @@ SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed)
 SZ_INTERNAL void _sz_hash_state_update_haswell(sz_hash_state_t *state) {
     __m128i const shuffle_mask = _mm_load_si128((__m128i const *)_sz_hash_u8x16x4_shuffle());
     state->aes.xmms[0] = _mm_aesenc_si128(state->aes.xmms[0], state->ins.xmms[0]);
-    state->sum.u64x2s[0] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.u64x2s[0], shuffle_mask), state->ins.xmms[0]);
+    state->sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[0], shuffle_mask), state->ins.xmms[0]);
     state->aes.xmms[1] = _mm_aesenc_si128(state->aes.xmms[1], state->ins.xmms[1]);
-    state->sum.u64x2s[1] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.u64x2s[1], shuffle_mask), state->ins.xmms[1]);
+    state->sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[1], shuffle_mask), state->ins.xmms[1]);
     state->aes.xmms[2] = _mm_aesenc_si128(state->aes.xmms[2], state->ins.xmms[2]);
-    state->sum.u64x2s[2] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.u64x2s[2], shuffle_mask), state->ins.xmms[2]);
+    state->sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[2], shuffle_mask), state->ins.xmms[2]);
     state->aes.xmms[3] = _mm_aesenc_si128(state->aes.xmms[3], state->ins.xmms[3]);
-    state->sum.u64x2s[3] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.u64x2s[3], shuffle_mask), state->ins.xmms[3]);
+    state->sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[3], shuffle_mask), state->ins.xmms[3]);
 }
 
 SZ_INTERNAL sz_u64_t _sz_hash_state_finalize_haswell(sz_hash_state_t const *state) {
     // Mix the length into the key
     __m128i key_with_length = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, state->ins_length));
     // Combine the "sum" and the "AES" blocks
-    __m128i mixed_registers0 = _mm_aesenc_si128(state->sum.u64x2s[0], state->aes.xmms[0]);
-    __m128i mixed_registers1 = _mm_aesenc_si128(state->sum.u64x2s[1], state->aes.xmms[1]);
-    __m128i mixed_registers2 = _mm_aesenc_si128(state->sum.u64x2s[2], state->aes.xmms[2]);
-    __m128i mixed_registers3 = _mm_aesenc_si128(state->sum.u64x2s[3], state->aes.xmms[3]);
+    __m128i mixed_registers0 = _mm_aesenc_si128(state->sum.xmms[0], state->aes.xmms[0]);
+    __m128i mixed_registers1 = _mm_aesenc_si128(state->sum.xmms[1], state->aes.xmms[1]);
+    __m128i mixed_registers2 = _mm_aesenc_si128(state->sum.xmms[2], state->aes.xmms[2]);
+    __m128i mixed_registers3 = _mm_aesenc_si128(state->sum.xmms[3], state->aes.xmms[3]);
     // Combine the mixed registers
     __m128i mixed_registers01 = _mm_aesenc_si128(mixed_registers0, mixed_registers1);
     __m128i mixed_registers23 = _mm_aesenc_si128(mixed_registers2, mixed_registers3);
