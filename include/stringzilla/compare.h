@@ -399,7 +399,26 @@ SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #pragma GCC target("arch=armv8.2-a+sve")
 #pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
 
-/* Nothing here for now. */
+SZ_PUBLIC sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+    // Determine the number of bytes in an SVE vector.
+    do {
+        svbool_t progress_vec = svwhilelt_b8((sz_size_t)0, length);
+        svuint8_t a_vec = svld1(progress_vec, (sz_u8_t const *)a);
+        svuint8_t b_vec = svld1(progress_vec, (sz_u8_t const *)b);
+        // Compare: generate a predicate marking lanes where a!=b
+        svbool_t not_equal_vec = svcmpne(progress_vec, a_vec, b_vec);
+        if (svptest_any(progress_vec, not_equal_vec)) return sz_false_k;
+        sz_size_t const vector_length = svcntp_b8(svptrue_b8(), progress_vec);
+        a += vector_length, b += vector_length, length -= vector_length;
+    } while (length > 0);
+    return sz_true_k;
+}
+
+SZ_PUBLIC sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+    //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
+    //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
+    return sz_order_serial(a, a_length, b, b_length);
+}
 
 #pragma clang attribute pop
 #pragma GCC pop_options
@@ -417,6 +436,8 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_equal_skylake(a, b, length);
 #elif SZ_USE_HASWELL
     return sz_equal_haswell(a, b, length);
+#elif SZ_USE_SVE
+    return sz_equal_sve(a, b, length);
 #elif SZ_USE_NEON
     return sz_equal_neon(a, b, length);
 #else
@@ -429,6 +450,8 @@ SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, 
     return sz_order_skylake(a, a_length, b, b_length);
 #elif SZ_USE_HASWELL
     return sz_order_haswell(a, a_length, b, b_length);
+#elif SZ_USE_SVE
+    return sz_order_sve(a, a_length, b, b_length);
 #elif SZ_USE_NEON
     return sz_order_neon(a, a_length, b, b_length);
 #else
