@@ -486,9 +486,9 @@ count: int = sz.count("haystack", "needle", start=0, end=sys.maxsize, allowoverl
 ### Edit Distances
 
 ```py
-assert sz.edit_distance("apple", "aple") == 1 # skip one ASCII character
-assert sz.edit_distance("αβγδ", "αγδ") == 2 # skip two bytes forming one rune
-assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1 # one unicode rune
+assert sz.levenshtein_distance("apple", "aple") == 1 # skip one ASCII character
+assert sz.levenshtein_distance("αβγδ", "αγδ") == 2 # skip two bytes forming one rune
+assert sz.levenshtein_distance_unicode("αβγδ", "αγδ") == 1 # one unicode rune
 ```
 
 Several Python libraries provide edit distance computation.
@@ -513,7 +513,7 @@ costs = np.zeros((256, 256), dtype=np.int8)
 costs.fill(-1)
 np.fill_diagonal(costs, 0)
 
-assert sz.alignment_score("first", "second", substitution_matrix=costs, gap_score=-1) == -sz.edit_distance(a, b)
+assert sz.alignment_score("first", "second", substitution_matrix=costs, gap_score=-1) == -sz.levenshtein_distance(a, b)
 ```
 
 Using the same proteins as for Levenshtein distance benchmarks:
@@ -1088,8 +1088,8 @@ Standard library functions may not offer the most efficient or convenient method
 - `haystack.replace_all(sz::byteset(""), replacement_string)`
 - `haystack.try_replace_all(needle_string, replacement_string)`
 - `haystack.try_replace_all(sz::byteset(""), replacement_string)`
-- `haystack.transform(sz::look_up_table::identity())`
-- `haystack.transform(sz::look_up_table::identity(), haystack.data())`
+- `haystack.lookup(sz::look_up_table::identity())`
+- `haystack.lookup(sz::look_up_table::identity(), haystack.data())`
 
 ### Levenshtein Edit Distance and Alignment Scores
 
@@ -1103,8 +1103,8 @@ sz::hamming_distance(first, second[, upper_bound]) -> std::size_t;
 sz::hamming_distance_utf8(first, second[, upper_bound]) -> std::size_t;
 
 // Count number of insertions, deletions and substitutions
-sz::edit_distance(first, second[, upper_bound[, allocator]]) -> std::size_t;
-sz::edit_distance_utf8(first, second[, upper_bound[, allocator]]) -> std::size_t;
+sz::levenshtein_distance(first, second[, upper_bound[, allocator]]) -> std::size_t;
+sz::levenshtein_distance_utf8(first, second[, upper_bound[, allocator]]) -> std::size_t;
 
 // Substitution-parametrized Needleman-Wunsch global alignment score
 std::int8_t costs[256][256]; // Substitution costs matrix
@@ -1160,8 +1160,8 @@ The performance of those containers is often limited by the performance of the s
 StringZilla can be used to accelerate containers with `std::string` keys, by overriding the default comparator and hash functions.
 
 ```cpp
-std::map<std::string, int, sz::string_view_less> sorted_words;
-std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to> words;
+std::map<std::string, int, sz::less> sorted_words;
+std::unordered_map<std::string, int, sz::hash, sz::equal_to> words;
 ```
 
 Alternatively, a better approach would be to use the `sz::string` class as a key.
@@ -1278,19 +1278,19 @@ assert_eq!(my_str.sz_find("world"), Some(7));
 assert_eq!(my_cow_str.as_ref().sz_find("world"), Some(7));
 ```
 
-The library also exposes Levenshtein and Hamming edit-distances for byte-arrays and UTF-8 strings, as well as Needleman-Wunch alignment scores.
+The library also exposes Levenshtein and Hamming edit-distances for byte-arrays and UTF-8 strings, as well as Needleman-Wunsch alignment scores.
 
 ```rust
 use stringzilla::sz;
 
 // Handling arbitrary byte arrays:
-sz::edit_distance("Hello, world!", "Hello, world?"); // 1
+sz::levenshtein_distance("Hello, world!", "Hello, world?"); // 1
 sz::hamming_distance("Hello, world!", "Hello, world?"); // 1
 sz::alignment_score("Hello, world!", "Hello, world?", sz::unary_substitution_costs(), -1); // -1
 
 // Handling UTF-8 strings:
 sz::hamming_distance_utf8("αβγδ", "αγγδ") // 1
-sz::edit_distance_utf8("façade", "facade") // 1
+sz::levenshtein_distance_utf8("façade", "facade") // 1
 ```
 
 [memchr-benchmarks]: https://github.com/ashvardanian/memchr_vs_stringzilla
@@ -1465,7 +1465,7 @@ In AVX-512, StringZilla uses non-temporal stores to avoid cache pollution, when 
 Moreover, it handles the unaligned head and the tails of the `target` buffer separately, ensuring that writes in big copies are always aligned to cache-line boundaries.
 That's true for both AVX2 and AVX-512 backends.
 
-StringZilla also contains "drafts" of smarter, but less efficient algorithms, that minimize the number of unaligned loads, perfoming shuffles and permutations.
+StringZilla also contains "drafts" of smarter, but less efficient algorithms, that minimize the number of unaligned loads, performing shuffles and permutations.
 That's a topic for future research, as the performance gains are not yet satisfactory.
 
 > § Reading materials.
