@@ -58,7 +58,7 @@ extern "C" {
  *  Example usage:
  *
  *  @code{.c}
- *      #include <stringzilla/join.h>
+ *      #include <stringzilla/intersect.h>
  *      int main() {
  *          char const *first[] = {"banana", "apple", "cherry"};
  *          char const *second[] = {"cherry", "orange", "pineapple", "banana"};

@@ -213,7 +213,8 @@ inline dataset_t make_dataset_from_path(std::string path) {
         "Parsed the dataset with:\n"                 //
         "- %zu words of mean length ~ %.2f bytes\n"  //
         "- %zu lines of mean length ~ %.2f bytes\n", //
-        data.tokens.size(), mean_token_bytes, data.lines.size(), mean_line_bytes);
+        "- %zu bytes in total\n",                    //
+        data.tokens.size(), mean_token_bytes, data.lines.size(), mean_line_bytes, data.text.size());
 
     return data;
 }
