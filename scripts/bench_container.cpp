@@ -14,25 +14,25 @@
 
 using namespace ashvardanian::stringzilla::scripts;
 
-template <typename string_type_to, typename string_type_from>
-std::vector<string_type_to> to(std::vector<string_type_from> const &strings) {
-    std::vector<string_type_to> result;
+template <typename string_to_type_, typename string_from_type_>
+std::vector<string_to_type_> to(std::vector<string_from_type_> const &strings) {
+    std::vector<string_to_type_> result;
     result.reserve(strings.size());
-    for (string_type_from const &string : strings) result.push_back({string.data(), string.size()});
+    for (string_from_type_ const &string : strings) result.push_back({string.data(), string.size()});
     return result;
 }
 
 /**
  *  @brief  Evaluation for search string operations: find.
  */
-template <typename container_at>
+template <typename container_type_>
 void bench(std::string name, std::vector<std::string_view> const &strings) {
 
-    using key_type = typename container_at::key_type;
+    using key_type = typename container_type_::key_type;
     std::vector<key_type> keys = to<key_type>(strings);
 
     // Build up the container
-    container_at container;
+    container_type_ container;
     for (key_type const &key : keys) container[key] = 0;
 
     tracked_function_gt<unary_function_t> variant;
@@ -45,33 +45,32 @@ void bench(std::string name, std::vector<std::string_view> const &strings) {
     variant.print();
 }
 
-template <typename strings_type>
-void bench_tokens(strings_type const &strings) {
-    if (strings.size() == 0) return;
-    auto const &s = strings;
+template <typename strings_type_>
+void bench_tokens(strings_type_ const &s) {
+    if (s.size() == 0) return;
 
-    // StringZilla structures
-    bench<std::map<sz::string, int>>("std::map<sz::string>", s);
-    bench<std::map<sz::string_view, int>>("std::map<sz::string_view>", s);
-    bench<std::unordered_map<sz::string, int>>("std::umap<sz::string>", s);
-    bench<std::unordered_map<sz::string_view, int>>("std::umap<sz::string_view>", s);
+    // STL containers with StringZilla strings and views
+    bench<std::map<sz::string, int>>("std::map<sz::string>::find", s);
+    bench<std::map<sz::string_view, int>>("std::map<sz::string_view>::find", s);
+    bench<std::unordered_map<sz::string, int>>("std::umap<sz::string>::find", s);
+    bench<std::unordered_map<sz::string_view, int>>("std::umap<sz::string_view>::find", s);
 
-    // Pure STL
-    bench<std::map<std::string, int>>("std::map<std::string>", s);
-    bench<std::map<std::string_view, int>>("std::map<std::string_view>", s);
-    bench<std::unordered_map<std::string, int>>("std::umap<std::string>", s);
-    bench<std::unordered_map<std::string_view, int>>("std::umap<std::string_view>", s);
+    // STL containers with STL strings and views
+    bench<std::map<std::string, int>>("std::map<std::string>::find", s);
+    bench<std::map<std::string_view, int>>("std::map<std::string_view>::find", s);
+    bench<std::unordered_map<std::string, int>>("std::umap<std::string>::find", s);
+    bench<std::unordered_map<std::string_view, int>>("std::umap<std::string_view>::find", s);
 
     // STL structures with StringZilla operations
-    bench<std::map<std::string, int, sz::less>>("std::map<std::string, sz::less>", s);
-    bench<std::map<std::string_view, int, sz::less>>("std::map<std::string_view, sz::less>", s);
-    bench<std::unordered_map<std::string, int, sz::hash, sz::equal_to>>("std::umap<std::string, sz::hash>", s);
-    bench<std::unordered_map<std::string_view, int, sz::hash, sz::equal_to>>("std::umap<std::string_view, sz::hash>",
-                                                                             s);
+    bench<std::map<std::string, int, sz::less>>("std::map<std::string, sz::less>::find", s);
+    bench<std::map<std::string_view, int, sz::less>>("std::map<std::string_view, sz::less>::find", s);
+    bench<std::unordered_map<std::string, int, sz::hash, sz::equal_to>>("std::umap<std::string, sz::hash>::find", s);
+    bench<std::unordered_map<std::string_view, int, sz::hash, sz::equal_to>>(
+        "std::umap<std::string_view, sz::hash>::find", s);
 }
 
 int main(int argc, char const **argv) {
-    std::printf("StringZilla. Starting search benchmarks.\n");
+    std::printf("StringZilla. Starting container benchmarks.\n");
 
     dataset_t dataset = prepare_benchmark_environment(argc, argv);
 
