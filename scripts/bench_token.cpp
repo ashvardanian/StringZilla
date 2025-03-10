@@ -11,6 +11,10 @@
 
 using namespace ashvardanian::stringzilla::scripts;
 
+/**
+ *  @brief  Provides kernels, each computing the unsigned sum of bytes in given tokens.
+ *          Compares all supported SIMD backed outputs to the serial implementation.
+ */
 tracked_unary_functions_t bytesum_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
         return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
@@ -38,9 +42,13 @@ tracked_unary_functions_t bytesum_functions() {
     return result;
 }
 
+/**
+ *  @brief Provides kernels, each computing the hash of given tokens using the same seed.
+ *         Compares all supported SIMD backed outputs to the serial implementation.
+ */
 tracked_unary_functions_t hash_functions() {
     auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size(), 42); });
+        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size(), 0); });
     };
     tracked_unary_functions_t result = {
         {"sz_hash_serial", wrap_sz(sz_hash_serial)},
@@ -61,13 +69,14 @@ tracked_unary_functions_t hash_functions() {
     return result;
 }
 
-struct wrap_hash_stream {
+/** @brief Wraps hash state initialization, streaming, and folding for streaming benchmarks. */
+struct wrap_sz_hash_stream {
     sz_hash_state_t state;
     sz_hash_state_init_t init;
     sz_hash_state_stream_t stream;
     sz_hash_state_fold_t fold;
 
-    wrap_hash_stream(sz_hash_state_init_t i, sz_hash_state_stream_t s, sz_hash_state_fold_t f)
+    wrap_sz_hash_stream(sz_hash_state_init_t i, sz_hash_state_stream_t s, sz_hash_state_fold_t f)
         : init(i), stream(s), fold(f) {}
 
     std::size_t operator()(std::string_view s) noexcept {
@@ -77,30 +86,40 @@ struct wrap_hash_stream {
     }
 };
 
+/**
+ *  @brief  Provides kernels, each computing the hash of given tokens using more expensive "streaming" API.
+ *          Compares all supported SIMD backed outputs to the serial implementation.
+ */
 tracked_unary_functions_t hash_stream_functions() {
     tracked_unary_functions_t result = {
         {"sz_hash_stream_serial",
-         wrap_hash_stream(sz_hash_state_init_serial, sz_hash_state_stream_serial, sz_hash_state_fold_serial)},
+         wrap_sz_hash_stream(sz_hash_state_init_serial, sz_hash_state_stream_serial, sz_hash_state_fold_serial)},
 #if SZ_USE_HASWELL
         {"sz_hash_stream_haswell",
-         wrap_hash_stream(sz_hash_state_init_haswell, sz_hash_state_stream_haswell, sz_hash_state_fold_haswell), true},
+         wrap_sz_hash_stream(sz_hash_state_init_haswell, sz_hash_state_stream_haswell, sz_hash_state_fold_haswell),
+         true},
 #endif
 #if SZ_USE_SKYLAKE
         {"sz_hash_stream_skylake",
-         wrap_hash_stream(sz_hash_state_init_skylake, sz_hash_state_stream_skylake, sz_hash_state_fold_skylake), true},
+         wrap_sz_hash_stream(sz_hash_state_init_skylake, sz_hash_state_stream_skylake, sz_hash_state_fold_skylake),
+         true},
 #endif
 #if SZ_USE_ICE
         {"sz_hash_stream_ice",
-         wrap_hash_stream(sz_hash_state_init_ice, sz_hash_state_stream_ice, sz_hash_state_fold_ice), true},
+         wrap_sz_hash_stream(sz_hash_state_init_ice, sz_hash_state_stream_ice, sz_hash_state_fold_ice), true},
 #endif
 #if SZ_USE_NEON
         {"sz_hash_stream_neon",
-         wrap_hash_stream(sz_hash_state_init_neon, sz_hash_state_stream_neon, sz_hash_state_fold_neon), true},
+         wrap_sz_hash_stream(sz_hash_state_init_neon, sz_hash_state_stream_neon, sz_hash_state_fold_neon), true},
 #endif
     };
     return result;
 }
 
+/**
+ *  @brief  Provides kernels, each generating random bytes for given tokens using the same "nonce".
+ *          Compares all supported SIMD backed outputs to the serial implementation.
+ */
 tracked_unary_functions_t random_generation_functions() {
     static std::vector<char> buffer;
     auto wrap_sz = [](auto function) -> unary_function_t {
@@ -139,55 +158,75 @@ tracked_unary_functions_t random_generation_functions() {
     return result;
 }
 
+/** @brief Wraps string equality check for potentially different length inputs. */
+struct wrap_sz_equal {
+    sz_equal_t function;
+
+    wrap_sz_equal(sz_equal_t f) : function(f) {}
+    bool operator()(std::string_view a, std::string_view b) const noexcept {
+        return a.size() == b.size() && function(a.data(), b.data(), a.size());
+    }
+};
+
+/** @brief Wraps LibC's string equality check for potentially different length inputs. */
+bool memcmp_for_equality(std::string_view a, std::string_view b) noexcept {
+    return (a.size() == b.size() && memcmp(a.data(), b.data(), a.size()) == 0);
+}
+
+/**
+ *  @brief  Provides kernels, each comparing two tokens for equality.
+ *          Compares all supported SIMD backed outputs to the serial implementation.
+ *          In each iteration combines self- and cross-compares to dampen the branch prediction effect,
+ *          assuming most random string would differ in the very first byte.
+ */
 tracked_binary_functions_t equality_functions() {
-    auto wrap_sz = [](auto function) -> binary_function_t {
-        return binary_function_t([function](std::string_view a, std::string_view b) {
-            return a.size() == b.size() && function(a.data(), b.data(), a.size());
-        });
-    };
     tracked_binary_functions_t result = {
-        {"std::string_view.==", [](std::string_view a, std::string_view b) { return a == b; }},
-        {"sz_equal_serial", wrap_sz(sz_equal_serial), true},
+        {"sz_equal_serial", binary_combinations(wrap_sz_equal(sz_equal_serial))},
 #if SZ_USE_HASWELL
-        {"sz_equal_haswell", wrap_sz(sz_equal_haswell), true},
+        {"sz_equal_haswell", binary_combinations(wrap_sz_equal(sz_equal_haswell)), true},
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_equal_skylake", wrap_sz(sz_equal_skylake), true},
+        {"sz_equal_skylake", binary_combinations(wrap_sz_equal(sz_equal_skylake)), true},
 #endif
-        {"memcmp",
-         [](std::string_view a, std::string_view b) {
-             return (a.size() == b.size() && memcmp(a.data(), b.data(), a.size()) == 0);
-         }},
+#if SZ_USE_SVE
+        {"sz_equal_sve", binary_combinations(wrap_sz_equal(sz_equal_sve)), true},
+#endif
+#if SZ_USE_NEON
+        {"sz_equal_neon", binary_combinations(wrap_sz_equal(sz_equal_neon)), true},
+#endif
+        {"memcmp(equality)", binary_combinations(memcmp_for_equality)},
     };
     return result;
 }
 
+/** @brief Wraps LibC's string comparison for potentially different length inputs. */
+int memcmp_for_ordering(std::string_view a, std::string_view b) noexcept {
+    auto order = memcmp(a.data(), b.data(), a.size() < b.size() ? a.size() : b.size());
+    if (order == 0) return a.size() == b.size() ? 0 : (a.size() < b.size() ? -1 : 1);
+    return order;
+}
+
+/**
+ *  @brief  Provides kernels, each computing the relative order of two tokens.
+ *          Compares all supported SIMD backed outputs to the serial implementation.
+ *          In each iteration combines self- and cross-compares to dampen the branch prediction effect,
+ *          assuming most random string would differ in the very first byte.
+ */
 tracked_binary_functions_t ordering_functions() {
     auto wrap_sz = [](auto function) -> binary_function_t {
         return binary_function_t([function](std::string_view a, std::string_view b) {
-            return function(a.data(), a.size(), b.data(), b.size());
+            return (int)function(a.data(), a.size(), b.data(), b.size());
         });
     };
     tracked_binary_functions_t result = {
-        {"std::string_view.compare",
-         [](std::string_view a, std::string_view b) {
-             auto order = a.compare(b);
-             return (order == 0 ? sz_equal_k : (order < 0 ? sz_less_k : sz_greater_k));
-         }},
-        {"sz_order_serial", wrap_sz(sz_order_serial), true},
+        {"sz_order_serial", binary_combinations(wrap_sz(sz_order_serial))},
 #if SZ_USE_HASWELL
-        {"sz_order_haswell", wrap_sz(sz_order_haswell), true},
+        {"sz_order_haswell", binary_combinations(wrap_sz(sz_order_haswell)), true},
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_order_skylake", wrap_sz(sz_order_skylake), true},
+        {"sz_order_skylake", binary_combinations(wrap_sz(sz_order_skylake)), true},
 #endif
-        {"memcmp",
-         [](std::string_view a, std::string_view b) {
-             auto order = memcmp(a.data(), b.data(), a.size() < b.size() ? a.size() : b.size());
-             return order != 0 ? (a.size() == b.size() ? (order < 0 ? sz_less_k : sz_greater_k)
-                                                       : (a.size() < b.size() ? sz_less_k : sz_greater_k))
-                               : sz_equal_k;
-         }},
+        {"memcmp(ordering)", binary_combinations(memcmp_for_ordering)},
     };
     return result;
 }

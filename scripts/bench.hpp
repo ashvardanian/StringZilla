@@ -42,6 +42,22 @@ using unary_function_t = std::function<std::size_t(std::string_view)>;
 using binary_function_t = std::function<std::size_t(std::string_view, std::string_view)>;
 
 /**
+ *  @brief  Wraps a binary function to compare all combinations of two tokens.
+ *          Designed to benchmark functions that on-average take very different times to execute
+ *          for the same string or different strings. For equality checks it's similar to a typical
+ *          load when probing a Hash Table. For relative ordering, it's similar to sorting a dense
+ *          array with many similar strings.
+ */
+template <typename function_type_>
+binary_function_t binary_combinations(function_type_ function) {
+    return binary_function_t([function](std::string_view a, std::string_view b) {
+        // Assuming most outputs here will be 0 or 1, we want to combine them to with different
+        // multiples to ensure a unique output for each combination.
+        return function(a, b) * 1 + function(a, a) * 2 + function(b, a) * 4 + function(b, b) * 8;
+    });
+}
+
+/**
  *  @brief  Wrapper for a single execution backend.
  */
 template <typename function_type_>
@@ -144,9 +160,7 @@ inline std::vector<std::string_view> tokenize(std::string_view str, is_separator
     return words;
 }
 
-/**
- *  @brief  Splits a string into words, using newlines, tabs, and whitespaces as delimiters.
- */
+/** @brief Splits a string into words, using newlines, tabs, and whitespaces as delimiters using @b `std::isspace`. */
 inline std::vector<std::string_view> tokenize(std::string_view str) {
     return tokenize(str, [](char c) { return std::isspace(c); });
 }
@@ -175,11 +189,11 @@ struct dataset_t {
 inline dataset_t make_dataset_from_path(std::string path) {
     dataset_t data;
     data.text = read_file(path);
-    data.text.resize(bit_floor(data.text.size()));
+    data.text.resize(bit_floor(data.text.size())); // Shrink to the nearest power of two
     data.tokens = tokenize(data.text);
-    data.tokens.resize(bit_floor(data.tokens.size()));
+    data.tokens.resize(bit_floor(data.tokens.size())); // Shrink to the nearest power of two
     data.lines = tokenize(data.text, [](char c) { return c == '\n'; });
-    data.lines.resize(bit_floor(data.lines.size()));
+    data.lines.resize(bit_floor(data.lines.size())); // Shrink to the nearest power of two
 
 #if !SZ_DEBUG // Shuffle only in release mode
     auto &generator = global_random_generator();
