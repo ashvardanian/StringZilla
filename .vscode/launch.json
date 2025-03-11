@@ -50,6 +50,10 @@
         {
           "name": "ASAN_OPTIONS",
           "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
+        },
+        {
+          "name": "STRINGWARS_DATASET",
+          "value": "leipzig1M.txt"
         }
       ],
       "stopAtEntry": false,
