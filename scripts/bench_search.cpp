@@ -138,6 +138,7 @@ struct matcher_from_std_search {
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = std::search(haystack.begin(), haystack.end(), searcher_);
+        if (match == haystack.end()) return std::string_view::npos; // No match found
         return (size_type)(match - haystack.begin());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
@@ -154,8 +155,10 @@ struct rmatcher_from_std_search {
     inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = std::search(haystack.rbegin(), haystack.rend(), searcher_);
+        if (match == haystack.rend()) return std::string_view::npos; // No match found
         auto offset_from_end = match - haystack.rbegin();
-        return std::string_view::npos - offset_from_end - needle_.size();
+        auto offset_from_start = haystack.size() - offset_from_end - needle_.size();
+        return (size_type)offset_from_start;
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
