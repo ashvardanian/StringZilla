@@ -315,7 +315,8 @@ struct ordering_from_memcmp_t {
 void bench_comparing_equality(environment_t const &env) {
 
     auto validator = equality_from_memcmp_t(env);
-    benchmark_result_t base = benchmark(env, "sz_equal_serial", validator, equality_from_sz<sz_equal_serial>(env));
+    benchmark_result_t base =
+        benchmark(env, "sz_equal_serial", validator, equality_from_sz<sz_equal_serial>(env)).log();
     benchmark_result_t base_stl = benchmark(env, "std::memcmp==0", validator).log(base);
 
 #if SZ_USE_HASWELL
@@ -330,12 +331,16 @@ void bench_comparing_equality(environment_t const &env) {
 #if SZ_USE_NEON
     benchmark(env, "sz_equal_neon", validator, equality_from_sz<sz_equal_neon>(env)).log(base, base_stl);
 #endif
+#if SZ_USE_SVE
+    benchmark(env, "sz_equal_sve", validator, equality_from_sz<sz_equal_sve>(env)).log(base, base_stl);
+#endif
 }
 
 void bench_comparing_order(environment_t const &env) {
 
     auto validator = ordering_from_memcmp_t(env);
-    benchmark_result_t base = benchmark(env, "sz_order_serial", validator, ordering_from_sz<sz_order_serial>(env));
+    benchmark_result_t base =
+        benchmark(env, "sz_order_serial", validator, ordering_from_sz<sz_order_serial>(env)).log();
     benchmark_result_t base_stl = benchmark(env, "memcmp<=>0", validator).log(base);
 
 #if SZ_USE_HASWELL
