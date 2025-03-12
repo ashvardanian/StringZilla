@@ -676,8 +676,8 @@ SZ_INTERNAL void _sz_pgrams_union_serial(                                       
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
 
 /**
- *  @brief  The most important part of the QuickSort algorithm partitioning the elements around the pivot.
- *          Unlike the serial algorithm, uses compressed stores to filter and move the elements around the pivot.
+ *  @brief The most important part of the QuickSort algorithm partitioning the elements around the pivot.
+ *  @note Unlike the serial algorithm, uses compressed stores to filter and move the elements around the pivot.
  */
 SZ_INTERNAL void _sz_sequence_argsort_skylake_3way_partition(                       //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
@@ -748,24 +748,10 @@ SZ_INTERNAL void _sz_sequence_argsort_skylake_3way_partition(                   
     // Copy back.
     sz_copy_skylake((sz_ptr_t)(initial_pgrams + start_in_sequence),      //
                     (sz_cptr_t)(partitioned_pgrams + start_in_sequence), //
-                    count_smaller * sizeof(sz_pgram_t));
+                    count * sizeof(sz_pgram_t));
     sz_copy_skylake((sz_ptr_t)(initial_order + start_in_sequence),      //
                     (sz_cptr_t)(partitioned_order + start_in_sequence), //
-                    count_smaller * sizeof(sz_sorted_idx_t));
-
-    sz_copy_skylake((sz_ptr_t)(initial_pgrams + start_in_sequence + count_smaller),      //
-                    (sz_cptr_t)(partitioned_pgrams + start_in_sequence + count_smaller), //
-                    count_equal * sizeof(sz_pgram_t));
-    sz_copy_skylake((sz_ptr_t)(initial_order + start_in_sequence + count_smaller),      //
-                    (sz_cptr_t)(partitioned_order + start_in_sequence + count_smaller), //
-                    count_equal * sizeof(sz_sorted_idx_t));
-
-    sz_copy_skylake((sz_ptr_t)(initial_pgrams + start_in_sequence + count_smaller + count_equal),      //
-                    (sz_cptr_t)(partitioned_pgrams + start_in_sequence + count_smaller + count_equal), //
-                    count_greater * sizeof(sz_pgram_t));
-    sz_copy_skylake((sz_ptr_t)(initial_order + start_in_sequence + count_smaller + count_equal),      //
-                    (sz_cptr_t)(partitioned_order + start_in_sequence + count_smaller + count_equal), //
-                    count_greater * sizeof(sz_sorted_idx_t));
+                    count * sizeof(sz_sorted_idx_t));
 
     // Return the offsets of the equal elements.
     *first_pivot_offset = start_in_sequence + count_smaller;
@@ -773,7 +759,7 @@ SZ_INTERNAL void _sz_sequence_argsort_skylake_3way_partition(                   
 }
 
 /**
- *  @brief  Recursive Quick-Sort implementation backing both the `sz_sequence_argsort_skylake` and
+ *  @brief Recursive Quick-Sort implementation backing both the `sz_sequence_argsort_skylake` and
  * `sz_pgrams_sort_skylake`, and using the `_sz_sequence_argsort_skylake_3way_partition` under the hood.
  */
 SZ_PUBLIC void _sz_sequence_argsort_skylake_recursively(            //
@@ -837,9 +823,10 @@ SZ_PUBLIC sz_status_t sz_pgrams_sort_skylake(sz_pgram_t *pgrams, sz_size_t count
 }
 
 /**
- *  @brief  Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
- *          It combines `_sz_sequence_argsort_serial_export_next_pgrams` and `_sz_sequence_argsort_serial_recursively`,
- *          recursively diving into the identical pgrams.
+ *  @brief Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
+ *
+ *  It combines `_sz_sequence_argsort_serial_export_next_pgrams` and `_sz_sequence_argsort_serial_recursively`,
+ *  recursively diving into the identical pgrams.
  */
 SZ_PUBLIC void _sz_sequence_argsort_skylake_next_pgrams(                        //
     sz_sequence_t const *const sequence,                                        //
@@ -931,16 +918,218 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
 #pragma GCC target("arch=armv8.2-a+sve")
 #pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
 
-/** @copydoc sz_sequence_argsort */
-SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-                                              sz_sorted_idx_t *order) {
-    return sz_sequence_argsort_serial(sequence, alloc, order);
+/**
+ *  @brief The most important part of the QuickSort algorithm partitioning the elements around the pivot.
+ *  @note Unlike the serial algorithm, uses compressed stores to filter and move the elements around the pivot.
+ *  @sa Identical to @b Skylake implementation, but uses variable length SVE registers.
+ */
+SZ_INTERNAL void _sz_sequence_argsort_sve_3way_partition(
+    sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order, sz_pgram_t *const partitioned_pgrams,
+    sz_sorted_idx_t *const partitioned_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
+    sz_size_t *const first_pivot_offset, sz_size_t *const last_pivot_offset) {
+    sz_size_t const count = end_in_sequence - start_in_sequence;
+
+    // Use `svcntd()` to obtain the number of 64-bit elements in one SVE vector.
+    sz_size_t const pgrams_per_vector = svcntd();
+
+    // Choose the pivot with Sedgewick's method.
+    sz_pgram_t const *pivot_pgram_ptr = _sz_sequence_partitioning_pivot(initial_pgrams + start_in_sequence, count);
+    sz_pgram_t const pivot_pgram = *pivot_pgram_ptr;
+    svuint64_t pivot_vec = svdup_n_u64(pivot_pgram);
+
+    // Count elements smaller and greater than the pivot.
+    sz_size_t count_smaller = 0, count_greater = 0;
+    for (sz_size_t i = start_in_sequence; i < end_in_sequence; i += pgrams_per_vector) {
+        svbool_t load_mask = svwhilelt_b64(i, end_in_sequence);
+        svuint64_t pgrams_vec = svld1_u64(load_mask, initial_pgrams + i);
+        svbool_t smaller_mask = svcmplt_u64(load_mask, pgrams_vec, pivot_vec);
+        svbool_t greater_mask = svcmpgt_u64(load_mask, pgrams_vec, pivot_vec);
+        count_smaller += svcntp_b64(smaller_mask, smaller_mask);
+        count_greater += svcntp_b64(greater_mask, greater_mask);
+    }
+
+    sz_size_t const count_equal = count - count_smaller - count_greater;
+    _sz_assert(count_equal >= 1 && "The pivot must be present in the collection.");
+    _sz_assert(count_smaller + count_equal + count_greater == count && "The partitioning must be exhaustive.");
+
+    // Set offsets for each partition.
+    sz_size_t smaller_offset = start_in_sequence;
+    sz_size_t equal_offset = start_in_sequence + count_smaller;
+    sz_size_t greater_offset = start_in_sequence + count_smaller + count_equal;
+
+    // Partition elements into three segments.
+    for (sz_size_t i = start_in_sequence; i < end_in_sequence; i += pgrams_per_vector) {
+        svbool_t load_mask = svwhilelt_b64(i, end_in_sequence);
+        svuint64_t pgrams_vec = svld1_u64(load_mask, initial_pgrams + i);
+        svuint64_t order_vec = svld1_u64(load_mask, initial_order + i);
+
+        svbool_t smaller_mask = svcmplt_u64(load_mask, pgrams_vec, pivot_vec);
+        svbool_t equal_mask = svcmpeq_u64(load_mask, pgrams_vec, pivot_vec);
+        svbool_t greater_mask = svcmpgt_u64(load_mask, pgrams_vec, pivot_vec);
+
+        // Compress the elements that satisfy the predicate and store them contiguously.
+        sz_size_t count_smaller = svcntp_b64(smaller_mask, smaller_mask);
+        sz_size_t count_equal = svcntp_b64(equal_mask, equal_mask);
+        sz_size_t count_greater = svcntp_b64(greater_mask, greater_mask);
+        if (count_smaller) {
+            svuint64_t comp_pgrams = svcompact_u64(smaller_mask, pgrams_vec);
+            svuint64_t comp_order = svcompact_u64(smaller_mask, order_vec);
+            svbool_t store_mask = svwhilelt_b64((sz_size_t)0, count_smaller);
+            svst1_u64(store_mask, partitioned_pgrams + smaller_offset, comp_pgrams);
+            svst1_u64(store_mask, partitioned_order + smaller_offset, comp_order);
+            smaller_offset += count_smaller;
+        }
+        if (count_equal) {
+            svuint64_t comp_pgrams = svcompact_u64(equal_mask, pgrams_vec);
+            svuint64_t comp_order = svcompact_u64(equal_mask, order_vec);
+            svbool_t store_mask = svwhilelt_b64((sz_size_t)0, count_equal);
+            svst1_u64(store_mask, partitioned_pgrams + equal_offset, comp_pgrams);
+            svst1_u64(store_mask, partitioned_order + equal_offset, comp_order);
+            equal_offset += count_equal;
+        }
+        if (count_greater) {
+            svuint64_t comp_pgrams = svcompact_u64(greater_mask, pgrams_vec);
+            svuint64_t comp_order = svcompact_u64(greater_mask, order_vec);
+            svbool_t store_mask = svwhilelt_b64((sz_size_t)0, count_greater);
+            svst1_u64(store_mask, partitioned_pgrams + greater_offset, comp_pgrams);
+            svst1_u64(store_mask, partitioned_order + greater_offset, comp_order);
+            greater_offset += count_greater;
+        }
+    }
+
+    // Copy back.
+    sz_copy_sve((sz_ptr_t)(initial_pgrams + start_in_sequence),      //
+                (sz_cptr_t)(partitioned_pgrams + start_in_sequence), //
+                count * sizeof(sz_pgram_t));
+    sz_copy_sve((sz_ptr_t)(initial_order + start_in_sequence),      //
+                (sz_cptr_t)(partitioned_order + start_in_sequence), //
+                count * sizeof(sz_sorted_idx_t));
+
+    // Return the offsets of the equal elements.
+    *first_pivot_offset = start_in_sequence + count_smaller;
+    *last_pivot_offset = start_in_sequence + count_smaller + count_equal - 1;
 }
 
-/** @copydoc sz_pgrams_sort */
+/**
+ *  @brief Recursive Quick-Sort implementation backing both the `sz_sequence_argsort_skylake` and
+ * `sz_pgrams_sort_skylake`, and using the `_sz_sequence_argsort_skylake_3way_partition` under the hood.
+ *  @sa Identical to @b Skylake implementation, but uses variable length SVE registers.
+ */
+SZ_PUBLIC void _sz_sequence_argsort_sve_recursively(sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,
+                                                    sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order,
+                                                    sz_size_t const start_in_sequence,
+                                                    sz_size_t const end_in_sequence) {
+    sz_size_t const count = end_in_sequence - start_in_sequence;
+    sz_size_t const pgrams_per_vector = svcntd();
+    if (count <= pgrams_per_vector) {
+        // For very small arrays use a simple insertion sort.
+        sz_pgrams_sort_with_insertion(initial_pgrams + start_in_sequence, count, initial_order + start_in_sequence);
+        return;
+    }
+
+    sz_size_t first_pivot_index, last_pivot_index;
+    _sz_sequence_argsort_sve_3way_partition(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+                                            start_in_sequence, end_in_sequence, &first_pivot_index, &last_pivot_index);
+
+    if (start_in_sequence + 1 < first_pivot_index)
+        _sz_sequence_argsort_sve_recursively(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+                                             start_in_sequence, first_pivot_index);
+    if (last_pivot_index + 2 < end_in_sequence)
+        _sz_sequence_argsort_sve_recursively(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+                                             last_pivot_index + 1, end_in_sequence);
+}
+
 SZ_PUBLIC sz_status_t sz_pgrams_sort_sve(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *alloc,
                                          sz_sorted_idx_t *order) {
-    return sz_pgrams_sort_serial(pgrams, count, alloc, order);
+    // Initialize the order with 0,1,2,...
+    for (sz_size_t i = 0; i != count; ++i) order[i] = i;
+
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
+    // Allocate temporary memory for partitioning.
+    sz_size_t memory_usage = sizeof(sz_pgram_t) * count + sizeof(sz_sorted_idx_t) * count;
+    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
+    if (!temporary_pgrams) return sz_bad_alloc_k;
+
+    _sz_sequence_argsort_sve_recursively(pgrams, order, temporary_pgrams, temporary_order, 0, count);
+
+    alloc->free(temporary_pgrams, memory_usage, alloc);
+    return sz_success_k;
+}
+
+/**
+ *  @brief Recursive Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
+ *  @sa Identical to @b Skylake implementation, but uses variable length SVE registers.
+ *
+ *  It combines `_sz_sequence_argsort_serial_export_next_pgrams` and `_sz_sequence_argsort_serial_recursively`,
+ *  recursively diving into the identical pgrams.
+ */
+SZ_PUBLIC void _sz_sequence_argsort_sve_next_pgrams(
+    sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
+    sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
+    sz_size_t const end_in_sequence, sz_size_t const start_character) {
+
+    // Export the next pgrams from the sequence.
+    _sz_sequence_argsort_serial_export_next_pgrams(sequence, global_pgrams, global_order, start_in_sequence,
+                                                   end_in_sequence, start_character);
+
+    // Sort the current pgrams with the SVE quicksort.
+    _sz_sequence_argsort_sve_recursively(global_pgrams, global_order, temporary_pgrams, temporary_order,
+                                         start_in_sequence, end_in_sequence);
+
+    // For each group of equal pgrams, if there are multiple strings and more characters,
+    // recursively sort the next pgrams.
+    sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
+    sz_size_t nested_start = start_in_sequence;
+    sz_size_t nested_end = start_in_sequence;
+    while (nested_end != end_in_sequence) {
+        sz_pgram_t current_pgram = global_pgrams[nested_start];
+        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
+
+        sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; // byte order was swapped
+        int has_multiple_strings = nested_end - nested_start > 1;
+        int has_more_characters_in_each = current_pgram_length == pgram_capacity;
+        if (has_multiple_strings && has_more_characters_in_each)
+            _sz_sequence_argsort_sve_next_pgrams(sequence, global_pgrams, global_order, temporary_pgrams,
+                                                 temporary_order, nested_start, nested_end,
+                                                 start_character + pgram_capacity);
+        nested_start = nested_end;
+    }
+}
+
+SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
+                                              sz_sorted_idx_t *order) {
+    sz_size_t count = sequence->count;
+    for (sz_size_t i = 0; i != count; ++i) order[i] = i;
+
+    if (count <= 32) {
+        sz_sequence_argsort_with_insertion(sequence, order);
+        return sz_success_k;
+    }
+
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
+    sz_size_t memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    sz_pgram_t *temporary_pgrams = global_pgrams + count;
+    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
+    if (!global_pgrams) return sz_bad_alloc_k;
+
+    _sz_sequence_argsort_sve_next_pgrams(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0, count,
+                                         0);
+
+    alloc->free(global_pgrams, memory_usage, alloc);
+    return sz_success_k;
 }
 
 #pragma clang attribute pop
