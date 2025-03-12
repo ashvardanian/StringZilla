@@ -1,293 +1,378 @@
 /**
  *  @file   bench_token.cpp
  *  @brief  Benchmarks token-level operations like hashing, equality, ordering, and copies.
+ *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
+ *          validating the SIMD-accelerated backends against the serial baselines.
  *
- *  This file is the sibling of `bench_sort.cpp`, `bench_search.cpp` and `bench_similarity.cpp`.
+ *  Benchmarks include:
+ *  - Checksum calculation and hashing for each token - @b bytesum and @b hash.
+ *  - Stream hashing of a token (file, lines, or words) - @b hash_init, @b hash_stream, @b hash_fold.
+ *  - Equality check between two tokens and their relative order - @b equal and @b ordering.
+ *
+ *  For substring search, the number of operations per second are reported as the number of character-level comparisons
+ *  happening in the worst case in the naive algorithm, meaning O(N*M) for N characters in the haystack and M in the
+ *  needle.
+ *
+ *  Instead of CLI arguments, for compatibility with @b StringWa.rs, the following environment variables are used:
+ *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
+ *
+ *  Unlike StringWa.rs, the following additional environment variables are supported:
+ *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
+ *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
+ *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
+ *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *
+ *  Here are a few build & run commands:
+ *
+ *  @code{.sh}
+ *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
+ *  cmake --build build_release --config Release --target stringzilla_bench_token
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=lines build_release/stringzilla_bench_token
+ *  @endcode
+ *
+ *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
+ *  like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes (exactly 1 cache line),
+ *  your last command may look like:
+ *
+ *  @code{.sh}
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
+ *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
+ *  build_release/stringzilla_bench_token
+ *  @endcode
+ *
+ *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
+ *  This file is the sibling of `bench_sort.cpp`, `bench_token.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
  */
 #include <numeric> // `std::accumulate`
 
-#include <bench.hpp>
-#include <test.hpp> // `random_string`
+#include "bench.hpp"
 
 using namespace ashvardanian::stringzilla::scripts;
 
-/**
- *  @brief  Provides kernels, each computing the unsigned sum of bytes in given tokens.
- *          Compares all supported SIMD backed outputs to the serial implementation.
- */
-tracked_unary_functions_t bytesum_functions() {
-    auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size()); });
-    };
-    tracked_unary_functions_t result = {
-        {"std::accumulate",
-         [](std::string_view s) {
-             return std::accumulate(s.begin(), s.end(), (std::size_t)0,
-                                    [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
-         }},
-        {"sz_bytesum_serial", wrap_sz(sz_bytesum_serial), true},
-#if SZ_USE_HASWELL
-        {"sz_bytesum_haswell", wrap_sz(sz_bytesum_haswell), true},
-#endif
-#if SZ_USE_SKYLAKE
-        {"sz_bytesum_skylake", wrap_sz(sz_bytesum_skylake), true},
-#endif
-#if SZ_USE_ICE
-        {"sz_bytesum_ice", wrap_sz(sz_bytesum_ice), true},
-#endif
-#if SZ_USE_NEON
-        {"sz_bytesum_neon", wrap_sz(sz_bytesum_neon), true},
-#endif
-    };
-    return result;
-}
+#pragma region Unary Functions
 
-/**
- *  @brief Provides kernels, each computing the hash of given tokens using the same seed.
- *         Compares all supported SIMD backed outputs to the serial implementation.
- */
-tracked_unary_functions_t hash_functions() {
-    auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](std::string_view s) { return function(s.data(), s.size(), 0); });
-    };
-    tracked_unary_functions_t result = {
-        {"sz_hash_serial", wrap_sz(sz_hash_serial)},
-#if SZ_USE_HASWELL
-        {"sz_hash_haswell", wrap_sz(sz_hash_haswell), true},
-#endif
-#if SZ_USE_SKYLAKE
-        {"sz_hash_skylake", wrap_sz(sz_hash_skylake), true},
-#endif
-#if SZ_USE_ICE
-        {"sz_hash_ice", wrap_sz(sz_hash_ice), true},
-#endif
-#if SZ_USE_NEON
-        {"sz_hash_neon", wrap_sz(sz_hash_neon), true},
-#endif
-        {"std::hash", [](std::string_view s) { return std::hash<std::string_view> {}(s); }},
-    };
-    return result;
-}
+/** @brief Wraps a hardware-specific hashing backend into something similar to @b `std::accumulate`. */
+template <sz_bytesum_t func_>
+struct bytesum_from_sz {
 
-/** @brief Wraps hash state initialization, streaming, and folding for streaming benchmarks. */
-struct wrap_sz_hash_stream {
-    sz_hash_state_t state;
-    sz_hash_state_init_t init;
-    sz_hash_state_stream_t stream;
-    sz_hash_state_fold_t fold;
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
 
-    wrap_sz_hash_stream(sz_hash_state_init_t i, sz_hash_state_stream_t s, sz_hash_state_fold_t f)
-        : init(i), stream(s), fold(f) {}
-
-    std::size_t operator()(std::string_view s) noexcept {
-        init(&state, 42);
-        stream(&state, s.data(), s.size());
-        return fold(&state);
+    inline call_result_t operator()(std::string_view buffer) const noexcept {
+        sz_u64_t bytesum = func_(buffer.data(), buffer.size());
+        return {buffer.size(), static_cast<check_value_t>(bytesum)};
     }
 };
 
-/**
- *  @brief  Provides kernels, each computing the hash of given tokens using more expensive "streaming" API.
- *          Compares all supported SIMD backed outputs to the serial implementation.
- */
-tracked_unary_functions_t hash_stream_functions() {
-    tracked_unary_functions_t result = {
-        {"sz_hash_stream_serial",
-         wrap_sz_hash_stream(sz_hash_state_init_serial, sz_hash_state_stream_serial, sz_hash_state_fold_serial)},
+/** @brief Wraps @b `std::accumulate` into a function object compatible with our benchmarking suite. */
+struct bytesum_from_std_t {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view buffer) const noexcept {
+        std::size_t bytesum =
+            std::accumulate(buffer.begin(), buffer.end(), (std::size_t)0,
+                            [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
+        return {buffer.size(), static_cast<check_value_t>(bytesum)};
+    }
+};
+
+/** @brief Wraps a hardware-specific hashing backend into something similar to @b `std::hash`. */
+template <sz_hash_t func_>
+struct hash_from_sz {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view buffer) const noexcept {
+        sz_u64_t hash = func_(buffer.data(), buffer.size(), 0);
+        return {buffer.size(), static_cast<check_value_t>(hash)};
+    }
+};
+
+/** @brief Wraps @b `std::hash` into a function object compatible with our benchmarking suite. */
+struct hash_from_std_t {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view buffer) const noexcept {
+        std::size_t hash = std::hash<std::string_view> {}(buffer);
+        do_not_optimize(hash); //! The used function is not documented and can't be tested against anything
+        return {buffer.size() /* static_cast<check_value_t>(hash) */};
+    }
+};
+
+/** @brief Wraps hash state initialization, streaming, and folding for streaming benchmarks. */
+template <sz_hash_state_init_t init_, sz_hash_state_stream_t stream_, sz_hash_state_fold_t fold_>
+struct hash_stream_from_sz {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index]);
+    }
+
+    call_result_t operator()(std::string_view s) const noexcept {
+        sz_hash_state_t state;
+        init_(&state, 42);
+        stream_(&state, s.data(), s.size());
+        sz_u64_t hash = fold_(&state);
+        return {s.size(), static_cast<check_value_t>(hash)};
+    }
+};
+
+void bench_checksums(environment_t const &env) {
+
+    auto validator = bytesum_from_std_t(env);
+    benchmark_result_t base_stl = benchmark(env, "std::accumulate", validator).log();
+    benchmark_result_t base =
+        benchmark(env, "sz_bytesum_serial", validator, bytesum_from_sz<sz_bytesum_serial>(env)).log(base_stl);
+
 #if SZ_USE_HASWELL
-        {"sz_hash_stream_haswell",
-         wrap_sz_hash_stream(sz_hash_state_init_haswell, sz_hash_state_stream_haswell, sz_hash_state_fold_haswell),
-         true},
+    benchmark(env, "sz_bytesum_haswell", validator, bytesum_from_sz<sz_bytesum_haswell>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_hash_stream_skylake",
-         wrap_sz_hash_stream(sz_hash_state_init_skylake, sz_hash_state_stream_skylake, sz_hash_state_fold_skylake),
-         true},
+    benchmark(env, "sz_bytesum_skylake", validator, bytesum_from_sz<sz_bytesum_skylake>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_ICE
-        {"sz_hash_stream_ice",
-         wrap_sz_hash_stream(sz_hash_state_init_ice, sz_hash_state_stream_ice, sz_hash_state_fold_ice), true},
+    benchmark(env, "sz_bytesum_ice", validator, bytesum_from_sz<sz_bytesum_ice>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_NEON
-        {"sz_hash_stream_neon",
-         wrap_sz_hash_stream(sz_hash_state_init_neon, sz_hash_state_stream_neon, sz_hash_state_fold_neon), true},
+    benchmark(env, "sz_bytesum_neon", validator, bytesum_from_sz<sz_bytesum_neon>(env)).log(base, base_stl);
 #endif
-    };
-    return result;
 }
 
-/**
- *  @brief  Provides kernels, each generating random bytes for given tokens using the same "nonce".
- *          Compares all supported SIMD backed outputs to the serial implementation.
- */
-tracked_unary_functions_t random_generation_functions() {
-    static std::vector<char> buffer;
-    auto wrap_sz = [](auto function) -> unary_function_t {
-        return unary_function_t([function](std::string_view s) {
-            if (buffer.size() < s.size()) buffer.resize(s.size());
-            function(buffer.data(), s.size(), 0);
-            return s.size();
-        });
-    };
+void bench_hashing(environment_t const &env) {
 
-    tracked_unary_functions_t result = {
-        {"sz_fill_random_serial", wrap_sz(sz_fill_random_serial)},
+    auto validator = hash_from_sz<sz_hash_serial>(env);
+    benchmark_result_t base = benchmark(env, "sz_hash_serial", validator).log();
+    benchmark_result_t base_stl = benchmark(env, "std::hash", hash_from_std_t(env)).log(base);
 #if SZ_USE_HASWELL
-        {"sz_fill_random_haswell", wrap_sz(sz_fill_random_haswell), true},
+    benchmark(env, "sz_hash_haswell", validator, hash_from_sz<sz_hash_haswell>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_fill_random_skylake", wrap_sz(sz_fill_random_skylake), true},
+    benchmark(env, "sz_hash_skylake", validator, hash_from_sz<sz_hash_skylake>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_ICE
-        {"sz_fill_random_ice", wrap_sz(sz_fill_random_ice), true},
+    benchmark(env, "sz_hash_ice", validator, hash_from_sz<sz_hash_ice>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_NEON
-        {"sz_fill_random_neon", wrap_sz(sz_fill_random_neon), true},
+    benchmark(env, "sz_hash_neon", validator, hash_from_sz<sz_hash_neon>(env)).log(base, base_stl);
 #endif
-        {"std::rand() & 0xFF", unary_function_t([](std::string_view token) -> std::size_t {
-             if (buffer.size() < token.size()) buffer.resize(token.size());
-             for (std::size_t i = 0; i < token.size(); ++i) buffer[i] = static_cast<char>(std::rand() & 0xFF);
-             return token.size();
-         })},
-        {"std::uniform_int<uint8>", unary_function_t([](std::string_view token) -> std::size_t {
-             if (buffer.size() < token.size()) buffer.resize(token.size());
-             randomize_string(&buffer[0], token.size());
-             return token.size();
-         })},
-    };
-    return result;
 }
 
-/** @brief Wraps string equality check for potentially different length inputs. */
-struct wrap_sz_equal {
-    sz_equal_t function;
+void bench_stream_hashing(environment_t const &env) {
 
-    wrap_sz_equal(sz_equal_t f) : function(f) {}
-    bool operator()(std::string_view a, std::string_view b) const noexcept {
-        return a.size() == b.size() && function(a.data(), b.data(), a.size());
+    auto validator =
+        hash_stream_from_sz<sz_hash_state_init_serial, sz_hash_state_stream_serial, sz_hash_state_fold_serial>(env);
+    benchmark_result_t base = benchmark(env, "sz_hash_stream_serial", validator).log();
+    benchmark_result_t base_stl = benchmark(env, "std::hash", hash_from_std_t(env)).log(base);
+
+#if SZ_USE_HASWELL
+    benchmark(
+        env, "sz_hash_stream_haswell", validator,
+        hash_stream_from_sz<sz_hash_state_init_haswell, sz_hash_state_stream_haswell, sz_hash_state_fold_haswell>(env))
+        .log(base, base_stl);
+#endif
+#if SZ_USE_SKYLAKE
+    benchmark(
+        env, "sz_hash_stream_skylake", validator,
+        hash_stream_from_sz<sz_hash_state_init_skylake, sz_hash_state_stream_skylake, sz_hash_state_fold_skylake>(env))
+        .log(base, base_stl);
+#endif
+#if SZ_USE_ICE
+    benchmark(env, "sz_hash_stream_ice", validator,
+              hash_stream_from_sz<sz_hash_state_init_ice, sz_hash_state_stream_ice, sz_hash_state_fold_ice>(env))
+        .log(base, base_stl);
+#endif
+#if SZ_USE_NEON
+    benchmark(env, "sz_hash_stream_neon", validator,
+              hash_stream_from_sz<sz_hash_state_init_neon, sz_hash_state_stream_neon, sz_hash_state_fold_neon>(env))
+        .log(base, base_stl);
+#endif
+}
+
+#pragma endregion
+
+#pragma region Binary Functions
+
+/**
+ *  @brief  Wraps a hardware-specific equality-checking backend into something similar to @b `std::equal_to`.
+ *          Assuming that almost any random pair of strings would differ in the very first byte, to make benchmarks
+ *          more similar to mixed cases, like Hash Table lookups, where during probing we meet both differing
+ *          and equivalent strings.
+ */
+template <sz_equal_t func_>
+struct equality_from_sz {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
+        bool ab = func_(a.data(), b.data(), std::min(a.size(), b.size())) == sz_true_k;
+        bool aa = func_(a.data(), a.data(), a.size()) == sz_true_k;
+        bool bb = func_(b.data(), b.data(), b.size()) == sz_true_k;
+        bool ba = func_(b.data(), a.data(), std::min(a.size(), b.size())) == sz_true_k;
+        std::size_t max_bytes_passed = a.size() + b.size() + std::min(a.size(), b.size());
+        check_value_t check_value = ab;
+        do_not_optimize(ab);
+        do_not_optimize(aa);
+        do_not_optimize(bb);
+        do_not_optimize(ba);
+        return {max_bytes_passed, check_value};
     }
 };
 
 /** @brief Wraps LibC's string equality check for potentially different length inputs. */
-bool memcmp_for_equality(std::string_view a, std::string_view b) noexcept {
-    return (a.size() == b.size() && memcmp(a.data(), b.data(), a.size()) == 0);
-}
+struct equality_from_memcmp_t {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
+        bool ab = std::memcmp(a.data(), b.data(), std::min(a.size(), b.size())) == 0;
+        bool aa = std::memcmp(a.data(), a.data(), a.size()) == 0;
+        bool bb = std::memcmp(b.data(), b.data(), b.size()) == 0;
+        bool ba = std::memcmp(b.data(), a.data(), std::min(a.size(), b.size())) == 0;
+        std::size_t max_bytes_passed = a.size() + b.size() + std::min(a.size(), b.size());
+        check_value_t check_value = ab;
+        do_not_optimize(ab);
+        do_not_optimize(aa);
+        do_not_optimize(bb);
+        do_not_optimize(ba);
+        return {max_bytes_passed, check_value};
+    }
+};
 
 /**
- *  @brief  Provides kernels, each comparing two tokens for equality.
- *          Compares all supported SIMD backed outputs to the serial implementation.
- *          In each iteration combines self- and cross-compares to dampen the branch prediction effect,
- *          assuming most random string would differ in the very first byte.
+ *  @brief  Wraps a hardware-specific order-checking backend into something similar to @b `std::equal_to`.
+ *          Assuming that almost any random pair of strings would differ in the very first byte, to make benchmarks
+ *          more similar to mixed cases, like Hash Table lookups, where during probing we meet both differing
+ *          and equivalent strings.
  */
-tracked_binary_functions_t equality_functions() {
-    tracked_binary_functions_t result = {
-        {"sz_equal_serial", binary_combinations(wrap_sz_equal(sz_equal_serial))},
+template <sz_order_t func_>
+struct ordering_from_sz {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
+        sz_ordering_t ab = func_(a.data(), a.size(), b.data(), b.size());
+        sz_ordering_t aa = func_(a.data(), a.size(), a.data(), a.size());
+        sz_ordering_t bb = func_(b.data(), b.size(), b.data(), b.size());
+        sz_ordering_t ba = func_(b.data(), a.size(), a.data(), a.size());
+        std::size_t max_bytes_passed = 4 * std::min(a.size(), b.size());
+        check_value_t check_value = ab + aa * 3 + bb * 9 + ba * 27; // Each can have 3 unique values
+        return {max_bytes_passed, check_value};
+    }
+};
+
+/** @brief Wraps LibC's string order-checking for potentially different length inputs. */
+struct ordering_from_memcmp_t {
+
+    environment_t const &env;
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
+        int ab = memcmp_for_ordering(a, b);
+        int aa = memcmp_for_ordering(a, a);
+        int bb = memcmp_for_ordering(b, b);
+        int ba = memcmp_for_ordering(b, a);
+        std::size_t max_bytes_passed = 4 * std::min(a.size(), b.size());
+        check_value_t check_value = ab + aa * 3 + bb * 9 + ba * 27; // Each can have 3 unique values
+        return {max_bytes_passed, check_value};
+    }
+
+    /** @brief Wraps LibC's string comparison for potentially different length inputs. */
+    static int memcmp_for_ordering(std::string_view a, std::string_view b) noexcept {
+        auto order = memcmp(a.data(), b.data(), a.size() < b.size() ? a.size() : b.size());
+        if (order == 0) return a.size() == b.size() ? 0 : (a.size() < b.size() ? -1 : 1);
+        return order;
+    }
+};
+
+void bench_comparing_equality(environment_t const &env) {
+
+    auto validator = equality_from_memcmp_t(env);
+    benchmark_result_t base = benchmark(env, "sz_equal_serial", validator, equality_from_sz<sz_equal_serial>(env));
+    benchmark_result_t base_stl = benchmark(env, "std::memcmp==0", validator).log(base);
+
 #if SZ_USE_HASWELL
-        {"sz_equal_haswell", binary_combinations(wrap_sz_equal(sz_equal_haswell)), true},
+    benchmark(env, "sz_equal_haswell", validator, equality_from_sz<sz_equal_haswell>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_equal_skylake", binary_combinations(wrap_sz_equal(sz_equal_skylake)), true},
+    benchmark(env, "sz_equal_skylake", validator, equality_from_sz<sz_equal_skylake>(env)).log(base, base_stl);
 #endif
-#if SZ_USE_SVE
-        {"sz_equal_sve", binary_combinations(wrap_sz_equal(sz_equal_sve)), true},
+#if SZ_USE_ICE
+    benchmark(env, "sz_equal_ice", validator, equality_from_sz<sz_equal_ice>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_NEON
-        {"sz_equal_neon", binary_combinations(wrap_sz_equal(sz_equal_neon)), true},
+    benchmark(env, "sz_equal_neon", validator, equality_from_sz<sz_equal_neon>(env)).log(base, base_stl);
 #endif
-        {"memcmp(equality)", binary_combinations(memcmp_for_equality)},
-    };
-    return result;
 }
 
-/** @brief Wraps LibC's string comparison for potentially different length inputs. */
-int memcmp_for_ordering(std::string_view a, std::string_view b) noexcept {
-    auto order = memcmp(a.data(), b.data(), a.size() < b.size() ? a.size() : b.size());
-    if (order == 0) return a.size() == b.size() ? 0 : (a.size() < b.size() ? -1 : 1);
-    return order;
-}
+void bench_comparing_order(environment_t const &env) {
 
-/**
- *  @brief  Provides kernels, each computing the relative order of two tokens.
- *          Compares all supported SIMD backed outputs to the serial implementation.
- *          In each iteration combines self- and cross-compares to dampen the branch prediction effect,
- *          assuming most random string would differ in the very first byte.
- */
-tracked_binary_functions_t ordering_functions() {
-    auto wrap_sz = [](auto function) -> binary_function_t {
-        return binary_function_t([function](std::string_view a, std::string_view b) {
-            return (int)function(a.data(), a.size(), b.data(), b.size());
-        });
-    };
-    tracked_binary_functions_t result = {
-        {"sz_order_serial", binary_combinations(wrap_sz(sz_order_serial))},
+    auto validator = ordering_from_memcmp_t(env);
+    benchmark_result_t base = benchmark(env, "sz_order_serial", validator, ordering_from_sz<sz_order_serial>(env));
+    benchmark_result_t base_stl = benchmark(env, "memcmp<=>0", validator).log(base);
+
 #if SZ_USE_HASWELL
-        {"sz_order_haswell", binary_combinations(wrap_sz(sz_order_haswell)), true},
+    benchmark(env, "sz_order_haswell", validator, ordering_from_sz<sz_order_haswell>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
-        {"sz_order_skylake", binary_combinations(wrap_sz(sz_order_skylake)), true},
+    benchmark(env, "sz_order_skylake", validator, ordering_from_sz<sz_order_skylake>(env)).log(base, base_stl);
 #endif
-        {"memcmp(ordering)", binary_combinations(memcmp_for_ordering)},
-    };
-    return result;
+#if SZ_USE_ICE
+    benchmark(env, "sz_order_ice", validator, ordering_from_sz<sz_order_ice>(env)).log(base, base_stl);
+#endif
+#if SZ_USE_NEON
+    benchmark(env, "sz_order_neon", validator, ordering_from_sz<sz_order_neon>(env)).log(base, base_stl);
+#endif
 }
 
-template <typename string_type>
-void bench_dereferencing(std::string name, std::vector<string_type> strings) {
-    auto func = unary_function_t([](std::string_view s) { return s.size(); });
-    tracked_unary_functions_t converts = {{name, func}};
-    bench_unary_functions(strings, converts);
-}
-
-template <typename strings_type>
-void bench(strings_type &&strings) {
-    if (strings.size() == 0) return;
-
-    // Benchmark logical operations
-    bench_unary_functions(strings, bytesum_functions());
-    bench_unary_functions(strings, hash_functions());
-    bench_unary_functions(strings, hash_stream_functions());
-    bench_binary_functions(strings, equality_functions());
-    bench_binary_functions(strings, ordering_functions());
-    bench_unary_functions(strings, random_generation_functions());
-
-    // Benchmark the cost of converting `std::string` and `sz::string` to `std::string_view`.
-    // ! The results on a mixture of short and long strings should be similar.
-    // ! If the dataset is made of exclusively short or long strings, STL will look much better
-    // ! in this micro-benchmark, as the correct branch of the SSO will be predicted every time.
-    bench_dereferencing<std::string>("std::string -> std::string_view", {strings.begin(), strings.end()});
-    bench_dereferencing<sz::string>("sz::string -> std::string_view", {strings.begin(), strings.end()});
-}
-
-void bench_on_input_data(int argc, char const **argv) {
-    dataset_t dataset = prepare_benchmark_environment(argc, argv);
-
-    // Baseline benchmarks for real words, coming in all lengths
-    std::printf("Benchmarking on real words:\n");
-    bench(dataset.tokens);
-    std::printf("Benchmarking on real lines:\n");
-    bench(dataset.lines);
-    std::printf("Benchmarking on entire dataset:\n");
-    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, bytesum_functions());
-    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, hash_functions());
-    bench_unary_functions<std::vector<std::string_view>>({dataset.text}, hash_stream_functions());
-
-    // Run benchmarks on tokens of different length
-    for (std::size_t token_length : {1, 2, 3, 4, 5, 6, 7, 8, 16, 32}) {
-        std::printf("Benchmarking on real words of length %zu:\n", token_length);
-        bench(filter_by_length(dataset.tokens, token_length));
-    }
-}
-
-void bench_on_synthetic_data() {
-    // Generate some random words
-}
+#pragma endregion
 
 int main(int argc, char const **argv) {
-    std::printf("StringZilla. Starting token-level benchmarks.\n");
-    std::printf("- Seconds per benchmark: %zu\n", seconds_per_benchmark);
+    std::printf("Welcome to StringZilla!\n");
 
-    if (argc < 2) { bench_on_synthetic_data(); }
-    else { bench_on_input_data(argc, argv); }
+    std::printf("Building up the environment...\n");
+    environment_t env = build_environment( //
+        argc, argv,                        //
+        "leipzig1M.txt",                   //
+        environment_t::tokenization_t::lines_k);
+
+    std::printf("Starting individual token-level benchmarks...\n");
+
+    // Unary operations
+    bench_checksums(env);
+    bench_hashing(env);
+    bench_stream_hashing(env);
+
+    // Binary operations
+    bench_comparing_equality(env);
+    bench_comparing_order(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;
