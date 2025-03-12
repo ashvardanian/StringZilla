@@ -194,10 +194,10 @@ typedef struct sz_implementations_t {
     sz_find_byte_t rfind_byte;
     sz_find_t find;
     sz_find_t rfind;
-    sz_find_set_t find_from_set;
-    sz_find_set_t rfind_from_set;
+    sz_find_byteset_t find_byteset;
+    sz_find_byteset_t rfind_byteset;
 
-    sz_levenshtein_distance_t edit_distance;
+    sz_levenshtein_distance_t levenshtein_distance;
     sz_needleman_wunsch_score_t alignment_score;
 
     sz_sequence_argsort_t sequence_argsort;
@@ -239,10 +239,10 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     impl->rfind = sz_rfind_serial;
     impl->find_byte = sz_find_byte_serial;
     impl->rfind_byte = sz_rfind_byte_serial;
-    impl->find_from_set = sz_find_byteset_serial;
-    impl->rfind_from_set = sz_rfind_byteset_serial;
+    impl->find_byteset = sz_find_byteset_serial;
+    impl->rfind_byteset = sz_rfind_byteset_serial;
 
-    impl->edit_distance = sz_levenshtein_distance_serial;
+    impl->levenshtein_distance = sz_levenshtein_distance_serial;
     impl->alignment_score = sz_needleman_wunsch_score_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
@@ -270,8 +270,8 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->rfind_byte = sz_rfind_byte_haswell;
         impl->find = sz_find_haswell;
         impl->rfind = sz_rfind_haswell;
-        impl->find_from_set = sz_find_byteset_haswell;
-        impl->rfind_from_set = sz_rfind_byteset_haswell;
+        impl->find_byteset = sz_find_byteset_haswell;
+        impl->rfind_byteset = sz_rfind_byteset_haswell;
     }
 #endif
 
@@ -304,10 +304,10 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
 
 #if SZ_USE_ICE
     if (caps & sz_cap_ice_k) {
-        impl->find_from_set = sz_find_byteset_ice;
-        impl->rfind_from_set = sz_rfind_byteset_ice;
+        impl->find_byteset = sz_find_byteset_ice;
+        impl->rfind_byteset = sz_rfind_byteset_ice;
 
-        impl->edit_distance = sz_levenshtein_distance_ice;
+        impl->levenshtein_distance = sz_levenshtein_distance_ice;
         impl->alignment_score = sz_needleman_wunsch_score_ice;
 
         impl->lookup = sz_lookup_ice;
@@ -343,8 +343,8 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->rfind = sz_rfind_neon;
         impl->find_byte = sz_find_byte_neon;
         impl->rfind_byte = sz_rfind_byte_neon;
-        impl->find_from_set = sz_find_byteset_neon;
-        impl->rfind_from_set = sz_rfind_byteset_neon;
+        impl->find_byteset = sz_find_byteset_neon;
+        impl->rfind_byteset = sz_rfind_byteset_neon;
     }
 #endif
 
@@ -464,11 +464,11 @@ SZ_DYNAMIC sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t h_length, sz_cptr_t 
 }
 
 SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
-    return sz_dispatch_table.find_from_set(text, length, set);
+    return sz_dispatch_table.find_byteset(text, length, set);
 }
 
 SZ_DYNAMIC sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
-    return sz_dispatch_table.rfind_from_set(text, length, set);
+    return sz_dispatch_table.rfind_byteset(text, length, set);
 }
 
 SZ_DYNAMIC sz_status_t sz_hamming_distance( //
@@ -489,7 +489,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distance( //
     sz_cptr_t a, sz_size_t a_length,            //
     sz_cptr_t b, sz_size_t b_length,            //
     sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result) {
-    return sz_dispatch_table.edit_distance(a, a_length, b, b_length, bound, alloc, result);
+    return sz_dispatch_table.levenshtein_distance(a, a_length, b, b_length, bound, alloc, result);
 }
 
 SZ_DYNAMIC sz_status_t sz_levenshtein_distance_utf8( //
