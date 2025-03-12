@@ -42,6 +42,7 @@
 #include <vector>     // `std::vector`
 #include <regex>      // `std::regex`, `std::regex_search`
 #include <thread>     // `std::this_thread::sleep_for`
+#include <optional>   // `std::optional`
 
 #include <string_view> // Requires C++17
 
@@ -412,14 +413,21 @@ inline environment_t build_environment(                                        /
  *  @brief  Uses C-style file IO to save information about the most recent stress test failure.
  *          Files can be found in: "$STRINGWARS_STRESS_DIR/failed_$time_$name.txt".
  */
-inline void log_stress_failure(environment_t const &env, std::string const &name, std::size_t input_index,
-                               std::size_t expected_check_value, std::size_t actual_check_value) noexcept(false) {
+inline void log_failure(                                              //
+    environment_t const &env, std::string const &name,                //
+    std::size_t expected_check_value, std::size_t actual_check_value, //
+    std::optional<std::size_t> token_index) noexcept(false) {
 
-    std::string file_name = "failed_" + name + "_" + std::to_string(input_index) + ".txt";
+    std::string timestamp = std::to_string(std::time(nullptr));
+    std::string file_name = "failed_" + timestamp + "_" + name + "_" + ".txt";
     std::string file_path = env.stress_dir + "/" + file_name;
     std::FILE *file = std::fopen(file_path.c_str(), "w");
     if (!file) throw std::runtime_error("Failed to open file for writing: " + file_name);
 
+    std::fprintf(file, "Dataset path: %s\n", env.path.c_str());
+    std::fprintf(file, "Tokenization mode: %d\n", env.tokenization);
+    std::fprintf(file, "Seed: %zu\n", env.seed);
+    if (token_index) std::fprintf(file, "Token index: %zu\n", *token_index);
     std::fprintf(file, "Expected: %zu\n", expected_check_value);
     std::fprintf(file, "Actual: %zu\n", actual_check_value);
     std::fclose(file);
@@ -564,7 +572,73 @@ struct benchmark_result_t {
 };
 
 /**
- *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given unary function.
+ *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b nullary function.
+ *  @param[in] env Environment with the dataset and tokens.
+ *  @param[in] name Name of the benchmark, used for logging.
+ *  @param[in] baseline Optional serial analog, against which the accelerated function will be stress-tested.
+ *  @param[in] callable Nullary function taking no arguments and returning a @b `call_result_t`.
+ *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
+ */
+template <                                          //
+    typename callable_type_,                        //
+    typename baseline_type_ = callable_no_op_t,     //
+    typename preprocessing_type_ = callable_no_op_t //
+    >
+benchmark_result_t benchmark_nullary( //
+    environment_t const &env,         //
+    std::string const &name,          //
+    baseline_type_ &&baseline,        //
+    callable_type_ &&callable,        //
+    preprocessing_type_ &&preprocessing = callable_no_op_t()) {
+
+    benchmark_result_t result;
+    result.name = name;
+    if (!env.allow(name)) {
+        result.skipped = true;
+        return result;
+    }
+
+    // Pre-process before testing
+    if constexpr (!std::is_same<preprocessing_type_, callable_no_op_t>()) preprocessing();
+
+    // Perform the testing against the baseline, if provided.
+    if constexpr (!std::is_same<baseline_type_, callable_no_op_t>())
+        for (auto running_seconds : repeat_up_to(env.stress_seconds)) {
+            call_result_t const accelerated_result = callable();
+            call_result_t const baseline_result = baseline();
+            ++result.stress_calls;
+            if (accelerated_result.check_value == baseline_result.check_value) continue; // No failures
+
+            // If we got here, the error needs to be reported and investigated.
+            ++result.errors;
+            if (result.errors > env.stress_limit) {
+                std::printf("Too many errors in %s after %.3f seconds. Stopping the test.\n", name.c_str(),
+                            running_seconds);
+                std::terminate();
+            }
+            log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, {});
+        }
+
+    // Repeat the benchmark of the unary function. Assume most of them are applied to the entire
+    // dataset and take a lot of time, so we don't unroll much, unlike `benchmark_unary`.
+    for (auto running_seconds : repeat_up_to(env.benchmark_seconds)) {
+        std::uint64_t time_start = cpu_cycle_counter();
+        call_result_t call_result = callable();
+        std::uint64_t time_end = cpu_cycle_counter();
+
+        // Aggregate:
+        result += call_result;
+        result.profiled_seconds = running_seconds;
+        result.profiled_calls += 1;
+        result.profiled_cpu_cycles += time_end - time_start;
+        result.cpu_cycles_histogram[time_end - time_start] += 1;
+    }
+
+    return result;
+}
+
+/**
+ *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b unary function.
  *  @param[in] env Environment with the dataset and tokens.
  *  @param[in] name Name of the benchmark, used for logging.
  *  @param[in] baseline Optional serial analog, against which the accelerated function will be stress-tested.
@@ -576,11 +650,11 @@ template <                                          //
     typename baseline_type_ = callable_no_op_t,     //
     typename preprocessing_type_ = callable_no_op_t //
     >
-benchmark_result_t benchmark(  //
-    environment_t const &env,  //
-    std::string const &name,   //
-    baseline_type_ &&baseline, //
-    callable_type_ &&callable, //
+benchmark_result_t benchmark_unary( //
+    environment_t const &env,       //
+    std::string const &name,        //
+    baseline_type_ &&baseline,      //
+    callable_type_ &&callable,      //
     preprocessing_type_ &&preprocessing = callable_no_op_t()) {
 
     benchmark_result_t result;
@@ -596,9 +670,9 @@ benchmark_result_t benchmark(  //
     std::size_t const lookup_mask = bit_floor(env.tokens.size()) - 1;
     if constexpr (!std::is_same<baseline_type_, callable_no_op_t>())
         for (auto running_seconds : repeat_up_to(env.stress_seconds)) {
-            std::size_t const input_index = (result.stress_calls++) & lookup_mask;
-            call_result_t const accelerated_result = callable(input_index);
-            call_result_t const baseline_result = baseline(input_index);
+            std::size_t const token_index = (result.stress_calls++) & lookup_mask;
+            call_result_t const accelerated_result = callable(token_index);
+            call_result_t const baseline_result = baseline(token_index);
             if (accelerated_result.check_value == baseline_result.check_value) continue; // No failures
 
             // If we got here, the error needs to be reported and investigated.
@@ -608,14 +682,14 @@ benchmark_result_t benchmark(  //
                             running_seconds);
                 std::terminate();
             }
-            log_stress_failure(env, name, input_index, baseline_result.check_value, accelerated_result.check_value);
+            log_failure(env, name, baseline_result.check_value, accelerated_result.check_value, token_index);
         }
 
     // For profiling, we will first run the benchmark just once to get a rough estimate of the time.
     // But then we will repeat it in an unrolled fashion for a more accurate measurement.
     result.profiled_seconds += seconds_per_call([&] {
         std::uint64_t start_cycle = cpu_cycle_counter();
-        result += callable((std::size_t)0); // First input for debugging
+        result += callable((std::size_t)0); //? Use the first token
         std::uint64_t end_cycle = cpu_cycle_counter();
         result.profiled_calls += 1;
         result.profiled_cpu_cycles += end_cycle - start_cycle;
@@ -653,15 +727,27 @@ benchmark_result_t benchmark(  //
 }
 
 /**
- *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given unary function.
+ *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b nullary function.
+ *  @param[in] env Environment with the dataset and tokens.
+ *  @param[in] name Name of the benchmark, used for logging.
+ *  @param[in] callable Nullary function taking no arguments and returning a @b `call_result_t`.
+ *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
+ */
+template <typename callable_type_>
+benchmark_result_t benchmark_nullary(environment_t const &env, std::string const &name, callable_type_ &&callable) {
+    return benchmark_nullary(env, name, callable_no_op_t {}, callable);
+}
+
+/**
+ *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b unary function.
  *  @param[in] env Environment with the dataset and tokens.
  *  @param[in] name Name of the benchmark, used for logging.
  *  @param[in] callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>
-benchmark_result_t benchmark(environment_t const &env, std::string const &name, callable_type_ &&callable) {
-    return benchmark(env, name, callable_no_op_t {}, callable);
+benchmark_result_t benchmark_unary(environment_t const &env, std::string const &name, callable_type_ &&callable) {
+    return benchmark_unary(env, name, callable_no_op_t {}, callable);
 }
 
 } // namespace scripts
