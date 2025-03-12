@@ -24,6 +24,8 @@
  *
  *  4.  Integrate with Linux @b `perf` and other tools for more detailed analysis.
  *      We can isolate the relevant pieces of code, excluding the preprocessing costs from the actual workload.
+ *      We can also track individual hardware counters, including platform-specific `PERF_TYPE_RAW` ones,
+ *      that are not handled by most tools.
  *
  *  5.  Visualize the results differently, with a compact output for both generic workloads and special cases.
  */
@@ -421,14 +423,36 @@ inline void log_stress_failure(environment_t const &env, std::string const &name
     std::fclose(file);
 }
 
+/**
+ *  @brief  Light-weight structure to construct a histogram of function call durations for a very
+ *          wide range of floating point values using logarithmic binning. TODO:
+ */
+template <std::size_t slots_ = 128>
+struct duration_histogram {
+    using count_t = std::uint32_t;
+    std::array<count_t, slots_> bins = {};
+    static constexpr double max_seconds = 1000; // Hard to imagine a single call taking more than 15-ish minutes
+    static constexpr double min_seconds = 1e-9; // A single nanosecond is just 3-ish CPU cycles on modern hardware
+
+    inline count_t &operator[](double seconds) {
+        auto bin_float = std::log(seconds / min_seconds) / std::log(max_seconds / min_seconds) * bins.size();
+        std::size_t bin = std::min(bins.size(), static_cast<std::size_t>(bin_float));
+        return bins[bin];
+    }
+};
+
+using duration_histogram_t = duration_histogram<>;
+
 struct benchmark_result_t {
     std::string name;
     bool skipped = false;
 
     std::size_t stress_calls = 0;
     std::size_t profiled_calls = 0;
+    std::size_t profiled_cpu_cycles = 0;
     double profiled_seconds = 0;
-    std::uint64_t profiled_cpu_cycles = 0;
+
+    duration_histogram_t cpu_cycles_histogram;
 
     std::size_t bytes_passed = 0; //< Pulled from the `call_result_t`
     std::size_t operations = 0;   //< Pulled from the `call_result_t`
@@ -441,80 +465,99 @@ struct benchmark_result_t {
     }
 
     /**
-     *  @brief  Logs the benchmark results to the console, including the throughput and latency.
+     *  @brief  Logs the benchmark results to the console, including the throughput and latency,
+     *          comparing against one or more baselines.
      *
      *  Example output:
      *
      *  @code{.unparsed}
-     *  Benchmarking sz_find_serial:
-     *  - Performance: 0.00 TOps/s @ 0.00 ns/call
-     *  - Errors: 1 in 1 calls
+     *  Benchmarking `sz_find_skylake`:
+     *  > Throughput: 0.00 TB/s @ 0.00 ns/call
+     *  > Efficiency: 0.00 TOps/s @ 0.00 ops/cycle
+     *  > Errors: 0 in 10 calls
+     *  > + 3.5 x against `sz_find_serial`
+     *  > + 70 % against `memmem`
      *  @endcode
-     */
-    benchmark_result_t const &log() const {
-        benchmark_result_t const &result = *this;
-        if (result.skipped) return result;
-        std::printf("Benchmarking %s:\n", result.name.c_str());
-
-        // Infer the latency from the number of calls and the total time
-        auto duration = result.profiled_seconds * 1e9 / result.profiled_calls;
-        auto duration_unit = "ns";
-        if (duration > 1e3) duration /= 1e3, duration_unit = "us";
-        if (duration > 1e3) duration /= 1e3, duration_unit = "ms";
-        if (duration > 1e3) duration /= 1e3, duration_unit = "s";
-
-        // We may want to analyze the call latency distribution:
-        // auto cpu_frequency = result.profiled_cpu_cycles / result.profiled_seconds;
-        // auto cpu_frequency_unit = "Hz";
-        // if (cpu_frequency > 1e3) cpu_frequency /= 1e3, cpu_frequency_unit = "KHz";
-        // if (cpu_frequency > 1e3) cpu_frequency /= 1e3, cpu_frequency_unit = "MHz";
-        // if (cpu_frequency > 1e3) cpu_frequency /= 1e3, cpu_frequency_unit = "GHz";
-
-        // Infer the throughput from the number of operations and the total time
-        auto throughput = (result.operations ? result.operations : result.bytes_passed) / result.profiled_seconds;
-        auto throughput_unit = result.operations ? "Ops/s" : "B/s";
-        if (throughput > 1e3) throughput /= 1e3, throughput_unit = result.operations ? "KOps/s" : "KB/s";
-        if (throughput > 1e3) throughput /= 1e3, throughput_unit = result.operations ? "MOps/s" : "MB/s";
-        if (throughput > 1e3) throughput /= 1e3, throughput_unit = result.operations ? "GOps/s" : "GB/s";
-
-        // Print to console
-        std::printf(" - Performance: %.2f %s @ %.2f %s/call\n", throughput, throughput_unit, duration, duration_unit);
-        if (result.errors) std::printf(" - Errors: %zu in %zu calls\n", result.errors, result.stress_calls);
-
-        return result;
-    }
-
-    /**
-     *  @brief  Logs @b relative results to the console, comparing @p this to a @p base result.
      *
-     *  Example output:
+     *  When running on Linux, additional hardware counters can be sampled using `perf`:
      *
      *  @code{.unparsed}
-     *  Benchmarking sz_find_skylake:
-     *  - Performance: 0.00 TOps/s @ 0.00 ns/call
-     *  - Errors: 1 in 1 calls
-     *  - Relative performance: +25% vs sz_find_serial
+     *  > Instructions retired: ... ~ 3.2 per cycle
+     *  > L1 cache misses: ...
+     *  > L2 cache misses: ...
+     *  > L3 cache misses: ...
+     *  > Branch misses: ... ~ 3% of all branches
+     *  > Branch instructions: ... ~ 20% of all instructions
+     *  > Frontend stall cycles: %
+     *  > Backend stall cycles: %
+     *  > Port 0 cycles: ... progress bar showing its share of the total
+     *  > Port 3 cycles: ... progress bar showing its share of the total
+     *  ...
      *  @endcode
+     *
+     *  After a section of benchmarks is completed, you can use other functionality to visualize the results
+     *  in a more structured way, like a table or a graph or a set of progress bars.
      */
-    benchmark_result_t const &log(benchmark_result_t const &base) const {
-        benchmark_result_t const &new_ = *this;
-        new_.log();
+    template <typename... Baselines>
+    benchmark_result_t const &log(Baselines const &...bases) const {
+        if (skipped) return *this;
+        std::printf("Benchmarking `%s`:\n", name.c_str());
 
-        if (new_.skipped || base.skipped) return new_; //? Nothing to compare to
-        auto base_throughput = (base.operations ? base.operations : base.bytes_passed) / base.profiled_seconds;
-        auto new_throughput = (new_.operations ? new_.operations : new_.bytes_passed) / new_.profiled_seconds;
-        auto relative_throughput = new_throughput / base_throughput;
+        // Print the number of errors, if any
+        if (errors) std::printf("> Errors: %zu in %zu calls\n", errors, stress_calls);
 
-        // Now format the relative improvement as a percentage for small changes and as a multiplier for large ones,
-        // formatting it with a plus and a green color for improvements and a minus and a red color for regressions.
-        auto relative_color = relative_throughput > 1 ? "\033[32m" : "\033[31m";
-        auto relative_sign = relative_throughput > 1 ? "+" : "-";
-        auto relative_unit = relative_throughput > 2 ? "x" : "%";
-        if (relative_throughput < 0.5) relative_throughput = 1 / relative_throughput, relative_unit = "x";
-        if (std::strcmp(relative_unit, "%") == 0) relative_throughput *= 100;
-        std::printf(" - Relative performance: %s%s%.0f %s\033[0m vs. %s\n", relative_color, relative_sign,
-                    relative_throughput, relative_unit, base.name.c_str());
-        return new_;
+        // Compute average call latency.
+        auto seconds_printable = profiled_seconds * 1e9 / profiled_calls;
+        char const *seconds_printable_unit = "ns";
+        if (seconds_printable > 1e3) seconds_printable /= 1e3, seconds_printable_unit = "us";
+        if (seconds_printable > 1e3) seconds_printable /= 1e3, seconds_printable_unit = "ms";
+        if (seconds_printable > 1e3) seconds_printable /= 1e3, seconds_printable_unit = "s";
+
+        // Compute throughput based on operations (or bytes passed if operations == 0).
+        auto bytes_printable = bytes_passed / profiled_seconds;
+        char const *bytes_printable_unit = "B/s";
+        if (bytes_printable > 1e3) bytes_printable /= 1e3, bytes_printable_unit = "KB/s";
+        if (bytes_printable > 1e3) bytes_printable /= 1e3, bytes_printable_unit = "MB/s";
+        if (bytes_printable > 1e3) bytes_printable /= 1e3, bytes_printable_unit = "GB/s";
+        std::printf("> Throughput: %.2f %s @ %.2f %s/call\n", //
+                    bytes_printable, bytes_printable_unit,    //
+                    seconds_printable, seconds_printable_unit);
+
+        // Print the number of operations, if there was a separate tracking mechanism for those
+        if (operations) {
+            auto ops_printable = operations * 1.0 / profiled_seconds;
+            auto ops_per_cycle = operations * 1.0 / profiled_cpu_cycles;
+            char const *ops_printable_unit = (operations ? "Ops/s" : "B/s");
+            if (ops_printable > 1e3) ops_printable /= 1e3, ops_printable_unit = "KOps/s";
+            if (ops_printable > 1e3) ops_printable /= 1e3, ops_printable_unit = "MOps/s";
+            if (ops_printable > 1e3) ops_printable /= 1e3, ops_printable_unit = "GOps/s";
+            std::printf("> Efficiency: %.2f %s @ %.2f ops/cycle\n", ops_printable, ops_printable_unit, ops_per_cycle);
+        }
+
+        // Define a helper lambda to log relative performance with folding expressions.
+        auto log_relative = [this](benchmark_result_t const &base) {
+            if (skipped || base.skipped) return;
+            auto relative_throughput = (bytes_passed / profiled_seconds) / (base.bytes_passed / base.profiled_seconds);
+            if (operations)
+                relative_throughput = (operations / profiled_seconds) / (base.operations / base.profiled_seconds);
+
+            // Format relative improvements: green and a plus for improvements, red and a minus for regressions.
+            char const *relative_color = (relative_throughput > 1) ? "\033[32m" : "\033[31m";
+            char const *relative_sign = (relative_throughput > 1) ? "+" : "-";
+            char const *relative_unit = (relative_throughput > 2) ? "x" : "%";
+            if (relative_throughput < 0.5) relative_throughput = 1 / relative_throughput, relative_unit = "x";
+            if (std::strcmp(relative_unit, "%") == 0) relative_throughput *= 100;
+            std::printf("> %s%s %.0f %s\033[0m against `%s`\n", //
+                        relative_color, relative_sign, relative_throughput,
+                        relative_unit, //
+                        base.name.c_str());
+        };
+
+        // Expand over all provided baselines.
+        (void)std::initializer_list<int> {(log_relative(bases), 0)...};
+        sz_unused(log_relative); // In case no `bases` were provided
+
+        return *this;
     }
 };
 
@@ -526,9 +569,17 @@ struct benchmark_result_t {
  *  @param[in] callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
-template <typename callable_type_, typename baseline_type_ = callable_no_op_t>
-benchmark_result_t benchmark(environment_t const &env, std::string const &name, baseline_type_ &&baseline,
-                             callable_type_ &&callable) {
+template <                                          //
+    typename callable_type_,                        //
+    typename baseline_type_ = callable_no_op_t,     //
+    typename preprocessing_type_ = callable_no_op_t //
+    >
+benchmark_result_t benchmark(  //
+    environment_t const &env,  //
+    std::string const &name,   //
+    baseline_type_ &&baseline, //
+    callable_type_ &&callable, //
+    preprocessing_type_ &&preprocessing = callable_no_op_t()) {
 
     benchmark_result_t result;
     result.name = name;
@@ -536,6 +587,9 @@ benchmark_result_t benchmark(environment_t const &env, std::string const &name, 
         result.skipped = true;
         return result;
     }
+
+    // Pre-process before testing
+    if constexpr (!std::is_same<preprocessing_type_, callable_no_op_t>()) preprocessing();
 
     std::size_t const lookup_mask = bit_floor(env.tokens.size()) - 1;
     if constexpr (!std::is_same<baseline_type_, callable_no_op_t>())
@@ -559,30 +613,38 @@ benchmark_result_t benchmark(environment_t const &env, std::string const &name, 
     // But then we will repeat it in an unrolled fashion for a more accurate measurement.
     result.profiled_seconds += seconds_per_call([&] {
         std::uint64_t start_cycle = cpu_cycle_counter();
-        result += callable(0); // First input for debugging
+        result += callable((std::size_t)0); // First input for debugging
         std::uint64_t end_cycle = cpu_cycle_counter();
         result.profiled_calls += 1;
         result.profiled_cpu_cycles += end_cycle - start_cycle;
+        result.cpu_cycles_histogram[end_cycle - start_cycle] += 1;
     });
     if (result.profiled_seconds >= env.benchmark_seconds) return result;
 
     // Repeat the benchmarks in unrolled batches until the time limit is reached.
     for (auto running_seconds : repeat_up_to(env.benchmark_seconds - result.profiled_seconds)) {
-        std::uint64_t start_cycle = cpu_cycle_counter();
+        std::uint64_t t0 = cpu_cycle_counter();
         call_result_t r0 = callable((result.profiled_calls + 0) & lookup_mask);
+        std::uint64_t t1 = cpu_cycle_counter();
         call_result_t r1 = callable((result.profiled_calls + 1) & lookup_mask);
+        std::uint64_t t2 = cpu_cycle_counter();
         call_result_t r2 = callable((result.profiled_calls + 2) & lookup_mask);
+        std::uint64_t t3 = cpu_cycle_counter();
         call_result_t r3 = callable((result.profiled_calls + 3) & lookup_mask);
-        std::uint64_t end_cycle = cpu_cycle_counter();
+        std::uint64_t t4 = cpu_cycle_counter();
 
         // Aggregate all of them:
         result += r0;
         result += r1;
         result += r2;
         result += r3;
-        result.profiled_calls += 4;
-        result.profiled_cpu_cycles += end_cycle - start_cycle;
         result.profiled_seconds = running_seconds;
+        result.profiled_calls += 4;
+        result.profiled_cpu_cycles += t4 - t0;
+        result.cpu_cycles_histogram[t1 - t0] += 1;
+        result.cpu_cycles_histogram[t2 - t1] += 1;
+        result.cpu_cycles_histogram[t3 - t2] += 1;
+        result.cpu_cycles_histogram[t4 - t3] += 1;
     }
 
     return result;
@@ -599,12 +661,6 @@ template <typename callable_type_>
 benchmark_result_t benchmark(environment_t const &env, std::string const &name, callable_type_ &&callable) {
     return benchmark(env, name, callable_no_op_t {}, callable);
 }
-
-inline sz_string_view_t to_c(std::string_view str) noexcept { return {str.data(), str.size()}; }
-inline sz_string_view_t to_c(std::string const &str) noexcept { return {str.data(), str.size()}; }
-inline sz_string_view_t to_c(sz::string_view str) noexcept { return {str.data(), str.size()}; }
-inline sz_string_view_t to_c(sz::string const &str) noexcept { return {str.data(), str.size()}; }
-inline sz_string_view_t to_c(sz_string_view_t str) noexcept { return str; }
 
 } // namespace scripts
 } // namespace stringzilla

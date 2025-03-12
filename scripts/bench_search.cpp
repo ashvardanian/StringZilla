@@ -15,7 +15,7 @@
  *
  *  Instead of CLI arguments, for compatibility with @b StringWa.rs, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
- *  - `STRINGWARS_TOKENS=word` : Tokenization model ("file", "line", "word", or positive integer [1:200] for N-grams
+ *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
  *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
  *
  *  Unlike StringWa.rs, the following additional environment variables are supported:
@@ -46,9 +46,6 @@
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
  *  This file is the sibling of `bench_sort.cpp`, `bench_token.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
- *
- *  ! It requires more memory than some of the other benchmarks, as every token is re-allocated
- *  ! into a NULL-terminated buffer for compatibility with the C-style string functions.
  */
 #include <cstring>    // `memmem`
 #include <functional> // `std::boyer_moore_searcher`
