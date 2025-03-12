@@ -545,8 +545,8 @@ typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 /** @brief Signature of `sz_find`. */
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
-/** @brief Signature of `sz_find_set`. */
-typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
+/** @brief Signature of `sz_find_byteset`. */
+typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
 
 /** @brief Signature of `sz_hamming_distance`. */
 typedef sz_status_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_size_t *);
