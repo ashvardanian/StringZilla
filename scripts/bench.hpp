@@ -64,11 +64,13 @@ std::size_t round_up_to_multiple(std::size_t n) {
     return n == 0 ? multiple : ((n + multiple - 1) / multiple) * multiple;
 }
 
+using check_value_t = std::uint64_t;
+
 struct call_result_t {
     /** @brief Number of input bytes processed. */
     std::size_t bytes_passed = 0;
     /** @brief Some value used to compare execution result between the baseline and accelerated backend. */
-    std::size_t check_value = 0;
+    check_value_t check_value = 0;
     /** @brief For some operations with non-linear complexity, the throughput should be measured differently. */
     std::size_t operations = 0;
 
@@ -546,8 +548,8 @@ struct benchmark_result_t {
             char const *relative_sign = (relative_throughput > 1) ? "+" : "-";
             char const *relative_unit = (relative_throughput > 2) ? "x" : "%";
             if (relative_throughput < 0.5) relative_throughput = 1 / relative_throughput, relative_unit = "x";
-            if (std::strcmp(relative_unit, "%") == 0) relative_throughput *= 100;
-            std::printf("> %s%s %.0f %s\033[0m against `%s`\n", //
+            if (std::strcmp(relative_unit, "%") == 0) relative_throughput = (relative_throughput - 1) * 100;
+            std::printf("> %s%s %.1f %s\033[0m against `%s`\n", //
                         relative_color, relative_sign, relative_throughput,
                         relative_unit, //
                         base.name.c_str());
