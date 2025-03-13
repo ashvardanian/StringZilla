@@ -210,6 +210,11 @@ void bench_substring_search(environment_t const &env) {
                 callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_haswell>>(env))
         .log(base_reverse);
 #endif
+#if SZ_USE_SVE
+    bench_unary(env, "sz_find_sve", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_sve>>(env))
+        .log(base);
+#endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_find_neon", base_call,
                 callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_neon>>(env))
