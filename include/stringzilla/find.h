@@ -1757,8 +1757,10 @@ SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz
                 if (sz_equal_sve(h + progress + forward_offset_in_register, n, n_length))
                     return h + progress + forward_offset_in_register;
                 // If it doesn't match - clear the first bit and continue
-                svbool_t only_first_match = svpfirst_b(svnot_b_z(svptrue_b8(), pred_to_skip), matches);
-                matches = svbic_b_z(svptrue_b8(), matches, only_first_match);
+                svbool_t first_match = svpnext_b8(svptrue_b8(), pred_to_skip);
+                _sz_assert(svcntp_b8(svptrue_b8(), first_match) == 1);
+                matches = svbic_b_z(svptrue_b8(), matches, first_match);
+                _sz_assert(svcntp_b8(svptrue_b8(), matches) == (matches_count - 1));
             }
             progress += vector_bytes;
         } while (progress < h_length - (n_length - 1));
