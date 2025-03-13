@@ -31,7 +31,7 @@
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench_search
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=lines build_release/stringzilla_bench_search
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzilla_bench_search
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
@@ -387,6 +387,14 @@ void bench_byte_search(environment_t const &env) {
         .log(base);
     bench_unary(env, "sz_rfind_byte_neon", base_call,
                 callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_neon>>(env))
+        .log(base_reverse);
+#endif
+#if SZ_USE_SVE
+    bench_unary(env, "sz_find_byte_sve", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_sve>>(env))
+        .log(base);
+    bench_unary(env, "sz_rfind_byte_sve", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_sve>>(env))
         .log(base_reverse);
 #endif
 
