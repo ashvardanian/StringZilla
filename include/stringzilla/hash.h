@@ -2178,27 +2178,61 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
 #pragma GCC target("arch=armv8.2-a+sve")
 #pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
 
-SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) { return sz_bytesum_serial(text, length); }
-
-SZ_PUBLIC void sz_hash_state_init_sve(sz_hash_state_t *state, sz_u64_t seed) { sz_hash_state_init_serial(state, seed); }
-
-SZ_PUBLIC void sz_hash_state_stream_sve(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
-    sz_hash_state_stream_serial(state, text, length);
-}
-
-SZ_PUBLIC sz_u64_t sz_hash_state_fold_sve(sz_hash_state_t const *state) { return sz_hash_state_fold_serial(state); }
-
-SZ_PUBLIC sz_u64_t sz_hash_sve(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
-    return sz_hash_serial(text, length, seed);
-}
-
-SZ_PUBLIC void sz_fill_random_sve(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_fill_random_serial(text, length, nonce);
+SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
+    sz_u64_t sum = 0;
+    sz_size_t progress = 0;
+    sz_size_t const vector_length = svcntb();
+    // SVE doesn't have widening accumulation, so we reduce across each loaded vector
+    for (; progress < length; progress += vector_length) {
+        svbool_t progress_mask = svwhilelt_b8(progress, length);
+        svuint8_t text_vec = svld1_u8(progress_mask, (sz_u8_t const *)(text + progress));
+        sum += svaddv_u8(progress_mask, text_vec);
+    }
+    return sum;
 }
 
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif            // SZ_USE_SVE
+#pragma endregion // SVE Implementation
+
+/*  Implementation of the string search algorithms using the Arm SVE2 variable-length registers,
+ *  available in Arm v9 processors, like in Apple M4+ and Graviton 4+ CPUs.
+ */
+#pragma region SVE Implementation
+#if SZ_USE_SVE2
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+sve+sve2")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2"))), apply_to = function)
+
+SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
+    sz_u64_t sum = 0;
+    sz_size_t progress = 0;
+    sz_size_t const vector_length = svcntb();
+    // In SVE2 we have an instruction, that can add 8-bit elements in one operand to 16-bit elements in another.
+    // Assuming the size mismatch, there 2 such instructions - for the top and bottom elements in each 8-bit pair.
+    //
+    // We can use that kind of logic to accelerate the inner loop, but we still need to reduce the 64-bit results.
+    while (progress < length) {
+        svuint16_t sum_u16_top = svdup_n_u16(0);
+        svuint16_t sum_u16_bot = svdup_n_u16(0);
+        // Assuming `u16` has a 256x wider range than `u8`, we can aggregate up to 256 lanes in each value.
+        for (sz_size_t loop_index = 0; progress < length && loop_index < 256; progress += vector_length, ++loop_index) {
+            svbool_t progress_mask = svwhilelt_b8(progress, length);
+            svuint8_t text_vec = svld1_u8(progress_mask, (sz_u8_t const *)(text + progress));
+            sum_u16_top = svaddwb_u16(sum_u16_top, text_vec);
+            sum_u16_bot = svaddwt_u16(sum_u16_bot, text_vec);
+        }
+        sum += svaddv_u16(svptrue_b16(), sum_u16_top);
+        sum += svaddv_u16(svptrue_b16(), sum_u16_bot);
+    }
+
+    return sum;
+}
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+#endif            // SZ_USE_SVE2
 #pragma endregion // SVE Implementation
 
 /*  Pick the right implementation for the string search algorithms.

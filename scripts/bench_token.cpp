@@ -157,6 +157,12 @@ void bench_checksums(environment_t const &env) {
 #if SZ_USE_NEON
     bench_unary(env, "sz_bytesum_neon", validator, bytesum_from_sz<sz_bytesum_neon>(env)).log(base, base_stl);
 #endif
+#if SZ_USE_SVE
+    bench_unary(env, "sz_bytesum_sve", validator, bytesum_from_sz<sz_bytesum_sve>(env)).log(base, base_stl);
+#endif
+#if SZ_USE_SVE2
+    bench_unary(env, "sz_bytesum_sve2", validator, bytesum_from_sz<sz_bytesum_sve2>(env)).log(base, base_stl);
+#endif
 }
 
 void bench_hashing(environment_t const &env) {
