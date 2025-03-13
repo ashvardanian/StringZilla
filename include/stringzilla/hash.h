@@ -361,27 +361,88 @@ SZ_INTERNAL sz_u128_vec_t _sz_emulate_aesenc_si128_serial(sz_u128_vec_t state_ve
 
     // Combine `ShiftRows` and `SubBytes`
     sz_u8_t state_2d[4][4];
-    for (int i = 0; i < 16; ++i) state_2d[((i / 4) + 4 - (i % 4)) % 4][i % 4] = sbox[state_vec.u8s[i]];
-#define _sz_gf2_double(x) (((x) << 1) ^ ((((x) >> 7) & 1) * 0x1b))
+
+    state_2d[0][0] = sbox[state_vec.u8s[0]];
+    state_2d[3][1] = sbox[state_vec.u8s[1]];
+    state_2d[2][2] = sbox[state_vec.u8s[2]];
+    state_2d[1][3] = sbox[state_vec.u8s[3]];
+
+    state_2d[1][0] = sbox[state_vec.u8s[4]];
+    state_2d[0][1] = sbox[state_vec.u8s[5]];
+    state_2d[3][2] = sbox[state_vec.u8s[6]];
+    state_2d[2][3] = sbox[state_vec.u8s[7]];
+
+    state_2d[2][0] = sbox[state_vec.u8s[8]];
+    state_2d[1][1] = sbox[state_vec.u8s[9]];
+    state_2d[0][2] = sbox[state_vec.u8s[10]];
+    state_2d[3][3] = sbox[state_vec.u8s[11]];
+
+    state_2d[3][0] = sbox[state_vec.u8s[12]];
+    state_2d[2][1] = sbox[state_vec.u8s[13]];
+    state_2d[1][2] = sbox[state_vec.u8s[14]];
+    state_2d[0][3] = sbox[state_vec.u8s[15]];
+
     // Perform `MixColumns` using GF2 multiplication by 2
-    for (int i = 0; i < 4; ++i) {
-        sz_u8_t t = state_2d[i][0];
-        sz_u8_t u = state_2d[i][0] ^ state_2d[i][1] ^ state_2d[i][2] ^ state_2d[i][3];
-        state_2d[i][0] ^= u ^ _sz_gf2_double(state_2d[i][0] ^ state_2d[i][1]);
-        state_2d[i][1] ^= u ^ _sz_gf2_double(state_2d[i][1] ^ state_2d[i][2]);
-        state_2d[i][2] ^= u ^ _sz_gf2_double(state_2d[i][2] ^ state_2d[i][3]);
-        state_2d[i][3] ^= u ^ _sz_gf2_double(state_2d[i][3] ^ t);
-    }
+#define _sz_gf2_double(x) (((x) << 1) ^ ((((x) >> 7) & 1) * 0x1b))
+    // Row 0:
+    sz_u8_t t0 = state_2d[0][0];
+    sz_u8_t u0 = state_2d[0][0] ^ state_2d[0][1] ^ state_2d[0][2] ^ state_2d[0][3];
+    state_2d[0][0] ^= u0 ^ _sz_gf2_double(state_2d[0][0] ^ state_2d[0][1]);
+    state_2d[0][1] ^= u0 ^ _sz_gf2_double(state_2d[0][1] ^ state_2d[0][2]);
+    state_2d[0][2] ^= u0 ^ _sz_gf2_double(state_2d[0][2] ^ state_2d[0][3]);
+    state_2d[0][3] ^= u0 ^ _sz_gf2_double(state_2d[0][3] ^ t0);
+
+    // Row 1:
+    sz_u8_t t1 = state_2d[1][0];
+    sz_u8_t u1 = state_2d[1][0] ^ state_2d[1][1] ^ state_2d[1][2] ^ state_2d[1][3];
+    state_2d[1][0] ^= u1 ^ _sz_gf2_double(state_2d[1][0] ^ state_2d[1][1]);
+    state_2d[1][1] ^= u1 ^ _sz_gf2_double(state_2d[1][1] ^ state_2d[1][2]);
+    state_2d[1][2] ^= u1 ^ _sz_gf2_double(state_2d[1][2] ^ state_2d[1][3]);
+    state_2d[1][3] ^= u1 ^ _sz_gf2_double(state_2d[1][3] ^ t1);
+
+    // Row 2:
+    sz_u8_t t2 = state_2d[2][0];
+    sz_u8_t u2 = state_2d[2][0] ^ state_2d[2][1] ^ state_2d[2][2] ^ state_2d[2][3];
+    state_2d[2][0] ^= u2 ^ _sz_gf2_double(state_2d[2][0] ^ state_2d[2][1]);
+    state_2d[2][1] ^= u2 ^ _sz_gf2_double(state_2d[2][1] ^ state_2d[2][2]);
+    state_2d[2][2] ^= u2 ^ _sz_gf2_double(state_2d[2][2] ^ state_2d[2][3]);
+    state_2d[2][3] ^= u2 ^ _sz_gf2_double(state_2d[2][3] ^ t2);
+
+    // Row 3:
+    sz_u8_t t3 = state_2d[3][0];
+    sz_u8_t u3 = state_2d[3][0] ^ state_2d[3][1] ^ state_2d[3][2] ^ state_2d[3][3];
+    state_2d[3][0] ^= u3 ^ _sz_gf2_double(state_2d[3][0] ^ state_2d[3][1]);
+    state_2d[3][1] ^= u3 ^ _sz_gf2_double(state_2d[3][1] ^ state_2d[3][2]);
+    state_2d[3][2] ^= u3 ^ _sz_gf2_double(state_2d[3][2] ^ state_2d[3][3]);
+    state_2d[3][3] ^= u3 ^ _sz_gf2_double(state_2d[3][3] ^ t3);
 #undef _sz_gf2_double
+
     // Export `XOR`-ing with the round key
-    sz_u128_vec_t result;
-    for (int i = 0; i < 16; ++i) result.u8s[i] = state_2d[i / 4][i % 4] ^ round_key_vec.u8s[i];
+    sz_u128_vec_t result = *(sz_u128_vec_t *)state_2d;
+    result.u64s[0] ^= round_key_vec.u64s[0];
+    result.u64s[1] ^= round_key_vec.u64s[1];
     return result;
 }
 
 SZ_INTERNAL sz_u128_vec_t _sz_emulate_shuffle_epi8_serial(sz_u128_vec_t state_vec, sz_u8_t const order[16]) {
     sz_u128_vec_t result;
-    for (int i = 0; i < 16; ++i) result.u8s[i] = state_vec.u8s[order[i]];
+    // Unroll the loop for 16 bytes
+    result.u8s[0] = state_vec.u8s[order[0]];
+    result.u8s[1] = state_vec.u8s[order[1]];
+    result.u8s[2] = state_vec.u8s[order[2]];
+    result.u8s[3] = state_vec.u8s[order[3]];
+    result.u8s[4] = state_vec.u8s[order[4]];
+    result.u8s[5] = state_vec.u8s[order[5]];
+    result.u8s[6] = state_vec.u8s[order[6]];
+    result.u8s[7] = state_vec.u8s[order[7]];
+    result.u8s[8] = state_vec.u8s[order[8]];
+    result.u8s[9] = state_vec.u8s[order[9]];
+    result.u8s[10] = state_vec.u8s[order[10]];
+    result.u8s[11] = state_vec.u8s[order[11]];
+    result.u8s[12] = state_vec.u8s[order[12]];
+    result.u8s[13] = state_vec.u8s[order[13]];
+    result.u8s[14] = state_vec.u8s[order[14]];
+    result.u8s[15] = state_vec.u8s[order[15]];
     return result;
 }
 
