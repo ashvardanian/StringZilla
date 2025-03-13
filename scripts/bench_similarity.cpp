@@ -1,147 +1,176 @@
 /**
  *  @file   bench_similarity.cpp
  *  @brief  Benchmarks string similarity computations.
+ *          It accepts a file with a list of words, and benchmarks the levenshtein edit-distance computations,
+ *          alignment scores, and fingerprinting techniques combined with the Hamming distance.
  *
- *  This file is the sibling of `bench_sort.cpp`, `bench_search.cpp` and `bench_token.cpp`.
- *  It accepts a file with a list of words, and benchmarks the levenshtein edit-distance computations,
- *  alignment scores, and fingerprinting techniques combined with the Hamming distance.
+ *  Benchmarks include:
+ *  - Linear-complexity basic & bounded Hamming distance computations.
+ *  - Quadratic-complexity basic & bounded Levenshtein edit-distance computations.
+ *  - Quadratic-complexity Needleman-Wunsch alignment scores for bioinformatics.
+ *
+ *  For Dynamic Programming algorithms, the number of operations per second are reported as the worst-case time
+ *  complexity of the Cells Updates Per Second @b (CUPS) metric, meaning O(N*M) for a pair of strings with N and M
+ *  characters, respectively.
+ *
+ *  Instead of CLI arguments, for compatibility with @b StringWa.rs, the following environment variables are used:
+ *  - `STRINGWARS_DATASET` : Path to the dataset file.
+ *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer [1:200] for N-grams
+ *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
+ *
+ *  Unlike StringWa.rs, the following additional environment variables are supported:
+ *  - `STRINGWARS_DURATION=10` : Time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
+ *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
+ *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
+ *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
+ *  - `STRINGWARS_FILTER` : Regular Expression pattern to filter algorithm/backend names.
+ *
+ *  Here are a few build & run commands:
+ *
+ *  @code{.sh}
+ *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
+ *  cmake --build build_release --config Release --target stringzilla_bench_similarity
+ *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=words build_release/stringzilla_bench_similarity
+ *  @endcode
+ *
+ *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
+ *  like all Skylake-X and newer kernels on a boundary-condition input length of 64 bytes (exactly 1 cache line),
+ *  your last command may look like:
+ *
+ *  @code{.sh}
+ *  STRINGWARS_DATASET=proteins.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
+ *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
+ *  build_release/stringzilla_bench_similarity
+ *  @endcode
+ *
+ *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
+ *  This file is the sibling of `bench_search.cpp`, `bench_token.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
  */
-#include <bench.hpp>
-#include <test.hpp> // `levenshtein_baseline`, `unary_substitution_costs`
+
+#include "bench.hpp"
+#include "test.hpp" // `levenshtein_baseline`, `unary_substitution_costs`
 
 using namespace ashvardanian::stringzilla::scripts;
 
-using temporary_memory_t = std::vector<char>;
-temporary_memory_t temporary_memory;
+#pragma region Hamming Distance
 
-static void *allocate_from_vector(sz_size_t length, void *handle) {
-    temporary_memory_t &vec = *reinterpret_cast<temporary_memory_t *>(handle);
-    if (vec.size() < length) vec.resize(length);
-    return vec.data();
+/** @brief Wraps a hardware-specific Hamming-distance backend into something @b `bench_unary`-compatible . */
+template <sz_hamming_distance_t hamming_distance_>
+struct hamming_from_sz {
+
+    environment_t const &env;
+    sz_size_t bound = SZ_SIZE_MAX;
+
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
+        sz_size_t result_distance;
+        sz_status_t status = hamming_distance_( //
+            a.data(), a.size(),                 //
+            b.data(), b.size(),                 //
+            bound, &result_distance);
+        do_not_optimize(status);
+        std::size_t bytes_passed = std::min(a.size(), b.size());
+        return {bytes_passed, static_cast<check_value_t>(result_distance)};
+    }
+};
+
+void bench_hamming(environment_t const &env) {
+    auto base_call = hamming_from_sz<sz_hamming_distance_serial>(env);
+    bench_result_t base = bench_unary(env, "sz_hamming_distance_serial", base_call).log();
+    auto base_utf8_call = hamming_from_sz<sz_hamming_distance_utf8_serial>(env);
+    bench_result_t base_utf8 = bench_unary(env, "sz_hamming_distance_utf8_serial", base_utf8_call).log(base);
+    sz_unused(base_utf8);
 }
 
-static void free_from_vector(void *buffer, sz_size_t length, void *handle) { sz_unused(buffer && length && handle); }
+#pragma endregion
 
-tracked_binary_functions_t distance_functions() {
-    // Populate the unary substitutions matrix
-    static std::vector<std::int8_t> costs = unary_substitution_costs();
-    sz_error_cost_t const *costs_ptr = reinterpret_cast<sz_error_cost_t const *>(costs.data());
+#pragma region Levenshtein Distance and Alignment Scores
 
-    // Two rows of the Levenshtein matrix will occupy this much:
-    sz_memory_allocator_t alloc;
-    alloc.allocate = &allocate_from_vector;
-    alloc.free = &free_from_vector;
-    alloc.handle = &temporary_memory;
+/** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
+template <sz_levenshtein_distance_t levenshtein_distance_>
+struct levenshtein_from_sz {
 
-    auto wrap_baseline = binary_function_t([](std::string_view a, std::string_view b) -> std::size_t {
-        return levenshtein_baseline(a.data(), a.length(), b.data(), b.length());
-    });
-    auto wrap_sz_distance = [alloc](auto function) mutable -> binary_function_t {
-        return binary_function_t([function, alloc](std::string_view a, std::string_view b) mutable -> std::size_t {
-            sz_size_t result;
-            function(a.data(), a.length(), b.data(), b.length(), SZ_SIZE_MAX, &alloc, &result);
-            return result;
-        });
-    };
-    auto wrap_sz_scoring = [alloc, costs_ptr](auto function) mutable -> binary_function_t {
-        return binary_function_t(
-            [function, alloc, costs_ptr](std::string_view a, std::string_view b) mutable -> std::size_t {
-                sz_memory_allocator_t *alloc_ptr = &alloc;
-                sz_ssize_t signed_result;
-                function(a.data(), a.length(), b.data(), b.length(), costs_ptr, (sz_error_cost_t)-1, alloc_ptr,
-                         &signed_result);
-                return (std::size_t)(-signed_result);
-            });
-    };
-    tracked_binary_functions_t result = {
-        {"naive", wrap_baseline},
-        {"sz_levenshtein_distance_serial", wrap_sz_distance(sz_levenshtein_distance_serial), true},
-        {"sz_needleman_wunsch_score_serial", wrap_sz_scoring(sz_needleman_wunsch_score_serial), true},
+    environment_t const &env;
+    sz_size_t bound = SZ_SIZE_MAX;
+
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
+        sz_size_t result_distance;
+        sz_status_t status = levenshtein_distance_( //
+            a.data(), a.size(),                     //
+            b.data(), b.size(),                     //
+            bound, NULL, &result_distance);
+        do_not_optimize(status);
+        std::size_t bytes_passed = std::min(a.size(), b.size());
+        std::size_t cells_passed = a.size() * b.size();
+        return {bytes_passed, static_cast<check_value_t>(result_distance), cells_passed};
+    }
+};
+
+/** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
+template <sz_needleman_wunsch_score_t needleman_wunsch_>
+struct alignment_score_from_sz {
+
+    environment_t const &env;
+    sz_size_t bound = SZ_SIZE_MAX;
+    error_costs_256x256_t costs = unary_substitution_costs();
+
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
+        sz_ssize_t result_score;
+        sz_status_t status = needleman_wunsch_( //
+            a.data(), a.size(),                 //
+            b.data(), b.size(),                 //
+            costs.data(), (sz_error_cost_t)-1,  //
+            NULL, &result_score);
+        do_not_optimize(status);
+        sz_size_t result_distance = (sz_size_t)(-result_score);
+        std::size_t bytes_passed = std::min(a.size(), b.size());
+        std::size_t cells_passed = a.size() * b.size();
+        return {bytes_passed, static_cast<check_value_t>(result_distance), cells_passed};
+    }
+};
+
+void bench_edits(environment_t const &env) {
+    auto base_call = levenshtein_from_sz<sz_levenshtein_distance_serial>(env);
+    bench_result_t base = bench_unary(env, "sz_levenshtein_distance_serial", base_call).log();
+    auto base_utf8_call = levenshtein_from_sz<sz_levenshtein_distance_utf8_serial>(env);
+    bench_result_t base_utf8 = bench_unary(env, "sz_levenshtein_distance_utf8_serial", base_utf8_call).log(base);
+    sz_unused(base_utf8);
+
 #if SZ_USE_ICE
-        {"sz_levenshtein_distance_ice", wrap_sz_distance(sz_levenshtein_distance_ice), true},
-        {"sz_needleman_wunsch_score_ice", wrap_sz_scoring(sz_needleman_wunsch_score_ice), true},
+    auto ice_call = levenshtein_from_sz<sz_levenshtein_distance_ice>(env);
+    bench_unary(env, "sz_levenshtein_distance_ice", ice_call).log(base);
 #endif
-    };
-    return result;
+
+    auto needleman_wunsch_call = alignment_score_from_sz<sz_needleman_wunsch_score_serial>(env);
+    bench_unary(env, "sz_needleman_wunsch_score_serial", needleman_wunsch_call).log(base);
 }
 
-template <typename strings_at>
-void bench_similarity(strings_at &&strings) {
-    if (strings.size() == 0) return;
-    bench_binary_functions(strings, distance_functions());
-}
-
-void bench_similarity_on_bio_data() {
-    std::vector<std::string> proteins;
-
-    // A typical protein is 100-1000 amino acids long.
-    // The alphabet is generally 20 amino acids, but that won't affect the throughput.
-    char alphabet[4] = {'a', 'c', 'g', 't'};
-    constexpr std::size_t bio_samples = 128;
-    struct {
-        std::size_t length_lower_bound;
-        std::size_t length_upper_bound;
-        char const *name;
-    } bio_cases[] = {
-        {60, 60, "60 aminoacids"},              //
-        {100, 100, "100 aminoacids"},           //
-        {300, 300, "300 aminoacids"},           //
-        {1000, 1000, "1000 aminoacids"},        //
-        {100, 1000, "100-1000 aminoacids"},     //
-        {1000, 10000, "1000-10000 aminoacids"}, //
-    };
-    std::random_device random_device;
-    std::mt19937 generator(random_device());
-    for (auto bio_case : bio_cases) {
-        std::uniform_int_distribution<std::size_t> length_distribution(bio_case.length_lower_bound,
-                                                                       bio_case.length_upper_bound);
-        for (std::size_t i = 0; i != bio_samples; ++i) {
-            std::size_t length = length_distribution(generator);
-            std::string protein(length, 'a');
-            std::generate(protein.begin(), protein.end(), [&]() { return alphabet[generator() % sizeof(alphabet)]; });
-            proteins.push_back(protein);
-        }
-
-        std::printf("Benchmarking on protein-like sequences with %s:\n", bio_case.name);
-        bench_similarity(proteins);
-        proteins.clear();
-    }
-}
-
-void bench_similarity_on_input_data(int argc, char const **argv) {
-
-    dataset_t dataset = prepare_benchmark_environment(argc, argv);
-
-    // Baseline benchmarks for real words, coming in all lengths
-    std::printf("Benchmarking on real words:\n");
-    bench_similarity(dataset.tokens);
-
-    struct size_range_t {
-        std::size_t min_length;
-        std::size_t max_length;
-    };
-
-    // Run benchmarks on tokens of different length
-    for (size_range_t size : {
-             size_range_t {1, 16},
-             size_range_t {17, 32},
-             size_range_t {33, 64},
-             size_range_t {65, 128},
-         }) {
-        auto filtered_dataset = filter_by_length(dataset.tokens, size.min_length, std::greater_equal<std::size_t> {});
-        filtered_dataset = filter_by_length(filtered_dataset, size.max_length, std::greater_equal<std::size_t> {});
-        if (filtered_dataset.size() < 3) continue;
-        std::printf("Benchmarking on %zu real words of length %zu to %zu:\n", filtered_dataset.size(), size.min_length,
-                    size.max_length);
-        bench_similarity(std::move(filtered_dataset));
-    }
-}
+#pragma endregion
 
 int main(int argc, char const **argv) {
-    std::printf("StringZilla. Starting similarity benchmarks.\n");
+    std::printf("Welcome to StringZilla!\n");
 
-    if (argc < 2) { bench_similarity_on_bio_data(); }
-    else { bench_similarity_on_input_data(argc, argv); }
+    std::printf("Building up the environment...\n");
+    environment_t env = build_environment( //
+        argc, argv,                        //
+        "xlsum.csv",                       // Preferred for UTF-8 content
+        environment_t::tokenization_t::words_k);
+
+    std::printf("Starting string similarity benchmarks...\n");
+    bench_hamming(env);
+    bench_edits(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;

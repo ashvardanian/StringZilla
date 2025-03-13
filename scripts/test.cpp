@@ -1016,7 +1016,7 @@ static void test_non_stl_extensions_for_reads() {
 
     // Computing alignment scores.
     using matrix_t = std::int8_t[256][256];
-    std::vector<std::int8_t> costs_vector = unary_substitution_costs();
+    error_costs_256x256_t costs_vector = unary_substitution_costs();
     matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
 
     assert(sz::alignment_score(str("listen"), str("silent"), costs, -1) == -4);
@@ -1651,7 +1651,7 @@ static void test_levenshtein_distances() {
     };
 
     using matrix_t = std::int8_t[256][256];
-    std::vector<std::int8_t> costs_vector = unary_substitution_costs();
+    error_costs_256x256_t costs_vector = unary_substitution_costs();
     matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
 
     auto print_failure = [&](char const *name, sz::string const &l, sz::string const &r, std::size_t expected,

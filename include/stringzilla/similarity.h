@@ -189,7 +189,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distance(                       //
  *  @sa     sz_levenshtein_distance
  *
  *  @note   Selects the fastest implementation at compile- or run-time based on `SZ_DYNAMIC_DISPATCH`.
- *  @sa     sz_levenshtein_distance_utf8_serial, sz_levenshtein_distance_utf8_ice
+ *  @sa     sz_levenshtein_distance_utf8_serial
  */
 SZ_DYNAMIC sz_status_t sz_levenshtein_distance_utf8(                  //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
@@ -575,6 +575,13 @@ SZ_PUBLIC sz_status_t sz_levenshtein_distance_serial( //
                                                                 alloc, result_ptr);
     return _sz_levenshtein_distance_wagner_fisher_serial( //
         longer, longer_length, shorter, shorter_length, bound, sz_false_k, alloc, result_ptr);
+}
+
+SZ_PUBLIC sz_status_t sz_levenshtein_distance_utf8_serial( //
+    sz_cptr_t a, sz_size_t a_length,                       //
+    sz_cptr_t b, sz_size_t b_length,                       //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
+    return _sz_levenshtein_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc, result_ptr);
 }
 
 SZ_PUBLIC sz_status_t sz_needleman_wunsch_score_serial( //
@@ -1522,7 +1529,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distance_utf8( //
     sz_cptr_t a, sz_size_t a_length,                 //
     sz_cptr_t b, sz_size_t b_length,                 //
     sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
-    return _sz_levenshtein_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc, result_ptr);
+    return sz_levenshtein_distance_utf8_serial(a, a_length, b, b_length, bound, alloc, result_ptr);
 }
 
 SZ_DYNAMIC sz_status_t sz_needleman_wunsch_score( //
