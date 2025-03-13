@@ -292,6 +292,14 @@ static void test_simd_against_serial() {
         sz_hash_state_stream_neon, sz_hash_state_fold_neon);
     test_random_generator_on_platform(sz_fill_random_serial, sz_fill_random_neon);
 #endif
+#if SZ_USE_SVE2
+    test_hashing_on_platform(                                   //
+        sz_hash_serial, sz_hash_state_init_serial,              //
+        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
+        sz_hash_sve2, sz_hash_state_init_sve2,                  //
+        sz_hash_state_stream_sve2, sz_hash_state_fold_sve2);
+    test_random_generator_on_platform(sz_fill_random_serial, sz_fill_random_sve2);
+#endif
 };
 
 /**

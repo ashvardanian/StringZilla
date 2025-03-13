@@ -2197,13 +2197,18 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
 #pragma endregion // SVE Implementation
 
 /*  Implementation of the string search algorithms using the Arm SVE2 variable-length registers,
- *  available in Arm v9 processors, like in Apple M4+ and Graviton 4+ CPUs.
+ *  available in Arm v9 processors, like in AWS Graviton 4+ CPUs.
+ *
+ *  Our AES hashing algorithms are implemented differently depending on the size of the size of the input.
+ *  Given how SVE+AES extensions are structured, we have a separate implementation for different register sizes.
+ *
+ *  @see https://stackoverflow.com/a/73218637/2766161
  */
 #pragma region SVE Implementation
 #if SZ_USE_SVE2
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve+sve2")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2"))), apply_to = function)
+#pragma GCC target("arch=armv8.2-a+sve+sve2+sve2-aes")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2+sve2-aes"))), apply_to = function)
 
 SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
     sz_u64_t sum = 0;
@@ -2230,6 +2235,136 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
     return sum;
 }
 
+/**
+ *  @brief  Emulates the Intel's AES-NI `AESENC` instruction with Arm SVE2.
+ *  @see    "Emulating x86 AES Intrinsics on ARMv8-A" by Michael Brase:
+ *          https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
+ */
+SZ_INTERNAL svuint8_t _sz_emulate_aesenc_u8x16_sve2(svuint8_t state_vec, svuint8_t round_key_vec) {
+    return sveor_u8_x(svptrue_b8(), svaesmc_u8(svaese_u8(state_vec, svdup_n_u8(0))), round_key_vec);
+}
+
+SZ_INTERNAL svuint64_t _sz_emulate_aesenc_u64x2_sve2(svuint64_t state_vec, svuint64_t round_key_vec) {
+    return svreinterpret_u64_u8(_sz_emulate_aesenc_u8x16_sve2( //
+        svreinterpret_u8_u64(state_vec),                       //
+        svreinterpret_u8_u64(round_key_vec)));
+}
+
+/** @brief A variant of `sz_hash_sve2` for strings up to 16 bytes long - smallest SVE register size. */
+SZ_PUBLIC sz_u64_t _sz_hash_sve2_upto16(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+    svuint8_t state_aes, state_sum, state_key;
+
+    // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.
+    state_key = svreinterpret_u8_u64(svdup_n_u64(seed));
+
+    // XOR the user-supplied keys with the two "pi" constants
+    sz_u64_t const *pi = _sz_hash_pi_constants();
+    svuint64_t pi0 = svld1_u64(svptrue_b64(), pi);
+    svuint64_t pi1 = svld1_u64(svptrue_b64(), pi + 8);
+    state_aes = sveor_u8_x(svptrue_b8(), state_key, svreinterpret_u8_u64(pi0));
+    state_sum = sveor_u8_x(svptrue_b8(), state_key, svreinterpret_u8_u64(pi1));
+
+    // We will only use the first 128 bits of the shuffle mask
+    svuint8_t const shuffle_mask = svld1_u8(svptrue_b8(), _sz_hash_u8x16x4_shuffle());
+
+    // This is our best case for SVE2 dominance over NEON - we can load the data in one go with a predicate.
+    svuint8_t block = svld1_u8(svwhilelt_b8((sz_size_t)0, length), (sz_u8_t const *)text);
+    // One round of hashing logic
+    state_aes = _sz_emulate_aesenc_u8x16_sve2(state_aes, block);
+    svuint8_t sum_shuffled = svtbl_u8(state_sum, shuffle_mask);
+    state_sum = svreinterpret_u8_u64(
+        svadd_u64_x(svptrue_b64(), svreinterpret_u64_u8(sum_shuffled), svreinterpret_u64_u8(block)));
+
+    // Now mix, folding the length into the key
+    svuint64_t key_with_length = svadd_u64_x(svptrue_b64(), svreinterpret_u64_u8(state_key), svdupq_n_u64(length, 0));
+    // Combine the "sum" and the "AES" blocks
+    svuint8_t mixed_registers = _sz_emulate_aesenc_u8x16_sve2(state_sum, state_aes);
+    // Make sure the "key" mixes enough with the state,
+    // as with less than 2 rounds - SMHasher fails
+    svuint8_t mixed_within_register = _sz_emulate_aesenc_u8x16_sve2(
+        _sz_emulate_aesenc_u8x16_sve2(mixed_registers, svreinterpret_u8_u64(key_with_length)), mixed_registers);
+    // Extract the low 64 bits
+    svuint64_t mixed_within_register_u64 = svreinterpret_u64_u8(mixed_within_register);
+    return svlasta_u64(svpfalse_b(), mixed_within_register_u64); // Extract the first element
+}
+
+SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed) { sz_hash_state_init_neon(state, seed); }
+
+SZ_PUBLIC void sz_hash_state_stream_sve2(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
+    sz_hash_state_stream_neon(state, text, length);
+}
+
+SZ_PUBLIC sz_u64_t sz_hash_state_fold_sve2(sz_hash_state_t const *state) { //
+    return sz_hash_state_fold_neon(state);
+}
+
+SZ_PUBLIC sz_u64_t sz_hash_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+    if (length <= 16) { return _sz_hash_sve2_upto16(text, length, seed); }
+    else { return sz_hash_neon(text, length, seed); }
+}
+
+SZ_PUBLIC void sz_fill_random_sve2(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+    return sz_fill_random_neon(text, length, nonce);
+}
+
+#if 0
+/**
+ *  @brief  A helper function for computing 16x packed string hashes for strings up to 16 bytes long.
+ *          The number 16 is derived from 2048 bits (256 bytes) being the maximum size of the SVE register
+ *          and the AES block size being 128 bits (16 bytes). So in the largest SVE register, we can fit
+ *          16 such individual AES blocks.
+ *          It's relevant for set intersection operations and is faster than hashing each string individually.
+ */
+SZ_PUBLIC void _sz_hash_sve2_upto16x16(char texts[16][16], sz_size_t length[16], sz_u64_t seed, sz_u64_t hashes[16]) {
+    svuint8_t state_aes, state_sum, state_key;
+
+    // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.
+    state_key = svreinterpret_u8_u64(svdup_n_u64(seed));
+
+    // XOR the user-supplied keys with the two "pi" constants
+    sz_u64_t const *pi = _sz_hash_pi_constants();
+    svuint64_t pi0 = svdupq_n_u64(pi[0], pi[1]);
+    svuint64_t pi1 = svdupq_n_u64(pi[8], pi[9]);
+    state_aes = sveor_u8_x(svptrue_b8(), state_key, svreinterpret_u8_u64(pi0));
+    state_sum = sveor_u8_x(svptrue_b8(), state_key, svreinterpret_u8_u64(pi1));
+
+    // We will only use the first 128 bits of the shuffle mask
+    sz_u8_t const *shuffle_mask = _sz_hash_u8x16x4_shuffle();
+    svuint8_t const shuffle_mask = svreinterpret_u8_u64(svdupq_n_u64( //
+        *(sz_u64_t const *)(shuffle_mask + 0),                        //
+        *(sz_u64_t const *)(shuffle_mask + 8)));
+    svuint8_t const sum_shuffled = svtbl_u8(state_sum, shuffle_mask);
+
+    // Loop throughthe input until we process all the bytes
+    sz_size_t const bytes_per_register = svcntb();
+    sz_size_t const texts_per_register = bytes_per_register / 16;
+    for (sz_size_t progress_bytes = 0; progress_bytes < 256; progress_bytes += bytes_per_register) {
+        svuint8_t blocks =
+            svld1_u8(svwhilelt_b8(progress_bytes, 256), (sz_u8_t const *)(&texts[0][0] + progress_bytes));
+
+        // One round of hashing logic for multiple blocks
+        svuint8_t blocks_aes = _sz_emulate_aesenc_u8x16_sve2(state_aes, blocks);
+        svuint8_t blocks_sum = svreinterpret_u8_u64(
+            svadd_u64_x(svptrue_b64(), svreinterpret_u64_u8(sum_shuffled), svreinterpret_u64_u8(blocks)));
+
+        // Now mix, folding the length into the key
+        svuint64_t key_with_lengths =
+            svadd_u64_x(svptrue_b64(), svreinterpret_u64_u8(state_key), svdupq_n_u64(length, 0));
+
+        // Combine the "sum" and the "AES" blocks
+        svuint8_t mixed_registers = _sz_emulate_aesenc_u8x16_sve2(blocks_sum, blocks_aes);
+
+        // Make sure the "key" mixes enough with the state,
+        // as with less than 2 rounds - SMHasher fails
+        svuint8_t mixed_within_register = _sz_emulate_aesenc_u8x16_sve2(
+            _sz_emulate_aesenc_u8x16_sve2(mixed_registers, svreinterpret_u8_u64(key_with_lengths)), mixed_registers);
+
+        // Extract the low 64 bits from each lane
+        svuint64_t mixed_within_register_u64 = svreinterpret_u64_u8(mixed_within_register);
+    }
+}
+#endif
+
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif            // SZ_USE_SVE2
@@ -2248,6 +2383,10 @@ SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) {
     return sz_bytesum_skylake(text, length);
 #elif SZ_USE_HASWELL
     return sz_bytesum_haswell(text, length);
+#elif SZ_USE_SVE2
+    return sz_bytesum_sve2(text, length);
+#elif SZ_USE_SVE
+    return sz_bytesum_sve(text, length);
 #elif SZ_USE_NEON
     return sz_bytesum_neon(text, length);
 #else
@@ -2262,6 +2401,8 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     return sz_hash_skylake(text, length, seed);
 #elif SZ_USE_HASWELL
     return sz_hash_haswell(text, length, seed);
+#elif SZ_USE_SVE2
+    return sz_hash_sve2(text, length, seed);
 #elif SZ_USE_NEON
     return sz_hash_neon(text, length, seed);
 #else
@@ -2276,6 +2417,8 @@ SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) 
     sz_fill_random_skylake(text, length, nonce);
 #elif SZ_USE_HASWELL
     sz_fill_random_haswell(text, length, nonce);
+#elif SZ_USE_SVE2
+    sz_fill_random_sve2(text, length, nonce);
 #elif SZ_USE_NEON
     sz_fill_random_neon(text, length, nonce);
 #else
@@ -2290,6 +2433,8 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
     sz_hash_state_init_skylake(state, seed);
 #elif SZ_USE_HASWELL
     sz_hash_state_init_haswell(state, seed);
+#elif SZ_USE_SVE2
+    sz_hash_state_init_sve2(state, seed);
 #elif SZ_USE_NEON
     sz_hash_state_init_neon(state, seed);
 #else
@@ -2304,6 +2449,8 @@ SZ_DYNAMIC void sz_hash_state_stream(sz_hash_state_t *state, sz_cptr_t text, sz_
     sz_hash_state_stream_skylake(state, text, length);
 #elif SZ_USE_HASWELL
     sz_hash_state_stream_haswell(state, text, length);
+#elif SZ_USE_SVE2
+    sz_hash_state_stream_sve2(state, text, length);
 #elif SZ_USE_NEON
     sz_hash_state_stream_neon(state, text, length);
 #else
@@ -2318,6 +2465,8 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_fold(sz_hash_state_t const *state) {
     return sz_hash_state_fold_skylake(state);
 #elif SZ_USE_HASWELL
     return sz_hash_state_fold_haswell(state);
+#elif SZ_USE_SVE2
+    return sz_hash_state_fold_sve2(state);
 #elif SZ_USE_NEON
     return sz_hash_state_fold_neon(state);
 #else
