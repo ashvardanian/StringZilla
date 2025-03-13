@@ -1750,8 +1750,7 @@ SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz
             svbool_t cmp2 = svcmpeq_n_u8(pred, hay_last, n_last);
             svbool_t matches = svand_b_z(cmp0, cmp1, cmp2); //? Practically a 3-way AND.
             // There might be multiple candidate positions, so we need to iterate over them.
-            sz_size_t matches_count = svcntp_b8(pred, matches);
-            for (; matches_count; --matches_count) {
+            while (svptest_any(pred, matches)) {
                 svbool_t pred_to_skip = svbrkb_b_z(pred, matches);
                 sz_size_t forward_offset_in_register = svcntp_b8(pred, pred_to_skip);
                 if (sz_equal_sve(h + progress + forward_offset_in_register, n, n_length))
@@ -1760,7 +1759,6 @@ SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz
                 svbool_t first_match = svpnext_b8(svptrue_b8(), pred_to_skip);
                 _sz_assert(svcntp_b8(svptrue_b8(), first_match) == 1);
                 matches = svbic_b_z(svptrue_b8(), matches, first_match);
-                _sz_assert(svcntp_b8(svptrue_b8(), matches) == (matches_count - 1));
             }
             progress += vector_bytes;
         } while (progress < h_length - (n_length - 1));
