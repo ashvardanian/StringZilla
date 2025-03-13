@@ -66,6 +66,7 @@ struct bytesum_from_sz {
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
         sz_u64_t bytesum = func_(buffer.data(), buffer.size());
+        do_not_optimize(bytesum);
         return {buffer.size(), static_cast<check_value_t>(bytesum)};
     }
 };
@@ -82,6 +83,7 @@ struct bytesum_from_std_t {
         std::size_t bytesum =
             std::accumulate(buffer.begin(), buffer.end(), (std::size_t)0,
                             [](std::size_t sum, char c) { return sum + static_cast<unsigned char>(c); });
+        do_not_optimize(bytesum);
         return {buffer.size(), static_cast<check_value_t>(bytesum)};
     }
 };
@@ -97,6 +99,7 @@ struct hash_from_sz {
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
         sz_u64_t hash = func_(buffer.data(), buffer.size(), 0);
+        do_not_optimize(hash);
         return {buffer.size(), static_cast<check_value_t>(hash)};
     }
 };
@@ -130,6 +133,7 @@ struct hash_stream_from_sz {
         init_(&state, 42);
         stream_(&state, s.data(), s.size());
         sz_u64_t hash = fold_(&state);
+        do_not_optimize(hash);
         return {s.size(), static_cast<check_value_t>(hash)};
     }
 };
@@ -282,6 +286,10 @@ struct ordering_from_sz {
         sz_ordering_t ba = func_(b.data(), a.size(), a.data(), a.size());
         std::size_t max_bytes_passed = 4 * std::min(a.size(), b.size());
         check_value_t check_value = ab + aa * 3 + bb * 9 + ba * 27; // Each can have 3 unique values
+        do_not_optimize(ab);
+        do_not_optimize(aa);
+        do_not_optimize(bb);
+        do_not_optimize(ba);
         return {max_bytes_passed, check_value};
     }
 };
@@ -301,6 +309,10 @@ struct ordering_from_memcmp_t {
         int ba = memcmp_for_ordering(b, a);
         std::size_t max_bytes_passed = 4 * std::min(a.size(), b.size());
         check_value_t check_value = ab + aa * 3 + bb * 9 + ba * 27; // Each can have 3 unique values
+        do_not_optimize(ab);
+        do_not_optimize(aa);
+        do_not_optimize(bb);
+        do_not_optimize(ba);
         return {max_bytes_passed, check_value};
     }
 
