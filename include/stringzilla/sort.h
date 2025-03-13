@@ -944,8 +944,8 @@ SZ_INTERNAL void _sz_sequence_argsort_sve_3way_partition(
         svuint64_t pgrams_vec = svld1_u64(load_mask, initial_pgrams + i);
         svbool_t smaller_mask = svcmplt_u64(load_mask, pgrams_vec, pivot_vec);
         svbool_t greater_mask = svcmpgt_u64(load_mask, pgrams_vec, pivot_vec);
-        count_smaller += svcntp_b64(smaller_mask, smaller_mask);
-        count_greater += svcntp_b64(greater_mask, greater_mask);
+        count_smaller = svqincp_n_u64_b64(count_smaller, smaller_mask); // Smarter than `svcntp_b64`
+        count_greater = svqincp_n_u64_b64(count_greater, greater_mask); // Smarter than `svcntp_b64`
     }
 
     sz_size_t const count_equal = count - count_smaller - count_greater;
