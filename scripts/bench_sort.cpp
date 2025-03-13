@@ -209,24 +209,24 @@ void bench_sorting_strings(environment_t const &env) {
 
     // First, benchmark the STL function
     auto base_call = argsort_strings_via_std_t {env.tokens, permute_buffer};
-    benchmark_result_t base = benchmark_nullary(env, "sequence_argsort<std::sort>", base_call).log();
+    bench_result_t base = bench_nullary(env, "sequence_argsort<std::sort>", base_call).log();
     auto serial_call = argsort_strings_via_sz<sz_sequence_argsort_serial> {env.tokens, permute_buffer};
-    benchmark_nullary(env, "sz_sequence_argsort_serial", base_call, serial_call).log(base);
+    bench_nullary(env, "sz_sequence_argsort_serial", base_call, serial_call).log(base);
 
 // Conditionally include SIMD-accelerated backends
 #if SZ_USE_SKYLAKE
     auto skylake_call = argsort_strings_via_sz<sz_sequence_argsort_skylake> {env.tokens, permute_buffer};
-    benchmark_nullary(env, "sz_sequence_argsort_skylake", base_call, skylake_call).log(base);
+    bench_nullary(env, "sz_sequence_argsort_skylake", base_call, skylake_call).log(base);
 #endif
 #if SZ_USE_SVE
     auto sve_call = argsort_strings_via_sz<sz_sequence_argsort_sve> {env.tokens, permute_buffer};
-    benchmark_nullary(env, "sz_sequence_argsort_sve", base_call, sve_call).log(base);
+    bench_nullary(env, "sz_sequence_argsort_sve", base_call, sve_call).log(base);
 #endif
 
     // Include POSIX and WinAPI functionality
 #if defined(_SZ_HAS_QSORT_R) || defined(_SZ_HAS_QSORT_S)
     auto qsort_call = argsort_strings_via_qsort_t {env.tokens, permute_buffer};
-    benchmark_nullary(env, "sequence_argsort<qsort>", base_call, qsort_call).log(base);
+    bench_nullary(env, "sequence_argsort<qsort>", base_call, qsort_call).log(base);
 #endif
 }
 
@@ -296,18 +296,18 @@ void bench_sorting_pgrams(environment_t const &env) {
 
     // First, benchmark the STL function
     auto base_call = sort_pgrams_via_std_t {pgrams_buffer, permute_buffer};
-    benchmark_result_t base = benchmark_nullary(env, "pgrams_sort<std::sort>", base_call).log();
+    bench_result_t base = bench_nullary(env, "pgrams_sort<std::sort>", base_call).log();
     auto serial_call = sort_pgrams_via_sz<sz_pgrams_sort_serial> {pgrams_buffer, pgrams_sorted, permute_buffer};
-    benchmark_nullary(env, "sz_pgrams_sort_serial", base_call, serial_call).log(base);
+    bench_nullary(env, "sz_pgrams_sort_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
 #if SZ_USE_SKYLAKE
     auto skylake_call = sort_pgrams_via_sz<sz_pgrams_sort_skylake> {pgrams_buffer, pgrams_sorted, permute_buffer};
-    benchmark_nullary(env, "sz_pgrams_sort_skylake", base_call, skylake_call).log(base);
+    bench_nullary(env, "sz_pgrams_sort_skylake", base_call, skylake_call).log(base);
 #endif
 #if SZ_USE_SVE
     auto sve_call = sort_pgrams_via_sz<sz_pgrams_sort_sve> {pgrams_buffer, pgrams_sorted, permute_buffer};
-    benchmark_nullary(env, "sz_pgrams_sort_sve", base_call, sve_call).log(base);
+    bench_nullary(env, "sz_pgrams_sort_sve", base_call, sve_call).log(base);
 #endif
 }
 
@@ -411,19 +411,19 @@ void bench_intersections(environment_t const &env) {
 
     // First, benchmark the STL function
     auto base_call = intersect_strings_via_std_t {tokens_a, tokens_b, permute_a, permute_b};
-    benchmark_result_t base = benchmark_nullary(env, "intersect<std::unordered_map>", base_call).log();
+    bench_result_t base = bench_nullary(env, "intersect<std::unordered_map>", base_call).log();
     auto serial_call =
         intersect_strings_via_sz<sz_sequence_intersect_serial> {tokens_a, tokens_b, permute_a, permute_b};
-    benchmark_nullary(env, "sz_sequence_intersect_serial", base_call, serial_call).log(base);
+    bench_nullary(env, "sz_sequence_intersect_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
 #if SZ_USE_SKYLAKE
     auto skylake_call = intersect_strings_via_sz<sz_sequence_intersect_ice> {tokens_a, tokens_b, permute_a, permute_b};
-    benchmark_nullary(env, "sz_sequence_intersect_ice", base_call, skylake_call).log(base);
+    bench_nullary(env, "sz_sequence_intersect_ice", base_call, skylake_call).log(base);
 #endif
 #if SZ_USE_SVE
     auto sve_call = intersect_strings_via_sz<sz_sequence_intersect_sve> {tokens_a, tokens_b, permute_a, permute_b};
-    benchmark_nullary(env, "sz_sequence_intersect_sve", base_call, sve_call).log(base);
+    bench_nullary(env, "sz_sequence_intersect_sve", base_call, sve_call).log(base);
 #endif
 }
 

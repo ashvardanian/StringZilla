@@ -187,46 +187,48 @@ void bench_substring_search(environment_t const &env) {
     // First, benchmark the serial function
     // The "check value" for normal and reverse search is the same - simply the number of matches.
     auto base_call = callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_serial>>(env);
-    benchmark_result_t base = benchmark(env, "sz_find_serial", base_call).log();
-    benchmark_result_t base_reverse =
-        benchmark(env, "sz_rfind_serial",
-                  callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_serial>>(env))
+    bench_result_t base = bench_unary(env, "sz_find_serial", base_call).log();
+    bench_result_t base_reverse =
+        bench_unary(env, "sz_rfind_serial",
+                    callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_serial>>(env))
             .log();
 
     // Conditionally include SIMD-accelerated backends
 #if SZ_USE_SKYLAKE
-    benchmark(env, "sz_find_skylake", base_call,
-              callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_skylake>>(env))
+    bench_unary(env, "sz_find_skylake", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_skylake>>(env))
         .log(base);
-    benchmark(env, "sz_rfind_skylake", base_call,
-              callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_skylake>>(env))
+    bench_unary(env, "sz_rfind_skylake", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_skylake>>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_HASWELL
-    benchmark(env, "sz_find_haswell", base_call,
-              callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_haswell>>(env))
+    bench_unary(env, "sz_find_haswell", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_haswell>>(env))
         .log(base);
-    benchmark(env, "sz_rfind_haswell", base_call,
-              callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_haswell>>(env))
+    bench_unary(env, "sz_rfind_haswell", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_haswell>>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_NEON
-    benchmark(env, "sz_find_neon", base_call,
-              callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_neon>>(env))
+    bench_unary(env, "sz_find_neon", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_from_sz_find<sz_find_neon>>(env))
         .log(base);
-    benchmark(env, "sz_rfind_neon", base_call,
-              callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_neon>>(env))
+    bench_unary(env, "sz_rfind_neon", base_call,
+                callable_for_substring_search<sz::range_rmatches, matcher_from_sz_find<sz_rfind_neon>>(env))
         .log(base_reverse);
 #endif
 
     // Include LibC functionality
     // ! Despite receiving string-views, following functions are assuming the strings are null-terminated.
-    benchmark(env, "strstr", base_call, callable_for_substring_search<sz::range_matches, matcher_strstr_t>(env))
+    bench_unary(env, "find<std::strstr>", base_call, //
+                callable_for_substring_search<sz::range_matches, matcher_strstr_t>(env))
         .log(base);
 
     // Include POSIX functionality
 #if defined(_GNU_SOURCE)
-    benchmark(env, "memmem", base_call, callable_for_substring_search<sz::range_matches, matcher_memmem_t>(env))
+    bench_unary(env, "find<memmem>", base_call, //
+                callable_for_substring_search<sz::range_matches, matcher_memmem_t>(env))
         .log(base);
 #endif
 
@@ -237,16 +239,17 @@ void bench_substring_search(environment_t const &env) {
     using rmatcher_bm_t = rmatcher_from_std_search<std::boyer_moore_searcher<std::string_view::const_reverse_iterator>>;
     using rmatcher_bmh_t =
         rmatcher_from_std_search<std::boyer_moore_horspool_searcher<std::string_view::const_reverse_iterator>>;
-    benchmark(env, "std::boyer_moore", base_call, callable_for_substring_search<sz::range_matches, matcher_bm_t>(env))
+    bench_unary(env, "find<std::boyer_moore>", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_bm_t>(env))
         .log(base);
-    benchmark(env, "std::boyer_moore<reverse>", base_call,
-              callable_for_substring_search<sz::range_rmatches, rmatcher_bm_t>(env))
+    bench_unary(env, "rfind<std::boyer_moore>", base_call,
+                callable_for_substring_search<sz::range_rmatches, rmatcher_bm_t>(env))
         .log(base_reverse);
-    benchmark(env, "std::boyer_moore_horspool", base_call,
-              callable_for_substring_search<sz::range_matches, matcher_bmh_t>(env))
+    bench_unary(env, "find<std::boyer_moore_horspool>", base_call,
+                callable_for_substring_search<sz::range_matches, matcher_bmh_t>(env))
         .log(base);
-    benchmark(env, "std::boyer_moore_horspool<reverse>", base_call,
-              callable_for_substring_search<sz::range_rmatches, rmatcher_bmh_t>(env))
+    bench_unary(env, "rfind<std::boyer_moore_horspool>", base_call,
+                callable_for_substring_search<sz::range_rmatches, rmatcher_bmh_t>(env))
         .log(base_reverse);
 #endif
 }
@@ -305,7 +308,7 @@ struct matcher_memchr_t {
     inline matcher_memchr_t(char needle) noexcept : needle_(needle) {}
     constexpr size_type needle_length() const noexcept { return 1; }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto ptr = (char *)memchr(haystack.data(), needle_, haystack.size());
+        auto ptr = (char *)std::memchr(haystack.data(), needle_, haystack.size());
         do_not_optimize(ptr);
         if (!ptr) return std::string_view::npos; // No match found
         return (size_type)(ptr - haystack.data());
@@ -355,48 +358,49 @@ void bench_byte_search(environment_t const &env) {
     // First, benchmark the serial function
     // The "check value" for normal and reverse search is the same - simply the number of matches.
     auto base_call = callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_serial>>(env);
-    benchmark_result_t base = benchmark(env, "sz_find_byte_serial", base_call).log();
-    benchmark_result_t base_reverse =
-        benchmark(env, "sz_rfind_byte_serial",
-                  callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_serial>>(env))
+    bench_result_t base = bench_unary(env, "sz_find_byte_serial", base_call).log();
+    bench_result_t base_reverse =
+        bench_unary(env, "sz_rfind_byte_serial",
+                    callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_serial>>(env))
             .log();
 
     // Conditionally include SIMD-accelerated backends
 #if SZ_USE_SKYLAKE
-    benchmark(env, "sz_find_byte_skylake", base_call,
-              callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_skylake>>(env))
+    bench_unary(env, "sz_find_byte_skylake", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_skylake>>(env))
         .log(base);
-    benchmark(env, "sz_rfind_byte_skylake", base_call,
-              callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_skylake>>(env))
+    bench_unary(env, "sz_rfind_byte_skylake", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_skylake>>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_HASWELL
-    benchmark(env, "sz_find_byte_haswell", base_call,
-              callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_haswell>>(env))
+    bench_unary(env, "sz_find_byte_haswell", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_haswell>>(env))
         .log(base);
-    benchmark(env, "sz_rfind_byte_haswell", base_call,
-              callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_haswell>>(env))
+    bench_unary(env, "sz_rfind_byte_haswell", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_haswell>>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_NEON
-    benchmark(env, "sz_find_byte_neon", base_call,
-              callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_neon>>(env))
+    bench_unary(env, "sz_find_byte_neon", base_call,
+                callable_for_byte_search<sz::range_matches, matcher_from_sz_find_byte<sz_find_byte_neon>>(env))
         .log(base);
-    benchmark(env, "sz_rfind_byte_neon", base_call,
-              callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_neon>>(env))
+    bench_unary(env, "sz_rfind_byte_neon", base_call,
+                callable_for_byte_search<sz::range_rmatches, matcher_from_sz_find_byte<sz_rfind_byte_neon>>(env))
         .log(base_reverse);
 #endif
 
     // Include LibC functionality
-    benchmark(env, "strchr", base_call, callable_for_byte_search<sz::range_matches, matcher_strchr_t>(env)).log(base);
-
-    // Include POSIX functionality
-#if defined(_GNU_SOURCE)
-    benchmark(env, "memchr", base_call, callable_for_byte_search<sz::range_matches, matcher_memchr_t>(env)).log(base);
-#endif
+    bench_unary(env, "find_byte<std::strchr>", base_call, //
+                callable_for_byte_search<sz::range_matches, matcher_strchr_t>(env))
+        .log(base);
+    bench_unary(env, "find_byte<std::memchr>", base_call, //
+                callable_for_byte_search<sz::range_matches, matcher_memchr_t>(env))
+        .log(base);
 
     // Include STL functionality
-    benchmark(env, "std::find", base_call, callable_for_byte_search<sz::range_matches, matcher_from_std_find>(env))
+    bench_unary(env, "find_byte<std::find>", base_call, //
+                callable_for_byte_search<sz::range_matches, matcher_from_std_find>(env))
         .log(base);
 }
 
@@ -496,58 +500,62 @@ void bench_byteset_search(environment_t const &env) {
     auto base_call =
         callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_serial>,
                                     sz::byteset>(env);
-    benchmark_result_t base = benchmark(env, "sz_find_byteset_serial", base_call).log();
-    benchmark_result_t base_reverse =
-        benchmark(env, "sz_rfind_byteset_serial",
-                  callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_serial>,
-                                              sz::byteset>(env))
+    bench_result_t base = bench_unary(env, "sz_find_byteset_serial", base_call).log();
+    bench_result_t base_reverse =
+        bench_unary(
+            env, "sz_rfind_byteset_serial",
+            callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_serial>,
+                                        sz::byteset>(env))
             .log();
 
     // Conditionally include SIMD-accelerated backends
 #if SZ_USE_HASWELL
-    benchmark(env, "sz_find_byteset_haswell", base_call,
-              callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_haswell>,
-                                          sz::byteset>(env))
+    bench_unary( //
+        env, "sz_find_byteset_haswell", base_call,
+        callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_haswell>,
+                                    sz::byteset>(env))
         .log(base);
-    benchmark(env, "sz_rfind_byteset_haswell", base_call,
-              callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_haswell>,
-                                          sz::byteset>(env))
+    bench_unary( //
+        env, "sz_rfind_byteset_haswell", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_haswell>,
+                                    sz::byteset>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_ICE
-    benchmark(
+    bench_unary( //
         env, "sz_find_byteset_ice", base_call,
         callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_ice>, sz::byteset>(
             env))
         .log(base);
-    benchmark(env, "sz_rfind_byteset_ice", base_call,
-              callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_ice>,
-                                          sz::byteset>(env))
+    bench_unary( //
+        env, "sz_rfind_byteset_ice", base_call,
+        callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_ice>,
+                                    sz::byteset>(env))
         .log(base_reverse);
 #endif
 #if SZ_USE_NEON
-    benchmark(
+    bench_unary(
         env, "sz_find_byteset_neon", base_call,
         callable_for_byteset_search<sz::range_matches, matcher_from_sz_find_byteset<sz_find_byteset_neon>, sz::byteset>(
             env))
         .log(base);
-    benchmark(env, "sz_rfind_byteset_neon", base_call,
-              callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_neon>,
-                                          sz::byteset>(env))
+    bench_unary(env, "sz_rfind_byteset_neon", base_call,
+                callable_for_byteset_search<sz::range_rmatches, matcher_from_sz_find_byteset<sz_rfind_byteset_neon>,
+                                            sz::byteset>(env))
         .log(base_reverse);
 #endif
 
     // Include LibC functionality
-    benchmark(env, "strcspn", base_call,
-              callable_for_byteset_search<sz::range_matches, matcher_strcspn_t, std::string_view>(env))
+    bench_unary(env, "find_byteset<std::strcspn>", base_call,
+                callable_for_byteset_search<sz::range_matches, matcher_strcspn_t, std::string_view>(env))
         .log(base);
 
     // Include STL functionality
-    benchmark(env, "std::string_view.find_first_of", base_call,
-              callable_for_byteset_search<sz::range_matches, matcher_std_string_first_of_t, std::string_view>(env))
+    bench_unary(env, "find_byteset<std::string_view::find_first_of>", base_call,
+                callable_for_byteset_search<sz::range_matches, matcher_std_string_first_of_t, std::string_view>(env))
         .log(base);
-    benchmark(env, "std::string_view.find_last_of", base_call,
-              callable_for_byteset_search<sz::range_rmatches, matcher_std_string_last_of_t, std::string_view>(env))
+    bench_unary(env, "rfind_byteset<std::string_view::find_last_of>", base_call,
+                callable_for_byteset_search<sz::range_rmatches, matcher_std_string_last_of_t, std::string_view>(env))
         .log(base_reverse);
 }
 

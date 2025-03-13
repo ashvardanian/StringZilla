@@ -453,7 +453,7 @@ struct duration_histogram {
 
 using duration_histogram_t = duration_histogram<>;
 
-struct benchmark_result_t {
+struct bench_result_t {
     std::string name;
     bool skipped = false;
 
@@ -468,7 +468,7 @@ struct benchmark_result_t {
     std::size_t operations = 0;   //< Pulled from the `call_result_t`
     std::size_t errors = 0;       //< Pulled from the `call_result_t`
 
-    inline benchmark_result_t &operator+=(call_result_t const &run) noexcept {
+    inline bench_result_t &operator+=(call_result_t const &run) noexcept {
         bytes_passed += run.bytes_passed;
         operations += run.operations;
         return *this;
@@ -508,8 +508,8 @@ struct benchmark_result_t {
      *  After a section of benchmarks is completed, you can use other functionality to visualize the results
      *  in a more structured way, like a table or a graph or a set of progress bars.
      */
-    template <typename... Baselines>
-    benchmark_result_t const &log(Baselines const &...bases) const {
+    template <typename... baselines_types_>
+    bench_result_t const &log(baselines_types_ const &...bases) const {
         if (skipped) return *this;
         std::printf("Benchmarking `%s`:\n", name.c_str());
 
@@ -545,7 +545,7 @@ struct benchmark_result_t {
         }
 
         // Define a helper lambda to log relative performance with folding expressions.
-        auto log_relative = [this](benchmark_result_t const &base) {
+        auto log_relative = [this](bench_result_t const &base) {
             if (skipped || base.skipped) return;
             auto relative_throughput = (bytes_passed / profiled_seconds) / (base.bytes_passed / base.profiled_seconds);
             if (operations)
@@ -584,14 +584,14 @@ template <                                          //
     typename baseline_type_ = callable_no_op_t,     //
     typename preprocessing_type_ = callable_no_op_t //
     >
-benchmark_result_t benchmark_nullary( //
-    environment_t const &env,         //
-    std::string const &name,          //
-    baseline_type_ &&baseline,        //
-    callable_type_ &&callable,        //
+bench_result_t bench_nullary(  //
+    environment_t const &env,  //
+    std::string const &name,   //
+    baseline_type_ &&baseline, //
+    callable_type_ &&callable, //
     preprocessing_type_ &&preprocessing = callable_no_op_t()) {
 
-    benchmark_result_t result;
+    bench_result_t result;
     result.name = name;
     if (!env.allow(name)) {
         result.skipped = true;
@@ -620,7 +620,7 @@ benchmark_result_t benchmark_nullary( //
         }
 
     // Repeat the benchmark of the unary function. Assume most of them are applied to the entire
-    // dataset and take a lot of time, so we don't unroll much, unlike `benchmark_unary`.
+    // dataset and take a lot of time, so we don't unroll much, unlike `bench_unary`.
     for (auto running_seconds : repeat_up_to(env.benchmark_seconds)) {
         std::uint64_t time_start = cpu_cycle_counter();
         call_result_t call_result = callable();
@@ -650,14 +650,14 @@ template <                                          //
     typename baseline_type_ = callable_no_op_t,     //
     typename preprocessing_type_ = callable_no_op_t //
     >
-benchmark_result_t benchmark_unary( //
-    environment_t const &env,       //
-    std::string const &name,        //
-    baseline_type_ &&baseline,      //
-    callable_type_ &&callable,      //
+bench_result_t bench_unary(    //
+    environment_t const &env,  //
+    std::string const &name,   //
+    baseline_type_ &&baseline, //
+    callable_type_ &&callable, //
     preprocessing_type_ &&preprocessing = callable_no_op_t()) {
 
-    benchmark_result_t result;
+    bench_result_t result;
     result.name = name;
     if (!env.allow(name)) {
         result.skipped = true;
@@ -734,8 +734,8 @@ benchmark_result_t benchmark_unary( //
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>
-benchmark_result_t benchmark_nullary(environment_t const &env, std::string const &name, callable_type_ &&callable) {
-    return benchmark_nullary(env, name, callable_no_op_t {}, callable);
+bench_result_t bench_nullary(environment_t const &env, std::string const &name, callable_type_ &&callable) {
+    return bench_nullary(env, name, callable_no_op_t {}, callable);
 }
 
 /**
@@ -746,8 +746,8 @@ benchmark_result_t benchmark_nullary(environment_t const &env, std::string const
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <typename callable_type_>
-benchmark_result_t benchmark_unary(environment_t const &env, std::string const &name, callable_type_ &&callable) {
-    return benchmark_unary(env, name, callable_no_op_t {}, callable);
+bench_result_t bench_unary(environment_t const &env, std::string const &name, callable_type_ &&callable) {
+    return bench_unary(env, name, callable_no_op_t {}, callable);
 }
 
 } // namespace scripts
