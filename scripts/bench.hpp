@@ -565,9 +565,10 @@ struct bench_result_t {
             char const *relative_unit = (relative_throughput > 2) ? "x" : "%";
             if (relative_throughput < 0.5) relative_throughput = 1 / relative_throughput, relative_unit = "x";
             if (std::strcmp(relative_unit, "%") == 0) relative_throughput = (relative_throughput - 1) * 100;
-            std::printf("> %s%s %.1f %s\033[0m against `%s`\n", //
-                        relative_color, relative_sign, relative_throughput,
-                        relative_unit, //
+            std::printf("> %s%s %.1f %s\033[0m against `%s`\n",       //
+                        relative_color,                               //
+                        relative_sign, std::abs(relative_throughput), //
+                        relative_unit,                                //
                         base.name.c_str());
         };
 
