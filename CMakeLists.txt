@@ -25,7 +25,7 @@
 #
 # * stringzilla_bench_search: A benchmark for substring search operations.
 # * stringzilla_bench_similarity: A benchmark for similarity operations.
-# * stringzilla_bench_sort: A benchmark for sorting operations.
+# * stringzilla_bench_sequence: A benchmark for string array-level operations.
 # * stringzilla_bench_token: A benchmark for comparators and hash functions.
 # * stringzilla_bench_container: A benchmark for STL containers powered by StringZilla.
 # * stringzilla_bench_memory: A benchmark for LibC-style low-level memory operations.
@@ -254,7 +254,7 @@ endfunction ()
 if (${STRINGZILLA_BUILD_BENCHMARK})
     define_launcher(stringzilla_bench_search scripts/bench_search.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_similarity scripts/bench_similarity.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_sort scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_sequence scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_token scripts/bench_token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_container scripts/bench_container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_memory scripts/bench_memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
