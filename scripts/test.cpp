@@ -568,6 +568,19 @@ static void test_stl_compatibility_for_reads() {
     assert(str("abbabbaaaaaa").find("aa") == 6);
     assert(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
     assert(str("hello, world!").substr(0, 11).find("world") == str::npos);
+    assert(str("axabbcxcaaabbccc").find("aaabbccc") == 8);
+
+    // Simple repeating patterns - with one "almost match" before an actual match in each direction
+    assert(str("_ab_abc_").find("abc") == 4);
+    assert(str("_abc_ab_").rfind("abc") == 1);
+    assert(str("_abc_abcd_").find("abcd") == 5);
+    assert(str("_abcd_abc_").rfind("abcd") == 1);
+    assert(str("_abcd_abcde_").find("abcde") == 6);
+    assert(str("_abcde_abcd_").rfind("abcde") == 1);
+    assert(str("_abcde_abcdef_").find("abcdef") == 7);
+    assert(str("_abcdef_abcde_").rfind("abcdef") == 1);
+    assert(str("_abcdef_abcdefg_").find("abcdefg") == 8);
+    assert(str("_abcdefg_abcdef_").rfind("abcdefg") == 1);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);
