@@ -47,8 +47,9 @@
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
  *  This file is the sibling of `bench_search.cpp`, `bench_token.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
  */
-#include <memory>  // `std::memcpy`
-#include <numeric> // `std::iota`
+#include <memory>        // `std::memcpy`
+#include <numeric>       // `std::iota`
+#include <unordered_set> // `std::unordered_set`
 
 #if __linux__ && defined(_GNU_SOURCE)
 #include <stdlib.h> // `qsort_r`
@@ -56,6 +57,7 @@
 
 #define SZ_USE_MISALIGNED_LOADS (1)
 #include "bench.hpp"
+#include "test.hpp" // `global_random_generator`
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -207,24 +209,24 @@ void bench_sorting_strings(environment_t const &env) {
 
     // First, benchmark the STL function
     auto base_call = argsort_strings_via_std_t {env.tokens, permute_buffer};
-    benchmark_result_t base = benchmark_nullary(env, "std::sort(positions)", base_call).log();
+    benchmark_result_t base = benchmark_nullary(env, "sequence_argsort<std::sort>", base_call).log();
     auto serial_call = argsort_strings_via_sz<sz_sequence_argsort_serial> {env.tokens, permute_buffer};
-    benchmark_nullary(env, "sz_sequence_argsort_serial(positions)", base_call, serial_call).log(base);
+    benchmark_nullary(env, "sz_sequence_argsort_serial", base_call, serial_call).log(base);
 
 // Conditionally include SIMD-accelerated backends
 #if SZ_USE_SKYLAKE
     auto skylake_call = argsort_strings_via_sz<sz_sequence_argsort_skylake> {env.tokens, permute_buffer};
-    benchmark_nullary(env, "sz_sequence_argsort_skylake(positions)", base_call, skylake_call).log(base);
+    benchmark_nullary(env, "sz_sequence_argsort_skylake", base_call, skylake_call).log(base);
 #endif
 #if SZ_USE_SVE
     auto sve_call = argsort_strings_via_sz<sz_sequence_argsort_sve> {env.tokens, permute_buffer};
-    benchmark_nullary(env, "sz_sequence_argsort_sve(positions)", base_call, sve_call).log(base);
+    benchmark_nullary(env, "sz_sequence_argsort_sve", base_call, sve_call).log(base);
 #endif
 
-    // Include POSIX functionality
-#if __linux__ && defined(_GNU_SOURCE) && !defined(__BIONIC__)
+    // Include POSIX and WinAPI functionality
+#if defined(_SZ_HAS_QSORT_R) || defined(_SZ_HAS_QSORT_S)
     auto qsort_call = argsort_strings_via_qsort_t {env.tokens, permute_buffer};
-    benchmark_nullary(env, "qsort_r(positions)", base_call, qsort_call).log(base);
+    benchmark_nullary(env, "sequence_argsort<qsort>", base_call, qsort_call).log(base);
 #endif
 }
 
@@ -294,18 +296,134 @@ void bench_sorting_pgrams(environment_t const &env) {
 
     // First, benchmark the STL function
     auto base_call = sort_pgrams_via_std_t {pgrams_buffer, permute_buffer};
-    benchmark_result_t base = benchmark_nullary(env, "std::sort(pgrams)", base_call).log();
+    benchmark_result_t base = benchmark_nullary(env, "pgrams_sort<std::sort>", base_call).log();
     auto serial_call = sort_pgrams_via_sz<sz_pgrams_sort_serial> {pgrams_buffer, pgrams_sorted, permute_buffer};
-    benchmark_nullary(env, "sz_pgrams_sort_serial(pgrams)", base_call, serial_call).log(base);
+    benchmark_nullary(env, "sz_pgrams_sort_serial", base_call, serial_call).log(base);
 
     // Conditionally include SIMD-accelerated backends
 #if SZ_USE_SKYLAKE
     auto skylake_call = sort_pgrams_via_sz<sz_pgrams_sort_skylake> {pgrams_buffer, pgrams_sorted, permute_buffer};
-    benchmark_nullary(env, "sz_pgrams_sort_skylake(pgrams)", base_call, skylake_call).log(base);
+    benchmark_nullary(env, "sz_pgrams_sort_skylake", base_call, skylake_call).log(base);
 #endif
 #if SZ_USE_SVE
     auto sve_call = sort_pgrams_via_sz<sz_pgrams_sort_sve> {pgrams_buffer, pgrams_sorted, permute_buffer};
-    benchmark_nullary(env, "sz_pgrams_sort_sve(pgrams)", base_call, sve_call).log(base);
+    benchmark_nullary(env, "sz_pgrams_sort_sve", base_call, sve_call).log(base);
+#endif
+}
+
+#pragma endregion
+
+#pragma region Intersections Benchmarks
+
+/** @brief Uses the STL's @b `std::unordered_map` to find the intersections between two string sequences. */
+struct intersect_strings_via_std_t {
+    strings_t const &input_a;
+    strings_t const &input_b;
+    permute_t &output_a;
+    permute_t &output_b;
+
+    intersect_strings_via_std_t(strings_t const &input_a, strings_t const &input_b, //
+                                permute_t &output_a, permute_t &output_b)
+        : input_a(input_a), input_b(input_b), output_a(output_a), output_b(output_b) {}
+
+    call_result_t operator()() const {
+        auto const &input_small = input_a.size() < input_b.size() ? input_a : input_b;
+        auto const &input_large = input_a.size() < input_b.size() ? input_b : input_a;
+        auto &output_small = input_a.size() < input_b.size() ? output_a : output_b;
+        auto &output_large = input_a.size() < input_b.size() ? output_b : output_a;
+
+        // Construct an unordered map for the smaller input
+        std::unordered_map<std::string_view, sz_sorted_idx_t> map_small;
+        for (sz_sorted_idx_t idx_in_small = 0; idx_in_small < input_small.size(); ++idx_in_small)
+            map_small[input_small[idx_in_small]] = idx_in_small;
+
+        // Iterate through the larger input and find the intersections
+        std::size_t intersections = 0;
+        for (sz_sorted_idx_t idx_in_large = 0; idx_in_large < input_large.size(); ++idx_in_large) {
+            auto it = map_small.find(input_large[idx_in_large]);
+            if (it == map_small.end()) continue;
+            output_large[intersections] = idx_in_large;
+            output_small[intersections] = it->second;
+            ++intersections;
+        }
+
+        // Prepare stats
+        check_value_t checksum = static_cast<check_value_t>(intersections);
+        std::size_t bytes_passed = accumulate_lengths(input_a) + accumulate_lengths(input_b);
+        return {bytes_passed, checksum};
+    }
+};
+
+template <sz_sequence_intersect_t func_>
+struct intersect_strings_via_sz {
+    strings_t const &input_a;
+    strings_t const &input_b;
+    permute_t &output_a;
+    permute_t &output_b;
+
+    intersect_strings_via_sz(strings_t const &input_a, strings_t const &input_b, //
+                             permute_t &output_a, permute_t &output_b)
+        : input_a(input_a), input_b(input_b), output_a(output_a), output_b(output_b) {}
+
+    call_result_t operator()() const {
+
+        // Prepare the sequence structure for the callback.
+        sz_sequence_t array_a, array_b;
+        array_a.count = input_a.size();
+        array_a.handle = &input_a;
+        array_a.get_start = get_start;
+        array_a.get_length = get_length;
+        array_b.count = input_b.size();
+        array_b.handle = &input_b;
+        array_b.get_start = get_start;
+        array_b.get_length = get_length;
+
+        // Prepare the sequence structure for the callback.
+        sz_size_t intersections = 0;
+        sz::_with_alloc<std::allocator<char>>([&](sz_memory_allocator_t &alloc) {
+            return func_(&array_a, &array_b, &alloc, 0, //
+                         &intersections, output_a.data(), output_b.data());
+        });
+
+        // Prepare stats
+        check_value_t checksum = static_cast<check_value_t>(intersections);
+        std::size_t bytes_passed = accumulate_lengths(input_a) + accumulate_lengths(input_b);
+        return {bytes_passed, checksum};
+    }
+};
+
+/**
+ *  @brief Find the array permutation that sorts the input strings.
+ *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
+ */
+void bench_intersections(environment_t const &env) {
+
+    // Deduplicate the entire set of tokens and also sample some tokens into the second set
+    std::unordered_set<std::string_view> unique_tokens(env.tokens.begin(), env.tokens.end());
+    std::vector<std::string_view> tokens_a(unique_tokens.begin(), unique_tokens.end());
+    std::vector<std::string_view> tokens_b;
+    std::size_t const tokens_b_size = env.tokens.size() / 2;
+    std::sample(unique_tokens.begin(), unique_tokens.end(), //
+                std::back_inserter(tokens_b), tokens_b_size, global_random_generator());
+
+    std::size_t const max_tokens_in_intersection = (std::min)(tokens_a.size(), tokens_b.size());
+    permute_t permute_a(max_tokens_in_intersection), permute_b(max_tokens_in_intersection);
+
+    // First, benchmark the STL function
+    auto base_call = intersect_strings_via_std_t {tokens_a, tokens_b, permute_a, permute_b};
+    benchmark_result_t base = benchmark_nullary(env, "intersect<std::unordered_map>", base_call).log();
+    auto serial_call =
+        intersect_strings_via_sz<sz_sequence_intersect_serial> {tokens_a, tokens_b, permute_a, permute_b};
+    benchmark_nullary(env, "sz_sequence_intersect_serial", base_call, serial_call).log(base);
+
+    // Conditionally include SIMD-accelerated backends
+#if SZ_USE_SKYLAKE
+    auto skylake_call = intersect_strings_via_sz<sz_sequence_intersect_ice> {tokens_a, tokens_b, permute_a, permute_b};
+    benchmark_nullary(env, "sz_sequence_intersect_ice", base_call, skylake_call).log(base);
+#endif
+#if SZ_USE_SVE
+    auto sve_call = intersect_strings_via_sz<sz_sequence_intersect_sve> {tokens_a, tokens_b, permute_a, permute_b};
+    benchmark_nullary(env, "sz_sequence_intersect_sve", base_call, sve_call).log(base);
 #endif
 }
 
@@ -323,6 +441,7 @@ int main(int argc, char const **argv) {
     std::printf("Starting search benchmarks...\n");
     bench_sorting_pgrams(env);
     bench_sorting_strings(env);
+    bench_intersections(env);
 
     std::printf("All benchmarks passed.\n");
     return 0;
