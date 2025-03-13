@@ -1,6 +1,6 @@
 
 /**
- *  @file   bench_sort.cpp
+ *  @file   bench_sequence.cpp
  *  @brief  Benchmarks sorting, partitioning, and merging operations on string sequences.
  *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *          validating the SIMD-accelerated backends against the serial baselines.
@@ -30,8 +30,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_bench_sort
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzilla_bench_sort
+ *  cmake --build build_release --config Release --target stringzilla_bench_sequence
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzilla_bench_sequence
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
@@ -41,7 +41,7 @@
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
  *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
- *  build_release/stringzilla_bench_sort
+ *  build_release/stringzilla_bench_sequence
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
@@ -204,7 +204,7 @@ struct argsort_strings_via_sz {
  *  @brief Find the array permutation that sorts the input strings.
  *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
  */
-void bench_sorting_strings(environment_t const &env) {
+void bench_sequenceing_strings(environment_t const &env) {
     permute_t permute_buffer(env.tokens.size());
 
     // First, benchmark the STL function
@@ -282,7 +282,7 @@ struct sort_pgrams_via_sz {
  *  @brief Find the array permutation that sorts the input strings.
  *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
  */
-void bench_sorting_pgrams(environment_t const &env) {
+void bench_sequenceing_pgrams(environment_t const &env) {
     permute_t permute_buffer(env.tokens.size());
 
     // Before sorting the strings themselves, which is a heavy operation,
@@ -439,8 +439,8 @@ int main(int argc, char const **argv) {
         environment_t::tokenization_t::words_k);
 
     std::printf("Starting search benchmarks...\n");
-    bench_sorting_pgrams(env);
-    bench_sorting_strings(env);
+    bench_sequenceing_pgrams(env);
+    bench_sequenceing_strings(env);
     bench_intersections(env);
 
     std::printf("All benchmarks passed.\n");

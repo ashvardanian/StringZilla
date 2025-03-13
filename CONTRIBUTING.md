@@ -27,13 +27,13 @@ They have the broadest coverage of the library, and are the most important to ke
 - `bench_token.cpp` - token-level ops, like hashing, ordering, equality checks.
 - `bench_search.cpp` - bidirectional substring search, both exact and fuzzy.
 - `bench_similarity.cpp` - benchmark all edit distance backends.
-- `bench_sort.cpp` - sorting, partitioning, merging.
+- `bench_sequence.cpp` - sorting, partitioning, merging.
 - `bench_container.cpp` - STL containers with different string keys.
 
 The role of Python benchmarks is less to provide absolute number, but to compare against popular tools in the Python ecosystem.
 
 - `bench_search.(py|ipynb)` - compares against native Python `str`.
-- `bench_sort.(py|ipynb)` - compares against `pandas`.
+- `bench_sequence.(py|ipynb)` - compares against `pandas`.
 - `bench_similarity.(ipynb)` - compares against `jellyfish`, `editdistance`, etc.
 
 ## Benchmarking Datasets

@@ -3,7 +3,7 @@
  *  @brief  Benchmarks STL associative containers with @b `std::string_view`-compatible keys.
  *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the lookup operations.
  *
- *  This file is the sibling of `bench_sort.cpp`, `bench_search.cpp` and `bench_token.cpp`.
+ *  This file is the sibling of `bench_sequence.cpp`, `bench_search.cpp` and `bench_token.cpp`.
  *  It accepts a file with a list of words, constructs associative containers with string keys,
  *  using `std::string`, `std::string_view`, `sz::string_view`, and `sz::string`, and then
  *  evaluates the latency of lookups.
@@ -35,7 +35,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_sort.cpp`, `bench_token.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `bench_sequence.cpp`, `bench_token.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
  */
 #include <map>           // `std::map`
 #include <unordered_map> // `std::unordered_map`
