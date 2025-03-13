@@ -406,6 +406,14 @@ inline environment_t build_environment(                                        /
     std::printf(" - Number of tokens: %zu\n", env.tokens.size());
     std::printf(" - Mean token length: %.2f bytes\n", mean_token_length);
 
+    std::printf("Compile-time capabilities:\n");
+    std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
+    std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
+    std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
+    std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
+    std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
+    std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
+
     return env;
 }
 

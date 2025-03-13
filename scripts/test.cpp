@@ -32,6 +32,7 @@
 // #define SZ_USE_ICE 0
 // #define SZ_USE_NEON 0
 // #define SZ_USE_SVE 0
+// #define SZ_USE_SVE2 0
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
 #include <stringzilla/stringzilla.hpp>
@@ -1931,6 +1932,7 @@ int main(int argc, char const **argv) {
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
+    std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
 
     // Basic utilities
     test_arithmetical_utilities();

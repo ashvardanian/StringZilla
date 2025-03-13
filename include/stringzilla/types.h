@@ -245,6 +245,14 @@
 #endif
 #endif
 
+#ifndef SZ_USE_SVE2
+#ifdef __ARM_FEATURE_SVE2
+#define SZ_USE_SVE2 1
+#else
+#define SZ_USE_SVE2 0
+#endif
+#endif
+
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers.
  */
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
@@ -256,11 +264,11 @@
 #endif
 #include <arm_neon.h>
 #endif // SZ_USE_NEON
-#if SZ_USE_SVE
+#if SZ_USE_SVE || SZ_USE_SVE2
 #if !defined(_MSC_VER)
 #include <arm_sve.h>
 #endif
-#endif // SZ_USE_SVE
+#endif // SZ_USE_SVE || SZ_USE_SVE2
 
 #ifdef __cplusplus
 extern "C" {

@@ -1181,7 +1181,7 @@ __`SZ_DEBUG`__:
 > If you want to enable more aggressive bounds-checking, define `SZ_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
-__`SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_SVE`__:
+__`SZ_USE_HASWELL`, `SZ_USE_SKYLAKE`, `SZ_USE_ICE`, `SZ_USE_NEON`, `SZ_USE_SVE`, `SZ_USE_SVE2`__:
 
 > One can explicitly disable certain families of SIMD instructions for compatibility purposes.
 > Default values are inferred at compile time.

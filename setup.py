@@ -59,6 +59,7 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "1" if is_64bit_arm() else "0"),
+        ("SZ_USE_SVE2", "1" if is_64bit_arm() else "0"),
         ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
 
@@ -96,6 +97,7 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         ("SZ_USE_ICE", "0"),
         ("SZ_USE_NEON", "1" if is_building_arm else "0"),
         ("SZ_USE_SVE", "0"),
+        ("SZ_USE_SVE2", "0"),
     ]
 
     return compile_args, link_args, macros_args
@@ -115,6 +117,7 @@ def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         ("SZ_USE_ICE", "1" if is_64bit_x86() else "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
+        ("SZ_USE_SVE2", "0"),
         ("SZ_DETECT_BIG_ENDIAN", "1" if is_big_endian() else "0"),
     ]
 
