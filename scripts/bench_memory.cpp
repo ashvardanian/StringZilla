@@ -251,7 +251,9 @@ struct fill_random_from_sz {
     inline call_result_t operator()(std::string_view slice) const noexcept {
         std::size_t output_offset = slice.data() - env.dataset.data();
         fill_func_(output + output_offset, slice.size(), slice.front());
-        return {slice.size(), static_cast<check_value_t>(slice.front())};
+        char last_random_byte = output[output_offset + slice.size() - 1];
+        do_not_optimize(last_random_byte);
+        return {slice.size(), static_cast<check_value_t>(last_random_byte)};
     }
 };
 
@@ -265,7 +267,7 @@ void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
 
 /**
  *  @brief  Benchmarks `memset`-like operations overwriting regions of output memory filling
- *          them with the first byte of the input regions.
+ *          them with the first byte of the input regions or with random @b (reproducible) byte streams.
  *
  *  Multiple calls to the provided functions even with the same arguments won't change the input or output.
  *  So the kernels can be compared against the baseline `memset` function.
@@ -284,23 +286,27 @@ void bench_fill(environment_t const &env) {
 
     // Provide a baseline for overwriting the `output_buffer` memory
     bench_result_t zeros = bench_unary(env, "sz_fill_serial", fill_from_sz<sz_fill_serial>(env, o)).log();
-    bench_result_t random =
-        bench_unary(env, "sz_fill_random_serial", fill_random_from_sz<sz_fill_random_serial>(env, o)).log(zeros);
+    auto random_call = fill_random_from_sz<sz_fill_random_serial>(env, o);
+    bench_result_t random = bench_unary(env, "sz_fill_random_serial", random_call).log(zeros);
 
 #if SZ_USE_HASWELL
     bench_unary(env, "sz_fill_haswell", fill_from_sz<sz_fill_haswell>(env, o)).log(zeros);
-    bench_unary(env, "sz_fill_random_haswell", fill_random_from_sz<sz_fill_random_haswell>(env, o)).log(zeros, random);
+    bench_unary(env, "sz_fill_random_haswell", random_call, fill_random_from_sz<sz_fill_random_haswell>(env, o))
+        .log(zeros, random);
 #endif
 #if SZ_USE_SKYLAKE
     bench_unary(env, "sz_fill_skylake", fill_from_sz<sz_fill_skylake>(env, o)).log(zeros);
-    bench_unary(env, "sz_fill_random_skylake", fill_random_from_sz<sz_fill_random_skylake>(env, o)).log(zeros, random);
+    bench_unary(env, "sz_fill_random_skylake", random_call, fill_random_from_sz<sz_fill_random_skylake>(env, o))
+        .log(zeros, random);
 #endif
 #if SZ_USE_ICE
-    bench_unary(env, "sz_fill_random_ice", fill_random_from_sz<sz_fill_random_ice>(env, o)).log(zeros, random);
+    bench_unary(env, "sz_fill_random_ice", random_call, fill_random_from_sz<sz_fill_random_ice>(env, o))
+        .log(zeros, random);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_fill_neon", fill_from_sz<sz_fill_neon>(env, o)).log(zeros);
-    bench_unary(env, "sz_fill_random_neon", fill_random_from_sz<sz_fill_random_neon>(env, o)).log(zeros, random);
+    bench_unary(env, "sz_fill_random_neon", random_call, fill_random_from_sz<sz_fill_random_neon>(env, o))
+        .log(zeros, random);
 #endif
 #if SZ_USE_SVE
     bench_unary(env, "sz_fill_sve", fill_from_sz<sz_fill_sve>(env, o)).log(zeros);
