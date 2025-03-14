@@ -317,15 +317,15 @@ if (${STRINGZILLA_BUILD_SHARED})
             endif ()
 
             target_compile_definitions(
-                ${target} PRIVATE "SZ_USE_HASWELL=1" "SZ_USE_SKYLAKE=1" "SZ_USE_ICE=1" "SZ_USE_NEON=0"
-                                  "SZ_USE_SVE=0 SZ_USE_SVE2=0"
+                ${target} PRIVATE "SZ_USE_HASWELL=1" "SZ_USE_SKYLAKE=1" "SZ_USE_ICE=1" "SZ_USE_NEON=0" "SZ_USE_SVE=0"
+                                  "SZ_USE_SVE2=0"
             )
         elseif (SZ_PLATFORM_ARM)
             set_compiler_flags(${target} "" "armv8-a")
 
             target_compile_definitions(
-                ${target} PRIVATE "SZ_USE_HASWELL=0" "SZ_USE_SKYLAKE=0" "SZ_USE_ICE=0" "SZ_USE_NEON=1"
-                                  "SZ_USE_SVE=1 SZ_USE_SVE2=1"
+                ${target} PRIVATE "SZ_USE_HASWELL=0" "SZ_USE_SKYLAKE=0" "SZ_USE_ICE=0" "SZ_USE_NEON=1" "SZ_USE_SVE=1"
+                                  "SZ_USE_SVE2=1"
             )
         endif ()
 
