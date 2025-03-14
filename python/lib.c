@@ -3726,7 +3726,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     // Define SIMD capabilities
     {
         sz_capability_t caps = sz_capabilities();
-        sz_cptr_t caps_str = sz_capability_to_string(caps);
+        sz_cptr_t caps_str = sz_capabilities_to_string(caps);
         PyModule_AddStringConstant(m, "__capabilities__", caps_str);
     }
 
