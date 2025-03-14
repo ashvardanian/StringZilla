@@ -543,6 +543,9 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 /** @brief Signature of `sz_lookup`. */
 typedef void (*sz_lookup_t)(sz_ptr_t, sz_size_t, sz_cptr_t, sz_cptr_t);
 
+/** @brief Signature of `sz_copy`. */
+typedef void (*sz_copy_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
+
 /** @brief Signature of `sz_move`. */
 typedef void (*sz_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
 

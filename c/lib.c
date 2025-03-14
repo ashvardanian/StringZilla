@@ -178,7 +178,7 @@ typedef struct sz_implementations_t {
     sz_equal_t equal;
     sz_order_t order;
 
-    sz_move_t copy;
+    sz_copy_t copy;
     sz_move_t move;
     sz_fill_t fill;
     sz_lookup_t lookup;
