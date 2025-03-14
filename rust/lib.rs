@@ -99,6 +99,22 @@ pub mod sz {
                 *b = !*b;
             }
         }
+        /// Constructs a Byteset from a slice of bytes.
+        #[inline]
+        pub fn from_bytes(bytes: &[u8]) -> Self {
+            let mut set = Self::new();
+            for &b in bytes {
+                set.add_u8(b);
+            }
+            set
+        }
+    }
+
+    impl From<&[u8]> for Byteset {
+        #[inline]
+        fn from(bytes: &[u8]) -> Self {
+            Self::from_bytes(bytes)
+        }
     }
 
     use core::fmt::{self, Write};
