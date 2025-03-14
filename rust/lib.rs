@@ -99,6 +99,15 @@ pub mod sz {
                 *b = !*b;
             }
         }
+
+        /// Returns a new Byteset with all bits inverted, leaving self unchanged.
+        #[inline]
+        pub fn inverted(&self) -> Self {
+            Self {
+                bits: [!self.bits[0], !self.bits[1], !self.bits[2], !self.bits[3]],
+            }
+        }
+
         /// Constructs a Byteset from a slice of bytes.
         #[inline]
         pub fn from_bytes(bytes: &[u8]) -> Self {
@@ -110,10 +119,10 @@ pub mod sz {
         }
     }
 
-    impl From<&[u8]> for Byteset {
+    impl<T: AsRef<[u8]>> From<T> for Byteset {
         #[inline]
-        fn from(bytes: &[u8]) -> Self {
-            Self::from_bytes(bytes)
+        fn from(bytes: T) -> Self {
+            Self::from_bytes(bytes.as_ref())
         }
     }
 
@@ -516,22 +525,16 @@ pub mod sz {
     /// An `Option<usize>` representing the index of the first occurrence of any byte from
     /// `needles` within `haystack`, if found, otherwise `None`.
     #[inline(always)]
-    pub fn find_byte_from<H, N>(haystack: H, needles: N) -> Option<usize>
+    pub fn find_byteset<H>(haystack: H, needles: Byteset) -> Option<usize>
     where
         H: AsRef<[u8]>,
-        N: AsRef<[u8]>,
     {
         let haystack_ref = haystack.as_ref();
-        let needles_ref = needles.as_ref();
         let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let mut byteset = Byteset::new();
-        for &b in needles_ref {
-            byteset.add_u8(b);
-        }
 
         let result =
-            unsafe { sz_find_byteset(haystack_pointer, haystack_length, &byteset as *const _ as *const c_void) };
+            unsafe { sz_find_byteset(haystack_pointer, haystack_length, &needles as *const _ as *const c_void) };
         if result.is_null() {
             None
         } else {
@@ -552,27 +555,64 @@ pub mod sz {
     ///
     /// An `Option<usize>` representing the index of the last occurrence of any byte from
     /// `needles` within `haystack`, if found, otherwise `None`.
-    pub fn rfind_byte_from<H, N>(haystack: H, needles: N) -> Option<usize>
+    pub fn rfind_byteset<H>(haystack: H, needles: Byteset) -> Option<usize>
     where
         H: AsRef<[u8]>,
-        N: AsRef<[u8]>,
     {
         let haystack_ref = haystack.as_ref();
-        let needles_ref = needles.as_ref();
         let haystack_pointer = haystack_ref.as_ptr() as _;
         let haystack_length = haystack_ref.len();
-        let mut byteset = Byteset::new();
-        for &b in needles_ref {
-            byteset.add_u8(b);
-        }
 
         let result =
-            unsafe { sz_rfind_byteset(haystack_pointer, haystack_length, &byteset as *const _ as *const c_void) };
+            unsafe { sz_rfind_byteset(haystack_pointer, haystack_length, &needles as *const _ as *const c_void) };
         if result.is_null() {
             None
         } else {
             Some(unsafe { result.offset_from(haystack_pointer) } as usize)
         }
+    }
+
+    /// Finds the index of the first character in `haystack` that is also present in `needles`.
+    /// This function is particularly useful for parsing and tokenization tasks where a set of
+    /// delimiter characters is used.
+    ///
+    /// # Arguments
+    ///
+    /// * `haystack`: The byte slice to search.
+    /// * `needles`: The set of bytes to search for within the haystack.
+    ///
+    /// # Returns
+    ///
+    /// An `Option<usize>` representing the index of the first occurrence of any byte from
+    /// `needles` within `haystack`, if found, otherwise `None`.
+    #[inline(always)]
+    pub fn find_byte_from<H, N>(haystack: H, needles: N) -> Option<usize>
+    where
+        H: AsRef<[u8]>,
+        N: AsRef<[u8]>,
+    {
+        find_byteset(haystack, Byteset::from(needles))
+    }
+
+    /// Finds the index of the last character in `haystack` that is also present in `needles`.
+    /// This can be used to find the last occurrence of any character from a specified set,
+    /// useful in parsing scenarios such as finding the last delimiter in a string.
+    ///
+    /// # Arguments
+    ///
+    /// * `haystack`: The byte slice to search.
+    /// * `needles`: The set of bytes to search for within the haystack.
+    ///
+    /// # Returns
+    ///
+    /// An `Option<usize>` representing the index of the last occurrence of any byte from
+    /// `needles` within `haystack`, if found, otherwise `None`.
+    pub fn rfind_byte_from<H, N>(haystack: H, needles: N) -> Option<usize>
+    where
+        H: AsRef<[u8]>,
+        N: AsRef<[u8]>,
+    {
+        rfind_byteset(haystack, Byteset::from(needles))
     }
 
     /// Finds the index of the first character in `haystack` that is not present in `needles`.
@@ -593,23 +633,7 @@ pub mod sz {
         H: AsRef<[u8]>,
         N: AsRef<[u8]>,
     {
-        let haystack_ref = haystack.as_ref();
-        let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as _;
-        let haystack_length = haystack_ref.len();
-        let mut byteset = Byteset::new();
-        for &b in needles_ref {
-            byteset.add_u8(b);
-        }
-        byteset.invert();
-
-        let result =
-            unsafe { sz_find_byteset(haystack_pointer, haystack_length, &byteset as *const _ as *const c_void) };
-        if result.is_null() {
-            None
-        } else {
-            Some(unsafe { result.offset_from(haystack_pointer) } as usize)
-        }
+        find_byteset(haystack, Byteset::from(needles).inverted())
     }
 
     /// Finds the index of the last character in `haystack` that is not present in `needles`.
@@ -630,23 +654,7 @@ pub mod sz {
         H: AsRef<[u8]>,
         N: AsRef<[u8]>,
     {
-        let haystack_ref = haystack.as_ref();
-        let needles_ref = needles.as_ref();
-        let haystack_pointer = haystack_ref.as_ptr() as _;
-        let haystack_length = haystack_ref.len();
-        let mut byteset = Byteset::new();
-        for &b in needles_ref {
-            byteset.add_u8(b);
-        }
-        byteset.invert();
-
-        let result =
-            unsafe { sz_rfind_byteset(haystack_pointer, haystack_length, &byteset as *const _ as *const c_void) };
-        if result.is_null() {
-            None
-        } else {
-            Some(unsafe { result.offset_from(haystack_pointer) } as usize)
-        }
+        rfind_byteset(haystack, Byteset::from(needles).inverted())
     }
 
     /// Computes the Levenshtein edit distance between two strings, using the Wagner-Fisher
@@ -1843,7 +1851,7 @@ where
     /// # Arguments
     ///
     /// * `needles`: The set of bytes that should not be matched within `self`.
-    ///q
+    ///
     /// # Examples
     ///
     /// ```
