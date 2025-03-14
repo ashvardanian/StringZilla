@@ -207,41 +207,49 @@
  */
 #ifndef SZ_USE_HASWELL
 #ifdef __AVX2__
-#define SZ_USE_HASWELL 1
+#define SZ_USE_HASWELL (1)
 #else
-#define SZ_USE_HASWELL 0
+#define SZ_USE_HASWELL (0)
 #endif
 #endif
 
 #ifndef SZ_USE_SKYLAKE
 #ifdef __AVX512F__
-#define SZ_USE_SKYLAKE 1
+#define SZ_USE_SKYLAKE (1)
 #else
-#define SZ_USE_SKYLAKE 0
+#define SZ_USE_SKYLAKE (0)
 #endif
 #endif
 
 #ifndef SZ_USE_ICE
 #ifdef __AVX512BW__
-#define SZ_USE_ICE 1
+#define SZ_USE_ICE (1)
 #else
-#define SZ_USE_ICE 0
+#define SZ_USE_ICE (0)
 #endif
 #endif
 
 #ifndef SZ_USE_NEON
 #ifdef __ARM_NEON
-#define SZ_USE_NEON 1
+#define SZ_USE_NEON (1)
 #else
-#define SZ_USE_NEON 0
+#define SZ_USE_NEON (0)
 #endif
 #endif
 
 #ifndef SZ_USE_SVE
 #ifdef __ARM_FEATURE_SVE
-#define SZ_USE_SVE 1
+#define SZ_USE_SVE (1)
 #else
-#define SZ_USE_SVE 0
+#define SZ_USE_SVE (0)
+#endif
+#endif
+
+#ifndef SZ_USE_SVE2
+#ifdef __ARM_FEATURE_SVE2
+#define SZ_USE_SVE2 (1)
+#else
+#define SZ_USE_SVE2 (0)
 #endif
 #endif
 
@@ -256,11 +264,11 @@
 #endif
 #include <arm_neon.h>
 #endif // SZ_USE_NEON
-#if SZ_USE_SVE
+#if SZ_USE_SVE || SZ_USE_SVE2
 #if !defined(_MSC_VER)
 #include <arm_sve.h>
 #endif
-#endif // SZ_USE_SVE
+#endif // SZ_USE_SVE || SZ_USE_SVE2
 
 #ifdef __cplusplus
 extern "C" {
@@ -342,28 +350,30 @@ struct sz_sequence_t;              // Forward declaration of an ordered collecti
 typedef sz_size_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
 typedef sz_size_t sz_pgram_t;      // "Pointer-sized N-gram" of a string
 
-typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;                        // Only one relevant bit
-typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t; // Only three possible states: <=>
+/**
+ *  @brief Simple boolean type, until `_Bool` in C 99 and `true` and `false` in C 23.
+ *  @see https://stackoverflow.com/questions/1921539/using-boolean-values-in-c
+ */
+typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;
 
 /**
- *  @brief  Describes an error status of a function.
+ *  @brief Describes the result of a comparison operation. Equivalent to @b `std::strong_ordering` in C++20.
+ *  @see https://en.cppreference.com/w/cpp/utility/compare/strong_ordering
+ */
+typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t;
+
+/**
+ *  @brief A simple signed integer type describing the status of a faulty operation.
+ *  @sa sz_success_k, sz_bad_alloc_k, sz_invalid_utf8_k, sz_contains_duplicates_k
  */
 typedef enum {
-    /**
-     *  For algorithms that return a status, this status indicates that the operation was successful.
-     */
+    /** For algorithms that return a status, this status indicates that the operation was successful. */
     sz_success_k = 0,
-    /**
-     *  For algorithms that require memory allocation, this status indicates that the allocation failed.
-     */
+    /** For algorithms that require memory allocation, this status indicates that the allocation failed. */
     sz_bad_alloc_k = -1,
-    /**
-     *  For algorithms that require UTF8 input, this status indicates that the input is invalid.
-     */
+    /** For algorithms that require UTF8 input, this status indicates that the input is invalid. */
     sz_invalid_utf8_k = -2,
-    /**
-     *  For algorithms that take collections of unique elements, this status indicates presence of duplicates.
-     */
+    /** For algorithms that take collections of unique elements, this status indicates presence of duplicates. */
     sz_contains_duplicates_k = -3,
 } sz_status_t;
 
@@ -533,6 +543,9 @@ typedef sz_ordering_t (*sz_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 /** @brief Signature of `sz_lookup`. */
 typedef void (*sz_lookup_t)(sz_ptr_t, sz_size_t, sz_cptr_t, sz_cptr_t);
 
+/** @brief Signature of `sz_copy`. */
+typedef void (*sz_copy_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
+
 /** @brief Signature of `sz_move`. */
 typedef void (*sz_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t);
 
@@ -545,8 +558,8 @@ typedef sz_cptr_t (*sz_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t);
 /** @brief Signature of `sz_find`. */
 typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
-/** @brief Signature of `sz_find_set`. */
-typedef sz_cptr_t (*sz_find_set_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
+/** @brief Signature of `sz_find_byteset`. */
+typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
 
 /** @brief Signature of `sz_hamming_distance`. */
 typedef sz_status_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_size_t *);

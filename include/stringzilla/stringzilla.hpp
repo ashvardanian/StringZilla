@@ -1971,7 +1971,7 @@ class basic_string_slice {
 #pragma endregion
 
     /**  @brief Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
-    size_type hash(std::uint64_t seed = 42) const noexcept {
+    size_type hash(std::uint64_t seed = 0) const noexcept {
         return static_cast<size_type>(sz_hash(start_, length_, static_cast<sz_u64_t>(seed)));
     }
 
@@ -3759,10 +3759,10 @@ bool basic_string<char_type_, allocator_>::try_preparing_replacement( //
  *  @see Similar to `std::less<std::string_view>`: https://en.cppreference.com/w/cpp/utility/functional/less
  *
  *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
- *  Can be used to combine STL classes with StringZilla logic, like: `std::map<std::string, int, sz::string_view_less>`.
+ *  Can be used to combine STL classes with StringZilla logic, like: `std::map<std::string, int, sz::less>`.
  */
-struct string_view_less {
-    bool operator()(string_view a, string_view b) const noexcept { return a < b; }
+struct less {
+    inline bool operator()(string_view a, string_view b) const noexcept { return a < b; }
 };
 
 /**
@@ -3771,10 +3771,10 @@ struct string_view_less {
  *
  *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
  *  Can be used to combine STL classes with StringZilla logic, like:
- *      `std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to>`.
+ *      `std::unordered_map<std::string, int, sz::hash, sz::equal_to>`.
  */
-struct string_view_equal_to {
-    bool operator()(string_view a, string_view b) const noexcept { return a == b; }
+struct equal_to {
+    inline bool operator()(string_view a, string_view b) const noexcept { return a == b; }
 };
 
 /**
@@ -3783,10 +3783,10 @@ struct string_view_equal_to {
  *
  *  Unlike the STL analog, doesn't require C++14 or including the heavy `<functional>` header.
  *  Can be used to combine STL classes with StringZilla logic, like:
- *      `std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to>`.
+ *      `std::unordered_map<std::string, int, sz::hash, sz::equal_to>`.
  */
-struct string_view_hash {
-    std::size_t operator()(string_view str) const noexcept { return str.hash(); }
+struct hash {
+    inline std::size_t operator()(string_view str) const noexcept { return str.hash(); }
 };
 
 /**  @brief SFINAE-type used to infer the resulting type of concatenating multiple string together. */

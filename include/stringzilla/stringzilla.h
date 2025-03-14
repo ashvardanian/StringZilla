@@ -32,7 +32,8 @@
  *  - `SZ_USE_SKYLAKE=?` - whether to use AVX-512 instructions on x86_64.
  *  - `SZ_USE_ICE=?` - whether to use AVX-512 VBMI & wider AES instructions on x86_64.
  *  - `SZ_USE_NEON=?` - whether to use NEON instructions on ARM.
- *  - `SZ_USE_SVE=?` - whether to use SVE and SVE2 instructions on ARM.
+ *  - `SZ_USE_SVE=?` - whether to use SVE instructions on ARM.
+ *  - `SZ_USE_SVE2=?` - whether to use SVE2 instructions on ARM.
  */
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_

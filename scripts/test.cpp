@@ -32,6 +32,7 @@
 // #define SZ_USE_ICE 0
 // #define SZ_USE_NEON 0
 // #define SZ_USE_SVE 0
+// #define SZ_USE_SVE2 0
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
 #include <stringzilla/stringzilla.hpp>
@@ -290,6 +291,14 @@ static void test_simd_against_serial() {
         sz_hash_neon, sz_hash_state_init_neon,                  //
         sz_hash_state_stream_neon, sz_hash_state_fold_neon);
     test_random_generator_on_platform(sz_fill_random_serial, sz_fill_random_neon);
+#endif
+#if SZ_USE_SVE2
+    test_hashing_on_platform(                                   //
+        sz_hash_serial, sz_hash_state_init_serial,              //
+        sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
+        sz_hash_sve2, sz_hash_state_init_sve2,                  //
+        sz_hash_state_stream_sve2, sz_hash_state_fold_sve2);
+    test_random_generator_on_platform(sz_fill_random_serial, sz_fill_random_sve2);
 #endif
 };
 
@@ -559,6 +568,19 @@ static void test_stl_compatibility_for_reads() {
     assert(str("abbabbaaaaaa").find("aa") == 6);
     assert(str("abcdabcd").substr(2, 4).find("abc") == str::npos);
     assert(str("hello, world!").substr(0, 11).find("world") == str::npos);
+    assert(str("axabbcxcaaabbccc").find("aaabbccc") == 8);
+
+    // Simple repeating patterns - with one "almost match" before an actual match in each direction
+    assert(str("_ab_abc_").find("abc") == 4);
+    assert(str("_abc_ab_").rfind("abc") == 1);
+    assert(str("_abc_abcd_").find("abcd") == 5);
+    assert(str("_abcd_abc_").rfind("abcd") == 1);
+    assert(str("_abcd_abcde_").find("abcde") == 6);
+    assert(str("_abcde_abcd_").rfind("abcde") == 1);
+    assert(str("_abcde_abcdef_").find("abcdef") == 7);
+    assert(str("_abcdef_abcde_").rfind("abcdef") == 1);
+    assert(str("_abcdef_abcdefg_").find("abcdefg") == 8);
+    assert(str("_abcdefg_abcdef_").rfind("abcdefg") == 1);
 
     // ! `rfind` and `find_last_of` are not consistent in meaning of their arguments.
     assert(str("hello").find_first_of("le") == 1);
@@ -1007,7 +1029,7 @@ static void test_non_stl_extensions_for_reads() {
 
     // Computing alignment scores.
     using matrix_t = std::int8_t[256][256];
-    std::vector<std::int8_t> costs_vector = unary_substitution_costs();
+    error_costs_256x256_t costs_vector = unary_substitution_costs();
     matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
 
     assert(sz::alignment_score(str("listen"), str("silent"), costs, -1) == -4);
@@ -1642,7 +1664,7 @@ static void test_levenshtein_distances() {
     };
 
     using matrix_t = std::int8_t[256][256];
-    std::vector<std::int8_t> costs_vector = unary_substitution_costs();
+    error_costs_256x256_t costs_vector = unary_substitution_costs();
     matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
 
     auto print_failure = [&](char const *name, sz::string const &l, sz::string const &r, std::size_t expected,
@@ -1915,8 +1937,8 @@ static void test_stl_containers() {
     assert(sorted_words_sz.empty());
     assert(words_sz.empty());
 
-    std::map<std::string, int, sz::string_view_less> sorted_words_stl;
-    std::unordered_map<std::string, int, sz::string_view_hash, sz::string_view_equal_to> words_stl;
+    std::map<std::string, int, sz::less> sorted_words_stl;
+    std::unordered_map<std::string, int, sz::hash, sz::equal_to> words_stl;
     assert(sorted_words_stl.empty());
     assert(words_stl.empty());
 }
@@ -1931,6 +1953,7 @@ int main(int argc, char const **argv) {
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
+    std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
 
     // Basic utilities
     test_arithmetical_utilities();

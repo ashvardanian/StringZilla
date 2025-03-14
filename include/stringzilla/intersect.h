@@ -5,7 +5,7 @@
  *
  *  Includes core APIs for `sz_sequence_t` string collections with hardware-specific backends:
  *
- *  - `sz_sequence_intersection` - to compute the strict intersection of two deduplicated string collections.
+ *  - `sz_sequence_intersect` - to compute the strict intersection of two deduplicated string collections.
  *  - TODO: `sz_sequence_join` - to compute the intersection of two arbitrary string collections.
  */
 #ifndef STRINGZILLA_INTERSECT_H_
@@ -58,7 +58,7 @@ extern "C" {
  *  Example usage:
  *
  *  @code{.c}
- *      #include <stringzilla/join.h>
+ *      #include <stringzilla/intersect.h>
  *      int main() {
  *          char const *first[] = {"banana", "apple", "cherry"};
  *          char const *second[] = {"cherry", "orange", "pineapple", "banana"};
@@ -724,6 +724,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_seque
                                                 sz_memory_allocator_t *alloc, sz_u64_t seed,
                                                 sz_size_t *intersection_size, sz_sorted_idx_t *first_positions,
                                                 sz_sorted_idx_t *second_positions) {
+    // TODO: Finalize `_sz_hash_sve2_upto16x16` and integrate here
     return sz_sequence_intersect_serial( //
         first_sequence, second_sequence, //
         alloc, seed, intersection_size,  //

@@ -372,16 +372,23 @@ SZ_PUBLIC sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t
 }
 
 SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    sz_u128_vec_t a_vec, b_vec;
-    for (; length >= 16; a += 16, b += 16, length -= 16) {
-        a_vec.u8x16 = vld1q_u8((sz_u8_t const *)a);
-        b_vec.u8x16 = vld1q_u8((sz_u8_t const *)b);
-        uint8x16_t cmp = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
-        if (vminvq_u8(cmp) != 255) { return sz_false_k; } // Check if all bytes match
-    }
+    if (length < 16) return sz_equal_serial(a, b, length);
 
-    // Handle remaining bytes
-    if (length) return sz_equal_serial(a, b, length);
+    sz_u128_vec_t a_vec, b_vec;
+    sz_size_t offset = 0;
+    do {
+        a_vec.u8x16 = vld1q_u8((sz_u8_t const *)(a + offset));
+        b_vec.u8x16 = vld1q_u8((sz_u8_t const *)(b + offset));
+        uint8x16_t cmp = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
+        if (vminvq_u8(cmp) != 255) return sz_false_k; // Check if all bytes match
+        offset += 16;
+    } while (offset + 16 <= length);
+
+    // For final check - load the last register-long piece of content from the end
+    a_vec.u8x16 = vld1q_u8((sz_u8_t const *)(a + length - 16));
+    b_vec.u8x16 = vld1q_u8((sz_u8_t const *)(b + length - 16));
+    uint8x16_t cmp = vceqq_u8(a_vec.u8x16, b_vec.u8x16);
+    if (vminvq_u8(cmp) != 255) return sz_false_k;
     return sz_true_k;
 }
 
@@ -399,7 +406,27 @@ SZ_PUBLIC sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 #pragma GCC target("arch=armv8.2-a+sve")
 #pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
 
-/* Nothing here for now. */
+SZ_PUBLIC sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+    // Determine the number of bytes in an SVE vector.
+    sz_size_t const vector_bytes = svcntb();
+    sz_size_t progress = 0;
+    do {
+        svbool_t progress_vec = svwhilelt_b8(progress, length);
+        svuint8_t a_vec = svld1(progress_vec, (sz_u8_t const *)(a + progress));
+        svuint8_t b_vec = svld1(progress_vec, (sz_u8_t const *)(b + progress));
+        // Compare: generate a predicate marking lanes where a!=b
+        svbool_t not_equal_vec = svcmpne(progress_vec, a_vec, b_vec);
+        if (svptest_any(progress_vec, not_equal_vec)) return sz_false_k;
+        progress += vector_bytes;
+    } while (progress < length);
+    return sz_true_k;
+}
+
+SZ_PUBLIC sz_ordering_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+    //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
+    //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
+    return sz_order_serial(a, a_length, b, b_length);
+}
 
 #pragma clang attribute pop
 #pragma GCC pop_options
@@ -417,6 +444,8 @@ SZ_DYNAMIC sz_bool_t sz_equal(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     return sz_equal_skylake(a, b, length);
 #elif SZ_USE_HASWELL
     return sz_equal_haswell(a, b, length);
+#elif SZ_USE_SVE
+    return sz_equal_sve(a, b, length);
 #elif SZ_USE_NEON
     return sz_equal_neon(a, b, length);
 #else
@@ -429,6 +458,8 @@ SZ_DYNAMIC sz_ordering_t sz_order(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, 
     return sz_order_skylake(a, a_length, b, b_length);
 #elif SZ_USE_HASWELL
     return sz_order_haswell(a, a_length, b, b_length);
+#elif SZ_USE_SVE
+    return sz_order_sve(a, a_length, b, b_length);
 #elif SZ_USE_NEON
     return sz_order_neon(a, a_length, b, b_length);
 #else

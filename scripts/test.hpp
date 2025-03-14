@@ -112,12 +112,14 @@ inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char c
     return matrix_buffer.back();
 }
 
+using error_costs_256x256_t = std::array<sz_error_cost_t, 256 * 256>;
+
 /**
  *  @brief  Produces a substitution cost matrix for the Needleman-Wunsch alignment score,
  *          that would yield the same result as the negative Levenshtein distance.
  */
-inline std::vector<std::int8_t> unary_substitution_costs() {
-    std::vector<std::int8_t> result(256 * 256);
+inline error_costs_256x256_t unary_substitution_costs() {
+    error_costs_256x256_t result;
     for (std::size_t i = 0; i != 256; ++i)
         for (std::size_t j = 0; j != 256; ++j) result[i * 256 + j] = (i == j ? 0 : -1);
     return result;
