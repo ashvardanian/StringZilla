@@ -988,39 +988,36 @@ pub mod sz {
         }
     }
 
-    /// A helper type that represents a view into an existing slice of items,
-    /// along with a function pointer that maps an element to a byte slice.
-    /// This view is only used for the duration of a single FFI call.
-    struct SliceSequenceView<'a, Container> {
-        data: &'a Container,
-        /// A mapping function that, given an index, returns the corresponding byte slice.
-        mapper: fn(&'a Container, SortedIdx) -> &'a [u8],
+    /// A helper type that holds a mapper closure which, given an index,
+    /// returns the corresponding byte‑slice representation.
+    ///
+    /// The closure is expected to have type `Fn(usize) -> &[u8]` so that callers
+    /// can write closures like `|i| data[i].as_ref()` or `|i| people[i].name.as_bytes()`.
+    struct _SliceLookupView<F: Fn(usize) -> &'static [u8]> {
+        mapper: F,
     }
 
-    unsafe extern "C" fn slice_get_start<T>(handle: *const c_void, idx: SortedIdx) -> *const c_void {
-        let view = &*(handle as *const SliceSequenceView<T>);
-        (view.mapper)(view.data, idx).as_ptr() as *const c_void
+    unsafe extern "C" fn _slice_get_start<F>(handle: *const c_void, idx: SortedIdx) -> *const c_void
+    where
+        F: Fn(usize) -> &'static [u8],
+    {
+        let view = &*(handle as *const _SliceLookupView<F>);
+        (view.mapper)(idx).as_ptr() as *const c_void
     }
 
-    unsafe extern "C" fn slice_get_length<T>(handle: *const c_void, idx: SortedIdx) -> usize {
-        let view = &*(handle as *const SliceSequenceView<T>);
-        (view.mapper)(view.data, idx).len()
-    }
-
-    /// The default mapper for types that implement AsRef<[u8]>.
-    fn default_mapper<T: AsRef<[u8]>>(data: &[T], idx: SortedIdx) -> &[u8] {
-        data[idx].as_ref()
+    unsafe extern "C" fn _slice_get_length<F>(handle: *const c_void, idx: SortedIdx) -> usize
+    where
+        F: Fn(usize) -> &'static [u8],
+    {
+        let view = &*(handle as *const _SliceLookupView<F>);
+        (view.mapper)(idx).len()
     }
 
     /// Sorts a sequence of items by comparing their byte‑slice representations.
     ///
-    /// This variant uses the default mapping (which requires that the element
-    /// type implements `AsRef<[u8]>`).
-    ///
     /// The caller must supply an output buffer `order` whose length is at least
     /// equal to the length of `data`. On success, the function writes the sorted
-    /// permutation indices into `order` and returns the number of items (which is
-    /// always equal to data.len()).
+    /// permutation indices into `order`.
     ///
     /// # Example
     ///
@@ -1028,33 +1025,66 @@ pub mod sz {
     /// use stringzilla::sz;
     ///
     /// let fruits = ["banana", "apple", "cherry"];
-    /// let mut order = [0; 3];
-    /// let n = sz::sort_into(&fruits, &mut order).expect("sort failed");
-    /// assert_eq!(n, 3);
-    /// assert_eq!(&order[..n], &[1, 0, 2]); // "apple", "banana", "cherry"
+    /// let mut order = [0; fruits.len()];
+    /// sz::argsort_permutation(&fruits, &mut order).expect("sort failed");
+    /// assert_eq!(order, &[1, 0, 2]); // "apple", "banana", "cherry"
     /// ```
-    pub fn sort_into<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx]) -> Result<usize, Status> {
-        sort_by_into(data, default_mapper::<T>, order)
-    }
-
-    /// Like `sort_into` but accepts a custom mapping function.
-    /// The mapper is a function pointer (no closures) that converts an element
-    /// into a byte‑slice view.
-    pub fn sort_by_into<T>(data: &[T], mapper: fn(&T) -> &[u8], order: &mut [SortedIdx]) -> Result<usize, Status> {
-        if order.len() < data.len() {
+    pub fn argsort_permutation<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx]) -> Result<(), Status> {
+        if data.len() > order.len() {
             return Err(Status::BadAlloc);
         }
-        // Create a view; no data copies occur.
-        let view = SliceSequenceView { data, mapper };
+        argsort_permutation_by(|i| data[i].as_ref(), order)
+    }
+
+    /// Sorts a sequence of items by comparing their corresponding byte‑slice representations.
+    /// The size of the permutation is inferred from the length of the `order` slice.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stringzilla::sz;
+    ///
+    /// let people = [
+    ///     Person { name: "Charlie", age: 20 },
+    ///     Person { name: "Alice", age: 25 },
+    ///     Person { name: "Bob", age: 30 },
+    /// ];
+    /// let mut order = [0; people.len()];
+    /// sz::argsort_permutation_by(|i| people[i].name.as_bytes(), &mut order).expect("sort failed");
+    /// assert_eq!(order, &[1, 2, 0]); // "Alice", "Bob", "Charlie"
+    /// ```
+    pub fn argsort_permutation_by<F, A>(mapper: F, order: &mut [SortedIdx]) -> Result<(), Status>
+    where
+        F: Fn(usize) -> A,
+        A: AsRef<[u8]>,
+    {
+        // Adapter closure: given an index, call the provided mapper and then transmute the
+        // resulting slice to have a `'static` lifetime. This transmute is safe as long as
+        // the FFI call is synchronous and the returned slices are only used during the call.
+        let adapter = move |i: usize| -> &'static [u8] {
+            let binding = mapper(i);
+            let slice = binding.as_ref();
+            unsafe { core::mem::transmute(slice) }
+        };
+
+        _argsort_permutation_impl(adapter, order)
+    }
+
+    /// Helper that takes an adapter (with a concrete type) and performs the FFI call.
+    fn _argsort_permutation_impl<FAdapter>(adapter: FAdapter, order: &mut [SortedIdx]) -> Result<(), Status>
+    where
+        FAdapter: Fn(usize) -> &'static [u8],
+    {
+        let view = _SliceLookupView { mapper: adapter };
         let seq = _SzSequence {
             handle: &view as *const _ as *const c_void,
-            count: data.len(),
-            get_start: Some(slice_get_start::<T>),
-            get_length: Some(slice_get_length::<T>),
+            count: order.len(),
+            get_start: Some(_slice_get_start::<FAdapter>),
+            get_length: Some(_slice_get_length::<FAdapter>),
         };
         let status = unsafe { sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr()) };
         if status == Status::Success {
-            Ok(data.len())
+            Ok(())
         } else {
             Err(status)
         }
@@ -1076,54 +1106,116 @@ pub mod sz {
     ///
     /// let set1 = ["banana", "apple", "cherry"];
     /// let set2 = ["cherry", "orange", "pineapple", "banana"];
-    /// let mut out1 = [0; 3]; // at least min(3, 4) == 3 elements.
-    /// let mut out2 = [0; 3];
-    /// let n = sz::intersect_into(&set1, &set2, 0, &mut out1, &mut out2).expect("intersect failed");
+    /// let mut positions1 = [0; 3]; // at least min(3, 4) == 3 elements.
+    /// let mut positions2 = [0; 3];
+    /// let n = sz::intersection(&set1, &set2, 0, &mut positions1, &mut positions2).expect("intersect failed");
     /// assert!(n == 2); // "banana" and "cherry" are common.
     /// ```
-    pub fn intersect_into<T: AsRef<[u8]>>(
+    pub fn intersection<T: AsRef<[u8]>>(
         data1: &[T],
         data2: &[T],
         seed: u64,
-        out1: &mut [SortedIdx],
-        out2: &mut [SortedIdx],
-    ) -> Result<usize, Status> {
-        intersect_by_into(data1, default_mapper::<T>, data2, default_mapper::<T>, seed, out1, out2)
-    }
-
-    /// Like `intersect_into` but accepts custom mapping functions.
-    pub fn intersect_by_into<T, U>(
-        data1: &[T],
-        mapper1: fn(SortedIdx) -> &[u8],
-        data2: &[U],
-        mapper2: fn(SortedIdx) -> &[u8],
-        seed: u64,
-        out1: &mut [SortedIdx],
-        out2: &mut [SortedIdx],
+        positions1: &mut [SortedIdx],
+        positions2: &mut [SortedIdx],
     ) -> Result<usize, Status> {
         let min_count = data1.len().min(data2.len());
-        if out1.len() < min_count || out2.len() < min_count {
+        if positions1.len() < min_count || positions2.len() < min_count {
             return Err(Status::BadAlloc);
         }
-        let view1 = SliceSequenceView {
-            data: data1,
-            mapper: mapper1,
+
+        intersection_by(
+            |i| data1[i].as_ref(),
+            |j| data2[j].as_ref(),
+            seed,
+            positions1,
+            positions2,
+        )
+    }
+
+    /// Intersects two sequences (inner join) using their elements corresponding byte‑slice views.
+    /// The caller must provide a closure that maps an index to the byte slice representation of
+    /// the corresponding element in the first and second sequences.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stringzilla::sz;
+    ///
+    /// let people1 = [
+    ///     Person { name: "Charlie", age: 20 },
+    ///     Person { name: "Alice", age: 25 },
+    ///     Person { name: "Bob", age: 30 },
+    /// ];
+    /// let people2 = [
+    ///     Person { name: "Alice", age: 25 },
+    ///     Person { name: "Bob", age: 30 },
+    ///     Person { name: "Charlie", age: 20 },
+    /// ];
+    /// let mut positions1 = [0; people1.len().min(people2.len())];
+    /// let mut positions2 = [0; people2.len().min(people1.len())];
+    /// let n = sz::intersection_by(
+    ///     |i| people1[i].name.as_bytes(),
+    ///     |j| people2[j].name.as_bytes(),
+    ///     0,
+    ///     &mut positions1,
+    ///     &mut positions2,
+    /// ).expect("intersect failed");
+    /// assert!(n == 3); // "Alice", "Bob", and "Charlie" are common.
+    /// ```
+    pub fn intersection_by<F, G, A, B>(
+        mapper1: F,
+        mapper2: G,
+        seed: u64,
+        positions1: &mut [SortedIdx],
+        positions2: &mut [SortedIdx],
+    ) -> Result<usize, Status>
+    where
+        F: Fn(usize) -> A,
+        A: AsRef<[u8]>,
+        G: Fn(usize) -> B,
+        B: AsRef<[u8]>,
+    {
+        // Adapter closure: given an index, call the provided mapper and then transmute the
+        // resulting slice to have a `'static` lifetime. This transmute is safe as long as
+        // the FFI call is synchronous and the returned slices are only used during the call.
+        let adapter1 = move |i: usize| -> &'static [u8] {
+            let binding = mapper1(i);
+            let slice = binding.as_ref();
+            unsafe { core::mem::transmute(slice) }
         };
-        let view2 = SliceSequenceView {
-            data: data2,
-            mapper: mapper2,
+        let adapter2 = move |i: usize| -> &'static [u8] {
+            let binding = mapper2(i);
+            let slice = binding.as_ref();
+            unsafe { core::mem::transmute(slice) }
         };
+
+        _intersection_by_impl(adapter1, adapter2, seed, positions1, positions2)
+    }
+
+    fn _intersection_by_impl<FAdapter, GAdapter>(
+        adapter1: FAdapter,
+        adapter2: GAdapter,
+        seed: u64,
+        positions1: &mut [SortedIdx],
+        positions2: &mut [SortedIdx],
+    ) -> Result<usize, Status>
+    where
+        FAdapter: Fn(usize) -> &'static [u8],
+        GAdapter: Fn(usize) -> &'static [u8],
+    {
+        let view1 = _SliceLookupView { mapper: adapter1 };
+        let view2 = _SliceLookupView { mapper: adapter2 };
         let seq1 = _SzSequence {
             handle: &view1 as *const _ as *const c_void,
-            count: data1.len(),
-            get_start: Some(slice_get_start::<T>),
-            get_length: Some(slice_get_length::<T>),
+            count: positions1.len(),
+            get_start: Some(_slice_get_start::<FAdapter>),
+            get_length: Some(_slice_get_length::<FAdapter>),
         };
         let seq2 = _SzSequence {
             handle: &view2 as *const _ as *const c_void,
-            count: data2.len(),
-            get_start: Some(slice_get_start::<U>),
-            get_length: Some(slice_get_length::<U>),
+            count: positions2.len(),
+            get_start: Some(_slice_get_start::<GAdapter>),
+            get_length: Some(_slice_get_length::<GAdapter>),
         };
         let mut inter_size: usize = 0;
         let status = unsafe {
@@ -1133,8 +1225,8 @@ pub mod sz {
                 core::ptr::null(),
                 seed,
                 &mut inter_size as *mut usize,
-                out1.as_mut_ptr(),
-                out2.as_mut_ptr(),
+                positions1.as_mut_ptr(),
+                positions2.as_mut_ptr(),
             )
         };
         if status == Status::Success {
@@ -1142,7 +1234,6 @@ pub mod sz {
         } else {
             Err(status)
         }
-        // The temporary views are dropped after the call.
     }
 }
 
@@ -2102,15 +2193,14 @@ mod tests {
     }
 
     #[test]
-    fn test_sort_into_default() {
+    fn test_argsort_permutation_default() {
         // Test with a slice of string literals.
         let fruits = ["banana", "apple", "cherry"];
         let mut order = [0; 3]; // output buffer must be at least fruits.len()
-        let n = sz::sort_into(&fruits, &mut order).expect("sort_into failed");
-        assert_eq!(n, fruits.len());
+        sz::argsort_permutation(&fruits, &mut order).expect("argsort_permutation failed");
 
         // Reconstruct sorted order using the returned indices.
-        let sorted_from_api: Vec<_> = order[..n].iter().map(|&i| fruits[i]).collect();
+        let sorted_from_api: Vec<_> = order.iter().map(|&i| fruits[i]).collect();
 
         // Compute expected order using the standard sort.
         let mut expected = fruits.to_vec();
@@ -2120,7 +2210,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sort_by_into_custom() {
+    fn test_argsort_permutation_by_custom() {
         // Define a custom type.
         #[derive(Debug)]
         struct Person {
@@ -2137,11 +2227,10 @@ mod tests {
             Person { name: "Bob", age: 40 },
         ];
         let mut order = [0; 3];
-        // Use sort_by_into with a custom mapper that extracts the name as a byte slice.
-        let n = sz::sort_by_into(&people, |p: &Person| p.name.as_bytes(), &mut order).expect("sort_by_into failed");
-        assert_eq!(n, people.len());
+        sz::argsort_permutation_by(|i: usize| people[i].name.as_bytes(), &mut order)
+            .expect("argsort_permutation_by failed");
 
-        let sorted_from_api: Vec<_> = order[..n].iter().map(|&i| people[i].name).collect();
+        let sorted_from_api: Vec<_> = order.iter().map(|&i| people[i].name).collect();
 
         // Compute expected order using standard sorting on the names.
         let mut expected: Vec<_> = people.iter().map(|p| p.name).collect();
@@ -2151,7 +2240,7 @@ mod tests {
     }
 
     #[test]
-    fn test_intersect_into_default() {
+    fn test_intersection_default() {
         // Two slices of string literals.
         let set1 = ["banana", "apple", "cherry"];
         let set2 = ["cherry", "orange", "pineapple", "banana"];
@@ -2159,14 +2248,14 @@ mod tests {
         let mut out1 = [0; 3];
         let mut out2 = [0; 3];
 
-        let n = sz::intersect_into(&set1, &set2, 0, &mut out1, &mut out2).expect("intersect_into failed");
+        let n = sz::intersection(&set1, &set2, 0, &mut out1, &mut out2).expect("intersection failed");
         assert!(n <= set1.len().min(set2.len()));
 
         // For simplicity, we will compare the intersection from the first set.
         // Our API returns indices (for set1 in out1).
         let common_from_api: HashSet<_> = out1[..n].iter().map(|&i| set1[i]).collect();
 
-        // Compute the expected intersection using a HashSet.
+        // Compute the expected intersection using a `HashSet`.
         let expected: HashSet<_> = set1
             .iter()
             .cloned()
@@ -2179,7 +2268,7 @@ mod tests {
     }
 
     #[test]
-    fn test_intersect_by_into_custom() {
+    fn test_intersection_by_custom() {
         // Define a custom type.
         #[derive(Debug)]
         struct Person {
@@ -2206,22 +2295,20 @@ mod tests {
         let mut out1 = [0; 3];
         let mut out2 = [0; 3];
 
-        let n = sz::intersect_by_into(
-            &group1,
+        let n = sz::intersection_by(
             |i: SortedIdx| group1[i].name.as_bytes(),
-            &group2,
             |j: SortedIdx| group2[j].name.as_bytes(),
             0,
             &mut out1,
             &mut out2,
         )
-        .expect("intersect_by_into failed");
+        .expect("intersection_by failed");
         assert!(n <= group1.len().min(group2.len()));
 
-        // Use the indices for group1 to get common names.
+        // Use the indices for `group1` to get common names.
         let common_from_api: HashSet<_> = out1[..n].iter().map(|&i| group1[i].name).collect();
 
-        // Compute expected common names using a HashSet.
+        // Compute expected common names using a `HashSet`.
         let expected: HashSet<_> = group1
             .iter()
             .map(|p| p.name)
