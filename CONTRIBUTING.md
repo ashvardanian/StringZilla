@@ -174,8 +174,17 @@ build_release/stringzilla_bench_memory <path>     # - for string copies and fill
 build_release/stringzilla_bench_search <path>     # - for substring search
 build_release/stringzilla_bench_token <path>      # - for hashing, equality comparisons, etc.
 build_release/stringzilla_bench_similarity <path> # - for edit distances and alignment scores
-build_release/stringzilla_bench_sort <path>       # - for sorting arrays of strings
+build_release/stringzilla_bench_sequence <path>   # - for sorting arrays of strings
 build_release/stringzilla_bench_container <path>  # - for STL containers with string keys
+```
+
+Each benchmark originates from an identically named single-source file in the `scripts/` directory.
+All of them feature file-level documentation, and are designed to be self-explanatory.
+You can easily log their descriptions until the first `*/` with the following `sed` and `awk` commands:
+
+```sh
+sed '/\*\//q' scripts/bench_memory.cpp
+awk '/\*\// { exit } { print }' scripts/bench_memory.cpp
 ```
 
 ### Benchmarking Hardware-Specific Optimizations
