@@ -519,7 +519,8 @@ struct bench_result_t {
     template <typename... baselines_types_>
     bench_result_t const &log(baselines_types_ const &...bases) const {
         if (skipped) return *this;
-        std::printf("Benchmarking `%s`:\n", name.c_str());
+        std::printf("\n"); // Let's add some spacing between separate benchmarks
+        std::printf("Benchmarking \033[1m`%s`\033[0m:\n", name.c_str());
 
         // Print the number of errors, if any
         if (errors) std::printf("> Errors: %zu in %zu calls\n", errors, stress_calls);

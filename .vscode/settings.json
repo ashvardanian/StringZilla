@@ -114,6 +114,7 @@
     "NOMINMAX",
     "NOTIMPLEMENTED",
     "npos",
+    "nullary",
     "numpy",
     "octdigits",
     "octogram",
@@ -152,6 +153,8 @@
     "ssize",
     "startswith",
     "STL",
+    "StringWa.rs",
+    "STRINGWARS",
     "stringzilla",
     "stringzilla_bare",
     "Strs",
@@ -308,6 +311,7 @@
     "xstring": "cpp",
     "xtr1common": "cpp",
     "xtree": "cpp",
-    "xutility": "cpp"
+    "xutility": "cpp",
+    "regex": "cpp"
   }
 }
