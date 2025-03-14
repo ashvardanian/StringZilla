@@ -8,7 +8,8 @@ module.exports = {
      * @param {string} needle 
      * @returns {bigint}
      */
-    find: compiled.find,
+    indexOf: compiled.indexOf,
+    indexOfB: compiled.indexOfB,
 
     /**
      * Searches for a substring in a larger string.
@@ -18,5 +19,8 @@ module.exports = {
      * @param {boolean} overlap 
      * @returns {bigint}
      */
-    count: compiled.count
+    count: compiled.count,
+
+    Str: compiled.Str
 };
+
