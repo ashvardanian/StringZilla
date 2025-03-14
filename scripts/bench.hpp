@@ -532,17 +532,18 @@ struct bench_result_t {
         if (seconds_printable > 1e3) seconds_printable /= 1e3, seconds_printable_unit = "ms";
         if (seconds_printable > 1e3) seconds_printable /= 1e3, seconds_printable_unit = "s";
 
-        // Compute throughput based on operations (or bytes passed if operations == 0).
+        // Compute throughput based on operations.
+        // Assuming we normalize by a power of 2, we use "Ki", "Mi", "Gi" prefixes over "K", "M", "G".
         auto bytes_printable = bytes_passed / profiled_seconds;
         char const *bytes_printable_unit = "B/s";
-        if (bytes_printable > 1e3) bytes_printable /= 1e3, bytes_printable_unit = "KB/s";
-        if (bytes_printable > 1e3) bytes_printable /= 1e3, bytes_printable_unit = "MB/s";
-        if (bytes_printable > 1e3) bytes_printable /= 1e3, bytes_printable_unit = "GB/s";
+        if (bytes_printable > 1024) bytes_printable /= 1024, bytes_printable_unit = "KiB/s";
+        if (bytes_printable > 1024) bytes_printable /= 1024, bytes_printable_unit = "MiB/s";
+        if (bytes_printable > 1024) bytes_printable /= 1024, bytes_printable_unit = "GiB/s";
         std::printf("> Throughput: %.2f %s @ %.2f %s/call\n", //
                     bytes_printable, bytes_printable_unit,    //
                     seconds_printable, seconds_printable_unit);
 
-        // Print the number of operations, if there was a separate tracking mechanism for those
+        // Print the number of operations, if there was a separate tracking mechanism for those.
         if (operations) {
             auto ops_printable = operations * 1.0 / profiled_seconds;
             auto ops_per_cycle = operations * 1.0 / profiled_cpu_cycles;
