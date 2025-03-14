@@ -345,9 +345,6 @@ void bench_comparing_equality(environment_t const &env) {
 #if SZ_USE_SKYLAKE
     bench_unary(env, "sz_equal_skylake", validator, equality_from_sz<sz_equal_skylake>(env)).log(base, base_stl);
 #endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_equal_ice", validator, equality_from_sz<sz_equal_ice>(env)).log(base, base_stl);
-#endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_equal_neon", validator, equality_from_sz<sz_equal_neon>(env)).log(base, base_stl);
 #endif
@@ -367,9 +364,6 @@ void bench_comparing_order(environment_t const &env) {
 #endif
 #if SZ_USE_SKYLAKE
     bench_unary(env, "sz_order_skylake", validator, ordering_from_sz<sz_order_skylake>(env)).log(base, base_stl);
-#endif
-#if SZ_USE_ICE
-    bench_unary(env, "sz_order_ice", validator, ordering_from_sz<sz_order_ice>(env)).log(base, base_stl);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_order_neon", validator, ordering_from_sz<sz_order_neon>(env)).log(base, base_stl);
