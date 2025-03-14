@@ -77,7 +77,7 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
         "-Wno-incompatible-pointer-types",  # like: passing argument 4 of ‘sz_export_prefix_u32’ from incompatible pointer type
         "-Wno-discarded-qualifiers",  # like: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target type
         "-fPIC",  # to enable dynamic dispatch
-        "-mfloat-abi=hard",  # NEON intrinsics not available with the soft-float ABI
+        # "-mfloat-abi=hard",  # NEON intrinsics not available with the soft-float ABI
         "-mmacosx-version-min=11.0",  # minimum macOS version
     ]
     link_args = [

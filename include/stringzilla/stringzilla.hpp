@@ -4065,7 +4065,7 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
 
 /**
  *  @brief Locates the positions of the elements in 2 deduplicated string arrays that have identical values.
- *  @sa sz_sequence_join
+ *  @sa sz_sequence_intersect
  *
  *  @param[in] first_begin The pointer to the first element of the first array.
  *  @param[in] first_end The pointer to the element after the last element of the first array.

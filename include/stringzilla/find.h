@@ -32,8 +32,8 @@ extern "C" {
 /**
  *  @brief  Locates first matching byte in a string. Equivalent to `memchr(haystack, *needle, h_length)` in LibC.
  *
- *  X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memchr.S
- *  Aarch64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/aarch64/memchr.S
+ *  @see X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memchr.S
+ *  @see Aarch64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/aarch64/memchr.S
  *
  *  @param[in] haystack Haystack - the string to search in.
  *  @param[in] h_length Number of bytes in the haystack.
@@ -45,8 +45,8 @@ SZ_DYNAMIC sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t h_length, sz_cpt
 /**
  *  @brief  Locates last matching byte in a string. Equivalent to `memrchr(haystack, *needle, h_length)` in LibC.
  *
- *  X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memrchr.S
- *  Aarch64 implementation: missing
+ *  @see X86_64 implementation: https://github.com/lattera/glibc/blob/master/sysdeps/x86_64/memrchr.S
+ *  @see Aarch64 implementation: missing
  *
  *  @param[in] haystack Haystack - the string to search in.
  *  @param[in] h_length Number of bytes in the haystack.
@@ -1632,20 +1632,6 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t h, sz_size_t h_length, sz_by
 #pragma GCC pop_options
 #endif            // SZ_USE_NEON
 #pragma endregion // NEON Implementation
-
-/*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
- *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs.
- */
-#pragma region SVE Implementation
-#if SZ_USE_SVE
-#pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
-
-#pragma clang attribute pop
-#pragma GCC pop_options
-#endif            // SZ_USE_SVE
-#pragma endregion // SVE Implementation
 
 /*  Pick the right implementation for the string search algorithms.
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
