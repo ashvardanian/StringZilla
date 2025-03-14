@@ -2365,7 +2365,7 @@ SZ_PUBLIC sz_u64_t sz_hash_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t seed)
 }
 
 SZ_PUBLIC void sz_fill_random_sve2(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    return sz_fill_random_neon(text, length, nonce);
+    sz_fill_random_neon(text, length, nonce);
 }
 
 #if 0
