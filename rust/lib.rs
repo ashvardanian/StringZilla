@@ -8,6 +8,14 @@
 
 pub mod sz {
 
+    /// A simple semantic version structure.
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+    pub struct SemVer {
+        pub major: i32,
+        pub minor: i32,
+        pub patch: i32,
+    }
+
     #[repr(C)]
     #[derive(Debug, PartialEq)]
     pub enum Status {
@@ -25,20 +33,32 @@ pub mod sz {
 
     pub type SortedIdx = usize;
 
+    /// A trait for types that support indexed lookup.
+    pub trait SequenceData {
+        type Item;
+        fn len(&self) -> usize;
+        fn index(&self, idx: usize) -> &Self::Item;
+    }
+
+    // Implement SequenceData for slices.
+    impl<T> SequenceData for [T] {
+        type Item = T;
+        #[inline]
+        fn len(&self) -> usize {
+            self.len()
+        }
+        #[inline]
+        fn index(&self, idx: usize) -> &T {
+            &self[idx]
+        }
+    }
+
     #[repr(C)]
-    pub struct Sequence {
+    pub struct _SzSequence {
         pub handle: *const c_void,
         pub count: usize,
         pub get_start: Option<unsafe extern "C" fn(handle: *const c_void, idx: usize) -> *const c_void>,
         pub get_length: Option<unsafe extern "C" fn(handle: *const c_void, idx: usize) -> usize>,
-    }
-
-    /// A simple semantic version structure.
-    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-    pub struct SemVer {
-        pub major: i32,
-        pub minor: i32,
-        pub patch: i32,
     }
 
     impl Byteset {
@@ -120,11 +140,12 @@ pub mod sz {
 
         fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
 
-        pub fn sz_sequence_argsort(sequence: *const Sequence, alloc: *const c_void, order: *mut SortedIdx) -> Status;
+        pub fn sz_sequence_argsort(sequence: *const _SzSequence, alloc: *const c_void, order: *mut SortedIdx)
+            -> Status;
 
         pub fn sz_sequence_intersect(
-            first_sequence: *const Sequence,
-            second_sequence: *const Sequence,
+            first_sequence: *const _SzSequence,
+            second_sequence: *const _SzSequence,
             alloc: *const c_void,
             seed: u64,
             intersection_size: *mut usize,
@@ -966,6 +987,163 @@ pub mod sz {
             sz_fill_random(buffer_slice.as_ptr() as _, buffer_slice.len(), nonce);
         }
     }
+
+    /// A helper type that represents a view into an existing slice of items,
+    /// along with a function pointer that maps an element to a byte slice.
+    /// This view is only used for the duration of a single FFI call.
+    struct SliceSequenceView<'a, Container> {
+        data: &'a Container,
+        /// A mapping function that, given an index, returns the corresponding byte slice.
+        mapper: fn(&'a Container, SortedIdx) -> &'a [u8],
+    }
+
+    unsafe extern "C" fn slice_get_start<T>(handle: *const c_void, idx: SortedIdx) -> *const c_void {
+        let view = &*(handle as *const SliceSequenceView<T>);
+        (view.mapper)(view.data, idx).as_ptr() as *const c_void
+    }
+
+    unsafe extern "C" fn slice_get_length<T>(handle: *const c_void, idx: SortedIdx) -> usize {
+        let view = &*(handle as *const SliceSequenceView<T>);
+        (view.mapper)(view.data, idx).len()
+    }
+
+    /// The default mapper for types that implement AsRef<[u8]>.
+    fn default_mapper<T: AsRef<[u8]>>(data: &[T], idx: SortedIdx) -> &[u8] {
+        data[idx].as_ref()
+    }
+
+    /// Sorts a sequence of items by comparing their byte‑slice representations.
+    ///
+    /// This variant uses the default mapping (which requires that the element
+    /// type implements `AsRef<[u8]>`).
+    ///
+    /// The caller must supply an output buffer `order` whose length is at least
+    /// equal to the length of `data`. On success, the function writes the sorted
+    /// permutation indices into `order` and returns the number of items (which is
+    /// always equal to data.len()).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stringzilla::sz;
+    ///
+    /// let fruits = ["banana", "apple", "cherry"];
+    /// let mut order = [0; 3];
+    /// let n = sz::sort_into(&fruits, &mut order).expect("sort failed");
+    /// assert_eq!(n, 3);
+    /// assert_eq!(&order[..n], &[1, 0, 2]); // "apple", "banana", "cherry"
+    /// ```
+    pub fn sort_into<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx]) -> Result<usize, Status> {
+        sort_by_into(data, default_mapper::<T>, order)
+    }
+
+    /// Like `sort_into` but accepts a custom mapping function.
+    /// The mapper is a function pointer (no closures) that converts an element
+    /// into a byte‑slice view.
+    pub fn sort_by_into<T>(data: &[T], mapper: fn(&T) -> &[u8], order: &mut [SortedIdx]) -> Result<usize, Status> {
+        if order.len() < data.len() {
+            return Err(Status::BadAlloc);
+        }
+        // Create a view; no data copies occur.
+        let view = SliceSequenceView { data, mapper };
+        let seq = _SzSequence {
+            handle: &view as *const _ as *const c_void,
+            count: data.len(),
+            get_start: Some(slice_get_start::<T>),
+            get_length: Some(slice_get_length::<T>),
+        };
+        let status = unsafe { sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr()) };
+        if status == Status::Success {
+            Ok(data.len())
+        } else {
+            Err(status)
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Intersection functions
+    // ----------------------------------------------------------------------
+
+    /// Intersects two sequences (inner join) using their default byte‑slice views.
+    ///
+    /// Both sequences must have an output buffer provided (for first and second positions)
+    /// whose length is at least the minimum of the two input lengths.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use stringzilla::sz;
+    ///
+    /// let set1 = ["banana", "apple", "cherry"];
+    /// let set2 = ["cherry", "orange", "pineapple", "banana"];
+    /// let mut out1 = [0; 3]; // at least min(3, 4) == 3 elements.
+    /// let mut out2 = [0; 3];
+    /// let n = sz::intersect_into(&set1, &set2, 0, &mut out1, &mut out2).expect("intersect failed");
+    /// assert!(n == 2); // "banana" and "cherry" are common.
+    /// ```
+    pub fn intersect_into<T: AsRef<[u8]>>(
+        data1: &[T],
+        data2: &[T],
+        seed: u64,
+        out1: &mut [SortedIdx],
+        out2: &mut [SortedIdx],
+    ) -> Result<usize, Status> {
+        intersect_by_into(data1, default_mapper::<T>, data2, default_mapper::<T>, seed, out1, out2)
+    }
+
+    /// Like `intersect_into` but accepts custom mapping functions.
+    pub fn intersect_by_into<T, U>(
+        data1: &[T],
+        mapper1: fn(SortedIdx) -> &[u8],
+        data2: &[U],
+        mapper2: fn(SortedIdx) -> &[u8],
+        seed: u64,
+        out1: &mut [SortedIdx],
+        out2: &mut [SortedIdx],
+    ) -> Result<usize, Status> {
+        let min_count = data1.len().min(data2.len());
+        if out1.len() < min_count || out2.len() < min_count {
+            return Err(Status::BadAlloc);
+        }
+        let view1 = SliceSequenceView {
+            data: data1,
+            mapper: mapper1,
+        };
+        let view2 = SliceSequenceView {
+            data: data2,
+            mapper: mapper2,
+        };
+        let seq1 = _SzSequence {
+            handle: &view1 as *const _ as *const c_void,
+            count: data1.len(),
+            get_start: Some(slice_get_start::<T>),
+            get_length: Some(slice_get_length::<T>),
+        };
+        let seq2 = _SzSequence {
+            handle: &view2 as *const _ as *const c_void,
+            count: data2.len(),
+            get_start: Some(slice_get_start::<U>),
+            get_length: Some(slice_get_length::<U>),
+        };
+        let mut inter_size: usize = 0;
+        let status = unsafe {
+            sz_sequence_intersect(
+                &seq1,
+                &seq2,
+                core::ptr::null(),
+                seed,
+                &mut inter_size as *mut usize,
+                out1.as_mut_ptr(),
+                out2.as_mut_ptr(),
+            )
+        };
+        if status == Status::Success {
+            Ok(inter_size)
+        } else {
+            Err(status)
+        }
+        // The temporary views are dropped after the call.
+    }
 }
 
 pub trait Matcher<'a> {
@@ -1665,8 +1843,11 @@ where
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::collections::HashSet;
 
-    use crate::sz; // For global functions
+    use crate::sz;
+    use crate::sz::SortedIdx;
+    // For global functions
     use crate::StringZilla; // For member functions
 
     #[test]
@@ -1918,5 +2099,137 @@ mod tests {
             let matches: Vec<_> = RangeRMatches::new(haystack, matcher, false).collect();
             assert_eq!(matches, vec![&b"aa"[..], &b"aa"[..]]);
         }
+    }
+
+    #[test]
+    fn test_sort_into_default() {
+        // Test with a slice of string literals.
+        let fruits = ["banana", "apple", "cherry"];
+        let mut order = [0; 3]; // output buffer must be at least fruits.len()
+        let n = sz::sort_into(&fruits, &mut order).expect("sort_into failed");
+        assert_eq!(n, fruits.len());
+
+        // Reconstruct sorted order using the returned indices.
+        let sorted_from_api: Vec<_> = order[..n].iter().map(|&i| fruits[i]).collect();
+
+        // Compute expected order using the standard sort.
+        let mut expected = fruits.to_vec();
+        expected.sort();
+
+        assert_eq!(sorted_from_api, expected);
+    }
+
+    #[test]
+    fn test_sort_by_into_custom() {
+        // Define a custom type.
+        #[derive(Debug)]
+        struct Person {
+            name: &'static str,
+            age: u32,
+        }
+
+        let people = [
+            Person {
+                name: "Charlie",
+                age: 30,
+            },
+            Person { name: "Alice", age: 25 },
+            Person { name: "Bob", age: 40 },
+        ];
+        let mut order = [0; 3];
+        // Use sort_by_into with a custom mapper that extracts the name as a byte slice.
+        let n = sz::sort_by_into(&people, |p: &Person| p.name.as_bytes(), &mut order).expect("sort_by_into failed");
+        assert_eq!(n, people.len());
+
+        let sorted_from_api: Vec<_> = order[..n].iter().map(|&i| people[i].name).collect();
+
+        // Compute expected order using standard sorting on the names.
+        let mut expected: Vec<_> = people.iter().map(|p| p.name).collect();
+        expected.sort();
+
+        assert_eq!(sorted_from_api, expected);
+    }
+
+    #[test]
+    fn test_intersect_into_default() {
+        // Two slices of string literals.
+        let set1 = ["banana", "apple", "cherry"];
+        let set2 = ["cherry", "orange", "pineapple", "banana"];
+        // Output buffers: size must be at least min(set1.len(), set2.len()).
+        let mut out1 = [0; 3];
+        let mut out2 = [0; 3];
+
+        let n = sz::intersect_into(&set1, &set2, 0, &mut out1, &mut out2).expect("intersect_into failed");
+        assert!(n <= set1.len().min(set2.len()));
+
+        // For simplicity, we will compare the intersection from the first set.
+        // Our API returns indices (for set1 in out1).
+        let common_from_api: HashSet<_> = out1[..n].iter().map(|&i| set1[i]).collect();
+
+        // Compute the expected intersection using a HashSet.
+        let expected: HashSet<_> = set1
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>()
+            .intersection(&set2.iter().cloned().collect())
+            .cloned()
+            .collect();
+
+        assert_eq!(common_from_api, expected);
+    }
+
+    #[test]
+    fn test_intersect_by_into_custom() {
+        // Define a custom type.
+        #[derive(Debug)]
+        struct Person {
+            name: &'static str,
+            age: u32,
+        }
+
+        let group1 = [
+            Person { name: "Alice", age: 25 },
+            Person { name: "Bob", age: 30 },
+            Person {
+                name: "Charlie",
+                age: 35,
+            },
+        ];
+        let group2 = [
+            Person { name: "David", age: 40 },
+            Person {
+                name: "Charlie",
+                age: 50,
+            },
+            Person { name: "Alice", age: 60 },
+        ];
+        let mut out1 = [0; 3];
+        let mut out2 = [0; 3];
+
+        let n = sz::intersect_by_into(
+            &group1,
+            |i: SortedIdx| group1[i].name.as_bytes(),
+            &group2,
+            |j: SortedIdx| group2[j].name.as_bytes(),
+            0,
+            &mut out1,
+            &mut out2,
+        )
+        .expect("intersect_by_into failed");
+        assert!(n <= group1.len().min(group2.len()));
+
+        // Use the indices for group1 to get common names.
+        let common_from_api: HashSet<_> = out1[..n].iter().map(|&i| group1[i].name).collect();
+
+        // Compute expected common names using a HashSet.
+        let expected: HashSet<_> = group1
+            .iter()
+            .map(|p| p.name)
+            .collect::<HashSet<_>>()
+            .intersection(&group2.iter().map(|p| p.name).collect())
+            .cloned()
+            .collect();
+
+        assert_eq!(common_from_api, expected);
     }
 }
