@@ -157,7 +157,7 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
  *      int main() {
  *          char first_buffer[5], second_buffer[5];
  *          sz_fill_random(first_buffer, 5, 0);
- *          sz_fill_random(second_buffer, 5, 0); //? Same nonce must produce the same output
+ *          sz_fill_random(second_buffer, 5, 0); // ? Same nonce must produce the same output
  *          return sz_bytesum(first_buffer, 5) == sz_bytesum(second_buffer, 5) ? 0 : 1;
  *      }
  *  @endcode
@@ -528,13 +528,13 @@ SZ_INTERNAL sz_u64_t _sz_hash_minimal_finalize_serial(_sz_hash_minimal_t const *
     sz_u128_vec_t key_with_length = state->key;
     key_with_length.u64s[0] += length;
     // Combine the "sum" and the "AES" blocks
-    sz_u128_vec_t mixed_registers = _sz_emulate_aesenc_si128_serial(state->sum, state->aes);
+    sz_u128_vec_t mixed = _sz_emulate_aesenc_si128_serial(state->sum, state->aes);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    sz_u128_vec_t mixed_within_register = _sz_emulate_aesenc_si128_serial(
-        _sz_emulate_aesenc_si128_serial(mixed_registers, key_with_length), mixed_registers);
+    sz_u128_vec_t mixed_in_register =
+        _sz_emulate_aesenc_si128_serial(_sz_emulate_aesenc_si128_serial(mixed, key_with_length), mixed);
     // Extract the low 64 bits
-    return mixed_within_register.u64s[0];
+    return mixed_in_register.u64s[0];
 }
 
 SZ_INTERNAL void _sz_hash_shift_in_register_serial(sz_u128_vec_t *vec, int shift_bytes) {
@@ -607,23 +607,23 @@ SZ_INTERNAL sz_u64_t _sz_hash_state_finalize_serial(sz_hash_state_t const *state
     sz_u128_vec_t *sum_vecs = (sz_u128_vec_t *)&state->sum.u64s[0];
 
     // Combine the "sum" and the "AES" blocks
-    sz_u128_vec_t mixed_registers0 = _sz_emulate_aesenc_si128_serial(sum_vecs[0], aes_vecs[0]);
-    sz_u128_vec_t mixed_registers1 = _sz_emulate_aesenc_si128_serial(sum_vecs[1], aes_vecs[1]);
-    sz_u128_vec_t mixed_registers2 = _sz_emulate_aesenc_si128_serial(sum_vecs[2], aes_vecs[2]);
-    sz_u128_vec_t mixed_registers3 = _sz_emulate_aesenc_si128_serial(sum_vecs[3], aes_vecs[3]);
+    sz_u128_vec_t mixed0 = _sz_emulate_aesenc_si128_serial(sum_vecs[0], aes_vecs[0]);
+    sz_u128_vec_t mixed1 = _sz_emulate_aesenc_si128_serial(sum_vecs[1], aes_vecs[1]);
+    sz_u128_vec_t mixed2 = _sz_emulate_aesenc_si128_serial(sum_vecs[2], aes_vecs[2]);
+    sz_u128_vec_t mixed3 = _sz_emulate_aesenc_si128_serial(sum_vecs[3], aes_vecs[3]);
 
     // Combine the mixed registers
-    sz_u128_vec_t mixed_registers01 = _sz_emulate_aesenc_si128_serial(mixed_registers0, mixed_registers1);
-    sz_u128_vec_t mixed_registers23 = _sz_emulate_aesenc_si128_serial(mixed_registers2, mixed_registers3);
-    sz_u128_vec_t mixed_registers = _sz_emulate_aesenc_si128_serial(mixed_registers01, mixed_registers23);
+    sz_u128_vec_t mixed01 = _sz_emulate_aesenc_si128_serial(mixed0, mixed1);
+    sz_u128_vec_t mixed23 = _sz_emulate_aesenc_si128_serial(mixed2, mixed3);
+    sz_u128_vec_t mixed = _sz_emulate_aesenc_si128_serial(mixed01, mixed23);
 
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    sz_u128_vec_t mixed_within_register = _sz_emulate_aesenc_si128_serial(
-        _sz_emulate_aesenc_si128_serial(mixed_registers, key_with_length), mixed_registers);
+    sz_u128_vec_t mixed_in_register =
+        _sz_emulate_aesenc_si128_serial(_sz_emulate_aesenc_si128_serial(mixed, key_with_length), mixed);
 
     // Extract the low 64 bits
-    return mixed_within_register.u64s[0];
+    return mixed_in_register.u64s[0];
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
@@ -911,35 +911,43 @@ SZ_INTERNAL sz_u64_t _sz_hash_minimal_finalize_haswell(_sz_hash_minimal_t const 
     // Mix the length into the key
     __m128i key_with_length = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, length));
     // Combine the "sum" and the "AES" blocks
-    __m128i mixed_registers = _mm_aesenc_si128(state->sum.xmm, state->aes.xmm);
+    __m128i mixed = _mm_aesenc_si128(state->sum.xmm, state->aes.xmm);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    __m128i mixed_within_register =
-        _mm_aesenc_si128(_mm_aesenc_si128(mixed_registers, key_with_length), mixed_registers);
+    __m128i mixed_in_register = _mm_aesenc_si128(_mm_aesenc_si128(mixed, key_with_length), mixed);
     // Extract the low 64 bits
-    return _mm_cvtsi128_si64(mixed_within_register);
+    return _mm_cvtsi128_si64(mixed_in_register);
 }
 
 SZ_INTERNAL void _sz_hash_minimal_update_haswell(_sz_hash_minimal_t *state, __m128i block) {
+    // ? In this kernel, assuming it's only used internally on properly aligned `state`,
+    // ? we don't need `_mm_storeu_si128` stores to update the state.
     __m128i const shuffle_mask = _mm_load_si128((__m128i const *)_sz_hash_u8x16x4_shuffle());
-    state->aes.xmm = _mm_aesenc_si128(state->aes.xmm, block);
-    state->sum.xmm = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmm, shuffle_mask), block);
+    state->aes.xmm = _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmm), block);
+    state->sum.xmm = _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmm), shuffle_mask), block);
 }
 
 SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m128i seed_vec = _mm_set1_epi64x(seed);
-    state->key.xmm = seed_vec;
+
+    // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
+    // ! we must use `_mm_storeu_si128` stores to update the state.
+    _mm_storeu_si128(&state->key.xmm, seed_vec);
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = _sz_hash_pi_constants();
     for (int i = 0; i < 4; ++i)
-        state->aes.xmms[i] = _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2)));
+        _mm_storeu_si128(&state->aes.xmms[i], _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2))));
     for (int i = 0; i < 4; ++i)
-        state->sum.xmms[i] = _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2 + 8)));
+        _mm_storeu_si128(&state->sum.xmms[i],
+                         _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2 + 8))));
 
     // The inputs are zeroed out at the beginning
-    state->ins.xmms[0] = state->ins.xmms[1] = state->ins.xmms[2] = state->ins.xmms[3] = _mm_setzero_si128();
+    _mm_storeu_si128(&state->ins.xmms[0], _mm_setzero_si128());
+    _mm_storeu_si128(&state->ins.xmms[1], _mm_setzero_si128());
+    _mm_storeu_si128(&state->ins.xmms[2], _mm_setzero_si128());
+    _mm_storeu_si128(&state->ins.xmms[3], _mm_setzero_si128());
     state->ins_length = 0;
 }
 
@@ -957,22 +965,21 @@ SZ_INTERNAL void _sz_hash_state_update_haswell(sz_hash_state_t *state) {
 
 SZ_INTERNAL sz_u64_t _sz_hash_state_finalize_haswell(sz_hash_state_t const *state) {
     // Mix the length into the key
-    __m128i key_with_length = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, state->ins_length));
+    __m128i key_with_length = _mm_add_epi64(_mm_lddqu_si128(&state->key.xmm), _mm_set_epi64x(0, state->ins_length));
     // Combine the "sum" and the "AES" blocks
-    __m128i mixed_registers0 = _mm_aesenc_si128(state->sum.xmms[0], state->aes.xmms[0]);
-    __m128i mixed_registers1 = _mm_aesenc_si128(state->sum.xmms[1], state->aes.xmms[1]);
-    __m128i mixed_registers2 = _mm_aesenc_si128(state->sum.xmms[2], state->aes.xmms[2]);
-    __m128i mixed_registers3 = _mm_aesenc_si128(state->sum.xmms[3], state->aes.xmms[3]);
+    __m128i mixed0 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[0]), _mm_lddqu_si128(&state->aes.xmms[0]));
+    __m128i mixed1 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[1]), _mm_lddqu_si128(&state->aes.xmms[1]));
+    __m128i mixed2 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[2]), _mm_lddqu_si128(&state->aes.xmms[2]));
+    __m128i mixed3 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[3]), _mm_lddqu_si128(&state->aes.xmms[3]));
     // Combine the mixed registers
-    __m128i mixed_registers01 = _mm_aesenc_si128(mixed_registers0, mixed_registers1);
-    __m128i mixed_registers23 = _mm_aesenc_si128(mixed_registers2, mixed_registers3);
-    __m128i mixed_registers = _mm_aesenc_si128(mixed_registers01, mixed_registers23);
+    __m128i mixed01 = _mm_aesenc_si128(mixed0, mixed1);
+    __m128i mixed23 = _mm_aesenc_si128(mixed2, mixed3);
+    __m128i mixed = _mm_aesenc_si128(mixed01, mixed23);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    __m128i mixed_within_register =
-        _mm_aesenc_si128(_mm_aesenc_si128(mixed_registers, key_with_length), mixed_registers);
+    __m128i mixed_in_register = _mm_aesenc_si128(_mm_aesenc_si128(mixed, key_with_length), mixed);
     // Extract the low 64 bits
-    return _mm_cvtsi128_si64(mixed_within_register);
+    return _mm_cvtsi128_si64(mixed_in_register);
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
@@ -1101,33 +1108,33 @@ SZ_PUBLIC sz_u64_t sz_hash_state_fold_haswell(sz_hash_state_t const *state) {
     if (length >= 64) return _sz_hash_state_finalize_haswell(state);
 
     // Switch back to a smaller "minimal" state for small inputs
-    _sz_hash_minimal_t minimal_state;
-    minimal_state.key.xmm = state->key.xmm;
-    minimal_state.aes.xmm = state->aes.xmms[0];
-    minimal_state.sum.xmm = state->sum.xmms[0];
+    _SZ_ALIGN64 _sz_hash_minimal_t minimal_state;
+    minimal_state.key.xmm = _mm_lddqu_si128(&state->key.xmm);
+    minimal_state.aes.xmm = _mm_lddqu_si128(&state->aes.xmms[0]);
+    minimal_state.sum.xmm = _mm_lddqu_si128(&state->sum.xmms[0]);
 
     // The logic is different depending on the length of the input
-    __m128i const *ins_vecs = (__m128i const *)&state->ins.xmms[0];
+    __m128i const *ins_xmms = (__m128i const *)&state->ins.xmms[0];
     if (length <= 16) {
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[0]);
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[0]));
         return _sz_hash_minimal_finalize_haswell(&minimal_state, length);
     }
     else if (length <= 32) {
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[0]);
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[1]);
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[0]));
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[1]));
         return _sz_hash_minimal_finalize_haswell(&minimal_state, length);
     }
     else if (length <= 48) {
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[0]);
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[1]);
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[2]);
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[0]));
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[1]));
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[2]));
         return _sz_hash_minimal_finalize_haswell(&minimal_state, length);
     }
     else {
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[0]);
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[1]);
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[2]);
-        _sz_hash_minimal_update_haswell(&minimal_state, ins_vecs[3]);
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[0]));
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[1]));
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[2]));
+        _sz_hash_minimal_update_haswell(&minimal_state, _mm_lddqu_si128(&ins_xmms[3]));
         return _sz_hash_minimal_finalize_haswell(&minimal_state, length);
     }
 }
@@ -1345,17 +1352,19 @@ SZ_PUBLIC sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
 SZ_PUBLIC void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m512i seed_vec = _mm512_set1_epi64(seed);
-    state->key.xmm = _mm512_castsi512_si128(seed_vec);
+    // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
+    // ! we must use `_mm_storeu_si128` stores to update the state.
+    _mm_storeu_si128(&state->key.xmm, _mm512_castsi512_si128(seed_vec));
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = _sz_hash_pi_constants();
     __m512i const pi0 = _mm512_load_epi64((__m512i const *)(pi));
     __m512i const pi1 = _mm512_load_epi64((__m512i const *)(pi + 8));
-    state->aes.zmm = _mm512_xor_si512(seed_vec, pi0);
-    state->sum.zmm = _mm512_xor_si512(seed_vec, pi1);
+    _mm512_storeu_si512(&state->aes.zmm, _mm512_xor_si512(seed_vec, pi0));
+    _mm512_storeu_si512(&state->sum.zmm, _mm512_xor_si512(seed_vec, pi1));
 
     // The inputs are zeroed out at the beginning
-    state->ins.zmm = _mm512_setzero_si512();
+    _mm512_storeu_si512(&state->ins.zmm, _mm512_setzero_si512());
     state->ins_length = 0;
 }
 
@@ -1456,12 +1465,12 @@ SZ_PUBLIC void sz_hash_state_stream_skylake(sz_hash_state_t *state, sz_cptr_t te
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_skylake(sz_hash_state_t const *state) {
-    //? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
+    // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
     return sz_hash_state_fold_haswell(state);
 }
 
 SZ_PUBLIC void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_fill_random_serial(text, length, nonce);
+    sz_fill_random_haswell(text, length, nonce);
 }
 
 #pragma clang attribute pop
@@ -1612,8 +1621,11 @@ SZ_PUBLIC sz_u64_t sz_bytesum_ice(sz_cptr_t text, sz_size_t length) {
 
 SZ_INTERNAL void _sz_hash_state_update_ice(sz_hash_state_t *state) {
     __m512i const shuffle_mask = _mm512_load_si512((__m512i const *)_sz_hash_u8x16x4_shuffle());
-    state->aes.zmm = _mm512_aesenc_epi128(state->aes.zmm, state->ins.zmm);
-    state->sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state->sum.zmm, shuffle_mask), state->ins.zmm);
+    // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
+    // ! we must use `_mm512_storeu_si512` stores to update the state.
+    _mm512_storeu_si512(&state->aes.zmm, _mm512_aesenc_epi128(state->aes.zmm, state->ins.zmm));
+    _mm512_storeu_si512(&state->sum.zmm,
+                        _mm512_add_epi64(_mm512_shuffle_epi8(state->sum.zmm, shuffle_mask), state->ins.zmm));
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
@@ -1684,8 +1696,8 @@ SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed)
             _sz_hash_state_update_ice(&state);
         }
         if (state.ins_length < length) {
-            state.ins.zmm = _mm512_maskz_loadu_epi8( //
-                _sz_u64_mask_until(length - state.ins_length), start + state.ins_length);
+            state.ins.zmm =
+                _mm512_maskz_loadu_epi8(_sz_u64_mask_until(length - state.ins_length), start + state.ins_length);
             _sz_hash_state_update_ice(&state);
             state.ins_length = length;
         }
@@ -1714,13 +1726,13 @@ SZ_PUBLIC void sz_hash_state_stream_ice(sz_hash_state_t *state, sz_cptr_t text, 
         if (will_fill_block) {
             _sz_hash_state_update_ice(state);
             // Reset to zeros now, so we don't have to overwrite an immutable buffer in the folding state
-            state->ins.zmm = _mm512_setzero_si512();
+            _mm512_storeu_si512(&state->ins.zmm, _mm512_setzero_si512());
         }
     }
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_ice(sz_hash_state_t const *state) {
-    //? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
+    // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
     return sz_hash_state_fold_haswell(state);
 }
 
@@ -1793,7 +1805,7 @@ SZ_INTERNAL void _sz_hash_minimal_x4_init_ice(_sz_hash_minimal_x4_t *state, sz_u
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m512i seed_vec = _mm512_set1_epi64(seed);
-    state->key.zmm = seed_vec;
+    state->key.zmm = seed_vec; //! This will definitely be aligned
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = _sz_hash_pi_constants();
@@ -1819,15 +1831,14 @@ SZ_INTERNAL __m256i _sz_hash_minimal_x4_finalize_ice(_sz_hash_minimal_x4_t const
     // Mix the length into the key
     __m512i key_with_length = _mm512_add_epi64(state->key.zmm, padded_lengths);
     // Combine the "sum" and the "AES" blocks
-    __m512i mixed_registers = _mm512_aesenc_epi128(state->sum.zmm, state->aes.zmm);
+    __m512i mixed = _mm512_aesenc_epi128(state->sum.zmm, state->aes.zmm);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    __m512i mixed_within_register =
-        _mm512_aesenc_epi128(_mm512_aesenc_epi128(mixed_registers, key_with_length), mixed_registers);
+    __m512i mixed_in_register = _mm512_aesenc_epi128(_mm512_aesenc_epi128(mixed, key_with_length), mixed);
     // Extract the low 64 bits from each 128-bit lane - weirdly using the `permutexvar` instruction
     // is cheaper than compressing instructions like `_mm512_maskz_compress_epi64`.
     return _mm512_castsi512_si256(
-        _mm512_permutexvar_epi64(_mm512_set_epi64(0, 0, 0, 0, 6, 4, 2, 0), mixed_within_register));
+        _mm512_permutexvar_epi64(_mm512_set_epi64(0, 0, 0, 0, 6, 4, 2, 0), mixed_in_register));
 }
 
 SZ_INTERNAL void _sz_hash_minimal_x4_update_ice(_sz_hash_minimal_x4_t *state, __m512i blocks) {
@@ -1906,13 +1917,13 @@ SZ_INTERNAL sz_u64_t _sz_hash_minimal_finalize_neon(_sz_hash_minimal_t const *st
     // Mix the length into the key
     uint64x2_t key_with_length = vaddq_u64(state->key.u64x2, vsetq_lane_u64(length, vdupq_n_u64(0), 0));
     // Combine the "sum" and the "AES" blocks
-    uint8x16_t mixed_registers = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16, state->aes.u8x16);
+    uint8x16_t mixed = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16, state->aes.u8x16);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    uint8x16_t mixed_within_register = _sz_emulate_aesenc_u8x16_neon(
-        _sz_emulate_aesenc_u8x16_neon(mixed_registers, vreinterpretq_u8_u64(key_with_length)), mixed_registers);
+    uint8x16_t mixed_in_register = _sz_emulate_aesenc_u8x16_neon(
+        _sz_emulate_aesenc_u8x16_neon(mixed, vreinterpretq_u8_u64(key_with_length)), mixed);
     // Extract the low 64 bits
-    return vgetq_lane_u64(vreinterpretq_u64_u8(mixed_within_register), 0);
+    return vgetq_lane_u64(vreinterpretq_u64_u8(mixed_in_register), 0);
 }
 
 SZ_INTERNAL void _sz_hash_minimal_update_neon(_sz_hash_minimal_t *state, uint8x16_t block) {
@@ -1957,20 +1968,20 @@ SZ_INTERNAL sz_u64_t _sz_hash_state_finalize_neon(sz_hash_state_t const *state) 
     // Mix the length into the key
     uint64x2_t key_with_length = vaddq_u64(state->key.u64x2, vsetq_lane_u64(state->ins_length, vdupq_n_u64(0), 0));
     // Combine the "sum" and the "AES" blocks
-    uint8x16_t mixed_registers0 = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16s[0], state->aes.u8x16s[0]);
-    uint8x16_t mixed_registers1 = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16s[1], state->aes.u8x16s[1]);
-    uint8x16_t mixed_registers2 = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16s[2], state->aes.u8x16s[2]);
-    uint8x16_t mixed_registers3 = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16s[3], state->aes.u8x16s[3]);
+    uint8x16_t mixed0 = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16s[0], state->aes.u8x16s[0]);
+    uint8x16_t mixed1 = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16s[1], state->aes.u8x16s[1]);
+    uint8x16_t mixed2 = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16s[2], state->aes.u8x16s[2]);
+    uint8x16_t mixed3 = _sz_emulate_aesenc_u8x16_neon(state->sum.u8x16s[3], state->aes.u8x16s[3]);
     // Combine the mixed registers
-    uint8x16_t mixed_registers01 = _sz_emulate_aesenc_u8x16_neon(mixed_registers0, mixed_registers1);
-    uint8x16_t mixed_registers23 = _sz_emulate_aesenc_u8x16_neon(mixed_registers2, mixed_registers3);
-    uint8x16_t mixed_registers = _sz_emulate_aesenc_u8x16_neon(mixed_registers01, mixed_registers23);
+    uint8x16_t mixed01 = _sz_emulate_aesenc_u8x16_neon(mixed0, mixed1);
+    uint8x16_t mixed23 = _sz_emulate_aesenc_u8x16_neon(mixed2, mixed3);
+    uint8x16_t mixed = _sz_emulate_aesenc_u8x16_neon(mixed01, mixed23);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    uint8x16_t mixed_within_register = _sz_emulate_aesenc_u8x16_neon(
-        _sz_emulate_aesenc_u8x16_neon(mixed_registers, vreinterpretq_u8_u64(key_with_length)), mixed_registers);
+    uint8x16_t mixed_in_register = _sz_emulate_aesenc_u8x16_neon(
+        _sz_emulate_aesenc_u8x16_neon(mixed, vreinterpretq_u8_u64(key_with_length)), mixed);
     // Extract the low 64 bits
-    return vgetq_lane_u64(vreinterpretq_u64_u8(mixed_within_register), 0);
+    return vgetq_lane_u64(vreinterpretq_u64_u8(mixed_in_register), 0);
 }
 
 SZ_PUBLIC void sz_hash_state_stream_neon(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
@@ -2339,14 +2350,14 @@ SZ_PUBLIC sz_u64_t _sz_hash_sve2_upto16(sz_cptr_t text, sz_size_t length, sz_u64
     // Now mix, folding the length into the key
     svuint64_t key_with_length = svadd_u64_x(svptrue_b64(), svreinterpret_u64_u8(state_key), svdupq_n_u64(length, 0));
     // Combine the "sum" and the "AES" blocks
-    svuint8_t mixed_registers = _sz_emulate_aesenc_u8x16_sve2(state_sum, state_aes);
+    svuint8_t mixed = _sz_emulate_aesenc_u8x16_sve2(state_sum, state_aes);
     // Make sure the "key" mixes enough with the state,
     // as with less than 2 rounds - SMHasher fails
-    svuint8_t mixed_within_register = _sz_emulate_aesenc_u8x16_sve2(
-        _sz_emulate_aesenc_u8x16_sve2(mixed_registers, svreinterpret_u8_u64(key_with_length)), mixed_registers);
+    svuint8_t mixed_in_register = _sz_emulate_aesenc_u8x16_sve2(
+        _sz_emulate_aesenc_u8x16_sve2(mixed, svreinterpret_u8_u64(key_with_length)), mixed);
     // Extract the low 64 bits
-    svuint64_t mixed_within_register_u64 = svreinterpret_u64_u8(mixed_within_register);
-    return svlasta_u64(svpfalse_b(), mixed_within_register_u64); // Extract the first element
+    svuint64_t mixed_in_register_u64 = svreinterpret_u64_u8(mixed_in_register);
+    return svlasta_u64(svpfalse_b(), mixed_in_register_u64); // Extract the first element
 }
 
 SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed) { sz_hash_state_init_neon(state, seed); }
@@ -2413,15 +2424,15 @@ SZ_PUBLIC void _sz_hash_sve2_upto16x16(char texts[16][16], sz_size_t length[16],
             svadd_u64_x(svptrue_b64(), svreinterpret_u64_u8(state_key), svdupq_n_u64(length, 0));
 
         // Combine the "sum" and the "AES" blocks
-        svuint8_t mixed_registers = _sz_emulate_aesenc_u8x16_sve2(blocks_sum, blocks_aes);
+        svuint8_t mixed = _sz_emulate_aesenc_u8x16_sve2(blocks_sum, blocks_aes);
 
         // Make sure the "key" mixes enough with the state,
         // as with less than 2 rounds - SMHasher fails
-        svuint8_t mixed_within_register = _sz_emulate_aesenc_u8x16_sve2(
-            _sz_emulate_aesenc_u8x16_sve2(mixed_registers, svreinterpret_u8_u64(key_with_lengths)), mixed_registers);
+        svuint8_t mixed_in_register = _sz_emulate_aesenc_u8x16_sve2(
+            _sz_emulate_aesenc_u8x16_sve2(mixed, svreinterpret_u8_u64(key_with_lengths)), mixed);
 
         // Extract the low 64 bits from each lane
-        svuint64_t mixed_within_register_u64 = svreinterpret_u64_u8(mixed_within_register);
+        svuint64_t mixed_in_register_u64 = svreinterpret_u64_u8(mixed_in_register);
     }
 }
 #endif

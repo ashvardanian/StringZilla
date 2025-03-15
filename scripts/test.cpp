@@ -203,15 +203,28 @@ static void test_hashing_on_platform(                                   //
         assert(sz_hash_state_equal(&state_simd, &state_simd) == sz_true_k); // Self-equality
         assert(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
 
+        // Let's also create an intentionally misaligned version of the state,
+        // assuming some of the SIMD instructions may require alignment.
+        _SZ_ALIGN64 char state_misaligned_buffer[sizeof(sz_hash_state_t) + 1];
+        sz_hash_state_t &state_misaligned = *reinterpret_cast<sz_hash_state_t *>(state_misaligned_buffer + 1);
+        init_simd(&state_misaligned, seed);
+        assert(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k); // Same across platforms
+
         // Try breaking those strings into arbitrary chunks, expecting the same output in the streaming mode.
         // The length of each chunk and the number of chunks will be determined with a coin toss.
         iterate_in_random_slices(text, [&](std::string slice) {
             stream_base(&state_base, slice.data(), slice.size());
             stream_simd(&state_simd, slice.data(), slice.size());
             assert(sz_hash_state_equal(&state_base, &state_simd) == sz_true_k); // Same across platforms
+
+            stream_simd(&state_misaligned, slice.data(), slice.size());
+            assert(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k); // Same across platforms
+
             result_base = fold_base(&state_base);
             result_simd = fold_simd(&state_simd);
             assert(result_base == result_simd);
+            sz_u64_t result_misaligned = fold_simd(&state_misaligned);
+            assert(result_base == result_misaligned);
         });
     };
 
