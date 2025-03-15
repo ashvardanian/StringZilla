@@ -698,7 +698,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
     else {
         // Use a larger state to handle the main loop and add different offsets
         // to different lanes of the register
-        sz_hash_state_t state;
+        _SZ_ALIGN64 sz_hash_state_t state;
         sz_hash_state_init_serial(&state, seed);
 
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
@@ -1039,7 +1039,7 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
     else {
         // Use a larger state to handle the main loop and add different offsets
         // to different lanes of the register
-        sz_hash_state_t state;
+        _SZ_ALIGN64 sz_hash_state_t state;
         sz_hash_state_init_haswell(&state, seed);
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
             state.ins.xmms[0] = _mm_lddqu_si128((__m128i const *)(start + state.ins_length + 0));
@@ -1416,7 +1416,7 @@ SZ_PUBLIC sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length, sz_u64_t s
     else {
         // Use a larger state to handle the main loop and add different offsets
         // to different lanes of the register
-        sz_hash_state_t state;
+        _SZ_ALIGN64 sz_hash_state_t state;
         sz_hash_state_init_skylake(&state, seed);
 
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
@@ -1676,7 +1676,7 @@ SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed)
     else {
         // Use a larger state to handle the main loop and add different offsets
         // to different lanes of the register
-        sz_hash_state_t state;
+        _SZ_ALIGN64 sz_hash_state_t state;
         sz_hash_state_init_skylake(&state, seed);
 
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
@@ -2107,7 +2107,7 @@ SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t start, sz_size_t length, sz_u64_t seed
     else {
         // Use a larger state to handle the main loop and add different offsets
         // to different lanes of the register
-        sz_hash_state_t state;
+        _SZ_ALIGN64 sz_hash_state_t state;
         sz_hash_state_init_neon(&state, seed);
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
             state.ins.u8x16s[0] = vld1q_u8((sz_u8_t const *)(start + state.ins_length + 0));

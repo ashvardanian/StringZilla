@@ -33,6 +33,7 @@ pub mod sz {
 
     #[repr(C)]
     #[derive(Debug, Clone, Copy)]
+    #[repr(align(64))] // For optimal performance we align to 64 bytes.
     pub struct HashState {
         aes: [u64; 8],
         sum: [u64; 8],
@@ -2027,7 +2028,9 @@ mod tests {
 
     #[test]
     fn hash() {
-        assert_ne!(sz::hash("Hello"), sz::hash("World"));
+        let hash_hello = sz::hash("Hello");
+        let hash_world = sz::hash("World");
+        assert_ne!(hash_hello, hash_world);
 
         // Hashing should work the same for any seed
         for seed in [0u64, 42, 123456789].iter() {
