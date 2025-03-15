@@ -31,6 +31,16 @@ pub mod sz {
         bits: [u64; 4],
     }
 
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct HashState {
+        aes: [u64; 8],
+        sum: [u64; 8],
+        ins: [u64; 8], // Ignored in comparisons
+        key: [u64; 2],
+        ins_length: usize, // Ignored in comparisons
+    }
+
     pub type SortedIdx = usize;
 
     /// A trait for types that support indexed lookup.
@@ -131,15 +141,19 @@ pub mod sz {
 
     // Import the functions from the StringZilla C library.
     extern "C" {
-        fn sz_copy(target: *const c_void, source: *const c_void, length: usize);
-        fn sz_fill(target: *const c_void, length: usize, value: u8);
-        fn sz_move(target: *const c_void, source: *const c_void, length: usize);
+
         fn sz_dynamic_dispatch() -> i32;
         fn sz_version_major() -> i32;
         fn sz_version_minor() -> i32;
         fn sz_version_patch() -> i32;
         fn sz_capabilities() -> u32;
         fn sz_capabilities_to_string(caps: u32) -> *const c_void;
+
+        fn sz_copy(target: *const c_void, source: *const c_void, length: usize);
+        fn sz_fill(target: *const c_void, length: usize, value: u8);
+        fn sz_move(target: *const c_void, source: *const c_void, length: usize);
+        fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
+        fn sz_lookup(target: *const c_void, length: usize, source: *const c_void, lut: *const u8) -> *const c_void;
 
         fn sz_find(
             haystack: *const c_void,
@@ -156,17 +170,20 @@ pub mod sz {
         ) -> *const c_void;
 
         fn sz_find_byteset(haystack: *const c_void, haystack_length: usize, byteset: *const c_void) -> *const c_void;
-
         fn sz_rfind_byteset(haystack: *const c_void, haystack_length: usize, byteset: *const c_void) -> *const c_void;
 
         fn sz_bytesum(text: *const c_void, length: usize) -> u64;
-
         fn sz_hash(text: *const c_void, length: usize, seed: u64) -> u64;
+        fn sz_hash_state_init(state: *const c_void, seed: u64);
+        fn sz_hash_state_stream(state: *const c_void, text: *const c_void, length: usize);
+        fn sz_hash_state_fold(state: *const c_void) -> u64;
 
-        fn sz_fill_random(text: *mut c_void, length: usize, seed: u64);
-
-        pub fn sz_sequence_argsort(sequence: *const _SzSequence, alloc: *const c_void, order: *mut SortedIdx)
-            -> Status;
+        pub fn sz_sequence_argsort(
+            //
+            sequence: *const _SzSequence,
+            alloc: *const c_void,
+            order: *mut SortedIdx,
+        ) -> Status;
 
         pub fn sz_sequence_intersect(
             first_sequence: *const _SzSequence,
@@ -227,18 +244,51 @@ pub mod sz {
             result: *mut isize,
         ) -> Status;
 
-        fn sz_hash_state_init(state: *const c_void, seed: u64);
-
-        fn sz_hash_state_stream(state: *const c_void, text: *const c_void, length: usize);
-
-        fn sz_hash_state_fold(state: *const c_void) -> u64;
-
-        fn sz_lookup(target: *const c_void, length: usize, source: *const c_void, lut: *const u8) -> *const c_void;
     }
 
     impl SemVer {
         pub const fn new(major: i32, minor: i32, patch: i32) -> Self {
             Self { major, minor, patch }
+        }
+    }
+
+    impl HashState {
+        /// Creates a new `HashState` and initializes it with a given seed.
+        pub fn new(seed: u64) -> Self {
+            let mut state = HashState {
+                aes: [0; 8],
+                sum: [0; 8],
+                ins: [0; 8],
+                key: [0; 2],
+                ins_length: 0,
+            };
+            unsafe {
+                sz_hash_state_init(&mut state as *mut _ as *mut c_void, seed);
+            }
+            state
+        }
+
+        /// Streams data into the hash state.
+        pub fn stream(&mut self, data: &[u8]) -> &mut Self {
+            unsafe {
+                sz_hash_state_stream(
+                    self as *mut _ as *mut c_void,
+                    data.as_ptr() as *const c_void,
+                    data.len(),
+                );
+            }
+            self
+        }
+
+        /// Finalizes the hash and returns the folded value.
+        pub fn fold(&self) -> u64 {
+            unsafe { sz_hash_state_fold(self as *const _ as *const c_void) }
+        }
+    }
+
+    impl PartialEq for HashState {
+        fn eq(&self, other: &Self) -> bool {
+            self.aes == other.aes && self.sum == other.sum && self.key == other.key
         }
     }
 
@@ -1962,13 +2012,39 @@ mod tests {
 
     use crate::sz;
     use crate::sz::SortedIdx;
-    // For global functions
-    use crate::StringZilla; // For member functions
+    use crate::StringZilla;
 
     #[test]
     fn metadata() {
         assert!(sz::dynamic_dispatch());
         assert!(sz::capabilities().as_str().len() > 0);
+    }
+
+    #[test]
+    fn bytesum() {
+        assert_eq!(sz::bytesum("hi"), 209u64);
+    }
+
+    #[test]
+    fn hash() {
+        assert_ne!(sz::hash("Hello"), sz::hash("World"));
+
+        // Hashing should work the same for any seed
+        for seed in [0u64, 42, 123456789].iter() {
+            // Single-pass hashing
+            assert_eq!(
+                sz::HashState::new(*seed).stream("Hello".as_bytes()).fold(),
+                sz::hash_with_seed("Hello", *seed)
+            );
+            // Dual pass for short strings
+            assert_eq!(
+                sz::HashState::new(*seed)
+                    .stream("Hello".as_bytes())
+                    .stream("World".as_bytes())
+                    .fold(),
+                sz::hash_with_seed("HelloWorld", *seed)
+            );
+        }
     }
 
     #[test]
@@ -2237,9 +2313,10 @@ mod tests {
     fn test_argsort_permutation_by_custom() {
         // Define a custom type.
         #[derive(Debug)]
+        #[allow(dead_code)]
         struct Person {
             name: &'static str,
-            age: u32,
+            age: u32, //? We won't use this field for intersection
         }
 
         let people = [
@@ -2295,9 +2372,10 @@ mod tests {
     fn test_intersection_by_custom() {
         // Define a custom type.
         #[derive(Debug)]
+        #[allow(dead_code)]
         struct Person {
             name: &'static str,
-            age: u32,
+            age: u32, //? We won't use this field for intersection
         }
 
         let group1 = [
