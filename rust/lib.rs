@@ -468,7 +468,8 @@ pub mod sz {
     /// To convert uppercase ASCII characters to lowercase:
     ///
     /// ```
-    /// let mut to_lower = [0u8; 256];
+    /// use stringzilla::sz;
+    /// let mut to_lower: [u8; 256] = core::array::from_fn(|i| i as u8);
     /// for (upper, lower) in ('A'..='Z').zip('a'..='z') {
     ///     to_lower[upper as usize] = lower as u8;
     /// }
@@ -508,16 +509,16 @@ pub mod sz {
     ///
     /// ```
     /// use stringzilla::sz;
-    /// let mut to_lower = [0u8; 256];
+    /// let mut to_lower: [u8; 256] = core::array::from_fn(|i| i as u8);
     /// for (upper, lower) in ('A'..='Z').zip('a'..='z') {
     ///     to_lower[upper as usize] = lower as u8;
     /// }
-    /// let mut text = b"HELLO WORLD!";
+    /// let mut text = *b"HELLO WORLD!";
     /// sz::lookup_inplace(&mut text, to_lower);
-    /// assert_eq!(text, "hello world!");
+    /// assert_eq!(text, *b"hello world!");
     /// ```
     ///
-    pub fn lookup_inplace<T>(buffer: &T, table: [u8; 256])
+    pub fn lookup_inplace<T>(buffer: &mut T, table: [u8; 256])
     where
         T: AsMut<[u8]> + ?Sized,
     {
