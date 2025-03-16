@@ -1,4 +1,4 @@
-# This file configures wheels compilation for `cibuilwheel` for StringZilla CPython bindings.
+# This file configures wheels compilation for `cibuildwheel` for StringZilla CPython bindings.
 # On a good day it will produce:
 #   - `manylinux` and `musllinux` wheels for Linux on x86_64, aarch64, i686, ppc64le, s390x;
 #   - `macos` wheels for x86_64, arm64, and universal2;
@@ -28,7 +28,7 @@ build-verbosity = 0
 # - on Windows: AMD64, x86, ARM64
 # https://cibuildwheel.readthedocs.io/en/stable/options/#archs
 #
-# Important to note, not all those paltforms have recent images.
+# Important to note, not all those platforms have recent images.
 # The `manylinux_2_28` seems to be missing for `i686`.
 # The `i686` is 32-bit x86, and `x86_64` is 64-bit x86.
 archs = ["all"]

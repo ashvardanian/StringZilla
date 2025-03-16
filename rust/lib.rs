@@ -1,10 +1,11 @@
 #![cfg_attr(not(test), no_std)]
-
-/// The `sz` module provides a collection of string searching and manipulation functionality,
-/// designed for high efficiency and compatibility with `no_std` environments. This module offers
-/// various utilities for byte string manipulation, including search, reverse search, and
-/// edit-distance calculations, suitable for a wide range of applications from basic string
-/// processing to complex text analysis tasks.
+#[doc = r"
+The `sz` module provides a collection of string searching and manipulation functionality,
+designed for high efficiency and compatibility with `no_std` environments. This module offers
+various utilities for byte string manipulation, including search, reverse search, and
+edit-distance calculations, suitable for a wide range of applications from basic string
+processing to complex text analysis tasks.
+"]
 
 pub mod sz {
 

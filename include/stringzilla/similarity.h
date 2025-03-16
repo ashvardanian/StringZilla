@@ -379,11 +379,11 @@ SZ_INTERNAL sz_status_t _sz_levenshtein_distance_skewed_diagonals_serial( //
  *          Stores only 2 rows of the Levenshtein matrix, but uses 64-bit integers for the distance values,
  *          and upcasts UTF8 variable-length codepoints to 64-bit integers for faster addressing.
  *
- *  ! In the worst case for 2 strings of length 100, that contain just one 16-bit codepoint this will result in
- * extra:
- *      + 2 rows * 100 slots * 8 bytes/slot = 1600 bytes of memory for the two rows of the Levenshtein matrix rows.
- *      + 100 codepoints * 2 strings * 4 bytes/codepoint = 800 bytes of memory for the UTF8 buffer.
- *      = 2400 bytes of memory or @b 12x memory amplification!
+ *  ! In the worst case for 2 strings of length 100, that contain just one 16-bit codepoint this algorithm
+ *  ! will require 2400 bytes of memory:
+ *  !    + 2 rows * 100 slots * 8 bytes/slot = 1600 bytes of memory for the two rows of the Levenshtein matrix rows.
+ *  !    + 100 codepoints * 2 strings * 4 bytes/codepoint = 800 bytes of memory for the UTF8 buffer.
+ *  !    = 2400 bytes of memory or @b 12x memory amplification!
  */
 SZ_INTERNAL sz_status_t _sz_levenshtein_distance_wagner_fisher_serial( //
     sz_cptr_t longer, sz_size_t longer_length,                         //
@@ -764,15 +764,16 @@ SZ_PUBLIC sz_status_t sz_hamming_distance_utf8_serial( //
                              apply_to = function)
 
 /**
- *  @brief  Computes the edit distance between two very short byte-strings using the AVX-512VBMI extensions.
+ *  @brief Computes the edit distance between two very short byte-strings using the AVX-512VBMI extensions.
+ *  @sa `sz::levenshtein_distance_openmp`.
  *
  *  Applies to string lengths up to 63, and evaluates at most (63 * 2 + 1 = 127) diagonals, or just as many loop
  *  cycles. Supports an early exit, if the distance is bounded. Keeps all of the data and Levenshtein matrices skew
  *  diagonal in just a couple of registers. Benefits from the @b `vpermb` instructions, that can rotate the bytes
  *  across the entire ZMM register.
  *
- *? Bounds check, for inputs ranging from 33 to 64 bytes doesn't affect the performance at all.
- *? It's also worth exploring `_mm512_alignr_epi8` and `_mm512_maskz_compress_epi8` for the shift.
+ *  ? Bounds check, for inputs ranging from 33 to 64 bytes doesn't affect the performance at all.
+ *  ? It's also worth exploring `_mm512_alignr_epi8` and `_mm512_maskz_compress_epi8` for the shift.
  */
 SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto63_ice( //
     sz_cptr_t shorter, sz_size_t shorter_length,                            //
@@ -809,7 +810,7 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto63_ice( //
     bound_vec.zmm = _mm512_set1_epi8(bound <= 255 ? (sz_u8_t)bound : 255);
 
     // To simplify comparisons and traversals, we want to reverse the order of bytes in the shorter string.
-    shorter_vec.zmm = _mm512_setzero_si512(); //? To simplify debugging.
+    shorter_vec.zmm = _mm512_setzero_si512(); //? To simplify debugging, but can be noise
     for (sz_size_t i = 0; i != shorter_length; ++i) shorter_vec.u8s[63 - i] = shorter[i];
     shorter_rotated_vec.zmm = _mm512_permutexvar_epi8(rotate_right_vec.zmm, shorter_vec.zmm);
 
@@ -1034,7 +1035,7 @@ SZ_INTERNAL sz_status_t _sz_levenshtein_distance_skewed_diagonals_upto65k_ice( /
     // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
     sz_size_t const shorter_dim = shorter_length + 1;
     sz_size_t const longer_dim = longer_length + 1;
-    // Unlike the serial version, we also want to avoid reverse-order iteration over teh shorter string.
+    // Unlike the serial version, we also want to avoid reverse-order iteration over the shorter string.
     // So let's allocate a bit more memory and reverse-export our shorter string into that buffer.
     sz_size_t const buffer_length = sizeof(sz_u16_t) * longer_dim * 3 + shorter_length;
     sz_u16_t *const distances = (sz_u16_t *)alloc->allocate(buffer_length, alloc->handle);
@@ -1225,8 +1226,8 @@ SZ_PUBLIC sz_status_t sz_levenshtein_distance_ice( //
  *  Unlike the `_sz_levenshtein_distance_skewed_diagonals_upto65k_avx512` method, this one uses signed integers to store
  *  the accumulated score. Moreover, it's primary bottleneck is the latency of gathering the substitution costs
  *  from the substitution matrix. If we use the diagonal order, we will be comparing a slice of the first string
- * with a slice of the second. If we stick to the conventional horizontal order, we will be comparing one character
- * against a slice, which is much easier to optimize. In that case we are sampling costs not from arbitrary parts of
+ *  with a slice of the second. If we stick to the conventional horizontal order, we will be comparing one character
+ *  against a slice, which is much easier to optimize. In that case we are sampling costs not from arbitrary parts of
  *  a 256 x 256 matrix, but from a single row!
  */
 SZ_INTERNAL sz_status_t _sz_needleman_wunsch_score_wagner_fisher_upto17m_ice( //

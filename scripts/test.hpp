@@ -14,13 +14,13 @@ namespace scripts {
 
 inline std::string read_file(std::string path) {
     std::ifstream stream(path);
-    if (!stream.is_open()) { throw std::runtime_error("Failed to open file: " + path); }
+    if (!stream.is_open()) throw std::runtime_error("Failed to open file: " + path);
     return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
 }
 
 inline void write_file(std::string path, std::string content) {
     std::ofstream stream(path);
-    if (!stream.is_open()) { throw std::runtime_error("Failed to open file: " + path); }
+    if (!stream.is_open()) throw std::runtime_error("Failed to open file: " + path);
     stream << content;
     stream.close();
 }
@@ -74,13 +74,15 @@ inline std::string repeat(std::string const &patten, std::size_t count) {
 }
 
 /**
- *  @brief  A callback type for iterating over consecutive random-length slices of a string.
+ *  @brief Randomly slices a string into consecutive parts and passes those to @p slice_callback.
+ *  @warning Is @b single-threaded in nature, as it depends on the `global_random_generator`.
  */
 template <typename slice_callback_type_>
 inline void iterate_in_random_slices(std::string const &text, slice_callback_type_ &&slice_callback) {
     std::size_t remaining = text.size();
     while (remaining > 0) {
-        std::size_t slice_length = std::uniform_int_distribution<std::size_t>(1, remaining)(global_random_generator());
+        std::uniform_int_distribution<std::size_t> slice_length_distribution(1, remaining);
+        std::size_t slice_length = slice_length_distribution(global_random_generator());
         slice_callback({text.data() + text.size() - remaining, slice_length});
         remaining -= slice_length;
     }
@@ -121,7 +123,8 @@ using error_costs_256x256_t = std::array<sz_error_cost_t, 256 * 256>;
 inline error_costs_256x256_t unary_substitution_costs() {
     error_costs_256x256_t result;
     for (std::size_t i = 0; i != 256; ++i)
-        for (std::size_t j = 0; j != 256; ++j) result[i * 256 + j] = (i == j ? 0 : -1);
+        for (std::size_t j = 0; j != 256; ++j) //
+            result[i * 256 + j] = i == j ? 0 : -1;
     return result;
 }
 

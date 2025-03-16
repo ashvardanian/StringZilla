@@ -11,7 +11,12 @@
  *
  *  For substring search, the number of operations per second are reported as the number of character-level comparisons
  *  happening in the worst case in the naive algorithm, meaning O(N*M) for N characters in the haystack and M in the
- *  needle.
+ *  needle. In byteset search, the number of operations per second is computed the same way and the following character
+ *  sets are tested against each scanned token:
+ *
+ *  - "\n\r\v\f": 4 tabs
+ *  - "</>&'\"=[]": 9 html
+ *  - "0123456789": 10 digits
  *
  *  Instead of CLI arguments, for compatibility with @b StringWa.rs, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
