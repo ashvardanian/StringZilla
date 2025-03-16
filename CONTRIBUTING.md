@@ -366,9 +366,12 @@ cmake --build build_artifacts --config Release
 ## Contributing in Python
 
 Python bindings are implemented using pure CPython, so you wouldn't need to install SWIG, PyBind11, or any other third-party library.
+Still, you need a virtual environment, and it's recommended to use `uv` to create one.
 
 ```bash
-pip install -e . # To build locally from source
+uv venv --python 3.11           # Or your preferred Python version
+source .venv/bin/activate       # To activate the virtual environment
+pip install -e .                # To build locally from source
 ```
 
 ### Testing
@@ -376,16 +379,17 @@ pip install -e . # To build locally from source
 For testing we use PyTest, which may not be installed on your system.
 
 ```bash
-pip install pytest              # To install PyTest
+pip install pytest numpy        # NumPy is optional, but recommended
 pytest scripts/test.py -s -x    # Runs tests printing logs and stops on the first failure
 ```
 
-On a related note, StringZilla for Python seems to cover more OS and hardware combinations, than NumPy.
+StringZilla for Python seems to cover more OS and hardware combinations, than NumPy.
 That's why NumPy isn't a required dependency.
 Still, many tests may use NumPy, so consider installing it on mainstream platforms.
+Also considering the other optional dependencies for benchmarking and other scripts:
 
 ```bash
-pip install numpy
+uv pip install -r scripts/requirements.txt 
 ```
 
 Before you ship, please make sure the `cibuilwheel` packaging works and tests pass on other platforms.
