@@ -451,6 +451,84 @@ pub mod sz {
         }
     }
 
+    /// Performs a lookup transformation (LUT), mapping contents of a buffer into the same or other
+    /// memory region, taking a byte substitution value from the provided table.
+    ///
+    /// # Arguments
+    ///
+    /// * `target`: A mutable buffer to populate.
+    /// * `source`: An immutable buffer to map from.
+    /// * `table`: Lookup table of 256 substitution values.
+    ///
+    /// # Examples
+    ///
+    /// To convert uppercase ASCII characters to lowercase:
+    ///
+    /// ```
+    /// let mut to_lower = [0u8; 256];
+    /// for (upper, lower) in ('A'..='Z').zip('a'..='z') {
+    ///     to_lower[upper as usize] = lower as u8;
+    /// }
+    /// let source = "HELLO WORLD!";
+    /// let mut target = vec![0u8; source.len()];
+    /// sz::lookup(&mut target, &source, to_lower);
+    /// let result = String::from_utf8(target).expect("Invalid UTF-8 sequence");
+    /// assert_eq!(result, "hello world!");
+    /// ```
+    ///
+    pub fn lookup<T, S>(target: &mut T, source: &S, table: [u8; 256])
+    where
+        T: AsMut<[u8]> + ?Sized,
+        S: AsRef<[u8]> + ?Sized,
+    {
+        let target_slice = target.as_mut();
+        let source_slice = source.as_ref();
+        unsafe {
+            sz_lookup(
+                target_slice.as_mut_ptr() as *mut c_void,
+                source_slice.len(),
+                source_slice.as_ptr() as *const c_void,
+                table.as_ptr() as _,
+            );
+        }
+    }
+
+    /// Performs a lookup transformation (LUT), mapping contents of a buffer into the same or other
+    /// memory region, taking a byte substitution value from the provided table.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer`: A mutable buffer to update inplace.
+    /// * `table`: Lookup table of 256 substitution values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use stringzilla::sz;
+    /// let mut to_lower = [0u8; 256];
+    /// for (upper, lower) in ('A'..='Z').zip('a'..='z') {
+    ///     to_lower[upper as usize] = lower as u8;
+    /// }
+    /// let mut text = b"HELLO WORLD!";
+    /// sz::lookup_inplace(&mut text, to_lower);
+    /// assert_eq!(text, "hello world!");
+    /// ```
+    ///
+    pub fn lookup_inplace<T>(buffer: &T, table: [u8; 256])
+    where
+        T: AsMut<[u8]> + ?Sized,
+    {
+        let buffer_slice = buffer.as_mut();
+        unsafe {
+            sz_lookup(
+                buffer_slice.as_mut_ptr() as *mut c_void,
+                buffer_slice.len(),
+                buffer_slice.as_ptr() as *const c_void,
+                table.as_ptr() as _,
+            );
+        }
+    }
+
     /// Computes a 64-bit AES-based hash value for a given byte slice `text`.
     /// This function is designed to provide a high-quality hash value for use in
     /// hash tables, data structures, and cryptographic applications.
