@@ -1225,8 +1225,8 @@ SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
 
     if (length <= vec_len) {
         // Small buffer case: use mask to handle small writes
-        svbool_t mask = svwhilelt_b8((sz_u32_t)0ull, (sz_u32_t)length);
-        svst1_u8(mask, (unsigned char *)target, value_vec);
+        svbool_t mask = svwhilelt_b8((sz_u64_t)0ull, (sz_u64_t)length);
+        svst1_u8(mask, (sz_u8_t *)target, value_vec);
     }
     else {
         // Calculate head, body, and tail sizes
@@ -1235,18 +1235,18 @@ SZ_PUBLIC void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
         sz_size_t body_length = length - head_length - tail_length;
 
         // Handle unaligned head
-        svbool_t head_mask = svwhilelt_b8((sz_u32_t)0ull, (sz_u32_t)head_length);
-        svst1_u8(head_mask, (unsigned char *)target, value_vec);
+        svbool_t head_mask = svwhilelt_b8((sz_u64_t)0ull, (sz_u64_t)head_length);
+        svst1_u8(head_mask, (sz_u8_t *)target, value_vec);
         target += head_length;
 
         // Aligned body loop
         for (; body_length >= vec_len; target += vec_len, body_length -= vec_len) {
-            svst1_u8(svptrue_b8(), (unsigned char *)target, value_vec);
+            svst1_u8(svptrue_b8(), (sz_u8_t *)target, value_vec);
         }
 
         // Handle unaligned tail
-        svbool_t tail_mask = svwhilelt_b8((sz_u32_t)0ull, (sz_u32_t)tail_length);
-        svst1_u8(tail_mask, (unsigned char *)target, value_vec);
+        svbool_t tail_mask = svwhilelt_b8((sz_u64_t)0ull, (sz_u64_t)tail_length);
+        svst1_u8(tail_mask, (sz_u8_t *)target, value_vec);
     }
 }
 
@@ -1262,9 +1262,9 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
     // When the buffer is small, there isn't much to innovate.
     if (length <= vec_len) {
         // Small buffer case: use mask to handle small writes
-        svbool_t mask = svwhilelt_b8((sz_u32_t)0ull, (sz_u32_t)length);
-        svuint8_t data = svld1_u8(mask, (unsigned char *)source);
-        svst1_u8(mask, (unsigned char *)target, data);
+        svbool_t mask = svwhilelt_b8((sz_u64_t)0ull, (sz_u64_t)length);
+        svuint8_t data = svld1_u8(mask, (sz_u8_t *)source);
+        svst1_u8(mask, (sz_u8_t *)target, data);
     }
     // When dealing with larger buffers, similar to AVX-512, we want minimize unaligned operations
     // and handle the head, body, and tail separately. We can also traverse the buffer in both directions
@@ -1287,36 +1287,36 @@ SZ_PUBLIC void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) 
         sz_size_t body_length = length - head_length - tail_length;
 
         // Handle unaligned parts
-        svbool_t head_mask = svwhilelt_b8((sz_u32_t)0ull, (sz_u32_t)head_length);
-        svuint8_t head_data = svld1_u8(head_mask, (unsigned char *)source);
-        svst1_u8(head_mask, (unsigned char *)target, head_data);
-        svbool_t tail_mask = svwhilelt_b8((sz_u32_t)0ull, (sz_u32_t)tail_length);
-        svuint8_t tail_data = svld1_u8(tail_mask, (unsigned char *)source + head_length + body_length);
-        svst1_u8(tail_mask, (unsigned char *)target + head_length + body_length, tail_data);
+        svbool_t head_mask = svwhilelt_b8((sz_u64_t)0ull, (sz_u64_t)head_length);
+        svuint8_t head_data = svld1_u8(head_mask, (sz_u8_t *)source);
+        svst1_u8(head_mask, (sz_u8_t *)target, head_data);
+        svbool_t tail_mask = svwhilelt_b8((sz_u64_t)0ull, (sz_u64_t)tail_length);
+        svuint8_t tail_data = svld1_u8(tail_mask, (sz_u8_t *)source + head_length + body_length);
+        svst1_u8(tail_mask, (sz_u8_t *)target + head_length + body_length, tail_data);
         target += head_length;
         source += head_length;
 
         // Aligned body loop, walking in two directions
         for (; body_length >= vec_len * 2; target += vec_len, source += vec_len, body_length -= vec_len * 2) {
-            svuint8_t forward_data = svld1_u8(svptrue_b8(), (unsigned char *)source);
-            svuint8_t backward_data = svld1_u8(svptrue_b8(), (unsigned char *)source + body_length - vec_len);
-            svst1_u8(svptrue_b8(), (unsigned char *)target, forward_data);
-            svst1_u8(svptrue_b8(), (unsigned char *)target + body_length - vec_len, backward_data);
+            svuint8_t forward_data = svld1_u8(svptrue_b8(), (sz_u8_t *)source);
+            svuint8_t backward_data = svld1_u8(svptrue_b8(), (sz_u8_t *)source + body_length - vec_len);
+            svst1_u8(svptrue_b8(), (sz_u8_t *)target, forward_data);
+            svst1_u8(svptrue_b8(), (sz_u8_t *)target + body_length - vec_len, backward_data);
         }
         // Up to (vec_len * 2 - 1) bytes of data may be left in the body,
         // so we can unroll the last two optional loop iterations.
         if (body_length > vec_len) {
-            svbool_t mask = svwhilelt_b8((sz_u32_t)0ull, (sz_u32_t)body_length);
-            svuint8_t data = svld1_u8(mask, (unsigned char *)source);
-            svst1_u8(mask, (unsigned char *)target, data);
+            svbool_t mask = svwhilelt_b8((sz_u64_t)0ull, (sz_u64_t)body_length);
+            svuint8_t data = svld1_u8(mask, (sz_u8_t *)source);
+            svst1_u8(mask, (sz_u8_t *)target, data);
             body_length -= vec_len;
             source += body_length;
             target += body_length;
         }
         if (body_length) {
-            svbool_t mask = svwhilelt_b8((sz_u32_t)0ull, (sz_u32_t)body_length);
-            svuint8_t data = svld1_u8(mask, (unsigned char *)source);
-            svst1_u8(mask, (unsigned char *)target, data);
+            svbool_t mask = svwhilelt_b8((sz_u64_t)0ull, (sz_u64_t)body_length);
+            svuint8_t data = svld1_u8(mask, (sz_u8_t *)source);
+            svst1_u8(mask, (sz_u8_t *)target, data);
         }
     }
 }

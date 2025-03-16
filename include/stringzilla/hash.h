@@ -2256,7 +2256,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
     sz_size_t const vector_length = svcntb();
     // SVE doesn't have widening accumulation, so we reduce across each loaded vector
     for (; progress < length; progress += vector_length) {
-        svbool_t progress_mask = svwhilelt_b8(progress, length);
+        svbool_t progress_mask = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)length);
         svuint8_t text_vec = svld1_u8(progress_mask, (sz_u8_t const *)(text + progress));
         sum += svaddv_u8(progress_mask, text_vec);
     }
@@ -2295,7 +2295,7 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
         svuint16_t sum_u16_bot = svdup_n_u16(0);
         // Assuming `u16` has a 256x wider range than `u8`, we can aggregate up to 256 lanes in each value.
         for (sz_size_t loop_index = 0; progress < length && loop_index < 256; progress += vector_length, ++loop_index) {
-            svbool_t progress_mask = svwhilelt_b8(progress, length);
+            svbool_t progress_mask = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)length);
             svuint8_t text_vec = svld1_u8(progress_mask, (sz_u8_t const *)(text + progress));
             sum_u16_top = svaddwb_u16(sum_u16_top, text_vec);
             sum_u16_bot = svaddwt_u16(sum_u16_bot, text_vec);
@@ -2340,7 +2340,7 @@ SZ_PUBLIC sz_u64_t _sz_hash_sve2_upto16(sz_cptr_t text, sz_size_t length, sz_u64
     svuint8_t const shuffle_mask = svld1_u8(svptrue_b8(), _sz_hash_u8x16x4_shuffle());
 
     // This is our best case for SVE2 dominance over NEON - we can load the data in one go with a predicate.
-    svuint8_t block = svld1_u8(svwhilelt_b8((sz_size_t)0, length), (sz_u8_t const *)text);
+    svuint8_t block = svld1_u8(svwhilelt_b8((sz_u64_t)0, (sz_u64_t)length), (sz_u8_t const *)text);
     // One round of hashing logic
     state_aes = _sz_emulate_aesenc_u8x16_sve2(state_aes, block);
     svuint8_t sum_shuffled = svtbl_u8(state_sum, shuffle_mask);
@@ -2412,7 +2412,7 @@ SZ_PUBLIC void _sz_hash_sve2_upto16x16(char texts[16][16], sz_size_t length[16],
     sz_size_t const texts_per_register = bytes_per_register / 16;
     for (sz_size_t progress_bytes = 0; progress_bytes < 256; progress_bytes += bytes_per_register) {
         svuint8_t blocks =
-            svld1_u8(svwhilelt_b8(progress_bytes, 256), (sz_u8_t const *)(&texts[0][0] + progress_bytes));
+            svld1_u8(svwhilelt_b8((sz_u64_t)progress_bytes, (sz_u64_t)256), (sz_u8_t const *)(&texts[0][0] + progress_bytes));
 
         // One round of hashing logic for multiple blocks
         svuint8_t blocks_aes = _sz_emulate_aesenc_u8x16_sve2(state_aes, blocks);

@@ -291,17 +291,53 @@ typedef ptrdiff_t sz_ssize_t; // Signed version of `sz_size_t`, 32 or 64 bits
 
 #else // if SZ_AVOID_LIBC:
 /**
+ *  Even when LibC is not available, we can use compiler macros to infer the size of integer types.
+ *  https://gcc.gnu.org/onlinedocs/cpp/Common-Predefined-Macros.html
+ *
  *  ! The C standard doesn't specify the signedness of char.
  *  ! On x86 char is signed by default while on Arm it is unsigned by default.
  *  ! That's why we don't define `sz_char_t` and generally use explicit `sz_i8_t` and `sz_u8_t`.
  */
-typedef signed char sz_i8_t;         // Always 8 bits
-typedef unsigned char sz_u8_t;       // Always 8 bits
-typedef unsigned short sz_u16_t;     // Always 16 bits
-typedef int sz_i32_t;                // Always 32 bits
-typedef unsigned int sz_u32_t;       // Always 32 bits
-typedef long long sz_i64_t;          // Always 64 bits
-typedef unsigned long long sz_u64_t; // Always 64 bits
+#if defined(__INT8_TYPE__)
+typedef __INT8_TYPE__ sz_i8_t;
+#else
+typedef signed char sz_i8_t;
+#endif
+#if defined(__UINT8_TYPE__)
+typedef __UINT8_TYPE__ sz_u8_t;
+#else
+typedef unsigned char sz_u8_t;
+#endif
+#if defined(__INT16_TYPE__)
+typedef __INT16_TYPE__ sz_i16_t;
+#else
+typedef short sz_i16_t;
+#endif
+#if defined(__UINT16_TYPE__)
+typedef __UINT16_TYPE__ sz_u16_t;
+#else
+typedef unsigned short sz_u16_t;
+#endif
+#if defined(__INT32_TYPE__)
+typedef __INT32_TYPE__ sz_i32_t;
+#else
+typedef int sz_i32_t;
+#endif
+#if defined(__UINT32_TYPE__)
+typedef __UINT32_TYPE__ sz_u32_t;
+#else
+typedef unsigned int sz_u32_t;
+#endif
+#if defined(__INT64_TYPE__)
+typedef __INT64_TYPE__ sz_i64_t;
+#else
+typedef long long sz_i64_t;
+#endif
+#if defined(__UINT64_TYPE__)
+typedef __UINT64_TYPE__ sz_u64_t;
+#else
+typedef unsigned long long sz_u64_t;
+#endif
 
 /**
  *  Now we need to redefine the `size_t`.
@@ -322,11 +358,11 @@ typedef unsigned long long sz_u64_t; // Always 64 bits
  *  Source: https://learn.microsoft.com/en-us/windows/win32/winprog64/abstract-data-models
  */
 #if _SZ_IS_64_BIT
-typedef unsigned long long sz_size_t; // 64-bit.
-typedef long long sz_ssize_t;         // 64-bit.
+typedef sz_u64_t sz_size_t;  // ? Preferred over the `__SIZE_TYPE__` and `__UINTMAX_TYPE__` macros
+typedef sz_i64_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__INTMAX_TYPE__` macros
 #else
-typedef unsigned int sz_size_t; // 32-bit.
-typedef int sz_ssize_t;         // 32-bit.
+typedef sz_u32_t sz_size_t;  // ? Preferred over the `__SIZE_TYPE__` and `__UINTMAX_TYPE__` macros
+typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__INTMAX_TYPE__` macros
 #endif // _SZ_IS_64_BIT
 #endif // SZ_AVOID_LIBC
 

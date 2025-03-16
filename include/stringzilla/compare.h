@@ -411,7 +411,7 @@ SZ_PUBLIC sz_bool_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     sz_size_t const vector_bytes = svcntb();
     sz_size_t progress = 0;
     do {
-        svbool_t progress_vec = svwhilelt_b8(progress, length);
+        svbool_t progress_vec = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)length);
         svuint8_t a_vec = svld1(progress_vec, (sz_u8_t const *)(a + progress));
         svuint8_t b_vec = svld1(progress_vec, (sz_u8_t const *)(b + progress));
         // Compare: generate a predicate marking lanes where a!=b

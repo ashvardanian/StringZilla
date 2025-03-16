@@ -940,8 +940,8 @@ SZ_INTERNAL void _sz_sequence_argsort_sve_3way_partition(
     // Count elements smaller and greater than the pivot.
     sz_size_t count_smaller = 0, count_greater = 0;
     for (sz_size_t i = start_in_sequence; i < end_in_sequence; i += pgrams_per_vector) {
-        svbool_t load_mask = svwhilelt_b64(i, end_in_sequence);
-        svuint64_t pgrams_vec = svld1_u64(load_mask, initial_pgrams + i);
+        svbool_t load_mask = svwhilelt_b64((sz_u64_t)i, (sz_u64_t)end_in_sequence);
+        svuint64_t pgrams_vec = svld1_u64(load_mask, (sz_u64_t const *)(initial_pgrams + i));
         svbool_t smaller_mask = svcmplt_u64(load_mask, pgrams_vec, pivot_vec);
         svbool_t greater_mask = svcmpgt_u64(load_mask, pgrams_vec, pivot_vec);
         count_smaller = svqincp_n_u64_b64(count_smaller, smaller_mask); // Smarter than `svcntp_b64`
@@ -959,9 +959,9 @@ SZ_INTERNAL void _sz_sequence_argsort_sve_3way_partition(
 
     // Partition elements into three segments.
     for (sz_size_t i = start_in_sequence; i < end_in_sequence; i += pgrams_per_vector) {
-        svbool_t load_mask = svwhilelt_b64(i, end_in_sequence);
-        svuint64_t pgrams_vec = svld1_u64(load_mask, initial_pgrams + i);
-        svuint64_t order_vec = svld1_u64(load_mask, initial_order + i);
+        svbool_t load_mask = svwhilelt_b64((sz_u64_t)i, (sz_u64_t)end_in_sequence);
+        svuint64_t pgrams_vec = svld1_u64(load_mask, (sz_u64_t const *)(initial_pgrams + i));
+        svuint64_t order_vec = svld1_u64(load_mask, (sz_u64_t const *)(initial_order + i));
 
         svbool_t smaller_mask = svcmplt_u64(load_mask, pgrams_vec, pivot_vec);
         svbool_t equal_mask = svcmpeq_u64(load_mask, pgrams_vec, pivot_vec);
@@ -974,25 +974,25 @@ SZ_INTERNAL void _sz_sequence_argsort_sve_3way_partition(
         if (count_smaller) {
             svuint64_t comp_pgrams = svcompact_u64(smaller_mask, pgrams_vec);
             svuint64_t comp_order = svcompact_u64(smaller_mask, order_vec);
-            svbool_t store_mask = svwhilelt_b64((sz_size_t)0, count_smaller);
-            svst1_u64(store_mask, partitioned_pgrams + smaller_offset, comp_pgrams);
-            svst1_u64(store_mask, partitioned_order + smaller_offset, comp_order);
+            svbool_t store_mask = svwhilelt_b64((sz_u64_t)0, (sz_u64_t)count_smaller);
+            svst1_u64(store_mask, (sz_u64_t *)(partitioned_pgrams + smaller_offset), comp_pgrams);
+            svst1_u64(store_mask, (sz_u64_t *)(partitioned_order + smaller_offset), comp_order);
             smaller_offset += count_smaller;
         }
         if (count_equal) {
             svuint64_t comp_pgrams = svcompact_u64(equal_mask, pgrams_vec);
             svuint64_t comp_order = svcompact_u64(equal_mask, order_vec);
-            svbool_t store_mask = svwhilelt_b64((sz_size_t)0, count_equal);
-            svst1_u64(store_mask, partitioned_pgrams + equal_offset, comp_pgrams);
-            svst1_u64(store_mask, partitioned_order + equal_offset, comp_order);
+            svbool_t store_mask = svwhilelt_b64((sz_u64_t)0, (sz_u64_t)count_equal);
+            svst1_u64(store_mask, (sz_u64_t *)(partitioned_pgrams + equal_offset), comp_pgrams);
+            svst1_u64(store_mask, (sz_u64_t *)(partitioned_order + equal_offset), comp_order);
             equal_offset += count_equal;
         }
         if (count_greater) {
             svuint64_t comp_pgrams = svcompact_u64(greater_mask, pgrams_vec);
             svuint64_t comp_order = svcompact_u64(greater_mask, order_vec);
-            svbool_t store_mask = svwhilelt_b64((sz_size_t)0, count_greater);
-            svst1_u64(store_mask, partitioned_pgrams + greater_offset, comp_pgrams);
-            svst1_u64(store_mask, partitioned_order + greater_offset, comp_order);
+            svbool_t store_mask = svwhilelt_b64((sz_u64_t)0, (sz_u64_t)count_greater);
+            svst1_u64(store_mask, (sz_u64_t *)(partitioned_pgrams + greater_offset), comp_pgrams);
+            svst1_u64(store_mask, (sz_u64_t *)(partitioned_order + greater_offset), comp_order);
             greater_offset += count_greater;
         }
     }

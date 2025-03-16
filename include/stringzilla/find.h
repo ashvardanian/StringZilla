@@ -1648,7 +1648,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byte_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t 
     sz_size_t const vector_bytes = svcntb();
     sz_size_t progress = 0;
     do {
-        svbool_t progress_mask = svwhilelt_b8(progress, h_length);
+        svbool_t progress_mask = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)h_length);
         svuint8_t h_vec = svld1(progress_mask, (sz_u8_t const *)(h + progress));
         // Compare: generate a predicate marking lanes where h[i]!=n
         svbool_t equal_vec = svcmpeq_n_u8(progress_mask, h_vec, n_scalar);
@@ -1668,7 +1668,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byte_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t
     sz_size_t const vector_bytes = svcntb();
     sz_size_t progress = 0;
     do {
-        svbool_t progress_mask = svwhilelt_b8(progress, h_length);
+        svbool_t progress_mask = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)h_length);
         svbool_t backward_mask = svrev_b8(progress_mask);
         svuint8_t h_vec = svld1(backward_mask, (sz_u8_t const *)(h + h_length - progress - vector_bytes));
         // Compare: generate a predicate marking lanes where h[i]!=n
@@ -1698,7 +1698,7 @@ SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz
         sz_u8_t n1 = ((sz_u8_t *)n)[1];
         do {
             // We must avoid overrunning the haystack for the second byte.
-            svbool_t pred = svwhilelt_b8(progress, h_length - 1);
+            svbool_t pred = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)(h_length - 1));
             // Load two adjacent vectors.
             svuint8_t hay0 = svld1(pred, (sz_u8_t const *)(h + progress));
             svuint8_t hay1 = svld1(pred, (sz_u8_t const *)(h + progress + 1));
@@ -1717,7 +1717,7 @@ SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz
         sz_u8_t n2 = ((sz_u8_t *)n)[2];
         do {
             // Prevent overrunning for the 3rd byte.
-            svbool_t pred = svwhilelt_b8(progress, h_length - 2);
+            svbool_t pred = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)(h_length - 2));
             svuint8_t hay0 = svld1(pred, (sz_u8_t const *)(h + progress));
             svuint8_t hay1 = svld1(pred, (sz_u8_t const *)(h + progress + 1));
             svuint8_t hay2 = svld1(pred, (sz_u8_t const *)(h + progress + 2));
@@ -1740,7 +1740,7 @@ SZ_PUBLIC sz_cptr_t sz_find_sve(sz_cptr_t h, sz_size_t h_length, sz_cptr_t n, sz
         sz_u8_t n_last = ((sz_u8_t *)n)[offset_last];
         do {
             // Make sure the predicate does not run off the end.
-            svbool_t pred = svwhilelt_b8(progress, h_length - (n_length - 1));
+            svbool_t pred = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)(h_length - n_length + 1));
             // Load haystack bytes at the chosen offsets.
             svuint8_t hay_first = svld1(pred, (sz_u8_t const *)(h + progress + offset_first));
             svuint8_t hay_mid = svld1(pred, (sz_u8_t const *)(h + progress + offset_mid));
