@@ -403,7 +403,8 @@ pub mod sz {
     /// Moves the contents of `source` into `target`, overwriting the existing contents of `target`.
     /// This function is useful for scenarios where you need to replace the contents of a byte slice
     /// with the contents of another byte slice.
-    pub fn move_bytes<T, S>(target: &mut T, source: &S)
+    #[inline(always)]
+    pub fn move_<T, S>(target: &mut T, source: &S)
     where
         T: AsMut<[u8]> + ?Sized,
         S: AsRef<[u8]> + ?Sized,
@@ -422,6 +423,7 @@ pub mod sz {
     /// Fills the contents of `target` with the specified `value`. This function is useful for
     /// scenarios where you need to set all bytes in a byte slice to a specific value, such as
     /// zeroing out a buffer or initializing a buffer with a specific byte pattern.
+    #[inline(always)]
     pub fn fill<T>(target: &mut T, value: u8)
     where
         T: AsMut<[u8]> + ?Sized,
@@ -435,6 +437,7 @@ pub mod sz {
     /// Copies the contents of `source` into `target`, overwriting the existing contents of `target`.
     /// This function is useful for scenarios where you need to replace the contents of a byte slice
     /// with the contents of another byte slice.
+    #[inline(always)]
     pub fn copy<T, S>(target: &mut T, source: &S)
     where
         T: AsMut<[u8]> + ?Sized,
@@ -537,7 +540,7 @@ pub mod sz {
     /// # Arguments
     ///
     /// * `text`: The byte slice to compute the checksum for.
-    /// * `seed` - A 64-bit value that acts as the seed for the hash function.
+    /// * `seed`: A 64-bit value that acts as the seed for the hash function.
     ///
     /// # Returns
     ///
@@ -1101,7 +1104,7 @@ pub mod sz {
     /// between two characters (byte values). Matching characters are assigned a cost
     /// of 0, and non-matching characters are assigned a cost of -1.
     pub fn unary_substitution_costs() -> [[i8; 256]; 256] {
-        let mut result = [[0; 256]; 256];
+        let mut result = [[0i8; 256]; 256];
 
         for i in 0..256 {
             for j in 0..256 {
@@ -1469,6 +1472,7 @@ impl<'a> RangeMatches<'a> {
 impl<'a> Iterator for RangeMatches<'a> {
     type Item = &'a [u8];
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.position >= self.haystack.len() {
             return None;
@@ -1520,6 +1524,7 @@ impl<'a> RangeSplits<'a> {
 impl<'a> Iterator for RangeSplits<'a> {
     type Item = &'a [u8];
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.position > self.haystack.len() {
             return None;
@@ -1575,6 +1580,7 @@ impl<'a> RangeRMatches<'a> {
 impl<'a> Iterator for RangeRMatches<'a> {
     type Item = &'a [u8];
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.position == 0 {
             return None;
@@ -1628,6 +1634,7 @@ impl<'a> RangeRSplits<'a> {
 impl<'a> Iterator for RangeRSplits<'a> {
     type Item = &'a [u8];
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.position == 0 {
             return None;
