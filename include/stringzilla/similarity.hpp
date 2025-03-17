@@ -50,6 +50,13 @@ sz_status_t score_diagonally(                            //
     sz_memory_allocator_t *alloc,                        //
     distance_type_ *result_ptr) {
 
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
     // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
     // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
     sz_size_t const shorter_dim = shorter_length + 1;
@@ -75,7 +82,7 @@ sz_status_t score_diagonally(                            //
     distance_type_ *previous_distances = distances;
     distance_type_ *current_distances = previous_distances + longer_dim;
     distance_type_ *next_distances = current_distances + longer_dim;
-    char_type_ const *const shorter_reversed = (char_type_ const *)(next_distances + longer_dim);
+    char_type_ *const shorter_reversed = (char_type_ *)(next_distances + longer_dim);
 
     // Export the reversed string into the buffer.
     for (sz_size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
@@ -91,13 +98,13 @@ sz_status_t score_diagonally(                            //
     sz_size_t next_diagonal_index = 2;
 
     // Progress through the upper triangle of the Levenshtein matrix.
-    for (; next_diagonal_index != shorter_dim; ++next_diagonal_index) {
+    for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
         sz_size_t const next_diagonal_length = next_diagonal_index + 1;
 #pragma omp simd
         for (sz_size_t offset_in_diagonal = 1; offset_in_diagonal + 1 < next_diagonal_length; ++offset_in_diagonal) {
             // ? Note that here we are still traversing both buffers in the same order,
             // ? because the shorter string has been reversed into `shorter_reversed`.
-            char_type_ shorter_char = shorter_reversed[shorter_length - next_diagonal_index + offset_within_diagonal];
+            char_type_ shorter_char = shorter_reversed[shorter_length - next_diagonal_index + offset_in_diagonal];
             char_type_ longer_char = longer[offset_in_diagonal - 1];
             sz_error_cost_t cost_of_substitution = get_substitution_cost(shorter_char, longer_char);
             distance_type_ cost_if_substitution = previous_distances[offset_in_diagonal] + cost_of_substitution;
@@ -119,7 +126,7 @@ sz_status_t score_diagonally(                            //
     }
 
     // Now let's handle the anti-diagonal band of the matrix, between the top and bottom triangles.
-    for (; next_diagonal_index != longer_dim; ++next_diagonal_index) {
+    for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
         sz_size_t const next_diagonal_length = shorter_dim;
 #pragma omp simd
         for (sz_size_t offset_in_diagonal = 0; offset_in_diagonal + 1 < next_diagonal_length; ++offset_in_diagonal) {
@@ -133,7 +140,7 @@ sz_status_t score_diagonally(                            //
                     current_distances[offset_in_diagonal + 1] //
                     ) +
                 gap_cost_;
-            next_distances[i] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
+            next_distances[offset_in_diagonal] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
         }
         next_distances[next_diagonal_length - 1] = next_diagonal_index;
         // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
@@ -145,7 +152,7 @@ sz_status_t score_diagonally(                            //
     }
 
     // Now let's handle the bottom-right triangle of the matrix.
-    for (; next_diagonal_index != longer_dim; ++next_diagonal_index) {
+    for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
         sz_size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
 #pragma omp simd
         for (sz_size_t offset_in_diagonal = 0; offset_in_diagonal < next_diagonal_length; ++offset_in_diagonal) {
@@ -159,7 +166,7 @@ sz_status_t score_diagonally(                            //
                     current_distances[offset_in_diagonal + 1] //
                     ) +
                 gap_cost_;
-            next_distances[i] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
+            next_distances[offset_in_diagonal] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
         }
         // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
         // dropping the first element in the current array.
@@ -175,6 +182,57 @@ sz_status_t score_diagonally(                            //
     *result_ptr = result;
     return sz_success_k;
 }
+
+template <typename first_string_type_, typename second_string_type_>
+inline std::size_t levenshtein_distance( //
+    first_string_type_ const &first, second_string_type_ const &second) {
+
+    std::size_t const first_length = first.length();
+    std::size_t const second_length = second.length();
+    if (first_length == 0) return second_length;
+    if (second_length == 0) return first_length;
+
+    sz_size_t max_length = sz_max_of_two(first_length, second_length);
+    if (max_length < 256u) {
+
+        sz_u8_t result_u8;
+        sz_status_t status = score_diagonally<char, sz_u8_t, uniform_substitution_cost_t, 1>(
+            first.data(), first_length, second.data(), second_length, {}, NULL, &result_u8);
+        sz_unused(status);
+        return result_u8;
+    }
+    else if (max_length < 65536u) {
+        sz_u16_t result_u16;
+        sz_status_t status = score_diagonally<char, sz_u16_t, uniform_substitution_cost_t, 1>(
+            first.data(), first_length, second.data(), second_length, {}, NULL, &result_u16);
+        sz_unused(status);
+        return result_u16;
+    }
+    else {
+        sz_size_t result_size_t;
+        sz_status_t status = score_diagonally<char, sz_size_t, uniform_substitution_cost_t, 1>(
+            first.data(), first_length, second.data(), second_length, {}, NULL, &result_size_t);
+        sz_unused(status);
+        return result_size_t;
+    }
+}
+
+inline void levenshtein_distance_utf8(                                //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result) {
+    sz_unused(a && b && a_length && b_length && alloc && result && bound);
+}
+
+inline void needleman_wunsch_score(                                   //
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
+    sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
+    sz_memory_allocator_t *alloc, sz_ssize_t *result) {
+    sz_unused(a && b && a_length && b_length && subs && alloc && result && gap);
+}
+
+inline void levenshtein_distances() {}
+inline void levenshtein_distances_utf8() {}
+inline void needleman_wunsch_scores() {}
 
 } // namespace openmp
 } // namespace stringzilla
