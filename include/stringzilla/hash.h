@@ -953,14 +953,30 @@ SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed)
 
 SZ_INTERNAL void _sz_hash_state_update_haswell(sz_hash_state_t *state) {
     __m128i const shuffle_mask = _mm_load_si128((__m128i const *)_sz_hash_u8x16x4_shuffle());
-    state->aes.xmms[0] = _mm_aesenc_si128(state->aes.xmms[0], state->ins.xmms[0]);
-    state->sum.xmms[0] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[0], shuffle_mask), state->ins.xmms[0]);
-    state->aes.xmms[1] = _mm_aesenc_si128(state->aes.xmms[1], state->ins.xmms[1]);
-    state->sum.xmms[1] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[1], shuffle_mask), state->ins.xmms[1]);
-    state->aes.xmms[2] = _mm_aesenc_si128(state->aes.xmms[2], state->ins.xmms[2]);
-    state->sum.xmms[2] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[2], shuffle_mask), state->ins.xmms[2]);
-    state->aes.xmms[3] = _mm_aesenc_si128(state->aes.xmms[3], state->ins.xmms[3]);
-    state->sum.xmms[3] = _mm_add_epi64(_mm_shuffle_epi8(state->sum.xmms[3], shuffle_mask), state->ins.xmms[3]);
+    _mm_storeu_si128( //
+        &state->aes.xmms[0],
+        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[0]), _mm_lddqu_si128(&state->ins.xmms[0])));
+    _mm_storeu_si128( //
+        &state->sum.xmms[0], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[0]), shuffle_mask),
+                                           _mm_lddqu_si128(&state->ins.xmms[0])));
+    _mm_storeu_si128( //
+        &state->aes.xmms[1],
+        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[1]), _mm_lddqu_si128(&state->ins.xmms[1])));
+    _mm_storeu_si128( //
+        &state->sum.xmms[1], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[1]), shuffle_mask),
+                                           _mm_lddqu_si128(&state->ins.xmms[1])));
+    _mm_storeu_si128( //
+        &state->aes.xmms[2],
+        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[2]), _mm_lddqu_si128(&state->ins.xmms[2])));
+    _mm_storeu_si128( //
+        &state->sum.xmms[2], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[2]), shuffle_mask),
+                                           _mm_lddqu_si128(&state->ins.xmms[2])));
+    _mm_storeu_si128( //
+        &state->aes.xmms[3],
+        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[3]), _mm_lddqu_si128(&state->ins.xmms[3])));
+    _mm_storeu_si128( //
+        &state->sum.xmms[3], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[3]), shuffle_mask),
+                                           _mm_lddqu_si128(&state->ins.xmms[3])));
 }
 
 SZ_INTERNAL sz_u64_t _sz_hash_state_finalize_haswell(sz_hash_state_t const *state) {
@@ -1074,10 +1090,10 @@ SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t te
     while (length) {
         // Append to the internal buffer until it's full
         if (state->ins_length % 64 == 0 && length >= 64) {
-            state->ins.xmms[0] = _mm_lddqu_si128((__m128i const *)(text + 0));
-            state->ins.xmms[1] = _mm_lddqu_si128((__m128i const *)(text + 16));
-            state->ins.xmms[2] = _mm_lddqu_si128((__m128i const *)(text + 32));
-            state->ins.xmms[3] = _mm_lddqu_si128((__m128i const *)(text + 48));
+            _mm_storeu_si128(&state->ins.xmms[0], _mm_lddqu_si128((__m128i const *)(text + 0)));
+            _mm_storeu_si128(&state->ins.xmms[1], _mm_lddqu_si128((__m128i const *)(text + 16)));
+            _mm_storeu_si128(&state->ins.xmms[2], _mm_lddqu_si128((__m128i const *)(text + 32)));
+            _mm_storeu_si128(&state->ins.xmms[3], _mm_lddqu_si128((__m128i const *)(text + 48)));
             _sz_hash_state_update_haswell(state);
             state->ins_length += 64;
             text += 64;
@@ -1623,9 +1639,11 @@ SZ_INTERNAL void _sz_hash_state_update_ice(sz_hash_state_t *state) {
     __m512i const shuffle_mask = _mm512_load_si512((__m512i const *)_sz_hash_u8x16x4_shuffle());
     // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
     // ! we must use `_mm512_storeu_si512` stores to update the state.
-    _mm512_storeu_si512(&state->aes.zmm, _mm512_aesenc_epi128(state->aes.zmm, state->ins.zmm));
+    _mm512_storeu_si512(&state->aes.zmm,
+                        _mm512_aesenc_epi128(_mm512_loadu_si512(&state->aes.zmm), _mm512_loadu_si512(&state->ins.zmm)));
     _mm512_storeu_si512(&state->sum.zmm,
-                        _mm512_add_epi64(_mm512_shuffle_epi8(state->sum.zmm, shuffle_mask), state->ins.zmm));
+                        _mm512_add_epi64(_mm512_shuffle_epi8(_mm512_loadu_si512(&state->sum.zmm), shuffle_mask),
+                                         _mm512_loadu_si512(&state->ins.zmm)));
 }
 
 SZ_PUBLIC sz_u64_t sz_hash_ice(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
