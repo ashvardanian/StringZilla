@@ -51,6 +51,8 @@
 #include "bench.hpp"
 #include "test.hpp" // `levenshtein_baseline`, `unary_substitution_costs`
 
+#include "stringzilla/similarity.hpp"
+
 using namespace ashvardanian::stringzilla::scripts;
 
 #pragma region Hamming Distance
@@ -135,6 +137,26 @@ struct alignment_score_from_sz {
             NULL, &result_score);
         do_not_optimize(status);
         sz_size_t result_distance = (sz_size_t)(-result_score);
+        std::size_t bytes_passed = std::min(a.size(), b.size());
+        std::size_t cells_passed = a.size() * b.size();
+        return {bytes_passed, static_cast<check_value_t>(result_distance), cells_passed};
+    }
+};
+
+/** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
+template <sz_levenshtein_distance_t levenshtein_distance_>
+struct score_from_sz_cpp {
+
+    environment_t const &env;
+    sz_size_t bound = SZ_SIZE_MAX;
+
+    inline call_result_t operator()(std::size_t token_index) const noexcept {
+        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+    }
+
+    inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept(false) {
+        sz_size_t result_distance = sz::openmp::levenshtein_distance(a, b);
+        do_not_optimize(result_distance);
         std::size_t bytes_passed = std::min(a.size(), b.size());
         std::size_t cells_passed = a.size() * b.size();
         return {bytes_passed, static_cast<check_value_t>(result_distance), cells_passed};

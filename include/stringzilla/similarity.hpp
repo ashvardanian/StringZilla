@@ -5,10 +5,10 @@
  *
  *  Includes core APIs:
  *
- *  - `sz::openmp::levenshtein_distances` & `sz::openmp::levenshtein_distances_utf8` for Levenshtein edit-distances.
- *  - `sz::openmp::needleman_wunsch_score` for weighted Needleman-Wunsch global alignment.
+ *  - `sz::levenshtein_distances` & `sz::levenshtein_distances_utf8` for Levenshtein edit-distances.
+ *  - `sz::needleman_wunsch_score` for weighted Needleman-Wunsch global alignment.
  *
- *  Those are mostly providing specialized overloads of the @b `sz::openmp::score_diagonally` template.
+ *  Those are mostly providing specialized overloads of the @b `sz::score_diagonally` template.
  */
 #ifndef STRINGZILLA_SIMILARITY_HPP_
 #define STRINGZILLA_SIMILARITY_HPP_
@@ -23,10 +23,14 @@ struct uniform_substitution_cost_t {
     sz_error_cost_t operator()(char a, char b) const { return a == b ? 0 : 1; }
 };
 
+struct lookup_substitution_cost_t {
+    sz_error_cost_t const *costs;
+    sz_error_cost_t operator()(char a, char b) const { return costs[(sz_u8_t)a * 256 + (sz_u8_t)b]; }
+};
+
 /**
  *  @brief  Alignment Score and Edit Distance algorithm evaluating the Dynamic Programming matrix
  *          @b three skewed (reverse) diagonals at a time on a CPU, leveraging OpenMP for parallelization.
- *  @sa     sz_levenshtein_distance, sz_levenshtein_distance_utf8, sz_needleman_wunsch_score
  *
  *  @param[in] first The first string.
  *  @param[in] first_length The length of the first string.
@@ -36,25 +40,37 @@ struct uniform_substitution_cost_t {
  *  There are smarter algorithms for computing the Levenshtein distance, mostly based on bit-level operations.
  *  Those, however, don't generalize well to arbitrary length inputs or non-uniform substitution costs.
  *  This algorithm provides a more flexible baseline implementation for future SIMD and GPGPU optimizations.
+ *
+ *  @note   The API of this algorithm is a bit weird, but it's designed to minimize the reliance on the definitions
+ *          in the `stringzilla.hpp` header, making compilation times shorter for the end-user.
+ *  @sa     For lower-level API, check `sz_levenshtein_distance[_utf8]` and `sz_needleman_wunsch_score`.
+ *  @sa     For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
+ *  @sa     For bulk API, use `sz::levenshtein_distances[_utf8]`.
  */
 template <                                                         //
     typename char_type_ = char,                                    //
     typename distance_type_ = sz_size_t,                           //
     typename get_substitution_cost_ = uniform_substitution_cost_t, //
-    sz_error_cost_t gap_cost_ = 1                                  //
+    typename allocator_type_ = std::allocator<char>                //
     >
-sz_status_t score_diagonally(                            //
-    char_type_ const *shorter, sz_size_t shorter_length, //
-    char_type_ const *longer, sz_size_t longer_length,   //
-    get_substitution_cost_ &&get_substitution_cost,      //
-    sz_memory_allocator_t *alloc,                        //
-    distance_type_ *result_ptr) {
-
+sz_status_t score_diagonally(                          //
+    char_type_ const *first, sz_size_t first_length,   //
+    char_type_ const *second, sz_size_t second_length, //
+    distance_type_ *result_ptr,
+    sz_error_cost_t gap_cost = 1,                                                    //
+    get_substitution_cost_ &&get_substitution_cost = uniform_substitution_cost_t {}, //
+    allocator_type_ &&alloc = allocator_type_ {}                                     //
+) {
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
-    sz_memory_allocator_t global_alloc;
-    if (!alloc) {
-        sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
+    using allocated_type = typename allocator_type_::value_type;
+    static_assert(sizeof(allocated_type) == sizeof(char), "Allocator must be byte-aligned");
+
+    // Make sure the size relation between the strings is correct.
+    char_type_ const *shorter = first, *longer = second;
+    sz_size_t shorter_length = first_length, longer_length = second_length;
+    if (shorter_length > longer_length) {
+        std::swap(shorter, longer);
+        std::swap(shorter_length, longer_length);
     }
 
     // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
@@ -75,14 +91,14 @@ sz_status_t score_diagonally(                            //
     // Let's allocate a bit more memory and reverse-export our shorter string into that buffer.
     sz_size_t const buffer_length =
         sizeof(distance_type_) * max_diagonal_length * 3 + shorter_length * sizeof(char_type_);
-    distance_type_ *const distances = (distance_type_ *)alloc->allocate(buffer_length, alloc->handle);
+    distance_type_ *const distances = (distance_type_ *)alloc.allocate(buffer_length);
     if (!distances) return sz_bad_alloc_k;
 
     // The next few pointers will be swapped around.
     distance_type_ *previous_distances = distances;
-    distance_type_ *current_distances = previous_distances + longer_dim;
-    distance_type_ *next_distances = current_distances + longer_dim;
-    char_type_ *const shorter_reversed = (char_type_ *)(next_distances + longer_dim);
+    distance_type_ *current_distances = previous_distances + max_diagonal_length;
+    distance_type_ *next_distances = current_distances + max_diagonal_length;
+    char_type_ *const shorter_reversed = (char_type_ *)(next_distances + max_diagonal_length);
 
     // Export the reversed string into the buffer.
     for (sz_size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
@@ -107,13 +123,13 @@ sz_status_t score_diagonally(                            //
             char_type_ shorter_char = shorter_reversed[shorter_length - next_diagonal_index + offset_in_diagonal];
             char_type_ longer_char = longer[offset_in_diagonal - 1];
             sz_error_cost_t cost_of_substitution = get_substitution_cost(shorter_char, longer_char);
-            distance_type_ cost_if_substitution = previous_distances[offset_in_diagonal] + cost_of_substitution;
+            distance_type_ cost_if_substitution = previous_distances[offset_in_diagonal - 1] + cost_of_substitution;
             distance_type_ cost_if_deletion_or_insertion =     //
                 sz_min_of_two(                                 //
                     current_distances[offset_in_diagonal - 1], //
                     current_distances[offset_in_diagonal]      //
                     ) +
-                gap_cost_;
+                gap_cost;
             next_distances[offset_in_diagonal] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
         }
         // Don't forget to populate the first row and the first column of the Levenshtein matrix.
@@ -139,16 +155,19 @@ sz_status_t score_diagonally(                            //
                     current_distances[offset_in_diagonal],    //
                     current_distances[offset_in_diagonal + 1] //
                     ) +
-                gap_cost_;
+                gap_cost;
             next_distances[offset_in_diagonal] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
         }
         next_distances[next_diagonal_length - 1] = next_diagonal_index;
         // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
         // dropping the first element in the current array.
         distance_type_ *temporary = previous_distances;
-        previous_distances = current_distances + 1; // ! Note how we shift forward here
+        previous_distances = current_distances;
         current_distances = next_distances;
         next_distances = temporary;
+        // ! Drop the first entry among the current distances.
+        sz_move((sz_ptr_t)(previous_distances), (sz_ptr_t)(previous_distances + 1),
+                (max_diagonal_length - 1) * sizeof(distance_type_));
     }
 
     // Now let's handle the bottom-right triangle of the matrix.
@@ -165,69 +184,168 @@ sz_status_t score_diagonally(                            //
                     current_distances[offset_in_diagonal],    //
                     current_distances[offset_in_diagonal + 1] //
                     ) +
-                gap_cost_;
+                gap_cost;
             next_distances[offset_in_diagonal] = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
         }
         // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
         // dropping the first element in the current array.
         distance_type_ *temporary = previous_distances;
-        previous_distances = current_distances + 1; // ! Note how we shift forward here
+        previous_distances = current_distances;
         current_distances = next_distances;
         next_distances = temporary;
+        // ! Drop the first entry among the current distances.
+        sz_move((sz_ptr_t)(previous_distances), (sz_ptr_t)(previous_distances + 1),
+                (max_diagonal_length - 1) * sizeof(distance_type_));
     }
 
     // Cache scalar before `free` call.
     distance_type_ result = current_distances[0];
-    alloc->free(distances, buffer_length, alloc->handle);
+    alloc.deallocate((allocated_type *)distances, buffer_length);
     *result_ptr = result;
     return sz_success_k;
 }
 
-template <typename first_string_type_, typename second_string_type_>
-inline std::size_t levenshtein_distance( //
-    first_string_type_ const &first, second_string_type_ const &second) {
+template <                                          //
+    typename first_type_,                           //
+    typename second_type_,                          //
+    typename allocator_type_ = std::allocator<char> //
+    >
+inline sz_size_t levenshtein_distance( //
+    first_type_ const &first, second_type_ const &second,
+    allocator_type_ &&alloc = allocator_type_ {}) noexcept(false) {
 
-    std::size_t const first_length = first.length();
-    std::size_t const second_length = second.length();
+    sz_size_t const first_length = first.length();
+    sz_size_t const second_length = second.length();
     if (first_length == 0) return second_length;
     if (second_length == 0) return first_length;
 
-    sz_size_t max_length = sz_max_of_two(first_length, second_length);
-    if (max_length < 256u) {
-
+    // Estimate the maximum dimension of the DP matrix
+    sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+    if (max_dim < 256u) {
         sz_u8_t result_u8;
-        sz_status_t status = score_diagonally<char, sz_u8_t, uniform_substitution_cost_t, 1>(
-            first.data(), first_length, second.data(), second_length, {}, NULL, &result_u8);
-        sz_unused(status);
+        sz_status_t status = score_diagonally<char, sz_u8_t, uniform_substitution_cost_t, allocator_type_>(
+            first.data(), first_length, second.data(), second_length, &result_u8, 1, uniform_substitution_cost_t {},
+            std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
         return result_u8;
     }
-    else if (max_length < 65536u) {
+    else if (max_dim < 65536u) {
         sz_u16_t result_u16;
-        sz_status_t status = score_diagonally<char, sz_u16_t, uniform_substitution_cost_t, 1>(
-            first.data(), first_length, second.data(), second_length, {}, NULL, &result_u16);
-        sz_unused(status);
+        sz_status_t status = score_diagonally<char, sz_u16_t, uniform_substitution_cost_t, allocator_type_>(
+            first.data(), first_length, second.data(), second_length, &result_u16, 1, uniform_substitution_cost_t {},
+            std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
         return result_u16;
     }
     else {
-        sz_size_t result_size_t;
-        sz_status_t status = score_diagonally<char, sz_size_t, uniform_substitution_cost_t, 1>(
-            first.data(), first_length, second.data(), second_length, {}, NULL, &result_size_t);
-        sz_unused(status);
-        return result_size_t;
+        sz_size_t result_size;
+        sz_status_t status = score_diagonally<char, sz_size_t, uniform_substitution_cost_t, allocator_type_>(
+            first.data(), first_length, second.data(), second_length, &result_size, 1, uniform_substitution_cost_t {},
+            std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
+        return result_size;
     }
 }
 
-inline void levenshtein_distance_utf8(                                //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result) {
-    sz_unused(a && b && a_length && b_length && alloc && result && bound);
+template <                                          //
+    typename first_type_,                           //
+    typename second_type_,                          //
+    typename allocator_type_ = std::allocator<char> //
+    >
+inline sz_size_t levenshtein_distance_utf8( //
+    first_type_ const &first, second_type_ const &second,
+    allocator_type_ &&alloc = allocator_type_ {}) noexcept(false) {
+
+    // Check if the strings are entirely composed of ASCII characters,
+    // and default to a simpler algorithm in that case.
+    if (sz_isascii(first.data(), first.length()) && sz_isascii(second.data(), second.length()))
+        return levenshtein_distance(first, second);
+
+    // Allocate some memory to expand UTF-8 strings into UTF-32.
+    sz_size_t const max_utf32_bytes = first.size() * 4 + second.size() * 4;
+    sz_rune_t const *const first_utf32 = (sz_rune_t *)alloc.allocate(max_utf32_bytes);
+    sz_rune_t const *const second_utf32 = first_utf32 + first.size();
+
+    // Export into UTF-32 buffer.
+    sz_rune_length_t rune_length;
+    sz_size_t first_length_utf32 = 0, second_length_utf32 = 0;
+    for (sz_size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < first.size();
+         progress_utf8 += rune_length, ++progress_utf32, ++first_length_utf32)
+        sz_rune_parse(first.data() + progress_utf8, first_utf32 + progress_utf32, &rune_length);
+    for (sz_size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < second.size();
+         progress_utf8 += rune_length, ++progress_utf32, ++second_length_utf32)
+        sz_rune_parse(second.data() + progress_utf8, second_utf32 + progress_utf32, &rune_length);
+
+    // Infer the largest distance type we may need fr aggregated error costs.
+    // Estimate the maximum dimension of the DP matrix
+    sz_size_t const max_dim = sz_max_of_two(first_length_utf32, second_length_utf32) + 1;
+    if (max_dim < 256u) {
+        sz_u8_t result_u8;
+        sz_status_t status = score_diagonally<sz_rune_t, sz_u8_t, uniform_substitution_cost_t, allocator_type_>(
+            first_utf32, first_length_utf32, second_utf32, second_length_utf32, &result_u8, 1,
+            uniform_substitution_cost_t {}, std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
+        return result_u8;
+    }
+    else if (max_dim < 65536u) {
+        sz_u16_t result_u16;
+        sz_status_t status = score_diagonally<sz_rune_t, sz_u16_t, uniform_substitution_cost_t, allocator_type_>(
+            first_utf32, first_length_utf32, second_utf32, second_length_utf32, &result_u16, 1,
+            uniform_substitution_cost_t {}, std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
+        return result_u16;
+    }
+    else {
+        sz_size_t result_size;
+        sz_status_t status = score_diagonally<sz_rune_t, sz_size_t, uniform_substitution_cost_t, allocator_type_>(
+            first_utf32, first_length_utf32, second_utf32, second_length_utf32, &result_size, 1,
+            uniform_substitution_cost_t {}, std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
+        return result_size;
+    }
 }
 
-inline void needleman_wunsch_score(                                   //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
-    sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
-    sz_memory_allocator_t *alloc, sz_ssize_t *result) {
-    sz_unused(a && b && a_length && b_length && subs && alloc && result && gap);
+template <                                          //
+    typename first_type_,                           //
+    typename second_type_,                          //
+    typename allocator_type_ = std::allocator<char> //
+    >
+inline sz_ssize_t needleman_wunsch_score(                 //
+    first_type_ const &first, second_type_ const &second, //
+    sz_error_cost_t const *subs, sz_error_cost_t gap,     //
+    allocator_type_ &&alloc = allocator_type_ {}) noexcept(false) {
+
+    sz_size_t const first_length = first.length();
+    sz_size_t const second_length = second.length();
+    if (first_length == 0) return second_length;
+    if (second_length == 0) return first_length;
+
+    // Estimate the maximum dimension of the DP matrix
+    sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+    if (max_dim < 256u) {
+        sz_u8_t result_u8;
+        sz_status_t status = score_diagonally<char, sz_u8_t, lookup_substitution_cost_t, allocator_type_>(
+            first.data(), first_length, second.data(), second_length, &result_u8, gap,
+            lookup_substitution_cost_t {subs}, std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
+        return result_u8;
+    }
+    else if (max_dim < 65536u) {
+        sz_u16_t result_u16;
+        sz_status_t status = score_diagonally<char, sz_u16_t, lookup_substitution_cost_t, allocator_type_>(
+            first.data(), first_length, second.data(), second_length, &result_u16, gap,
+            lookup_substitution_cost_t {subs}, std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
+        return result_u16;
+    }
+    else {
+        sz_size_t result_size;
+        sz_status_t status = score_diagonally<char, sz_size_t, lookup_substitution_cost_t, allocator_type_>(
+            first.data(), first_length, second.data(), second_length, &result_size, gap,
+            lookup_substitution_cost_t {subs}, std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
+        return result_size;
+    }
 }
 
 inline void levenshtein_distances() {}

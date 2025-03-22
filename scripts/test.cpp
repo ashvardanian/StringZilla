@@ -36,9 +36,16 @@
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
 #include <stringzilla/stringzilla.hpp>
+#include <stringzilla/similarity.hpp>
 
 #if defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
+#endif
+
+#if defined(__clang__) || defined(__GNUC__)
+#define ASAN_DISABLE __attribute__((no_sanitize_address))
+#else
+#define ASAN_DISABLE
 #endif
 
 #include <algorithm>     // `std::transform`
@@ -67,6 +74,10 @@ namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
 using sz::literals::operator""_sv; // for `sz::string_view`
 using sz::literals::operator""_bs; // for `sz::byteset`
+
+#if _SZ_IS_CPP17
+using namespace std::literals; // for ""sv
+#endif
 
 /*
  *  Instantiate all the templates to make the symbols visible and also check
@@ -152,29 +163,62 @@ static void test_arithmetical_utilities() {
 #endif
 }
 
-static void test_structural_utilities() {
+/** @brief Validates `sz_sequence_t` and related construction utilities. */
+static void test_sequence_struct() {
     // Make sure the sequence helper functions work as expected
     // for both trivial c-style arrays and
+    sz_sequence_t sequence;
+    sz_cptr_t strings[] = {"banana", "apple", "cherry"};
+    sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
+    assert(sequence.count == 3);
+    assert("banana"_sv == sequence.get_start(sequence.handle, 0));
+    assert("apple"_sv == sequence.get_start(sequence.handle, 1));
+    assert("cherry"_sv == sequence.get_start(sequence.handle, 2));
+}
+
+/** @brief Validates `sz_memory_allocator_t` and related construction utilities. */
+static void test_memory_allocator_struct() {
     {
-        sz_sequence_t sequence;
-        sz_cptr_t strings[] = {"banana", "apple", "cherry"};
-        sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
-        assert(sequence.count == 3);
-        assert("banana"_sv == sequence.get_start(sequence.handle, 0));
-        assert("apple"_sv == sequence.get_start(sequence.handle, 1));
-        assert("cherry"_sv == sequence.get_start(sequence.handle, 2));
+        sz_memory_allocator_t alloc;
+        sz_memory_allocator_init_default(&alloc);
+        assert(alloc.allocate(0, alloc.handle) == nullptr);
     }
 
-    // sz_memory_allocator_init_default;
-    // sz_memory_allocator_init_fixed;
-    // _sz_extract_utf8_rune;
-    // sz_byteset_init;
-    // sz_byteset_init_ascii;
-    // sz_byteset_add_u8;
-    // sz_byteset_add;
-    // sz_byteset_contains_u8;
-    // sz_byteset_contains;
-    // sz_byteset_invert;
+    // Non-NULL allocation
+    {
+        sz_memory_allocator_t alloc;
+        sz_memory_allocator_init_default(&alloc);
+        void *byte = alloc.allocate(1, alloc.handle);
+        assert(byte != nullptr);
+        alloc.free(byte, 1, alloc.handle);
+    }
+
+    // Use a fixed buffer
+    {
+        char buffer[1024];
+        sz_memory_allocator_t alloc;
+        sz_memory_allocator_init_fixed(&alloc, buffer, sizeof(buffer));
+        void *byte = alloc.allocate(1, alloc.handle);
+        assert(byte != nullptr);
+        alloc.free(byte, 1, alloc.handle);
+    }
+}
+
+/** @brief Validates `sz_byteset_t` and related construction utilities. */
+static void test_bytest_struct() {
+    sz_byteset_t s;
+    sz_byteset_init(&s);
+    assert(sz_byteset_contains(&s, 'a') == false);
+    sz_byteset_add(&s, 'a');
+    assert(sz_byteset_contains(&s, 'a') == true);
+    sz_byteset_add(&s, 'z');
+    assert(sz_byteset_contains(&s, 'z') == true);
+    sz_byteset_invert(&s);
+    assert(sz_byteset_contains(&s, 'a') == false);
+    assert(sz_byteset_contains(&s, 'z') == false);
+    assert(sz_byteset_contains(&s, 'b') == true);
+    sz_byteset_init_ascii(&s);
+    assert(sz_byteset_contains(&s, 'A') == true);
 }
 
 /**
@@ -183,7 +227,7 @@ static void test_structural_utilities() {
  *  The test covers increasingly long and complex strings, starting with "abcabc..." repetitions and
  *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
  */
-static void test_hashing_on_platform(                                   //
+static void test_hash_equivalence(                                      //
     sz_hash_t hash_base, sz_hash_state_init_t init_base,                //
     sz_hash_state_stream_t stream_base, sz_hash_state_fold_t fold_base, //
     sz_hash_t hash_simd, sz_hash_state_init_t init_simd,                //
@@ -250,7 +294,7 @@ static void test_hashing_on_platform(                                   //
  *  @brief  Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
  *          produces exactly the same output across different SIMD implementations.
  */
-static void test_random_generator_on_platform(sz_fill_random_t generate_base, sz_fill_random_t generate_simd) {
+static void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_random_t generate_simd) {
 
     auto test_on_nonce = [&](std::size_t length, sz_u64_t nonce) {
         std::string text_base(length, '\0');
@@ -272,46 +316,188 @@ static void test_random_generator_on_platform(sz_fill_random_t generate_base, sz
             test_on_nonce(length, nonce);
 }
 
-static void test_simd_against_serial() {
+/**
+ *  @brief  Tests the correctness of the string class Levenshtein distance computation,
+ *          as well as the similarity scoring functions for bioinformatics-like workloads.
+ */
+template <typename base_operator_, typename simd_operator_>
+static void test_edit_distance_equivalence(base_operator_ distance_base, simd_operator_ &&distance_simd) {
+
+    // Let's log the error and the strings that caused it.
+    auto test_distance = [&](std::string const &l, std::string const &r) {
+        auto result_base = distance_base(l, r);
+        auto result_simd = distance_simd(l, r);
+        if (result_base == result_simd) return;
+
+        char const *ellipsis = l.length() > 22 || r.length() > 22 ? "..." : "";
+        std::printf("Edit Distance error: distance(\"%.22s%s\", \"%.22s%s\"); got %zd, expected %zd\n", //
+                    l.c_str(), ellipsis, r.c_str(), ellipsis, result_simd, result_base);
+    };
+
+    // Pick a few representative cases for ASCII and Unicode strings.
+    struct {
+        char const *left;
+        char const *right;
+        std::size_t edit_distance_bytes;
+        std::size_t edit_distance_utf8;
+    } explicit_cases[] = {
+        {"atca", "ctactcaccc", 6, 6},
+        {"listen", "silent", 4, 4},
+        {"A", "=", 1, 1},
+        {"a", "a", 0, 0},
+        {"", "", 0, 0},
+        {"", "abc", 3, 3},
+        {"abc", "", 3, 3},
+        {"abc", "ac", 1, 1},                   // one deletion
+        {"abc", "a_bc", 1, 1},                 // one insertion
+        {"abc", "adc", 1, 1},                  // one substitution
+        {"abc", "abc", 0, 0},                  // same string
+        {"ggbuzgjux{}l", "gbuzgjux{}l", 1, 1}, // one insertion (prepended)
+        {"apple", "aple", 1, 1},
+        //
+        // Unicode:
+        {"αβγδ", "αγδ", 2, 1},                      // Each Greek symbol is 2 bytes in size
+        {"مرحبا بالعالم", "مرحبا يا عالم", 3, 2},   // "Hello World" vs "Welcome to the World" ?
+        {"école", "école", 3, 2},                   // letter "é" as a single character vs "e" + "´"
+        {"Schön", "Scho\u0308n", 3, 2},             // "ö" represented as "o" + "¨"
+        {"💖", "💗", 1, 1},                         // 4-byte emojis: Different hearts
+        {"𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓", 3, 3},          // Ancient Chinese characters, no spaces vs spaces
+        {"München", "Muenchen", 2, 2},              // German name with umlaut vs. its transcription
+        {"façade", "facade", 2, 1},                 // "ç" represented as "c" with cedilla vs. plain "c"
+        {"こんにちは世界", "こんばんは世界", 3, 2}, // Japanese: "Good morning world" vs "Good evening world"
+        {"👩‍👩‍👧‍👦", "👨‍👩‍👧‍👦", 1, 1}, // Family emojis with different compositions
+        {"Data科学123", "Data科學321", 3, 3},
+        {"🙂🌍🚀", "🙂🌎✨", 5, 2},
+    };
+    for (auto explicit_case : explicit_cases) test_distance(explicit_case.left, explicit_case.right);
+
+    // Gradually increasing the length of the strings.
+    for (std::size_t length = 0; length != 1000; ++length) {
+        std::string left, right;
+        for (std::size_t i = 0; i != length; ++i) left.push_back('a'), right.push_back('b');
+        test_distance(left, right);
+    }
+
+    // Generate random strings and compare the results.
+    struct {
+        std::size_t length_upper_bound;
+        std::size_t iterations;
+    } fuzzy_cases[] = {
+        {10, 1000},
+        {64, 128},
+        {100, 100},
+        {1000, 10},
+    };
+    std::mt19937 &generator = global_random_generator();
+    sz::string first, second;
+    for (auto fuzzy_case : fuzzy_cases) {
+        char alphabet[4] = {'a', 'c', 'g', 't'};
+        std::uniform_int_distribution<std::size_t> length_distribution(0, fuzzy_case.length_upper_bound);
+        for (std::size_t i = 0; i != fuzzy_case.iterations; ++i) {
+            std::size_t first_length = length_distribution(generator);
+            std::size_t second_length = length_distribution(generator);
+            std::generate_n(std::back_inserter(first), first_length, [&]() { return alphabet[generator() % 4]; });
+            std::generate_n(std::back_inserter(second), second_length, [&]() { return alphabet[generator() % 4]; });
+            test_distance(first, second);
+
+            // Try computing the distance on equal-length chunks of those strings.
+            first.resize((std::min)(first_length, second_length));
+            second.resize((std::min)(first_length, second_length));
+            test_distance(first, second);
+
+            // Discard before the next iteration.
+            first.clear();
+            second.clear();
+        }
+    }
+}
+
+/** @brief Wraps a hardware-specific Levenshtein-distance backend. */
+template <sz_levenshtein_distance_t levenshtein_distance_>
+struct levenshtein_from_sz {
+
+    sz_size_t bound = SZ_SIZE_MAX;
+
+    inline sz_size_t operator()(std::string const &a, std::string const &b) const noexcept(false) {
+        sz_size_t result_distance;
+        sz_status_t status = levenshtein_distance_( //
+            a.data(), a.size(),                     //
+            b.data(), b.size(),                     //
+            bound, NULL, &result_distance);
+        assert(status == sz_success_k);
+        return result_distance;
+    }
+};
+
+/** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
+template <sz_needleman_wunsch_score_t needleman_wunsch_>
+struct alignment_score_from_sz {
+
+    sz_size_t bound = SZ_SIZE_MAX;
+    error_costs_256x256_t costs = unary_substitution_costs();
+
+    inline sz_size_t operator()(std::string const &a, std::string const &b) const noexcept(false) {
+        sz_ssize_t result_score;
+        sz_status_t status = needleman_wunsch_( //
+            a.data(), a.size(),                 //
+            b.data(), b.size(),                 //
+            costs.data(), (sz_error_cost_t)-1,  //
+            NULL, &result_score);
+        sz_size_t result_distance = (sz_size_t)(-result_score);
+        assert(status == sz_success_k);
+        return result_distance;
+    }
+};
+
+static void test_equivalence() {
+
+    test_edit_distance_equivalence(                            //
+        levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
+        alignment_score_from_sz<sz_needleman_wunsch_score_serial>());
+
+    test_edit_distance_equivalence(                            //
+        levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
+        [](std::string const &a, std::string const &b) { return sz::openmp::levenshtein_distance(a, b); });
+
 #if SZ_USE_HASWELL
-    test_hashing_on_platform(                                   //
+    test_hash_equivalence(                                      //
         sz_hash_serial, sz_hash_state_init_serial,              //
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
         sz_hash_haswell, sz_hash_state_init_haswell,            //
         sz_hash_state_stream_haswell, sz_hash_state_fold_haswell);
-    test_random_generator_on_platform(sz_fill_random_serial, sz_fill_random_haswell);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_haswell);
 #endif
 #if SZ_USE_SKYLAKE
-    test_hashing_on_platform(                                   //
+    test_hash_equivalence(                                      //
         sz_hash_serial, sz_hash_state_init_serial,              //
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
         sz_hash_skylake, sz_hash_state_init_skylake,            //
         sz_hash_state_stream_skylake, sz_hash_state_fold_skylake);
-    test_random_generator_on_platform(sz_fill_random_serial, sz_fill_random_skylake);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_skylake);
 #endif
 #if SZ_USE_ICE
-    test_hashing_on_platform(                                   //
+    test_hash_equivalence(                                      //
         sz_hash_serial, sz_hash_state_init_serial,              //
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
         sz_hash_ice, sz_hash_state_init_ice,                    //
         sz_hash_state_stream_ice, sz_hash_state_fold_ice);
-    test_random_generator_on_platform(sz_fill_random_serial, sz_fill_random_ice);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_ice);
 #endif
 #if SZ_USE_NEON
-    test_hashing_on_platform(                                   //
+    test_hash_equivalence(                                      //
         sz_hash_serial, sz_hash_state_init_serial,              //
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
         sz_hash_neon, sz_hash_state_init_neon,                  //
         sz_hash_state_stream_neon, sz_hash_state_fold_neon);
-    test_random_generator_on_platform(sz_fill_random_serial, sz_fill_random_neon);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_neon);
 #endif
 #if SZ_USE_SVE2
-    test_hashing_on_platform(                                   //
+    test_hash_equivalence(                                      //
         sz_hash_serial, sz_hash_state_init_serial,              //
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
         sz_hash_sve2, sz_hash_state_init_sve2,                  //
         sz_hash_state_stream_sve2, sz_hash_state_fold_sve2);
-    test_random_generator_on_platform(sz_fill_random_serial, sz_fill_random_sve2);
+    test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_sve2);
 #endif
 };
 
@@ -932,6 +1118,10 @@ static void test_stl_conversions() {
 #endif
 }
 
+/**
+ *  @brief The sum of an arithmetic progression.
+ *  @see https://en.wikipedia.org/wiki/Arithmetic_progression
+ */
 inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size_t step = 1) {
     std::size_t n = (last >= first) ? ((last - first) / step + 1) : 0;
     // Return 0 if there are no terms
@@ -1640,118 +1830,6 @@ static void test_search_with_misaligned_repetitions() {
 #endif
 
 /**
- *  @brief  Tests the correctness of the string class Levenshtein distance computation,
- *          as well as the similarity scoring functions for bioinformatics-like workloads.
- */
-static void test_levenshtein_distances() {
-    struct {
-        char const *left;
-        char const *right;
-        std::size_t distance;
-    } explicit_cases[] = {
-        {"a", "a", 0},
-        {"A", "=", 1},
-        {"listen", "silent", 4},
-        {"", "", 0},
-        {"", "abc", 3},
-        {"abc", "", 3},
-        {"abc", "ac", 1},                   // one deletion
-        {"abc", "a_bc", 1},                 // one insertion
-        {"abc", "adc", 1},                  // one substitution
-        {"abc", "abc", 0},                  // same string
-        {"ggbuzgjux{}l", "gbuzgjux{}l", 1}, // one insertion (prepended)
-        {"apple", "aple", 1},
-        // Unicode:
-        {"αβγδ", "αγδ", 2},                      // Each Greek symbol is 2 bytes in size
-        {"مرحبا بالعالم", "مرحبا يا عالم", 3},   // "Hello World" vs "Welcome to the World" ?
-        {"école", "école", 3},                   // letter "é" as a single character vs "e" + "´"
-        {"Schön", "Scho\u0308n", 3},             // "ö" represented as "o" + "¨"
-        {"💖", "💗", 1},                         // 4-byte emojis: Different hearts
-        {"𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓", 3},          // Ancient Chinese characters, no spaces vs spaces
-        {"München", "Muenchen", 2},              // German name with umlaut vs. its transcription
-        {"façade", "facade", 2},                 // "ç" represented as "c" with cedilla vs. plain "c"
-        {"こんにちは世界", "こんばんは世界", 3}, // Japanese: "Good morning world" vs "Good evening world"
-        {"👩‍👩‍👧‍👦", "👨‍👩‍👧‍👦", 1}, // Family emojis with different compositions
-        {"Data科学123", "Data科學321", 3},
-        {"🙂🌍🚀", "🙂🌎✨", 5},
-    };
-
-    using matrix_t = std::int8_t[256][256];
-    error_costs_256x256_t costs_vector = unary_substitution_costs();
-    matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
-
-    auto print_failure = [&](char const *name, sz::string const &l, sz::string const &r, std::size_t expected,
-                             std::size_t received) {
-        char const *ellipsis = l.length() > 22 || r.length() > 22 ? "..." : "";
-        std::printf("%s error: distance(\"%.22s%s\", \"%.22s%s\"); got %zd, expected %zd\n", //
-                    name, l.c_str(), ellipsis, r.c_str(), ellipsis, received, expected);
-    };
-
-    auto test_distance = [&](sz::string const &l, sz::string const &r, std::size_t expected) {
-        auto received = sz::levenshtein_distance(l, r);
-        auto received_score = sz::alignment_score(l, r, costs, -1);
-        if (received != expected) print_failure("Levenshtein", l, r, expected, received);
-        if ((std::size_t)(-received_score) != expected) print_failure("Scoring", l, r, expected, received_score);
-        // The distance relation commutes
-        received = sz::levenshtein_distance(r, l);
-        received_score = sz::alignment_score(r, l, costs, -1);
-        if (received != expected) print_failure("Levenshtein", r, l, expected, received);
-        if ((std::size_t)(-received_score) != expected) print_failure("Scoring", r, l, expected, received_score);
-
-        // Validate the bounded variants:
-        if (received > 1) {
-            assert(sz::levenshtein_distance(l, r, received) == received);
-            assert(sz::levenshtein_distance(r, l, received - 1) >= (std::max)(l.size(), r.size()));
-        }
-    };
-
-    for (auto explicit_case : explicit_cases)
-        test_distance(sz::string(explicit_case.left), sz::string(explicit_case.right), explicit_case.distance);
-
-    // Gradually increasing the length of the strings.
-    for (std::size_t length = 0; length != 1000; ++length) {
-        sz::string left, right;
-        for (std::size_t i = 0; i != length; ++i) left.push_back('a'), right.push_back('b');
-        test_distance(left, right, length);
-    }
-
-    // Randomized tests
-    struct {
-        std::size_t length_upper_bound;
-        std::size_t iterations;
-    } fuzzy_cases[] = {
-        {10, 1000},
-        {64, 128},
-        {100, 100},
-        {1000, 10},
-    };
-    std::mt19937 &generator = global_random_generator();
-    sz::string first, second;
-    for (auto fuzzy_case : fuzzy_cases) {
-        char alphabet[4] = {'a', 'c', 'g', 't'};
-        std::uniform_int_distribution<std::size_t> length_distribution(0, fuzzy_case.length_upper_bound);
-        for (std::size_t i = 0; i != fuzzy_case.iterations; ++i) {
-            std::size_t first_length = length_distribution(generator);
-            std::size_t second_length = length_distribution(generator);
-            std::generate_n(std::back_inserter(first), first_length, [&]() { return alphabet[generator() % 4]; });
-            std::generate_n(std::back_inserter(second), second_length, [&]() { return alphabet[generator() % 4]; });
-            test_distance(first, second,
-                          levenshtein_baseline(first.c_str(), first.length(), second.c_str(), second.length()));
-
-            // Try computing the distance on equal-length chunks of those strings.
-            first.resize(std::min(first_length, second_length));
-            second.resize(std::min(first_length, second_length));
-            test_distance(first, second,
-                          levenshtein_baseline(first.c_str(), first.length(), second.c_str(), second.length()));
-
-            // Discard before the next iteration.
-            first.clear();
-            second.clear();
-        }
-    }
-}
-
-/**
  *  Evaluates the correctness of look-up table transforms using random lookup tables.
  *
  *  @param lookup_tables_to_try The number of random lookup tables to try.
@@ -1970,8 +2048,8 @@ int main(int argc, char const **argv) {
 
     // Basic utilities
     test_arithmetical_utilities();
-    test_structural_utilities();
-    test_simd_against_serial();
+    test_sequence_struct();
+    test_equivalence();
 
     // Sequences of strings
     test_sorting_algorithms();
@@ -2013,8 +2091,6 @@ int main(int argc, char const **argv) {
 #if _SZ_IS_CPP17 && __cpp_lib_string_view
     test_search_with_misaligned_repetitions();
 #endif
-
-    test_levenshtein_distances();
 
     std::printf("All tests passed... Unbelievable!\n");
     return 0;
