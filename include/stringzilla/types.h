@@ -728,7 +728,7 @@ typedef union sz_u512_vec_t {
 #pragma region UTF8
 
 /** @brief Extracts just one UTF8 codepoint from a UTF8 string into a 32-bit unsigned integer. */
-SZ_INTERNAL void _sz_extract_utf8_rune(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *code_length) {
+SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *code_length) {
     sz_u8_t const *current = (sz_u8_t const *)utf8;
     sz_u8_t leading_byte = *current++;
     sz_rune_t ch;
@@ -775,11 +775,11 @@ SZ_INTERNAL void _sz_extract_utf8_rune(sz_cptr_t utf8, sz_rune_t *code, sz_rune_
  *  @warning The result is undefined id the UTF8 string is corrupted.
  *  @return The length in the number of codepoints.
  */
-SZ_INTERNAL sz_size_t _sz_export_utf8_to_utf32(sz_cptr_t utf8, sz_size_t utf8_length, sz_rune_t *utf32) {
+SZ_PUBLIC sz_size_t sz_runes_parse(sz_cptr_t utf8, sz_size_t utf8_length, sz_rune_t *utf32) {
     sz_cptr_t const end = utf8 + utf8_length;
     sz_size_t count = 0;
     sz_rune_length_t rune_length;
-    for (; utf8 != end; utf8 += rune_length, utf32++, count++) _sz_extract_utf8_rune(utf8, utf32, &rune_length);
+    for (; utf8 != end; utf8 += rune_length, utf32++, count++) sz_rune_parse(utf8, utf32, &rune_length);
     return count;
 }
 

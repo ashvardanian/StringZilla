@@ -198,15 +198,14 @@ SZ_PUBLIC void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t sourc
 #pragma region Helper API
 
 /**
- *  @brief  Initializes a lookup table for converting ASCII characters to lowercase.
+ *  @brief Initializes a lookup table for converting ASCII characters to lowercase.
+ *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  *
  *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
  *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
  *  can be done by flipping the 5th bit each inappropriate character byte.
  *  This, however, breaks for extended ASCII, so a different solution is needed.
  *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
- *
- *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
 SZ_PUBLIC void sz_lookup_init_lower(sz_ptr_t lut) {
     static sz_u8_t const lowered[256] = {
@@ -231,15 +230,14 @@ SZ_PUBLIC void sz_lookup_init_lower(sz_ptr_t lut) {
 }
 
 /**
- *  @brief  Initializes a lookup table for converting ASCII characters to uppercase.
+ *  @brief Initializes a lookup table for converting ASCII characters to uppercase.
+ *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  *
  *  ASCII characters [A, Z] map to decimals [65, 90], and [a, z] map to [97, 122].
  *  So there are 26 english letters, shifted by 32 values, meaning that a conversion
  *  can be done by flipping the 5th bit each inappropriate character byte.
  *  This, however, breaks for extended ASCII, so a different solution is needed.
  *  http://0x80.pl/notesen/2016-01-06-swar-swap-case.html
- *
- *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
 SZ_PUBLIC void sz_lookup_init_upper(sz_ptr_t lut) {
     static sz_u8_t const upped[256] = {
@@ -264,8 +262,7 @@ SZ_PUBLIC void sz_lookup_init_upper(sz_ptr_t lut) {
 }
 
 /**
- *  @brief  Initializes a lookup table for converting bytes to ASCII characters.
- *
+ *  @brief Initializes a lookup table for converting bytes to ASCII characters.
  *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
 SZ_PUBLIC void sz_lookup_init_ascii(sz_ptr_t lut) {
@@ -273,8 +270,10 @@ SZ_PUBLIC void sz_lookup_init_ascii(sz_ptr_t lut) {
 }
 
 /**
- *  @brief  Check if there is a byte in this buffer, that exceeds 127 and can't be an ASCII character.
- *          This implementation uses hardware-agnostic SWAR technique, to process 8 characters at a time.
+ *  @brief Checks if all characters in a @p text are valid ASCII characters.
+ *  @param[in] text String to be analyzed.
+ *  @param[in] length Number of bytes in the string.
+ *  @return Whether all characters are valid ASCII characters.
  */
 SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length) {
 

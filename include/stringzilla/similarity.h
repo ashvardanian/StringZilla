@@ -241,15 +241,6 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_score(                     //
     sz_error_cost_t const *subs, sz_error_cost_t gap,                 //
     sz_memory_allocator_t *alloc, sz_ssize_t *result);
 
-/**
- *  @brief  Checks if all characters in the range are valid ASCII characters.
- *
- *  @param text     String to be analyzed.
- *  @param length   Number of bytes in the string.
- *  @return         Whether all characters are valid ASCII characters.
- */
-SZ_PUBLIC sz_bool_t sz_isascii(sz_cptr_t text, sz_size_t length);
-
 /** @copydoc sz_hamming_distance */
 SZ_PUBLIC sz_status_t sz_hamming_distance_serial(                     //
     sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, //
@@ -431,8 +422,8 @@ SZ_INTERNAL sz_status_t _sz_levenshtein_distance_wagner_fisher_serial( //
         sz_rune_t *const longer_utf32 = (sz_rune_t *)(buffer + sizeof(_distance_t) * (n * 2));
         sz_rune_t *const shorter_utf32 = longer_utf32 + longer_length;
         // Export the UTF8 sequences into the newly allocated buffer.
-        longer_length = _sz_export_utf8_to_utf32(longer, longer_length, longer_utf32);
-        shorter_length = _sz_export_utf8_to_utf32(shorter, shorter_length, shorter_utf32);
+        longer_length = sz_runes_parse(longer, longer_length, longer_utf32);
+        shorter_length = sz_runes_parse(shorter, shorter_length, shorter_utf32);
         longer = (sz_cptr_t)longer_utf32;
         shorter = (sz_cptr_t)shorter_utf32;
     }
@@ -581,6 +572,10 @@ SZ_PUBLIC sz_status_t sz_levenshtein_distance_utf8_serial( //
     sz_cptr_t a, sz_size_t a_length,                       //
     sz_cptr_t b, sz_size_t b_length,                       //
     sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result_ptr) {
+
+    if (sz_isascii(a, a_length) && sz_isascii(b, b_length))
+        return sz_levenshtein_distance_serial(a, a_length, b, b_length, bound, alloc, result_ptr);
+
     return _sz_levenshtein_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc, result_ptr);
 }
 
@@ -682,6 +677,9 @@ SZ_PUBLIC sz_status_t sz_hamming_distance_utf8_serial( //
     sz_cptr_t b, sz_size_t b_length,                   //
     sz_size_t bound, sz_size_t *result_ptr) {
 
+    if (sz_isascii(a, a_length) && sz_isascii(b, b_length))
+        return sz_hamming_distance_serial(a, a_length, b, b_length, bound, result_ptr);
+
     sz_cptr_t const a_end = a + a_length;
     sz_cptr_t const b_end = b + b_length;
     sz_size_t distance = 0;
@@ -691,28 +689,28 @@ SZ_PUBLIC sz_status_t sz_hamming_distance_utf8_serial( //
 
     if (bound) {
         for (; a < a_end && b < b_end && distance < bound; a += a_rune_length, b += b_rune_length) {
-            _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
-            _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+            sz_rune_parse(a, &a_rune, &a_rune_length);
+            sz_rune_parse(b, &b_rune, &b_rune_length);
             distance += (a_rune != b_rune);
         }
         // If one string has more runes, we need to go through the tail.
         if (distance < bound) {
             for (; a < a_end && distance < bound; a += a_rune_length, ++distance)
-                _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
+                sz_rune_parse(a, &a_rune, &a_rune_length);
 
             for (; b < b_end && distance < bound; b += b_rune_length, ++distance)
-                _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+                sz_rune_parse(b, &b_rune, &b_rune_length);
         }
     }
     else {
         for (; a < a_end && b < b_end; a += a_rune_length, b += b_rune_length) {
-            _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
-            _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+            sz_rune_parse(a, &a_rune, &a_rune_length);
+            sz_rune_parse(b, &b_rune, &b_rune_length);
             distance += (a_rune != b_rune);
         }
         // If one string has more runes, we need to go through the tail.
-        for (; a < a_end; a += a_rune_length, ++distance) _sz_extract_utf8_rune(a, &a_rune, &a_rune_length);
-        for (; b < b_end; b += b_rune_length, ++distance) _sz_extract_utf8_rune(b, &b_rune, &b_rune_length);
+        for (; a < a_end; a += a_rune_length, ++distance) sz_rune_parse(a, &a_rune, &a_rune_length);
+        for (; b < b_end; b += b_rune_length, ++distance) sz_rune_parse(b, &b_rune, &b_rune_length);
     }
     *result_ptr = distance;
     return sz_success_k;

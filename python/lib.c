@@ -3436,7 +3436,7 @@ char const *export_escaped_unquoted_to_utf8_buffer(char const *cstr, size_t cstr
     while (cstr < cstr_end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
-        _sz_extract_utf8_rune(cstr, &rune, &rune_length);
+        sz_rune_parse(cstr, &rune, &rune_length);
         if (rune_length == 1 && buffer + 2 < buffer_end) {
             if (*cstr == '\'') {
                 *(buffer++) = '\\';
