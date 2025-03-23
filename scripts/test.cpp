@@ -457,7 +457,9 @@ static void test_equivalence() {
 
     test_edit_distance_equivalence(                            //
         levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
-        [](std::string const &a, std::string const &b) { return sz::openmp::levenshtein_distance(a, b); });
+        [](std::string const &a, std::string const &b) {
+            return sz::openmp::levenshtein_distance(a, b, std::allocator<char>());
+        });
 
 #if SZ_USE_HASWELL
     test_hash_equivalence(                                      //
