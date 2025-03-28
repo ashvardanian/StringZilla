@@ -205,7 +205,7 @@ static void test_memory_allocator_struct() {
 }
 
 /** @brief Validates `sz_byteset_t` and related construction utilities. */
-static void test_bytest_struct() {
+static void test_byteset_struct() {
     sz_byteset_t s;
     sz_byteset_init(&s);
     assert(sz_byteset_contains(&s, 'a') == false);
@@ -2051,6 +2051,8 @@ int main(int argc, char const **argv) {
     // Basic utilities
     test_arithmetical_utilities();
     test_sequence_struct();
+    test_memory_allocator_struct();
+    test_byteset_struct();
     test_equivalence();
 
     // Sequences of strings
