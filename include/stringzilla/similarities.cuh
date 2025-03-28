@@ -48,11 +48,11 @@ template <                                                        //
     typename get_substitution_cost_ = uniform_substitution_cost_t //
 
     >
-__device__ void score_diagonally(                                                        //
-    span<char_type_ const> const &first, span<char_type_ const> const &second,           //
-    distance_type_ &result_ref,                                                          //
-    sz_error_cost_t gap_cost = 1,                                                        //
-    get_substitution_cost_ const &get_substitution_cost = uniform_substitution_cost_t {} //
+__device__ void score_diagonally(                                                 //
+    span<char_type_ const> first, span<char_type_ const> second,                  //
+    distance_type_ &result_ref,                                                   //
+    sz_error_cost_t gap_cost = 1,                                                 //
+    get_substitution_cost_ get_substitution_cost = uniform_substitution_cost_t {} //
 ) {
     using char_type = char_type_;
     using distance_type = distance_type_;
@@ -64,6 +64,8 @@ __device__ void score_diagonally(                                               
         std::swap(shorter_global, longer_global);
         std::swap(shorter_length, longer_length);
     }
+    assert(shorter_length <= longer_length);
+    assert(shorter_length > 0 && longer_length > 0);
 
     // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
     // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
@@ -173,7 +175,6 @@ __device__ void score_diagonally(                                               
     // Now let's handle the bottom-right triangle of the matrix.
     for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
         sz_size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
-#pragma omp simd
         for (sz_size_t offset_in_diagonal = threadIdx.x; offset_in_diagonal < next_diagonal_length;
              offset_in_diagonal += blockDim.x) {
             char_type shorter_char = shorter_reversed[shorter_length - shorter_dim + offset_in_diagonal + 1];
@@ -223,8 +224,8 @@ template <                                                        //
     typename get_substitution_cost_ = uniform_substitution_cost_t //
     >
 __global__ void scores_diagonally(                                                //
-    first_strings_type_ const &first_strings,                                     //
-    second_strings_type_ const &second_strings,                                   //
+    first_strings_type_ first_strings,                                            //
+    second_strings_type_ second_strings,                                          //
     global_distance_type_ *results_ptr,                                           //
     sz_error_cost_t gap_cost = 1,                                                 //
     get_substitution_cost_ get_substitution_cost = uniform_substitution_cost_t {} //
@@ -240,41 +241,41 @@ __global__ void scores_diagonally(                                              
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
-    for (sz_size_t pair_idx = threadIdx.x; pair_idx < first_strings.size(); pair_idx += blockDim.x) {
-        first_string_type const &first_global = first_strings[pair_idx];
-        second_string_type const &second_global = second_strings[pair_idx];
-        distance_type &results_ref = results_ptr[pair_idx];
+    for (sz_size_t pair_idx = blockIdx.x; pair_idx < first_strings.size(); pair_idx += gridDim.x) {
+        first_string_type const first_global = first_strings[pair_idx];
+        second_string_type const second_global = second_strings[pair_idx];
+        distance_type &result_ref = results_ptr[pair_idx];
 
         // Skip empty strings.
         sz_size_t const first_length = first_global.length();
         sz_size_t const second_length = second_global.length();
         if (first_length == 0) {
-            results_ref = second_length * gap_cost;
+            result_ref = second_length * gap_cost;
             continue;
         }
         if (second_length == 0) {
-            results_ref = first_length * gap_cost;
+            result_ref = first_length * gap_cost;
             continue;
         }
 
         // Estimate the maximum dimension of the DP matrix to pick the smallest fitting type.
-        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        sz_size_t const max_cell_value = sz_max_of_two(first_length, second_length) + 1;
         span<char const> const first = {first_global.data(), first_length};
         span<char const> const second = {second_global.data(), second_length};
-        if (max_dim < 256u) {
-            sz_u8_t result_u8;
+        if (max_cell_value < 256u) {
+            sz_u8_t result_u8 = (sz_u8_t)-1;
             score_diagonally(first, second, result_u8, gap_cost, get_substitution_cost);
-            results_ref = result_u8;
+            if (threadIdx.x == 0) result_ref = result_u8;
         }
-        else if (max_dim < 65536u) {
-            sz_u16_t result_u16;
+        else if (max_cell_value < 65536u) {
+            sz_u16_t result_u16 = (sz_u16_t)-1;
             score_diagonally(first, second, result_u16, gap_cost, get_substitution_cost);
-            results_ref = result_u16;
+            if (threadIdx.x == 0) result_ref = result_u16;
         }
         else {
-            sz_size_t result_size;
+            sz_size_t result_size = (sz_size_t)-1;
             score_diagonally(first, second, result_size, gap_cost, get_substitution_cost);
-            results_ref = result_size;
+            if (threadIdx.x == 0) result_ref = result_size;
         }
     }
 }
