@@ -1,7 +1,9 @@
 /**
  *  @brief  StringZilla is a collection of advanced string algorithms, designed to be used in Big Data applications.
- *          It is generally faster than LibC, and has a broader & cleaner interface, and targets modern x86 CPUs
- *          with AVX-512 and Arm NEON and older CPUs with SWAR and auto-vectorization.
+ *          It is generally faster than LibC, and has a broader & cleaner interface for safer @b length-bounded strings.
+ *          On modern CPUs it uses AVX2, AVX-512, NEON, SVE, & SVE2 @b SIMD instructions & provides SWAR for older CPUs.
+ *          On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
+ *
  *  @file   stringzilla.h
  *  @author Ash Vardanian
  *

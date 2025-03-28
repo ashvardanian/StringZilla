@@ -51,7 +51,7 @@
 #include "bench.hpp"
 #include "test.hpp" // `levenshtein_baseline`, `unary_substitution_costs`
 
-#include "stringzilla/similarity.hpp"
+#include "stringzilla/similarities.hpp"
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -144,8 +144,7 @@ struct alignment_score_from_sz {
 };
 
 /** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
-template <sz_levenshtein_distance_t levenshtein_distance_>
-struct score_from_sz_cpp {
+struct levenshtein_from_sz_openmp {
 
     environment_t const &env;
     sz_size_t bound = SZ_SIZE_MAX;
@@ -169,6 +168,8 @@ void bench_edits(environment_t const &env) {
     auto base_utf8_call = levenshtein_from_sz<sz_levenshtein_distance_utf8_serial>(env);
     bench_result_t base_utf8 = bench_unary(env, "sz_levenshtein_distance_utf8_serial", base_utf8_call).log(base);
     sz_unused(base_utf8);
+
+    bench_unary(env, "sz::openmp::levenshtein_distance", levenshtein_from_sz_openmp(env)).log(base);
 
 #if SZ_USE_ICE
     auto ice_call = levenshtein_from_sz<sz_levenshtein_distance_ice>(env);

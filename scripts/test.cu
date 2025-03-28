@@ -38,8 +38,21 @@
 #endif
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
-#include <stringzilla/stringzilla.hpp>
-#include <stringzilla/similarity.hpp>
+#include <stringzilla/stringzilla.hpp> // C++ string class replacement
+#include <stringzilla/stringzilla.cuh> // Precompiled CUDA templates
+
+/**
+ * ! Overload the following with caution to enable parallelism.
+ * ! They control the OpenMP CPU backend as well as the CUDA GPU backend.
+ */
+#if SZ_USE_CUDA
+#include <stringzilla/types.cuh>        // `unified_alloc`
+#include <stringzilla/similarities.cuh> // Parallel string processing on CUDA or OpenMP
+#endif
+
+#if SZ_USE_OPENMP
+#include <stringzilla/similarities.hpp> // OpenMP templates for string similarity measures
+#endif
 
 #if defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
@@ -460,11 +473,49 @@ static void test_equivalence() {
         levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
         alignment_score_from_sz<sz_needleman_wunsch_score_serial>());
 
+#if SZ_USE_OPENMP
     test_edit_distance_equivalence(                            //
         levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
         [](std::string const &a, std::string const &b) {
             return sz::openmp::levenshtein_distance(a, b, std::allocator<char>());
         });
+#endif
+
+#if 0
+    using arrow_string_tape_cuda_t = sz::arrow_string_tape<char, sz_u32_t, sz::cuda::unified_alloc<char>>;
+    arrow_string_tape_cuda_t a_tape, b_tape;
+    std::vector<sz_size_t, sz::cuda::unified_alloc<sz_size_t>> cuda_results(1);
+    test_edit_distance_equivalence(                            //
+        levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
+        [&](std::string const &a, std::string const &b) {
+            // Compiling heavy CUDA templates is tricky and time-consuming!
+            a_tape.try_assign(&a, &a + 1);
+            b_tape.try_assign(&b, &b + 1);
+            sz_status_t status = sz_levenshtein_distances_u32tape( //
+                a_tape.buffer().data(), a_tape.offsets().data(),   //
+                b_tape.buffer().data(), b_tape.offsets().data(),   //
+                1, SZ_SIZE_MAX, nullptr, cuda_results.data());
+            assert(status == sz_success_k);
+            return cuda_results[0];
+        });
+#endif
+
+#if SZ_USE_CUDA
+    using arrow_string_tape_cuda_t = sz::arrow_string_tape<char, sz_u32_t, sz::cuda::unified_alloc<char>>;
+    using malloc_size_cuda_t = sz::cuda::unified_alloc<sz_size_t>;
+    arrow_string_tape_cuda_t a_tape, b_tape;
+    std::vector<sz_size_t, malloc_size_cuda_t> cuda_results(1);
+    test_edit_distance_equivalence(                            //
+        levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
+        [&](std::string const &a, std::string const &b) {
+            // Compiling heavy CUDA templates is tricky and time-consuming!
+            a_tape.try_assign(&a, &a + 1);
+            b_tape.try_assign(&b, &b + 1);
+            sz::status_t status = sz::cuda::levenshtein_distances(a_tape, b_tape, cuda_results.data());
+            assert(status == sz::status_t::success_k);
+            return cuda_results[0];
+        });
+#endif
 
 #if SZ_USE_HASWELL
     test_hash_equivalence(                                      //
@@ -2052,6 +2103,30 @@ int main(int argc, char const **argv) {
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
     std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
+    std::printf("- Uses OpenMP: %s \n", SZ_USE_OPENMP ? "yes" : "no");
+    std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
+
+#if SZ_USE_CUDA
+    int device_count = 0;
+    cudaError_t cuda_error = cudaGetDeviceCount(&device_count);
+    if (cuda_error != cudaSuccess) {
+        std::printf("CUDA error: %s\n", cudaGetErrorString(cuda_error));
+        return 1;
+    }
+    std::printf("CUDA device count: %d\n", device_count);
+    if (device_count == 0) {
+        std::printf("No CUDA devices found.\n");
+        return 1;
+    }
+    std::printf("- CUDA devices:\n");
+    cudaDeviceProp prop;
+    for (int i = 0; i < device_count; ++i) {
+        cudaGetDeviceProperties(&prop, i);
+        std::printf("  - %s\n", prop.name);
+    }
+    std::printf("- CUDA managed memory support: %s\n", prop.managedMemory == 1 ? "yes" : "no");
+    std::printf("- CUDA unified memory support: %s\n", prop.unifiedAddressing == 1 ? "yes" : "no");
+#endif
 
     // Basic utilities
     test_arithmetical_utilities();
