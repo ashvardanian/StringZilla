@@ -317,7 +317,12 @@ template <                             //
 status_t levenshtein_distances(                                                           //
     first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
     results_type_ *results,                                                               //
-    specs_t specs = {}) noexcept(false) {
+    specs_t specs = {}, cudaStream_t stream = 0) noexcept(false) {
+
+    // We need to be able to copy these function arguments into GPU memory:
+    static_assert(
+        std::is_trivially_copyable<first_strings_type_>() && std::is_trivially_copyable<second_strings_type_>(),
+        "The first and second strings must be trivially copyable types - consider `arrow_strings_view`.");
 
     // Make sure that we don't string pairs that are too large to fit 3 matrix diagonals into shared memory.
     // H100 Streaming Multiprocessor can have up to 128 active warps concurrently and only 256 KB of shared memory.
@@ -325,15 +330,32 @@ status_t levenshtein_distances(                                                 
     sz_size_t shared_memory_per_block = scores_diagonally_shared_memory_requirement(first_strings, second_strings);
     if (shared_memory_per_block > specs.shared_memory_per_sm) return status_t::bad_alloc_k;
 
+    // It may be the case that we've only received empty strings.
+    if (shared_memory_per_block == 0) {
+        for (sz_size_t i = 0; i < first_strings.size(); ++i)
+            if (first_strings[i].length() == 0) { results[i] = second_strings[i].length(); }
+            else if (second_strings[i].length() == 0) { results[i] = first_strings[i].length(); }
+        return status_t::success_k;
+    }
+
     // In most cases we should be able to fir many blocks per SM.
     sz_size_t count_blocks = specs.shared_memory_per_sm / shared_memory_per_block;
     if (count_blocks > specs.blocks_per_sm) count_blocks = specs.blocks_per_sm;
+    if (count_blocks > first_strings.size()) count_blocks = first_strings.size();
 
     // Let's use all 32 threads in a warp.
     constexpr sz_size_t threads_per_block = 32u;
     auto kernel =
         &scores_diagonally<first_strings_type_, second_strings_type_, results_type_, uniform_substitution_cost_t>;
-    kernel<<<count_blocks, threads_per_block, shared_memory_per_block>>>(first_strings, second_strings, results, 1, {});
+    kernel<<<count_blocks, threads_per_block, shared_memory_per_block, stream>>>(first_strings, second_strings, results,
+                                                                                 1, {});
+
+    // Fetch the error:
+    cudaError_t error = cudaStreamSynchronize(stream);
+    if (error != cudaSuccess) {
+        if (error == cudaErrorMemoryAllocation) { return status_t::bad_alloc_k; }
+        else { return status_t::unknown_error_k; }
+    }
     return status_t::success_k;
 }
 
@@ -353,7 +375,12 @@ status_t needleman_wunsch_scores(                                               
     first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
     results_type_ *results,                                                               //
     sz_error_cost_t const *subs, sz_error_cost_t gap,                                     //
-    specs_t specs = {}) noexcept(false) {
+    specs_t specs = {}, cudaStream_t stream = 0) noexcept(false) {
+
+    // We need to be able to copy these function arguments into GPU memory:
+    static_assert(
+        std::is_trivially_copyable<first_strings_type_>() && std::is_trivially_copyable<second_strings_type_>(),
+        "The first and second strings must be trivially copyable types - consider `arrow_strings_view`.");
 
     // Make sure that we don't string pairs that are too large to fit 3 matrix diagonals into shared memory.
     // H100 Streaming Multiprocessor can have up to 128 active warps concurrently and only 256 KB of shared memory.
@@ -363,16 +390,32 @@ status_t needleman_wunsch_scores(                                               
     // shared_memory_per_block += 256 * 256 * sizeof(sz_error_cost_t);
     if (shared_memory_per_block > specs.shared_memory_per_sm) return status_t::bad_alloc_k;
 
+    // It may be the case that we've only received empty strings.
+    if (shared_memory_per_block == 0) {
+        for (sz_size_t i = 0; i < first_strings.size(); ++i)
+            if (first_strings[i].length() == 0) { results[i] = second_strings[i].length() * gap; }
+            else if (second_strings[i].length() == 0) { results[i] = first_strings[i].length() * gap; }
+        return status_t::success_k;
+    }
+
     // In most cases we should be able to fir many blocks per SM.
     sz_size_t count_blocks = specs.shared_memory_per_sm / shared_memory_per_block;
     if (count_blocks > specs.blocks_per_sm) count_blocks = specs.blocks_per_sm;
+    if (count_blocks > first_strings.size()) count_blocks = first_strings.size();
 
     // Let's use all 32 threads in a warp.
     constexpr sz_size_t threads_per_block = 32u;
     auto kernel =
         &scores_diagonally<first_strings_type_, second_strings_type_, results_type_, lookup_substitution_cost_t>;
-    kernel<<<count_blocks, threads_per_block, shared_memory_per_block>>>(first_strings, second_strings, results, gap,
-                                                                         lookup_substitution_cost_t {subs});
+    kernel<<<count_blocks, threads_per_block, shared_memory_per_block, stream>>>(
+        first_strings, second_strings, results, gap, lookup_substitution_cost_t {subs});
+
+    // Fetch the error:
+    cudaError_t error = cudaStreamSynchronize(stream);
+    if (error != cudaSuccess) {
+        if (error == cudaErrorMemoryAllocation) { return status_t::bad_alloc_k; }
+        else { return status_t::unknown_error_k; }
+    }
     return status_t::success_k;
 }
 
