@@ -33,6 +33,9 @@
 // #define SZ_USE_NEON 0
 // #define SZ_USE_SVE 0
 // #define SZ_USE_SVE2 0
+#if defined(SZ_DEBUG)
+#undef SZ_DEBUG
+#endif
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
 #include <stringzilla/stringzilla.hpp>
