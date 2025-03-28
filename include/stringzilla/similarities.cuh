@@ -289,11 +289,13 @@ size_t scores_diagonally_shared_memory_requirement( //
         sz_size_t const second_length = second_strings[i].length();
         sz_size_t const shorter_length = sz_min_of_two(first_length, second_length);
         sz_size_t const longer_length = sz_max_of_two(first_length, second_length);
-        sz_size_t const max_dim = longer_length + 1;
-        sz_size_t const bytes_per_cell = max_dim < 256 ? 1 : max_dim < 65536 ? 2 : 4;
+        sz_size_t const max_diagonal_length = shorter_length + 1;
+        sz_size_t const max_cell_value = longer_length + 1;
+        sz_size_t const bytes_per_cell = max_cell_value < 256 ? 1 : max_cell_value < 65536 ? 2 : 4;
         // For each string we need to copy its contents, and allocate 3 bands proportional to the length
         // of the shorter string with each cell being big enough to hold the length of the longer one.
-        sz_size_t const shared_memory_requirement = 3 * shorter_length * bytes_per_cell + first_length + second_length;
+        sz_size_t const shared_memory_requirement = 3 * max_diagonal_length * bytes_per_cell + //
+                                                    first_length + second_length;
         max_required_shared_memory = sz_max_of_two(max_required_shared_memory, shared_memory_requirement);
     }
     return max_required_shared_memory;
