@@ -16,69 +16,7 @@
 #ifndef STRINGZILLA_HPP_
 #define STRINGZILLA_HPP_
 
-/**
- *  @brief  When set to 1, the library will include the C++ STL headers and implement
- *          automatic conversion from and to `std::stirng_view` and `std::basic_string<any_allocator>`.
- */
-#include "types.h"
-#ifndef SZ_AVOID_STL
-#define SZ_AVOID_STL (0) // true or false
-#endif
-
-/*  We need to detect the version of the C++ language we are compiled with.
- *  This will affect recent features like `operator<=>` and tests against STL.
- */
-#if __cplusplus >= 202101L
-#define _SZ_IS_CPP23 1
-#else
-#define _SZ_IS_CPP23 0
-#endif
-#if __cplusplus >= 202002L
-#define _SZ_IS_CPP20 1
-#else
-#define _SZ_IS_CPP20 0
-#endif
-#if __cplusplus >= 201703L
-#define _SZ_IS_CPP17 1
-#else
-#define _SZ_IS_CPP17 0
-#endif
-#if __cplusplus >= 201402L
-#define _SZ_IS_CPP14 1
-#else
-#define _SZ_IS_CPP14 0
-#endif
-#if __cplusplus >= 201103L
-#define _SZ_IS_CPP11 1
-#else
-#define _SZ_IS_CPP11 0
-#endif
-#if __cplusplus >= 199711L
-#define _SZ_IS_CPP98 1
-#else
-#define _SZ_IS_CPP98 0
-#endif
-
-/**
- *  @brief  Expands to `constexpr` in C++20 and later, and to nothing in older C++ versions.
- *          Useful for STL conversion operators, as several `std::string` members are `constexpr` in C++20.
- *
- *  The `constexpr` keyword has different applicability scope in different C++ versions.
- *  - C++11: Introduced `constexpr`, but no loops or multiple `return` statements were allowed.
- *  - C++14: Allowed loops, multiple statements, and local variables in `constexpr` functions.
- *  - C++17: Added the `if constexpr` construct for compile-time branching.
- *  - C++20: Added some dynamic memory allocations, `virtual` functions, and `try`/`catch` blocks.
- */
-#if _SZ_IS_CPP14
-#define sz_constexpr_if_cpp14 constexpr
-#else
-#define sz_constexpr_if_cpp14
-#endif
-#if _SZ_IS_CPP20
-#define sz_constexpr_if_cpp20 constexpr
-#else
-#define sz_constexpr_if_cpp20
-#endif
+#include "types.hpp"
 
 #if !SZ_AVOID_STL
 #include <array>
@@ -1066,13 +1004,6 @@ std::size_t range_length(iterator_type first, iterator_type last) {
 
 #pragma region Helper Types
 
-enum class status_t {
-    success_k = sz_success_k,
-    bad_alloc_k = sz_bad_alloc_k,
-    invalid_utf8_k = sz_invalid_utf8_k,
-    contains_duplicates_k = sz_contains_duplicates_k,
-};
-
 #if !SZ_AVOID_STL
 void raise(status_t status) noexcept(false) {
     switch (status) {
@@ -1082,8 +1013,6 @@ void raise(status_t status) noexcept(false) {
     default: break;
     }
 }
-
-using sorted_idx_t = sz_sorted_idx_t;
 
 #endif
 

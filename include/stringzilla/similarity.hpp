@@ -1,6 +1,6 @@
 /**
  *  @brief  OpenMP-accelerated string similarity utilities.
- *  @file   similarity.hpp
+ *  @file   similarities.hpp
  *  @author Ash Vardanian
  *
  *  Includes core APIs:
@@ -13,37 +13,11 @@
 #ifndef STRINGZILLA_SIMILARITY_HPP_
 #define STRINGZILLA_SIMILARITY_HPP_
 
-#include "types.h"
+#include "types.hpp"
 
 namespace ashvardanian {
 namespace stringzilla {
 namespace openmp {
-
-struct dummy_allocator_t {
-    using value_type = char;
-    inline char *allocate(sz_size_t) const noexcept { return nullptr; }
-    inline void deallocate(char *, sz_size_t) const noexcept {}
-};
-
-struct uniform_substitution_cost_t {
-    inline sz_error_cost_t operator()(char a, char b) const noexcept { return a == b ? 0 : 1; }
-};
-
-struct lookup_substitution_cost_t {
-    sz_error_cost_t const *costs;
-    inline sz_error_cost_t operator()(char a, char b) const noexcept { return costs[(sz_u8_t)a * 256 + (sz_u8_t)b]; }
-};
-
-template <typename char_type_>
-struct span {
-    char_type_ const *data_;
-    sz_size_t size_;
-
-    char_type_ const *begin() const noexcept { return data_; }
-    char_type_ const *end() const noexcept { return data_ + size_; }
-    char_type_ const *data() const noexcept { return data_; }
-    sz_size_t size() const noexcept { return size_; }
-};
 
 /**
  *  @brief  Alignment Score and Edit Distance algorithm evaluating the Dynamic Programming matrix
@@ -70,7 +44,7 @@ template <                                                         //
     typename char_type_,                                           //
     typename distance_type_ = sz_size_t,                           //
     typename get_substitution_cost_ = uniform_substitution_cost_t, //
-    typename allocator_type_ = dummy_allocator_t                   //
+    typename allocator_type_ = dummy_alloc_t                       //
     >
 sz_status_t score_diagonally(                                                        //
     span<char_type_ const> first, span<char_type_ const> second,                     //
@@ -224,10 +198,20 @@ sz_status_t score_diagonally(                                                   
     return sz_success_k;
 }
 
-template <                                       //
-    typename first_type_,                        //
-    typename second_type_,                       //
-    typename allocator_type_ = dummy_allocator_t //
+/**
+ *  @brief Computes the @b byte-level Levenshtein distance between two strings using the OpenMP backend.
+ *  @param[in] first The first string.
+ *  @param[in] second The second string.
+ *  @param[in] alloc An allocator for the internal buffers.
+ *  @return The Levenshtein distance between the two strings.
+ *  @throws `std::bad_alloc` if the allocator fails to allocate memory.
+ *  @sa `levenshtein_distance_utf8` for UTF-8 strings.
+ *  @sa `score_diagonally` for the core algorithm.
+ */
+template <                                   //
+    typename first_type_,                    //
+    typename second_type_,                   //
+    typename allocator_type_ = dummy_alloc_t //
     >
 inline sz_size_t levenshtein_distance( //
     first_type_ const &first, second_type_ const &second,
@@ -266,10 +250,20 @@ inline sz_size_t levenshtein_distance( //
     }
 }
 
-template <                                       //
-    typename first_type_,                        //
-    typename second_type_,                       //
-    typename allocator_type_ = dummy_allocator_t //
+/**
+ *  @brief Computes the @b rune-level Levenshtein distance between two UTF-8 strings using the OpenMP backend.
+ *  @param[in] first The first string.
+ *  @param[in] second The second string.
+ *  @param[in] alloc An allocator for the internal buffers.
+ *  @return The Levenshtein distance between the two strings.
+ *  @throws `std::bad_alloc` if the allocator fails to allocate memory.
+ *  @sa `levenshtein_distance` for binary strings.
+ *  @sa `score_diagonally` for the core algorithm.
+ */
+template <                                   //
+    typename first_type_,                    //
+    typename second_type_,                   //
+    typename allocator_type_ = dummy_alloc_t //
     >
 inline sz_size_t levenshtein_distance_utf8( //
     first_type_ const &first, second_type_ const &second,
@@ -329,10 +323,20 @@ inline sz_size_t levenshtein_distance_utf8( //
     }
 }
 
-template <                                       //
-    typename first_type_,                        //
-    typename second_type_,                       //
-    typename allocator_type_ = dummy_allocator_t //
+/**
+ *  @brief Computes the @b byte-level Needleman-Wunsch score between two strings using the OpenMP backend.
+ *  @param[in] first The first string.
+ *  @param[in] second The second string.
+ *  @param[in] alloc An allocator for the internal buffers.
+ *  @return The Needleman-Wunsch global alignment score between the two strings.
+ *  @throws `std::bad_alloc` if the allocator fails to allocate memory.
+ *  @sa `levenshtein_distance` for uniform substitution and gap costs.
+ *  @sa `score_diagonally` for the core algorithm.
+ */
+template <                                   //
+    typename first_type_,                    //
+    typename second_type_,                   //
+    typename allocator_type_ = dummy_alloc_t //
     >
 inline sz_ssize_t needleman_wunsch_score(                 //
     first_type_ const &first, second_type_ const &second, //
