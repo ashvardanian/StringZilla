@@ -181,6 +181,8 @@ static void test_sequence_struct() {
 
 /** @brief Validates `sz_memory_allocator_t` and related construction utilities. */
 static void test_memory_allocator_struct() {
+    // Our behavior for `malloc(0)` is to return a NULL pointer,
+    // while the standard is implementation-defined.
     {
         sz_memory_allocator_t alloc;
         sz_memory_allocator_init_default(&alloc);

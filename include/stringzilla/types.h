@@ -550,6 +550,9 @@ typedef struct sz_memory_allocator_t {
  *  @brief Initializes a memory allocator to use the system default `malloc` and `free`.
  *  @warning The function is not available if the library was compiled with `SZ_AVOID_LIBC`.
  *  @param[in] alloc Memory allocator to initialize.
+ *
+ *  @note Unlike the C standard library, the `malloc(0)` is guaranteed to return a non-null pointer.
+ *  @see https://en.cppreference.com/w/c/memory/malloc
  */
 SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
 
@@ -1238,6 +1241,7 @@ SZ_INTERNAL void _sz_memory_free_fixed(sz_ptr_t start, sz_size_t length, void *h
 
 SZ_PUBLIC void *_sz_memory_allocate_default(sz_size_t length, void *handle) {
     sz_unused(handle);
+    if (length == 0) return SZ_NULL;
     return malloc(length);
 }
 SZ_PUBLIC void _sz_memory_free_default(sz_ptr_t start, sz_size_t length, void *handle) {
