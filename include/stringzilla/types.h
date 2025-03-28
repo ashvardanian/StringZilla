@@ -544,7 +544,9 @@ SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
  *  @brief Initializes a memory allocator to use only a static-capacity buffer @b w/out any dynamic allocations.
  *  @param[in] alloc Memory allocator to initialize.
  *  @param[in] buffer Buffer to use for allocations.
- *  @param[in] length Length of the buffer. @b Must be greater than 8, at least 4KB (one RAM page) is recommended.
+ *  @param[in] length Length of the buffer. @b Must be greater than 16, at least 4KB (one RAM page) is recommended.
+ *
+ *  The `buffer` itself will be prepended with the capacity and the consumed size. Those values shouldn't be modified.
  */
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
 
@@ -1198,10 +1200,12 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 
 /** @brief Helper function, using the supplied fixed-capacity buffer to allocate memory. */
 SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
-    sz_size_t capacity;
-    *(sz_ptr_t)&capacity = *(sz_cptr_t)handle;
-    sz_size_t consumed_capacity = sizeof(sz_size_t);
+
+    sz_size_t const capacity = *(sz_size_t *)handle;
+    sz_size_t const consumed_capacity = *((sz_size_t *)handle + 1);
     if (consumed_capacity + length > capacity) return SZ_NULL_CHAR;
+    // Increase the consumed capacity.
+    *((sz_size_t *)handle + 1) += length;
     return (sz_ptr_t)handle + consumed_capacity;
 }
 
@@ -1242,12 +1246,14 @@ SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc) {
 }
 
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length) {
-    // The logic here is simple - put the buffer length in the first slots of the buffer.
-    // Later use it for bounds checking.
+    // The logic here is simple - put the buffer capacity in the first slots of the buffer.
+    // The second slot is used to store the current consumed capacity.
+    // The rest of the buffer is used for the actual data.
     alloc->allocate = (sz_memory_allocate_t)_sz_memory_allocate_fixed;
     alloc->free = (sz_memory_free_t)_sz_memory_free_fixed;
-    alloc->handle = &buffer;
-    *(sz_ptr_t)buffer = *(sz_cptr_t)&length;
+    alloc->handle = buffer;
+    *(sz_size_t *)buffer = length;
+    *((sz_ptr_t)buffer + sizeof(sz_size_t)) = sizeof(sz_size_t) * 2; // The capacity and consumption so far
 }
 
 SZ_PUBLIC sz_cptr_t _sz_sequence_from_null_terminated_strings_get_start(void const *handle, sz_size_t i) {
