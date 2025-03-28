@@ -275,6 +275,11 @@ inline sz_size_t levenshtein_distance_utf8( //
     first_type_ const &first, second_type_ const &second,
     allocator_type_ &&alloc = allocator_type_ {}) noexcept(false) {
 
+    sz_size_t const first_length = first.length();
+    sz_size_t const second_length = second.length();
+    if (first_length == 0) return second_length;
+    if (second_length == 0) return first_length;
+
     // Check if the strings are entirely composed of ASCII characters,
     // and default to a simpler algorithm in that case.
     if (sz_isascii(first.data(), first.length()) && sz_isascii(second.data(), second.length()))
@@ -336,8 +341,8 @@ inline sz_ssize_t needleman_wunsch_score(                 //
 
     sz_size_t const first_length = first.length();
     sz_size_t const second_length = second.length();
-    if (first_length == 0) return second_length;
-    if (second_length == 0) return first_length;
+    if (first_length == 0) return second_length * gap;
+    if (second_length == 0) return first_length * gap;
 
     // Estimate the maximum dimension of the DP matrix
     sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
