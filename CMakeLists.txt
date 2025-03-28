@@ -210,10 +210,21 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         ${compiler_id} STREQUAL "GNU"
         OR ${compiler_id} STREQUAL "Clang"
         OR ${compiler_id} STREQUAL "AppleClang"
-        OR ${compiler_id} STREQUAL "NVIDIA"
     )
         if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
             target_compile_options(${target} PRIVATE "-O0;-g")
+        endif ()
+        if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+            target_compile_options(${target} PRIVATE "-O3")
+        endif ()
+    elseif (${compiler_id} STREQUAL "NVIDIA")
+        if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+            target_compile_options(${target} PRIVATE "-O0;-g")
+            target_compile_options(${target} PRIVATE "-G;-no-compress") # for device code debug symbols
+            target_compile_options(${target} PRIVATE "-Xptxas=-O0") # pass to the PTX assembler
+            target_compile_options(${target} PRIVATE "-Xcompiler=-fno-omit-frame-pointer")
+            target_compile_options(${target} PRIVATE "-Xcompiler=-fno-inline")
+            target_compile_options(${target} PRIVATE "-maxrregcount=0")
         endif ()
         if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
             target_compile_options(${target} PRIVATE "-O3")
