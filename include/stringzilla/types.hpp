@@ -16,7 +16,7 @@
  *  - `span<value_type>` -
  *  - `dummy_alloc_t` -
  *  - `dummy_alloc<value_type>` -
- *  - `arrow_string_tape<char_type, offset_type>` -
+ *  - `arrow_strings_tape<char_type, offset_type>` -
  */
 #ifndef STRINGZILLA_TYPES_HPP_
 #define STRINGZILLA_TYPES_HPP_
@@ -115,6 +115,7 @@ enum class status_t {
     bad_alloc_k = sz_bad_alloc_k,
     invalid_utf8_k = sz_invalid_utf8_k,
     contains_duplicates_k = sz_contains_duplicates_k,
+    unknown_error_k = sz_unknown_error_k,
 };
 
 struct uniform_substitution_cost_t {
@@ -132,14 +133,15 @@ struct span {
     using size_type = sz_size_t;
     using difference_type = sz_ssize_t;
 
-    value_type *data_;
-    size_type size_;
+    value_type *data_ {};
+    size_type size_ {};
 
     constexpr value_type *begin() const noexcept { return data_; }
     constexpr value_type *end() const noexcept { return data_ + size_; }
     constexpr value_type *data() const noexcept { return data_; }
     constexpr size_type size() const noexcept { return size_; }
     constexpr size_type length() const noexcept { return size_; }
+    constexpr value_type &operator[](size_type i) const noexcept { return data_[i]; }
 };
 
 template <typename value_type_>
@@ -178,17 +180,40 @@ using dummy_alloc_t = dummy_alloc<char>;
 
 /**
  *  @brief  Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
+ *          Doesn't own the memory, but provides a view to the strings stored in a contiguous memory block.
+ *  @sa     arrow_strings_tape
+ */
+template <typename char_type_, typename offset_type_>
+struct arrow_strings_view {
+    using char_type = char_type_;
+    using offset_type = offset_type_;
+    using value_type = span<char_type>;
+
+    span<char_type> buffer_;
+    span<offset_type> offsets_;
+
+    constexpr arrow_strings_view() noexcept : buffer_ {}, offsets_ {} {}
+    constexpr arrow_strings_view(span<char_type> buf, span<offset_type> offs) noexcept : buffer_(buf), offsets_(offs) {}
+    constexpr size_t size() const noexcept { return offsets_.size() - 1; }
+
+    constexpr span<char_type> operator[](size_t i) const noexcept {
+        return {&buffer_[offsets_[i]], offsets_[i + 1] - offsets_[i] - 1};
+    }
+};
+
+/**
+ *  @brief  Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
  *          Each string is appended to a contiguous memory block, delimited by the NULL character.
  *          Provides @b ~O(1) access to each string by storing the offsets of each string in a separate array.
  */
 template <typename char_type_, typename offset_type_, typename allocator_type_>
-struct arrow_string_tape {
+struct arrow_strings_tape {
     using char_type = char_type_;
     using offset_type = offset_type_;
     using allocator_type = allocator_type_;
 
     using value_type = span<char_type>;
-    using view_type = arrow_string_tape<char_type, offset_type, dummy_alloc<char_type>>;
+    using view_type = arrow_strings_view<char_type, offset_type>;
 
     using char_alloc_t = typename allocator_type::template rebind<char_type>::other;
     using offset_alloc_t = typename allocator_type::template rebind<offset_type>::other;
@@ -200,52 +225,60 @@ struct arrow_string_tape {
     offset_alloc_t offset_alloc_;
 
   public:
-    constexpr arrow_string_tape() = default;
-    constexpr arrow_string_tape(span<char_type> buffer, span<offset_type> offsets, allocator_type alloc)
+    constexpr arrow_strings_tape() = default;
+    constexpr arrow_strings_tape(arrow_strings_tape const &) = delete;
+    constexpr arrow_strings_tape &operator=(arrow_strings_tape const &other) = delete;
+
+    constexpr arrow_strings_tape(arrow_strings_tape &&) = delete;
+    constexpr arrow_strings_tape &operator=(arrow_strings_tape &&) = delete;
+
+    constexpr arrow_strings_tape(span<char_type> buffer, span<offset_type> offsets, allocator_type alloc)
         : buffer_(buffer), offsets_(offsets), char_alloc_(alloc), offset_alloc_(alloc) {}
 
     template <typename strings_iterator_>
     sz_constexpr_if_cpp14 status_t try_assign(strings_iterator_ first, strings_iterator_ last) noexcept {
         // Deallocate the previous memory if it was allocated
-        if (buffer_.data_) char_alloc_.deallocate(const_cast<char_type *>(buffer_.data_), buffer_.size_);
-        if (offsets_.data_) offset_alloc_.deallocate(const_cast<offset_type *>(offsets_.data_), offsets_.size_);
+        if (buffer_.data_ && buffer_.size_)
+            char_alloc_.deallocate(const_cast<char_type *>(buffer_.data_), buffer_.size_), buffer_ = {};
+        if (offsets_.data_ && offsets_.size_)
+            offset_alloc_.deallocate(const_cast<offset_type *>(offsets_.data_), offsets_.size_), offsets_ = {};
 
         // Estimate the required memory size
-        size_t buffer_capacity = 0;
-        size_t max_count = 0;
-        for (auto it = first; it != last; ++it) {
-            buffer_capacity += it->size() + 1; // ? NULL-terminated
-            ++max_count;
-        }
-        buffer_ = {char_alloc_.allocate(buffer_capacity), buffer_capacity};
-        offsets_ = {offset_alloc_.allocate(max_count), max_count};
+        size_t count = 0;
+        size_t combined_length = 0;
+        for (auto it = first; it != last; ++it, ++count) combined_length += it->length();
+        combined_length += count; // ? NULL-terminate every string
+        buffer_ = {char_alloc_.allocate(combined_length), combined_length};
+        offsets_ = {offset_alloc_.allocate(count + 1), count + 1};
         if (!buffer_.data_ || !offsets_.data_) return status_t::bad_alloc_k;
 
         // Copy the strings to the buffer and store the offsets
-        auto buffer_ptr = buffer_.data_;
-        auto offsets_ptr = offsets_.data_;
+        char_type *buffer_ptr = buffer_.data_;
+        offset_type *offsets_ptr = offsets_.data_;
         for (auto it = first; it != last; ++it) {
-            *offsets_ptr++ = buffer_ptr - buffer_.data_;
+            *offsets_ptr++ = static_cast<offset_type>(buffer_ptr - buffer_.data_);
             // Perform a byte-level copy of the string, similar to `sz_copy`
-            for (size_t i = 0; i != it->size(); ++i) buffer_ptr[i] = it->data()[i];
-            buffer_ptr[it->size()] = '\0'; // ? NULL-terminated
-            buffer_ptr += it->size() + 1;
+            char_type const *from_ptr = it->data();
+            size_t const from_length = it->length();
+            for (size_t i = 0; i != from_length; ++i) *buffer_ptr++ = *from_ptr++;
+            *buffer_ptr++ = '\0'; // ? NULL-terminated
         }
-        *offsets_ptr = static_cast<offset_type>(buffer_ptr - buffer_.data_);
+        *offsets_ptr++ = static_cast<offset_type>(buffer_ptr - buffer_.data_);
         return status_t::success_k;
     }
 
-    sz_constexpr_if_cpp20 ~arrow_string_tape() noexcept {
-        if (buffer_.data_) char_alloc_.deallocate(const_cast<char_type *>(buffer_.data_), buffer_.size_);
-        if (offsets_.data_) offset_alloc_.deallocate(const_cast<offset_type *>(offsets_.data_), offsets_.size_);
+    sz_constexpr_if_cpp20 ~arrow_strings_tape() noexcept {
+        if (buffer_.data_) char_alloc_.deallocate(const_cast<char_type *>(buffer_.data_), buffer_.size_), buffer_ = {};
+        if (offsets_.data_)
+            offset_alloc_.deallocate(const_cast<offset_type *>(offsets_.data_), offsets_.size_), offsets_ = {};
     }
 
     constexpr value_type operator[](size_t i) const noexcept {
-        return {buffer_.data_ + offsets_.data_[i], offsets_.data_[i + 1] - offsets_.data_[i] - 1};
+        return {&buffer_[0] + offsets_[i], offsets_[i + 1] - offsets_[i] - 1};
     }
 
-    constexpr size_t size() const noexcept { return offsets_.size_ - 1; }
-    constexpr view_type view() const noexcept { return {buffer_, offsets_, dummy_alloc_t {}}; }
+    constexpr size_t size() const noexcept { return offsets_.size() - 1; }
+    constexpr view_type view() const noexcept { return {buffer_, offsets_}; }
 
     constexpr span<char_type> const &buffer() const noexcept { return buffer_; }
     constexpr span<offset_type> const &offsets() const noexcept { return offsets_; }

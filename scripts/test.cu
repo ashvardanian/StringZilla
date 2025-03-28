@@ -482,8 +482,8 @@ static void test_equivalence() {
 #endif
 
 #if 0
-    using arrow_string_tape_cuda_t = sz::arrow_string_tape<char, sz_u32_t, sz::cuda::unified_alloc<char>>;
-    arrow_string_tape_cuda_t a_tape, b_tape;
+    using arrow_strings_tape_cuda_t = sz::arrow_strings_tape<char, sz_u32_t, sz::cuda::unified_alloc<char>>;
+    arrow_strings_tape_cuda_t a_tape, b_tape;
     std::vector<sz_size_t, sz::cuda::unified_alloc<sz_size_t>> cuda_results(1);
     test_edit_distance_equivalence(                            //
         levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
@@ -501,17 +501,20 @@ static void test_equivalence() {
 #endif
 
 #if SZ_USE_CUDA
-    using arrow_string_tape_cuda_t = sz::arrow_string_tape<char, sz_u32_t, sz::cuda::unified_alloc<char>>;
+    using arrow_strings_tape_cuda_t = sz::arrow_strings_tape<char, sz_u32_t, sz::cuda::unified_alloc<char>>;
     using malloc_size_cuda_t = sz::cuda::unified_alloc<sz_size_t>;
-    arrow_string_tape_cuda_t a_tape, b_tape;
     std::vector<sz_size_t, malloc_size_cuda_t> cuda_results(1);
     test_edit_distance_equivalence(                            //
         levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
         [&](std::string const &a, std::string const &b) {
             // Compiling heavy CUDA templates is tricky and time-consuming!
-            a_tape.try_assign(&a, &a + 1);
-            b_tape.try_assign(&b, &b + 1);
-            sz::status_t status = sz::cuda::levenshtein_distances(a_tape, b_tape, cuda_results.data());
+            arrow_strings_tape_cuda_t a_tape, b_tape;
+            sz::status_t status;
+            status = a_tape.try_assign(&a, &a + 1);
+            assert(status == sz::status_t::success_k);
+            status = b_tape.try_assign(&b, &b + 1);
+            assert(status == sz::status_t::success_k);
+            status = sz::cuda::levenshtein_distances(a_tape.view(), b_tape.view(), cuda_results.data());
             assert(status == sz::status_t::success_k);
             return cuda_results[0];
         });
@@ -794,8 +797,10 @@ static void test_stl_compatibility_for_reads() {
     assert(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
     assert_throws(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
     assert_throws(str("hello world").substr(20, 5), std::out_of_range); // 20 is beyond the length of the string
-    assert_throws(str("hello world").substr(-1, 5), std::out_of_range); // -1 casts to unsigned without any warnings...
-    assert(str("hello world").substr(0, -1) == "hello world");          // -1 casts to unsigned without any warnings...
+#if defined(__GNUC__) && !defined(__NVCC__) // -1 casts to unsigned without warnings on GCC, but not NVCC
+    assert_throws(str("hello world").substr(-1, 5), std::out_of_range);
+    assert(str("hello world").substr(0, -1) == "hello world");
+#endif
 
     // Character search in normal and reverse directions.
     assert(str("hello").find('e') == 1);
@@ -2107,8 +2112,13 @@ int main(int argc, char const **argv) {
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
 
 #if SZ_USE_CUDA
+    cudaError_t cuda_error = cudaFree(0); // Force context initialization
+    if (cuda_error != cudaSuccess) {
+        std::printf("CUDA initialization error: %s\n", cudaGetErrorString(cuda_error));
+        return 1;
+    }
     int device_count = 0;
-    cudaError_t cuda_error = cudaGetDeviceCount(&device_count);
+    cuda_error = cudaGetDeviceCount(&device_count);
     if (cuda_error != cudaSuccess) {
         std::printf("CUDA error: %s\n", cudaGetErrorString(cuda_error));
         return 1;
@@ -2121,7 +2131,7 @@ int main(int argc, char const **argv) {
     std::printf("- CUDA devices:\n");
     cudaDeviceProp prop;
     for (int i = 0; i < device_count; ++i) {
-        cudaGetDeviceProperties(&prop, i);
+        cuda_error = cudaGetDeviceProperties(&prop, i);
         std::printf("  - %s\n", prop.name);
     }
     std::printf("- CUDA managed memory support: %s\n", prop.managedMemory == 1 ? "yes" : "no");
