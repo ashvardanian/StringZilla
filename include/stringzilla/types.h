@@ -253,6 +253,22 @@
 #endif
 #endif
 
+#ifndef SZ_USE_OPENMP
+#ifdef _OPENMP
+#define SZ_USE_OPENMP (1)
+#else
+#define SZ_USE_OPENMP (0)
+#endif
+#endif
+
+#ifndef SZ_USE_CUDA
+#ifdef __NVCC__
+#define SZ_USE_CUDA (1)
+#else
+#define SZ_USE_CUDA (0)
+#endif
+#endif
+
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers.
  */
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
@@ -369,10 +385,7 @@ typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__I
 /**
  *  @brief  Compile-time assert macro similar to `static_assert` in C++.
  */
-#define sz_static_assert(condition, name)                \
-    typedef struct {                                     \
-        int static_assert_##name : (condition) ? 1 : -1; \
-    } sz_static_assert_##name##_t
+#define sz_static_assert(condition, name) typedef char sz_static_assert_##name[(condition) ? 1 : -1]
 
 sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
 sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
