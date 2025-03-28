@@ -481,7 +481,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
                 _mm256_mmask_i64gather_epi64(_mm256_setzero_si256(), 0xFF, batch_slots.ymm, table_hashes, 8);
 
             // Check that we don't have any collisions - in that case each value will be equal to `SZ_SIZE_MAX`
-            int const all_empty = _mm256_testc_si256(existing_hashes.ymm, _mm256_set1_epi64x(SZ_SIZE_MAX));
+            int const all_empty = _mm256_testc_si256(existing_hashes.ymm, _mm256_set1_epi64x(-1));
             if (all_empty && !has_slot_collisions) {
                 // Scatter the new positions
                 _mm256_mask_i64scatter_epi64(table_hashes, 0xFF, batch_slots.ymm, batch_hashes.ymm, 8);
@@ -584,7 +584,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
             // Check if we already have all of those slots populated with exactly the same values
             int const same_hashes = _mm256_movemask_epi8(_mm256_cmpeq_epi64(existing_hashes.ymm, batch_hashes.ymm));
             int const nulled_hashes =
-                _mm256_movemask_epi8(_mm256_cmpeq_epi64(existing_hashes.ymm, _mm256_set1_epi64x(SZ_SIZE_MAX)));
+                _mm256_movemask_epi8(_mm256_cmpeq_epi64(existing_hashes.ymm, _mm256_set1_epi64x(-1)));
 
             // Now for every one of the 4 hashed values we can have several outcomes:
             // - it's an "empty" value → no match
