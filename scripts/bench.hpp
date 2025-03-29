@@ -382,8 +382,8 @@ inline environment_t build_environment(                                        /
 #endif
 
     auto const mean_token_length =
-        std::accumulate(env.tokens.begin(), env.tokens.end(), 0,
-                        [](std::size_t sum, std::string_view token) { return sum + token.size(); }) *
+        std::accumulate(env.tokens.begin(), env.tokens.end(), (std::size_t)0u,
+                        [](std::size_t sum, token_view_t token) -> std::size_t { return sum + token.size(); }) *
         1.0 / env.tokens.size();
 
     // Group integer decimal separators by 3
