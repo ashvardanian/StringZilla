@@ -375,8 +375,8 @@ inline environment_t build_environment(                                        /
 
     // In "RELEASE" mode, shuffle tokens to avoid bias.
     char const *seed_message = " (not used in DEBUG mode)";
-#if !defined(SZ_DEBUG)
-    std::mt19937 generator(static_cast<unsigned int>(env.seed));
+#if !defined(SZ_DEBUG) || !SZ_DEBUG
+    std::mt19937_64 generator(static_cast<unsigned long>(env.seed));
     std::shuffle(env.tokens.begin(), env.tokens.end(), generator);
     seed_message = "";
 #endif
