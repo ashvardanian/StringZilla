@@ -45,9 +45,14 @@
 #include <optional>   // `std::optional`
 
 #include <string_view> // Requires C++17
+#include <span>        // Requires C++20, used to pass info to batch-capable parallel backends
 
 #include <stringzilla/stringzilla.h>
 #include <stringzilla/stringzilla.hpp>
+
+#if SZ_USE_CUDA
+#include <stringzilla/types.cuh> // `unified_alloc`
+#endif
 
 #include "test.hpp" // `read_file`
 
@@ -74,10 +79,12 @@ struct call_result_t {
     check_value_t check_value = 0;
     /** @brief For some operations with non-linear complexity, the throughput should be measured differently. */
     std::size_t operations = 0;
+    /** @brief Equal to 1 for most inputs, but can be larger for batch-capable functions. */
+    std::size_t inputs_processed = 1;
 
     call_result_t() = default;
     call_result_t(std::size_t bytes_passed, std::size_t check_value = 0, std::size_t operations = 0)
-        : bytes_passed(bytes_passed), check_value(check_value), operations(operations) {}
+        : bytes_passed(bytes_passed), check_value(check_value), operations(operations), inputs_processed(1) {}
 };
 
 struct callable_no_op_t {
@@ -183,33 +190,57 @@ inline std::size_t bit_floor(std::size_t n) {
     return static_cast<std::size_t>(1) << most_siginificant_bit_position;
 }
 
+#if !SZ_USE_CUDA
+using dataset_t = std::string;
+using token_view_t = std::string_view;
+using tokens_t = std::vector<token_view_t>;
+#else
+using dataset_t = std::basic_string<char, std::char_traits<char>, sz::cuda::unified_alloc<char>>;
+using token_view_t = sz::span<char const>;
+using tokens_t = std::vector<token_view_t, sz::cuda::unified_alloc<token_view_t>>;
+#endif
+
 /**
  *  @brief Tokenizes a string with the given separator predicate.
  *  @see For faster ways to tokenize a string with STL: https://ashvardanian.com/posts/splitting-strings-cpp/
  */
-template <typename is_separator_callback_type>
-inline std::vector<std::string_view> tokenize(std::string_view str, is_separator_callback_type &&is_separator) {
-    std::vector<std::string_view> words;
-    std::size_t start = 0;
-    for (std::size_t end = 0; end <= str.length(); ++end) {
+template <typename is_separator_callback_type_>
+tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separator) {
+
+    // First, let's count the number of separators to minimize the number of allocations.
+    std::size_t separator_count = 0;
+    for (std::size_t i = 0; i < str.length(); ++i)
+        if (is_separator(str[i])) separator_count++;
+
+    // Now, let's allocate the vector with the right size.
+    std::size_t const token_upper_bound = separator_count + 1;
+    tokens_t tokens(token_upper_bound);
+
+    // Now, let's split the string into non-empty tokens.
+    std::size_t tokens_found = 0;
+    for (std::size_t start = 0, end = 0; end <= str.length(); ++end)
         if (end == str.length() || is_separator(str[end])) {
-            if (start < end) words.push_back({&str[start], end - start});
+            if (start < end) tokens[tokens_found] = {&str[start], end - start}, ++tokens_found;
             start = end + 1;
         }
-    }
-    return words;
+
+    // Now, let's resize the vector to the actual number of tokens found.
+    tokens.resize(tokens_found);
+    return tokens;
 }
 
 /** @brief Splits a string into words, using newlines, tabs, and whitespaces as delimiters using @b `std::isspace`. */
-inline std::vector<std::string_view> tokenize(std::string_view str) {
+inline tokens_t tokenize(std::string_view str) {
     return tokenize(str, [](char c) { return std::isspace(c); });
 }
 
-template <typename result_string_type = std::string_view, typename from_string_type = result_string_type,
-          typename comparator_type = std::equal_to<std::size_t>>
-inline std::vector<result_string_type> filter_by_length(std::vector<from_string_type> tokens, std::size_t n,
-                                                        comparator_type &&comparator = {}) {
-    std::vector<result_string_type> result;
+template <typename result_string_type_ = std::string_view, typename from_string_type_ = result_string_type_,
+          typename comparator_type_ = std::equal_to<std::size_t>, typename allocator_type_ = std::allocator<char>>
+std::vector<result_string_type_, allocator_type_> filter_by_length(
+    std::vector<from_string_type_, allocator_type_> const &tokens, //
+    std::size_t n, comparator_type_ &&comparator = {}) {
+
+    std::vector<result_string_type_, allocator_type_> result;
     for (auto const &str : tokens)
         if (comparator(str.length(), n)) result.push_back({str.data(), str.length()});
     return result;
@@ -249,17 +280,22 @@ struct environment_t {
     /** @brief Upper time bound on a duration of a single callable. */
     std::size_t benchmark_seconds = SZ_DEBUG ? 1 : 10;
     /** @brief Seed for the random number generator. */
-    std::size_t seed = 0;
+    std::uint64_t seed = 0;
     /** @brief Upper bound on the number of stress test failures on a callable. */
     std::size_t stress_limit = 1;
 
     /** @brief Textual content of the dataset file, fully loaded into memory. */
-    std::string dataset;
+    dataset_t dataset;
     /** @brief Array of tokens extracted from the @p dataset. */
-    std::vector<std::string_view> tokens;
+    tokens_t tokens;
 
     bool allow(std::string const &benchmark_name) const {
         return filter.empty() || std::regex_search(benchmark_name, std::regex(filter));
+    }
+
+    std::string_view operator[](std::size_t i) const {
+        if (i >= tokens.size()) throw std::out_of_range("Index out of range");
+        return {tokens[i].data(), tokens[i].size()};
     }
 };
 
@@ -362,14 +398,14 @@ inline environment_t build_environment(                                        /
     env.dataset.resize(bit_floor(env.dataset.size())); // Shrink to the nearest power of two
 
     // Tokenize the dataset according to the tokenization mode
-    if (env.tokenization == environment_t::file_k) { env.tokens.push_back(env.dataset); }
+    if (env.tokenization == environment_t::file_k) { env.tokens.push_back({env.dataset.data(), env.dataset.size()}); }
     else if (env.tokenization == environment_t::lines_k) {
         env.tokens = tokenize(env.dataset, [](char c) { return c == '\n'; });
     }
     else if (env.tokenization == environment_t::words_k) { env.tokens = tokenize(env.dataset); }
     else {
         std::size_t n = static_cast<std::size_t>(env.tokenization);
-        env.tokens = filter_by_length(tokenize(env.dataset), n, std::equal_to<std::size_t>());
+        env.tokens = filter_by_length<token_view_t>(tokenize(env.dataset), n, std::equal_to<std::size_t>());
     }
     env.tokens.resize(bit_floor(env.tokens.size())); // Shrink to the nearest power of two
 
@@ -465,22 +501,20 @@ struct bench_result_t {
     std::string name;
     bool skipped = false;
 
-    std::size_t stress_calls = 0;
-    std::size_t profiled_calls = 0;
-    std::size_t profiled_cpu_cycles = 0;
-    double profiled_seconds = 0;
+    std::size_t stress_calls = 0;   //< Number of calls to the callable for stress-testing
+    std::size_t profiled_calls = 0; //< Number of calls to the callable for profiling/benchmarking
+
+    std::size_t stress_inputs = 0;   //< Can be larger than `stress_calls` for batch-capable functions
+    std::size_t profiled_inputs = 0; //< Can be larger than `profiled_calls` for batch-capable functions
+
+    std::size_t profiled_cpu_cycles = 0; //< Number of CPU cycles used in the benchmark by the main thread
+    double profiled_seconds = 0;         //< Wall clock duration of the benchmark
 
     duration_histogram_t cpu_cycles_histogram;
 
     std::size_t bytes_passed = 0; //< Pulled from the `call_result_t`
     std::size_t operations = 0;   //< Pulled from the `call_result_t`
     std::size_t errors = 0;       //< Pulled from the `call_result_t`
-
-    inline bench_result_t &operator+=(call_result_t const &run) noexcept {
-        bytes_passed += run.bytes_passed;
-        operations += run.operations;
-        return *this;
-    }
 
     /**
      *  @brief  Logs the benchmark results to the console, including the throughput and latency,
@@ -618,6 +652,7 @@ bench_result_t bench_nullary(  //
             call_result_t const accelerated_result = callable();
             call_result_t const baseline_result = baseline();
             ++result.stress_calls;
+            result.stress_inputs += accelerated_result.inputs_processed;
             if (accelerated_result.check_value == baseline_result.check_value) continue; // No failures
 
             // If we got here, the error needs to be reported and investigated.
@@ -633,16 +668,18 @@ bench_result_t bench_nullary(  //
     // Repeat the benchmark of the unary function. Assume most of them are applied to the entire
     // dataset and take a lot of time, so we don't unroll much, unlike `bench_unary`.
     for (auto running_seconds : repeat_up_to(env.benchmark_seconds)) {
-        std::uint64_t time_start = cpu_cycle_counter();
+        std::uint64_t cpu_cycles_at_start = cpu_cycle_counter();
         call_result_t call_result = callable();
-        std::uint64_t time_end = cpu_cycle_counter();
+        std::uint64_t cpu_cycles_at_end = cpu_cycle_counter();
 
         // Aggregate:
-        result += call_result;
+        result.operations += call_result.operations;
+        result.bytes_passed += call_result.bytes_passed;
+        result.profiled_inputs += call_result.inputs_processed;
         result.profiled_seconds = running_seconds;
         result.profiled_calls += 1;
-        result.profiled_cpu_cycles += time_end - time_start;
-        result.cpu_cycles_histogram[time_end - time_start] += 1;
+        result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
+        result.cpu_cycles_histogram[cpu_cycles_at_end - cpu_cycles_at_start] += 1;
     }
 
     return result;
@@ -654,6 +691,7 @@ bench_result_t bench_nullary(  //
  *  @param[in] name Name of the benchmark, used for logging.
  *  @param[in] baseline Optional serial analog, against which the accelerated function will be stress-tested.
  *  @param[in] callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
+ *  @param[in] preprocessing Optional function to pre-process the data after the prediction.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
 template <                                          //
@@ -684,6 +722,7 @@ bench_result_t bench_unary(    //
             std::size_t const token_index = (result.stress_calls++) & lookup_mask;
             call_result_t const accelerated_result = callable(token_index);
             call_result_t const baseline_result = baseline(token_index);
+            result.stress_calls += accelerated_result.inputs_processed;
             if (accelerated_result.check_value == baseline_result.check_value) continue; // No failures
 
             // If we got here, the error needs to be reported and investigated.
@@ -699,12 +738,16 @@ bench_result_t bench_unary(    //
     // For profiling, we will first run the benchmark just once to get a rough estimate of the time.
     // But then we will repeat it in an unrolled fashion for a more accurate measurement.
     result.profiled_seconds += seconds_per_call([&] {
-        std::uint64_t start_cycle = cpu_cycle_counter();
-        result += callable((std::size_t)0); //? Use the first token
-        std::uint64_t end_cycle = cpu_cycle_counter();
+        std::uint64_t cpu_cycles_at_start = cpu_cycle_counter();
+        call_result_t const call_result = callable((std::size_t)0); //? Use the first token
+        std::uint64_t cpu_cycles_at_end = cpu_cycle_counter();
+
+        result.operations += call_result.operations;
+        result.bytes_passed += call_result.bytes_passed;
+        result.profiled_inputs += call_result.inputs_processed;
         result.profiled_calls += 1;
-        result.profiled_cpu_cycles += end_cycle - start_cycle;
-        result.cpu_cycles_histogram[end_cycle - start_cycle] += 1;
+        result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
+        result.cpu_cycles_histogram[cpu_cycles_at_end - cpu_cycles_at_start] += 1;
     });
     if (result.profiled_seconds >= env.benchmark_seconds) return result;
 
@@ -721,12 +764,15 @@ bench_result_t bench_unary(    //
         std::uint64_t t4 = cpu_cycle_counter();
 
         // Aggregate all of them:
-        result += r0;
-        result += r1;
-        result += r2;
-        result += r3;
-        result.profiled_seconds = running_seconds;
+        result.operations += r0.operations, result.operations += r1.operations,                           //
+            result.operations += r2.operations, result.operations += r3.operations;                       //
+        result.bytes_passed += r0.bytes_passed, result.bytes_passed += r1.bytes_passed,                   //
+            result.bytes_passed += r2.bytes_passed, result.bytes_passed += r3.bytes_passed;               //
+        result.profiled_inputs += r0.inputs_processed, result.profiled_inputs += r1.inputs_processed,     //
+            result.profiled_inputs += r2.inputs_processed, result.profiled_inputs += r3.inputs_processed; //
         result.profiled_calls += 4;
+
+        result.profiled_seconds = running_seconds;
         result.profiled_cpu_cycles += t4 - t0;
         result.cpu_cycles_histogram[t1 - t0] += 1;
         result.cpu_cycles_histogram[t2 - t1] += 1;
