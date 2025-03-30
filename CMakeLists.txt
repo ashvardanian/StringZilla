@@ -195,6 +195,20 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         target_compile_options(${target} PRIVATE "/Bt;/wd4068;/wd4146;/utf-8;/WX")
     endif ()
 
+    # Enable OpenMP if available
+    if (NOT target_type STREQUAL "SHARED_LIBRARY")
+        if (${compiler_id} STREQUAL "GNU"
+            OR ${compiler_id} STREQUAL "Clang"
+            OR ${compiler_id} STREQUAL "NVIDIA"
+        )
+            target_compile_options(${target} PRIVATE "-fopenmp")
+            target_link_libraries(${target} PRIVATE "-fopenmp")
+        elseif (${compiler_id} STREQUAL "MSVC")
+            target_compile_options(${target} PRIVATE "/openmp")
+            target_link_libraries(${target} PRIVATE "/openmp")
+        endif ()
+    endif ()
+
     # Set optimization options for different compilers differently
     if (${compiler_id} STREQUAL "MSVC")
         if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
@@ -326,7 +340,7 @@ endfunction ()
 
 if (${STRINGZILLA_BUILD_BENCHMARK})
     define_launcher(stringzilla_bench_search scripts/bench_search.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_similarity scripts/bench_similarity.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_gpu_launcher(stringzilla_bench_similarity scripts/bench_similarity.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_sequence scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_token scripts/bench_token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_container scripts/bench_container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
