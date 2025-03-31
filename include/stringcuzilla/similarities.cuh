@@ -355,7 +355,7 @@ status_t levenshtein_distances(                                                 
     cudaError_t error = cudaStreamSynchronize(stream);
     if (error != cudaSuccess) {
         if (error == cudaErrorMemoryAllocation) { return status_t::bad_alloc_k; }
-        else { return status_t::unknown_error_k; }
+        else { return status_t::unknown_k; }
     }
     return status_t::success_k;
 }
@@ -415,7 +415,7 @@ status_t needleman_wunsch_scores(                                               
     cudaError_t error = cudaStreamSynchronize(stream);
     if (error != cudaSuccess) {
         if (error == cudaErrorMemoryAllocation) { return status_t::bad_alloc_k; }
-        else { return status_t::unknown_error_k; }
+        else { return status_t::unknown_k; }
     }
     return status_t::success_k;
 }

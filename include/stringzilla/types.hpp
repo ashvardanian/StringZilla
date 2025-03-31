@@ -115,7 +115,7 @@ enum class status_t {
     bad_alloc_k = sz_bad_alloc_k,
     invalid_utf8_k = sz_invalid_utf8_k,
     contains_duplicates_k = sz_contains_duplicates_k,
-    unknown_error_k = sz_unknown_error_k,
+    unknown_k = sz_status_unknown_k,
 };
 
 struct uniform_substitution_cost_t {

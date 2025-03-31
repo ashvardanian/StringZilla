@@ -12,6 +12,24 @@
  *
  *  @section    Introduction
  *
+ *  StringZilla is multi-language project designed for high-throughput string processing, differentiating
+ *  the low-level "embeddable" mostly-C core implementation, containing:
+ *
+ *  - `compare.h` - byte-level comparison functions.
+ *  - `memory.h` - copying, moving, and filling raw memory.
+ *  - `hash.h` - hash functions and checksum algorithms.
+ *  - `find.h` - searching for substrings and byte sets.
+ *  - `sort.h` - single-threaded sorting algorithms.
+ *  - `intersect.h` - intersections of unordered string sets.
+ *  - `small_string.h` - "Small String Optimization" in C 99.
+ *  - `stringzilla.h` - umbrella header for the core C API.
+ *  - `stringzilla.hpp` - umbrella header for the core C++ API.
+ *
+ *  It also provides many higher-level algorithms, mostly implemented in C++ with OpenMP and CUDA,
+ *  also exposed via the stable C 99 ABI, but requiring C++17 and CUDA 17 compilers to build the shared libraries:
+ *
+ *  - `similarity.hpp` - similarity measures, like Levenshtein distance, Needleman-Wunsch, & Smith-Waterman alignment.
+ *  - `features.hpp` - feature extraction for TF-IDF and other Machine Learning algorithms.
  *
  *  @section    Compilation Settings
  *
@@ -36,6 +54,8 @@
  *  - `SZ_USE_NEON=?` - whether to use NEON instructions on ARM.
  *  - `SZ_USE_SVE=?` - whether to use SVE instructions on ARM.
  *  - `SZ_USE_SVE2=?` - whether to use SVE2 instructions on ARM.
+ *  - `SZ_USE_CUDA=?` -
+ *  - `SZ_USE_OPENMP=?` -
  */
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_

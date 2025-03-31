@@ -319,7 +319,7 @@ SZ_INTERNAL sz_status_t _sz_levenshtein_distance_skewed_diagonals_serial( //
     previous_distances[0] = 0;
     current_distances[0] = current_distances[1] = 1;
 
-    // Progress through the upper triangle of the Levenshtein matrix.
+    // Progress through the upper-left triangle of the Levenshtein matrix.
     sz_size_t next_diagonal_index = 2;
     for (; next_diagonal_index != n; ++next_diagonal_index) {
         sz_size_t const next_diagonal_length = next_diagonal_index + 1;
@@ -338,7 +338,7 @@ SZ_INTERNAL sz_status_t _sz_levenshtein_distance_skewed_diagonals_serial( //
         next_distances = temporary;
     }
 
-    // By now we've scanned through the upper triangle of the matrix, where each subsequent iteration results in a
+    // By now we've scanned through the upper-left triangle of the matrix, where each subsequent iteration results in a
     // larger diagonal. From now onwards, we will be shrinking. Instead of adding value equal to the skewed diagonal
     // index on either side, we will be cropping those values out.
     sz_size_t diagonals_count = n + n - 1;
@@ -836,7 +836,7 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto63_ice( //
     sz_size_t next_diagonal_index = 2;
     __mmask64 next_diagonal_mask = 0;
 
-    // Progress through the upper triangle of the Levenshtein matrix.
+    // Progress through the upper-left triangle of the Levenshtein matrix.
     for (; next_diagonal_index != shorter_dim; ++next_diagonal_index) {
         // After this iteration, the values at offset `0` and `next_diagonal_index` in the `next_vec`
         // should be set to `next_diagonal_index`, but it's easier to broadcast the value to the whole vector,
@@ -869,7 +869,7 @@ SZ_INTERNAL sz_size_t _sz_levenshtein_distance_skewed_diagonals_upto63_ice( //
         if (_ktestz_mask64_u8(within_bound_mask, next_diagonal_mask) == 1) return bound;
     }
 
-    // Now let's handle the anti-diagonal band of the matrix, between the top and bottom triangles.
+    // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
     for (; next_diagonal_index != longer_dim; ++next_diagonal_index) {
         // After this iteration, the value `shorted_dim - 1` in the `next_vec`
         // should be set to `next_diagonal_index`, but it's easier to broadcast the value to the whole vector,
@@ -1072,7 +1072,7 @@ SZ_INTERNAL sz_status_t _sz_levenshtein_distance_skewed_diagonals_upto65k_ice( /
     // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
     sz_size_t const diagonals_count = shorter_dim + longer_dim - 1;
 
-    // Progress through the upper triangle of the Levenshtein matrix.
+    // Progress through the upper-left triangle of the Levenshtein matrix.
     sz_size_t next_diagonal_index = 2;
     for (; next_diagonal_index != shorter_dim; ++next_diagonal_index) {
         sz_size_t const next_diagonal_length = next_diagonal_index + 1;
@@ -1118,7 +1118,7 @@ SZ_INTERNAL sz_status_t _sz_levenshtein_distance_skewed_diagonals_upto65k_ice( /
         next_distances = temporary;
     }
 
-    // By now we've scanned through the upper triangle of the matrix, where each subsequent iteration results in a
+    // By now we've scanned through the upper-left triangle of the matrix, where each subsequent iteration results in a
     // larger diagonal. From now onwards, we will be shrinking. Instead of adding value equal to the skewed diagonal
     // index on either side, we will be cropping those values out.
     for (; next_diagonal_index != diagonals_count; ++next_diagonal_index) {
@@ -1216,7 +1216,9 @@ SZ_PUBLIC sz_status_t sz_levenshtein_distance_ice( //
 }
 
 /**
- *  Computes the Needleman Wunsch alignment score between two strings.
+ *  @brief  Computes the Needleman-Wunsch alignment score between two strings. Uses the Wagner-Fischer algorithm
+ *          with the AVX-512VBMI extensions, vectorizing the substitution costs in each row.
+ *
  *  The method uses 32-bit integers to accumulate the running score for every cell in the matrix.
  *  Assuming the costs of substitutions can be arbitrary signed 8-bit integers, the method is expected to be used
  *  on strings not exceeding 2^24 length or 16.7 million characters.

@@ -412,6 +412,12 @@ typedef enum { sz_false_k = 0, sz_true_k = 1 } sz_bool_t;
 typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t;
 
 /**
+ *  @brief Describes the alignment goal for string similarity algorithms.
+ *  @sa sz_align_global_k, sz_align_local_k
+ */
+typedef enum { sz_align_global_k = 0, sz_align_local_k = 1 } sz_alignment_locality_t;
+
+/**
  *  @brief A simple signed integer type describing the status of a faulty operation.
  *  @sa sz_success_k, sz_bad_alloc_k, sz_invalid_utf8_k, sz_contains_duplicates_k
  */
@@ -424,6 +430,8 @@ typedef enum {
     sz_invalid_utf8_k = -2,
     /** For algorithms that take collections of unique elements, this status indicates presence of duplicates. */
     sz_contains_duplicates_k = -3,
+    /** A sink-hole status for unknown errors. */
+    sz_status_unknown_k = -4,
 } sz_status_t;
 
 /**

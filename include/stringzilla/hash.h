@@ -13,13 +13,13 @@
  *  Why the hell do we need a yet another hashing library?!
  *  Turns out, most existing libraries have noticeable constraints. Try finding a library that:
  *
- *  - Outputs 64-bit or 128-bit hashes and passes the SMHasher test suite.
- *  - Is fast for both short and long strings.
+ *  - Outputs 64-bit or 128-bit hashes and passes the @b SMHasher `--extra` tests.
+ *  - Is fast for both short @b (velocity) and long strings @b (throughput).
  *  - Supports incremental @b (streaming) hashing, when the data arrives in chunks.
- *  - Supports custom seeds hashes and secret strings for security.
- *  - Provides dynamic dispatch for different architectures to simplify deployment.
- *  - Uses modern SIMD, including not just AVX2 and NEON, but also AVX-512 and SVE2.
- *  - Documents its logic and guarantees the same output across different platforms.
+ *  - Supports custom @b seeds for hashes and have it affecting every bit of the output.
+ *  - Provides @b dynamic-dispatch for different architectures to simplify deployment.
+ *  - Uses @b SIMD, including not just AVX2 & NEON, but also masking AVX-512 & predicated SVE2.
+ *  - Documents its logic and @b guarantees the same output across different platforms.
  *
  *  This includes projects like "MurmurHash", "CityHash", "SpookyHash", "FarmHash", "MetroHash", "HighwayHash", etc.
  *  There are 2 libraries that are close to meeting these requirements: "xxHash" in C++ and "aHash" in Rust:
