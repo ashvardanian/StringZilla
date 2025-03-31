@@ -59,26 +59,6 @@ extern "C" {
 #endif
 
 /**
- *  @brief  Enumeration of SIMD capabilities of the target architecture.
- *          Used to introspect the supported functionality of the dynamic library.
- */
-typedef enum {
-    sz_cap_serial_k = 1,       ///< Serial (non-SIMD) capability
-    sz_cap_any_k = 0x7FFFFFFF, ///< Mask representing any capability with `INT_MAX`
-
-    sz_cap_haswell_k = 1 << 10, ///< x86 AVX2 capability with FMA and F16C extensions
-    sz_cap_skylake_k = 1 << 11, ///< x86 AVX512 baseline capability
-    sz_cap_ice_k = 1 << 12,     ///< x86 AVX512 capability with advanced integer algos and AES extensions
-
-    sz_cap_neon_k = 1 << 20,     ///< ARM NEON baseline capability
-    sz_cap_neon_aes_k = 1 << 21, ///< ARM NEON baseline capability with AES extensions
-    sz_cap_sve_k = 1 << 24,      ///< ARM SVE baseline capability
-    sz_cap_sve2_k = 1 << 25,     ///< ARM SVE2 capability
-    sz_cap_sve2_aes_k = 1 << 26, ///< ARM SVE2 capability with AES extensions
-
-} sz_capability_t;
-
-/**
  *  @brief  Function to determine the SIMD capabilities of the current machine @b only at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
