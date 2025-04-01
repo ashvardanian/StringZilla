@@ -1,9 +1,10 @@
 /**
  *  @brief  CUDA-accelerated string similarity utilities.
- *  @file   similarities.cuh
+ *  @file   similarity.cuh
  *  @author Ash Vardanian
  *
- *  Includes core APIs:
+ *  Unlike th OpenMP backed, which also has single-pair similarity scores, the CUDA backend focuses on
+ *  batch-processing of large collections of strings, generally, assigning a single warp to each string pair:
  *
  *  - `sz::cuda::levenshtein_distances` & `sz::cuda::levenshtein_distances_utf8` for Levenshtein edit-distances.
  *  - `sz::cuda::needleman_wunsch_score` for weighted Needleman-Wunsch global alignment.

@@ -1,6 +1,6 @@
 /**
  *  @brief  Hardware-accelerated feature extractions for string collections.
- *  @file   features.h
+ *  @file   features.hpp
  *  @author Ash Vardanian
  *
  *  The `sklearn.feature_extraction` module for @b TF-IDF, `CountVectorizer`, and `HashingVectorizer`
@@ -28,8 +28,8 @@
  *    - output hashes into a high-dimensional bit-vector.
  *
  */
-#ifndef STRINGZILLA_FEATURES_H_
-#define STRINGZILLA_FEATURES_H_
+#ifndef STRINGZILLA_FEATURES_HPP_
+#define STRINGZILLA_FEATURES_HPP_
 
 #include "types.h"
 
@@ -142,4 +142,4 @@ SZ_PUBLIC sz_bool_t sz_detect_encoding(sz_cptr_t text, sz_size_t length) {
 #ifdef __cplusplus
 }
 #endif // __cplusplus
-#endif // STRINGZILLA_FEATURES_H_
+#endif // STRINGZILLA_FEATURES_HPP_
