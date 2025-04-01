@@ -1,17 +1,17 @@
 /**
  *  @brief  OpenMP-accelerated string similarity scores in C++.
- *  @file   similarities.hpp
+ *  @file   similarity.hpp
  *  @author Ash Vardanian
  *
  *  Includes core APIs:
  *
- *  - `sz::levenshtein_distance` & `sz::levenshtein_distance_utf8` for Levenshtein edit-distances.
+ *  - `sz::levenshtein_distance` & `sz::levenshtein_distance_utf8` for Levenshtein edit-scores.
  *  - `sz::needleman_wunsch_score` for weighted Needleman-Wunsch global alignment.
  *  - `sz::smith_waterman_score` for weighted Smith-Waterman local alignment.
  *
  *  Also includes their batch-capable and parallel versions:
  *
- *  - `sz::levenshtein_distances` & `sz::levenshtein_distances_utf8` for Levenshtein edit-distances.
+ *  - `sz::levenshtein_scores` & `sz::levenshtein_scores_utf8` for Levenshtein edit-scores.
  *  - `sz::needleman_wunsch_scores` for weighted Needleman-Wunsch global alignment.
  *  - `sz::smith_waterman_scores` for weighted Smith-Waterman local alignment.
  *
@@ -53,31 +53,42 @@ namespace openmp {
  *  It updates the internal state to remember the last calculated value, as in Global Alignment it's
  *  always in the bottom-right corner of the DP matrix, which is evaluated last.
  */
-template <typename char_type = char, typename distance_type = sz_size_t,
-          typename get_substitution_cost_type = uniform_substitution_cost_t,
-          sz_capability_t capability = sz_cap_serial_k>
+template <                                                    //
+    typename first_iterator_type_ = char const *,             //
+    typename second_iterator_type_ = char const *,            //
+    typename score_type_ = sz_size_t,                         //
+    typename substituter_type_ = uniform_substitution_cost_t, //
+    sz_capability_t capability_ = sz_cap_serial_k             //
+    >
 struct global_aligner {
 
-    static constexpr bool is_parallel_k = capability & sz_cap_parallel_k;
+    using first_iterator_type = first_iterator_type_;
+    using second_iterator_type = second_iterator_type_;
+    using score_type = score_type_;
+    using substituter_type = substituter_type_;
+    static constexpr sz_capability_t capability = capability_;
 
-    get_substitution_cost_type get_substitution_cost_ {};
+    substituter_type substituter_ {};
     error_cost_t gap_cost_ {1};
-    distance_type last_cell_ {0};
+    score_type last_cell_ {0};
 
     global_aligner() = default;
-    global_aligner(get_substitution_cost_type &&get_substitution_cost, error_cost_t gap_cost) noexcept
-        : get_substitution_cost_(std::move(get_substitution_cost)), gap_cost_(gap_cost) {}
+    global_aligner(substituter_type &&substituter, error_cost_t gap_cost) noexcept
+        : substituter_(std::move(substituter)), gap_cost_(gap_cost) {}
+
+    static constexpr bool is_parallel() { return capability & sz_cap_parallel_k; }
 
     /**
      *  @brief Initializes a boundary value within a certain diagonal.
      *  @note Should only be called for the diagonals outside of the bottom-right triangle.
+     *  @note Should only be called for the top row and left column of the matrix.
      */
-    void init(distance_type &cell, sz_size_t diagonal_index) const noexcept { cell = gap_cost_ * diagonal_index; }
+    void init(score_type &cell, sz_size_t diagonal_index) const noexcept { cell = gap_cost_ * diagonal_index; }
 
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    distance_type score() const noexcept { return last_cell_; }
+    score_type score() const noexcept { return last_cell_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -87,30 +98,28 @@ struct global_aligner {
      */
     void operator()(                                                                             //
         char_type const *first_reversed_slice, char_type const *second_slice, sz_size_t const n, //
-        distance_type const *costs_pre_substitution,                                             //
-        distance_type const *costs_pre_insertion, distance_type const *costs_pre_deletion,       //
-        distance_type *costs_new) noexcept {
+        score_type const *scores_pre_substitution,                                               //
+        score_type const *scores_pre_insertion, score_type const *scores_pre_deletion,           //
+        score_type *scores_new) noexcept {
 
-        _sz_assert(costs_pre_insertion + 1 == costs_pre_deletion); // ? Those are expected to be in consecutive slots
-
-#pragma omp parallel for simd schedule(dynamic, 1) if (is_parallel_k)
+#pragma omp parallel for simd schedule(dynamic, 1) if (is_parallel())
         for (sz_size_t i = 0; i < n; ++i) {
-            distance_type cost_pre_substitution = costs_pre_substitution[i];
-            distance_type cost_pre_insertion = costs_pre_insertion[i];
-            distance_type cost_pre_deletion = costs_pre_deletion[i];
+            score_type score_pre_substitution = scores_pre_substitution[i];
+            score_type score_pre_insertion = scores_pre_insertion[i];
+            score_type score_pre_deletion = scores_pre_deletion[i];
 
             // ? Note that here we are still traversing both buffers in the same order,
-            // ? because the one of the strings has been reversed beforehand.
-            error_cost_t cost_of_substitution = get_substitution_cost_(first_reversed_slice[i], second_slice[i]);
-            distance_type cost_if_substitution = cost_pre_substitution + cost_of_substitution;
-            distance_type cost_if_deletion_or_insertion =
-                sz_min_of_two(cost_pre_deletion, cost_pre_insertion) + gap_cost_;
-            distance_type cell_score = sz_min_of_two(cost_if_deletion_or_insertion, cost_if_substitution);
-            costs_new[i] = cell_score;
+            // ? because one of the strings has been reversed beforehand.
+            error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+            score_type score_if_substitution = score_pre_substitution + cost_of_substitution;
+            score_type score_if_deletion_or_insertion =
+                sz_min_of_two(score_pre_deletion, score_pre_insertion) + gap_cost_;
+            score_type cell_score = sz_min_of_two(score_if_deletion_or_insertion, score_if_substitution);
+            scores_new[i] = cell_score;
         }
 
-        // The last element of the last diagonal is the result of the global alignment.
-        last_cell_ = costs_new[0];
+        // The last element of the last chunk is the result of the global alignment.
+        last_cell_ = scores_new[n - 1];
     }
 };
 
@@ -122,47 +131,66 @@ struct global_aligner {
  *  It updates the internal state to remember the minimum/maximum calculated value, as in Local Alignment
  *  it's always in the bottom-right corner of the DP matrix, which is evaluated last.
  */
-template <typename char_type = char, typename distance_type = sz_size_t,
-          typename get_substitution_cost_type = uniform_substitution_cost_t,
-          sz_capability_t capability = sz_cap_serial_k>
+template <                                                    //
+    typename first_iterator_type_ = char const *,             //
+    typename second_iterator_type_ = char const *,            //
+    typename score_type_ = sz_size_t,                         //
+    typename substituter_type_ = uniform_substitution_cost_t, //
+    sz_capability_t capability_ = sz_cap_serial_k             //
+    >
 struct local_aligner {
 
-    static constexpr bool is_parallel_k = capability & sz_cap_parallel_k;
+    using first_iterator_type = first_iterator_type_;
+    using second_iterator_type = second_iterator_type_;
+    using score_type = score_type_;
+    using substituter_type = substituter_type_;
+    static constexpr sz_capability_t capability = capability_;
 
-    get_substitution_cost_type get_substitution_cost_ {};
+    substituter_type substituter_ {};
     error_cost_t gap_cost_ {-1};
-    distance_type max_cell_ {0};
+    score_type max_cell_ {0};
 
     local_aligner() = default;
-    local_aligner(get_substitution_cost_type &&get_substitution_cost, error_cost_t gap_cost) noexcept
-        : get_substitution_cost_(std::move(get_substitution_cost)), gap_cost_(gap_cost) {}
+    local_aligner(substituter_type &&substituter, error_cost_t gap_cost) noexcept
+        : substituter_(std::move(substituter)), gap_cost_(gap_cost) {}
 
-    void init(distance_type &cell, sz_size_t /*diagonal_index*/) const noexcept { cell = 0; }
-    distance_type score() const noexcept { return max_cell_; }
+    static constexpr bool is_parallel() { return capability & sz_cap_parallel_k; }
+
+    /**
+     *  @brief Initializes a boundary value within a certain diagonal.
+     *  @note Should only be called for the diagonals outside of the bottom-right triangle.
+     *  @note Should only be called for the top row and left column of the matrix.
+     */
+    void init(score_type &cell, sz_size_t /* diagonal_index */) const noexcept { cell = 0; }
+
+    /**
+     *  @brief Extract the final result of the scoring operation which will be maximum encountered value.
+     */
+    score_type score() const noexcept { return max_cell_; }
 
     void operator()(char_type const *first_reversed_slice, char_type const *second_slice, sz_size_t const n,
-                    distance_type const *scores_pre_substitution, distance_type const *scores_pre_insertion,
-                    distance_type const *scores_pre_deletion, distance_type *scores_new) noexcept {
+                    score_type const *scores_pre_substitution, score_type const *scores_pre_insertion,
+                    score_type const *scores_pre_deletion, score_type *scores_new) noexcept {
 
-#pragma omp parallel for simd schedule(dynamic, 1) if (is_parallel_k)
+#pragma omp parallel for simd schedule(dynamic, 1) if (is_parallel())
         for (sz_size_t i = 0; i < n; ++i) {
-            distance_type score_pre_substitution = scores_pre_substitution[i];
-            distance_type score_pre_insertion = scores_pre_insertion[i];
-            distance_type score_pre_deletion = scores_pre_deletion[i];
+            score_type score_pre_substitution = scores_pre_substitution[i];
+            score_type score_pre_insertion = scores_pre_insertion[i];
+            score_type score_pre_deletion = scores_pre_deletion[i];
 
             // ? Note that here we are still traversing both buffers in the same order,
-            // ? because the one of the strings has been reversed beforehand.
-            error_cost_t substitution = get_substitution_cost_(first_reversed_slice[i], second_slice[i]);
-            distance_type cost_if_substitution = cost_pre_substitution + cost_of_substitution;
-            distance_type cost_if_deletion_or_insertion =
-                sz_min_of_two(cost_pre_deletion, cost_pre_insertion) + gap_cost_;
-            distance_type cell_score = sz_min_of_three(cost_if_deletion_or_insertion, cost_if_substitution, 0);
+            // ? because one of the strings has been reversed beforehand.
+            error_cost_t substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+            score_type score_if_substitution = score_pre_substitution + cost_of_substitution;
+            score_type score_if_deletion_or_insertion =
+                sz_min_of_two(score_pre_deletion, score_pre_insertion) + gap_cost_;
+            score_type cell_score = sz_min_of_three(score_if_deletion_or_insertion, score_if_substitution, 0);
             scores_new[i] = cell_score;
 
             // Update the global maximum score if this cell beats it.
 #pragma omp critical
             {
-                if (cell_score > max_cell_) { max_cell_ = cell_score; }
+                if (cell_score > max_cell_) max_cell_ = cell_score;
             }
         }
     }
@@ -178,18 +206,18 @@ struct local_aligner {
  *  ? This algorithm provides a more flexible baseline implementation for future SIMD and GPGPU optimizations.
  *  ! This algorithm can't handle different "gap opening" and "gap extension" costs, those need 3x more memory.
  *  ! This algorithm may be suboptimal for very small strings, where a conventional Wagner-Fischer algorithm
- *  ! with horizontal traversal order and fewer loops may be faster.
+ *  ! with horizontal traversal order and fewer loops may be faster. That one, however, can't be parallel!
  *
  *  @param[in] first The first string.
  *  @param[in] second The second string.
  *  @param[out] result_ref Location to dump the calculated score.
  *  @param[in] gap_cost The uniform cost of a gap (insertion or deletion).
- *  @param[in] get_substitution_cost A commutative function returning the cost of substituting one char with another.
+ *  @param[in] substituter A commutative function returning the cost of substituting one char with another.
  *  @param[in] alloc A default-constructible allocator for the internal buffers.
  *
  *  @tparam char_type_ The type of the characters in the strings, generally `char` or @b `rune_t` for UTF-8.
- *  @tparam distance_type_ The smallest type that can hold the distance, ideally `sz_i8_t` or `sz_u8_t`.
- *  @tparam get_substitution_cost_ A callable type that takes two characters and returns the substitution cost.
+ *  @tparam score_type_ The smallest type that can hold the distance, ideally `sz_i8_t` or `sz_u8_t`.
+ *  @tparam substituter_ A callable type that takes two characters and returns the substitution cost.
  *  @tparam allocator_type_ A default-constructible allocator type for the internal buffers.
  *  @tparam multi_threaded_ Whether to use OpenMP for @b multi-threading or just vectorization.
  *  @tparam global_alignment_ Whether to use the global alignment algorithm or the local one.
@@ -198,30 +226,31 @@ struct local_aligner {
  *          in the `stringzilla.hpp` header, making compilation times shorter for the end-user.
  *  @sa     For lower-level API, check `sz_levenshtein_distance[_utf8]` and `sz_needleman_wunsch_score`.
  *  @sa     For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
- *  @sa     For bulk API, use `sz::levenshtein_distances[_utf8]`.
+ *  @sa     For bulk API, use `sz::levenshtein_scores[_utf8]`.
  */
-template <                                                         //
-    sz_capability_t capability_ = sz_cap_serial_k,                 //
-    sz_alignment_locality_t locality_ = sz_align_global_k,         //
-    typename char_type_ = char,                                    //
-    typename distance_type_ = sz_size_t,                           //
-    typename get_substitution_cost_ = uniform_substitution_cost_t, //
-    typename allocator_type_ = dummy_alloc_t                       //
+template <                                                 //
+    sz_capability_t capability_ = sz_cap_serial_k,         //
+    sz_alignment_locality_t locality_ = sz_align_global_k, //
+    typename char_type_ = char,                            //
+    typename score_type_ = sz_size_t,                      //
+    typename substituter_ = uniform_substitution_cost_t,   //
+    typename allocator_type_ = dummy_alloc_t               //
     >
-sz_status_t score_diagonally(                                                        //
-    span<char_type_ const> first, span<char_type_ const> second,                     //
-    distance_type_ &result_ref,                                                      //
-    sz_error_cost_t gap_cost = 1,                                                    //
-    get_substitution_cost_ &&get_substitution_cost = uniform_substitution_cost_t {}, //
-    allocator_type_ &&alloc = allocator_type_ {}                                     //
-) {
+sz_status_t score_diagonally(                                    //
+    span<char_type_ const> first, span<char_type_ const> second, //
+    score_type_ &result_ref,                                     //
+    sz_error_cost_t gap_cost = 1,                                //
+    substituter_ &&substituter = uniform_substitution_cost_t {}, //
+    allocator_type_ &&alloc = allocator_type_ {}                 //
+    ) noexcept {
+
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using allocated_type = typename allocator_type_::value_type;
     static_assert(sizeof(allocated_type) == sizeof(char), "Allocator must be byte-aligned");
     using char_type = char_type_;
-    using distance_type = distance_type_;
+    using score_type = score_type_;
 
-    using aligner_t = global_aligner<char_type, distance_type, get_substitution_cost_, capability_>;
+    using aligner_t = global_aligner<char_type, score_type, substituter_, capability_>;
 
     // Make sure the size relation between the strings is correct.
     char_type const *shorter = first.data(), *longer = second.data();
@@ -247,25 +276,24 @@ sz_status_t score_diagonally(                                                   
 
     // We want to avoid reverse-order iteration over the shorter string.
     // Let's allocate a bit more memory and reverse-export our shorter string into that buffer.
-    sz_size_t const buffer_length =
-        sizeof(distance_type) * max_diagonal_length * 3 + shorter_length * sizeof(char_type);
-    distance_type *const buffer = (distance_type *)alloc.allocate(buffer_length);
+    sz_size_t const buffer_length = sizeof(score_type) * max_diagonal_length * 3 + shorter_length * sizeof(char_type);
+    score_type *const buffer = (score_type *)alloc.allocate(buffer_length);
     if (!buffer) return sz_bad_alloc_k;
 
     // The next few pointers will be swapped around.
-    distance_type *previous_distances = buffer;
-    distance_type *current_distances = previous_distances + max_diagonal_length;
-    distance_type *next_distances = current_distances + max_diagonal_length;
-    char_type *const shorter_reversed = (char_type *)(next_distances + max_diagonal_length);
+    score_type *previous_scores = buffer;
+    score_type *current_scores = previous_scores + max_diagonal_length;
+    score_type *next_scores = current_scores + max_diagonal_length;
+    char_type *const shorter_reversed = (char_type *)(next_scores + max_diagonal_length);
 
     // Export the reversed string into the buffer.
     for (sz_size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
 
     // Initialize the first two diagonals:
     aligner_t diagonal_aligner;
-    diagonal_aligner.init(previous_distances[0], 0);
-    diagonal_aligner.init(current_distances[0], 1);
-    diagonal_aligner.init(current_distances[1], 1);
+    diagonal_aligner.init(previous_scores[0], 0);
+    diagonal_aligner.init(current_scores[0], 1);
+    diagonal_aligner.init(current_scores[1], 1);
 
     // We skip diagonals 0 and 1, as they are trivial.
     // We will start with diagonal 2, which has length 3, with the first and last elements being preset,
@@ -278,22 +306,22 @@ sz_status_t score_diagonally(                                                   
 
         sz_size_t const next_diagonal_length = next_diagonal_index + 1;
         diagonal_aligner(                                                //
-            shorter_reversed + shorter_length - next_diagonal_index + 1, // first string
-            longer,                                                      // second string
-            next_diagonal_length - 2,                 // number of elements to compute with the `diagonal_aligner`
-            previous_distances,                       // costs pre substitution
-            current_distances, current_distances + 1, // costs pre insertion/deletion
-            next_distances + 1);
+            shorter_reversed + shorter_length - next_diagonal_index + 1, // first sequence of characters
+            longer,                                                      // second sequence of characters
+            next_diagonal_length - 2,           // number of elements to compute with the `diagonal_aligner`
+            previous_scores,                    // costs pre substitution
+            current_scores, current_scores + 1, // costs pre insertion/deletion
+            next_scores + 1);
 
         // Don't forget to populate the first row and the first column of the Levenshtein matrix.
-        diagonal_aligner.init(next_distances[0], next_diagonal_index);
-        diagonal_aligner.init(next_distances[next_diagonal_length - 1], next_diagonal_index);
+        diagonal_aligner.init(next_scores[0], next_diagonal_index);
+        diagonal_aligner.init(next_scores[next_diagonal_length - 1], next_diagonal_index);
 
         // Perform a circular rotation of those buffers, to reuse the memory.
-        distance_type *temporary = previous_distances;
-        previous_distances = current_distances;
-        current_distances = next_distances;
-        next_distances = temporary;
+        score_type *temporary = previous_scores;
+        previous_scores = current_scores;
+        current_scores = next_scores;
+        next_scores = temporary;
     }
 
     // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
@@ -301,26 +329,26 @@ sz_status_t score_diagonally(                                                   
 
         sz_size_t const next_diagonal_length = shorter_dim;
         diagonal_aligner(                                        //
-            shorter_reversed + shorter_length - shorter_dim + 1, // first string
-            longer + next_diagonal_index - shorter_dim,          // second string
-            next_diagonal_length - 1,                 // number of elements to compute with the `diagonal_aligner`
-            previous_distances,                       // costs pre substitution
-            current_distances, current_distances + 1, // costs pre insertion/deletion
-            next_distances);
+            shorter_reversed + shorter_length - shorter_dim + 1, // first sequence of characters
+            longer + next_diagonal_index - shorter_dim,          // second sequence of characters
+            next_diagonal_length - 1,           // number of elements to compute with the `diagonal_aligner`
+            previous_scores,                    // costs pre substitution
+            current_scores, current_scores + 1, // costs pre insertion/deletion
+            next_scores);
 
         // Don't forget to populate the first row of the Levenshtein matrix.
-        diagonal_aligner.init(next_distances[next_diagonal_length - 1], next_diagonal_index);
+        diagonal_aligner.init(next_scores[next_diagonal_length - 1], next_diagonal_index);
 
         // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
         // dropping the first element in the current array.
-        distance_type *temporary = previous_distances;
-        previous_distances = current_distances;
-        current_distances = next_distances;
-        next_distances = temporary;
+        score_type *temporary = previous_scores;
+        previous_scores = current_scores;
+        current_scores = next_scores;
+        next_scores = temporary;
 
-        // ! Drop the first entry among the current distances.
-        sz_move((sz_ptr_t)(previous_distances), (sz_ptr_t)(previous_distances + 1),
-                (max_diagonal_length - 1) * sizeof(distance_type));
+        // ! Drop the first entry among the current scores.
+        sz_move((sz_ptr_t)(previous_scores), (sz_ptr_t)(previous_scores + 1),
+                (max_diagonal_length - 1) * sizeof(score_type));
     }
 
     // Now let's handle the bottom-right triangle of the matrix.
@@ -328,26 +356,136 @@ sz_status_t score_diagonally(                                                   
 
         sz_size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
         diagonal_aligner(                                        //
-            shorter_reversed + shorter_length - shorter_dim + 1, // first string
-            longer + next_diagonal_index - shorter_dim,          // second string
-            next_diagonal_length,                     // number of elements to compute with the `diagonal_aligner`
-            previous_distances,                       // costs pre substitution
-            current_distances, current_distances + 1, // costs pre insertion/deletion
-            next_distances);
+            shorter_reversed + shorter_length - shorter_dim + 1, // first sequence of characters
+            longer + next_diagonal_index - shorter_dim,          // second sequence of characters
+            next_diagonal_length,               // number of elements to compute with the `diagonal_aligner`
+            previous_scores,                    // costs pre substitution
+            current_scores, current_scores + 1, // costs pre insertion/deletion
+            next_scores);
 
         // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
         // dropping the first element in the current array.
-        distance_type *temporary = previous_distances;
-        // ! Drop the first entry among the current distances.
+        score_type *temporary = previous_scores;
+
+        // ! Drop the first entry among the current scores.
         // ! Assuming every next diagonal is shorter by one element, we don't need a full-blown `sz_move`.
         // ! to shift the array by one element.
-        previous_distances = current_distances + 1;
-        current_distances = next_distances;
-        next_distances = temporary;
+        previous_scores = current_scores + 1;
+        current_scores = next_scores;
+        next_scores = temporary;
     }
 
     // Export the scalar before `free` call.
     result_ref = diagonal_aligner.score();
+    alloc.deallocate((allocated_type *)buffer, buffer_length);
+    return sz_success_k;
+}
+
+/**
+ *  @brief  Alignment Score and Edit Distance algorithm evaluating the Dynamic Programming matrix
+ *          @b two rows at a time on a CPU, using the conventional Wagner Fischer algorithm.
+ *
+ *  ! This algorithm can't handle different "gap opening" and "gap extension" costs, those need 3x more memory.
+ *  ! This algorithm doesn't parallelize well, check out the diagonal variants!
+ *
+ *  @param[in] first The first string.
+ *  @param[in] second The second string.
+ *  @param[out] result_ref Location to dump the calculated score.
+ *  @param[in] gap_cost The uniform cost of a gap (insertion or deletion).
+ *  @param[in] substituter A commutative function returning the cost of substituting one char with another.
+ *  @param[in] alloc A default-constructible allocator for the internal buffers.
+ *
+ *  @tparam char_type_ The type of the characters in the strings, generally `char` or @b `rune_t` for UTF-8.
+ *  @tparam score_type_ The smallest type that can hold the distance, ideally `sz_i8_t` or `sz_u8_t`.
+ *  @tparam substituter_ A callable type that takes two characters and returns the substitution cost.
+ *  @tparam allocator_type_ A default-constructible allocator type for the internal buffers.
+ *  @tparam multi_threaded_ Whether to use OpenMP for @b multi-threading or just vectorization.
+ *  @tparam global_alignment_ Whether to use the global alignment algorithm or the local one.
+ *
+ *  @note   The API of this algorithm is a bit weird, but it's designed to minimize the reliance on the definitions
+ *          in the `stringzilla.hpp` header, making compilation times shorter for the end-user.
+ *  @sa     For lower-level API, check `sz_levenshtein_distance[_utf8]` and `sz_needleman_wunsch_score`.
+ *  @sa     For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
+ *  @sa     For bulk API, use `sz::levenshtein_scores[_utf8]`.
+ */
+template <                                                 //
+    sz_capability_t capability_ = sz_cap_serial_k,         //
+    sz_alignment_locality_t locality_ = sz_align_global_k, //
+    typename char_type_ = char,                            //
+    typename score_type_ = sz_size_t,                      //
+    typename substituter_ = uniform_substitution_cost_t,   //
+    typename allocator_type_ = dummy_alloc_t               //
+    >
+sz_status_t score_horizontally(                                  //
+    span<char_type_ const> first, span<char_type_ const> second, //
+    score_type_ &result_ref,                                     //
+    sz_error_cost_t gap_cost = 1,                                //
+    substituter_ &&substituter = uniform_substitution_cost_t {}, //
+    allocator_type_ &&alloc = allocator_type_ {}                 //
+    ) noexcept {
+
+    static_assert((capability_ & sz_cap_parallel_k) == 0, "This algorithm is not parallelized!");
+
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    using allocated_type = typename allocator_type_::value_type;
+    static_assert(sizeof(allocated_type) == sizeof(char), "Allocator must be byte-aligned");
+    using char_type = char_type_;
+    using score_type = score_type_;
+
+    using aligner_t = global_aligner<char_type, score_type, substituter_, capability_>;
+
+    // Make sure the size relation between the strings is correct.
+    char_type const *shorter = first.data(), *longer = second.data();
+    sz_size_t shorter_length = first.size(), longer_length = second.size();
+    if (shorter_length > longer_length) {
+        std::swap(shorter, longer);
+        std::swap(shorter_length, longer_length);
+    }
+
+    // We are going to store 2 rows of the matrix. It will be either 2 rows of length `shorter_length + 1`
+    // or 2 rows of length `longer_length + 1`, depending on our preference - either minimizing the memory
+    // consumption or the inner loop performance.
+    sz_size_t const shorter_dim = shorter_length + 1;
+    sz_size_t const longer_dim = longer_length + 1;
+
+    // We decide to use less memory!
+    sz_size_t const buffer_length = sizeof(score_type) * shorter_dim * 2;
+    score_type *const buffer = (score_type *)alloc.allocate(buffer_length);
+    if (!buffer) return sz_bad_alloc_k;
+
+    // The next few pointers will be swapped around.
+    score_type *previous_scores = buffer;
+    score_type *current_scores = previous_scores + shorter_dim;
+
+    // Initialize the first row:
+    aligner_t horizontal_aligner;
+    for (sz_size_t col_idx = 0; col_idx < shorter_dim; ++col_idx)
+        horizontal_aligner.init(previous_scores[col_idx], col_idx);
+
+    // Progress through the matrix row-by-row:
+    for (sz_size_t row_idx = 1; row_idx < longer_dim; ++row_idx) {
+
+        // Don't forget to populate the first column of each row:
+        horizontal_aligner.init(next_scores[0], 1);
+
+        horizontal_aligner(           //
+            repeat {&shorter[i - 1]}, // first sequence of characters
+            longer,                   // second sequence of characters
+            next_diagonal_length - 2, // number of elements to compute with the `horizontal_aligner`
+            previous_scores,          // costs pre substitution
+            previous_scores + 1,      // costs pre insertion
+            current_scores,           // costs pre deletion
+            current_scores + 1);
+
+        // Perform a circular rotation of those buffers, to reuse the memory.
+        score_type *temporary = previous_scores;
+        previous_scores = current_scores;
+        current_scores = next_scores;
+        next_scores = temporary;
+    }
+
+    // Export the scalar before `free` call.
+    result_ref = horizontal_aligner.score();
     alloc.deallocate((allocated_type *)buffer, buffer_length);
     return sz_success_k;
 }
@@ -378,7 +516,22 @@ inline sz_size_t levenshtein_distance( //
     if (second_length == 0) return first_length;
 
     // Estimate the maximum dimension of the DP matrix
+    sz_size_t const min_dim = sz_min_of_two(first_length, second_length) + 1;
     sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+
+    // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
+    if (min_dim < 16u) {
+        sz_u8_t result_u8;
+        sz_status_t status = score_horizontally<capability_, sz_align_global_k, char, sz_u8_t,
+                                                uniform_substitution_cost_t, allocator_type_>(
+            {first.data(), first_length}, {second.data(), second_length}, result_u8, 1, uniform_substitution_cost_t {},
+            std::forward<allocator_type_>(alloc));
+        if (status == sz_bad_alloc_k) throw std::bad_alloc();
+        return result_u8;
+    }
+
+    // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
+    // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
     if (max_dim < 256u) {
         sz_u8_t result_u8;
         sz_status_t status =
@@ -542,8 +695,8 @@ inline sz_ssize_t needleman_wunsch_score(                 //
     }
 }
 
-inline void levenshtein_distances() {}
-inline void levenshtein_distances_utf8() {}
+inline void levenshtein_scores() {}
+inline void levenshtein_scores_utf8() {}
 inline void needleman_wunsch_scores() {}
 
 } // namespace openmp
