@@ -51,7 +51,13 @@
 #include "bench.hpp"
 #include "test.hpp" // `levenshtein_baseline`, `unary_substitution_costs`
 
-#include "stringzilla/similarities.hpp"
+#if SZ_USE_CUDA
+#include <stringzilla/similarity.cuh> // Parallel string processing on CUDA or OpenMP
+#endif
+
+#if SZ_USE_OPENMP
+#include <stringzilla/similarity.hpp> // OpenMP templates for string similarity measures
+#endif
 
 using namespace ashvardanian::stringzilla::scripts;
 
@@ -65,7 +71,7 @@ struct hamming_from_sz {
     sz_size_t bound = SZ_SIZE_MAX;
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+        return operator()(env[token_index], env[env.tokens.size() - 1 - token_index]);
     }
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
@@ -100,7 +106,7 @@ struct levenshtein_from_sz {
     sz_size_t bound = SZ_SIZE_MAX;
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+        return operator()(env[token_index], env[env.tokens.size() - 1 - token_index]);
     }
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
@@ -125,7 +131,7 @@ struct alignment_score_from_sz {
     error_costs_256x256_t costs = unary_substitution_costs();
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+        return operator()(env[token_index], env[env.tokens.size() - 1 - token_index]);
     }
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
@@ -143,6 +149,8 @@ struct alignment_score_from_sz {
     }
 };
 
+#if SZ_USE_OPENMP
+
 /** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
 struct levenshtein_from_sz_openmp {
 
@@ -150,17 +158,60 @@ struct levenshtein_from_sz_openmp {
     sz_size_t bound = SZ_SIZE_MAX;
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+        return operator()(env[token_index], env[env.tokens.size() - 1 - token_index]);
     }
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept(false) {
-        sz_size_t result_distance = sz::openmp::levenshtein_distance(a, b);
+        sz_size_t result_distance = sz::openmp::levenshtein_distance(a, b, std::allocator<char>());
         do_not_optimize(result_distance);
         std::size_t bytes_passed = std::min(a.size(), b.size());
         std::size_t cells_passed = a.size() * b.size();
         return {bytes_passed, static_cast<check_value_t>(result_distance), cells_passed};
     }
 };
+
+#endif
+
+#if SZ_USE_CUDA
+
+/** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
+struct levenshtein_from_sz_cuda {
+
+    environment_t const &env;
+    std::vector<sz_size_t, sz::cuda::unified_alloc<sz_size_t>> results;
+    sz_size_t bound = SZ_SIZE_MAX;
+
+    levenshtein_from_sz_cuda(environment_t const &env, sz_size_t batch_size) : env(env), results(batch_size) {
+        if (env.tokens.size() <= batch_size) throw std::runtime_error("Batch size is too large.");
+    }
+
+    inline call_result_t operator()(std::size_t batch_index) noexcept(false) {
+        std::size_t const batch_size = results.size();
+        std::size_t const forward_token_index = (batch_index * batch_size) % (env.tokens.size() - batch_size);
+        std::size_t const backward_token_index = env.tokens.size() - forward_token_index - batch_size;
+
+        return operator()({env.tokens.data() + forward_token_index, batch_size},
+                          {env.tokens.data() + backward_token_index, batch_size});
+    }
+
+    inline call_result_t operator()(std::span<token_view_t const> a, std::span<token_view_t const> b) noexcept(false) {
+        sz::status_t status = sz::cuda::levenshtein_distances(a, b, results.data());
+        if (status != sz::status_t::success_k) throw std::runtime_error(cudaGetErrorString(cudaGetLastError()));
+        do_not_optimize(results);
+        std::size_t bytes_passed = 0, cells_passed = 0;
+        for (std::size_t i = 0; i < results.size(); ++i) {
+            bytes_passed += std::min(a[i].size(), b[i].size());
+            cells_passed += a[i].size() * b[i].size();
+        }
+        call_result_t call_result;
+        call_result.bytes_passed = bytes_passed;
+        call_result.operations = cells_passed;
+        call_result.inputs_processed = results.size();
+        return call_result;
+    }
+};
+
+#endif
 
 void bench_edits(environment_t const &env) {
     auto base_call = levenshtein_from_sz<sz_levenshtein_distance_serial>(env);
@@ -169,7 +220,12 @@ void bench_edits(environment_t const &env) {
     bench_result_t base_utf8 = bench_unary(env, "sz_levenshtein_distance_utf8_serial", base_utf8_call).log(base);
     sz_unused(base_utf8);
 
+#if SZ_USE_OPENMP
     bench_unary(env, "sz::openmp::levenshtein_distance", levenshtein_from_sz_openmp(env)).log(base);
+#endif
+#if SZ_USE_CUDA
+    bench_unary(env, "sz::cuda::levenshtein_distances(x1024)", levenshtein_from_sz_cuda(env, 1024)).log(base);
+#endif
 
 #if SZ_USE_ICE
     auto ice_call = levenshtein_from_sz<sz_levenshtein_distance_ice>(env);
@@ -185,16 +241,22 @@ void bench_edits(environment_t const &env) {
 int main(int argc, char const **argv) {
     std::printf("Welcome to StringZilla!\n");
 
-    std::printf("Building up the environment...\n");
-    environment_t env = build_environment( //
-        argc, argv,                        //
-        "xlsum.csv",                       // Preferred for UTF-8 content
-        environment_t::tokenization_t::words_k);
+    try {
+        std::printf("Building up the environment...\n");
+        environment_t env = build_environment( //
+            argc, argv,                        //
+            "xlsum.csv",                       // Preferred for UTF-8 content
+            environment_t::tokenization_t::lines_k);
 
-    std::printf("Starting string similarity benchmarks...\n");
-    bench_hamming(env);
-    bench_edits(env);
+        std::printf("Starting string similarity benchmarks...\n");
+        bench_hamming(env);
+        bench_edits(env);
+    }
+    catch (std::exception const &e) {
+        std::fprintf(stderr, "Failed with: %s\n", e.what());
+        return 1;
+    }
 
-    std::printf("All benchmarks passed.\n");
+    std::printf("All benchmarks finished.\n");
     return 0;
 }
