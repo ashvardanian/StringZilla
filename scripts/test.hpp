@@ -1,5 +1,7 @@
 /**
  *  @brief  Helper structures and functions for C++ unit- and stress-tests.
+ *  @file   test.hpp
+ *  @author Ash Vardanian
  */
 #pragma once
 #include <fstream>  // `std::ifstream`
@@ -89,8 +91,8 @@ inline void iterate_in_random_slices(std::string const &text, slice_callback_typ
 }
 
 /**
- *  @brief  Inefficient baseline Levenshtein distance computation, as implemented in most codebases.
- *          Allocates a new matrix on every call, with rows potentially scattered around memory.
+ *  @brief Inefficient baseline Levenshtein distance computation, as implemented in most codebases.
+ *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  */
 inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2) {
     std::size_t const rows = len1 + 1;
@@ -105,16 +107,81 @@ inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char c
         std::size_t const *last_row = &matrix_buffer[(i - 1) * cols];
         std::size_t *row = &matrix_buffer[i * cols];
         for (std::size_t j = 1; j < cols; ++j) {
-            std::size_t cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
-            std::size_t deletion_or_insertion = std::min(last_row[j], row[j - 1]) + 1;
-            row[j] = std::min(deletion_or_insertion, last_row[j - 1] + cost);
+            std::size_t substitution_cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
+            std::size_t if_deletion_or_insertion = std::min(last_row[j], row[j - 1]) + 1;
+            row[j] = std::min(if_deletion_or_insertion, last_row[j - 1] + substitution_cost);
         }
     }
 
     return matrix_buffer.back();
 }
 
-using error_costs_256x256_t = std::array<sz_error_cost_t, 256 * 256>;
+/**
+ *  @brief Inefficient baseline Needleman-Wunsch alignment score computation, as implemented in most codebases.
+ *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ */
+inline std::ptrdiff_t needleman_wunsch_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2,
+                                                std::function<error_cost_t(char, char)> substitution_cost_for,
+                                                error_cost_t gap_cost) {
+    std::size_t const rows = len1 + 1;
+    std::size_t const cols = len2 + 1;
+    std::vector<std::ptrdiff_t> matrix_buffer(rows * cols);
+
+    // Initialize the borders of the matrix.
+    for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = i * gap_cost;
+    for (std::size_t j = 0; j < cols; ++j) matrix_buffer[0 * cols + j] /* [0][j] in 2D */ = j * gap_cost;
+
+    // Fill in the rest of the matrix.
+    for (std::size_t i = 1; i < rows; ++i) {
+        std::ptrdiff_t const *last_row = &matrix_buffer[(i - 1) * cols];
+        std::ptrdiff_t *row = &matrix_buffer[i * cols];
+        for (std::size_t j = 1; j < cols; ++j) {
+            std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
+            std::ptrdiff_t if_deletion_or_insertion = std::min(last_row[j], row[j - 1]) + gap_cost;
+            row[j] = std::min(if_deletion_or_insertion, last_row[j - 1] + substitution_cost);
+        }
+    }
+
+    return matrix_buffer.back();
+}
+
+/**
+ *  @brief Inefficient baseline Smith-Waterman local alignment score computation, as implemented in most codebases.
+ *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ */
+inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2,
+                                              std::function<error_cost_t(char, char)> substitution_cost_for,
+                                              error_cost_t gap_cost) {
+    std::size_t const rows = len1 + 1;
+    std::size_t const cols = len2 + 1;
+    std::vector<std::ptrdiff_t> matrix_buffer(rows * cols);
+
+    // Unlike the global alignment we need to track the largest score in the matrix.
+    std::ptrdiff_t max_score = 0;
+
+    // Initialize the borders of the matrix to 0.
+    for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = 0;
+    for (std::size_t j = 0; j < cols; ++j) matrix_buffer[0 * cols + j] /* [0][j] in 2D */ = 0;
+
+    // Fill in the rest of the matrix.
+    for (std::size_t i = 1; i < rows; ++i) {
+        std::ptrdiff_t const *last_row = &matrix_buffer[(i - 1) * cols];
+        std::ptrdiff_t *row = &matrix_buffer[i * cols];
+        for (std::size_t j = 1; j < cols; ++j) {
+            std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
+            std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
+            std::ptrdiff_t if_deletion = last_row[j] + gap_cost;
+            std::ptrdiff_t if_insertion = row[j - 1] + gap_cost;
+            std::ptrdiff_t score = std::max({std::ptrdiff_t(0), if_substitution, if_deletion, if_insertion});
+            row[j] = score;
+            max_score = std::max(max_score, score);
+        }
+    }
+
+    return max_score;
+}
+
+using error_costs_256x256_t = std::array<error_cost_t, 256 * 256>;
 
 /**
  *  @brief  Produces a substitution cost matrix for the Needleman-Wunsch alignment score,
