@@ -46,12 +46,12 @@
  * ! They control the OpenMP CPU backend as well as the CUDA GPU backend.
  */
 #if SZ_USE_CUDA
-#include <stringzilla/types.cuh>        // `unified_alloc`
-#include <stringzilla/similarities.cuh> // Parallel string processing on CUDA or OpenMP
+#include <stringzilla/types.cuh>      // `unified_alloc`
+#include <stringzilla/similarity.cuh> // Parallel string processing on CUDA or OpenMP
 #endif
 
 #if SZ_USE_OPENMP
-#include <stringzilla/similarities.hpp> // OpenMP templates for string similarity measures
+#include <stringzilla/similarity.hpp> // OpenMP templates for string similarity measures
 #endif
 
 #if defined(__SANITIZE_ADDRESS__)
