@@ -297,6 +297,7 @@ extern "C" {
 #if !SZ_AVOID_LIBC
 typedef int8_t sz_i8_t;       // Always 8 bits
 typedef uint8_t sz_u8_t;      // Always 8 bits
+typedef int16_t sz_i16_t;     // Always 16 bits
 typedef uint16_t sz_u16_t;    // Always 16 bits
 typedef int32_t sz_i32_t;     // Always 32 bits
 typedef uint32_t sz_u32_t;    // Always 32 bits
