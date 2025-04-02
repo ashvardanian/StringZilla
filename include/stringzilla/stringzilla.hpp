@@ -1959,7 +1959,6 @@ class basic_string_slice {
  *      * `replace`, `insert`, `erase`, `append`, `push_back`, `pop_back`, `resize`, `shrink_to_fit`... from STL,
  *      * `try_` exception-free "try" operations that returning non-zero values on success,
  *      * `replace_all` and `erase_all` similar to Boost,
- *      * `levenshtein_distance` - Levenshtein distance computation reusing the allocator,
  *      * `translate` - character mapping,
  *      * `randomize`, `random` - for fast random string generation.
  *
@@ -3289,15 +3288,6 @@ class basic_string {
 
     concatenation<string_view, string_view> operator|(string_view other) const noexcept { return {view(), other}; }
 
-    size_type levenshtein_distance(string_view other, size_type bound = std::numeric_limits<size_type>::max()) const
-        noexcept(false) {
-        size_type result = std::numeric_limits<size_type>::max();
-        raise(_with_alloc([&](sz_alloc_type &alloc) {
-            return sz_levenshtein_distance(data(), size(), other.data(), other.size(), bound, &alloc, &result);
-        }));
-        return result;
-    }
-
     /**  @brief Hashes the string, equivalent to `std::hash<string_view>{}(str)`. */
     size_type hash() const noexcept { return view().hash(); }
 
@@ -3760,138 +3750,6 @@ typename concatenation_result<first_type, second_type, following_types...>::type
         ashvardanian::stringzilla::concatenate( //
             std::forward<second_type>(second),  //
             std::forward<following_types>(following)...));
-}
-
-/**
- *  @brief Calculates the Hamming edit distance in @b bytes between two strings.
- *  @sa sz_levenshtein_distance
- */
-template <typename char_type_>
-std::size_t hamming_distance(                                                         //
-    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
-    std::size_t bound = SZ_SIZE_MAX) noexcept {
-    std::size_t result;
-    sz_hamming_distance(a.data(), a.size(), b.data(), b.size(), bound, &result);
-    return result;
-}
-
-/**
- *  @brief Calculates the Hamming edit distance in @b bytes between two strings.
- *  @sa sz_levenshtein_distance
- */
-template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t hamming_distance(                                                                               //
-    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
-    std::size_t bound = SZ_SIZE_MAX) noexcept {
-    return ashvardanian::stringzilla::hamming_distance(a.view(), b.view(), bound);
-}
-
-/**
- *  @brief Calculates the Hamming edit distance in @b unicode codepoints between two strings.
- *  @sa sz_hamming_distance_utf8
- */
-template <typename char_type_>
-std::size_t hamming_distance_utf8( //
-    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b,
-    std::size_t bound = SZ_SIZE_MAX) noexcept {
-    std::size_t result;
-    sz_hamming_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &result);
-    return result;
-}
-
-/**
- *  @brief Calculates the Hamming edit distance in @b unicode codepoints between two strings.
- *  @sa sz_levenshtein_distance
- */
-template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t hamming_distance_utf8( //
-    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b,
-    std::size_t bound = SZ_SIZE_MAX) noexcept {
-    return ashvardanian::stringzilla::hamming_distance_utf8(a.view(), b.view(), bound);
-}
-
-/**
- *  @brief Calculates the Levenshtein edit distance in @b bytes between two strings.
- *  @sa sz_levenshtein_distance
- */
-template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t levenshtein_distance( //
-    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, std::size_t bound = SZ_SIZE_MAX,
-    allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
-    std::size_t result = SZ_SIZE_MAX;
-    raise(_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-        return sz_levenshtein_distance(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result);
-    }));
-    return result;
-}
-
-/**
- *  @brief Calculates the Levenshtein edit distance in @b bytes between two strings.
- *  @sa sz_levenshtein_distance
- */
-template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::size_t levenshtein_distance(                                                                           //
-    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
-    std::size_t bound = SZ_SIZE_MAX) noexcept(false) {
-    return ashvardanian::stringzilla::levenshtein_distance(a.view(), b.view(), bound, a.get_allocator());
-}
-
-/**
- *  @brief Calculates the Levenshtein edit distance in @b unicode codepoints between two strings.
- *  @sa sz_levenshtein_distance_utf8
- */
-template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::size_t levenshtein_distance_utf8(                                                //
-    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
-    std::size_t bound = SZ_SIZE_MAX, allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
-    std::size_t result = SZ_SIZE_MAX;
-    raise(_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-        return sz_levenshtein_distance_utf8(a.data(), a.size(), b.data(), b.size(), bound, &alloc, &result);
-    }));
-    return result;
-}
-
-/**
- *  @brief Calculates the Levenshtein edit distance in @b unicode codepoints between two strings.
- *  @sa sz_levenshtein_distance_utf8
- */
-template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::size_t levenshtein_distance_utf8(                                                                      //
-    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
-    std::size_t bound = SZ_SIZE_MAX) noexcept(false) {
-    return ashvardanian::stringzilla::levenshtein_distance_utf8(a.view(), b.view(), bound, a.get_allocator());
-}
-
-/**
- *  @brief Calculates the Needleman-Wunsch alignment score between two strings.
- *  @sa sz_needleman_wunsch_score
- */
-template <typename char_type_, typename allocator_type_ = std::allocator<typename std::remove_const<char_type_>::type>>
-std::ptrdiff_t alignment_score(                                                       //
-    basic_string_slice<char_type_> const &a, basic_string_slice<char_type_> const &b, //
-    std::int8_t const (&subs)[256][256], std::int8_t gap = -1,
-    allocator_type_ &&allocator = allocator_type_ {}) noexcept(false) {
-
-    static_assert(sizeof(sz_error_cost_t) == sizeof(std::int8_t), "sz_error_cost_t must be 8-bit.");
-    static_assert(std::is_signed<sz_error_cost_t>() == std::is_signed<std::int8_t>(),
-                  "sz_error_cost_t must be signed.");
-
-    std::ptrdiff_t result = SZ_SSIZE_MIN;
-    raise(_with_alloc(allocator, [&](sz_memory_allocator_t &alloc) {
-        return sz_needleman_wunsch_score(a.data(), a.size(), b.data(), b.size(), &subs[0][0], gap, &alloc, &result);
-    }));
-    return result;
-}
-
-/**
- *  @brief Calculates the Needleman-Wunsch alignment score between two strings.
- *  @sa sz_needleman_wunsch_score
- */
-template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
-std::ptrdiff_t alignment_score(                                                                             //
-    basic_string<char_type_, allocator_type_> const &a, basic_string<char_type_, allocator_type_> const &b, //
-    std::int8_t const (&subs)[256][256], std::int8_t gap = -1) noexcept(false) {
-    return ashvardanian::stringzilla::alignment_score(a.view(), b.view(), subs, gap, a.get_allocator());
 }
 
 /**
