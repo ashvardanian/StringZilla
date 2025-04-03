@@ -4,30 +4,32 @@
  *  @author Ash Vardanian
  */
 #pragma once
-#include <fstream>  // `std::ifstream`
-#include <iostream> // `std::cout`, `std::endl`
-#include <random>   // `std::random_device`
-#include <string>   // `std::string`
-#include <vector>   // `std::vector`
+#include <fstream>    // `std::ifstream`
+#include <iostream>   // `std::cout`, `std::endl`
+#include <random>     // `std::random_device`
+#include <string>     // `std::string`
+#include <vector>     // `std::vector`
+#include <array>      // `std::array`
+#include <functional> // `std::function`
 
 namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
 
-inline std::string read_file(std::string path) {
+inline std::string read_file(std::string path) noexcept(false) {
     std::ifstream stream(path);
     if (!stream.is_open()) throw std::runtime_error("Failed to open file: " + path);
     return std::string((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
 }
 
-inline void write_file(std::string path, std::string content) {
+inline void write_file(std::string path, std::string content) noexcept(false) {
     std::ofstream stream(path);
     if (!stream.is_open()) throw std::runtime_error("Failed to open file: " + path);
     stream << content;
     stream.close();
 }
 
-inline std::mt19937 &global_random_generator() {
+inline std::mt19937 &global_random_generator() noexcept {
     static std::random_device seed_source; // Too expensive to construct every time
     static std::mt19937 generator(seed_source());
     return generator;
@@ -41,35 +43,37 @@ inline std::mt19937 &global_random_generator() {
  *  MSVC, for example, requires one of `short`, `int`, `long`, `long long`, `unsigned short`, `unsigned int`,
  *  `unsigned long`, or `unsigned long long`.
  */
-struct uniform_uint8_distribution_t {
+struct uniform_u8_distribution_t {
     std::uniform_int_distribution<std::uint32_t> distribution;
-    inline uniform_uint8_distribution_t(std::size_t alphabet_size = 255)
+
+    inline uniform_u8_distribution_t(std::size_t alphabet_size = 255)
         : distribution(1, static_cast<std::uint32_t>(alphabet_size)) {}
-    inline uniform_uint8_distribution_t(char from, char to)
+    inline uniform_u8_distribution_t(char from, char to)
         : distribution(static_cast<std::uint32_t>(from), static_cast<std::uint32_t>(to)) {}
-    template <typename generator_type>
-    std::uint8_t operator()(generator_type &&generator) {
+
+    template <typename generator_type_>
+    std::uint8_t operator()(generator_type_ &&generator) noexcept {
         return static_cast<std::uint8_t>(distribution(generator));
     }
 };
 
-inline void randomize_string(char *string, std::size_t length, char const *alphabet, std::size_t cardinality) {
-    uniform_uint8_distribution_t distribution(0, cardinality - 1);
+inline void randomize_string(char *string, std::size_t length, char const *alphabet, std::size_t cardinality) noexcept {
+    uniform_u8_distribution_t distribution(0, cardinality - 1);
     std::generate(string, string + length, [&]() -> char { return alphabet[distribution(global_random_generator())]; });
 }
 
-inline void randomize_string(char *string, std::size_t length) {
-    uniform_uint8_distribution_t distribution;
+inline void randomize_string(char *string, std::size_t length) noexcept {
+    uniform_u8_distribution_t distribution;
     std::generate(string, string + length, [&]() -> char { return distribution(global_random_generator()); });
 }
 
-inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) {
+inline std::string random_string(std::size_t length, char const *alphabet, std::size_t cardinality) noexcept(false) {
     std::string result(length, '\0');
     randomize_string(&result[0], length, alphabet, cardinality);
     return result;
 }
 
-inline std::string repeat(std::string const &patten, std::size_t count) {
+inline std::string repeat(std::string const &patten, std::size_t count) noexcept(false) {
     std::string result(patten.size() * count, '\0');
     for (std::size_t i = 0; i < count; ++i) std::copy(patten.begin(), patten.end(), result.begin() + i * patten.size());
     return result;
@@ -80,7 +84,7 @@ inline std::string repeat(std::string const &patten, std::size_t count) {
  *  @warning Is @b single-threaded in nature, as it depends on the `global_random_generator`.
  */
 template <typename slice_callback_type_>
-inline void iterate_in_random_slices(std::string const &text, slice_callback_type_ &&slice_callback) {
+inline void iterate_in_random_slices(std::string const &text, slice_callback_type_ &&slice_callback) noexcept {
     std::size_t remaining = text.size();
     while (remaining > 0) {
         std::uniform_int_distribution<std::size_t> slice_length_distribution(1, remaining);
@@ -94,7 +98,8 @@ inline void iterate_in_random_slices(std::string const &text, slice_callback_typ
  *  @brief Inefficient baseline Levenshtein distance computation, as implemented in most codebases.
  *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  */
-inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2) {
+inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char const *s2,
+                                        std::size_t len2) noexcept(false) {
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
     std::vector<std::size_t> matrix_buffer(rows * cols);
@@ -122,7 +127,7 @@ inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char c
  */
 inline std::ptrdiff_t needleman_wunsch_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2,
                                                 std::function<error_cost_t(char, char)> substitution_cost_for,
-                                                error_cost_t gap_cost) {
+                                                error_cost_t gap_cost) noexcept(false) {
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
     std::vector<std::ptrdiff_t> matrix_buffer(rows * cols);
@@ -151,7 +156,7 @@ inline std::ptrdiff_t needleman_wunsch_baseline(char const *s1, std::size_t len1
  */
 inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2,
                                               std::function<error_cost_t(char, char)> substitution_cost_for,
-                                              error_cost_t gap_cost) {
+                                              error_cost_t gap_cost) noexcept(false) {
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
     std::vector<std::ptrdiff_t> matrix_buffer(rows * cols);
