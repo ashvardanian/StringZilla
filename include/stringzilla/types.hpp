@@ -228,6 +228,7 @@ struct arrow_strings_tape {
     span<offset_t> offsets_;
     char_alloc_t char_alloc_;
     offset_alloc_t offset_alloc_;
+    size_t count_ = 0;
 
   public:
     constexpr arrow_strings_tape() = default;
@@ -240,19 +241,30 @@ struct arrow_strings_tape {
     constexpr arrow_strings_tape(span<char_t> buffer, span<offset_t> offsets, allocator_t alloc)
         : buffer_(buffer), offsets_(offsets), char_alloc_(alloc), offset_alloc_(alloc) {}
 
+    sz_constexpr_if_cpp20 ~arrow_strings_tape() noexcept { reset(); }
+    sz_constexpr_if_cpp20 void reset() noexcept {
+        if (buffer_.data_) char_alloc_.deallocate(const_cast<char_t *>(buffer_.data_), buffer_.size_), buffer_ = {};
+        if (offsets_.data_)
+            offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data_), offsets_.size_), offsets_ = {};
+        count_ = 0;
+    }
+
     template <typename strings_iterator_type_>
-    sz_constexpr_if_cpp14 status_t try_assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
-        // Deallocate the previous memory if it was allocated
+    status_t try_assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
+        // Deallocate previous memory if allocated
         if (buffer_.data_ && buffer_.size_)
             char_alloc_.deallocate(const_cast<char_t *>(buffer_.data_), buffer_.size_), buffer_ = {};
+
         if (offsets_.data_ && offsets_.size_)
             offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data_), offsets_.size_), offsets_ = {};
 
-        // Estimate the required memory size
+        // Estimate required memory: total characters + one extra per string for the NULL.
         size_t count = 0;
         size_t combined_length = 0;
         for (auto it = first; it != last; ++it, ++count) combined_length += it->length();
         combined_length += count; // ? NULL-terminate every string
+
+        // Allocate exactly the required memory
         buffer_ = {char_alloc_.allocate(combined_length), combined_length};
         offsets_ = {offset_alloc_.allocate(count + 1), count + 1};
         if (!buffer_.data_ || !offsets_.data_) return status_t::bad_alloc_k;
@@ -268,30 +280,73 @@ struct arrow_strings_tape {
             for (size_t i = 0; i != from_length; ++i) *buffer_ptr++ = *from_ptr++;
             *buffer_ptr++ = '\0'; // ? NULL-terminated
         }
-        *offsets_ptr++ = static_cast<offset_t>(buffer_ptr - buffer_.data_);
+        *offsets_ptr = static_cast<offset_t>(buffer_ptr - buffer_.data_);
+        count_ = count;
         return status_t::success_k;
     }
 
 #if !SZ_AVOID_STL
     template <typename string_convertible_type_>
-    sz_constexpr_if_cpp14 status_t try_assign(std::initializer_list<string_convertible_type_> inits) noexcept {
+    status_t try_assign(std::initializer_list<string_convertible_type_> inits) noexcept {
         return try_assign(inits.begin(), inits.end());
     }
 #endif
 
-    sz_constexpr_if_cpp20 ~arrow_strings_tape() noexcept {
-        if (buffer_.data_) char_alloc_.deallocate(const_cast<char_t *>(buffer_.data_), buffer_.size_), buffer_ = {};
-        if (offsets_.data_)
-            offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data_), offsets_.size_), offsets_ = {};
+    status_t try_append(span<char_t const> string) noexcept {
+        size_t const string_length = string.length();
+        size_t const required = string_length + 1; // Space needed for the new string and its NULL
+        size_t current_used = count_ > 0 ? offsets_.data_[count_] : 0;
+
+        // Reallocate the buffer if needed (oversubscribe in powers of two).
+        if (current_used + required > buffer_.size_) {
+            size_t new_capacity = sz_size_bit_ceil(current_used + required);
+            char_t *new_buffer = char_alloc_.allocate(new_capacity);
+            if (!new_buffer) return status_t::bad_alloc_k;
+            if (buffer_.data_) {
+                // Copy the existing data to the new array, before deallocating the old one.
+                char_t const *src = buffer_.data_, *end = buffer_.data_ + current_used;
+                char_t *tgt = new_buffer;
+                for (; src != end; ++src, ++tgt) *tgt = *src;
+                char_alloc_.deallocate(const_cast<char_t *>(buffer_.data_), buffer_.size_);
+            }
+            buffer_.data_ = new_buffer;
+            buffer_.size_ = new_capacity;
+        }
+
+        // Reallocate the offsets array if needed.
+        if (count_ + 1 >= offsets_.size_) { // need one extra slot for the new offset
+            size_t new_offsets_capacity = sz_size_bit_ceil(count_ + 1);
+            offset_t *new_offsets = offset_alloc_.allocate(new_offsets_capacity);
+            if (!new_offsets) return status_t::bad_alloc_k;
+            if (offsets_.data_) {
+                // Copy the existing offsets to the new array, before deallocating the old one.
+                offset_t const *src = offsets_.data_, *end = offsets_.data_ + count_ + 1;
+                offset_t *tgt = new_offsets;
+                for (; src != end; ++src, ++tgt) *tgt = *src;
+                offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data_), offsets_.size_);
+            }
+            offsets_.data_ = new_offsets;
+            offsets_.size_ = new_offsets_capacity;
+        }
+
+        // Record the starting offset for the new string.
+        offsets_.data_[count_] = static_cast<offset_t>(current_used);
+        // Copy the string into the buffer.
+        for (size_t i = 0; i < string_length; ++i) buffer_.data_[current_used++] = string[i];
+        // Append the NULL terminator.
+        buffer_.data_[current_used++] = '\0';
+        // Update the offsets array with the new end-of-buffer position.
+        offsets_.data_[++count_] = static_cast<offset_t>(current_used);
+        return status_t::success_k;
     }
 
     constexpr value_type operator[](size_t i) const noexcept {
-        return {&buffer_[0] + offsets_[i], offsets_[i + 1] - offsets_[i] - 1};
+        _sz_assert(i < count_ && "Index out of bounds");
+        return {buffer_.data_ + offsets_.data_[i], offsets_.data_[i + 1] - offsets_.data_[i] - 1};
     }
 
-    constexpr size_t size() const noexcept { return offsets_.size() - 1; }
-    constexpr view_t view() const noexcept { return {buffer_, offsets_}; }
-
+    constexpr size_t size() const noexcept { return count_; }
+    constexpr view_t view() const noexcept { return {buffer_, {offsets_.data_, count_ + 1}}; }
     constexpr span<char_t> const &buffer() const noexcept { return buffer_; }
     constexpr span<offset_t> const &offsets() const noexcept { return offsets_; }
 };
