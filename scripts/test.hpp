@@ -142,8 +142,9 @@ inline std::ptrdiff_t needleman_wunsch_baseline(char const *s1, std::size_t len1
         std::ptrdiff_t *row = &matrix_buffer[i * cols];
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
-            std::ptrdiff_t if_deletion_or_insertion = std::min(last_row[j], row[j - 1]) + gap_cost;
-            row[j] = std::min(if_deletion_or_insertion, last_row[j - 1] + substitution_cost);
+            std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
+            std::ptrdiff_t if_deletion_or_insertion = std::max(last_row[j], row[j - 1]) + gap_cost;
+            row[j] = std::max(if_deletion_or_insertion, if_substitution);
         }
     }
 
@@ -162,7 +163,7 @@ inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, 
     std::vector<std::ptrdiff_t> matrix_buffer(rows * cols);
 
     // Unlike the global alignment we need to track the largest score in the matrix.
-    std::ptrdiff_t max_score = 0;
+    std::ptrdiff_t best_score = 0;
 
     // Initialize the borders of the matrix to 0.
     for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = 0;
@@ -175,15 +176,15 @@ inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, 
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
             std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::ptrdiff_t if_deletion = last_row[j] + gap_cost;
-            std::ptrdiff_t if_insertion = row[j - 1] + gap_cost;
-            std::ptrdiff_t score = std::max({std::ptrdiff_t(0), if_substitution, if_deletion, if_insertion});
+            std::ptrdiff_t if_deletion_or_insertion = std::max(row[j - 1], last_row[j]) + gap_cost;
+            std::ptrdiff_t if_substitution_or_reset = std::max<std::ptrdiff_t>(if_substitution, 0);
+            std::ptrdiff_t score = std::max(if_deletion_or_insertion, if_substitution_or_reset);
             row[j] = score;
-            max_score = std::max(max_score, score);
+            best_score = std::max(best_score, score);
         }
     }
 
-    return max_score;
+    return best_score;
 }
 
 using error_costs_256x256_t = std::array<error_cost_t, 256 * 256>;
@@ -192,11 +193,12 @@ using error_costs_256x256_t = std::array<error_cost_t, 256 * 256>;
  *  @brief  Produces a substitution cost matrix for the Needleman-Wunsch alignment score,
  *          that would yield the same result as the negative Levenshtein distance.
  */
-inline error_costs_256x256_t error_costs_256x256_unary() noexcept {
+inline error_costs_256x256_t error_costs_256x256_diagonal(error_cost_t match_score = 0,
+                                                          error_cost_t mismatch_score = -1) noexcept {
     error_costs_256x256_t result;
     for (std::size_t i = 0; i != 256; ++i)
         for (std::size_t j = 0; j != 256; ++j) //
-            result[i * 256 + j] = i == j ? 0 : -1;
+            result[i * 256 + j] = i == j ? match_score : mismatch_score;
     return result;
 }
 

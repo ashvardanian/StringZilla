@@ -54,9 +54,10 @@ template <typename value_type_>
 using unified_vector = std::vector<value_type_, sz::cuda::unified_alloc<value_type_>>;
 #endif
 
-struct levenshtein_baseline_t {
+struct levenshtein_baselines_t {
+    template <typename results_type_>
     sz::status_t operator()(arrow_strings_tape_t const &first, arrow_strings_tape_t const &second,
-                            sz_size_t *results) const {
+                            results_type_ *results) const {
         _sz_assert(first.size() == second.size());
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
@@ -66,9 +67,9 @@ struct levenshtein_baseline_t {
     }
 };
 
-struct needleman_wunsch_baseline_t {
+struct needleman_wunsch_baselines_t {
 
-    sz::scripts::error_costs_256x256_t substitution_costs = sz::scripts::error_costs_256x256_unary();
+    sz::scripts::error_costs_256x256_t substitution_costs = sz::scripts::error_costs_256x256_diagonal();
     sz::error_cost_t gap_cost = -1;
 
     sz::status_t operator()(arrow_strings_tape_t const &first, arrow_strings_tape_t const &second,
@@ -85,9 +86,9 @@ struct needleman_wunsch_baseline_t {
     }
 };
 
-struct smith_waterman_baseline_t {
+struct smith_waterman_baselines_t {
 
-    sz::scripts::error_costs_256x256_t substitution_costs = sz::scripts::error_costs_256x256_unary();
+    sz::scripts::error_costs_256x256_t substitution_costs = sz::scripts::error_costs_256x256_diagonal();
     sz::error_cost_t gap_cost = -1;
 
     sz::status_t operator()(arrow_strings_tape_t const &first, arrow_strings_tape_t const &second,
@@ -146,7 +147,7 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
         format_string = "Edit Distance error (got %zd, expected %zd): \"%.22s%s\" ⇔ \"%.22s%s\" \n";
     }
     else { format_string = "Edit Distance error (got %zu, expected %zu): \"%.22s%s\" ⇔ \"%.22s%s\" \n"; }
-    std::printf(format_string, first.c_str(), ellipsis, second.c_str(), ellipsis, result_base, result_simd);
+    std::printf(format_string, result_simd, result_base, first.c_str(), ellipsis, second.c_str(), ellipsis);
 }
 
 /**
@@ -262,46 +263,68 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
 
 static void test_equivalence(std::size_t batch_size = 1024, std::size_t max_string_length = 100) {
 
+    // Our logic of computing NW and SW alignment similarity scores differs in sign from most implementations.
+    // It's similar to how the "cosine distance" is the inverse of the "cosine similarity".
+    // In our case we compute the "distance" and by negating the sign, we can compute the "similarity".
+    constexpr sz::error_cost_t unary_match_score = 1;
+    constexpr sz::error_cost_t unary_mismatch_score = 0;
+    constexpr sz::error_cost_t unary_gap_score = 0;
+    using substituter_256x256_t = sz::error_costs_256x256_lookup_t;
+    sz::scripts::error_costs_256x256_t costs_unary =
+        sz::scripts::error_costs_256x256_diagonal(unary_match_score, unary_mismatch_score);
+    substituter_256x256_t substituter_unary(costs_unary.data());
+    {
+        auto distance_l = levenshtein_baseline("abcdefg", 7, "abc_efg", 7);
+        auto similarity_nw = needleman_wunsch_baseline("abcdefg", 7, "abc_efg", 7, substituter_unary, unary_gap_score);
+        auto similarity_sw = smith_waterman_baseline("abcdefg", 7, "abc_efg", 7, substituter_unary, unary_gap_score);
+        // Distance can be computed from the similarity, by inverting the sign around the length of the longest string:
+        auto distance_nw = std::max(7, 7) - similarity_nw;
+        auto distance_sw = std::max(7, 7) - similarity_sw;
+        _sz_assert(distance_l == 1);
+        _sz_assert(distance_nw == 1);
+        _sz_assert(distance_sw == 1);
+    }
+
+    // Now systematically compare the results of the baseline and SIMD implementations
     constexpr sz_capability_t serial_k = sz_cap_serial_k;
     constexpr sz_capability_t parallel_k = sz_cap_parallel_k;
 
     edit_distances_compare<sz_size_t>(                                              //
-        levenshtein_baseline_t {},                                                  //
+        levenshtein_baselines_t {},                                                 //
         sz::openmp::levenshtein_distances<serial_k, char, std::allocator<char>> {}, //
         batch_size, max_string_length);
 
     edit_distances_compare<sz_size_t>(                                                //
-        levenshtein_baseline_t {},                                                    //
+        levenshtein_baselines_t {},                                                   //
         sz::openmp::levenshtein_distances<parallel_k, char, std::allocator<char>> {}, //
         batch_size, max_string_length);
 
-    constexpr sz::error_cost_t blosum62_gap_opening_cost = 11;
-    constexpr sz::error_cost_t blosum62_gap_extension_cost = 1;
+    // Now let's take non-unary substitution costs, like BLOSUM62
+    constexpr sz::error_cost_t blosum62_gap_extension_cost = 4; // ? The inverted typical (-4) value
     sz::scripts::error_costs_256x256_t blosum62 = sz::scripts::error_costs_256x256_blosum62();
-    using substituter_t = sz::error_costs_256x256_lookup_t;
 
-    edit_distances_compare<sz_ssize_t>(                                      //
-        needleman_wunsch_baseline_t {blosum62, blosum62_gap_extension_cost}, //
-        sz::openmp::needleman_wunsch_scores<serial_k, char, substituter_t, std::allocator<char>> {
-            substituter_t {blosum62.data()}, blosum62_gap_extension_cost}, //
+    edit_distances_compare<sz_ssize_t>(                                       //
+        needleman_wunsch_baselines_t {blosum62, blosum62_gap_extension_cost}, //
+        sz::openmp::needleman_wunsch_scores<serial_k, char, substituter_256x256_t, std::allocator<char>> {
+            substituter_256x256_t {blosum62.data()}, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 
-    edit_distances_compare<sz_ssize_t>(                                      //
-        needleman_wunsch_baseline_t {blosum62, blosum62_gap_extension_cost}, //
-        sz::openmp::needleman_wunsch_scores<parallel_k, char, substituter_t, std::allocator<char>> {
-            substituter_t {blosum62.data()}, blosum62_gap_extension_cost}, //
+    edit_distances_compare<sz_ssize_t>(                                       //
+        needleman_wunsch_baselines_t {blosum62, blosum62_gap_extension_cost}, //
+        sz::openmp::needleman_wunsch_scores<parallel_k, char, substituter_256x256_t, std::allocator<char>> {
+            substituter_256x256_t {blosum62.data()}, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 
-    edit_distances_compare<sz_ssize_t>(                                    //
-        smith_waterman_baseline_t {blosum62, blosum62_gap_extension_cost}, //
-        sz::openmp::smith_waterman_scores<serial_k, char, substituter_t, std::allocator<char>> {
-            substituter_t {blosum62.data()}, blosum62_gap_extension_cost}, //
+    edit_distances_compare<sz_ssize_t>(                                     //
+        smith_waterman_baselines_t {blosum62, blosum62_gap_extension_cost}, //
+        sz::openmp::smith_waterman_scores<serial_k, char, substituter_256x256_t, std::allocator<char>> {
+            substituter_256x256_t {blosum62.data()}, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 
-    edit_distances_compare<sz_ssize_t>(                                    //
-        smith_waterman_baseline_t {blosum62, blosum62_gap_extension_cost}, //
-        sz::openmp::smith_waterman_scores<parallel_k, char, substituter_t, std::allocator<char>> {
-            substituter_t {blosum62.data()}, blosum62_gap_extension_cost}, //
+    edit_distances_compare<sz_ssize_t>(                                     //
+        smith_waterman_baselines_t {blosum62, blosum62_gap_extension_cost}, //
+        sz::openmp::smith_waterman_scores<parallel_k, char, substituter_256x256_t, std::allocator<char>> {
+            substituter_256x256_t {blosum62.data()}, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 };
 
@@ -347,7 +370,7 @@ static void test_non_stl_extensions_for_reads() {
 
     // Computing alignment scores.
     using matrix_t = std::int8_t[256][256];
-    sz::scripts::error_costs_256x256_t substitution_costs = error_costs_256x256_unary();
+    sz::scripts::error_costs_256x256_t substitution_costs = error_costs_256x256_diagonal();
     matrix_t &costs = *reinterpret_cast<matrix_t *>(substitution_costs.data());
 
     _sz_assert(sz::alignment_score(str("listen"), str("silent"), costs, -1) == -4);
