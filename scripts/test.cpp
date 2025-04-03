@@ -1,6 +1,6 @@
 /**
  *  @brief   Extensive @b unit-testing suite for StringZilla, written in C++.
- *  @note    It tests one target hardware platform at a time and should be compiled and run separately for each.
+ *  @note    It mostly tests one target hardware platform at a time and should be compiled and run separately for each.
  *           To override the default hardware platform, overrides the @b `SZ_USE_*` flags at the top of this file.
  *
  *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
@@ -8,62 +8,46 @@
  *  @file    test.cpp
  *  @author  Ash Vardanian
  */
+#undef NDEBUG // ! Enable all assertions for testing
 
-#include <limits>
-#undef NDEBUG // Enable all assertions
-
-/* The Visual C++ run-time library detects incorrect iterator use,
- * and asserts and displays a dialog box at run time on Windows.
+/**
+ *  The Visual C++ run-time library detects incorrect iterator use,
+ *  and asserts and displays a dialog box at run time on Windows.
  */
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#include <cassert> // assertions
-
 /**
- * ! Overload the following with caution.
- * ! Those parameters must never be explicitly set during releases,
- * ! but they come handy during development, if you want to validate
- * ! different ISA-specific implementations.
+ *  ! Overload the following with caution.
+ *  ! Those parameters must never be explicitly set during releases,
+ *  ! but they come handy during development, if you want to validate
+ *  ! different ISA-specific implementations.
+
+#define SZ_USE_HASWELL 0
+#define SZ_USE_SKYLAKE 0
+#define SZ_USE_ICE 0
+#define SZ_USE_NEON 0
+#define SZ_USE_SVE 0
  */
-// #define SZ_USE_HASWELL 0
-// #define SZ_USE_SKYLAKE 0
-// #define SZ_USE_ICE 0
-// #define SZ_USE_NEON 0
-// #define SZ_USE_SVE 0
-// #define SZ_USE_SVE2 0
+#define SZ_USE_SVE2 0
 #if defined(SZ_DEBUG)
 #undef SZ_DEBUG
 #endif
-#define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
-
-#include <stringzilla/stringzilla.hpp> // C++ string class replacement
-#include <stringzilla/stringzilla.cuh> // Precompiled CUDA templates
+#define SZ_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /**
- * ! Overload the following with caution to enable parallelism.
- * ! They control the OpenMP CPU backend as well as the CUDA GPU backend.
+ *  Make sure to include the StringZilla headers before anything else,
+ *  to intercept missing `#include` directives and other issues.
  */
-#if SZ_USE_CUDA
-#include <stringzilla/types.cuh>      // `unified_alloc`
-#include <stringzilla/similarity.cuh> // Parallel string processing on CUDA or OpenMP
-#endif
-
-#if SZ_USE_OPENMP
-#include <stringzilla/similarity.hpp> // OpenMP templates for string similarity measures
-#endif
+#include <stringzilla/stringzilla.h>   // Primary C API
+#include <stringzilla/stringzilla.hpp> // C++ string class replacement
 
 #if defined(__SANITIZE_ADDRESS__)
 #include <sanitizer/asan_interface.h> // We use ASAN API to poison memory addresses
 #endif
 
-#if defined(__clang__) || defined(__GNUC__)
-#define ASAN_DISABLE __attribute__((no_sanitize_address))
-#else
-#define ASAN_DISABLE
-#endif
-
+#include <cassert>       // C-style assertions
 #include <algorithm>     // `std::transform`
 #include <cstdio>        // `std::printf`
 #include <cstring>       // `std::memcpy`
@@ -84,7 +68,7 @@
 #error "This test requires C++11 or later."
 #endif
 
-#include <test.hpp> // `levenshtein_baseline`
+#include "test.hpp" // `global_random_generator`, `random_string`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
@@ -95,7 +79,7 @@ using sz::literals::operator""_bs; // for `sz::byteset`
 using namespace std::literals; // for ""sv
 #endif
 
-/*
+/**
  *  Instantiate all the templates to make the symbols visible and also check
  *  for weird compilation errors on uncommon paths.
  */
@@ -182,14 +166,39 @@ static void test_arithmetical_utilities() {
 /** @brief Validates `sz_sequence_t` and related construction utilities. */
 static void test_sequence_struct() {
     // Make sure the sequence helper functions work as expected
-    // for both trivial c-style arrays and
-    sz_sequence_t sequence;
-    sz_cptr_t strings[] = {"banana", "apple", "cherry"};
-    sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
-    assert(sequence.count == 3);
-    assert("banana"_sv == sequence.get_start(sequence.handle, 0));
-    assert("apple"_sv == sequence.get_start(sequence.handle, 1));
-    assert("cherry"_sv == sequence.get_start(sequence.handle, 2));
+    // for both trivial c-style arrays and more complicated STL containers.
+    {
+        sz_sequence_t sequence;
+        sz_cptr_t strings[] = {"banana", "apple", "cherry"};
+        sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
+        assert(sequence.count == 3);
+        assert("banana"_sv == sequence.get_start(sequence.handle, 0));
+        assert("apple"_sv == sequence.get_start(sequence.handle, 1));
+        assert("cherry"_sv == sequence.get_start(sequence.handle, 2));
+    }
+    // Do the same for STL:
+    {
+        using strings_vector_t = std::vector<std::string>;
+        strings_vector_t strings = {"banana", "apple", "cherry"};
+        sz_sequence_t sequence;
+        sequence.handle = &strings;
+        sequence.count = strings.size();
+        sequence.get_start =
+            reinterpret_cast<sz_sequence_member_start_t>(+[](void *handle, sz_size_t index) noexcept -> sz_cptr_t {
+                auto const &strings = *static_cast<strings_vector_t *>(handle);
+                return strings[index].c_str();
+            });
+        sequence.get_length =
+            reinterpret_cast<sz_sequence_member_length_t>(+[](void *handle, sz_size_t index) noexcept -> sz_size_t {
+                auto const &strings = *static_cast<strings_vector_t *>(handle);
+                return strings[index].size();
+            });
+
+        assert(sequence.count == 3);
+        assert("banana"_sv == sequence.get_start(sequence.handle, 0));
+        assert("apple"_sv == sequence.get_start(sequence.handle, 1));
+        assert("cherry"_sv == sequence.get_start(sequence.handle, 2));
+    }
 }
 
 /** @brief Validates `sz_memory_allocator_t` and related construction utilities. */
@@ -334,191 +343,7 @@ static void test_random_generator_equivalence(sz_fill_random_t generate_base, sz
             test_on_nonce(length, nonce);
 }
 
-/**
- *  @brief  Tests the correctness of the string class Levenshtein distance computation,
- *          as well as the similarity scoring functions for bioinformatics-like workloads.
- */
-template <typename base_operator_, typename simd_operator_>
-static void test_edit_distance_equivalence(base_operator_ distance_base, simd_operator_ &&distance_simd) {
-
-    // Let's log the error and the strings that caused it.
-    auto test_distance = [&](std::string const &l, std::string const &r) {
-        auto result_base = distance_base(l, r);
-        auto result_simd = distance_simd(l, r);
-        if (result_base == result_simd) return;
-
-        char const *ellipsis = l.length() > 22 || r.length() > 22 ? "..." : "";
-        std::printf("Edit Distance error: distance(\"%.22s%s\", \"%.22s%s\"); got %zd, expected %zd\n", //
-                    l.c_str(), ellipsis, r.c_str(), ellipsis, result_simd, result_base);
-    };
-
-    // Pick a few representative cases for ASCII and Unicode strings.
-    struct {
-        char const *left;
-        char const *right;
-        std::size_t edit_distance_bytes;
-        std::size_t edit_distance_utf8;
-    } explicit_cases[] = {
-        {"atca", "ctactcaccc", 6, 6},
-        {"listen", "silent", 4, 4},
-        {"A", "=", 1, 1},
-        {"a", "a", 0, 0},
-        {"", "", 0, 0},
-        {"", "abc", 3, 3},
-        {"abc", "", 3, 3},
-        {"abc", "ac", 1, 1},                   // one deletion
-        {"abc", "a_bc", 1, 1},                 // one insertion
-        {"abc", "adc", 1, 1},                  // one substitution
-        {"abc", "abc", 0, 0},                  // same string
-        {"ggbuzgjux{}l", "gbuzgjux{}l", 1, 1}, // one insertion (prepended)
-        {"apple", "aple", 1, 1},
-        //
-        // Unicode:
-        {"αβγδ", "αγδ", 2, 1},                      // Each Greek symbol is 2 bytes in size
-        {"مرحبا بالعالم", "مرحبا يا عالم", 3, 2},   // "Hello World" vs "Welcome to the World" ?
-        {"école", "école", 3, 2},                   // letter "é" as a single character vs "e" + "´"
-        {"Schön", "Scho\u0308n", 3, 2},             // "ö" represented as "o" + "¨"
-        {"💖", "💗", 1, 1},                         // 4-byte emojis: Different hearts
-        {"𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓", 3, 3},          // Ancient Chinese characters, no spaces vs spaces
-        {"München", "Muenchen", 2, 2},              // German name with umlaut vs. its transcription
-        {"façade", "facade", 2, 1},                 // "ç" represented as "c" with cedilla vs. plain "c"
-        {"こんにちは世界", "こんばんは世界", 3, 2}, // Japanese: "Good morning world" vs "Good evening world"
-        {"👩‍👩‍👧‍👦", "👨‍👩‍👧‍👦", 1, 1}, // Family emojis with different compositions
-        {"Data科学123", "Data科學321", 3, 3},
-        {"🙂🌍🚀", "🙂🌎✨", 5, 2},
-    };
-    for (auto explicit_case : explicit_cases) test_distance(explicit_case.left, explicit_case.right);
-
-    // Gradually increasing the length of the strings.
-    for (std::size_t length = 0; length != 1000; ++length) {
-        std::string left, right;
-        for (std::size_t i = 0; i != length; ++i) left.push_back('a'), right.push_back('b');
-        test_distance(left, right);
-    }
-
-    // Generate random strings and compare the results.
-    struct {
-        std::size_t length_upper_bound;
-        std::size_t iterations;
-    } fuzzy_cases[] = {
-        {10, 1000},
-        {64, 128},
-        {100, 100},
-        {1000, 10},
-    };
-    std::mt19937 &generator = global_random_generator();
-    sz::string first, second;
-    for (auto fuzzy_case : fuzzy_cases) {
-        char alphabet[4] = {'a', 'c', 'g', 't'};
-        std::uniform_int_distribution<std::size_t> length_distribution(0, fuzzy_case.length_upper_bound);
-        for (std::size_t i = 0; i != fuzzy_case.iterations; ++i) {
-            std::size_t first_length = length_distribution(generator);
-            std::size_t second_length = length_distribution(generator);
-            std::generate_n(std::back_inserter(first), first_length, [&]() { return alphabet[generator() % 4]; });
-            std::generate_n(std::back_inserter(second), second_length, [&]() { return alphabet[generator() % 4]; });
-            test_distance(first, second);
-
-            // Try computing the distance on equal-length chunks of those strings.
-            first.resize((std::min)(first_length, second_length));
-            second.resize((std::min)(first_length, second_length));
-            test_distance(first, second);
-
-            // Discard before the next iteration.
-            first.clear();
-            second.clear();
-        }
-    }
-}
-
-/** @brief Wraps a hardware-specific Levenshtein-distance backend. */
-template <sz_levenshtein_distance_t levenshtein_distance_>
-struct levenshtein_from_sz {
-
-    sz_size_t bound = SZ_SIZE_MAX;
-
-    inline sz_size_t operator()(std::string const &a, std::string const &b) const noexcept(false) {
-        sz_size_t result_distance;
-        sz_status_t status = levenshtein_distance_( //
-            a.data(), a.size(),                     //
-            b.data(), b.size(),                     //
-            bound, NULL, &result_distance);
-        assert(status == sz_success_k);
-        return result_distance;
-    }
-};
-
-/** @brief Wraps a hardware-specific Levenshtein-distance backend into something @b `bench_unary`-compatible . */
-template <sz_needleman_wunsch_score_t needleman_wunsch_>
-struct alignment_score_from_sz {
-
-    sz_size_t bound = SZ_SIZE_MAX;
-    error_costs_256x256_t costs = unary_substitution_costs();
-
-    inline sz_size_t operator()(std::string const &a, std::string const &b) const noexcept(false) {
-        sz_ssize_t result_score;
-        sz_status_t status = needleman_wunsch_( //
-            a.data(), a.size(),                 //
-            b.data(), b.size(),                 //
-            costs.data(), (sz_error_cost_t)-1,  //
-            NULL, &result_score);
-        sz_size_t result_distance = (sz_size_t)(-result_score);
-        assert(status == sz_success_k);
-        return result_distance;
-    }
-};
-
 static void test_equivalence() {
-
-    test_edit_distance_equivalence(                            //
-        levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
-        alignment_score_from_sz<sz_needleman_wunsch_score_serial>());
-
-#if SZ_USE_OPENMP
-    test_edit_distance_equivalence(                            //
-        levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
-        [](std::string const &a, std::string const &b) {
-            return sz::openmp::levenshtein_distance(a, b, std::allocator<char>());
-        });
-#endif
-
-#if 0
-    using arrow_strings_tape_cuda_t = sz::arrow_strings_tape<char, sz_u32_t, sz::cuda::unified_alloc<char>>;
-    arrow_strings_tape_cuda_t a_tape, b_tape;
-    std::vector<sz_size_t, sz::cuda::unified_alloc<sz_size_t>> cuda_results(1);
-    test_edit_distance_equivalence(                            //
-        levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
-        [&](std::string const &a, std::string const &b) {
-            // Compiling heavy CUDA templates is tricky and time-consuming!
-            a_tape.try_assign(&a, &a + 1);
-            b_tape.try_assign(&b, &b + 1);
-            sz_status_t status = sz_levenshtein_distances_u32tape( //
-                a_tape.buffer().data(), a_tape.offsets().data(),   //
-                b_tape.buffer().data(), b_tape.offsets().data(),   //
-                1, SZ_SIZE_MAX, nullptr, cuda_results.data());
-            assert(status == sz_success_k);
-            return cuda_results[0];
-        });
-#endif
-
-#if SZ_USE_CUDA
-    using arrow_strings_tape_cuda_t = sz::arrow_strings_tape<char, sz_u32_t, sz::cuda::unified_alloc<char>>;
-    using malloc_size_cuda_t = sz::cuda::unified_alloc<sz_size_t>;
-    std::vector<sz_size_t, malloc_size_cuda_t> cuda_results(1);
-    test_edit_distance_equivalence(                            //
-        levenshtein_from_sz<sz_levenshtein_distance_serial>(), //
-        [&](std::string const &a, std::string const &b) {
-            // Compiling heavy CUDA templates is tricky and time-consuming!
-            arrow_strings_tape_cuda_t a_tape, b_tape;
-            sz::status_t status;
-            status = a_tape.try_assign(&a, &a + 1);
-            assert(status == sz::status_t::success_k);
-            status = b_tape.try_assign(&b, &b + 1);
-            assert(status == sz::status_t::success_k);
-            status = sz::cuda::levenshtein_distances(a_tape.view(), b_tape.view(), cuda_results.data());
-            assert(status == sz::status_t::success_k);
-            return cuda_results[0];
-        });
-#endif
 
 #if SZ_USE_HASWELL
     test_hash_equivalence(                                      //
@@ -727,7 +552,7 @@ static void test_memory_utilities( //
     // https://en.cppreference.com/w/cpp/numeric/random/exponential_distribution
     std::string dataset(max_l2_size, '-');
     auto &gen = global_random_generator();
-    uniform_uint8_distribution_t alphabet_distribution('a', 'z');
+    uniform_u8_distribution_t alphabet_distribution('a', 'z');
     std::uniform_int_distribution<std::size_t> length_distribution(1, max_l2_size);
     std::exponential_distribution<double> shift_distribution(1.0 / SZ_CACHE_LINE_WIDTH);
 
@@ -1261,63 +1086,6 @@ static void test_non_stl_extensions_for_reads() {
             "近来，加文出席微博之夜时对着镜头频繁摆出假笑表情、一度累瘫睡倒在沙发上的照片被广泛转发，引发对他失去童年、"
             "被过度消费的担忧。八岁的加文，已当网红近六年了，可以说，自懂事以来，他没有过过一天没有名气的日子。",
         (void)0, s.bytesum() == accumulate_bytes(s));
-
-    // Computing edit-distances.
-    assert(sz::hamming_distance(str("hello"), str("hello")) == 0);
-    assert(sz::hamming_distance(str("hello"), str("hell")) == 1);
-    assert(sz::hamming_distance(str("abc"), str("adc")) == 1);                // one substitution
-    assert(sz::hamming_distance(str("αβγδ"), str("αxxγδ")) == 2);             // replace Beta UTF8 codepoint
-    assert(sz::hamming_distance_utf8(str("abcdefgh"), str("_bcdefg_")) == 2); // replace ASCI prefix and suffix
-    assert(sz::hamming_distance_utf8(str("αβγδ"), str("αγγδ")) == 1);         // replace Beta UTF8 codepoint
-
-    assert(sz::levenshtein_distance(str("hello"), str("hello")) == 0);
-    assert(sz::levenshtein_distance(str("hello"), str("hell")) == 1);
-    assert(sz::levenshtein_distance(str(""), str("")) == 0);
-    assert(sz::levenshtein_distance(str(""), str("abc")) == 3);
-    assert(sz::levenshtein_distance(str("abc"), str("")) == 3);
-    assert(sz::levenshtein_distance(str("abc"), str("ac")) == 1);                   // one deletion
-    assert(sz::levenshtein_distance(str("abc"), str("a_bc")) == 1);                 // one insertion
-    assert(sz::levenshtein_distance(str("abc"), str("adc")) == 1);                  // one substitution
-    assert(sz::levenshtein_distance(str("ggbuzgjux{}l"), str("gbuzgjux{}l")) == 1); // one insertion (prepended)
-    assert(sz::levenshtein_distance(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg")) == 14);
-
-    assert(sz::levenshtein_distance_utf8(str("hello"), str("hell")) == 1);           // no unicode symbols, just ASCII
-    assert(sz::levenshtein_distance_utf8(str("𠜎 𠜱 𠝹 𠱓"), str("𠜎𠜱𠝹𠱓")) == 3); // add 3 whitespaces in Chinese
-    assert(sz::levenshtein_distance_utf8(str("💖"), str("💗")) == 1);
-
-    assert(sz::levenshtein_distance_utf8(str("αβγδ"), str("αγδ")) == 1); // insert Beta
-    assert(sz::levenshtein_distance_utf8(str("école"), str("école")) ==
-           2); // etter "é" as a single character vs "e" + "´"
-    assert(sz::levenshtein_distance_utf8(str("façade"), str("facade")) == 1);     // "ç" with cedilla vs. plain
-    assert(sz::levenshtein_distance_utf8(str("Schön"), str("Scho\u0308n")) == 2); // "ö" represented as "o" + "¨"
-    assert(sz::levenshtein_distance_utf8(str("München"), str("Muenchen")) == 2); // German with umlaut vs. transcription
-    assert(sz::levenshtein_distance_utf8(str("こんにちは世界"), str("こんばんは世界")) == 2);
-
-    // Computing alignment scores.
-    using matrix_t = std::int8_t[256][256];
-    error_costs_256x256_t costs_vector = unary_substitution_costs();
-    matrix_t &costs = *reinterpret_cast<matrix_t *>(costs_vector.data());
-
-    assert(sz::alignment_score(str("listen"), str("silent"), costs, -1) == -4);
-    assert(sz::alignment_score(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg"), costs, -1) == -14);
-    assert(sz::alignment_score(str("hello"), str("hello"), costs, -1) == 0);
-    assert(sz::alignment_score(str("hello"), str("hell"), costs, -1) == -1);
-
-#if _SZ_DEPRECATED_FINGERPRINTS
-
-    // Computing rolling fingerprints.
-    assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
-    assert(sz::hashes_fingerprint<512>(str("hello"), 4).count() == 2);
-    assert(sz::hashes_fingerprint<512>(str("hello"), 3).count() == 3);
-
-    // No matter how many times one repeats a character, the hash should only contain at most one set bit.
-    assert(sz::hashes_fingerprint<512>(str("a"), 3).count() == 0);
-    assert(sz::hashes_fingerprint<512>(str("aa"), 3).count() == 0);
-    assert(sz::hashes_fingerprint<512>(str("aaa"), 3).count() == 1);
-    assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
-    assert(sz::hashes_fingerprint<512>(str("aaaaa"), 3).count() == 1);
-#endif
-    // Computing fuzzy search results.
 }
 
 void test_non_stl_extensions_for_updates() {

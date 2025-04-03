@@ -192,11 +192,68 @@ using error_costs_256x256_t = std::array<error_cost_t, 256 * 256>;
  *  @brief  Produces a substitution cost matrix for the Needleman-Wunsch alignment score,
  *          that would yield the same result as the negative Levenshtein distance.
  */
-inline error_costs_256x256_t unary_substitution_costs() {
+inline error_costs_256x256_t error_costs_256x256_unary() noexcept {
     error_costs_256x256_t result;
     for (std::size_t i = 0; i != 256; ++i)
         for (std::size_t j = 0; j != 256; ++j) //
             result[i * 256 + j] = i == j ? 0 : -1;
+    return result;
+}
+
+/**
+ *  @brief  Produces a substitution cost matrix using Blosum62 weights.
+ *
+ *  For characters corresponding to the 20 standard amino acids in Blosum62,
+ *  the matrix is initialized with the respective scores. For any other character,
+ *  a default penalty (e.g. -4) is used.
+ */
+inline error_costs_256x256_t error_costs_256x256_blosum62() noexcept {
+    error_costs_256x256_t result;
+
+    constexpr char amino_acids[] = "ARNDCQEGHILKMFPSTWYV";
+    constexpr int num_amino = 20;
+
+    // BLOSUM62 substitution matrix for the 20 amino acids.
+    constexpr int blosum62[num_amino][num_amino] = {
+        {4, -1, -2, -2, 0, -1, -1, 0, -2, -1, -1, -1, -1, -2, -1, 1, 0, -3, -2, 0},
+        {-1, 5, 0, -2, -3, 1, 0, -2, 0, -3, -2, 2, -1, -3, -2, -1, -1, -3, -2, -3},
+        {-2, 0, 6, 1, -3, 0, 0, 0, 1, -3, -3, 0, -2, -3, -2, 1, 0, -4, -2, -3},
+        {-2, -2, 1, 6, -3, 0, 2, -1, -1, -3, -4, -1, -3, -3, -1, 0, -1, -4, -3, -3},
+        {0, -3, -3, -3, 9, -3, -4, -3, -3, -1, -1, -3, -1, -2, -3, -1, -1, -2, -2, -1},
+        {-1, 1, 0, 0, -3, 5, 2, -2, 0, -3, -2, 1, 0, -3, -1, 0, -1, -2, -1, -2},
+        {-1, 0, 0, 2, -4, 2, 5, -2, 0, -3, -3, 1, -2, -3, -1, 0, -1, -3, -2, -2},
+        {0, -2, 0, -1, -3, -2, -2, 6, -2, -4, -4, -2, -3, -3, -2, 0, -2, -2, -3, -3},
+        {-2, 0, 1, -1, -3, 0, 0, -2, 8, -3, -3, -1, -2, -1, -2, -1, -2, -2, 2, -3},
+        {-1, -3, -3, -3, -1, -3, -3, -4, -3, 4, 2, -3, 1, 0, -3, -2, -1, -3, -1, 3},
+        {-1, -2, -3, -4, -1, -2, -3, -4, -3, 2, 4, -2, 2, 0, -3, -2, -1, -2, -1, 1},
+        {-1, 2, 0, -1, -3, 1, 1, -2, -1, -3, -2, 5, -1, -3, -1, 0, -1, -3, -2, -2},
+        {-1, -1, -2, -3, -1, 0, -2, -3, -2, 1, 2, -1, 5, 0, -2, -1, -1, -1, -1, 1},
+        {-2, -3, -3, -3, -2, -3, -3, -3, -1, 0, 0, -3, 0, 6, -4, -2, -2, 1, 3, -1},
+        {-1, -2, -2, -1, -3, -1, -1, -2, -2, -3, -3, -1, -2, -4, 7, -1, -1, -4, -3, -2},
+        {1, -1, 1, 0, -1, 0, 0, 0, -1, -2, -2, 0, -1, -2, -1, 4, 1, -3, -2, -2},
+        {0, -1, 0, -1, -1, -1, -1, -2, -2, -1, -1, -1, -1, -2, -1, 1, 5, -2, -2, 0},
+        {-3, -3, -4, -4, -2, -2, -3, -2, -2, -3, -2, -3, -1, 1, -4, -3, -2, 11, 2, -3},
+        {-2, -2, -2, -3, -2, -1, -2, -3, 2, -1, -1, -2, -1, 3, -3, -2, -2, 2, 7, -1},
+        {0, -3, -3, -3, -1, -2, -2, -3, -3, 3, 1, -2, 1, -1, -2, -2, 0, -3, -1, 4}};
+
+    // Build a lookup table to map any character (0–255) to an index in amino_acids,
+    // or -1 if the character is not one of the valid amino acids.
+    std::array<int, 256> amino_index;
+    amino_index.fill(-1);
+    for (int k = 0; k < num_amino; ++k) amino_index[static_cast<unsigned char>(amino_acids[k])] = k;
+
+    // Define a default penalty for characters not in Blosum62 (e.g., a typical gap or mismatch penalty)
+    constexpr error_cost_t default_penalty = -4;
+
+    // Initialize the substitution matrix.
+    for (std::size_t i = 0; i < 256; ++i) {
+        for (std::size_t j = 0; j < 256; ++j) {
+            int idx1 = amino_index[i];
+            int idx2 = amino_index[j];
+            if (idx1 != -1 && idx2 != -1) { result[i * 256 + j] = blosum62[idx1][idx2]; }
+            else { result[i * 256 + j] = default_penalty; }
+        }
+    }
     return result;
 }
 
