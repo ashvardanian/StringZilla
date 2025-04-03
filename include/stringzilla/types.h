@@ -441,7 +441,7 @@ typedef enum {
  */
 typedef enum {
     sz_cap_serial_k = 1,        ///< Serial (non-SIMD) capability
-    sz_cap_parallel_k = 1 << 2, ///< Serial (non-SIMD) capability
+    sz_cap_parallel_k = 1 << 2, ///< Multi-threading via OpenMP capability
     sz_cap_any_k = 0x7FFFFFFF,  ///< Mask representing any capability with `INT_MAX`
 
     sz_cap_haswell_k = 1 << 5, ///< x86 AVX2 capability with FMA and F16C extensions

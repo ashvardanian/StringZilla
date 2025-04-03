@@ -13,7 +13,7 @@
 
 #include <cuda_runtime.h> // `cudaMallocManaged`, `cudaFree`, `cudaSuccess`, `cudaGetErrorString`
 
-#include "types.hpp"
+#include "stringzilla/types.hpp"
 
 namespace ashvardanian {
 namespace stringzilla {
@@ -61,12 +61,6 @@ struct unified_alloc {
     bool operator!=(unified_alloc<other_type_> const &) const noexcept {
         return false;
     }
-};
-
-struct specs_t {
-    size_t total_sm_count = 108;              // ? On A100
-    size_t blocks_per_sm = 128;               // ? Each, generally, with 32 threads
-    size_t shared_memory_per_sm = 192 * 1024; // ? On A100 it's 192 KB per SM
 };
 
 } // namespace cuda

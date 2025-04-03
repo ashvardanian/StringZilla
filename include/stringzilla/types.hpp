@@ -121,12 +121,12 @@ enum class status_t {
     unknown_k = sz_status_unknown_k,
 };
 
-struct uniform_substitution_cost_t {
+struct error_costs_uniform_t {
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? 0 : 1; }
 };
 
-struct lookup_substitution_cost_t {
-    error_cost_t const *costs;
+struct error_costs_256x256_lookup_t {
+    error_cost_t const *costs = nullptr;
     constexpr error_cost_t operator()(char a, char b) const noexcept { return costs[(u8_t)a * 256 + (u8_t)b]; }
 };
 
@@ -410,6 +410,35 @@ struct constant_iterator {
   private:
     value_type value_;
     difference_type pos_;
+};
+
+template <typename first_, typename second_>
+struct is_same_type;
+
+template <typename first_>
+struct is_same_type<first_, first_> {
+    static constexpr bool value = true;
+};
+
+template <typename first_, typename second_>
+struct is_same_type {
+    static_assert(std::is_same<first_, second_>::value, "First and second types differ!");
+    static constexpr bool value = false;
+};
+
+struct gpu_specs_t {
+    size_t total_sm_count = 108;              // ? On A100
+    size_t blocks_per_sm = 128;               // ? Each, generally, with 32 threads
+    size_t shared_memory_per_sm = 192 * 1024; // ? On A100 it's 192 KB per SM
+};
+
+struct cpu_specs_t {
+    size_t l1_bytes = 32 * 1024;       // ? typically around 32 KB
+    size_t l2_bytes = 256 * 1024;      // ? typically around 256 KB
+    size_t l3_bytes = 8 * 1024 * 1024; // ? typically around 8 MB
+    size_t cache_line_width = 64;      // ? 64 bytes on x86, sometimes 128 on ARM
+    size_t cores_per_socket = 1;       // ? at least 1 core
+    size_t sockets = 1;                // ? at least 1 socket
 };
 
 } // namespace stringzilla
