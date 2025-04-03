@@ -351,6 +351,67 @@ struct arrow_strings_tape {
     constexpr span<offset_t> const &offsets() const noexcept { return offsets_; }
 };
 
+/**
+ *  @brief  Similar to `thrust::constant_iterator`, always returning the same value.
+ */
+template <typename value_type_>
+struct constant_iterator {
+
+    using value_type = value_type_;
+    using reference = value_type_ const &;
+    using pointer = value_type_ const *;
+    using difference_type = std::ptrdiff_t;
+    using iterator_category = std::random_access_iterator_tag;
+
+    constant_iterator(value_type const &value, difference_type pos = 0) noexcept : value_(value), pos_(pos) {}
+
+    reference operator*() const { return value_; }
+    pointer operator->() const { return &value_; }
+
+    constant_iterator &operator++() {
+        ++pos_;
+        return *this;
+    }
+    constant_iterator operator++(int) {
+        constant_iterator tmp(*this);
+        ++pos_;
+        return tmp;
+    }
+    constant_iterator &operator--() {
+        --pos_;
+        return *this;
+    }
+    constant_iterator operator--(int) {
+        constant_iterator tmp(*this);
+        --pos_;
+        return tmp;
+    }
+
+    constant_iterator operator+(difference_type n) const { return constant_iterator(value_, pos_ + n); }
+    constant_iterator &operator+=(difference_type n) {
+        pos_ += n;
+        return *this;
+    }
+    constant_iterator operator-(difference_type n) const { return constant_iterator(value_, pos_ - n); }
+    constant_iterator &operator-=(difference_type n) {
+        pos_ -= n;
+        return *this;
+    }
+    difference_type operator-(constant_iterator const &other) const { return pos_ - other.pos_; }
+
+    reference operator[](difference_type) const { return value_; }
+    bool operator==(constant_iterator const &other) const { return pos_ == other.pos_; }
+    bool operator!=(constant_iterator const &other) const { return pos_ != other.pos_; }
+    bool operator<(constant_iterator const &other) const { return pos_ < other.pos_; }
+    bool operator>(constant_iterator const &other) const { return pos_ > other.pos_; }
+    bool operator<=(constant_iterator const &other) const { return pos_ <= other.pos_; }
+    bool operator>=(constant_iterator const &other) const { return pos_ >= other.pos_; }
+
+  private:
+    value_type value_;
+    difference_type pos_;
+};
+
 } // namespace stringzilla
 } // namespace ashvardanian
 
