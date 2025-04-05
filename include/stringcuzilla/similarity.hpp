@@ -1195,7 +1195,184 @@ struct smith_waterman_scores {
     }
 };
 
-} // namespace openmp
+/**
+ *  @brief  The default most @b space-intensive error costs matrix for byte-level similarity scoring.
+ *          Takes (256 x 256) ~ 65'536 bytes of memory. Which equates to 1/3 of the shared memory on the GPU,
+ *          so smaller variants should be preferred where possible.
+ */
+struct error_costs_256x256_t {
+    error_cost_t cells[256][256] = {0};
+
+    constexpr error_cost_t operator()(char a, char b) const noexcept { return cells[(sz_u8_t)a][(sz_u8_t)b]; }
+    constexpr error_cost_t operator()(sz_u8_t a, sz_u8_t b) const noexcept { return cells[a][b]; }
+
+    constexpr error_cost_t &operator()(char a, char b) noexcept { return cells[(sz_u8_t)a][(sz_u8_t)b]; }
+    constexpr error_cost_t &operator()(sz_u8_t a, sz_u8_t b) noexcept { return cells[a][b]; }
+
+    /**
+     *  @brief  Produces a substitution cost matrix for the Needleman-Wunsch alignment score,
+     *          that would yield the same result as the negative Levenshtein distance.
+     */
+    constexpr static error_costs_256x256_t diagonal(error_cost_t match_score = 0,
+                                                    error_cost_t mismatch_score = -1) noexcept {
+        error_costs_256x256_t result;
+        for (int i = 0; i != 256; ++i)
+            for (int j = 0; j != 256; ++j) //
+                result.cells[i][j] = i == j ? match_score : mismatch_score;
+        return result;
+    }
+};
+
+/**
+ *  @brief  The recommended @b space-efficient error costs matrix for case-insensitive English word
+ *          scoring or protein sequences, which conveniently require only 26 and 20 letters respectively.
+ *  @note   All lookups are performed by indexing rows/columns from the 'A' character, which is 65 in ASCII.
+ *
+ *  @section    Biological Data
+ *
+ *  For proteins, a (26 x 26) matrix takes 676 bytes, which is a steep 43% increase from (20 x 20) ~ 400 bytes.
+ *  Still, its an acceptable tradeoff given the convenience of using ASCII arithmetic for lookups, and occasional
+ *  use of special "ambiguous" characters. The 20 standard amino-acids are @b ARNDCQEGHILKMFPSTWYV. Others include:
+ *  - @b U: Selenocysteine, sometimes called the 21st amino acid.
+ *  - @b O: Pyrrolysine, occasionally referred to as the 22nd amino acid.
+ *  - @b B: An ambiguous code representing either Aspartic acid (D) or Asparagine (N).
+ *  - @b Z: An ambiguous code representing either Glutamic acid (E) or Glutamine (Q).
+ *  - @b X: Used when the identity of an amino acid is unknown or unspecified.
+ *  - @b *: Denotes a stop codon, signaling the end of the protein sequence during translation.
+ *  This leaves @b J as the only ASCII letter not used in protein sequences and @b (*) asterisk as the the only
+ *  non-letter character used.
+ *
+ *  For DNA and RNA sequences, often a (4 x 4) matrix can be enough, but in the general case, additional characters
+ *  are used to mark ambiguous reads. For nucleic acids the standard alphabets are @b ACGT for @b DNA and @b ACGU
+ *  for @b RNA. There are a lot more ambiguity codes though:
+ *
+ *      ------+----------+----------+----------+-----------
+ *       Code | Can be A | Can be C | Can be G | Can be T/U
+ *      ------+----------+----------+----------+-----------
+ *       A    |    X     |          |          |
+ *       C    |          |    X     |          |
+ *       G    |          |          |    X     |
+ *       T    |          |          |          |     X
+ *       R    |    X     |          |    X     |
+ *       Y    |          |    X     |          |     X
+ *       S    |          |    X     |    X     |
+ *       W    |    X     |          |          |     X
+ *       K    |          |          |    X     |     X
+ *       M    |    X     |    X     |          |
+ *       B    |          |    X     |    X     |     X
+ *       D    |    X     |          |    X     |     X
+ *       H    |    X     |    X     |          |     X
+ *       V    |    X     |    X     |    X     |
+ *       N    |    X     |    X     |    X     |     X
+ *      ------+----------+----------+----------+-----------
+ *
+ *  If the BLOSUM62 matrix is often used for proteins, the IUB or NUC.4.4 are often used for nucleic acids.
+ *  Both can be easily extracted from BioPython and converted to our ASCII order:
+ *
+ *  @code{.py}
+ *  import string
+ *  from Bio.Align import substitution_matrices
+ *
+ *  def map_to_new_alphabet(matrix, new_alphabet: str, default_value: int = -128):
+ *      old_alphabet = str(matrix.alphabet)
+ *      indices = {ch: old_alphabet.find(ch) for ch in new_alphabet}
+ *      return [
+ *          [matrix[indices[r], indices[c]] if indices[r] != -1 and indices[c] != -1 else default_value
+ *          for c in new_alphabet]
+ *          for r in new_alphabet
+ *      ]
+ *
+ *  matrix = substitution_matrices.load("BLOSUM62").astype(int) # Or "NUC.4.4"
+ *  print(map_to_new_alphabet(matrix, string.ascii_uppercase))
+ *  @endcode
+ */
+struct error_costs_26x26ascii_t {
+    error_cost_t cells[26][26] = {0};
+
+    constexpr error_cost_t operator()(char a, char b) const noexcept { return cells[(sz_u8_t)a - 65][(sz_u8_t)b - 65]; }
+    constexpr error_cost_t operator()(sz_u8_t a, sz_u8_t b) const noexcept { return cells[a - 65][b - 65]; }
+
+    constexpr error_cost_t &operator()(char a, char b) noexcept { return cells[(sz_u8_t)a - 65][(sz_u8_t)b - 65]; }
+    constexpr error_cost_t &operator()(sz_u8_t a, sz_u8_t b) noexcept { return cells[a - 65][b - 65]; }
+
+    constexpr error_costs_256x256_t decompressed() const noexcept {
+        error_costs_256x256_t result;
+        for (int i = 0; i != 26; ++i)
+            for (int j = 0; j != 26; ++j) //
+                result.cells[i + 65][j + 65] = cells[i][j];
+        return result;
+    }
+
+    /**
+     *  @brief BLOSUM62 substitution matrix for protein analysis in bioinformatics, reorganized for ASCII lookups.
+     *  @see https://en.wikipedia.org/wiki/BLOSUM
+     */
+    constexpr static error_costs_26x26ascii_t blosum62() {
+        constexpr error_cost_t na = -128; // Placeholder for unused characters
+        return {
+            {{4, -2, 0, -2, -1, -2, 0, -2, -1, na, -1, -1, -1, -2, na, -1, -1, -1, 1, 0, na, 0, -3, 0, -2, -1},
+             {-2, 4, -3, 4, 1, -3, -1, 0, -3, na, 0, -4, -3, 3, na, -2, 0, -1, 0, -1, na, -3, -4, -1, -3, 1},
+             {0, -3, 9, -3, -4, -2, -3, -3, -1, na, -3, -1, -1, -3, na, -3, -3, -3, -1, -1, na, -1, -2, -2, -2, -3},
+             {-2, 4, -3, 6, 2, -3, -1, -1, -3, na, -1, -4, -3, 1, na, -1, 0, -2, 0, -1, na, -3, -4, -1, -3, 1},
+             {-1, 1, -4, 2, 5, -3, -2, 0, -3, na, 1, -3, -2, 0, na, -1, 2, 0, 0, -1, na, -2, -3, -1, -2, 4},
+             {-2, -3, -2, -3, -3, 6, -3, -1, 0, na, -3, 0, 0, -3, na, -4, -3, -3, -2, -2, na, -1, 1, -1, 3, -3},
+             {0, -1, -3, -1, -2, -3, 6, -2, -4, na, -2, -4, -3, 0, na, -2, -2, -2, 0, -2, na, -3, -2, -1, -3, -2},
+             {-2, 0, -3, -1, 0, -1, -2, 8, -3, na, -1, -3, -2, 1, na, -2, 0, 0, -1, -2, na, -3, -2, -1, 2, 0},
+             {-1, -3, -1, -3, -3, 0, -4, -3, 4, na, -3, 2, 1, -3, na, -3, -3, -3, -2, -1, na, 3, -3, -1, -1, -3},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {-1, 0, -3, -1, 1, -3, -2, -1, -3, na, 5, -2, -1, 0, na, -1, 1, 2, 0, -1, na, -2, -3, -1, -2, 1},
+             {-1, -4, -1, -4, -3, 0, -4, -3, 2, na, -2, 4, 2, -3, na, -3, -2, -2, -2, -1, na, 1, -2, -1, -1, -3},
+             {-1, -3, -1, -3, -2, 0, -3, -2, 1, na, -1, 2, 5, -2, na, -2, 0, -1, -1, -1, na, 1, -1, -1, -1, -1},
+             {-2, 3, -3, 1, 0, -3, 0, 1, -3, na, 0, -3, -2, 6, na, -2, 0, 0, 1, 0, na, -3, -4, -1, -2, 0},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {-1, -2, -3, -1, -1, -4, -2, -2, -3, na, -1, -3, -2, -2, na, 7, -1, -2, -1, -1, na, -2, -4, -2, -3, -1},
+             {-1, 0, -3, 0, 2, -3, -2, 0, -3, na, 1, -2, 0, 0, na, -1, 5, 1, 0, -1, na, -2, -2, -1, -1, 3},
+             {-1, -1, -3, -2, 0, -3, -2, 0, -3, na, 2, -2, -1, 0, na, -2, 1, 5, -1, -1, na, -3, -3, -1, -2, 0},
+             {1, 0, -1, 0, 0, -2, 0, -1, -2, na, 0, -2, -1, 1, na, -1, 0, -1, 4, 1, na, -2, -3, 0, -2, 0},
+             {0, -1, -1, -1, -1, -2, -2, -2, -1, na, -1, -1, -1, 0, na, -1, -1, -1, 1, 5, na, 0, -2, 0, -2, -1},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {0, -3, -1, -3, -2, -1, -3, -3, 3, na, -2, 1, 1, -3, na, -2, -2, -3, -2, 0, na, 4, -3, -1, -1, -2},
+             {-3, -4, -2, -4, -3, 1, -2, -2, -3, na, -3, -2, -1, -4, na, -4, -2, -3, -3, -2, na, -3, 11, -2, 2, -3},
+             {0, -1, -2, -1, -1, -1, -1, -1, -1, na, -1, -1, -1, -1, na, -2, -1, -1, 0, 0, na, -1, -2, -1, -1, -1},
+             {-2, -3, -2, -3, -2, 3, -3, 2, -1, na, -2, -1, -1, -2, na, -3, -1, -2, -2, -2, na, -1, 2, -1, 7, -2},
+             {-1, 1, -3, 1, 4, -3, -2, 0, -3, na, 1, -3, -1, 0, na, -1, 3, 0, 0, -1, na, -2, -3, -1, -2, 4}}};
+    }
+    /**
+     *  @brief NUC.4.4 substitution matrix for DNA analysis in bioinformatics, reorganized for ASCII lookups.
+     *  @see https://www.biostars.org/p/73028/#93435
+     */
+    constexpr static error_costs_26x26ascii_t nuc44() {
+        constexpr error_cost_t na = -128; // Placeholder for unused characters
+        return {
+            {{5, -4, -4, -1, na, na, -4, -1, na, na, -4, na, 1, -2, na, na, na, 1, -4, -4, na, -1, 1, na, -4, na},
+             {-4, -1, -1, -2, na, na, -1, -2, na, na, -1, na, -3, -1, na, na, na, -3, -1, -1, na, -2, -3, na, -1, na},
+             {-4, -1, 5, -4, na, na, -4, -1, na, na, -4, na, 1, -2, na, na, na, -4, 1, -4, na, -1, -4, na, 1, na},
+             {-1, -2, -4, -1, na, na, -1, -2, na, na, -1, na, -3, -1, na, na, na, -1, -3, -1, na, -2, -1, na, -3, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {-4, -1, -4, -1, na, na, 5, -4, na, na, 1, na, -4, -2, na, na, na, 1, 1, -4, na, -1, -4, na, -4, na},
+             {-1, -2, -1, -2, na, na, -4, -1, na, na, -3, na, -1, -1, na, na, na, -3, -3, -1, na, -2, -1, na, -1, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {-4, -1, -4, -1, na, na, 1, -3, na, na, -1, na, -4, -1, na, na, na, -2, -2, 1, na, -3, -2, na, -2, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {1, -3, 1, -3, na, na, -4, -1, na, na, -4, na, -1, -1, na, na, na, -2, -2, -4, na, -1, -2, na, -2, na},
+             {-2, -1, -2, -1, na, na, -2, -1, na, na, -1, na, -1, -1, na, na, na, -1, -1, -2, na, -1, -1, na, -1, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {1, -3, -4, -1, na, na, 1, -3, na, na, -2, na, -2, -1, na, na, na, -1, -2, -4, na, -1, -2, na, -4, na},
+             {-4, -1, 1, -3, na, na, 1, -3, na, na, -2, na, -2, -1, na, na, na, -2, -1, -4, na, -1, -4, na, -2, na},
+             {-4, -1, -4, -1, na, na, -4, -1, na, na, 1, na, -4, -2, na, na, na, -4, -4, 5, na, -4, 1, na, 1, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {-1, -2, -1, -2, na, na, -1, -2, na, na, -3, na, -1, -1, na, na, na, -1, -1, -4, na, -1, -3, na, -3, na},
+             {1, -3, -4, -1, na, na, -4, -1, na, na, -2, na, -2, -1, na, na, na, -2, -4, 1, na, -3, -1, na, -2, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na},
+             {-4, -1, 1, -3, na, na, -4, -1, na, na, -2, na, -2, -1, na, na, na, -4, -2, 1, na, -3, -2, na, -1, na},
+             {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na}}};
+    }
+};
+
 } // namespace stringzilla
 } // namespace ashvardanian
 
