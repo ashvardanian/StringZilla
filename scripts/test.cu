@@ -44,20 +44,21 @@ namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
 using namespace std::literals; // for ""sv
 
+using arrow_strings_view_t = sz::arrow_strings_view<char, sz_size_t>;
+
 #if !SZ_USE_CUDA
 using arrow_strings_tape_t = sz::arrow_strings_tape<char, sz_size_t, std::allocator<char>>;
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
 #else
-using arrow_strings_tape_t = sz::arrow_strings_tape<char, sz_size_t, sz::cuda::unified_alloc<char>>;
+using arrow_strings_tape_t = sz::arrow_strings_tape<char, sz_size_t, sz::unified_alloc<char>>;
 template <typename value_type_>
-using unified_vector = std::vector<value_type_, sz::cuda::unified_alloc<value_type_>>;
+using unified_vector = std::vector<value_type_, sz::unified_alloc<value_type_>>;
 #endif
 
 struct levenshtein_baselines_t {
     template <typename results_type_>
-    sz::status_t operator()(arrow_strings_tape_t const &first, arrow_strings_tape_t const &second,
-                            results_type_ *results) const {
+    sz::status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, results_type_ *results) const {
         _sz_assert(first.size() == second.size());
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
@@ -69,73 +70,67 @@ struct levenshtein_baselines_t {
 
 struct needleman_wunsch_baselines_t {
 
-    sz::scripts::error_costs_256x256_t substitution_costs = sz::scripts::error_costs_256x256_diagonal();
+    sz::error_costs_256x256_t substitution_costs = sz::error_costs_256x256_t::diagonal();
     sz::error_cost_t gap_cost = -1;
 
-    sz::status_t operator()(arrow_strings_tape_t const &first, arrow_strings_tape_t const &second,
-                            sz_ssize_t *results) const {
+    sz::status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
         _sz_assert(first.size() == second.size());
 
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
-            results[i] = sz::scripts::needleman_wunsch_baseline(
-                first[i].data(), first[i].size(),   //
-                second[i].data(), second[i].size(), //
-                sz::error_costs_256x256_lookup_t {substitution_costs.data()}, gap_cost);
+            results[i] = sz::scripts::needleman_wunsch_baseline(first[i].data(), first[i].size(),   //
+                                                                second[i].data(), second[i].size(), //
+                                                                substitution_costs, gap_cost);
         return sz::status_t::success_k;
     }
 };
 
 struct smith_waterman_baselines_t {
 
-    sz::scripts::error_costs_256x256_t substitution_costs = sz::scripts::error_costs_256x256_diagonal();
+    sz::error_costs_256x256_t substitution_costs = sz::error_costs_256x256_t::diagonal();
     sz::error_cost_t gap_cost = -1;
 
-    sz::status_t operator()(arrow_strings_tape_t const &first, arrow_strings_tape_t const &second,
-                            sz_ssize_t *results) const {
+    sz::status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
         _sz_assert(first.size() == second.size());
 
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
-            results[i] = sz::scripts::smith_waterman_baseline(
-                first[i].data(), first[i].size(),   //
-                second[i].data(), second[i].size(), //
-                sz::error_costs_256x256_lookup_t {substitution_costs.data()}, gap_cost);
+            results[i] = sz::scripts::smith_waterman_baseline(first[i].data(), first[i].size(),   //
+                                                              second[i].data(), second[i].size(), //
+                                                              substitution_costs, gap_cost);
         return sz::status_t::success_k;
     }
 };
 
-using levenshtein_serial_t = sz::openmp::levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>>;
-using levenshtein_utf8_serial_t = sz::openmp::levenshtein_distances_utf8<sz_cap_parallel_k, char, std::allocator<char>>;
-using needleman_wunsch_serial_t = sz::openmp::needleman_wunsch_scores<sz_cap_parallel_k, char, std::allocator<char>>;
-using smith_waterman_serial_t = sz::openmp::smith_waterman_scores<sz_cap_parallel_k, char, std::allocator<char>>;
+using levenshtein_serial_t = sz::levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>>;
+using levenshtein_utf8_serial_t = sz::levenshtein_distances_utf8<sz_cap_parallel_k, char, std::allocator<char>>;
+using needleman_wunsch_serial_t = sz::needleman_wunsch_scores<sz_cap_parallel_k, char, std::allocator<char>>;
+using smith_waterman_serial_t = sz::smith_waterman_scores<sz_cap_parallel_k, char, std::allocator<char>>;
 
 /**
  *  In @b AVX-512:
  *  - for Global Alignments, we can vectorize the min-max calculation for diagonal "walkers"
  *  - for Local Alignments, we can vectorize the character substitution lookups for horizontal "walkers"
  */
-using levenshtein_ice_t = sz::openmp::levenshtein_distances<sz_cap_ice_k, char, std::allocator<char>>;
-using levenshtein_utf8_ice_t = sz::openmp::levenshtein_distances_utf8<sz_cap_ice_k, char, std::allocator<char>>;
-using needleman_wunsch_ice_t = sz::openmp::needleman_wunsch_scores<sz_cap_ice_k, char, std::allocator<char>>;
-using smith_waterman_ice_t = sz::openmp::smith_waterman_scores<sz_cap_ice_k, char, std::allocator<char>>;
+using levenshtein_ice_t = sz::levenshtein_distances<sz_cap_ice_k, char, std::allocator<char>>;
+using levenshtein_utf8_ice_t = sz::levenshtein_distances_utf8<sz_cap_ice_k, char, std::allocator<char>>;
+using needleman_wunsch_ice_t = sz::needleman_wunsch_scores<sz_cap_ice_k, char, std::allocator<char>>;
+using smith_waterman_ice_t = sz::smith_waterman_scores<sz_cap_ice_k, char, std::allocator<char>>;
 
-#if 0
 /**
  *  In @b CUDA:
  *  - for GPUs before Hopper, we can use the @b SIMT model for warp-level parallelism using diagonal "walkers"
  *  - for GPUs after Hopper, we compound that with thread-level @b SIMD via @b DPX instructions for min-max
  */
-using levenshtein_cuda_t = sz::cuda::levenshtein_distances<sz_cap_cuda_k, char>;
-using levenshtein_utf8_cuda_t = sz::cuda::levenshtein_distances_utf8<sz_cap_cuda_k, char>;
-using needleman_wunsch_cuda_t = sz::cuda::needleman_wunsch_scores<sz_cap_cuda_k, char>;
-using smith_waterman_cuda_t = sz::cuda::smith_waterman_scores<sz_cap_cuda_k, char>;
+using levenshtein_cuda_t = sz::levenshtein_distances<sz_cap_cuda_k, char>;
+using levenshtein_utf8_cuda_t = sz::levenshtein_distances_utf8<sz_cap_cuda_k, char>;
+using needleman_wunsch_cuda_t = sz::needleman_wunsch_scores<sz_cap_cuda_k, char>;
+using smith_waterman_cuda_t = sz::smith_waterman_scores<sz_cap_cuda_k, char>;
 
-using levenshtein_hopper_t = sz::cuda::levenshtein_distances<sz_cap_hopper_k, char>;
-using levenshtein_utf8_hopper_t = sz::cuda::levenshtein_distances_utf8<sz_cap_hopper_k, char>;
-using needleman_wunsch_hopper_t = sz::cuda::needleman_wunsch_scores<sz_cap_hopper_k, char>;
-using smith_waterman_hopper_t = sz::cuda::smith_waterman_scores<sz_cap_hopper_k, char>;
-#endif
+using levenshtein_hopper_t = sz::levenshtein_distances<sz_cap_hopper_k, char>;
+using levenshtein_utf8_hopper_t = sz::levenshtein_distances_utf8<sz_cap_hopper_k, char>;
+using needleman_wunsch_hopper_t = sz::needleman_wunsch_scores<sz_cap_hopper_k, char>;
+using smith_waterman_hopper_t = sz::smith_waterman_scores<sz_cap_hopper_k, char>;
 
 template <typename score_type_>
 void edit_distance_log_mismatch(std::string const &first, std::string const &second, //
@@ -161,7 +156,7 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
     using score_t = score_type_;
 
     std::vector<std::pair<std::string, std::string>> test_cases = {
-        {"abc", "abc"},                  // same string; distance ~ 0
+        {"ABC", "ABC"},                  // same string; distance ~ 0
         {"listen", "silent"},            // distance ~ 4
         {"atca", "ctactcaccc"},          // distance ~ 6
         {"A", "="},                      // distance ~ 1
@@ -201,8 +196,8 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
         second_tape.try_assign(&second, &second + 1);
 
         // Compute with both backends
-        sz::status_t status_base = base_operator(first_tape, second_tape, results_base.data());
-        sz::status_t status_simd = simd_operator(first_tape, second_tape, results_simd.data());
+        sz::status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
+        sz::status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data());
         _sz_assert(status_base == sz::status_t::success_k);
         _sz_assert(status_simd == sz::status_t::success_k);
         if (results_base[0] != results_simd[0])
@@ -220,8 +215,8 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
     }
 
     // Compute with both backends
-    sz::status_t status_base = base_operator(first_tape, second_tape, results_base.data());
-    sz::status_t status_simd = simd_operator(first_tape, second_tape, results_simd.data());
+    sz::status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
+    sz::status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data());
     _sz_assert(status_base == sz::status_t::success_k);
     _sz_assert(status_simd == sz::status_t::success_k);
 
@@ -248,8 +243,8 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
         results_simd.resize(batch_size);
 
         // Compute with both backends
-        sz::status_t status_base = base_operator(first_tape, second_tape, results_base.data());
-        sz::status_t status_simd = simd_operator(first_tape, second_tape, results_simd.data());
+        sz::status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
+        sz::status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data());
         _sz_assert(status_base == sz::status_t::success_k);
         _sz_assert(status_simd == sz::status_t::success_k);
 
@@ -263,16 +258,17 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
 
 static void test_equivalence(std::size_t batch_size = 1024, std::size_t max_string_length = 100) {
 
+    using error_t = sz::error_cost_t;
+    using error_matrix_t = sz::error_costs_256x256_t; // ? Full matrix for all 256 ASCII characters
+    using error_mat_t = sz::error_costs_26x26ascii_t; // ? Smaller compact form for 26 capital ASCII characters
+
     // Our logic of computing NW and SW alignment similarity scores differs in sign from most implementations.
     // It's similar to how the "cosine distance" is the inverse of the "cosine similarity".
     // In our case we compute the "distance" and by negating the sign, we can compute the "similarity".
-    constexpr sz::error_cost_t unary_match_score = 1;
-    constexpr sz::error_cost_t unary_mismatch_score = 0;
-    constexpr sz::error_cost_t unary_gap_score = 0;
-    using substituter_256x256_t = sz::error_costs_256x256_lookup_t;
-    sz::scripts::error_costs_256x256_t costs_unary =
-        sz::scripts::error_costs_256x256_diagonal(unary_match_score, unary_mismatch_score);
-    substituter_256x256_t substituter_unary(costs_unary.data());
+    constexpr error_t unary_match_score = 1;
+    constexpr error_t unary_mismatch_score = 0;
+    constexpr error_t unary_gap_score = 0;
+    error_matrix_t substituter_unary = error_matrix_t::diagonal(unary_match_score, unary_mismatch_score);
     {
         auto distance_l = levenshtein_baseline("abcdefg", 7, "abc_efg", 7);
         auto similarity_nw = needleman_wunsch_baseline("abcdefg", 7, "abc_efg", 7, substituter_unary, unary_gap_score);
@@ -288,43 +284,68 @@ static void test_equivalence(std::size_t batch_size = 1024, std::size_t max_stri
     // Now systematically compare the results of the baseline and SIMD implementations
     constexpr sz_capability_t serial_k = sz_cap_serial_k;
     constexpr sz_capability_t parallel_k = sz_cap_parallel_k;
+    constexpr sz_capability_t cuda_k = sz_cap_cuda_k;
 
-    edit_distances_compare<sz_size_t>(                                              //
-        levenshtein_baselines_t {},                                                 //
-        sz::openmp::levenshtein_distances<serial_k, char, std::allocator<char>> {}, //
+    // Single-threaded serial Levenshtein distance implementation
+    edit_distances_compare<sz_size_t>(                                      //
+        levenshtein_baselines_t {},                                         //
+        sz::levenshtein_distances<serial_k, char, std::allocator<char>> {}, //
         batch_size, max_string_length);
 
-    edit_distances_compare<sz_size_t>(                                                //
-        levenshtein_baselines_t {},                                                   //
-        sz::openmp::levenshtein_distances<parallel_k, char, std::allocator<char>> {}, //
+    // Multi-threaded parallel Levenshtein distance implementation
+    edit_distances_compare<sz_size_t>(                                        //
+        levenshtein_baselines_t {},                                           //
+        sz::levenshtein_distances<parallel_k, char, std::allocator<char>> {}, //
         batch_size, max_string_length);
 
     // Now let's take non-unary substitution costs, like BLOSUM62
-    constexpr sz::error_cost_t blosum62_gap_extension_cost = 4; // ? The inverted typical (-4) value
-    sz::scripts::error_costs_256x256_t blosum62 = sz::scripts::error_costs_256x256_blosum62();
+    constexpr error_t blosum62_gap_extension_cost = 4; // ? The inverted typical (-4) value
+    error_matrix_t blosum62 = sz::error_costs_26x26ascii_t::blosum62().decompressed();
 
+    // Single-threaded serial NW implementation
     edit_distances_compare<sz_ssize_t>(                                       //
         needleman_wunsch_baselines_t {blosum62, blosum62_gap_extension_cost}, //
-        sz::openmp::needleman_wunsch_scores<serial_k, char, substituter_256x256_t, std::allocator<char>> {
-            substituter_256x256_t {blosum62.data()}, blosum62_gap_extension_cost}, //
+        sz::needleman_wunsch_scores<serial_k, char, error_matrix_t, std::allocator<char>> {
+            blosum62, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 
+    // Multi-threaded parallel NW implementation
     edit_distances_compare<sz_ssize_t>(                                       //
         needleman_wunsch_baselines_t {blosum62, blosum62_gap_extension_cost}, //
-        sz::openmp::needleman_wunsch_scores<parallel_k, char, substituter_256x256_t, std::allocator<char>> {
-            substituter_256x256_t {blosum62.data()}, blosum62_gap_extension_cost}, //
+        sz::needleman_wunsch_scores<parallel_k, char, error_matrix_t, std::allocator<char>> {
+            blosum62, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 
+    // Single-threaded serial SW implementation
     edit_distances_compare<sz_ssize_t>(                                     //
         smith_waterman_baselines_t {blosum62, blosum62_gap_extension_cost}, //
-        sz::openmp::smith_waterman_scores<serial_k, char, substituter_256x256_t, std::allocator<char>> {
-            substituter_256x256_t {blosum62.data()}, blosum62_gap_extension_cost}, //
+        sz::smith_waterman_scores<serial_k, char, error_matrix_t, std::allocator<char>> {
+            blosum62, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 
+    // Multi-threaded parallel SW implementation
     edit_distances_compare<sz_ssize_t>(                                     //
         smith_waterman_baselines_t {blosum62, blosum62_gap_extension_cost}, //
-        sz::openmp::smith_waterman_scores<parallel_k, char, substituter_256x256_t, std::allocator<char>> {
-            substituter_256x256_t {blosum62.data()}, blosum62_gap_extension_cost}, //
+        sz::smith_waterman_scores<parallel_k, char, error_matrix_t, std::allocator<char>> {
+            blosum62, blosum62_gap_extension_cost}, //
+        batch_size, max_string_length);
+
+    // Switch to the GPU, using an identical matrix, but move it into unified memory
+    unified_vector<error_matrix_t> blosum62_unified(1);
+    blosum62_unified[0] = blosum62;
+
+    // CUDA Levenshtein distance against Multi-threaded on CPU
+    edit_distances_compare<sz_size_t>(                                        //
+        sz::levenshtein_distances<parallel_k, char, std::allocator<char>> {}, //
+        sz::levenshtein_distances<cuda_k, char> {},                           //
+        batch_size, max_string_length);
+
+    // CUDA Needleman-Wunsch distance against Multi-threaded on CPU
+    edit_distances_compare<sz_ssize_t>( //
+        sz::needleman_wunsch_scores<parallel_k, char, error_matrix_t, std::allocator<char>> {
+            blosum62, blosum62_gap_extension_cost}, //
+        sz::needleman_wunsch_scores<cuda_k, char, error_matrix_t *> {blosum62_unified.data(),
+                                                                     blosum62_gap_extension_cost},
         batch_size, max_string_length);
 };
 
@@ -370,7 +391,7 @@ static void test_non_stl_extensions_for_reads() {
 
     // Computing alignment scores.
     using matrix_t = std::int8_t[256][256];
-    sz::scripts::error_costs_256x256_t substitution_costs = error_costs_256x256_diagonal();
+    sz::error_costs_256x256_t substitution_costs = error_costs_256x256_diagonal();
     matrix_t &costs = *reinterpret_cast<matrix_t *>(substitution_costs.data());
 
     _sz_assert(sz::alignment_score(str("listen"), str("silent"), costs, -1) == -4);

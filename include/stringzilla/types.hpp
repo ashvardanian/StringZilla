@@ -121,13 +121,12 @@ enum class status_t {
     unknown_k = sz_status_unknown_k,
 };
 
+/**
+ *  @brief A trivial function object for uniform character substitution costs in Levenshtein-like similarity algorithms.
+ *  @sa error_costs_256x256_t, error_costs_26x26ascii_t
+ */
 struct error_costs_uniform_t {
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? 0 : 1; }
-};
-
-struct error_costs_256x256_lookup_t {
-    error_cost_t const *costs = nullptr;
-    constexpr error_cost_t operator()(char a, char b) const noexcept { return costs[(u8_t)a * 256 + (u8_t)b]; }
 };
 
 template <typename value_type_>

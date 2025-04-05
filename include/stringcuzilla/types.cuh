@@ -17,7 +17,6 @@
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace cuda {
 
 /**
  *  @brief  A custom allocator that uses CUDA Unified Memory for allocation.
@@ -63,7 +62,6 @@ struct unified_alloc {
     }
 };
 
-} // namespace cuda
 } // namespace stringzilla
 } // namespace ashvardanian
 

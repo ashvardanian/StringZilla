@@ -57,7 +57,6 @@
 
 namespace ashvardanian {
 namespace stringzilla {
-namespace openmp {
 
 /**
  *  @brief  An operator to be applied to be applied to all 2x2 blocks of the DP matrix to produce
@@ -67,13 +66,13 @@ namespace openmp {
  *  It updates the internal state to remember the last calculated value, as in Global Alignment it's
  *  always in the bottom-right corner of the DP matrix, which is evaluated last.
  */
-template <                                                     //
-    typename first_iterator_type_ = char const *,              //
-    typename second_iterator_type_ = char const *,             //
-    typename score_type_ = sz_size_t,                          //
-    typename substituter_type_ = error_costs_uniform_t,        //
-    sz_alignment_direction_t direction_ = sz_align_maximize_k, //
-    sz_capability_t capability_ = sz_cap_serial_k              //
+template <                                                   //
+    typename first_iterator_type_ = char const *,            //
+    typename second_iterator_type_ = char const *,           //
+    typename score_type_ = sz_size_t,                        //
+    typename substituter_type_ = error_costs_uniform_t,      //
+    sz_similarity_objective_t objective_ = maximize_score_k, //
+    sz_capability_t capability_ = sz_cap_serial_k            //
     >
 struct global_scorer {
 
@@ -81,6 +80,8 @@ struct global_scorer {
     using second_iterator_t = second_iterator_type_;
     using score_t = score_type_;
     using substituter_t = substituter_type_;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
     static constexpr sz_capability_t capability_k = capability_;
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
@@ -91,10 +92,10 @@ struct global_scorer {
   private:
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
-    score_t last_cell_ {0};
+    score_t last_score_ {0};
 
     static inline score_t pick_best(score_t a, score_t b) noexcept {
-        if constexpr (direction_ == sz_align_minimize_k) { return sz_min_of_two(a, b); }
+        if constexpr (objective_k == minimize_distance_k) { return sz_min_of_two(a, b); }
         else { return sz_max_of_two(a, b); }
     }
 
@@ -115,7 +116,7 @@ struct global_scorer {
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    score_t score() const noexcept { return last_cell_; }
+    score_t score() const noexcept { return last_score_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -130,21 +131,21 @@ struct global_scorer {
 
 #pragma omp parallel for simd schedule(dynamic, 1) if (is_parallel())
         for (sz_size_t i = 0; i < n; ++i) {
-            score_t score_pre_substitution = scores_pre_substitution[i];
-            score_t score_pre_insertion = scores_pre_insertion[i];
-            score_t score_pre_deletion = scores_pre_deletion[i];
+            score_t pre_substitution = scores_pre_substitution[i];
+            score_t pre_insertion = scores_pre_insertion[i];
+            score_t pre_deletion = scores_pre_deletion[i];
 
             // ? Note that here we are still traversing both buffers in the same order,
             // ? because one of the strings has been reversed beforehand.
             error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
-            score_t score_if_substitution = score_pre_substitution + cost_of_substitution;
-            score_t score_if_deletion_or_insertion = pick_best(score_pre_deletion, score_pre_insertion) + gap_cost_;
-            score_t cell_score = pick_best(score_if_deletion_or_insertion, score_if_substitution);
+            score_t if_substitution = pre_substitution + cost_of_substitution;
+            score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_cost_;
+            score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution);
             scores_new[i] = cell_score;
         }
 
         // The last element of the last chunk is the result of the global alignment.
-        last_cell_ = scores_new[n - 1];
+        last_score_ = scores_new[n - 1];
     }
 };
 
@@ -156,13 +157,13 @@ struct global_scorer {
  *  It updates the internal state to remember the minimum/maximum calculated value, as in Local Alignment
  *  it's always in the bottom-right corner of the DP matrix, which is evaluated last.
  */
-template <                                                     //
-    typename first_iterator_type_ = char const *,              //
-    typename second_iterator_type_ = char const *,             //
-    typename score_type_ = sz_size_t,                          //
-    typename substituter_type_ = error_costs_uniform_t,        //
-    sz_alignment_direction_t direction_ = sz_align_maximize_k, //
-    sz_capability_t capability_ = sz_cap_serial_k              //
+template <                                                   //
+    typename first_iterator_type_ = char const *,            //
+    typename second_iterator_type_ = char const *,           //
+    typename score_type_ = sz_size_t,                        //
+    typename substituter_type_ = error_costs_uniform_t,      //
+    sz_similarity_objective_t objective_ = maximize_score_k, //
+    sz_capability_t capability_ = sz_cap_serial_k            //
     >
 struct local_scorer {
 
@@ -170,6 +171,8 @@ struct local_scorer {
     using second_iterator_t = second_iterator_type_;
     using score_t = score_type_;
     using substituter_t = substituter_type_;
+
+    static constexpr sz_similarity_objective_t objective_k = objective_;
     static constexpr sz_capability_t capability_k = capability_;
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
@@ -183,7 +186,7 @@ struct local_scorer {
     score_t best_score_ {0};
 
     static inline score_t pick_best(score_t a, score_t b) noexcept {
-        if constexpr (direction_ == sz_align_minimize_k) { return sz_min_of_two(a, b); }
+        if constexpr (objective_k == minimize_distance_k) { return sz_min_of_two(a, b); }
         else { return sz_max_of_two(a, b); }
     }
 
@@ -213,17 +216,17 @@ struct local_scorer {
 
 #pragma omp parallel for schedule(dynamic, 1) if (is_parallel())
         for (sz_size_t i = 0; i < n; ++i) {
-            score_t score_pre_substitution = scores_pre_substitution[i];
-            score_t score_pre_insertion = scores_pre_insertion[i];
-            score_t score_pre_deletion = scores_pre_deletion[i];
+            score_t pre_substitution = scores_pre_substitution[i];
+            score_t pre_insertion = scores_pre_insertion[i];
+            score_t pre_deletion = scores_pre_deletion[i];
 
             // ? Note that here we are still traversing both buffers in the same order,
             // ? because one of the strings has been reversed beforehand.
             error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
-            score_t score_if_substitution = score_pre_substitution + cost_of_substitution;
-            score_t score_if_deletion_or_insertion = pick_best(score_pre_deletion, score_pre_insertion) + gap_cost_;
-            score_t score_if_substitution_or_reset = pick_best(score_if_substitution, 0);
-            score_t cell_score = pick_best(score_if_deletion_or_insertion, score_if_substitution_or_reset);
+            score_t if_substitution = pre_substitution + cost_of_substitution;
+            score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_cost_;
+            score_t if_substitution_or_reset = pick_best(if_substitution, 0);
+            score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution_or_reset);
             scores_new[i] = cell_score;
 
             // Update the global maximum score if this cell beats it.
@@ -258,14 +261,14 @@ struct local_scorer {
  *  @sa     For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
  *  @sa     For bulk API, use `sz::levenshtein_scores[_utf8]`.
  */
-template <                                                     //
-    sz_capability_t capability_ = sz_cap_serial_k,             //
-    sz_alignment_direction_t direction_ = sz_align_maximize_k, //
-    sz_alignment_locality_t locality_ = sz_align_global_k,     //
-    typename char_type_ = char,                                //
-    typename score_type_ = sz_size_t,                          //
-    typename substituter_type_ = error_costs_uniform_t,        //
-    typename allocator_type_ = dummy_alloc_t                   //
+template <                                                       //
+    sz_capability_t capability_ = sz_cap_serial_k,               //
+    sz_similarity_objective_t objective_ = maximize_score_k,     //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    typename char_type_ = char,                                  //
+    typename score_type_ = sz_size_t,                            //
+    typename substituter_type_ = error_costs_uniform_t,          //
+    typename allocator_type_ = dummy_alloc_t                     //
     >
 struct diagonal_walker {
 
@@ -275,20 +278,20 @@ struct diagonal_walker {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_alignment_locality_t locality_k = locality_;
-    static constexpr sz_alignment_direction_t direction_k = direction_;
+    static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_similarity_objective_t objective_k = objective_;
 
     using allocated_t = typename allocator_t::value_type;
     static_assert(sizeof(allocated_t) == sizeof(char), "Allocator must be byte-aligned");
     using global_scorer_t =
-        global_scorer<char_t const *, char_t const *, score_t, substituter_t, direction_k, capability_k>;
+        global_scorer<char_t const *, char_t const *, score_t, substituter_t, objective_k, capability_k>;
     using local_scorer_t =
-        local_scorer<char_t const *, char_t const *, score_t, substituter_t, direction_k, capability_k>;
-    using scorer_t = std::conditional_t<locality_k == sz_align_local_k, local_scorer_t, global_scorer_t>;
+        local_scorer<char_t const *, char_t const *, score_t, substituter_t, objective_k, capability_k>;
+    using scorer_t = std::conditional_t<locality_k == sz_similarity_local_k, local_scorer_t, global_scorer_t>;
 
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
-    allocator_t alloc_ {};
+    mutable allocator_t alloc_ {};
 
     diagonal_walker(allocator_t alloc = allocator_t {}) noexcept : alloc_(alloc) {}
 
@@ -306,7 +309,7 @@ struct diagonal_walker {
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref) noexcept {
+    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref) const noexcept {
 
         // Make sure the size relation between the strings is correct.
         char_t const *shorter = first.data(), *longer = second.data();
@@ -465,14 +468,14 @@ struct diagonal_walker {
  *  @sa     For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
  *  @sa     For bulk API, use `sz::levenshtein_scores[_utf8]`.
  */
-template <                                                     //
-    sz_capability_t capability_ = sz_cap_serial_k,             //
-    sz_alignment_direction_t direction_ = sz_align_maximize_k, //
-    sz_alignment_locality_t locality_ = sz_align_global_k,     //
-    typename char_type_ = char,                                //
-    typename score_type_ = sz_size_t,                          //
-    typename substituter_type_ = error_costs_uniform_t,        //
-    typename allocator_type_ = dummy_alloc_t                   //
+template <                                                       //
+    sz_capability_t capability_ = sz_cap_serial_k,               //
+    sz_similarity_objective_t objective_ = maximize_score_k,     //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    typename char_type_ = char,                                  //
+    typename score_type_ = sz_size_t,                            //
+    typename substituter_type_ = error_costs_uniform_t,          //
+    typename allocator_type_ = dummy_alloc_t                     //
     >
 struct horizontal_walker {
 
@@ -482,21 +485,21 @@ struct horizontal_walker {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_alignment_locality_t locality_k = locality_;
-    static constexpr sz_alignment_direction_t direction_k = direction_;
+    static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_similarity_objective_t objective_k = objective_;
     static_assert((capability_k & sz_cap_parallel_k) == 0, "This algorithm is not parallelized!");
 
     using allocated_t = typename allocator_t::value_type;
     static_assert(sizeof(allocated_t) == sizeof(char), "Allocator must be byte-aligned");
     using global_scorer_t =
-        global_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, direction_k, capability_k>;
+        global_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, objective_k, capability_k>;
     using local_scorer_t =
-        local_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, direction_k, capability_k>;
-    using scorer_t = std::conditional_t<locality_k == sz_align_local_k, local_scorer_t, global_scorer_t>;
+        local_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, objective_k, capability_k>;
+    using scorer_t = std::conditional_t<locality_k == sz_similarity_local_k, local_scorer_t, global_scorer_t>;
 
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
-    allocator_t alloc_ {};
+    mutable allocator_t alloc_ {};
 
     horizontal_walker(allocator_t alloc = allocator_t {}) noexcept : alloc_(alloc) {}
 
@@ -514,7 +517,7 @@ struct horizontal_walker {
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref) noexcept {
+    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref) const noexcept {
 
         // Make sure the size relation between the strings is correct.
         char_t const *shorter = first.data(), *longer = second.data();
@@ -587,15 +590,15 @@ struct levenshtein_distance {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_u8_t = horizontal_walker<capability_serialized_k, sz_align_minimize_k, sz_align_global_k, char_t,
-                                              sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u8_t = diagonal_walker<capability_serialized_k, sz_align_minimize_k, sz_align_global_k, char_t,
+    using horizontal_u8_t = horizontal_walker<capability_serialized_k, minimize_distance_k, sz_similarity_global_k,
+                                              char_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
+    using diagonal_u8_t = diagonal_walker<capability_serialized_k, minimize_distance_k, sz_similarity_global_k, char_t,
                                           sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u16_t = diagonal_walker<capability_k, sz_align_minimize_k, sz_align_global_k, char_t, sz_u16_t,
+    using diagonal_u16_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, char_t, sz_u16_t,
                                            error_costs_uniform_t, allocator_t>;
-    using diagonal_u32_t = diagonal_walker<capability_k, sz_align_minimize_k, sz_align_global_k, char_t, sz_u32_t,
+    using diagonal_u32_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, char_t, sz_u32_t,
                                            error_costs_uniform_t, allocator_t>;
-    using diagonal_u64_t = diagonal_walker<capability_k, sz_align_minimize_k, sz_align_global_k, char_t, sz_u64_t,
+    using diagonal_u64_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, char_t, sz_u64_t,
                                            error_costs_uniform_t, allocator_t>;
 
     allocator_t alloc_ {};
@@ -676,16 +679,16 @@ struct levenshtein_distance_utf8 {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_u8_t = horizontal_walker<capability_serialized_k, sz_align_minimize_k, sz_align_global_k,
+    using horizontal_u8_t = horizontal_walker<capability_serialized_k, minimize_distance_k, sz_similarity_global_k,
                                               sz_rune_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u8_t = diagonal_walker<capability_serialized_k, sz_align_minimize_k, sz_align_global_k, sz_rune_t,
-                                          sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u16_t = diagonal_walker<capability_k, sz_align_minimize_k, sz_align_global_k, sz_rune_t, sz_u16_t,
-                                           error_costs_uniform_t, allocator_t>;
-    using diagonal_u32_t = diagonal_walker<capability_k, sz_align_minimize_k, sz_align_global_k, sz_rune_t, sz_u32_t,
-                                           error_costs_uniform_t, allocator_t>;
-    using diagonal_u64_t = diagonal_walker<capability_k, sz_align_minimize_k, sz_align_global_k, sz_rune_t, sz_u64_t,
-                                           error_costs_uniform_t, allocator_t>;
+    using diagonal_u8_t = diagonal_walker<capability_serialized_k, minimize_distance_k, sz_similarity_global_k,
+                                          sz_rune_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
+    using diagonal_u16_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, sz_rune_t,
+                                           sz_u16_t, error_costs_uniform_t, allocator_t>;
+    using diagonal_u32_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, sz_rune_t,
+                                           sz_u32_t, error_costs_uniform_t, allocator_t>;
+    using diagonal_u64_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, sz_rune_t,
+                                           sz_u64_t, error_costs_uniform_t, allocator_t>;
 
     using ascii_fallback_t = levenshtein_distance_utf8<capability_k, char_t, allocator_t>;
 
@@ -776,11 +779,11 @@ struct levenshtein_distance_utf8 {
  *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the OpenMP backend.
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
-template <                                                     //
-    sz_capability_t capability_ = sz_cap_serial_k,             //
-    typename char_type_ = char,                                //
-    typename substituter_type_ = error_costs_256x256_lookup_t, //
-    typename allocator_type_ = dummy_alloc_t                   //
+template <                                              //
+    sz_capability_t capability_ = sz_cap_serial_k,      //
+    typename char_type_ = char,                         //
+    typename substituter_type_ = error_costs_uniform_t, //
+    typename allocator_type_ = dummy_alloc_t            //
     >
 struct needleman_wunsch_score {
 
@@ -791,13 +794,13 @@ struct needleman_wunsch_score {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_i16_t = horizontal_walker<capability_serialized_k, sz_align_maximize_k, sz_align_global_k, char_t,
-                                               sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i16_t = diagonal_walker<capability_serialized_k, sz_align_maximize_k, sz_align_global_k, char_t,
+    using horizontal_i16_t = horizontal_walker<capability_serialized_k, maximize_score_k, sz_similarity_global_k,
+                                               char_t, sz_i16_t, substituter_t, allocator_t>;
+    using diagonal_i16_t = diagonal_walker<capability_serialized_k, maximize_score_k, sz_similarity_global_k, char_t,
                                            sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i32_t = diagonal_walker<capability_k, sz_align_maximize_k, sz_align_global_k, char_t, sz_i32_t,
+    using diagonal_i32_t = diagonal_walker<capability_k, maximize_score_k, sz_similarity_global_k, char_t, sz_i32_t,
                                            substituter_t, allocator_t>;
-    using diagonal_i64_t = diagonal_walker<capability_k, sz_align_maximize_k, sz_align_global_k, char_t, sz_i64_t,
+    using diagonal_i64_t = diagonal_walker<capability_k, maximize_score_k, sz_similarity_global_k, char_t, sz_i64_t,
                                            substituter_t, allocator_t>;
 
     substituter_t substituter_ {};
@@ -868,11 +871,11 @@ struct needleman_wunsch_score {
  *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the OpenMP backend.
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
-template <                                                     //
-    sz_capability_t capability_ = sz_cap_serial_k,             //
-    typename char_type_ = char,                                //
-    typename substituter_type_ = error_costs_256x256_lookup_t, //
-    typename allocator_type_ = dummy_alloc_t                   //
+template <                                              //
+    sz_capability_t capability_ = sz_cap_serial_k,      //
+    typename char_type_ = char,                         //
+    typename substituter_type_ = error_costs_uniform_t, //
+    typename allocator_type_ = dummy_alloc_t            //
     >
 struct smith_waterman_score {
 
@@ -883,13 +886,13 @@ struct smith_waterman_score {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_i16_t = horizontal_walker<capability_serialized_k, sz_align_maximize_k, sz_align_local_k, char_t,
+    using horizontal_i16_t = horizontal_walker<capability_serialized_k, maximize_score_k, sz_similarity_local_k, char_t,
                                                sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i16_t = diagonal_walker<capability_serialized_k, sz_align_maximize_k, sz_align_local_k, char_t,
+    using diagonal_i16_t = diagonal_walker<capability_serialized_k, maximize_score_k, sz_similarity_local_k, char_t,
                                            sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i32_t = diagonal_walker<capability_k, sz_align_maximize_k, sz_align_local_k, char_t, sz_i32_t,
+    using diagonal_i32_t = diagonal_walker<capability_k, maximize_score_k, sz_similarity_local_k, char_t, sz_i32_t,
                                            substituter_t, allocator_t>;
-    using diagonal_i64_t = diagonal_walker<capability_k, sz_align_maximize_k, sz_align_local_k, char_t, sz_i64_t,
+    using diagonal_i64_t = diagonal_walker<capability_k, maximize_score_k, sz_similarity_local_k, char_t, sz_i64_t,
                                            substituter_t, allocator_t>;
 
     substituter_t substituter_ {};
@@ -1111,11 +1114,11 @@ struct levenshtein_distances_utf8 {
     }
 };
 
-template <                                                     //
-    sz_capability_t capability_ = sz_cap_serial_k,             //
-    typename char_type_ = char,                                //
-    typename substituter_type_ = error_costs_256x256_lookup_t, //
-    typename allocator_type_ = dummy_alloc_t                   //
+template <                                              //
+    sz_capability_t capability_ = sz_cap_serial_k,      //
+    typename char_type_ = char,                         //
+    typename substituter_type_ = error_costs_uniform_t, //
+    typename allocator_type_ = dummy_alloc_t            //
     >
 struct needleman_wunsch_scores {
 
@@ -1153,11 +1156,11 @@ struct needleman_wunsch_scores {
     }
 };
 
-template <                                                     //
-    sz_capability_t capability_ = sz_cap_serial_k,             //
-    typename char_type_ = char,                                //
-    typename substituter_type_ = error_costs_256x256_lookup_t, //
-    typename allocator_type_ = dummy_alloc_t                   //
+template <                                              //
+    sz_capability_t capability_ = sz_cap_serial_k,      //
+    typename char_type_ = char,                         //
+    typename substituter_type_ = error_costs_uniform_t, //
+    typename allocator_type_ = dummy_alloc_t            //
     >
 struct smith_waterman_scores {
 

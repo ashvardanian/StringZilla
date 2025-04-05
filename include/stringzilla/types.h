@@ -414,15 +414,15 @@ typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t;
 
 /**
  *  @brief Describes the alignment scope for string similarity algorithms.
- *  @sa sz_align_global_k, sz_align_local_k
+ *  @sa sz_similarity_global_k, sz_similarity_local_k
  */
-typedef enum { sz_align_global_k = 0, sz_align_local_k = 1 } sz_alignment_locality_t;
+typedef enum { sz_similarity_global_k = 0, sz_similarity_local_k = 1 } sz_similarity_locality_t;
 
 /**
  *  @brief Describes the alignment objective for string similarity algorithms.
- *  @sa sz_align_minimize_k, sz_align_maximize_k
+ *  @sa minimize_distance_k, maximize_score_k
  */
-typedef enum { sz_align_minimize_k = 0, sz_align_maximize_k = 1 } sz_alignment_direction_t;
+typedef enum { minimize_distance_k = 0, maximize_score_k = 1 } sz_similarity_objective_t;
 
 /**
  *  @brief A simple signed integer type describing the status of a faulty operation.
@@ -461,7 +461,8 @@ typedef enum {
     sz_cap_sve2_aes_k = 1 << 14, ///< ARM SVE2 capability with AES extensions
 
     sz_cap_cuda_k = 1 << 20,   ///< CUDA capability
-    sz_cap_hopper_k = 1 << 21, ///< CUDA capability
+    sz_cap_kepler_k = 1 << 21, ///< CUDA capability with support with in-warp register shuffles
+    sz_cap_hopper_k = 1 << 22, ///< CUDA capability with support for Hopper's DPX instructions
 
 } sz_capability_t;
 
@@ -927,7 +928,8 @@ SZ_INTERNAL sz_ssize_t _sz_ssize_max(void) { return SZ_SSIZE_MAX; }
  *          to check the invariants of the library. It's a no-op in the "Release" mode.
  *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
-#if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC)
+#if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC) && \
+    !defined(__CUDA_ARCH__) // ? CPU code w/out LibC access
 SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int line) {
     fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     exit(EXIT_FAILURE);
@@ -935,6 +937,15 @@ SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int l
 #define _sz_assert(condition)                                                     \
     do {                                                                          \
         if (!(condition)) { _sz_assert_failure(#condition, __FILE__, __LINE__); } \
+    } while (0)
+#elif SZ_DEBUG && defined(__CUDA_ARCH__) // ? CUDA code for GPUs
+__device__ __noinline__ void _sz_assert_cuda_failure(char const *condition, char const *file, int line) {
+    printf("Assertion failed: %s, in file %s, line %d\n", condition, file, line);
+    __trap();
+}
+#define _sz_assert(condition)                                                          \
+    do {                                                                               \
+        if (!(condition)) { _sz_assert_cuda_failure(#condition, __FILE__, __LINE__); } \
     } while (0)
 #else
 #define _sz_assert(condition) ((void)(condition))
