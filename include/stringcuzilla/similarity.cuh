@@ -492,7 +492,6 @@ __global__ void _levenshtein_in_cuda(    //
 
     // Allocating shared memory is handled on the host side.
     extern __shared__ char shared_memory_buffer[];
-    printf("results_ptr: %p\n", results_ptr);
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
@@ -683,10 +682,10 @@ __global__ void _needleman_wunsch_in_cuda(           //
     extern __shared__ char shared_memory_buffer[];
 
     // Assuming, all pairwise computations use the same substituter, load it into shared memory.
-    static constexpr uint substituter_size = sizeof(substituter_type_) / sizeof(error_cost_t);
-    error_cost_t *substituter_costs = reinterpret_cast<error_cost_t *>(shared_memory_buffer);
+    static constexpr uint substituter_size = sizeof(substituter_type_);
+    char *substituter_costs = reinterpret_cast<char *>(shared_memory_buffer);
     for (uint i = threadIdx.x; i < substituter_size; i += blockDim.x)
-        substituter_costs[i] = reinterpret_cast<error_cost_t const *>(substituter_global_ptr)[i];
+        substituter_costs[i] = reinterpret_cast<char const *>(substituter_global_ptr)[i];
     substituter_t &substituter_shared = *reinterpret_cast<substituter_t *>(substituter_costs);
     __syncthreads();
 
@@ -762,7 +761,7 @@ status_t _needleman_wunsch_via_cuda(                                            
     // H100 Streaming Multiprocessor can have up to 128 active warps concurrently and only 256 KB of shared memory.
     // A100 SMs had only 192 KB. We can't deal with blocks that require more memory than the SM can provide.
     sz_size_t shared_memory_per_block =
-        _scores_diagonally_warp_shared_memory_requirement(first_strings, second_strings, 1);
+        _scores_diagonally_warp_shared_memory_requirement(first_strings, second_strings, 127);
     if (shared_memory_per_block > specs.shared_memory_per_sm) return status_t::bad_alloc_k;
 
     // It may be the case that we've only received empty strings.
@@ -785,8 +784,8 @@ status_t _needleman_wunsch_via_cuda(                                            
     constexpr sz_size_t threads_per_block = 32u;
     auto kernel = &_needleman_wunsch_in_cuda<capability_k, first_strings_t, second_strings_t, score_t, substituter_t>;
     void *kernel_args[] = {
-        (void *)&first_strings,         (void *)&second_strings, (void *)&results,
-        (void *)substituter_global_ptr, (void *)&gap_cost,
+        (void *)&first_strings,          (void *)&second_strings, (void *)&results,
+        (void *)&substituter_global_ptr, (void *)&gap_cost,
     };
 
     // Enqueue the kernel for execution:

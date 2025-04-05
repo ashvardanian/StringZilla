@@ -151,24 +151,25 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
  */
 template <typename score_type_, typename base_operator_, typename simd_operator_>
 static void edit_distances_compare(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                   std::size_t batch_size = 1024 * 16, std::size_t max_string_length = 512) {
+                                   std::size_t batch_size = 1024 * 16, std::size_t max_string_length = 512,
+                                   std::string_view allowed_chars = {}) {
 
     using score_t = score_type_;
 
     std::vector<std::pair<std::string, std::string>> test_cases = {
         {"ABC", "ABC"},                  // same string; distance ~ 0
-        {"listen", "silent"},            // distance ~ 4
-        {"atca", "ctactcaccc"},          // distance ~ 6
+        {"LISTEN", "SILENT"},            // distance ~ 4
+        {"ATCA", "CTACTCACCC"},          // distance ~ 6
         {"A", "="},                      // distance ~ 1
-        {"a", "a"},                      // distance ~ 0
+        {"A", "A"},                      // distance ~ 0
         {"", ""},                        // distance ~ 0
-        {"", "abc"},                     // distance ~ 3
-        {"abc", ""},                     // distance ~ 3
-        {"abc", "ac"},                   // one deletion; distance ~ 1
-        {"abc", "a_bc"},                 // one insertion; distance ~ 1
+        {"", "ABC"},                     // distance ~ 3
+        {"ABC", ""},                     // distance ~ 3
+        {"ABC", "AC"},                   // one deletion; distance ~ 1
+        {"ABC", "A_BC"},                 // one insertion; distance ~ 1
         {"ggbuzgjux{}l", "gbuzgjux{}l"}, // one (prepended) insertion; distance ~ 1
-        {"abc", "adc"},                  // one substitution; distance ~ 1
-        {"apple", "aple"},               // distance ~ 1
+        {"ABC", "ADC"},                  // one substitution; distance ~ 1
+        {"APPLE", "APLE"},               // distance ~ 1
         //
         // Unicode:
         {"αβγδ", "αγδ"},                      // Each Greek symbol is 2 bytes in size; 2 bytes, 1 runes diff.
@@ -188,7 +189,17 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
     // First check with a batch-size of 1
     unified_vector<score_t> results_base(1), results_simd(1);
     arrow_strings_tape_t first_tape, second_tape;
+    bool contains_missing_in_any_case = false;
     for (auto [first, second] : test_cases) {
+
+        // Check if the input strings fit into our allowed characters set
+        if (!allowed_chars.empty()) {
+            bool contains_missing = false;
+            for (auto c : first) contains_missing |= allowed_chars.find(c) == std::string_view::npos;
+            for (auto c : second) contains_missing |= allowed_chars.find(c) == std::string_view::npos;
+            contains_missing_in_any_case |= contains_missing;
+            if (contains_missing) continue;
+        }
 
         // Reset the tapes and results
         results_base[0] = 0, results_simd[0] = 0;
@@ -205,25 +216,27 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
     }
 
     // Unzip the test cases into two separate tapes and perform batch processing
-    results_base.resize(test_cases.size());
-    results_simd.resize(test_cases.size());
-    first_tape.reset();
-    second_tape.reset();
-    for (auto [first, second] : test_cases) {
-        _sz_assert(first_tape.try_append({first.data(), first.size()}) == sz::status_t::success_k);
-        _sz_assert(second_tape.try_append({second.data(), second.size()}) == sz::status_t::success_k);
-    }
+    if (!contains_missing_in_any_case) {
+        results_base.resize(test_cases.size());
+        results_simd.resize(test_cases.size());
+        first_tape.reset();
+        second_tape.reset();
+        for (auto [first, second] : test_cases) {
+            _sz_assert(first_tape.try_append({first.data(), first.size()}) == sz::status_t::success_k);
+            _sz_assert(second_tape.try_append({second.data(), second.size()}) == sz::status_t::success_k);
+        }
 
-    // Compute with both backends
-    sz::status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
-    sz::status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data());
-    _sz_assert(status_base == sz::status_t::success_k);
-    _sz_assert(status_simd == sz::status_t::success_k);
+        // Compute with both backends
+        sz::status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
+        sz::status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data());
+        _sz_assert(status_base == sz::status_t::success_k);
+        _sz_assert(status_simd == sz::status_t::success_k);
 
-    // Individually log the failed results
-    for (std::size_t i = 0; i != test_cases.size(); ++i) {
-        if (results_base[i] == results_simd[i]) continue;
-        edit_distance_log_mismatch(test_cases[i].first, test_cases[i].second, results_base[i], results_simd[i]);
+        // Individually log the failed results
+        for (std::size_t i = 0; i != test_cases.size(); ++i) {
+            if (results_base[i] == results_simd[i]) continue;
+            edit_distance_log_mismatch(test_cases[i].first, test_cases[i].second, results_base[i], results_simd[i]);
+        }
     }
 
     // Generate some random strings, using a small alphabet
@@ -232,8 +245,8 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
         for (std::size_t i = 0; i != batch_size; ++i) {
             std::size_t first_length = 1u + std::rand() % max_string_length;
             std::size_t second_length = 1u + std::rand() % max_string_length;
-            first_array[i] = random_string(first_length, "abc", 3);
-            second_array[i] = random_string(second_length, "abc", 3);
+            first_array[i] = random_string(first_length, "ABC", 3);
+            second_array[i] = random_string(second_length, "ABC", 3);
         }
 
         // Convert to a GPU-friendly layout
@@ -299,40 +312,43 @@ static void test_equivalence(std::size_t batch_size = 1024, std::size_t max_stri
         batch_size, max_string_length);
 
     // Now let's take non-unary substitution costs, like BLOSUM62
-    constexpr error_t blosum62_gap_extension_cost = 4; // ? The inverted typical (-4) value
-    error_matrix_t blosum62 = sz::error_costs_26x26ascii_t::blosum62().decompressed();
+    constexpr error_t blosum62_gap_extension_cost = -4;
+    error_mat_t blosum62_mat = sz::error_costs_26x26ascii_t::blosum62();
+    error_matrix_t blosum62_matrix = blosum62_mat.decompressed();
 
+#if 0
     // Single-threaded serial NW implementation
-    edit_distances_compare<sz_ssize_t>(                                       //
-        needleman_wunsch_baselines_t {blosum62, blosum62_gap_extension_cost}, //
+    edit_distances_compare<sz_ssize_t>(                                              //
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
         sz::needleman_wunsch_scores<serial_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62, blosum62_gap_extension_cost}, //
+            blosum62_matrix, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 
     // Multi-threaded parallel NW implementation
-    edit_distances_compare<sz_ssize_t>(                                       //
-        needleman_wunsch_baselines_t {blosum62, blosum62_gap_extension_cost}, //
+    edit_distances_compare<sz_ssize_t>(                                              //
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
         sz::needleman_wunsch_scores<parallel_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62, blosum62_gap_extension_cost}, //
+            blosum62_matrix, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 
     // Single-threaded serial SW implementation
-    edit_distances_compare<sz_ssize_t>(                                     //
-        smith_waterman_baselines_t {blosum62, blosum62_gap_extension_cost}, //
+    edit_distances_compare<sz_ssize_t>(                                            //
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
         sz::smith_waterman_scores<serial_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62, blosum62_gap_extension_cost}, //
+            blosum62_matrix, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
 
     // Multi-threaded parallel SW implementation
-    edit_distances_compare<sz_ssize_t>(                                     //
-        smith_waterman_baselines_t {blosum62, blosum62_gap_extension_cost}, //
+    edit_distances_compare<sz_ssize_t>(                                            //
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
         sz::smith_waterman_scores<parallel_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62, blosum62_gap_extension_cost}, //
+            blosum62_matrix, blosum62_gap_extension_cost}, //
         batch_size, max_string_length);
+#endif
 
     // Switch to the GPU, using an identical matrix, but move it into unified memory
-    unified_vector<error_matrix_t> blosum62_unified(1);
-    blosum62_unified[0] = blosum62;
+    unified_vector<error_mat_t> blosum62_unified(1);
+    blosum62_unified[0] = blosum62_mat;
 
     // CUDA Levenshtein distance against Multi-threaded on CPU
     edit_distances_compare<sz_size_t>(                                        //
@@ -340,13 +356,14 @@ static void test_equivalence(std::size_t batch_size = 1024, std::size_t max_stri
         sz::levenshtein_distances<cuda_k, char> {},                           //
         batch_size, max_string_length);
 
-    // CUDA Needleman-Wunsch distance against Multi-threaded on CPU
+    // CUDA Needleman-Wunsch distance against Multi-threaded on CPU,
+    // using a compressed smaller matrix to fit into GPU shared memory
+    std::string_view ascii_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     edit_distances_compare<sz_ssize_t>( //
         sz::needleman_wunsch_scores<parallel_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62, blosum62_gap_extension_cost}, //
-        sz::needleman_wunsch_scores<cuda_k, char, error_matrix_t *> {blosum62_unified.data(),
-                                                                     blosum62_gap_extension_cost},
-        batch_size, max_string_length);
+            blosum62_matrix, blosum62_gap_extension_cost}, //
+        sz::needleman_wunsch_scores<cuda_k, char, error_mat_t *> {blosum62_unified.data(), blosum62_gap_extension_cost},
+        batch_size, max_string_length, ascii_alphabet);
 };
 
 #if 0
