@@ -35,7 +35,7 @@ namespace sz = ashvardanian::stringzilla;
 int main(int argc, char const **argv) {
     sz_unused(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
-    sz::scripts::log_environment();
+    if (auto code = sz::scripts::log_environment(); code != 0) return code;
 
     sz::scripts::test_similarity_scores_equivalence();
     sz::scripts::test_similarity_scores_memory_usage();

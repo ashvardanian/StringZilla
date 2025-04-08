@@ -21,7 +21,7 @@ namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
 
-void log_environment() {
+int log_environment() {
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
     std::printf("- Uses Ice Lake: %s \n", SZ_USE_ICE ? "yes" : "no");
@@ -57,6 +57,7 @@ void log_environment() {
     std::printf("- CUDA managed memory support: %s\n", prop.managedMemory == 1 ? "yes" : "no");
     std::printf("- CUDA unified memory support: %s\n", prop.unifiedAddressing == 1 ? "yes" : "no");
 #endif
+    return 0;
 }
 
 /**
@@ -527,15 +528,15 @@ void test_similarity_scores_memory_usage() {
                     experiment.batch_size, experiment.min_string_length, experiment.max_string_length,
                     experiment.iterations);
 
-        // Single-threaded serial Levenshtein distance implementation
-        test_similarity_scores_fuzzy<sz_size_t>( //
-            levenshtein_baselines_t {},          //
-            levenshtein_distances<sz_cap_serial_k, char, std::allocator<char>> {}, experiment);
-
-        // Multi-threaded parallel Levenshtein distance implementation
+        // Multi-threaded serial Levenshtein distance implementation
         test_similarity_scores_fuzzy<sz_size_t>( //
             levenshtein_baselines_t {},          //
             levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, experiment);
+
+        // CUDA Levenshtein distance against Multi-threaded on CPU
+        test_similarity_scores_fuzzy<sz_size_t>(                                     //
+            levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, //
+            levenshtein_distances<sz_cap_cuda_k, char, std::allocator<char>> {}, experiment);
     }
 }
 
