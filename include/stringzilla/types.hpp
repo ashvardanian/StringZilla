@@ -24,7 +24,7 @@
 
 /**
  *  @brief  When set to 1, the library will include the C++ STL headers and implement
- *          automatic conversion from and to `std::stirng_view` and `std::basic_string<any_allocator>`.
+ *          automatic conversion from and to `std::string_view` and `std::basic_string<any_allocator>`.
  */
 #ifndef SZ_AVOID_STL
 #define SZ_AVOID_STL (0) // true or false
@@ -439,6 +439,15 @@ struct cpu_specs_t {
     size_t cores_per_socket = 1;       // ? at least 1 core
     size_t sockets = 1;                // ? at least 1 socket
 };
+
+/**
+ *  @brief Rounds @p x up to the nearest multiple of @p divisor.
+ */
+template <typename scalar_type_>
+constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
+    _sz_assert(divisor > 0 && "Divisor must be positive");
+    return ((x + divisor - 1) / divisor) * divisor;
+}
 
 } // namespace stringzilla
 } // namespace ashvardanian

@@ -15,6 +15,22 @@
 
 #include "stringzilla/types.hpp"
 
+#if !defined(SZ_USE_HOPPER)
+#if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ < 11)
+#define SZ_USE_HOPPER (1)
+#else
+#define SZ_USE_HOPPER (0)
+#endif
+#endif
+
+#if !defined(SZ_USE_KEPLER)
+#if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ < 3)
+#define SZ_USE_KEPLER (1)
+#else
+#define SZ_USE_KEPLER (0)
+#endif
+#endif
+
 namespace ashvardanian {
 namespace stringzilla {
 

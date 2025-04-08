@@ -66,13 +66,13 @@ namespace stringzilla {
  *  It updates the internal state to remember the last calculated value, as in Global Alignment it's
  *  always in the bottom-right corner of the DP matrix, which is evaluated last.
  */
-template <                                                   //
-    typename first_iterator_type_ = char const *,            //
-    typename second_iterator_type_ = char const *,           //
-    typename score_type_ = sz_size_t,                        //
-    typename substituter_type_ = error_costs_uniform_t,      //
-    sz_similarity_objective_t objective_ = maximize_score_k, //
-    sz_capability_t capability_ = sz_cap_serial_k            //
+template <                                                      //
+    typename first_iterator_type_ = char const *,               //
+    typename second_iterator_type_ = char const *,              //
+    typename score_type_ = sz_size_t,                           //
+    typename substituter_type_ = error_costs_uniform_t,         //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k, //
+    sz_capability_t capability_ = sz_cap_serial_k               //
     >
 struct global_scorer {
 
@@ -87,7 +87,7 @@ struct global_scorer {
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
-    using char_t = first_char_t;
+    using char_t = typename std::remove_cvref<first_char_t>::type;
 
   private:
     substituter_t substituter_ {};
@@ -95,7 +95,7 @@ struct global_scorer {
     score_t last_score_ {0};
 
     static inline score_t pick_best(score_t a, score_t b) noexcept {
-        if constexpr (objective_k == minimize_distance_k) { return sz_min_of_two(a, b); }
+        if constexpr (objective_k == sz_minimize_distance_k) { return sz_min_of_two(a, b); }
         else { return sz_max_of_two(a, b); }
     }
 
@@ -157,13 +157,13 @@ struct global_scorer {
  *  It updates the internal state to remember the minimum/maximum calculated value, as in Local Alignment
  *  it's always in the bottom-right corner of the DP matrix, which is evaluated last.
  */
-template <                                                   //
-    typename first_iterator_type_ = char const *,            //
-    typename second_iterator_type_ = char const *,           //
-    typename score_type_ = sz_size_t,                        //
-    typename substituter_type_ = error_costs_uniform_t,      //
-    sz_similarity_objective_t objective_ = maximize_score_k, //
-    sz_capability_t capability_ = sz_cap_serial_k            //
+template <                                                      //
+    typename first_iterator_type_ = char const *,               //
+    typename second_iterator_type_ = char const *,              //
+    typename score_type_ = sz_size_t,                           //
+    typename substituter_type_ = error_costs_uniform_t,         //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k, //
+    sz_capability_t capability_ = sz_cap_serial_k               //
     >
 struct local_scorer {
 
@@ -186,7 +186,7 @@ struct local_scorer {
     score_t best_score_ {0};
 
     static inline score_t pick_best(score_t a, score_t b) noexcept {
-        if constexpr (objective_k == minimize_distance_k) { return sz_min_of_two(a, b); }
+        if constexpr (objective_k == sz_minimize_distance_k) { return sz_min_of_two(a, b); }
         else { return sz_max_of_two(a, b); }
     }
 
@@ -263,7 +263,7 @@ struct local_scorer {
  */
 template <                                                       //
     sz_capability_t capability_ = sz_cap_serial_k,               //
-    sz_similarity_objective_t objective_ = maximize_score_k,     //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     typename char_type_ = char,                                  //
     typename score_type_ = sz_size_t,                            //
@@ -470,7 +470,7 @@ struct diagonal_walker {
  */
 template <                                                       //
     sz_capability_t capability_ = sz_cap_serial_k,               //
-    sz_similarity_objective_t objective_ = maximize_score_k,     //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     typename char_type_ = char,                                  //
     typename score_type_ = sz_size_t,                            //
@@ -590,16 +590,16 @@ struct levenshtein_distance {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_u8_t = horizontal_walker<capability_serialized_k, minimize_distance_k, sz_similarity_global_k,
+    using horizontal_u8_t = horizontal_walker<capability_serialized_k, sz_minimize_distance_k, sz_similarity_global_k,
                                               char_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u8_t = diagonal_walker<capability_serialized_k, minimize_distance_k, sz_similarity_global_k, char_t,
-                                          sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u16_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, char_t, sz_u16_t,
-                                           error_costs_uniform_t, allocator_t>;
-    using diagonal_u32_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, char_t, sz_u32_t,
-                                           error_costs_uniform_t, allocator_t>;
-    using diagonal_u64_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, char_t, sz_u64_t,
-                                           error_costs_uniform_t, allocator_t>;
+    using diagonal_u8_t = diagonal_walker<capability_serialized_k, sz_minimize_distance_k, sz_similarity_global_k,
+                                          char_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
+    using diagonal_u16_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, char_t,
+                                           sz_u16_t, error_costs_uniform_t, allocator_t>;
+    using diagonal_u32_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, char_t,
+                                           sz_u32_t, error_costs_uniform_t, allocator_t>;
+    using diagonal_u64_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, char_t,
+                                           sz_u64_t, error_costs_uniform_t, allocator_t>;
 
     allocator_t alloc_ {};
 
@@ -679,15 +679,15 @@ struct levenshtein_distance_utf8 {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_u8_t = horizontal_walker<capability_serialized_k, minimize_distance_k, sz_similarity_global_k,
+    using horizontal_u8_t = horizontal_walker<capability_serialized_k, sz_minimize_distance_k, sz_similarity_global_k,
                                               sz_rune_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u8_t = diagonal_walker<capability_serialized_k, minimize_distance_k, sz_similarity_global_k,
+    using diagonal_u8_t = diagonal_walker<capability_serialized_k, sz_minimize_distance_k, sz_similarity_global_k,
                                           sz_rune_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u16_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, sz_rune_t,
+    using diagonal_u16_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, sz_rune_t,
                                            sz_u16_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u32_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, sz_rune_t,
+    using diagonal_u32_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, sz_rune_t,
                                            sz_u32_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u64_t = diagonal_walker<capability_k, minimize_distance_k, sz_similarity_global_k, sz_rune_t,
+    using diagonal_u64_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, sz_rune_t,
                                            sz_u64_t, error_costs_uniform_t, allocator_t>;
 
     using ascii_fallback_t = levenshtein_distance_utf8<capability_k, char_t, allocator_t>;
@@ -794,13 +794,13 @@ struct needleman_wunsch_score {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_i16_t = horizontal_walker<capability_serialized_k, maximize_score_k, sz_similarity_global_k,
+    using horizontal_i16_t = horizontal_walker<capability_serialized_k, sz_maximize_score_k, sz_similarity_global_k,
                                                char_t, sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i16_t = diagonal_walker<capability_serialized_k, maximize_score_k, sz_similarity_global_k, char_t,
+    using diagonal_i16_t = diagonal_walker<capability_serialized_k, sz_maximize_score_k, sz_similarity_global_k, char_t,
                                            sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i32_t = diagonal_walker<capability_k, maximize_score_k, sz_similarity_global_k, char_t, sz_i32_t,
+    using diagonal_i32_t = diagonal_walker<capability_k, sz_maximize_score_k, sz_similarity_global_k, char_t, sz_i32_t,
                                            substituter_t, allocator_t>;
-    using diagonal_i64_t = diagonal_walker<capability_k, maximize_score_k, sz_similarity_global_k, char_t, sz_i64_t,
+    using diagonal_i64_t = diagonal_walker<capability_k, sz_maximize_score_k, sz_similarity_global_k, char_t, sz_i64_t,
                                            substituter_t, allocator_t>;
 
     substituter_t substituter_ {};
@@ -886,13 +886,13 @@ struct smith_waterman_score {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_i16_t = horizontal_walker<capability_serialized_k, maximize_score_k, sz_similarity_local_k, char_t,
-                                               sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i16_t = diagonal_walker<capability_serialized_k, maximize_score_k, sz_similarity_local_k, char_t,
+    using horizontal_i16_t = horizontal_walker<capability_serialized_k, sz_maximize_score_k, sz_similarity_local_k,
+                                               char_t, sz_i16_t, substituter_t, allocator_t>;
+    using diagonal_i16_t = diagonal_walker<capability_serialized_k, sz_maximize_score_k, sz_similarity_local_k, char_t,
                                            sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i32_t = diagonal_walker<capability_k, maximize_score_k, sz_similarity_local_k, char_t, sz_i32_t,
+    using diagonal_i32_t = diagonal_walker<capability_k, sz_maximize_score_k, sz_similarity_local_k, char_t, sz_i32_t,
                                            substituter_t, allocator_t>;
-    using diagonal_i64_t = diagonal_walker<capability_k, maximize_score_k, sz_similarity_local_k, char_t, sz_i64_t,
+    using diagonal_i64_t = diagonal_walker<capability_k, sz_maximize_score_k, sz_similarity_local_k, char_t, sz_i64_t,
                                            substituter_t, allocator_t>;
 
     substituter_t substituter_ {};

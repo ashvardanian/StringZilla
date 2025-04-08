@@ -420,9 +420,9 @@ typedef enum { sz_similarity_global_k = 0, sz_similarity_local_k = 1 } sz_simila
 
 /**
  *  @brief Describes the alignment objective for string similarity algorithms.
- *  @sa minimize_distance_k, maximize_score_k
+ *  @sa sz_minimize_distance_k, sz_maximize_score_k
  */
-typedef enum { minimize_distance_k = 0, maximize_score_k = 1 } sz_similarity_objective_t;
+typedef enum { sz_minimize_distance_k = 0, sz_maximize_score_k = 1 } sz_similarity_objective_t;
 
 /**
  *  @brief A simple signed integer type describing the status of a faulty operation.
@@ -654,17 +654,6 @@ typedef sz_cptr_t (*sz_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t);
 
 /** @brief Signature of `sz_find_byteset`. */
 typedef sz_cptr_t (*sz_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
-
-/** @brief Signature of `sz_hamming_distance`. */
-typedef sz_status_t (*sz_hamming_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t, sz_size_t *);
-
-/** @brief Signature of `sz_levenshtein_distance`. */
-typedef sz_status_t (*sz_levenshtein_distance_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_size_t,
-                                                 sz_memory_allocator_t *, sz_size_t *);
-
-/** @brief Signature of `sz_needleman_wunsch_score`. */
-typedef sz_status_t (*sz_needleman_wunsch_score_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_error_cost_t const *,
-                                                   sz_error_cost_t, sz_memory_allocator_t *, sz_ssize_t *);
 
 /** @brief Signature of `sz_sequence_argsort`. */
 typedef sz_status_t (*sz_sequence_argsort_t)(struct sz_sequence_t const *, sz_memory_allocator_t *, sz_sorted_idx_t *);
