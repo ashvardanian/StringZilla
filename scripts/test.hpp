@@ -12,9 +12,26 @@
 #include <array>      // `std::array`
 #include <functional> // `std::function`
 
+#include "stringzilla/types.hpp"
+#if SZ_USE_CUDA
+#include "stringcuzilla/types.cuh"
+#endif
+
 namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
+
+using arrow_strings_view_t = arrow_strings_view<char, sz_size_t>;
+
+#if !SZ_USE_CUDA
+using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, std::allocator<char>>;
+template <typename value_type_>
+using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
+#else
+using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, unified_alloc<char>>;
+template <typename value_type_>
+using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
+#endif
 
 inline std::string read_file(std::string path) noexcept(false) {
     std::ifstream stream(path);

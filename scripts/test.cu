@@ -28,10 +28,10 @@
  *  ! Overload the following with caution to enable parallelism.
  *  ! They control the OpenMP CPU backend as well as the CUDA GPU backend.
  */
-#include <stringcuzilla/similarity.hpp>
+#include "stringcuzilla/similarity.hpp"
 
 #if SZ_USE_CUDA
-#include <stringcuzilla/similarity.cuh>
+#include "stringcuzilla/similarity.cuh"
 #endif
 
 #if !_SZ_IS_CPP17
@@ -43,18 +43,6 @@
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;
 using namespace std::literals; // for ""sv
-
-using arrow_strings_view_t = sz::arrow_strings_view<char, sz_size_t>;
-
-#if !SZ_USE_CUDA
-using arrow_strings_tape_t = sz::arrow_strings_tape<char, sz_size_t, std::allocator<char>>;
-template <typename value_type_>
-using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
-#else
-using arrow_strings_tape_t = sz::arrow_strings_tape<char, sz_size_t, sz::unified_alloc<char>>;
-template <typename value_type_>
-using unified_vector = std::vector<value_type_, sz::unified_alloc<value_type_>>;
-#endif
 
 struct levenshtein_baselines_t {
     template <typename results_type_>
@@ -147,14 +135,12 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
 
 /**
  *  @brief  Tests the correctness of the string class Levenshtein distance computation,
- *          as well as the similarity scoring functions for bioinformatics-like workloads.
+ *          as well as the similarity scoring functions for bioinformatics-like workloads
+ *          on a @b fixed set of different representative ASCII and UTF-8 strings.
  */
 template <typename score_type_, typename base_operator_, typename simd_operator_>
-static void edit_distances_compare(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                   std::size_t batch_size = 1024 * 16, std::size_t max_string_length = 512,
-                                   std::string_view allowed_chars = {}) {
-
-    using score_t = score_type_;
+static void edit_distances_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                                 std::string_view allowed_chars = {}) {
 
     std::vector<std::pair<std::string, std::string>> test_cases = {
         {"ABC", "ABC"},                  // same string; distance ~ 0
@@ -187,6 +173,7 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
     };
 
     // First check with a batch-size of 1
+    using score_t = score_type_;
     unified_vector<score_t> results_base(1), results_simd(1);
     arrow_strings_tape_t first_tape, second_tape;
     bool contains_missing_in_any_case = false;
@@ -238,22 +225,43 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
             edit_distance_log_mismatch(test_cases[i].first, test_cases[i].second, results_base[i], results_simd[i]);
         }
     }
+}
+
+struct fuzzy_config_t {
+    std::string_view alphabet = "ABC";
+    std::size_t batch_size = 1024 * 16;
+    std::size_t min_string_length = 1;
+    std::size_t max_string_length = 512;
+    std::size_t iterations = 10;
+};
+
+/**
+ *  @brief  Tests the correctness of the string class Levenshtein distance computation,
+ *          as well as the similarity scoring functions for bioinformatics-like workloads
+ *          on a synthetic @b randomly-generated set of strings from a given @p alphabet.
+ */
+template <typename score_type_, typename base_operator_, typename simd_operator_>
+static void edit_distances_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                                 fuzzy_config_t config = {}) {
+
+    using score_t = score_type_;
+    unified_vector<score_t> results_base(config.batch_size), results_simd(config.batch_size);
+    std::vector<std::string> first_array(config.batch_size), second_array(config.batch_size);
+    arrow_strings_tape_t first_tape, second_tape;
+    std::uniform_int_distribution<std::size_t> length_distribution(config.min_string_length, config.max_string_length);
 
     // Generate some random strings, using a small alphabet
-    for (std::size_t iteration_idx = 0; iteration_idx < 10; ++iteration_idx) {
-        std::vector<std::string> first_array(batch_size), second_array(batch_size);
-        for (std::size_t i = 0; i != batch_size; ++i) {
-            std::size_t first_length = 1u + std::rand() % max_string_length;
-            std::size_t second_length = 1u + std::rand() % max_string_length;
-            first_array[i] = random_string(first_length, "ABC", 3);
-            second_array[i] = random_string(second_length, "ABC", 3);
+    for (std::size_t iteration_idx = 0; iteration_idx < config.iterations; ++iteration_idx) {
+        for (std::size_t i = 0; i != config.batch_size; ++i) {
+            std::size_t first_length = length_distribution(global_random_generator());
+            std::size_t second_length = length_distribution(global_random_generator());
+            first_array[i] = random_string(first_length, config.alphabet.data(), config.alphabet.size());
+            second_array[i] = random_string(second_length, config.alphabet.data(), config.alphabet.size());
         }
 
         // Convert to a GPU-friendly layout
-        first_tape.try_assign(first_array.data(), first_array.data() + batch_size);
-        second_tape.try_assign(second_array.data(), second_array.data() + batch_size);
-        results_base.resize(batch_size);
-        results_simd.resize(batch_size);
+        first_tape.try_assign(first_array.data(), first_array.data() + config.batch_size);
+        second_tape.try_assign(second_array.data(), second_array.data() + config.batch_size);
 
         // Compute with both backends
         sz::status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
@@ -262,14 +270,25 @@ static void edit_distances_compare(base_operator_ &&base_operator, simd_operator
         _sz_assert(status_simd == sz::status_t::success_k);
 
         // Individually log the failed results
-        for (std::size_t i = 0; i != test_cases.size(); ++i) {
+        for (std::size_t i = 0; i != config.batch_size; ++i) {
             if (results_base[i] == results_simd[i]) continue;
             edit_distance_log_mismatch(first_array[i], second_array[i], results_base[i], results_simd[i]);
         }
     }
 }
 
-static void test_equivalence(std::size_t batch_size = 1024, std::size_t max_string_length = 100) {
+template <typename score_type_, typename base_operator_, typename simd_operator_>
+static void edit_distances_fixed_and_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                                           std::string_view allowed_chars = {}, fuzzy_config_t config = {}) {
+    edit_distances_fixed<score_type_>(base_operator, simd_operator, allowed_chars);
+    edit_distances_fuzzy<score_type_>(base_operator, simd_operator, config);
+}
+
+/**
+ *  @brief  Tests the correctness of the string class Levenshtein distance, NW & SW score computation,
+ *          comparing the results to some baseline implementation for predefined and random inputs.
+ */
+static void test_equivalence() {
 
     using error_t = sz::error_cost_t;
     using error_matrix_t = sz::error_costs_256x256_t; // ? Full matrix for all 256 ASCII characters
@@ -298,139 +317,123 @@ static void test_equivalence(std::size_t batch_size = 1024, std::size_t max_stri
     constexpr sz_capability_t serial_k = sz_cap_serial_k;
     constexpr sz_capability_t parallel_k = sz_cap_parallel_k;
     constexpr sz_capability_t cuda_k = sz_cap_cuda_k;
+    constexpr sz_capability_t hopper_k = sz_cap_hopper_k;
 
     // Single-threaded serial Levenshtein distance implementation
-    edit_distances_compare<sz_size_t>(                                      //
-        levenshtein_baselines_t {},                                         //
-        sz::levenshtein_distances<serial_k, char, std::allocator<char>> {}, //
-        batch_size, max_string_length);
+    edit_distances_fixed_and_fuzzy<sz_size_t>( //
+        levenshtein_baselines_t {},            //
+        sz::levenshtein_distances<serial_k, char, std::allocator<char>> {});
 
     // Multi-threaded parallel Levenshtein distance implementation
-    edit_distances_compare<sz_size_t>(                                        //
-        levenshtein_baselines_t {},                                           //
-        sz::levenshtein_distances<parallel_k, char, std::allocator<char>> {}, //
-        batch_size, max_string_length);
+    edit_distances_fixed_and_fuzzy<sz_size_t>( //
+        levenshtein_baselines_t {},            //
+        sz::levenshtein_distances<parallel_k, char, std::allocator<char>> {});
 
     // Now let's take non-unary substitution costs, like BLOSUM62
     constexpr error_t blosum62_gap_extension_cost = -4;
     error_mat_t blosum62_mat = sz::error_costs_26x26ascii_t::blosum62();
     error_matrix_t blosum62_matrix = blosum62_mat.decompressed();
 
-#if 0
     // Single-threaded serial NW implementation
-    edit_distances_compare<sz_ssize_t>(                                              //
+    edit_distances_fixed_and_fuzzy<sz_ssize_t>(                                      //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
         sz::needleman_wunsch_scores<serial_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62_matrix, blosum62_gap_extension_cost}, //
-        batch_size, max_string_length);
+            blosum62_matrix, blosum62_gap_extension_cost});
 
     // Multi-threaded parallel NW implementation
-    edit_distances_compare<sz_ssize_t>(                                              //
+    edit_distances_fixed_and_fuzzy<sz_ssize_t>(                                      //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
         sz::needleman_wunsch_scores<parallel_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62_matrix, blosum62_gap_extension_cost}, //
-        batch_size, max_string_length);
+            blosum62_matrix, blosum62_gap_extension_cost});
 
     // Single-threaded serial SW implementation
-    edit_distances_compare<sz_ssize_t>(                                            //
+    edit_distances_fixed_and_fuzzy<sz_ssize_t>(                                    //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        sz::smith_waterman_scores<serial_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62_matrix, blosum62_gap_extension_cost}, //
-        batch_size, max_string_length);
+        sz::smith_waterman_scores<serial_k, char, error_matrix_t, std::allocator<char>> {blosum62_matrix,
+                                                                                         blosum62_gap_extension_cost});
 
     // Multi-threaded parallel SW implementation
-    edit_distances_compare<sz_ssize_t>(                                            //
+    edit_distances_fixed_and_fuzzy<sz_ssize_t>(                                    //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
         sz::smith_waterman_scores<parallel_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62_matrix, blosum62_gap_extension_cost}, //
-        batch_size, max_string_length);
-#endif
+            blosum62_matrix, blosum62_gap_extension_cost});
 
     // Switch to the GPU, using an identical matrix, but move it into unified memory
     unified_vector<error_mat_t> blosum62_unified(1);
     blosum62_unified[0] = blosum62_mat;
 
     // CUDA Levenshtein distance against Multi-threaded on CPU
-    edit_distances_compare<sz_size_t>(                                        //
+    edit_distances_fixed_and_fuzzy<sz_size_t>(                                //
         sz::levenshtein_distances<parallel_k, char, std::allocator<char>> {}, //
-        sz::levenshtein_distances<cuda_k, char> {},                           //
-        batch_size, max_string_length);
+        sz::levenshtein_distances<cuda_k, char> {});
+
+#if SZ_USE_HOPPER
+    // CUDA Levenshtein distance on Hopper against Multi-threaded on CPU
+    edit_distances_fixed_and_fuzzy<sz_size_t>(                                //
+        sz::levenshtein_distances<parallel_k, char, std::allocator<char>> {}, //
+        sz::levenshtein_distances<hopper_k, char> {});
+#endif
 
     // CUDA Needleman-Wunsch distance against Multi-threaded on CPU,
     // using a compressed smaller matrix to fit into GPU shared memory
     std::string_view ascii_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    edit_distances_compare<sz_ssize_t>( //
+    edit_distances_fixed_and_fuzzy<sz_ssize_t>( //
         sz::needleman_wunsch_scores<parallel_k, char, error_matrix_t, std::allocator<char>> {
             blosum62_matrix, blosum62_gap_extension_cost}, //
         sz::needleman_wunsch_scores<cuda_k, char, error_mat_t *> {blosum62_unified.data(), blosum62_gap_extension_cost},
-        batch_size, max_string_length, ascii_alphabet);
-};
-
-#if 0
-/**
- *  @brief  Invokes different C++ member methods of immutable strings to cover
- *          extensions beyond the STL API.
- */
-template <typename string_type>
-static void test_non_stl_extensions_for_reads() {
-    using str = string_type;
-
-    // Computing edit-distances.
-    _sz_assert(sz::hamming_distance(str("hello"), str("hello")) == 0);
-    _sz_assert(sz::hamming_distance(str("hello"), str("hell")) == 1);
-    _sz_assert(sz::hamming_distance(str("abc"), str("adc")) == 1);                // one substitution
-    _sz_assert(sz::hamming_distance(str("αβγδ"), str("αxxγδ")) == 2);             // replace Beta UTF8 codepoint
-    _sz_assert(sz::hamming_distance_utf8(str("abcdefgh"), str("_bcdefg_")) == 2); // replace ASCI prefix and suffix
-    _sz_assert(sz::hamming_distance_utf8(str("αβγδ"), str("αγγδ")) == 1);         // replace Beta UTF8 codepoint
-
-    _sz_assert(sz::levenshtein_distance(str("hello"), str("hello")) == 0);
-    _sz_assert(sz::levenshtein_distance(str("hello"), str("hell")) == 1);
-    _sz_assert(sz::levenshtein_distance(str(""), str("")) == 0);
-    _sz_assert(sz::levenshtein_distance(str(""), str("abc")) == 3);
-    _sz_assert(sz::levenshtein_distance(str("abc"), str("")) == 3);
-    _sz_assert(sz::levenshtein_distance(str("abc"), str("ac")) == 1);                   // one deletion
-    _sz_assert(sz::levenshtein_distance(str("abc"), str("a_bc")) == 1);                 // one insertion
-    _sz_assert(sz::levenshtein_distance(str("abc"), str("adc")) == 1);                  // one substitution
-    _sz_assert(sz::levenshtein_distance(str("ggbuzgjux{}l"), str("gbuzgjux{}l")) == 1); // one insertion (prepended)
-    _sz_assert(sz::levenshtein_distance(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg")) == 14);
-
-    _sz_assert(sz::levenshtein_distance_utf8(str("hello"), str("hell")) == 1);           // no unicode symbols, just ASCII
-    _sz_assert(sz::levenshtein_distance_utf8(str("𠜎 𠜱 𠝹 𠱓"), str("𠜎𠜱𠝹𠱓")) == 3); // add 3 whitespaces in Chinese
-    _sz_assert(sz::levenshtein_distance_utf8(str("💖"), str("💗")) == 1);
-
-    _sz_assert(sz::levenshtein_distance_utf8(str("αβγδ"), str("αγδ")) == 1); // insert Beta
-    _sz_assert(sz::levenshtein_distance_utf8(str("école"), str("école")) ==
-           2); // etter "é" as a single character vs "e" + "´"
-    _sz_assert(sz::levenshtein_distance_utf8(str("façade"), str("facade")) == 1);     // "ç" with cedilla vs. plain
-    _sz_assert(sz::levenshtein_distance_utf8(str("Schön"), str("Scho\u0308n")) == 2); // "ö" represented as "o" + "¨"
-    _sz_assert(sz::levenshtein_distance_utf8(str("München"), str("Muenchen")) == 2); // German with umlaut vs. transcription
-    _sz_assert(sz::levenshtein_distance_utf8(str("こんにちは世界"), str("こんばんは世界")) == 2);
-
-    // Computing alignment scores.
-    using matrix_t = std::int8_t[256][256];
-    sz::error_costs_256x256_t substitution_costs = error_costs_256x256_diagonal();
-    matrix_t &costs = *reinterpret_cast<matrix_t *>(substitution_costs.data());
-
-    _sz_assert(sz::alignment_score(str("listen"), str("silent"), costs, -1) == -4);
-    _sz_assert(sz::alignment_score(str("abcdefgABCDEFG"), str("ABCDEFGabcdefg"), costs, -1) == -14);
-    _sz_assert(sz::alignment_score(str("hello"), str("hello"), costs, -1) == 0);
-    _sz_assert(sz::alignment_score(str("hello"), str("hell"), costs, -1) == -1);
-
-    // Computing rolling fingerprints.
-    _sz_assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
-    _sz_assert(sz::hashes_fingerprint<512>(str("hello"), 4).count() == 2);
-    _sz_assert(sz::hashes_fingerprint<512>(str("hello"), 3).count() == 3);
-
-    // No matter how many times one repeats a character, the hash should only contain at most one set bit.
-    _sz_assert(sz::hashes_fingerprint<512>(str("a"), 3).count() == 0);
-    _sz_assert(sz::hashes_fingerprint<512>(str("aa"), 3).count() == 0);
-    _sz_assert(sz::hashes_fingerprint<512>(str("aaa"), 3).count() == 1);
-    _sz_assert(sz::hashes_fingerprint<512>(str("aaaa"), 3).count() == 1);
-    _sz_assert(sz::hashes_fingerprint<512>(str("aaaaa"), 3).count() == 1);
-
-    // Computing fuzzy search results.
+        ascii_alphabet);
 }
-#endif
+
+/**
+ *  @brief  Many GPU algorithms depend on effective use of shared memory and scheduling its allocation for
+ *          long inputs or very large batches isn't trivial.
+ */
+void test_growing_memory_usage() {
+
+    // Now systematically compare the results of the baseline and SIMD implementations
+    constexpr sz_capability_t serial_k = sz_cap_serial_k;
+    constexpr sz_capability_t parallel_k = sz_cap_parallel_k;
+    constexpr sz_capability_t cuda_k = sz_cap_cuda_k;
+    constexpr sz_capability_t hopper_k = sz_cap_hopper_k;
+
+    std::vector<fuzzy_config_t> experiments = {
+        // Single string pair of same length:
+        {.batch_size = 1, .min_string_length = 512, .max_string_length = 512, .iterations = 1},
+        {.batch_size = 1, .min_string_length = 2048, .max_string_length = 2048, .iterations = 1},
+        {.batch_size = 1, .min_string_length = 8192, .max_string_length = 8192, .iterations = 1},
+        {.batch_size = 1, .min_string_length = 32768, .max_string_length = 32768, .iterations = 1},
+        {.batch_size = 1, .min_string_length = 131072, .max_string_length = 131072, .iterations = 1},
+        // Two strings of a same length:
+        {.batch_size = 2, .min_string_length = 512, .max_string_length = 512, .iterations = 1},
+        {.batch_size = 2, .min_string_length = 2048, .max_string_length = 2048, .iterations = 1},
+        {.batch_size = 2, .min_string_length = 8192, .max_string_length = 8192, .iterations = 1},
+        {.batch_size = 2, .min_string_length = 32768, .max_string_length = 32768, .iterations = 1},
+        {.batch_size = 2, .min_string_length = 131072, .max_string_length = 131072, .iterations = 1},
+        // Ten strings of random lengths:
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 512, .iterations = 1},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 2048, .iterations = 1},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 8192, .iterations = 1},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 32768, .iterations = 1},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 131072, .iterations = 1},
+    };
+
+    // Progress until something fails
+    for (fuzzy_config_t const &experiment : experiments) {
+        std::printf("Testing with batch size %zu, min length %zu, max length %zu, iterations %zu\n",
+                    experiment.batch_size, experiment.min_string_length, experiment.max_string_length,
+                    experiment.iterations);
+
+        // Single-threaded serial Levenshtein distance implementation
+        edit_distances_fuzzy<sz_size_t>( //
+            levenshtein_baselines_t {},  //
+            sz::levenshtein_distances<serial_k, char, std::allocator<char>> {}, experiment);
+
+        // Multi-threaded parallel Levenshtein distance implementation
+        edit_distances_fuzzy<sz_size_t>( //
+            levenshtein_baselines_t {},  //
+            sz::levenshtein_distances<parallel_k, char, std::allocator<char>> {}, experiment);
+    }
+}
 
 int main(int argc, char const **argv) {
 
@@ -474,6 +477,7 @@ int main(int argc, char const **argv) {
 #endif
 
     test_equivalence();
+    test_growing_memory_usage();
 
     std::printf("All tests passed... Unbelievable!\n");
     return 0;
