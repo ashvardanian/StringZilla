@@ -220,8 +220,13 @@ struct arrow_strings_tape {
     using view_t = arrow_strings_view<char_t, offset_t>;
     using value_type = value_t; // ? For STL compatibility
 
+#if _SZ_IS_CPP17
+    using char_alloc_t = typename std::allocator_traits<allocator_t>::rebind_alloc<char_t>;
+    using offset_alloc_t = typename std::allocator_traits<allocator_t>::rebind_alloc<offset_t>;
+#else
     using char_alloc_t = typename allocator_t::template rebind<char_t>::other;
     using offset_alloc_t = typename allocator_t::template rebind<offset_t>::other;
+#endif
 
   private:
     span<char_t> buffer_;
