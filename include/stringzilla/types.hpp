@@ -433,9 +433,38 @@ struct is_same_type {
 };
 
 struct gpu_specs_t {
-    size_t total_sm_count = 108;              // ? On A100
-    size_t blocks_per_sm = 128;               // ? Each, generally, with 32 threads
-    size_t shared_memory_per_sm = 192 * 1024; // ? On A100 it's 192 KB per SM
+    size_t vram_bytes = 40ul * 1024 * 1024 * 1024; // ? On A100 it's 40 GB
+    size_t constant_memory_bytes = 64 * 1024;      // ? On A100 it's 64 KB
+    size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
+    size_t streaming_multiprocessors = 108;        // ? On A100
+    size_t cuda_cores = 6912;                      // ? On A100 for f32/i32 logic
+    size_t max_blocks_per_multiprocessor = 0;
+    size_t reserved_memory_per_block = 0;
+
+    inline size_t shared_memory_per_multiprocessor() const noexcept {
+        return shared_memory_bytes / streaming_multiprocessors;
+    }
+
+    inline static size_t cores_per_multiprocessor(int major, int minor) noexcept {
+        typedef struct {
+            size_t sm;
+            size_t cores;
+        } generation_to_core_count;
+        generation_to_core_count generations_to_core_counts[] = {
+            {(7 << 4) + 0, 64},  // Compute Capability 7.0 (V100)
+            {(7 << 4) + 5, 64},  // Compute Capability 7.5 (RTX 2080 Ti)
+            {(8 << 4) + 0, 64},  // Compute Capability 8.0 (A100)
+            {(8 << 4) + 6, 128}, // Compute Capability 8.6 (RTX 3090)
+            {(9 << 4) + 0, 128}, // Compute Capability 9.0 (H100)
+            {0, 0}};
+
+        // Create a numeric code: for SM 3.5, SM = (3 << 4 + 5) = 0x35.
+        size_t sm = ((major << 4) + minor);
+        size_t index = 0;
+        for (; generations_to_core_counts[index].sm != 0; ++index)
+            if (generations_to_core_counts[index].sm == sm) return generations_to_core_counts[index].cores;
+        return generations_to_core_counts[index - 1].cores;
+    }
 };
 
 struct cpu_specs_t {

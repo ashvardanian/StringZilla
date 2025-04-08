@@ -21,6 +21,30 @@ namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
 
+inline gpu_specs_t gpu_specs(int device = 0) noexcept(false) {
+    gpu_specs_t specs;
+#if SZ_USE_CUDA
+    cudaDeviceProp prop;
+    cudaError_t cuda_error = cudaGetDeviceProperties(&prop, device);
+    if (cuda_error != cudaSuccess)
+        throw std::runtime_error(std::string("Error retrieving device properties: ") + cudaGetErrorString(cuda_error));
+
+    // Set the GPU specs
+    specs.streaming_multiprocessors = prop.multiProcessorCount;
+    specs.constant_memory_bytes = prop.totalConstMem;
+    specs.vram_bytes = prop.totalGlobalMem;
+
+    // Infer other global settings, that CUDA doesn't expose directly
+    specs.shared_memory_bytes = prop.sharedMemPerMultiprocessor * prop.multiProcessorCount;
+    specs.cuda_cores = gpu_specs_t::cores_per_multiprocessor(prop.major, prop.minor) * specs.streaming_multiprocessors;
+
+    // Scheduling-related constants
+    specs.max_blocks_per_multiprocessor = prop.maxBlocksPerMultiProcessor;
+    specs.reserved_memory_per_block = prop.reservedSharedMemPerBlock;
+#endif
+    return specs;
+}
+
 int log_environment() {
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
@@ -52,7 +76,18 @@ int log_environment() {
     cudaDeviceProp prop;
     for (int i = 0; i < device_count; ++i) {
         cuda_error = cudaGetDeviceProperties(&prop, i);
+        if (cuda_error != cudaSuccess) {
+            std::printf("Error retrieving properties for device %d: %s\n", i, cudaGetErrorString(cuda_error));
+            continue;
+        }
+        int warps_per_sm = prop.maxThreadsPerMultiProcessor / prop.warpSize;
+        int shared_memory_per_warp = (warps_per_sm > 0) ? (prop.sharedMemPerMultiprocessor / warps_per_sm) : 0;
         std::printf("  - %s\n", prop.name);
+        std::printf("    Shared Memory per SM: %zu bytes\n", prop.sharedMemPerMultiprocessor);
+        std::printf("    Maximum Threads per SM: %d\n", prop.maxThreadsPerMultiProcessor);
+        std::printf("    Warp Size: %d threads\n", prop.warpSize);
+        std::printf("    Max Warps per SM: %d warps\n", warps_per_sm);
+        std::printf("    Shared Memory per Warp: %d bytes\n", shared_memory_per_warp);
     }
     std::printf("- CUDA managed memory support: %s\n", prop.managedMemory == 1 ? "yes" : "no");
     std::printf("- CUDA unified memory support: %s\n", prop.unifiedAddressing == 1 ? "yes" : "no");
