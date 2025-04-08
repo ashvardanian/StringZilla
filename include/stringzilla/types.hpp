@@ -370,49 +370,48 @@ struct constant_iterator {
     using iterator_category = std::random_access_iterator_tag;
 #endif
 
-    constant_iterator(value_type const &value, difference_type pos = 0) noexcept : value_(value), pos_(pos) {}
+    constexpr constant_iterator(value_type const &value, difference_type pos = 0) noexcept : value_(value), pos_(pos) {}
+    constexpr reference operator*() const { return value_; }
+    constexpr pointer operator->() const { return &value_; }
 
-    reference operator*() const { return value_; }
-    pointer operator->() const { return &value_; }
-
-    constant_iterator &operator++() {
+    constexpr constant_iterator &operator++() {
         ++pos_;
         return *this;
     }
-    constant_iterator operator++(int) {
-        constant_iterator tmp(*this);
+    constexpr constant_iterator operator++(int) {
+        constexpr constant_iterator tmp(*this);
         ++pos_;
         return tmp;
     }
-    constant_iterator &operator--() {
+    constexpr constant_iterator &operator--() {
         --pos_;
         return *this;
     }
-    constant_iterator operator--(int) {
-        constant_iterator tmp(*this);
+    constexpr constant_iterator operator--(int) {
+        constexpr constant_iterator tmp(*this);
         --pos_;
         return tmp;
     }
 
-    constant_iterator operator+(difference_type n) const { return constant_iterator(value_, pos_ + n); }
-    constant_iterator &operator+=(difference_type n) {
+    constexpr constant_iterator operator+(difference_type n) const { return constant_iterator(value_, pos_ + n); }
+    constexpr constant_iterator &operator+=(difference_type n) {
         pos_ += n;
         return *this;
     }
-    constant_iterator operator-(difference_type n) const { return constant_iterator(value_, pos_ - n); }
-    constant_iterator &operator-=(difference_type n) {
+    constexpr constant_iterator operator-(difference_type n) const { return constant_iterator(value_, pos_ - n); }
+    constexpr constant_iterator &operator-=(difference_type n) {
         pos_ -= n;
         return *this;
     }
-    difference_type operator-(constant_iterator const &other) const { return pos_ - other.pos_; }
+    constexpr difference_type operator-(constant_iterator const &other) const { return pos_ - other.pos_; }
 
-    reference operator[](difference_type) const { return value_; }
-    bool operator==(constant_iterator const &other) const { return pos_ == other.pos_; }
-    bool operator!=(constant_iterator const &other) const { return pos_ != other.pos_; }
-    bool operator<(constant_iterator const &other) const { return pos_ < other.pos_; }
-    bool operator>(constant_iterator const &other) const { return pos_ > other.pos_; }
-    bool operator<=(constant_iterator const &other) const { return pos_ <= other.pos_; }
-    bool operator>=(constant_iterator const &other) const { return pos_ >= other.pos_; }
+    constexpr reference operator[](difference_type) const { return value_; }
+    constexpr bool operator==(constant_iterator const &other) const { return pos_ == other.pos_; }
+    constexpr bool operator!=(constant_iterator const &other) const { return pos_ != other.pos_; }
+    constexpr bool operator<(constant_iterator const &other) const { return pos_ < other.pos_; }
+    constexpr bool operator>(constant_iterator const &other) const { return pos_ > other.pos_; }
+    constexpr bool operator<=(constant_iterator const &other) const { return pos_ <= other.pos_; }
+    constexpr bool operator>=(constant_iterator const &other) const { return pos_ >= other.pos_; }
 
   private:
     value_type value_;
