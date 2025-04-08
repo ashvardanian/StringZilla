@@ -87,6 +87,7 @@
 
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
+#include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
 #endif
 
 namespace ashvardanian {
@@ -359,8 +360,10 @@ struct constant_iterator {
     using value_type = value_type_;
     using reference = value_type_ const &;
     using pointer = value_type_ const *;
-    using difference_type = std::ptrdiff_t;
+    using difference_type = sz_ssize_t;
+#if !SZ_AVOID_STL
     using iterator_category = std::random_access_iterator_tag;
+#endif
 
     constant_iterator(value_type const &value, difference_type pos = 0) noexcept : value_(value), pos_(pos) {}
 
