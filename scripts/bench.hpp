@@ -47,14 +47,14 @@
 #include <string_view> // Requires C++17
 #include <span>        // Requires C++20, used to pass info to batch-capable parallel backends
 
-#include <stringzilla/stringzilla.h>
-#include <stringzilla/stringzilla.hpp>
+#include "stringzilla/stringzilla.h"
+#include "stringzilla/stringzilla.hpp"
 
 #if SZ_USE_CUDA
-#include <stringzilla/types.cuh> // `unified_alloc`
+#include "stringcuzilla/types.cuh" // `unified_alloc`
 #endif
 
-#include "test.hpp" // `read_file`
+#include "test_stringzilla.hpp" // `read_file`
 
 namespace sz = ashvardanian::stringzilla;
 namespace stdc = std::chrono;
@@ -692,19 +692,22 @@ bench_result_t bench_nullary(  //
  *  @param[in] baseline Optional serial analog, against which the accelerated function will be stress-tested.
  *  @param[in] callable Unary function taking a @b `std::size_t` token index and returning a @b `call_result_t`.
  *  @param[in] preprocessing Optional function to pre-process the data after the prediction.
+ *  @param[in] check_validator Optional function to validate the results of the benchmark.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
-template <                                          //
-    typename callable_type_,                        //
-    typename baseline_type_ = callable_no_op_t,     //
-    typename preprocessing_type_ = callable_no_op_t //
+template <                                                        //
+    typename callable_type_,                                      //
+    typename baseline_type_ = callable_no_op_t,                   //
+    typename preprocessing_type_ = callable_no_op_t,              //
+    typename check_validator_type_ = std::equal_to<check_value_t> //
     >
 bench_result_t bench_unary(    //
     environment_t const &env,  //
     std::string const &name,   //
     baseline_type_ &&baseline, //
     callable_type_ &&callable, //
-    preprocessing_type_ &&preprocessing = callable_no_op_t()) {
+    preprocessing_type_ &&preprocessing = preprocessing_type_ {},
+    check_validator_type_ &&check_validator = check_validator_type_ {}) {
 
     bench_result_t result;
     result.name = name;
@@ -723,7 +726,7 @@ bench_result_t bench_unary(    //
             call_result_t const accelerated_result = callable(token_index);
             call_result_t const baseline_result = baseline(token_index);
             result.stress_calls += accelerated_result.inputs_processed;
-            if (accelerated_result.check_value == baseline_result.check_value) continue; // No failures
+            if (check_validator(accelerated_result.check_value, baseline_result.check_value)) continue; // No failures
 
             // If we got here, the error needs to be reported and investigated.
             ++result.errors;

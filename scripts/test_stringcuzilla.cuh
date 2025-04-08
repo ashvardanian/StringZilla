@@ -384,9 +384,9 @@ struct fuzzy_config_t {
  *          as well as the similarity scoring functions for bioinformatics-like workloads
  *          on a synthetic @b randomly-generated set of strings from a given @p alphabet.
  */
-template <typename score_type_, typename base_operator_, typename simd_operator_>
+template <typename score_type_, typename base_operator_, typename simd_operator_, typename... extra_args_>
 void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                  fuzzy_config_t config = {}) {
+                                  fuzzy_config_t config = {}, extra_args_ &&...extra_args) {
 
     using score_t = score_type_;
     unified_vector<score_t> results_base(config.batch_size), results_simd(config.batch_size);
@@ -409,7 +409,7 @@ void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
-        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data());
+        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), extra_args...);
         _sz_assert(status_base == status_t::success_k);
         _sz_assert(status_simd == status_t::success_k);
 
@@ -557,6 +557,8 @@ void test_similarity_scores_memory_usage() {
         {.batch_size = 10, .min_string_length = 1, .max_string_length = 131072, .iterations = 1},
     };
 
+    gpu_specs_t first_gpu_specs = gpu_specs();
+
     // Progress until something fails
     for (fuzzy_config_t const &experiment : experiments) {
         std::printf("Testing with batch size %zu, min length %zu, max length %zu, iterations %zu\n",
@@ -571,7 +573,7 @@ void test_similarity_scores_memory_usage() {
         // CUDA Levenshtein distance against Multi-threaded on CPU
         test_similarity_scores_fuzzy<sz_size_t>(                                     //
             levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, //
-            levenshtein_distances<sz_cap_cuda_k, char, std::allocator<char>> {}, experiment);
+            levenshtein_distances<sz_cap_cuda_k, char> {}, experiment, first_gpu_specs);
     }
 }
 
