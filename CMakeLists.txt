@@ -193,6 +193,8 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         target_compile_options(${target} PRIVATE "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas")
     elseif (${compiler_id} STREQUAL "MSVC")
         target_compile_options(${target} PRIVATE "/Bt;/wd4068;/wd4146;/utf-8;/WX")
+    elseif (${compiler_id} STREQUAL "NVIDIA")
+        target_compile_options(${target} PRIVATE "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra")
     endif ()
 
     # Enable OpenMP if available
@@ -233,12 +235,21 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         endif ()
     elseif (${compiler_id} STREQUAL "NVIDIA")
         if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
-            target_compile_options(${target} PRIVATE "-O0;-g")
-            target_compile_options(${target} PRIVATE "-G;-no-compress") # for device code debug symbols
-            target_compile_options(${target} PRIVATE "-Xptxas=-O0") # pass to the PTX assembler
-            target_compile_options(${target} PRIVATE "-Xcompiler=-fno-omit-frame-pointer")
-            target_compile_options(${target} PRIVATE "-Xcompiler=-fno-inline")
-            target_compile_options(${target} PRIVATE "-maxrregcount=0")
+            target_compile_options(
+                ${target}
+                PRIVATE "-G" # Device debug symbols
+                        "-lineinfo" # Include source line info in PTX
+                        "-O0" # Disable NVCC optimizations explicitly
+                        "-no-compress" # No compression of debug info
+                        "-Xptxas=-O0" # Disable PTX assembler optimizations
+                        "-Xcompiler=-g" # Host debugging symbols explicitly
+                        "-Xcompiler=-O0" # Host optimizations off
+                        "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
+                        "-Xcompiler=-Wall" # All warnings (host)
+                        "-Xcompiler=-Wextra" # Extra warnings (host)
+                        "-Xcompiler=-fno-inline" # Prevent host inlining
+                        "-maxrregcount=0" # No register count limits
+            )
         endif ()
         if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
             target_compile_options(${target} PRIVATE "-O3")
@@ -304,8 +315,8 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                 # ! NVCC can't handle sanitizers?!
                 # https://stackoverflow.com/questions/75590579/cuda-fails-to-initialise-when-address-sanitizer-is-enabled
             else ()
-                target_compile_options(${target} PRIVATE "-fsanitize=address;-fsanitize=leak")
-                target_link_options(${target} PRIVATE "-fsanitize=address;-fsanitize=leak")
+                # target_compile_options(${target} PRIVATE "-fsanitize=address;-fsanitize=leak")
+                # target_link_options(${target} PRIVATE "-fsanitize=address;-fsanitize=leak")
             endif ()
         endif ()
     else ()
@@ -340,27 +351,36 @@ endfunction ()
 
 if (${STRINGZILLA_BUILD_BENCHMARK})
     define_launcher(stringzilla_bench_search scripts/bench_search.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_gpu_launcher(stringzilla_bench_similarity scripts/bench_similarity.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_sequence scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_token scripts/bench_token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_container scripts/bench_container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_memory scripts/bench_memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    if (ENABLE_CUDA)
+        define_gpu_launcher(stringcuzilla_bench_similarity scripts/bench_similarity.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+    else ()
+        define_launcher(stringcuzilla_bench_similarity scripts/bench_similarity.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+    endif ()
 endif ()
 
 if (${STRINGZILLA_BUILD_TEST})
-    # Make sure that the compilation passes for different C++ standards ! Keep in mind, MSVC only supports C++11 and
-    # newer.
-    define_launcher(stringzilla_test_cpp11 scripts/test.cu 11 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_test_cpp14 scripts/test.cu 14 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_test_cpp17 scripts/test.cu 17 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_test_cpp20 scripts/test.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+    # Make sure that the compilation passes for different C++ standards!
+    #
+    # Keep in mind, MSVC only supports C++11 and newer.
+    define_launcher(stringzilla_test_cpp11 scripts/test_stringzilla.cpp 11 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_test_cpp14 scripts/test_stringzilla.cpp 14 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_test_cpp17 scripts/test_stringzilla.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_test_cpp20 scripts/test_stringzilla.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+
+    # Test parallel algorithms separately
+    define_launcher(stringcuzilla_test_cpp17 scripts/test_stringcuzilla.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringcuzilla_test_cpp20 scripts/test_stringcuzilla.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
 
     # To avoid bloating our codebase with `__device__` function annotations, we only target C++14 and newer to compile
     # `constexpr` functions on both host and device side. To avoid the complexity of defining too many template objects
     # and complex SFINAE, we only target C++17 anf newer to compile `if constexpr` compile-time SIMD dispatch.
     if (ENABLE_CUDA)
-        define_gpu_launcher(stringzilla_test_cu17 scripts/test.cu 17 "${STRINGZILLA_TARGET_ARCH}")
-        define_gpu_launcher(stringzilla_test_cu20 scripts/test.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringcuzilla_test_cu17 scripts/test_stringcuzilla.cu 17 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringcuzilla_test_cu20 scripts/test_stringcuzilla.cu 20 "${STRINGZILLA_TARGET_ARCH}")
     endif ()
 
     # Check system architecture to avoid complex cross-compilation workflows, but compile multiple backends: disabling
@@ -368,19 +388,34 @@ if (${STRINGZILLA_BUILD_TEST})
     if (SZ_PLATFORM_X86)
         # x86 specific backends
         if (MSVC)
-            define_launcher(stringzilla_test_cpp20_serial scripts/test.cu 20 "AVX")
-            define_launcher(stringzilla_test_cpp20_haswell scripts/test.cu 20 "AVX2")
-            define_launcher(stringzilla_test_cpp20_ice scripts/test.cu 20 "AVX512")
+            define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "AVX")
+            define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "AVX2")
+            define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "AVX512")
+            if (ENABLE_CUDA)
+                define_gpu_launcher(stringcuzilla_test_cu20_serial scripts/test_stringcuzilla.cu 20 "AVX")
+                define_gpu_launcher(stringcuzilla_test_cu20_haswell scripts/test_stringcuzilla.cu 20 "AVX2")
+                define_gpu_launcher(stringcuzilla_test_cu20_ice scripts/test_stringcuzilla.cu 20 "AVX512")
+            endif ()
         else ()
-            define_launcher(stringzilla_test_cpp20_serial scripts/test.cu 20 "ivybridge")
-            define_launcher(stringzilla_test_cpp20_haswell scripts/test.cu 20 "haswell")
-            define_launcher(stringzilla_test_cpp20_ice scripts/test.cu 20 "sapphirerapids")
+            define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "ivybridge")
+            define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "haswell")
+            define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "sapphirerapids")
+            if (ENABLE_CUDA)
+                define_gpu_launcher(stringcuzilla_test_cu20_serial scripts/test_stringcuzilla.cu 20 "ivybridge")
+                define_gpu_launcher(stringcuzilla_test_cu20_haswell scripts/test_stringcuzilla.cu 20 "haswell")
+                define_gpu_launcher(stringcuzilla_test_cu20_ice scripts/test_stringcuzilla.cu 20 "sapphirerapids")
+            endif ()
         endif ()
     elseif (SZ_PLATFORM_ARM)
         # ARM specific backends
-        define_launcher(stringzilla_test_cpp20_serial scripts/test.cu 20 "armv8-a")
-        define_launcher(stringzilla_test_cpp20_neon scripts/test.cu 20 "armv8-a+simd")
-        define_launcher(stringzilla_test_cpp20_sve scripts/test.cu 20 "armv8.2-a+sve")
+        define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8-a")
+        define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8-a+simd")
+        define_launcher(stringzilla_test_cpp20_sve scripts/test_stringzilla.cpp 20 "armv8.2-a+sve")
+        if (ENABLE_CUDA)
+            define_gpu_launcher(stringcuzilla_test_cu20_serial scripts/test_stringcuzilla.cu 20 "armv8-a")
+            define_gpu_launcher(stringcuzilla_test_cu20_neon scripts/test_stringcuzilla.cu 20 "armv8-a+simd")
+            define_gpu_launcher(stringcuzilla_test_cu20_sve scripts/test_stringcuzilla.cu 20 "armv8.2-a+sve")
+        endif ()
     endif ()
 endif ()
 
@@ -395,8 +430,6 @@ if (${STRINGZILLA_BUILD_SHARED})
 
     function (define_shared target)
         add_library(${target} SHARED c/lib.c)
-        # if (ENABLE_CUDA) target_sources(${target} PRIVATE c/lib.cu) target_include_directories(${target} PRIVATE
-        # ${CUDAToolkit_INCLUDE_DIRS}) target_link_libraries(${target} PRIVATE CUDA::cudart CUDA::cuda_driver) endif()
         add_library(${PROJECT_NAME}::${target} ALIAS ${target})
 
         set_target_properties(
@@ -444,7 +477,7 @@ if (${STRINGZILLA_BUILD_SHARED})
     target_include_directories(stringzilla_shared PUBLIC include)
 
     # Try compiling a version without linking the LibC ! This is only for Linux and Windows, as on modern Arm-based
-    # MacOS machines ! we can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. So let's
+    # MacOS machines ! We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. So let's
     # check if we are compiling for a Darwin-based OS.
     if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
         define_shared(stringzilla_bare)
