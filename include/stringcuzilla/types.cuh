@@ -11,9 +11,10 @@
 #ifndef STRINGZILLA_TYPES_CUH_
 #define STRINGZILLA_TYPES_CUH_
 
-#include <cuda_runtime.h> // `cudaMallocManaged`, `cudaFree`, `cudaSuccess`, `cudaGetErrorString`
-
 #include "stringzilla/types.hpp"
+
+#include <cuda_runtime.h> // `cudaMallocManaged`, `cudaFree`, `cudaSuccess`, `cudaGetErrorString`
+#include <optional>       // `std::optional`
 
 #if !defined(SZ_USE_HOPPER)
 #if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ < 11)
@@ -76,6 +77,35 @@ struct unified_alloc {
     bool operator!=(unified_alloc<other_type_> const &) const noexcept {
         return false;
     }
+};
+
+inline std::optional<gpu_specs_t> gpu_specs(int device = 0) noexcept {
+    gpu_specs_t specs;
+    cudaDeviceProp prop;
+    cudaError_t cuda_error = cudaGetDeviceProperties(&prop, device);
+    if (cuda_error != cudaSuccess) return std::nullopt; // ! Failed to get device properties
+
+    // Set the GPU specs
+    specs.streaming_multiprocessors = prop.multiProcessorCount;
+    specs.constant_memory_bytes = prop.totalConstMem;
+    specs.vram_bytes = prop.totalGlobalMem;
+
+    // Infer other global settings, that CUDA doesn't expose directly
+    specs.shared_memory_bytes = prop.sharedMemPerMultiprocessor * prop.multiProcessorCount;
+    specs.cuda_cores = gpu_specs_t::cores_per_multiprocessor(prop.major, prop.minor) * specs.streaming_multiprocessors;
+
+    // Scheduling-related constants
+    specs.max_blocks_per_multiprocessor = prop.maxBlocksPerMultiProcessor;
+    specs.reserved_memory_per_block = prop.reservedSharedMemPerBlock;
+    return specs;
+}
+
+struct cuda_status_t {
+    status_t status = status_t::success_k;
+    cudaError_t cuda_error = cudaSuccess;
+    float elapsed_milliseconds = 0.0;
+
+    inline operator status_t() const noexcept { return status; }
 };
 
 } // namespace stringzilla

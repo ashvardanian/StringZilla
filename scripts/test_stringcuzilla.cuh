@@ -21,30 +21,6 @@ namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
 
-inline gpu_specs_t gpu_specs(int device = 0) noexcept(false) {
-    gpu_specs_t specs;
-#if SZ_USE_CUDA
-    cudaDeviceProp prop;
-    cudaError_t cuda_error = cudaGetDeviceProperties(&prop, device);
-    if (cuda_error != cudaSuccess)
-        throw std::runtime_error(std::string("Error retrieving device properties: ") + cudaGetErrorString(cuda_error));
-
-    // Set the GPU specs
-    specs.streaming_multiprocessors = prop.multiProcessorCount;
-    specs.constant_memory_bytes = prop.totalConstMem;
-    specs.vram_bytes = prop.totalGlobalMem;
-
-    // Infer other global settings, that CUDA doesn't expose directly
-    specs.shared_memory_bytes = prop.sharedMemPerMultiprocessor * prop.multiProcessorCount;
-    specs.cuda_cores = gpu_specs_t::cores_per_multiprocessor(prop.major, prop.minor) * specs.streaming_multiprocessors;
-
-    // Scheduling-related constants
-    specs.max_blocks_per_multiprocessor = prop.maxBlocksPerMultiProcessor;
-    specs.reserved_memory_per_block = prop.reservedSharedMemPerBlock;
-#endif
-    return specs;
-}
-
 int log_environment() {
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
@@ -568,7 +544,7 @@ void test_similarity_scores_memory_usage() {
         {.batch_size = 10, .min_string_length = 1, .max_string_length = 131072, .iterations = 1},
     };
 
-    gpu_specs_t first_gpu_specs = gpu_specs();
+    gpu_specs_t first_gpu_specs = *gpu_specs();
 
     // Progress until something fails
     for (fuzzy_config_t const &experiment : experiments) {
