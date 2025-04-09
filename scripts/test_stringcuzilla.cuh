@@ -244,10 +244,14 @@ using smith_waterman_serial_t = smith_waterman_scores<sz_cap_parallel_k, char, s
  *  - for Global Alignments, we can vectorize the min-max calculation for diagonal "walkers"
  *  - for Local Alignments, we can vectorize the character substitution lookups for horizontal "walkers"
  */
-using levenshtein_ice_t = levenshtein_distances<sz_cap_ice_k, char, std::allocator<char>>;
-using levenshtein_utf8_ice_t = levenshtein_distances_utf8<sz_cap_ice_k, char, std::allocator<char>>;
-using needleman_wunsch_ice_t = needleman_wunsch_scores<sz_cap_ice_k, char, std::allocator<char>>;
-using smith_waterman_ice_t = smith_waterman_scores<sz_cap_ice_k, char, std::allocator<char>>;
+using levenshtein_ice_t =
+    levenshtein_distances<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>>;
+using levenshtein_utf8_ice_t =
+    levenshtein_distances_utf8<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>>;
+using needleman_wunsch_ice_t =
+    needleman_wunsch_scores<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>>;
+using smith_waterman_ice_t =
+    smith_waterman_scores<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>>;
 
 /**
  *  In @b CUDA:
@@ -496,9 +500,12 @@ void test_similarity_scores_equivalence() {
         smith_waterman_scores<sz_cap_parallel_k, char, error_matrix_t, std::allocator<char>> {
             blosum62_matrix, blosum62_gap_extension_cost});
 
-    // Switch to the GPU, using an identical matrix, but move it into unified memory
-    unified_vector<error_mat_t> blosum62_unified(1);
-    blosum62_unified[0] = blosum62_mat;
+#if SZ_USE_ICE
+    // Ice Lake Levenshtein distance against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                           //
+        levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, //
+        levenshtein_distances<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>> {});
+#endif
 
 #if SZ_USE_CUDA
     // CUDA Levenshtein distance against Multi-threaded on CPU
@@ -513,6 +520,10 @@ void test_similarity_scores_equivalence() {
         levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, //
         levenshtein_distances<sz_cap_hopper_k, char> {});
 #endif
+
+    // Switch to the GPU, using an identical matrix, but move it into unified memory
+    unified_vector<error_mat_t> blosum62_unified(1);
+    blosum62_unified[0] = blosum62_mat;
 
 #if SZ_USE_CUDA
     // CUDA Needleman-Wunsch distance against Multi-threaded on CPU,

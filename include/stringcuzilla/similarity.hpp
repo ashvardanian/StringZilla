@@ -89,7 +89,10 @@ struct global_scorer {
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = typename std::remove_cvref<first_char_t>::type;
 
-  private:
+    using scorer_t =
+        global_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k, capability_k>;
+
+  protected:
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
     score_t last_score_ {0};
@@ -145,7 +148,7 @@ struct global_scorer {
         }
 
         // The last element of the last chunk is the result of the global alignment.
-        last_score_ = scores_new[n - 1];
+        if (n == 1) last_score_ = scores_new[0];
     }
 };
 
@@ -180,7 +183,10 @@ struct local_scorer {
     static_assert(std::is_same<first_char_t, second_char_t>(), "String characters must be of the same type.");
     using char_t = first_char_t;
 
-  private:
+    using scorer_t =
+        local_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k, capability_k>;
+
+  protected:
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
     score_t best_score_ {0};
@@ -1375,6 +1381,194 @@ struct error_costs_26x26ascii_t {
              {na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na, na}}};
     }
 };
+
+/*  AVX512 implementation of the string similarity algorithms for Ice Lake and newer CPUs.
+ *  Includes extensions:
+ *      - 2017 Skylake: F, CD, ER, PF, VL, DQ, BW,
+ *      - 2018 CannonLake: IFMA, VBMI,
+ *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
+ */
+#pragma region Ice Lake Implementation
+#if SZ_USE_ICE
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2"))), \
+                             apply_to = function)
+
+/**
+ *  @brief Variant of `global_scorer` - Minimizes Levenshtein distance for inputs under 256 chars.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ */
+template <>
+struct global_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k, sz_cap_ice_k>
+    : public global_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
+                           sz_cap_serial_k> {
+
+    using scorer_t::global_scorer; // Make the constructors visible
+  protected:
+    __mmask64 load_mask_, mismatch_mask_;
+    sz_u512_vec_t first_vec_, second_vec_;
+    sz_u512_vec_t pre_substitution_vec_, pre_insertion_vec_, pre_deletion_vec_;
+    sz_u512_vec_t cost_if_substitution_vec_, cost_if_gap_vec_, cell_score_vec_;
+
+    // Initialize the constants
+    sz_u512_vec_t ones_vec_;
+
+  public:
+    inline void slice(                                                                        //
+        char const *first_reversed_slice, char const *second_slice, sz_size_t i, sz_size_t n, //
+        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,          //
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) noexcept {
+        load_mask_ = _sz_u64_mask_until(n - i);
+        pre_substitution_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, scores_pre_substitution + i);
+        pre_insertion_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, scores_pre_insertion + i);
+        pre_deletion_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, scores_pre_deletion + i);
+
+        // ? Note that here we are still traversing both buffers in the same order,
+        // ? because one of the strings has been reversed beforehand.
+        first_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, first_reversed_slice + i);
+        second_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, second_slice + i);
+        mismatch_mask_ = _mm512_cmpneq_epi8_mask(first_vec_.zmm, second_vec_.zmm);
+        cost_if_substitution_vec_.zmm =
+            _mm512_mask_add_epi8(pre_substitution_vec_.zmm, mismatch_mask_, pre_substitution_vec_.zmm, ones_vec_.zmm);
+        cost_if_gap_vec_.zmm =
+            _mm512_add_epi8(_mm512_min_epu8(pre_insertion_vec_.zmm, pre_deletion_vec_.zmm), ones_vec_.zmm);
+        cell_score_vec_.zmm = _mm512_min_epu8(cost_if_substitution_vec_.zmm, cost_if_gap_vec_.zmm);
+        _mm512_mask_storeu_epi8(scores_new + i, load_mask_, cell_score_vec_.zmm);
+    }
+
+    inline void operator()(                                                          //
+        char const *first_reversed_slice, char const *second_slice, sz_size_t n,     //
+        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, //
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) noexcept {
+
+        // Initialize the constants
+        ones_vec_.zmm = _mm512_set1_epi8(1);
+
+        // In this variant we will need at most 4 loops per diagonal.
+        for (sz_size_t i = 0; i < n; i += 64)
+            slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
+                  scores_pre_deletion, scores_new);
+
+        // The last element of the last chunk is the result of the global alignment.
+        if (n == 1) this->last_score_ = scores_new[0];
+    }
+};
+
+/**
+ *  @brief Variant of `global_scorer` - Minimizes Levenshtein distance for inputs in [256, 65K] chars.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ */
+template <>
+struct global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k, sz_cap_ice_k>
+    : public global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                           sz_cap_serial_k> {
+
+    using scorer_t::global_scorer; // Make the constructors visible
+    using ice_scorer_t = global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t,
+                                       sz_minimize_distance_k, sz_cap_ice_k>;
+
+  protected:
+    __mmask32 load_mask_, mismatch_mask_;
+    sz_u256_vec_t first_vec_, second_vec_;
+    sz_u512_vec_t pre_substitution_vec_, pre_insertion_vec_, pre_deletion_vec_;
+    sz_u512_vec_t cost_if_substitution_vec_, cost_if_gap_vec_, cell_score_vec_;
+    sz_u512_vec_t ones_vec_;
+
+  public:
+    inline void slice(                                                                        //
+        char const *first_reversed_slice, char const *second_slice, sz_size_t i, sz_size_t n, //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,        //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
+        load_mask_ = _sz_u32_clamp_mask_until(n - i);
+        pre_substitution_vec_.zmm = _mm512_maskz_loadu_epi16(load_mask_, scores_pre_substitution + i);
+        pre_insertion_vec_.zmm = _mm512_maskz_loadu_epi16(load_mask_, scores_pre_insertion + i);
+        pre_deletion_vec_.zmm = _mm512_maskz_loadu_epi16(load_mask_, scores_pre_deletion + i);
+
+        // ? Note that here we are still traversing both buffers in the same order,
+        // ? because one of the strings has been reversed beforehand.
+        first_vec_.ymm = _mm256_maskz_loadu_epi8(load_mask_, first_reversed_slice + i);
+        second_vec_.ymm = _mm256_maskz_loadu_epi8(load_mask_, second_slice + i);
+        mismatch_mask_ = _mm256_cmpneq_epi8_mask(first_vec_.ymm, second_vec_.ymm);
+        cost_if_substitution_vec_.zmm =
+            _mm512_mask_add_epi16(pre_substitution_vec_.zmm, mismatch_mask_, pre_substitution_vec_.zmm, ones_vec_.zmm);
+        cost_if_gap_vec_.zmm =
+            _mm512_add_epi16(_mm512_min_epu16(pre_insertion_vec_.zmm, pre_deletion_vec_.zmm), ones_vec_.zmm);
+        cell_score_vec_.zmm = _mm512_min_epu16(cost_if_substitution_vec_.zmm, cost_if_gap_vec_.zmm);
+        _mm512_mask_storeu_epi16(scores_new + i, load_mask_, cell_score_vec_.zmm);
+    }
+
+    inline void operator()(                                                            //
+        char const *first_reversed_slice, char const *second_slice, sz_size_t n,       //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
+
+        // Initialize the constants
+        ones_vec_.zmm = _mm512_set1_epi16(1);
+
+        // In this variant we will need at most 64*1024/32 = 2048 loops per diagonal.
+        for (sz_size_t i = 0; i < n; i += 32)
+            slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
+                  scores_pre_deletion, scores_new);
+
+        // The last element of the last chunk is the result of the global alignment.
+        if (n == 1) this->last_score_ = scores_new[0];
+    }
+};
+
+/**
+ *  @brief Variant of `global_scorer` - Minimizes Levenshtein distance for inputs in [256, 65K] chars in parallel.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ */
+template <>
+struct global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                     (sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k)>
+    : public global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                           sz_cap_ice_k> {
+
+    using ice_scorer_t::global_scorer; // Make the constructors visible
+
+    inline void operator()(                                                            //
+        char const *first_reversed_slice, char const *second_slice, sz_size_t n,       //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
+
+        // Initialize the constants
+        ice_scorer_t::ones_vec_.zmm = _mm512_set1_epi16(1);
+
+#pragma openmp parallel for
+        // In this variant we will need at most 64*1024/32 = 2048 loops per diagonal.
+        for (sz_size_t i = 0; i < n; i += 32)
+            ice_scorer_t::slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
+                                scores_pre_deletion, scores_new);
+
+        // The last element of the last chunk is the result of the global alignment.
+        if (n == 1) this->last_score_ = scores_new[0];
+    }
+};
+
+#if 0
+template <>
+struct global_scorer<char const *, char const *, sz_i16_t, error_costs_uniform_t, sz_maximize_distance_k, sz_cap_ice_k>
+    : public global_scorer<char const *, char const *, sz_i16_t, error_costs_uniform_t, sz_maximize_distance_k,
+                           sz_cap_serial_k> {
+
+    using scorer_t::global_scorer; // Make the constructors visible
+
+    void operator()(                                                                   //
+        char const *first_reversed_slice, char const *second_slice, sz_size_t n,       //
+        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
+        sz_i16_t const *scores_pre_deletion, sz_i16_t *scores_new) noexcept {
+
+        //
+    }
+};
+#endif
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+#endif            // SZ_USE_ICE
+#pragma endregion // Ice Lake Implementation
 
 } // namespace stringzilla
 } // namespace ashvardanian
