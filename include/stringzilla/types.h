@@ -416,19 +416,25 @@ typedef enum { sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 } sz_ordering_t;
  *  @brief Describes the alignment scope for string similarity algorithms.
  *  @sa sz_similarity_global_k, sz_similarity_local_k
  */
-typedef enum { sz_similarity_global_k = 0, sz_similarity_local_k = 1 } sz_similarity_locality_t;
+typedef enum sz_similarity_locality_t {
+    sz_similarity_global_k = 0,
+    sz_similarity_local_k = 1
+} sz_similarity_locality_t;
 
 /**
  *  @brief Describes the alignment objective for string similarity algorithms.
  *  @sa sz_minimize_distance_k, sz_maximize_score_k
  */
-typedef enum { sz_minimize_distance_k = 0, sz_maximize_score_k = 1 } sz_similarity_objective_t;
+typedef enum sz_similarity_objective_t {
+    sz_minimize_distance_k = 0,
+    sz_maximize_score_k = 1
+} sz_similarity_objective_t;
 
 /**
  *  @brief A simple signed integer type describing the status of a faulty operation.
  *  @sa sz_success_k, sz_bad_alloc_k, sz_invalid_utf8_k, sz_contains_duplicates_k
  */
-typedef enum {
+typedef enum sz_status_t {
     /** For algorithms that return a status, this status indicates that the operation was successful. */
     sz_success_k = 0,
     /** For algorithms that require memory allocation, this status indicates that the allocation failed. */
@@ -445,7 +451,7 @@ typedef enum {
  *  @brief  Enumeration of SIMD capabilities of the target architecture.
  *          Used to introspect the supported functionality of the dynamic library.
  */
-typedef enum {
+typedef enum sz_capability_t {
     sz_cap_serial_k = 1,        ///< Serial (non-SIMD) capability
     sz_cap_parallel_k = 1 << 2, ///< Multi-threading via OpenMP capability
     sz_cap_any_k = 0x7FFFFFFF,  ///< Mask representing any capability with `INT_MAX`
@@ -470,7 +476,7 @@ typedef enum {
  *  @brief Describes the length of a UTF-8 @b rune / character / codepoint in bytes, which can be 1 to 4.
  *  @see https://en.wikipedia.org/wiki/UTF-8
  */
-typedef enum {
+typedef enum sz_rune_length_t {
     sz_utf8_invalid_k = 0,     //!< Invalid UTF8 character.
     sz_utf8_rune_1byte_k = 1,  //!< 1-byte UTF8 character.
     sz_utf8_rune_2bytes_k = 2, //!< 2-byte UTF8 character.
