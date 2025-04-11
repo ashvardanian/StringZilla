@@ -557,7 +557,7 @@ struct horizontal_walker {
         for (sz_size_t row_idx = 1; row_idx < longer_dim; ++row_idx) {
 
             // Don't forget to populate the first column of each row:
-            horizontal_aligner.init(current_scores[0], 1);
+            horizontal_aligner.init(current_scores[0], row_idx);
 
             horizontal_aligner(                                  //
                 constant_iterator<char_t> {longer[row_idx - 1]}, // first sequence of characters
