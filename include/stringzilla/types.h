@@ -470,6 +470,11 @@ typedef enum sz_capability_t {
     sz_cap_kepler_k = 1 << 21, ///< CUDA capability with support with in-warp register shuffles
     sz_cap_hopper_k = 1 << 22, ///< CUDA capability with support for Hopper's DPX instructions
 
+    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k,                 ///< Serial code with OpenMP
+    sz_caps_spi_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_ice_k, ///< Serial code with OpenMP and Ice Lake
+    sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with OpenMP and SVE
+    sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
+
 } sz_capability_t;
 
 /**

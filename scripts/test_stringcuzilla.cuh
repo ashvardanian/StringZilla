@@ -210,39 +210,40 @@ struct smith_waterman_baselines_t {
     }
 };
 
-using levenshtein_serial_t = levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>>;
-using levenshtein_utf8_serial_t = levenshtein_distances_utf8<sz_cap_parallel_k, char, std::allocator<char>>;
-using needleman_wunsch_serial_t = needleman_wunsch_scores<sz_cap_parallel_k, char, std::allocator<char>>;
-using smith_waterman_serial_t = smith_waterman_scores<sz_cap_parallel_k, char, std::allocator<char>>;
+using malloc_t = std::allocator<char>;
+
+/**
+ *  In non-SIMD backends we still leverage OpenMP for parallelism.
+ */
+using levenshtein_serial_t = levenshtein_distances<char, malloc_t, sz_caps_sp_k>;
+using levenshtein_utf8_serial_t = levenshtein_distances_utf8<char, malloc_t, sz_caps_sp_k>;
+using needleman_wunsch_serial_t = needleman_wunsch_scores<char, error_costs_256x256_t, malloc_t, sz_caps_sp_k>;
+using smith_waterman_serial_t = smith_waterman_scores<char, error_costs_256x256_t, malloc_t, sz_caps_sp_k>;
 
 /**
  *  In @b AVX-512:
  *  - for Global Alignments, we can vectorize the min-max calculation for diagonal "walkers"
  *  - for Local Alignments, we can vectorize the character substitution lookups for horizontal "walkers"
  */
-using levenshtein_ice_t =
-    levenshtein_distances<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>>;
-using levenshtein_utf8_ice_t =
-    levenshtein_distances_utf8<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>>;
-using needleman_wunsch_ice_t =
-    needleman_wunsch_scores<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>>;
-using smith_waterman_ice_t =
-    smith_waterman_scores<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>>;
+using levenshtein_ice_t = levenshtein_distances<char, malloc_t, sz_caps_spi_k>;
+using levenshtein_utf8_ice_t = levenshtein_distances_utf8<char, malloc_t, sz_caps_spi_k>;
+using needleman_wunsch_ice_t = needleman_wunsch_scores<char, error_costs_256x256_t, malloc_t, sz_caps_spi_k>;
+using smith_waterman_ice_t = smith_waterman_scores<char, error_costs_256x256_t, malloc_t, sz_caps_spi_k>;
 
 /**
  *  In @b CUDA:
  *  - for GPUs before Hopper, we can use the @b SIMT model for warp-level parallelism using diagonal "walkers"
  *  - for GPUs after Hopper, we compound that with thread-level @b SIMD via @b DPX instructions for min-max
  */
-using levenshtein_cuda_t = levenshtein_distances<sz_cap_cuda_k, char>;
-using levenshtein_utf8_cuda_t = levenshtein_distances_utf8<sz_cap_cuda_k, char>;
-using needleman_wunsch_cuda_t = needleman_wunsch_scores<sz_cap_cuda_k, char>;
-using smith_waterman_cuda_t = smith_waterman_scores<sz_cap_cuda_k, char>;
+using levenshtein_cuda_t = levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k>;
+using levenshtein_utf8_cuda_t = levenshtein_distances_utf8<char, dummy_alloc_t, sz_cap_cuda_k>;
+using needleman_wunsch_cuda_t = needleman_wunsch_scores<char, error_costs_256x256_t, dummy_alloc_t, sz_cap_cuda_k>;
+using smith_waterman_cuda_t = smith_waterman_scores<char, error_costs_256x256_t, dummy_alloc_t, sz_cap_cuda_k>;
 
-using levenshtein_hopper_t = levenshtein_distances<sz_cap_hopper_k, char>;
-using levenshtein_utf8_hopper_t = levenshtein_distances_utf8<sz_cap_hopper_k, char>;
-using needleman_wunsch_hopper_t = needleman_wunsch_scores<sz_cap_hopper_k, char>;
-using smith_waterman_hopper_t = smith_waterman_scores<sz_cap_hopper_k, char>;
+using levenshtein_hopper_t = levenshtein_distances<char, dummy_alloc_t, sz_caps_ckh_k>;
+using levenshtein_utf8_hopper_t = levenshtein_distances_utf8<char, dummy_alloc_t, sz_caps_ckh_k>;
+using needleman_wunsch_hopper_t = needleman_wunsch_scores<char, error_costs_256x256_t, dummy_alloc_t, sz_caps_ckh_k>;
+using smith_waterman_hopper_t = smith_waterman_scores<char, error_costs_256x256_t, dummy_alloc_t, sz_caps_ckh_k>;
 
 template <typename score_type_>
 void edit_distance_log_mismatch(std::string const &first, std::string const &second, //
@@ -484,12 +485,12 @@ void test_similarity_scores_equivalence() {
     // Single-threaded serial Levenshtein distance implementation
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
         levenshtein_baselines_t {},                    //
-        levenshtein_distances<sz_cap_serial_k, char, std::allocator<char>> {});
+        levenshtein_distances<char, malloc_t, sz_cap_serial_k> {});
 
     // Multi-threaded parallel Levenshtein distance implementation
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
         levenshtein_baselines_t {},                    //
-        levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {});
+        levenshtein_distances<char, malloc_t, sz_caps_sp_k> {});
 
     // Now let's take non-unary substitution costs, like BLOSUM62
     constexpr error_t blosum62_gap_extension_cost = -4;
@@ -499,46 +500,58 @@ void test_similarity_scores_equivalence() {
     // Single-threaded serial NW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                              //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<sz_cap_serial_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62_matrix, blosum62_gap_extension_cost});
+        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
+                                                                                  blosum62_gap_extension_cost});
 
     // Multi-threaded parallel NW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                              //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<sz_cap_parallel_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62_matrix, blosum62_gap_extension_cost});
+        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_caps_sp_k> {blosum62_matrix,
+                                                                               blosum62_gap_extension_cost});
 
     // Single-threaded serial SW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                            //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        smith_waterman_scores<sz_cap_serial_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62_matrix, blosum62_gap_extension_cost});
+        smith_waterman_scores<char, error_matrix_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
+                                                                                blosum62_gap_extension_cost});
 
     // Multi-threaded parallel SW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                            //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        smith_waterman_scores<sz_cap_parallel_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62_matrix, blosum62_gap_extension_cost});
+        smith_waterman_scores<char, error_matrix_t, malloc_t, sz_caps_sp_k> {blosum62_matrix,
+                                                                             blosum62_gap_extension_cost});
 
 #if SZ_USE_ICE
     // Ice Lake Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                           //
-        levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, //
-        levenshtein_distances<(sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k), char, std::allocator<char>> {});
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(          //
+        levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
+        levenshtein_distances<char, malloc_t, sz_caps_spi_k> {});
+
+    // Ice Lake Levenshtein distance against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(               //
+        levenshtein_distances_utf8<char, malloc_t, sz_caps_sp_k> {}, //
+        levenshtein_distances_utf8<char, malloc_t, sz_caps_spi_k> {});
+
+    // Ice Lake Needleman-Wunsch distance against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                              //
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_caps_spi_k> {blosum62_matrix,
+                                                                                blosum62_gap_extension_cost});
+
 #endif
 
 #if SZ_USE_CUDA
     // CUDA Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                           //
-        levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, //
-        levenshtein_distances<sz_cap_cuda_k, char> {});
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(               //
+        levenshtein_distances<char, malloc_t, sz_cap_parallel_k> {}, //
+        levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {});
 #endif
 
 #if SZ_USE_HOPPER && 0
     // CUDA Levenshtein distance on Hopper against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                           //
-        levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, //
-        levenshtein_distances<sz_cap_hopper_k, char> {});
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(               //
+        levenshtein_distances<char, malloc_t, sz_cap_parallel_k> {}, //
+        levenshtein_distances<char, sz_cap_hopper_k> {});
 #endif
 
     // Switch to the GPU, using an identical matrix, but move it into unified memory
@@ -550,9 +563,9 @@ void test_similarity_scores_equivalence() {
     // using a compressed smaller matrix to fit into GPU shared memory
     std::string_view ascii_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        needleman_wunsch_scores<sz_cap_parallel_k, char, error_matrix_t, std::allocator<char>> {
-            blosum62_matrix, blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<sz_cap_cuda_k, char, error_mat_t *> {blosum62_unified.data(),
+        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_cap_parallel_k> {blosum62_matrix,
+                                                                                    blosum62_gap_extension_cost}, //
+        needleman_wunsch_scores<char, error_mat_t *, sz_cap_cuda_k> {blosum62_unified.data(),
                                                                      blosum62_gap_extension_cost},
         ascii_alphabet);
 #endif
@@ -588,7 +601,9 @@ void test_similarity_scores_memory_usage() {
         {.batch_size = 10, .min_string_length = 1, .max_string_length = 131072, .iterations = 1},
     };
 
+#if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs = *gpu_specs();
+#endif
 
     // Progress until something fails
     for (fuzzy_config_t const &experiment : experiments) {
@@ -599,12 +614,14 @@ void test_similarity_scores_memory_usage() {
         // Multi-threaded serial Levenshtein distance implementation
         test_similarity_scores_fuzzy<sz_size_t>( //
             levenshtein_baselines_t {},          //
-            levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, experiment);
+            levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, experiment);
 
+#if SZ_USE_CUDA
         // CUDA Levenshtein distance against Multi-threaded on CPU
-        test_similarity_scores_fuzzy<sz_size_t>(                                     //
-            levenshtein_distances<sz_cap_parallel_k, char, std::allocator<char>> {}, //
-            levenshtein_distances<sz_cap_cuda_k, char> {}, experiment, first_gpu_specs);
+        test_similarity_scores_fuzzy<sz_size_t>(                    //
+            levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
+            levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {}, experiment, first_gpu_specs);
+#endif
     }
 }
 
