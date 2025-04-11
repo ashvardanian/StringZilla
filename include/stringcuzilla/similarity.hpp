@@ -1944,11 +1944,11 @@ struct linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_cost
 #pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
         // Progress through the row 64 characters at a time.
         for (sz_size_t idx_slice = 0; idx_slice != count_slices; ++idx_slice)
-            slice_64chars(second_slice, idx_slice * 64, scores_pre_substitution, scores_pre_insertion, scores_new);
+            slice_64chars(second_slice, idx_slice * 64, gap, scores_pre_substitution, scores_pre_insertion, scores_new);
 
         // Handle the tail with a less efficient kernel - at most 2 iterations of the following loop:
         for (sz_size_t idx_half_slice = count_slices * 2; idx_half_slice * 32 < n; ++idx_half_slice)
-            slice_under32chars(second_slice, idx_half_slice * 32, n, scores_pre_substitution, scores_pre_insertion,
+            slice_under32chars(second_slice, idx_half_slice * 32, n, gap, scores_pre_substitution, scores_pre_insertion,
                                scores_new);
 
         // Horizontally compute the running minimum of the last row.
@@ -1964,7 +1964,7 @@ struct linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_cost
         this->last_score_ = last_in_row;
     }
 
-    void slice_64chars(char const *second_slice, sz_size_t i,                                         //
+    void slice_64chars(char const *second_slice, sz_size_t i, sz_i16_t gap,                           //
                        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
                        sz_i16_t *scores_new) const noexcept {
 
@@ -1974,8 +1974,8 @@ struct linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_cost
         sz_u512_vec_t cost_if_substitution_vecs[2], cost_if_gap_vecs[2], cell_score_vecs[2];
 
         // Initialize constats:
-        sz_u512_vec_t ones_vec;
-        ones_vec.zmm = _mm512_set1_epi16(1);
+        sz_u512_vec_t gap_cost_vec;
+        gap_cost_vec.zmm = _mm512_set1_epi16(gap);
 
         // Load the data without any masks:
         second_vec.zmm = _mm512_loadu_epi8(second_slice + i);
@@ -1997,8 +1997,8 @@ struct linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_cost
             _mm512_add_epi16(pre_substitution_vecs[0].zmm, cost_of_substitution_i16_vecs[0].zmm);
         cost_if_substitution_vecs[1].zmm =
             _mm512_add_epi16(pre_substitution_vecs[1].zmm, cost_of_substitution_i16_vecs[1].zmm);
-        cost_if_gap_vecs[0].zmm = _mm512_add_epi16(pre_gap_vecs[0].zmm, ones_vec.zmm);
-        cost_if_gap_vecs[1].zmm = _mm512_add_epi16(pre_gap_vecs[1].zmm, ones_vec.zmm);
+        cost_if_gap_vecs[0].zmm = _mm512_add_epi16(pre_gap_vecs[0].zmm, gap_cost_vec.zmm);
+        cost_if_gap_vecs[1].zmm = _mm512_add_epi16(pre_gap_vecs[1].zmm, gap_cost_vec.zmm);
         cell_score_vecs[0].zmm = _mm512_max_epi16(cost_if_substitution_vecs[0].zmm, cost_if_gap_vecs[0].zmm);
         cell_score_vecs[1].zmm = _mm512_max_epi16(cost_if_substitution_vecs[1].zmm, cost_if_gap_vecs[1].zmm);
 
@@ -2012,7 +2012,7 @@ struct linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_cost
         _mm512_storeu_epi16(scores_new + i + 32, cell_score_vecs[1].zmm);
     }
 
-    void slice_under32chars(char const *second_slice, sz_size_t i, sz_size_t n,                            //
+    void slice_under32chars(char const *second_slice, sz_size_t i, sz_size_t n, sz_i16_t gap,              //
                             sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
                             sz_i16_t *scores_new) const noexcept {
 
@@ -2023,8 +2023,8 @@ struct linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_cost
         sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
 
         // Initialize constats:
-        sz_u512_vec_t ones_vec;
-        ones_vec.zmm = _mm512_set1_epi16(1);
+        sz_u512_vec_t gap_cost_vec;
+        gap_cost_vec.zmm = _mm512_set1_epi16(gap);
 
         // Load the data with a mask:
         load_mask = _sz_u32_clamp_mask_until(n - i);
@@ -2038,7 +2038,7 @@ struct linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_cost
         // Then compute the data-parallel part, assuming the cost of deletions will be propagated
         // left to right outside of this loop.
         cost_if_substitution_vec.zmm = _mm512_add_epi16(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
-        cost_if_gap_vec.zmm = _mm512_add_epi16(pre_gap_vec.zmm, ones_vec.zmm);
+        cost_if_gap_vec.zmm = _mm512_add_epi16(pre_gap_vec.zmm, gap_cost_vec.zmm);
         cell_score_vec.zmm = _mm512_max_epi16(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
 
         // In Local Alignment for SW we also need to compare to zero and set the result to zero if negative.
