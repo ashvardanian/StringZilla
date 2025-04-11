@@ -42,8 +42,11 @@
  *  template object, which in turn builds on top of an "scorer" template object:
  *
  *  - the "walker" chooses the order in which the DP matrix is evaluated - row-wise or diagonal-wise.
- *  - the "scorer" evaluates the actual DP matrix cells, taking 3+ inputs, for "local" and "global" alignment,
- *    or the "affine local" and "affine global" alignments, differentiating the cost of gap opening & extension.
+ *  - the "scorer" evaluates the actual DP matrix cells, either with equivalent "linear" or "affine" scoring.
+ *
+ *  The linear scoring algorithms are best known in Computer Science have identical cost for initiating a gap
+ *  (insert/delete) and extending an existing one. In BioInformatics, however, we often want to assign much higher
+ *  penalty for the break itself, and a lower penalty for extending it. This is called "affine" scoring.
  *
  *  TODO: For @b sparse algorithms, the algorithms are constructed differently.
  */
@@ -59,22 +62,53 @@ namespace ashvardanian {
 namespace stringzilla {
 
 /**
+ *  @brief  Helper method to guess the amount of SRAM we want to effectively process the input
+ *          without fetching from RAM/VRAM all the time, including the space for 3 diagonals
+ *          and the strings themselves.
+ */
+inline sz_size_t _diagonal_similarity_memory_usage( //
+    sz_size_t first_length, sz_size_t second_length, error_cost_t max_cell_difference) noexcept {
+    sz_size_t shorter_length = sz_min_of_two(first_length, second_length);
+    sz_size_t longer_length = sz_max_of_two(first_length, second_length);
+    sz_size_t max_diagonal_length = shorter_length + 1;
+    sz_size_t max_cell_value = (longer_length + 1) * max_cell_difference;
+    sz_size_t bytes_per_cell = max_cell_value < 256 ? 1 : max_cell_value < 65536 ? 2 : 4;
+    // For each string we need to copy its contents, and allocate 3 bands proportional to the length
+    // of the shorter string with each cell being big enough to hold the length of the longer one.
+    // The diagonals should be aligned to 4 bytes to allow for SIMD operations.
+    sz_size_t bytes_per_diagonal = round_up_to_multiple<sz_size_t>(max_diagonal_length * bytes_per_cell, 4);
+    sz_size_t shared_memory_requirement = 3 * bytes_per_diagonal + first_length + second_length;
+    return shared_memory_requirement;
+}
+
+/**
  *  @brief  An operator to be applied to be applied to all 2x2 blocks of the DP matrix to produce
- *          the bottom-right value from the 3x others in case of Global Alignment algorithms, like
- *          the Needleman-Wunsch or Levenshtein distance calculations.
+ *          the bottom-right value from the 3x others in case of @b Global Alignment algorithms, like
+ *          the @b Needleman-Wunsch or @b Levenshtein distance calculations.
  *
  *  It updates the internal state to remember the last calculated value, as in Global Alignment it's
  *  always in the bottom-right corner of the DP matrix, which is evaluated last.
  */
-template <                                                      //
-    typename first_iterator_type_ = char const *,               //
-    typename second_iterator_type_ = char const *,              //
-    typename score_type_ = sz_size_t,                           //
-    typename substituter_type_ = error_costs_uniform_t,         //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k, //
-    sz_capability_t capability_ = sz_cap_serial_k               //
+template <                                                       //
+    typename first_iterator_type_ = char const *,                //
+    typename second_iterator_type_ = char const *,               //
+    typename score_type_ = sz_size_t,                            //
+    typename substituter_type_ = error_costs_uniform_t,          //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_serial_k,               //
+    typename enable_ = void                                      //
     >
-struct global_scorer {
+struct linear_scorer;
+
+constexpr bool is_serial_or_parallel(sz_capability_t capability) noexcept {
+    return (capability == sz_cap_serial_k) || (capability == (sz_capability_t)(sz_cap_serial_k | sz_cap_parallel_k));
+}
+
+template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
+          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, objective_,
+                     sz_similarity_global_k, capability_, std::enable_if_t<is_serial_or_parallel(capability_)>> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
@@ -82,6 +116,7 @@ struct global_scorer {
     using substituter_t = substituter_type_;
 
     static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
@@ -89,8 +124,8 @@ struct global_scorer {
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = typename std::remove_cvref<first_char_t>::type;
 
-    using scorer_t =
-        global_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k, capability_k>;
+    using scorer_t = linear_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k, locality_k,
+                                   capability_k>;
 
   protected:
     substituter_t substituter_ {};
@@ -103,11 +138,9 @@ struct global_scorer {
     }
 
   public:
-    global_scorer() = default;
-    global_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
+    linear_scorer() = default;
+    linear_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
         : substituter_(substituter), gap_cost_(gap_cost) {}
-
-    static constexpr bool is_parallel() { return capability_k & sz_cap_parallel_k; }
 
     /**
      *  @brief Initializes a boundary value within a certain diagonal.
@@ -132,7 +165,7 @@ struct global_scorer {
         score_t const *scores_pre_substitution, score_t const *scores_pre_insertion, score_t const *scores_pre_deletion,
         score_t *scores_new) noexcept {
 
-#pragma omp parallel for simd schedule(dynamic, 1) if (is_parallel())
+#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
         for (sz_size_t i = 0; i < n; ++i) {
             score_t pre_substitution = scores_pre_substitution[i];
             score_t pre_insertion = scores_pre_insertion[i];
@@ -148,27 +181,22 @@ struct global_scorer {
         }
 
         // The last element of the last chunk is the result of the global alignment.
-        if (n == 1) last_score_ = scores_new[0];
+        last_score_ = scores_new[n - 1];
     }
 };
 
 /**
  *  @brief  An operator to be applied to be applied to all 2x2 blocks of the DP matrix to produce
- *          the bottom-right value from the 3x others in case of Global Alignment algorithms, like
- *          the Smith-Waterman score.
+ *          the bottom-right value from the 3x others in case of @b Local Alignment algorithms, like
+ *          the @b Smith-Waterman score.
  *
  *  It updates the internal state to remember the minimum/maximum calculated value, as in Local Alignment
  *  it's always in the bottom-right corner of the DP matrix, which is evaluated last.
  */
-template <                                                      //
-    typename first_iterator_type_ = char const *,               //
-    typename second_iterator_type_ = char const *,              //
-    typename score_type_ = sz_size_t,                           //
-    typename substituter_type_ = error_costs_uniform_t,         //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k, //
-    sz_capability_t capability_ = sz_cap_serial_k               //
-    >
-struct local_scorer {
+template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
+          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, objective_,
+                     sz_similarity_local_k, capability_, std::enable_if_t<is_serial_or_parallel(capability_)>> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
@@ -176,6 +204,7 @@ struct local_scorer {
     using substituter_t = substituter_type_;
 
     static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
     static constexpr sz_capability_t capability_k = capability_;
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
@@ -183,8 +212,8 @@ struct local_scorer {
     static_assert(std::is_same<first_char_t, second_char_t>(), "String characters must be of the same type.");
     using char_t = first_char_t;
 
-    using scorer_t =
-        local_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k, capability_k>;
+    using scorer_t = linear_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k, locality_k,
+                                   capability_k>;
 
   protected:
     substituter_t substituter_ {};
@@ -197,11 +226,9 @@ struct local_scorer {
     }
 
   public:
-    local_scorer() = default;
-    local_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
+    linear_scorer() = default;
+    linear_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
         : substituter_(substituter), gap_cost_(gap_cost) {}
-
-    static constexpr bool is_parallel() { return capability_k & sz_cap_parallel_k; }
 
     /**
      *  @brief Initializes a boundary value within a certain diagonal.
@@ -220,7 +247,7 @@ struct local_scorer {
         score_t const *scores_pre_substitution, score_t const *scores_pre_insertion, score_t const *scores_pre_deletion,
         score_t *scores_new) noexcept {
 
-#pragma omp parallel for schedule(dynamic, 1) if (is_parallel())
+#pragma omp parallel for if (capability_k & sz_cap_parallel_k)
         for (sz_size_t i = 0; i < n; ++i) {
             score_t pre_substitution = scores_pre_substitution[i];
             score_t pre_insertion = scores_pre_insertion[i];
@@ -231,11 +258,12 @@ struct local_scorer {
             error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
             score_t if_substitution = pre_substitution + cost_of_substitution;
             score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_cost_;
+            // ! This is the main difference with global alignment:
             score_t if_substitution_or_reset = pick_best(if_substitution, 0);
             score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution_or_reset);
             scores_new[i] = cell_score;
 
-            // Update the global maximum score if this cell beats it.
+            // ! Update the global maximum score if this cell beats it - this is the costliest operation:
 #pragma omp critical
             { best_score_ = pick_best(best_score_, cell_score); }
         }
@@ -268,13 +296,14 @@ struct local_scorer {
  *  @sa     For bulk API, use `sz::levenshtein_scores[_utf8]`.
  */
 template <                                                       //
-    sz_capability_t capability_ = sz_cap_serial_k,               //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     typename char_type_ = char,                                  //
     typename score_type_ = sz_size_t,                            //
     typename substituter_type_ = error_costs_uniform_t,          //
-    typename allocator_type_ = dummy_alloc_t                     //
+    typename allocator_type_ = dummy_alloc_t,                    //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_serial_k,               //
+    typename enable_ = void                                      //
     >
 struct diagonal_walker {
 
@@ -284,16 +313,13 @@ struct diagonal_walker {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = objective_;
+    static constexpr sz_similarity_locality_t locality_k = locality_;
 
     using allocated_t = typename allocator_t::value_type;
     static_assert(sizeof(allocated_t) == sizeof(char), "Allocator must be byte-aligned");
-    using global_scorer_t =
-        global_scorer<char_t const *, char_t const *, score_t, substituter_t, objective_k, capability_k>;
-    using local_scorer_t =
-        local_scorer<char_t const *, char_t const *, score_t, substituter_t, objective_k, capability_k>;
-    using scorer_t = std::conditional_t<locality_k == sz_similarity_local_k, local_scorer_t, global_scorer_t>;
+    using scorer_t =
+        linear_scorer<char_t const *, char_t const *, score_t, substituter_t, objective_k, locality_k, capability_k>;
 
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
@@ -475,13 +501,14 @@ struct diagonal_walker {
  *  @sa     For bulk API, use `sz::levenshtein_scores[_utf8]`.
  */
 template <                                                       //
-    sz_capability_t capability_ = sz_cap_serial_k,               //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     typename char_type_ = char,                                  //
     typename score_type_ = sz_size_t,                            //
     typename substituter_type_ = error_costs_uniform_t,          //
-    typename allocator_type_ = dummy_alloc_t                     //
+    typename allocator_type_ = dummy_alloc_t,                    //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_serial_k,               //
+    typename enable_ = void                                      //
     >
 struct horizontal_walker {
 
@@ -490,18 +517,14 @@ struct horizontal_walker {
     using substituter_t = substituter_type_;
     using allocator_t = allocator_type_;
 
-    static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = objective_;
-    static_assert((capability_k & sz_cap_parallel_k) == 0, "This algorithm is not parallelized!");
+    static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_capability_t capability_k = capability_;
 
     using allocated_t = typename allocator_t::value_type;
     static_assert(sizeof(allocated_t) == sizeof(char), "Allocator must be byte-aligned");
-    using global_scorer_t =
-        global_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, objective_k, capability_k>;
-    using local_scorer_t =
-        local_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, objective_k, capability_k>;
-    using scorer_t = std::conditional_t<locality_k == sz_similarity_local_k, local_scorer_t, global_scorer_t>;
+    using scorer_t = linear_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, objective_k,
+                                   locality_k, capability_k>;
 
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
@@ -584,9 +607,10 @@ struct horizontal_walker {
  *  @sa     `levenshtein_distance_utf8` for UTF-8 strings.
  */
 template <                                         //
-    sz_capability_t capability_ = sz_cap_serial_k, //
     typename char_type_ = char,                    //
-    typename allocator_type_ = dummy_alloc_t       //
+    typename allocator_type_ = dummy_alloc_t,      //
+    sz_capability_t capability_ = sz_cap_serial_k, //
+    typename enable_ = void                        //
     >
 struct levenshtein_distance {
 
@@ -596,16 +620,16 @@ struct levenshtein_distance {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_u8_t = horizontal_walker<capability_serialized_k, sz_minimize_distance_k, sz_similarity_global_k,
-                                              char_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u8_t = diagonal_walker<capability_serialized_k, sz_minimize_distance_k, sz_similarity_global_k,
-                                          char_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u16_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, char_t,
-                                           sz_u16_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u32_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, char_t,
-                                           sz_u32_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u64_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, char_t,
-                                           sz_u64_t, error_costs_uniform_t, allocator_t>;
+    using horizontal_u8_t = horizontal_walker<char_t, sz_u8_t, error_costs_uniform_t, allocator_t,
+                                              sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
+    using diagonal_u8_t = diagonal_walker<char_t, sz_u8_t, error_costs_uniform_t, allocator_t, sz_minimize_distance_k,
+                                          sz_similarity_global_k, capability_serialized_k>;
+    using diagonal_u16_t = diagonal_walker<char_t, sz_u16_t, error_costs_uniform_t, allocator_t, sz_minimize_distance_k,
+                                           sz_similarity_global_k, capability_k>;
+    using diagonal_u32_t = diagonal_walker<char_t, sz_u32_t, error_costs_uniform_t, allocator_t, sz_minimize_distance_k,
+                                           sz_similarity_global_k, capability_k>;
+    using diagonal_u64_t = diagonal_walker<char_t, sz_u64_t, error_costs_uniform_t, allocator_t, sz_minimize_distance_k,
+                                           sz_similarity_global_k, capability_k>;
 
     allocator_t alloc_ {};
 
@@ -673,9 +697,10 @@ struct levenshtein_distance {
  *  @sa     `levenshtein_distance` for binary strings.
  */
 template <                                         //
-    sz_capability_t capability_ = sz_cap_serial_k, //
     typename char_type_ = char,                    //
-    typename allocator_type_ = dummy_alloc_t       //
+    typename allocator_type_ = dummy_alloc_t,      //
+    sz_capability_t capability_ = sz_cap_serial_k, //
+    typename enable_ = void                        //
     >
 struct levenshtein_distance_utf8 {
 
@@ -685,20 +710,20 @@ struct levenshtein_distance_utf8 {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_u8_t = horizontal_walker<capability_serialized_k, sz_minimize_distance_k, sz_similarity_global_k,
-                                              sz_rune_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u8_t = diagonal_walker<capability_serialized_k, sz_minimize_distance_k, sz_similarity_global_k,
-                                          sz_rune_t, sz_u8_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u16_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, sz_rune_t,
-                                           sz_u16_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u32_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, sz_rune_t,
-                                           sz_u32_t, error_costs_uniform_t, allocator_t>;
-    using diagonal_u64_t = diagonal_walker<capability_k, sz_minimize_distance_k, sz_similarity_global_k, sz_rune_t,
-                                           sz_u64_t, error_costs_uniform_t, allocator_t>;
+    using horizontal_u8_t = horizontal_walker<sz_rune_t, sz_u8_t, error_costs_uniform_t, allocator_t,
+                                              sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
+    using diagonal_u8_t = diagonal_walker<sz_rune_t, sz_u8_t, error_costs_uniform_t, allocator_t,
+                                          sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
+    using diagonal_u16_t = diagonal_walker<sz_rune_t, sz_u16_t, error_costs_uniform_t, allocator_t,
+                                           sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
+    using diagonal_u32_t = diagonal_walker<sz_rune_t, sz_u32_t, error_costs_uniform_t, allocator_t,
+                                           sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
+    using diagonal_u64_t = diagonal_walker<sz_rune_t, sz_u64_t, error_costs_uniform_t, allocator_t,
+                                           sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
 
-    using ascii_fallback_t = levenshtein_distance_utf8<capability_k, char_t, allocator_t>;
+    using ascii_fallback_t = levenshtein_distance<char_t, allocator_t, capability_k>;
 
-    allocator_t alloc_ {};
+    mutable allocator_t alloc_ {};
 
     levenshtein_distance_utf8(allocator_t alloc = allocator_t {}) noexcept : alloc_(alloc) {}
 
@@ -723,12 +748,12 @@ struct levenshtein_distance_utf8 {
         // Check if the strings are entirely composed of ASCII characters,
         // and default to a simpler algorithm in that case.
         if (sz_isascii(first.data(), first.length()) && sz_isascii(second.data(), second.length()))
-            return ascii_fallback_t {alloc_}(first, second);
+            return ascii_fallback_t {alloc_}(first, second, result_ref);
 
         // Allocate some memory to expand UTF-8 strings into UTF-32.
         sz_size_t const max_utf32_bytes = first.size() * 4 + second.size() * 4;
-        sz_rune_t const *const first_data_utf32 = (sz_rune_t *)alloc_.allocate(max_utf32_bytes);
-        sz_rune_t const *const second_data_utf32 = first_data_utf32 + first.size();
+        sz_rune_t *const first_data_utf32 = (sz_rune_t *)alloc_.allocate(max_utf32_bytes);
+        sz_rune_t *const second_data_utf32 = first_data_utf32 + first.size();
 
         // Export into UTF-32 buffer.
         sz_rune_length_t rune_length;
@@ -786,10 +811,11 @@ struct levenshtein_distance_utf8 {
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
 template <                                              //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
     typename char_type_ = char,                         //
     typename substituter_type_ = error_costs_uniform_t, //
-    typename allocator_type_ = dummy_alloc_t            //
+    typename allocator_type_ = dummy_alloc_t,           //
+    sz_capability_t capability_ = sz_cap_serial_k,      //
+    typename enable_ = void                             //
     >
 struct needleman_wunsch_score {
 
@@ -800,14 +826,14 @@ struct needleman_wunsch_score {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_i16_t = horizontal_walker<capability_serialized_k, sz_maximize_score_k, sz_similarity_global_k,
-                                               char_t, sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i16_t = diagonal_walker<capability_serialized_k, sz_maximize_score_k, sz_similarity_global_k, char_t,
-                                           sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i32_t = diagonal_walker<capability_k, sz_maximize_score_k, sz_similarity_global_k, char_t, sz_i32_t,
-                                           substituter_t, allocator_t>;
-    using diagonal_i64_t = diagonal_walker<capability_k, sz_maximize_score_k, sz_similarity_global_k, char_t, sz_i64_t,
-                                           substituter_t, allocator_t>;
+    using horizontal_i16_t = horizontal_walker<char_t, sz_i16_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                               sz_similarity_global_k, capability_serialized_k>;
+    using diagonal_i16_t = diagonal_walker<char_t, sz_i16_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                           sz_similarity_global_k, capability_serialized_k>;
+    using diagonal_i32_t = diagonal_walker<char_t, sz_i32_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                           sz_similarity_global_k, capability_k>;
+    using diagonal_i64_t = diagonal_walker<char_t, sz_i64_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                           sz_similarity_global_k, capability_k>;
 
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
@@ -878,10 +904,11 @@ struct needleman_wunsch_score {
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
 template <                                              //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
     typename char_type_ = char,                         //
     typename substituter_type_ = error_costs_uniform_t, //
-    typename allocator_type_ = dummy_alloc_t            //
+    typename allocator_type_ = dummy_alloc_t,           //
+    sz_capability_t capability_ = sz_cap_serial_k,      //
+    typename enable_ = void                             //
     >
 struct smith_waterman_score {
 
@@ -892,14 +919,14 @@ struct smith_waterman_score {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    using horizontal_i16_t = horizontal_walker<capability_serialized_k, sz_maximize_score_k, sz_similarity_local_k,
-                                               char_t, sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i16_t = diagonal_walker<capability_serialized_k, sz_maximize_score_k, sz_similarity_local_k, char_t,
-                                           sz_i16_t, substituter_t, allocator_t>;
-    using diagonal_i32_t = diagonal_walker<capability_k, sz_maximize_score_k, sz_similarity_local_k, char_t, sz_i32_t,
-                                           substituter_t, allocator_t>;
-    using diagonal_i64_t = diagonal_walker<capability_k, sz_maximize_score_k, sz_similarity_local_k, char_t, sz_i64_t,
-                                           substituter_t, allocator_t>;
+    using horizontal_i16_t = horizontal_walker<char_t, sz_i16_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                               sz_similarity_local_k, capability_serialized_k>;
+    using diagonal_i16_t = diagonal_walker<char_t, sz_i16_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                           sz_similarity_local_k, capability_serialized_k>;
+    using diagonal_i32_t = diagonal_walker<char_t, sz_i32_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                           sz_similarity_local_k, capability_k>;
+    using diagonal_i64_t = diagonal_walker<char_t, sz_i64_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                           sz_similarity_local_k, capability_k>;
 
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
@@ -967,26 +994,25 @@ struct smith_waterman_score {
  *          For pairs of very large strings, all cores cooperate to compute one distance maximizing
  *          cache hits. For smaller strings, each core computes its own distance.
  */
-template <                                                                              //
-    typename score_type_,                                                               //
-    typename inter_pair_parallel_type_,                                                 //
-    typename intra_pair_parallel_type_,                                                 //
-    typename first_strings_type_, typename second_strings_type_, typename results_type_ //
+template <                                                       //
+    typename score_type_,                                        //
+    typename core_per_input_type_,                               //
+    typename all_cores_per_input_type_,                          //
+    typename first_strings_type_, typename second_strings_type_, //
+    typename results_type_                                       //
     >
 status_t _score_in_parallel(                         //
-    inter_pair_parallel_type_ &&intra_pair_parallel, //
-    intra_pair_parallel_type_ &&inter_pair_parallel, //
+    core_per_input_type_ &&core_per_input,           //
+    all_cores_per_input_type_ &&all_cores_per_input, //
     first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, results_type_ &&results,
-    cpu_specs_t specs = {}) noexcept {
+    error_cost_t max_cell_difference, cpu_specs_t specs = {}) noexcept {
 
     using score_t = score_type_;
+    sz_unused(specs);
 
     auto first_size = first_strings.size();
     auto second_size = second_strings.size();
     _sz_assert(first_size == second_size && "Expect equal number of strings");
-
-    // Separately handle shorter and longer strings.
-    constexpr sz_size_t threshold_size = 256;
 
     // Use an atomic to store any error encountered.
     std::atomic<status_t> error {status_t::success_k};
@@ -999,35 +1025,40 @@ status_t _score_in_parallel(                         //
         score_t result = 0;
         auto const &first = first_strings[i];
         auto const &second = second_strings[i];
-        auto largest_dimension = sz_max_of_two(first.length(), second.length());
-        if (largest_dimension >= threshold_size) continue;
-        status_t status = inter_pair_parallel({first.data(), first.length()}, {second.data(), second.length()}, result);
+
+        // ! Longer strings will be handled separately
+        auto const shared_memory_requirement =
+            _diagonal_similarity_memory_usage(first.length(), second.length(), max_cell_difference);
+        if (shared_memory_requirement >= specs.l2_bytes) continue;
+        status_t status = core_per_input({first.data(), first.length()}, {second.data(), second.length()}, result);
         if (status == status_t::success_k) { results[i] = result; }
         else { error.store(status); }
     }
 
-    // Now handle the larger strings.
-    for (sz_size_t i = 0; i < first_size && error.load() != status_t::success_k; ++i) {
+    // Now handle the longer strings.
+    for (sz_size_t i = 0; i < first_size && error.load() == status_t::success_k; ++i) {
         score_t result = 0;
         auto const &first = first_strings[i];
         auto const &second = second_strings[i];
-        auto largest_dimension = sz_max_of_two(first.length(), second.length());
-        if (largest_dimension < threshold_size) continue;
-        status_t status = intra_pair_parallel({first.data(), first.length()}, {second.data(), second.length()}, result);
+        auto const shared_memory_requirement =
+            _diagonal_similarity_memory_usage(first.length(), second.length(), max_cell_difference);
+        if (shared_memory_requirement < specs.l2_bytes) continue;
+        status_t status = all_cores_per_input({first.data(), first.length()}, {second.data(), second.length()}, result);
         if (status == status_t::success_k) { results[i] = result; }
         else { error.store(status); }
     }
     return error.load();
 }
 
-template <                                                                              //
-    typename score_type_,                                                               //
-    typename scoring_type_,                                                             //
-    typename first_strings_type_, typename second_strings_type_, typename results_type_ //
+template <                                                       //
+    typename score_type_,                                        //
+    typename scoring_type_,                                      //
+    typename first_strings_type_, typename second_strings_type_, //
+    typename results_type_                                       //
     >
 status_t _score_sequentially(scoring_type_ &&scoring, first_strings_type_ const &first_strings,
                              second_strings_type_ const &second_strings, results_type_ &&results) noexcept {
-    using scoring_t = scoring_type_;
+
     using score_t = score_type_;
 
     auto first_size = first_strings.size();
@@ -1051,9 +1082,10 @@ status_t _score_sequentially(scoring_type_ &&scoring, first_strings_type_ const 
  *          cache hits. For smaller strings, each core computes its own distance.
  */
 template <                                         //
-    sz_capability_t capability_ = sz_cap_serial_k, //
     typename char_type_ = char,                    //
-    typename allocator_type_ = dummy_alloc_t       //
+    typename allocator_type_ = dummy_alloc_t,      //
+    sz_capability_t capability_ = sz_cap_serial_k, //
+    typename enable_ = void                        //
     >
 struct levenshtein_distances {
 
@@ -1063,10 +1095,8 @@ struct levenshtein_distances {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    static constexpr bool is_parallel() { return (capability_k & sz_cap_parallel_k) != 0; }
-
-    using intra_pair_parallel_t = levenshtein_distance<capability_serialized_k, char_t, allocator_t>;
-    using inter_pair_parallel_t = levenshtein_distance<capability_k, char_t, allocator_t>;
+    using all_cores_per_input_t = levenshtein_distance<char_t, allocator_t, capability_k>;
+    using core_per_input_t = levenshtein_distance<char_t, allocator_t, capability_serialized_k>;
 
     allocator_t alloc_ {};
 
@@ -1076,19 +1106,21 @@ struct levenshtein_distances {
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results) const noexcept {
 
-        if constexpr (is_parallel())
-            return _score_in_parallel<sz_size_t>(inter_pair_parallel_t {alloc_}, intra_pair_parallel_t {alloc_},
-                                                 first_strings, second_strings, std::forward<results_type_>(results));
+        if constexpr (capability_k & sz_cap_parallel_k)
+            return _score_in_parallel<sz_size_t>(core_per_input_t {alloc_}, all_cores_per_input_t {alloc_},
+                                                 first_strings, second_strings, std::forward<results_type_>(results),
+                                                 1);
         else
-            return _score_sequentially<sz_size_t>(intra_pair_parallel_t {alloc_}, first_strings, second_strings,
+            return _score_sequentially<sz_size_t>(all_cores_per_input_t {alloc_}, first_strings, second_strings,
                                                   std::forward<results_type_>(results));
     }
 };
 
 template <                                         //
-    sz_capability_t capability_ = sz_cap_serial_k, //
     typename char_type_ = char,                    //
-    typename allocator_type_ = dummy_alloc_t       //
+    typename allocator_type_ = dummy_alloc_t,      //
+    sz_capability_t capability_ = sz_cap_serial_k, //
+    typename enable_ = void                        //
     >
 struct levenshtein_distances_utf8 {
 
@@ -1098,10 +1130,8 @@ struct levenshtein_distances_utf8 {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    static constexpr bool is_parallel() { return (capability_k & sz_cap_parallel_k) != 0; }
-
-    using intra_pair_parallel_t = levenshtein_distance_utf8<capability_serialized_k, char_t, allocator_t>;
-    using inter_pair_parallel_t = levenshtein_distance_utf8<capability_k, char_t, allocator_t>;
+    using all_cores_per_input_t = levenshtein_distance_utf8<char_t, allocator_t, capability_k>;
+    using core_per_input_t = levenshtein_distance_utf8<char_t, allocator_t, capability_serialized_k>;
 
     allocator_t alloc_ {};
 
@@ -1111,20 +1141,22 @@ struct levenshtein_distances_utf8 {
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results) const noexcept {
 
-        if constexpr (is_parallel())
-            return _score_in_parallel<sz_size_t>(inter_pair_parallel_t {alloc_}, intra_pair_parallel_t {alloc_},
-                                                 first_strings, second_strings, std::forward<results_type_>(results));
+        if constexpr (capability_k & sz_cap_parallel_k)
+            return _score_in_parallel<sz_size_t>(core_per_input_t {alloc_}, all_cores_per_input_t {alloc_},
+                                                 first_strings, second_strings, std::forward<results_type_>(results),
+                                                 1);
         else
-            return _score_sequentially<sz_size_t>(intra_pair_parallel_t {alloc_}, first_strings, second_strings,
+            return _score_sequentially<sz_size_t>(all_cores_per_input_t {alloc_}, first_strings, second_strings,
                                                   std::forward<results_type_>(results));
     }
 };
 
 template <                                              //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
     typename char_type_ = char,                         //
     typename substituter_type_ = error_costs_uniform_t, //
-    typename allocator_type_ = dummy_alloc_t            //
+    typename allocator_type_ = dummy_alloc_t,           //
+    sz_capability_t capability_ = sz_cap_serial_k,      //
+    typename enable_ = void                             //
     >
 struct needleman_wunsch_scores {
 
@@ -1135,10 +1167,8 @@ struct needleman_wunsch_scores {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    static constexpr bool is_parallel() { return (capability_k & sz_cap_parallel_k) != 0; }
-
-    using intra_pair_parallel_t = needleman_wunsch_score<capability_serialized_k, char_t, substituter_t, allocator_t>;
-    using inter_pair_parallel_t = needleman_wunsch_score<capability_k, char_t, substituter_t, allocator_t>;
+    using all_cores_per_input_t = needleman_wunsch_score<char_t, substituter_t, allocator_t, capability_k>;
+    using core_per_input_t = needleman_wunsch_score<char_t, substituter_t, allocator_t, capability_serialized_k>;
 
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
@@ -1152,21 +1182,23 @@ struct needleman_wunsch_scores {
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results) const noexcept {
 
-        if constexpr (is_parallel())
-            return _score_in_parallel<sz_ssize_t>(inter_pair_parallel_t {substituter_, gap_cost_, alloc_},
-                                                  intra_pair_parallel_t {substituter_, gap_cost_, alloc_},
-                                                  first_strings, second_strings, std::forward<results_type_>(results));
+        if constexpr (capability_k & sz_cap_parallel_k)
+            return _score_in_parallel<sz_ssize_t>(core_per_input_t {substituter_, gap_cost_, alloc_},
+                                                  all_cores_per_input_t {substituter_, gap_cost_, alloc_},
+                                                  first_strings, second_strings, std::forward<results_type_>(results),
+                                                  127);
         else
-            return _score_sequentially<sz_ssize_t>(intra_pair_parallel_t {substituter_, gap_cost_, alloc_},
+            return _score_sequentially<sz_ssize_t>(all_cores_per_input_t {substituter_, gap_cost_, alloc_},
                                                    first_strings, second_strings, std::forward<results_type_>(results));
     }
 };
 
 template <                                              //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
     typename char_type_ = char,                         //
     typename substituter_type_ = error_costs_uniform_t, //
-    typename allocator_type_ = dummy_alloc_t            //
+    typename allocator_type_ = dummy_alloc_t,           //
+    sz_capability_t capability_ = sz_cap_serial_k,      //
+    typename enable_ = void                             //
     >
 struct smith_waterman_scores {
 
@@ -1177,10 +1209,8 @@ struct smith_waterman_scores {
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
-    static constexpr bool is_parallel() { return (capability_k & sz_cap_parallel_k) != 0; }
-
-    using intra_pair_parallel_t = smith_waterman_score<capability_serialized_k, char_t, substituter_t, allocator_t>;
-    using inter_pair_parallel_t = smith_waterman_score<capability_k, char_t, substituter_t, allocator_t>;
+    using all_cores_per_input_t = smith_waterman_score<char_t, substituter_t, allocator_t, capability_k>;
+    using core_per_input_t = smith_waterman_score<char_t, substituter_t, allocator_t, capability_serialized_k>;
 
     substituter_t substituter_ {};
     error_cost_t gap_cost_ {1};
@@ -1194,12 +1224,13 @@ struct smith_waterman_scores {
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results) const noexcept {
 
-        if constexpr (is_parallel())
-            return _score_in_parallel<sz_ssize_t>(inter_pair_parallel_t {substituter_, gap_cost_, alloc_},
-                                                  intra_pair_parallel_t {substituter_, gap_cost_, alloc_},
-                                                  first_strings, second_strings, std::forward<results_type_>(results));
+        if constexpr (capability_k & sz_cap_parallel_k)
+            return _score_in_parallel<sz_ssize_t>(core_per_input_t {substituter_, gap_cost_, alloc_},
+                                                  all_cores_per_input_t {substituter_, gap_cost_, alloc_},
+                                                  first_strings, second_strings, std::forward<results_type_>(results),
+                                                  127);
         else
-            return _score_sequentially<sz_ssize_t>(intra_pair_parallel_t {substituter_, gap_cost_, alloc_},
+            return _score_sequentially<sz_ssize_t>(all_cores_per_input_t {substituter_, gap_cost_, alloc_},
                                                    first_strings, second_strings, std::forward<results_type_>(results));
     }
 };
@@ -1396,45 +1427,51 @@ struct error_costs_26x26ascii_t {
                              apply_to = function)
 
 /**
- *  @brief Variant of `global_scorer` - Minimizes Levenshtein distance for inputs under 256 chars.
+ *  @brief Variant of `linear_scorer` - Minimizes Levenshtein distance for inputs under 256 bytes.
  *  @note Requires Intel Ice Lake generation CPUs or newer.
  */
-template <>
-struct global_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k, sz_cap_ice_k>
-    : public global_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
-                           sz_cap_serial_k> {
+template <sz_capability_t capability_>
+struct linear_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
+                     sz_similarity_global_k, capability_, std::enable_if_t<capability_ & sz_cap_ice_k>>
+    : public linear_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
+                           sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using scorer_t::global_scorer; // Make the constructors visible
-  protected:
-    __mmask64 load_mask_, mismatch_mask_;
-    sz_u512_vec_t first_vec_, second_vec_;
-    sz_u512_vec_t pre_substitution_vec_, pre_insertion_vec_, pre_deletion_vec_;
-    sz_u512_vec_t cost_if_substitution_vec_, cost_if_gap_vec_, cell_score_vec_;
+    using scorer_t::linear_scorer; // Make the constructors visible
 
-    // Initialize the constants
-    sz_u512_vec_t ones_vec_;
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
 
-  public:
     inline void slice(                                                                        //
         char const *first_reversed_slice, char const *second_slice, sz_size_t i, sz_size_t n, //
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,          //
-        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) noexcept {
-        load_mask_ = _sz_u64_mask_until(n - i);
-        pre_substitution_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, scores_pre_substitution + i);
-        pre_insertion_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, scores_pre_insertion + i);
-        pre_deletion_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, scores_pre_deletion + i);
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) const noexcept {
+
+        __mmask64 load_mask, mismatch_mask;
+        sz_u512_vec_t first_vec, second_vec;
+        sz_u512_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+
+        // Initialize constats:
+        sz_u512_vec_t ones_vec;
+        ones_vec.zmm = _mm512_set1_epi8(1);
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        first_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, first_reversed_slice + i);
-        second_vec_.zmm = _mm512_maskz_loadu_epi8(load_mask_, second_slice + i);
-        mismatch_mask_ = _mm512_cmpneq_epi8_mask(first_vec_.zmm, second_vec_.zmm);
-        cost_if_substitution_vec_.zmm =
-            _mm512_mask_add_epi8(pre_substitution_vec_.zmm, mismatch_mask_, pre_substitution_vec_.zmm, ones_vec_.zmm);
-        cost_if_gap_vec_.zmm =
-            _mm512_add_epi8(_mm512_min_epu8(pre_insertion_vec_.zmm, pre_deletion_vec_.zmm), ones_vec_.zmm);
-        cell_score_vec_.zmm = _mm512_min_epu8(cost_if_substitution_vec_.zmm, cost_if_gap_vec_.zmm);
-        _mm512_mask_storeu_epi8(scores_new + i, load_mask_, cell_score_vec_.zmm);
+        load_mask = _sz_u64_mask_until(n - i);
+        first_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, first_reversed_slice + i);
+        second_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, second_slice + i);
+        pre_substitution_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_substitution + i);
+        pre_insertion_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_insertion + i);
+        pre_deletion_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_deletion + i);
+
+        mismatch_mask = _mm512_cmpneq_epi8_mask(first_vec.zmm, second_vec.zmm);
+        cost_if_substitution_vec.zmm =
+            _mm512_mask_add_epi8(pre_substitution_vec.zmm, mismatch_mask, pre_substitution_vec.zmm, ones_vec.zmm);
+        cost_if_gap_vec.zmm =
+            _mm512_add_epi8(_mm512_min_epu8(pre_insertion_vec.zmm, pre_deletion_vec.zmm), ones_vec.zmm);
+        cell_score_vec.zmm = _mm512_min_epu8(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
+        _mm512_mask_storeu_epi8(scores_new + i, load_mask, cell_score_vec.zmm);
     }
 
     inline void operator()(                                                          //
@@ -1442,10 +1479,7 @@ struct global_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t,
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) noexcept {
 
-        // Initialize the constants
-        ones_vec_.zmm = _mm512_set1_epi8(1);
-
-        // In this variant we will need at most 4 loops per diagonal.
+        // In this variant we will need at most 4 loops per diagonal
         for (sz_size_t i = 0; i < n; i += 64)
             slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
                   scores_pre_deletion, scores_new);
@@ -1456,46 +1490,113 @@ struct global_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t,
 };
 
 /**
- *  @brief Variant of `global_scorer` - Minimizes Levenshtein distance for inputs in [256, 65K] chars.
+ *  @brief Variant of `scorer` - Minimizes Levenshtein distance for inputs under 256 runes.
  *  @note Requires Intel Ice Lake generation CPUs or newer.
  */
-template <>
-struct global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k, sz_cap_ice_k>
-    : public global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
-                           sz_cap_serial_k> {
+template <sz_capability_t capability_>
+struct linear_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
+                     sz_similarity_global_k, capability_, std::enable_if_t<capability_ & sz_cap_ice_k>>
+    : public linear_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
+                           sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using scorer_t::global_scorer; // Make the constructors visible
-    using ice_scorer_t = global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t,
-                                       sz_minimize_distance_k, sz_cap_ice_k>;
+    using scorer_t::linear_scorer; // Make the constructors visible
 
-  protected:
-    __mmask32 load_mask_, mismatch_mask_;
-    sz_u256_vec_t first_vec_, second_vec_;
-    sz_u512_vec_t pre_substitution_vec_, pre_insertion_vec_, pre_deletion_vec_;
-    sz_u512_vec_t cost_if_substitution_vec_, cost_if_gap_vec_, cell_score_vec_;
-    sz_u512_vec_t ones_vec_;
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
 
-  public:
-    inline void slice(                                                                        //
-        char const *first_reversed_slice, char const *second_slice, sz_size_t i, sz_size_t n, //
-        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,        //
-        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
-        load_mask_ = _sz_u32_clamp_mask_until(n - i);
-        pre_substitution_vec_.zmm = _mm512_maskz_loadu_epi16(load_mask_, scores_pre_substitution + i);
-        pre_insertion_vec_.zmm = _mm512_maskz_loadu_epi16(load_mask_, scores_pre_insertion + i);
-        pre_deletion_vec_.zmm = _mm512_maskz_loadu_epi16(load_mask_, scores_pre_deletion + i);
+    inline void slice(                                                                                  //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t i, sz_size_t n, //
+        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,                    //
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) const noexcept {
+
+        __mmask16 load_mask, mismatch_mask;
+        sz_u512_vec_t first_vec, second_vec;
+        sz_u128_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u128_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+
+        // Initialize constats:
+        sz_u128_vec_t ones_vec;
+        ones_vec.xmm = _mm_set1_epi8(1);
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        first_vec_.ymm = _mm256_maskz_loadu_epi8(load_mask_, first_reversed_slice + i);
-        second_vec_.ymm = _mm256_maskz_loadu_epi8(load_mask_, second_slice + i);
-        mismatch_mask_ = _mm256_cmpneq_epi8_mask(first_vec_.ymm, second_vec_.ymm);
-        cost_if_substitution_vec_.zmm =
-            _mm512_mask_add_epi16(pre_substitution_vec_.zmm, mismatch_mask_, pre_substitution_vec_.zmm, ones_vec_.zmm);
-        cost_if_gap_vec_.zmm =
-            _mm512_add_epi16(_mm512_min_epu16(pre_insertion_vec_.zmm, pre_deletion_vec_.zmm), ones_vec_.zmm);
-        cell_score_vec_.zmm = _mm512_min_epu16(cost_if_substitution_vec_.zmm, cost_if_gap_vec_.zmm);
-        _mm512_mask_storeu_epi16(scores_new + i, load_mask_, cell_score_vec_.zmm);
+        load_mask = _sz_u16_clamp_mask_until(n - i);
+        first_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, first_reversed_slice + i);
+        second_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, second_slice + i);
+        pre_substitution_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_substitution + i);
+        pre_insertion_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_insertion + i);
+        pre_deletion_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_deletion + i);
+
+        mismatch_mask = _mm512_cmpneq_epi32_mask(first_vec.zmm, second_vec.zmm);
+        cost_if_substitution_vec.xmm =
+            _mm_mask_add_epi8(pre_substitution_vec.xmm, mismatch_mask, pre_substitution_vec.xmm, ones_vec.xmm);
+        cost_if_gap_vec.xmm = _mm_add_epi8(_mm_min_epu8(pre_insertion_vec.xmm, pre_deletion_vec.xmm), ones_vec.xmm);
+        cell_score_vec.xmm = _mm_min_epu8(cost_if_substitution_vec.xmm, cost_if_gap_vec.xmm);
+        _mm_mask_storeu_epi8(scores_new + i, load_mask, cell_score_vec.xmm);
+    }
+
+    inline void operator()(                                                                //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t n, //
+        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,       //
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) noexcept {
+
+        // In this variant we will need at most (256 / 16) = 16 loops per diagonal.
+        for (sz_size_t i = 0; i < n; i += 16)
+            slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
+                  scores_pre_deletion, scores_new);
+
+        // The last element of the last chunk is the result of the global alignment.
+        if (n == 1) this->last_score_ = scores_new[0];
+    }
+};
+
+/**
+ *  @brief Variant of `scorer` - Minimizes Levenshtein distance for inputs in [256, 65K] bytes.
+ *  @note Requires Intel Ice Lake generation CPUs or newer.
+ */
+template <sz_capability_t capability_>
+struct linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                     sz_similarity_global_k, capability_, std::enable_if_t<capability_ & sz_cap_ice_k>>
+    : public linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                           sz_similarity_global_k, sz_cap_serial_k, void> {
+
+    using scorer_t::linear_scorer; // Make the constructors visible
+
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    inline void slice(                                                                        //
+        char const *first_reversed_slice, char const *second_slice, sz_size_t i, sz_size_t n, //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,        //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) const noexcept {
+
+        __mmask32 load_mask, mismatch_mask;
+        sz_u256_vec_t first_vec, second_vec;
+        sz_u512_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+
+        // Initialize constats:
+        sz_u512_vec_t ones_vec;
+        ones_vec.zmm = _mm512_set1_epi16(1);
+
+        // ? Note that here we are still traversing both buffers in the same order,
+        // ? because one of the strings has been reversed beforehand.
+        load_mask = _sz_u32_clamp_mask_until(n - i);
+        first_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, first_reversed_slice + i);
+        second_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, second_slice + i);
+        pre_substitution_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
+        pre_insertion_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
+        pre_deletion_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_deletion + i);
+
+        mismatch_mask = _mm256_cmpneq_epi8_mask(first_vec.ymm, second_vec.ymm);
+        cost_if_substitution_vec.zmm =
+            _mm512_mask_add_epi16(pre_substitution_vec.zmm, mismatch_mask, pre_substitution_vec.zmm, ones_vec.zmm);
+        cost_if_gap_vec.zmm =
+            _mm512_add_epi16(_mm512_min_epu16(pre_insertion_vec.zmm, pre_deletion_vec.zmm), ones_vec.zmm);
+        cell_score_vec.zmm = _mm512_min_epu16(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
+        _mm512_mask_storeu_epi16(scores_new + i, load_mask, cell_score_vec.zmm);
     }
 
     inline void operator()(                                                            //
@@ -1503,10 +1604,8 @@ struct global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
 
-        // Initialize the constants
-        ones_vec_.zmm = _mm512_set1_epi16(1);
-
-        // In this variant we will need at most 64*1024/32 = 2048 loops per diagonal.
+#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
+        // In this variant we will need at most (64 * 1024 / 32) = 2048 loops per diagonal.
         for (sz_size_t i = 0; i < n; i += 32)
             slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
                   scores_pre_deletion, scores_new);
@@ -1517,53 +1616,598 @@ struct global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t
 };
 
 /**
- *  @brief Variant of `global_scorer` - Minimizes Levenshtein distance for inputs in [256, 65K] chars in parallel.
+ *  @brief Variant of `scorer` - Minimizes Levenshtein distance for inputs in [256, 65K] runes in parallel.
  *  @note Requires Intel Ice Lake generation CPUs or newer.
  */
-template <>
-struct global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
-                     (sz_capability_t)(sz_cap_parallel_k | sz_cap_ice_k)>
-    : public global_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
-                           sz_cap_ice_k> {
+template <sz_capability_t capability_>
+struct linear_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                     sz_similarity_global_k, capability_, std::enable_if_t<capability_ & sz_cap_ice_k>>
+    : public linear_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, error_costs_uniform_t,
+                           sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using ice_scorer_t::global_scorer; // Make the constructors visible
+    using scorer_t::linear_scorer; // Make the constructors visible
 
-    inline void operator()(                                                            //
-        char const *first_reversed_slice, char const *second_slice, sz_size_t n,       //
-        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
+    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    inline void slice(                                                                                  //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t i, sz_size_t n, //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,                  //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) const noexcept {
+
+        __mmask16 load_mask, mismatch_mask;
+        sz_u512_vec_t first_vec, second_vec;
+        sz_u256_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u256_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+
+        // Initialize constats:
+        sz_u256_vec_t ones_vec;
+        ones_vec.ymm = _mm256_set1_epi16(1);
+
+        // ? Note that here we are still traversing both buffers in the same order,
+        // ? because one of the strings has been reversed beforehand.
+        load_mask = _sz_u16_clamp_mask_until(n - i);
+        first_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, first_reversed_slice + i);
+        second_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, second_slice + i);
+        pre_substitution_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
+        pre_insertion_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
+        pre_deletion_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_deletion + i);
+
+        mismatch_mask = _mm512_cmpneq_epi32_mask(first_vec.zmm, second_vec.zmm);
+        cost_if_substitution_vec.ymm =
+            _mm256_mask_add_epi16(pre_substitution_vec.ymm, mismatch_mask, pre_substitution_vec.ymm, ones_vec.ymm);
+        cost_if_gap_vec.ymm =
+            _mm256_add_epi16(_mm256_min_epu16(pre_insertion_vec.ymm, pre_deletion_vec.ymm), ones_vec.ymm);
+        cell_score_vec.ymm = _mm256_min_epu16(cost_if_substitution_vec.ymm, cost_if_gap_vec.ymm);
+        _mm256_mask_storeu_epi16(scores_new + i, load_mask, cell_score_vec.ymm);
+    }
+
+    inline void operator()(                                                                //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t n, //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,     //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
 
-        // Initialize the constants
-        ice_scorer_t::ones_vec_.zmm = _mm512_set1_epi16(1);
-
-#pragma openmp parallel for
-        // In this variant we will need at most 64*1024/32 = 2048 loops per diagonal.
-        for (sz_size_t i = 0; i < n; i += 32)
-            ice_scorer_t::slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
-                                scores_pre_deletion, scores_new);
+#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
+        // In this variant we will need at most (64 * 1024 / 16) = 4096 loops per diagonal.
+        for (sz_size_t i = 0; i < n; i += 16)
+            slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
+                  scores_pre_deletion, scores_new);
 
         // The last element of the last chunk is the result of the global alignment.
         if (n == 1) this->last_score_ = scores_new[0];
     }
 };
 
-#if 0
-template <>
-struct global_scorer<char const *, char const *, sz_i16_t, error_costs_uniform_t, sz_maximize_distance_k, sz_cap_ice_k>
-    : public global_scorer<char const *, char const *, sz_i16_t, error_costs_uniform_t, sz_maximize_distance_k,
-                           sz_cap_serial_k> {
+/**
+ *  @brief  Computes the @b byte-level Levenshtein distance between two strings using the OpenMP backend.
+ *  @sa     `levenshtein_distance_utf8` for UTF-8 strings.
+ */
+template <typename allocator_type_, sz_capability_t capability_>
+struct levenshtein_distance<char, allocator_type_, capability_, std::enable_if_t<capability_ & sz_cap_ice_k>> {
 
-    using scorer_t::global_scorer; // Make the constructors visible
+    using char_t = char;
+    using allocator_t = allocator_type_;
+
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
+    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
+
+    using diagonal_u8_t = diagonal_walker<char_t, sz_u8_t, error_costs_uniform_t, allocator_t, sz_minimize_distance_k,
+                                          sz_similarity_global_k, capability_serialized_k>;
+    using diagonal_u16_t = diagonal_walker<char_t, sz_u16_t, error_costs_uniform_t, allocator_t, sz_minimize_distance_k,
+                                           sz_similarity_global_k, capability_k>;
+    using diagonal_u32_t = diagonal_walker<char_t, sz_u32_t, error_costs_uniform_t, allocator_t, sz_minimize_distance_k,
+                                           sz_similarity_global_k, capability_wout_simd_k>;
+    using diagonal_u64_t = diagonal_walker<char_t, sz_u64_t, error_costs_uniform_t, allocator_t, sz_minimize_distance_k,
+                                           sz_similarity_global_k, capability_wout_simd_k>;
+
+    allocator_t alloc_ {};
+
+    levenshtein_distance(allocator_t alloc = allocator_t {}) noexcept : alloc_(alloc) {}
+
+    /**
+     *  @param[in] first The first string.
+     *  @param[in] second The second string.
+     *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
+     */
+    status_t operator()(span<char_t const> first, span<char_t const> second, sz_size_t &result_ref) const noexcept {
+
+        sz_size_t const first_length = first.length();
+        sz_size_t const second_length = second.length();
+        if (first_length == 0) {
+            result_ref = second_length;
+            return status_t::success_k;
+        }
+        if (second_length == 0) {
+            result_ref = first_length;
+            return status_t::success_k;
+        }
+
+        // Estimate the maximum dimension of the DP matrix and choose the best type for it.
+        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        status_t status = status_t::success_k;
+        if (max_dim < 256u) {
+            sz_u8_t result_u8;
+            status = diagonal_u8_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u8);
+            if (status == status_t::success_k) result_ref = result_u8;
+        }
+        else if (max_dim < 65536u) {
+            sz_u16_t result_u16;
+            status = diagonal_u16_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u16);
+            if (status == status_t::success_k) result_ref = result_u16;
+        }
+        else if (max_dim < 4294967296u) {
+            sz_u32_t result_u32;
+            status = diagonal_u32_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u32);
+            if (status == status_t::success_k) result_ref = result_u32;
+        }
+        else {
+            sz_u64_t result_u64;
+            status = diagonal_u64_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u64);
+            if (status == status_t::success_k) result_ref = result_u64;
+        }
+
+        return status;
+    }
+};
+
+/**
+ *  @brief  Computes the @b rune-level Levenshtein distance between two UTF-8 strings using the OpenMP backend.
+ *  @sa     `levenshtein_distance` for binary strings.
+ */
+template <typename allocator_type_, sz_capability_t capability_>
+struct levenshtein_distance_utf8<char, allocator_type_, capability_, std::enable_if_t<capability_ & sz_cap_ice_k>> {
+
+    using char_t = char;
+    using allocator_t = allocator_type_;
+
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
+    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
+
+    using diagonal_u8_t = diagonal_walker<sz_rune_t, sz_u8_t, error_costs_uniform_t, allocator_t,
+                                          sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
+    using diagonal_u16_t = diagonal_walker<sz_rune_t, sz_u16_t, error_costs_uniform_t, allocator_t,
+                                           sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
+    using diagonal_u32_t = diagonal_walker<sz_rune_t, sz_u32_t, error_costs_uniform_t, allocator_t,
+                                           sz_minimize_distance_k, sz_similarity_global_k, capability_wout_simd_k>;
+    using diagonal_u64_t = diagonal_walker<sz_rune_t, sz_u64_t, error_costs_uniform_t, allocator_t,
+                                           sz_minimize_distance_k, sz_similarity_global_k, capability_wout_simd_k>;
+
+    using ascii_fallback_t = levenshtein_distance<char_t, allocator_t, capability_k>;
+
+    mutable allocator_t alloc_ {};
+
+    levenshtein_distance_utf8(allocator_t alloc = allocator_t {}) noexcept : alloc_(alloc) {}
+
+    /**
+     *  @param[in] first The first string.
+     *  @param[in] second The second string.
+     *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
+     */
+    status_t operator()(span<char_t const> first, span<char_t const> second, sz_size_t &result_ref) const noexcept {
+
+        sz_size_t const first_length = first.length();
+        sz_size_t const second_length = second.length();
+        if (first_length == 0) {
+            result_ref = second_length;
+            return status_t::success_k;
+        }
+        if (second_length == 0) {
+            result_ref = first_length;
+            return status_t::success_k;
+        }
+
+        // Check if the strings are entirely composed of ASCII characters,
+        // and default to a simpler algorithm in that case.
+        if (sz_isascii(first.data(), first.length()) && sz_isascii(second.data(), second.length()))
+            return ascii_fallback_t {alloc_}(first, second, result_ref);
+
+        // Allocate some memory to expand UTF-8 strings into UTF-32.
+        sz_size_t const max_utf32_bytes = first.size() * 4 + second.size() * 4;
+        sz_rune_t *const first_data_utf32 = (sz_rune_t *)alloc_.allocate(max_utf32_bytes);
+        sz_rune_t *const second_data_utf32 = first_data_utf32 + first.size();
+
+        // Export into UTF-32 buffer.
+        sz_rune_length_t rune_length;
+        sz_size_t first_length_utf32 = 0, second_length_utf32 = 0;
+        for (sz_size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < first.size();
+             progress_utf8 += rune_length, ++progress_utf32, ++first_length_utf32)
+            sz_rune_parse(first.data() + progress_utf8, first_data_utf32 + progress_utf32, &rune_length);
+        for (sz_size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < second.size();
+             progress_utf8 += rune_length, ++progress_utf32, ++second_length_utf32)
+            sz_rune_parse(second.data() + progress_utf8, second_data_utf32 + progress_utf32, &rune_length);
+
+        // Estimate the maximum dimension of the DP matrix and choose the best type for it.
+        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        span<sz_rune_t const> const first_utf32 {first_data_utf32, first_length_utf32};
+        span<sz_rune_t const> const second_utf32 {second_data_utf32, second_length_utf32};
+        status_t status = status_t::success_k;
+        if (max_dim < 256u) {
+            sz_u8_t result_u8;
+            status = diagonal_u8_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u8);
+            if (status == status_t::success_k) result_ref = result_u8;
+        }
+        else if (max_dim < 65536u) {
+            sz_u16_t result_u16;
+            status = diagonal_u16_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u16);
+            if (status == status_t::success_k) result_ref = result_u16;
+        }
+        else if (max_dim < 4294967296u) {
+            sz_u32_t result_u32;
+            status = diagonal_u32_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u32);
+            if (status == status_t::success_k) result_ref = result_u32;
+        }
+        else {
+            sz_u64_t result_u64;
+            status = diagonal_u64_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u64);
+            if (status == status_t::success_k) result_ref = result_u64;
+        }
+
+        return status;
+    }
+};
+
+/**
+ *  @brief  Helper object optimizing the most expensive part of variable-substitution-cost alignment methods for
+ *          Ice Lake CPUs. It's designed for horizontal layout "walkers", where we look at just one row of (256 x 256)
+ *          substitution matrix and can fit 256 bytes worth of costs in the registers.
+ *
+ *  This is a common abstraction for both:
+ *  - Local SW and global NW alignment.
+ *  - Serial and parallel implementations.
+ *  - 8-bit, 16-bit, 32-bit, and even 64-bit costs.
+ *  - Any memory allocator used.
+ */
+struct lookup_in256bytes_ice_t {
+    sz_u512_vec_t row_subs_vecs_[4];
+    sz_u512_vec_t is_third_or_fourth_vec_, is_second_or_fourth_vec_;
+
+    inline lookup_in256bytes_ice_t() noexcept {
+        char is_third_or_fourth_check, is_second_or_fourth_check;
+        *(sz_u8_t *)&is_third_or_fourth_check = 0x80, *(sz_u8_t *)&is_second_or_fourth_check = 0x40;
+        is_third_or_fourth_vec_.zmm = _mm512_set1_epi8(is_third_or_fourth_check);
+        is_second_or_fourth_vec_.zmm = _mm512_set1_epi8(is_second_or_fourth_check);
+    }
+
+    inline void reload(sz_error_cost_t const *row_subs) noexcept {
+        row_subs_vecs_[0].zmm = _mm512_loadu_si512(row_subs + 64 * 0);
+        row_subs_vecs_[1].zmm = _mm512_loadu_si512(row_subs + 64 * 1);
+        row_subs_vecs_[2].zmm = _mm512_loadu_si512(row_subs + 64 * 2);
+        row_subs_vecs_[3].zmm = _mm512_loadu_si512(row_subs + 64 * 3);
+    }
+
+    inline sz_u512_vec_t lookup64(sz_u512_vec_t const &text_vec) const noexcept {
+
+        sz_u512_vec_t shuffled_subs_vecs[4];
+        sz_u512_vec_t substituted_vec;
+        __mmask64 is_third_or_fourth, is_second_or_fourth;
+
+        // Only the bottom 6 bits of a byte are used in `VPERB`, so we don't even need to mask.
+        shuffled_subs_vecs[0].zmm = _mm512_permutexvar_epi8(text_vec.zmm, row_subs_vecs_[0].zmm);
+        shuffled_subs_vecs[1].zmm = _mm512_permutexvar_epi8(text_vec.zmm, row_subs_vecs_[1].zmm);
+        shuffled_subs_vecs[2].zmm = _mm512_permutexvar_epi8(text_vec.zmm, row_subs_vecs_[2].zmm);
+        shuffled_subs_vecs[3].zmm = _mm512_permutexvar_epi8(text_vec.zmm, row_subs_vecs_[3].zmm);
+
+        // To blend we can invoke three `_mm512_cmplt_epu8_mask`, but we can also achieve the same using
+        // the AND logical operation, checking the top two bits of every byte. Continuing this thought,
+        // we can use the `VPTESTMB` instruction to output the mask after the AND.
+        is_third_or_fourth = _mm512_test_epi8_mask(text_vec.zmm, is_third_or_fourth_vec_.zmm);
+        is_second_or_fourth = _mm512_test_epi8_mask(text_vec.zmm, is_second_or_fourth_vec_.zmm);
+        substituted_vec.zmm = _mm512_mask_blend_epi8(
+            is_third_or_fourth,
+            // Choose between the first and the second.
+            _mm512_mask_blend_epi8(is_second_or_fourth, shuffled_subs_vecs[0].zmm, shuffled_subs_vecs[1].zmm),
+            // Choose between the third and the fourth.
+            _mm512_mask_blend_epi8(is_second_or_fourth, shuffled_subs_vecs[2].zmm, shuffled_subs_vecs[3].zmm));
+
+        return substituted_vec;
+    }
+};
+
+/**
+ *  @brief  Helper object for Ice Lake CPUs. It's designed for horizontal layout "walkers", operating over 16-bit costs.
+ *
+ *  This is a common abstraction for both:
+ *  - Local SW and global NW alignment.
+ *  - Serial and parallel implementations.
+ *  - Any memory allocator used.
+ */
+template <sz_similarity_locality_t locality_, sz_capability_t capability_>
+struct linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_256x256_t, sz_maximize_score_k,
+                     locality_, capability_, std::enable_if_t<capability_ & sz_cap_ice_k>>
+    : public linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_256x256_t, sz_maximize_score_k,
+                           locality_, sz_cap_serial_k, void> {
+
+    using linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_256x256_t, sz_maximize_score_k,
+                        locality_, sz_cap_serial_k, void>::linear_scorer; // Make the constructors visible
+
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
+    static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_capability_t capability_k = capability_;
+
+    lookup_in256bytes_ice_t lookup_;
 
     void operator()(                                                                   //
-        char const *first_reversed_slice, char const *second_slice, sz_size_t n,       //
+        constant_iterator<char> first_char, char const *second_slice, sz_size_t n,     //
         sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
         sz_i16_t const *scores_pre_deletion, sz_i16_t *scores_new) noexcept {
 
+        // Load a new substitution row.
+        sz_i16_t const gap = this->gap_cost_;
+        error_cost_t const *substitutions_row = &this->substituter_.cells[(sz_u8_t)*first_char][0];
+        lookup_.reload(substitutions_row);
+
+        sz_size_t const count_slices = n / 64;
+
+#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
+        // Progress through the row 64 characters at a time.
+        for (sz_size_t idx_slice = 0; idx_slice != count_slices; ++idx_slice)
+            slice_64chars(second_slice, idx_slice * 64, scores_pre_substitution, scores_pre_insertion, scores_new);
+
+        // Handle the tail with a less efficient kernel - at most 2 iterations of the following loop:
+        for (sz_size_t idx_half_slice = count_slices * 2; idx_half_slice * 32 < n; ++idx_half_slice)
+            slice_under32chars(second_slice, idx_half_slice * 32, n, scores_pre_substitution, scores_pre_insertion,
+                               scores_new);
+
+        // Horizontally compute the running minimum of the last row.
+        // Simply disabling this operation results in 5x performance improvement, meaning
         //
+        // To perform the same operation in vectorized form, we need to perform a tree-like reduction,
+        // that will involve multiple steps. It's quite expensive and should be first tested in the
+        // "experimental" section.
+        _sz_assert(scores_pre_substitution + 1 == scores_pre_insertion && "Expects horizontal traversal of DP matrix");
+        _sz_assert(scores_pre_deletion + 1 == scores_new && "Expects horizontal traversal of DP matrix");
+        sz_i16_t last_in_row = scores_pre_deletion[0];
+        for (size_t i = 0; i < n; ++i) scores_new[i] = last_in_row = sz_max_of_two(scores_new[i], last_in_row + gap);
+        this->last_score_ = last_in_row;
+    }
+
+    void slice_64chars(char const *second_slice, sz_size_t i,                                         //
+                       sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
+                       sz_i16_t *scores_new) const noexcept {
+
+        sz_u512_vec_t second_vec;
+        sz_u512_vec_t pre_substitution_vecs[2], pre_gap_vecs[2];
+        sz_u512_vec_t cost_of_substitution_i8_vec, cost_of_substitution_i16_vecs[2];
+        sz_u512_vec_t cost_if_substitution_vecs[2], cost_if_gap_vecs[2], cell_score_vecs[2];
+
+        // Initialize constats:
+        sz_u512_vec_t ones_vec;
+        ones_vec.zmm = _mm512_set1_epi16(1);
+
+        // Load the data without any masks:
+        second_vec.zmm = _mm512_loadu_epi8(second_slice + i);
+        pre_substitution_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_substitution + i + 0);
+        pre_substitution_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_substitution + i + 32);
+        pre_gap_vecs[0].zmm = _mm512_loadu_epi16(scores_pre_insertion + i + 0);
+        pre_gap_vecs[1].zmm = _mm512_loadu_epi16(scores_pre_insertion + i + 32);
+
+        // First, sign-extend the substitution cost vector.
+        cost_of_substitution_i8_vec = lookup_.lookup64(second_vec);
+        cost_of_substitution_i16_vecs[0].zmm =
+            _mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 0));
+        cost_of_substitution_i16_vecs[1].zmm =
+            _mm512_cvtepi8_epi16(_mm512_extracti64x4_epi64(cost_of_substitution_i8_vec.zmm, 1));
+
+        // Then compute the data-parallel part, assuming the cost of deletions will be propagated
+        // left to right outside of this loop.
+        cost_if_substitution_vecs[0].zmm =
+            _mm512_add_epi16(pre_substitution_vecs[0].zmm, cost_of_substitution_i16_vecs[0].zmm);
+        cost_if_substitution_vecs[1].zmm =
+            _mm512_add_epi16(pre_substitution_vecs[1].zmm, cost_of_substitution_i16_vecs[1].zmm);
+        cost_if_gap_vecs[0].zmm = _mm512_add_epi16(pre_gap_vecs[0].zmm, ones_vec.zmm);
+        cost_if_gap_vecs[1].zmm = _mm512_add_epi16(pre_gap_vecs[1].zmm, ones_vec.zmm);
+        cell_score_vecs[0].zmm = _mm512_max_epi16(cost_if_substitution_vecs[0].zmm, cost_if_gap_vecs[0].zmm);
+        cell_score_vecs[1].zmm = _mm512_max_epi16(cost_if_substitution_vecs[1].zmm, cost_if_gap_vecs[1].zmm);
+
+        // In Local Alignment for SW we also need to compare to zero and set the result to zero if negative.
+        if constexpr (locality_ == sz_similarity_local_k)
+            cell_score_vecs[0].zmm = _mm512_max_epi16(cell_score_vecs[0].zmm, _mm512_setzero_epi32()),
+            cell_score_vecs[1].zmm = _mm512_max_epi16(cell_score_vecs[1].zmm, _mm512_setzero_epi32());
+
+        // Dump partial results to the output buffer.
+        _mm512_storeu_epi16(scores_new + i + 0, cell_score_vecs[0].zmm);
+        _mm512_storeu_epi16(scores_new + i + 32, cell_score_vecs[1].zmm);
+    }
+
+    void slice_under32chars(char const *second_slice, sz_size_t i, sz_size_t n,                            //
+                            sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
+                            sz_i16_t *scores_new) const noexcept {
+
+        __mmask32 load_mask;
+        sz_u512_vec_t second_vec; // ! Only up to 32 bytes in the low YMM section will be used
+        sz_u512_vec_t pre_substitution_vec, pre_gap_vec;
+        sz_u512_vec_t cost_of_substitution_vec;
+        sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+
+        // Initialize constats:
+        sz_u512_vec_t ones_vec;
+        ones_vec.zmm = _mm512_set1_epi16(1);
+
+        // Load the data with a mask:
+        load_mask = _sz_u32_clamp_mask_until(n - i);
+        second_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, second_slice + i);
+        pre_substitution_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
+        pre_gap_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
+
+        // First, sign-extend the substitution cost vector.
+        cost_of_substitution_vec.zmm = _mm512_cvtepi8_epi16(lookup_.lookup64(second_vec).ymms[0]);
+
+        // Then compute the data-parallel part, assuming the cost of deletions will be propagated
+        // left to right outside of this loop.
+        cost_if_substitution_vec.zmm = _mm512_add_epi16(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
+        cost_if_gap_vec.zmm = _mm512_add_epi16(pre_gap_vec.zmm, ones_vec.zmm);
+        cell_score_vec.zmm = _mm512_max_epi16(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
+
+        // In Local Alignment for SW we also need to compare to zero and set the result to zero if negative.
+        if constexpr (locality_ == sz_similarity_local_k)
+            cell_score_vec.zmm = _mm512_max_epi16(cell_score_vec.zmm, _mm512_setzero_epi32());
+
+        // Dump partial results to the output buffer.
+        _mm512_mask_storeu_epi16(scores_new + i, load_mask, cell_score_vec.zmm);
     }
 };
-#endif
+
+/**
+ *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the Ice Lake (+OpenMP) backend.
+ *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
+ */
+template <typename allocator_type_, sz_capability_t capability_>
+struct needleman_wunsch_score<char, error_costs_256x256_t, allocator_type_, capability_,
+                              std::enable_if_t<capability_ & sz_cap_ice_k>> {
+
+    using char_t = char;
+    using substituter_t = error_costs_256x256_t;
+    using allocator_t = allocator_type_;
+
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
+    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
+
+    using horizontal_i16_t = horizontal_walker<char_t, sz_i16_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                               sz_similarity_global_k, capability_serialized_k>;
+    using horizontal_i32_t = horizontal_walker<char_t, sz_i32_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                               sz_similarity_global_k, capability_wout_simd_k>;
+    using horizontal_i64_t = horizontal_walker<char_t, sz_i64_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                               sz_similarity_global_k, capability_wout_simd_k>;
+
+    substituter_t substituter_ {};
+    error_cost_t gap_cost_ {1};
+    allocator_t alloc_ {};
+
+    needleman_wunsch_score(allocator_t alloc = allocator_t {}) noexcept : alloc_(alloc) {}
+    needleman_wunsch_score(substituter_t subs, error_cost_t gap_cost, allocator_t alloc = allocator_t {}) noexcept
+        : substituter_(subs), gap_cost_(gap_cost), alloc_(alloc) {}
+
+    /**
+     *  @param[in] first The first string.
+     *  @param[in] second The second string.
+     *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
+     */
+    status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref) const noexcept {
+
+        sz_size_t const first_length = first.length();
+        sz_size_t const second_length = second.length();
+        if (first_length == 0) {
+            result_ref = second_length * gap_cost_;
+            return status_t::success_k;
+        }
+        if (second_length == 0) {
+            result_ref = first_length * gap_cost_;
+            return status_t::success_k;
+        }
+
+        // Estimate the maximum dimension of the DP matrix
+        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+
+        // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
+        // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
+        // Assuming each individual cost falls in [-128, 127], the `i16` range of [-32768, 32767] is sufficient
+        // for inputs under (32768 / 128) = 256 characters.
+        status_t status = status_t::success_k;
+        if (max_dim < 256u) {
+            sz_i16_t result_i16;
+            status = horizontal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
+            if (status == status_t::success_k) result_ref = result_i16;
+        }
+        // Assuming each individual cost falls in [-128, 127], the `i32` range of [-2147483648, 2147483647] is
+        // sufficient for inputs under (2147483648 / 128) = 16777216 characters.
+        else if (max_dim < 16777216u) {
+            sz_i32_t result_i32;
+            status = horizontal_i32_t {substituter_, gap_cost_, alloc_}(first, second, result_i32);
+            if (status == status_t::success_k) result_ref = result_i32;
+        }
+        else {
+            sz_i64_t result_i64;
+            status = horizontal_i64_t {substituter_, gap_cost_, alloc_}(first, second, result_i64);
+            if (status == status_t::success_k) result_ref = result_i64;
+        }
+
+        return status;
+    }
+};
+
+/**
+ *  @brief  Computes the @b byte-level Smith-Waterman score between two strings using the Ice Lake (+OpenMP) backend.
+ *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
+ */
+template <typename allocator_type_, sz_capability_t capability_>
+struct smith_waterman_score<char, error_costs_256x256_t, allocator_type_, capability_,
+                            std::enable_if_t<capability_ & sz_cap_ice_k>> {
+
+    using char_t = char;
+    using substituter_t = error_costs_256x256_t;
+    using allocator_t = allocator_type_;
+
+    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
+    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
+
+    using horizontal_i16_t = horizontal_walker<char_t, sz_i16_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                               sz_similarity_local_k, capability_serialized_k>;
+    using horizontal_i32_t = horizontal_walker<char_t, sz_i32_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                               sz_similarity_local_k, capability_wout_simd_k>;
+    using horizontal_i64_t = horizontal_walker<char_t, sz_i64_t, substituter_t, allocator_t, sz_maximize_score_k,
+                                               sz_similarity_local_k, capability_wout_simd_k>;
+
+    substituter_t substituter_ {};
+    error_cost_t gap_cost_ {1};
+    allocator_t alloc_ {};
+
+    smith_waterman_score(allocator_t alloc = allocator_t {}) noexcept : alloc_(alloc) {}
+    smith_waterman_score(substituter_t subs, error_cost_t gap_cost, allocator_t alloc = allocator_t {}) noexcept
+        : substituter_(subs), gap_cost_(gap_cost), alloc_(alloc) {}
+
+    /**
+     *  @param[in] first The first string.
+     *  @param[in] second The second string.
+     *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
+     */
+    status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref) const noexcept {
+
+        sz_size_t const first_length = first.length();
+        sz_size_t const second_length = second.length();
+        if (first_length == 0) {
+            result_ref = second_length * gap_cost_;
+            return status_t::success_k;
+        }
+        if (second_length == 0) {
+            result_ref = first_length * gap_cost_;
+            return status_t::success_k;
+        }
+
+        // Estimate the maximum dimension of the DP matrix
+        sz_size_t const min_dim = sz_min_of_two(first_length, second_length) + 1;
+        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+
+        // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
+        // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
+        // Assuming each individual cost falls in [-128, 127], the `i16` range of [-32768, 32767] is sufficient
+        // for inputs under (32768 / 128) = 256 characters.
+        status_t status = status_t::success_k;
+        if (max_dim < 256u) {
+            sz_i16_t result_i16;
+            status = horizontal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
+            if (status == status_t::success_k) result_ref = result_i16;
+        }
+        // Assuming each individual cost falls in [-128, 127], the `i32` range of [-2147483648, 2147483647] is
+        // sufficient for inputs under (2147483648 / 128) = 16777216 characters.
+        else if (max_dim < 16777216u) {
+            sz_i32_t result_i32;
+            status = horizontal_i32_t {substituter_, gap_cost_, alloc_}(first, second, result_i32);
+            if (status == status_t::success_k) result_ref = result_i32;
+        }
+        else {
+            sz_i64_t result_i64;
+            status = horizontal_i64_t {substituter_, gap_cost_, alloc_}(first, second, result_i64);
+            if (status == status_t::success_k) result_ref = result_i64;
+        }
+
+        return status;
+    }
+};
 
 #pragma clang attribute pop
 #pragma GCC pop_options
