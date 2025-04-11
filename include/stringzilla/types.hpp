@@ -128,6 +128,7 @@ enum class status_t {
  */
 struct error_costs_uniform_t {
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? 0 : 1; }
+    constexpr error_cost_t operator()(sz_rune_t a, sz_rune_t b) const noexcept { return a == b ? 0 : 1; }
 };
 
 template <typename value_type_>
