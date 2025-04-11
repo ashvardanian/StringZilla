@@ -104,7 +104,7 @@ inline std::uint64_t cpu_cycle_counter() {
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
     return (static_cast<std::uint64_t>(hi) << 32) | lo;
 #elif defined(__aarch64__) || defined(_SZ_IS_ARM64)
-    // On ARM64, read the virtual count register (CNTVCT_EL0) which provides cycle count.
+    // On ARM64, read the virtual count register `CNTVCT_EL0` which provides cycle count.
     std::uint64_t cnt;
     asm volatile("mrs %0, cntvct_el0" : "=r"(cnt));
     return cnt;
@@ -185,9 +185,9 @@ static void do_not_optimize(argument_type &&value) noexcept {
  */
 inline std::size_t bit_floor(std::size_t n) {
     if (n == 0) return 0;
-    std::size_t most_siginificant_bit_position = 0;
-    while (n > 1) n >>= 1, most_siginificant_bit_position++;
-    return static_cast<std::size_t>(1) << most_siginificant_bit_position;
+    std::size_t most_significant_bit_position = 0;
+    while (n > 1) n >>= 1, most_significant_bit_position++;
+    return static_cast<std::size_t>(1) << most_significant_bit_position;
 }
 
 #if !SZ_USE_CUDA
@@ -195,9 +195,9 @@ using dataset_t = std::string;
 using token_view_t = std::string_view;
 using tokens_t = std::vector<token_view_t>;
 #else
-using dataset_t = std::basic_string<char, std::char_traits<char>, sz::cuda::unified_alloc<char>>;
+using dataset_t = std::basic_string<char, std::char_traits<char>, sz::unified_alloc<char>>;
 using token_view_t = sz::span<char const>;
-using tokens_t = std::vector<token_view_t, sz::cuda::unified_alloc<token_view_t>>;
+using tokens_t = std::vector<token_view_t, sz::unified_alloc<token_view_t>>;
 #endif
 
 /**

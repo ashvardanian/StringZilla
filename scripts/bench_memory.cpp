@@ -260,7 +260,7 @@ struct fill_random_from_sz {
 void memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value) { std::memset(output, value, length); }
 
 void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
-    uniform_uint8_distribution_t distribution;
+    uniform_u8_distribution_t distribution;
     std::generate(output, output + length, [&]() -> char { return distribution(global_random_generator()); });
     sz_unused(nonce);
 }

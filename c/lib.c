@@ -197,9 +197,6 @@ typedef struct sz_implementations_t {
     sz_find_byteset_t find_byteset;
     sz_find_byteset_t rfind_byteset;
 
-    sz_levenshtein_distance_t levenshtein_distance;
-    sz_needleman_wunsch_score_t alignment_score;
-
     sz_sequence_argsort_t sequence_argsort;
     sz_sequence_intersect_t sequence_intersect;
     sz_pgrams_sort_t pgrams_sort;
@@ -241,9 +238,6 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     impl->rfind_byte = sz_rfind_byte_serial;
     impl->find_byteset = sz_find_byteset_serial;
     impl->rfind_byteset = sz_rfind_byteset_serial;
-
-    impl->levenshtein_distance = sz_levenshtein_distance_serial;
-    impl->alignment_score = sz_needleman_wunsch_score_serial;
 
     impl->sequence_argsort = sz_sequence_argsort_serial;
     impl->sequence_intersect = sz_sequence_intersect_serial;
@@ -306,9 +300,6 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     if (caps & sz_cap_ice_k) {
         impl->find_byteset = sz_find_byteset_ice;
         impl->rfind_byteset = sz_rfind_byteset_ice;
-
-        impl->levenshtein_distance = sz_levenshtein_distance_ice;
-        impl->alignment_score = sz_needleman_wunsch_score_ice;
 
         impl->lookup = sz_lookup_ice;
 
@@ -469,41 +460,6 @@ SZ_DYNAMIC sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_bytese
 
 SZ_DYNAMIC sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
     return sz_dispatch_table.rfind_byteset(text, length, set);
-}
-
-SZ_DYNAMIC sz_status_t sz_hamming_distance( //
-    sz_cptr_t a, sz_size_t a_length,        //
-    sz_cptr_t b, sz_size_t b_length,        //
-    sz_size_t bound, sz_size_t *result) {
-    return sz_hamming_distance_serial(a, a_length, b, b_length, bound, result);
-}
-
-SZ_DYNAMIC sz_status_t sz_hamming_distance_utf8( //
-    sz_cptr_t a, sz_size_t a_length,             //
-    sz_cptr_t b, sz_size_t b_length,             //
-    sz_size_t bound, sz_size_t *result) {
-    return sz_hamming_distance_utf8_serial(a, a_length, b, b_length, bound, result);
-}
-
-SZ_DYNAMIC sz_status_t sz_levenshtein_distance( //
-    sz_cptr_t a, sz_size_t a_length,            //
-    sz_cptr_t b, sz_size_t b_length,            //
-    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result) {
-    return sz_dispatch_table.levenshtein_distance(a, a_length, b, b_length, bound, alloc, result);
-}
-
-SZ_DYNAMIC sz_status_t sz_levenshtein_distance_utf8( //
-    sz_cptr_t a, sz_size_t a_length,                 //
-    sz_cptr_t b, sz_size_t b_length,                 //
-    sz_size_t bound, sz_memory_allocator_t *alloc, sz_size_t *result) {
-    return _sz_levenshtein_distance_wagner_fisher_serial(a, a_length, b, b_length, bound, sz_true_k, alloc, result);
-}
-
-SZ_DYNAMIC sz_status_t sz_needleman_wunsch_score( //
-    sz_cptr_t a, sz_size_t a_length,              //
-    sz_cptr_t b, sz_size_t b_length,              //
-    sz_error_cost_t const *subs, sz_error_cost_t gap, sz_memory_allocator_t *alloc, sz_ssize_t *result) {
-    return sz_dispatch_table.alignment_score(a, a_length, b, b_length, subs, gap, alloc, result);
 }
 
 SZ_DYNAMIC sz_status_t sz_pgrams_sort(sz_pgram_t *array, sz_size_t count, sz_memory_allocator_t *alloc,
