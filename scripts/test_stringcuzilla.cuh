@@ -266,35 +266,79 @@ template <typename score_type_, typename base_operator_, typename simd_operator_
 void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
                                   std::string_view allowed_chars = {}) {
 
-    std::vector<std::pair<std::string, std::string>> test_cases = {
-        {"ABC", "ABC"},                  // same string; distance ~ 0
-        {"LISTEN", "SILENT"},            // distance ~ 4
-        {"ATCA", "CTACTCACCC"},          // distance ~ 6
-        {"A", "="},                      // distance ~ 1
-        {"A", "A"},                      // distance ~ 0
-        {"", ""},                        // distance ~ 0
-        {"", "ABC"},                     // distance ~ 3
-        {"ABC", ""},                     // distance ~ 3
-        {"ABC", "AC"},                   // one deletion; distance ~ 1
-        {"ABC", "A_BC"},                 // one insertion; distance ~ 1
-        {"ggbuzgjux{}l", "gbuzgjux{}l"}, // one (prepended) insertion; distance ~ 1
-        {"ABC", "ADC"},                  // one substitution; distance ~ 1
-        {"APPLE", "APLE"},               // distance ~ 1
-        //
-        // Unicode:
-        {"αβγδ", "αγδ"},                      // Each Greek symbol is 2 bytes in size; 2 bytes, 1 runes diff.
-        {"مرحبا بالعالم", "مرحبا يا عالم"},   // "Hello World" vs "Welcome to the World" ?; 3 bytes, 2 runes diff.
-        {"école", "école"},                   // letter "é" as a single character vs "e" + "´"; 3 bytes, 2 runes diff.
-        {"Schön", "Scho\u0308n"},             // "ö" represented as "o" + "¨"; 3 bytes, 2 runes diff.
-        {"💖", "💗"},                         // 4-byte emojis: Different hearts; 1 bytes, 1 runes diff.
-        {"𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓"},          // Ancient Chinese characters, no spaces vs spaces; 3 bytes, 3 runes
-        {"München", "Muenchen"},              // German name with umlaut vs. its transcription; 2 bytes, 2 runes
-        {"façade", "facade"},                 // "ç" represented as "c" with cedilla vs. plain "c"; 2 bytes, 1 runes
-        {"こんにちは世界", "こんばんは世界"}, // "Good morning world" vs "Good evening world"; 3 bytes, 2 runes
-        {"👩‍👩‍👧‍👦", "👨‍👩‍👧‍👦"}, // Different family emojis; 1 bytes, 1 runes
-        {"Data科学123", "Data科學321"},                             // 3 bytes, 3 runes
-        {"🙂🌍🚀", "🙂🌎✨"},                                       // 5 bytes, 2 runes
+    std::vector<std::pair<std::string, std::string>> test_cases;
+    auto append = [&test_cases](std::string const &first, std::string const &second) {
+        test_cases.emplace_back(first, second);
     };
+
+    // Some vary basic variants:
+    append("ABC", "ABC");                  // same string; distance ~ 0
+    append("LISTEN", "SILENT");            // distance ~ 4
+    append("ATCA", "CTACTCACCC");          // distance ~ 6
+    append("A", "=");                      // distance ~ 1
+    append("A", "A");                      // distance ~ 0
+    append("", "");                        // distance ~ 0
+    append("", "ABC");                     // distance ~ 3
+    append("ABC", "");                     // distance ~ 3
+    append("ABC", "AC");                   // one deletion; distance ~ 1
+    append("ABC", "A_BC");                 // one insertion; distance ~ 1
+    append("ggbuzgjux{}l", "gbuzgjux{}l"); // one (prepended) insertion; distance ~ 1
+    append("ABC", "ADC");                  // one substitution; distance ~ 1
+    append("APPLE", "APLE");               // distance ~ 1
+
+    // Short Unicode samples that we also use on the Python side:
+    append("αβγδ", "αγδ");                      // Each Greek symbol is 2 bytes in size; 2 bytes, 1 runes diff.
+    append("école", "école");                   // letter "é" as a single character vs "e" + "´"; 3 bytes, 2 runes diff.
+    append("Schön", "Scho\u0308n");             // "ö" represented as "o" + "¨"; 3 bytes, 2 runes diff.
+    append("Data科学123", "Data科學321");       // 3 bytes, 3 runes
+    append("🙂🌍🚀", "🙂🌎✨");                 // 5 bytes, 2 runes
+    append("💖", "💗");                         // 4-byte emojis: Different hearts; 1 bytes, 1 runes diff.
+    append("مرحبا بالعالم", "مرحبا يا عالم");   // "Hello World" vs "Welcome to the World" ?; 3 bytes, 2 runes diff.
+    append("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓");          // Ancient Chinese characters, no spaces vs spaces; 3 bytes, 3 runes
+    append("München", "Muenchen");              // German name with umlaut vs. its transcription; 2 bytes, 2 runes
+    append("façade", "facade");                 // "ç" represented as "c" with cedilla vs. plain "c"; 2 bytes, 1 runes
+    append("こんにちは世界", "こんばんは世界"); // "Good morning world" vs "Good evening world"; 3 bytes, 2 runes
+    append("👩‍👩‍👧‍👦", "👨‍👩‍👧‍👦"); // Different family emojis; 1 bytes, 1 runes
+
+    // ~20 characters; two similar integral expressions that differ in the upper limit.
+    append("∫₀¹ x² dx = 1/3", "∫₀² x² dx = 8/3");
+
+    // ~50 characters; typography test with box-drawing, quote style, currency symbol, dash type, and case differences.
+    append("╔══╦══╗ • ‘single’ and “double” quotes, € 14.95 — OK",
+           "╔══╦══╗ • ‘single’ and «double» quotes, $ 14.95 – ok");
+
+    // ~100 characters in one string combining Armenian, Georgian, and Greek:
+    append("Երևան, თბილისი, και Αθήνα – 3 մայրքաղաքներ: Բարի գալուստ, მოგესალმებით, και Καλώς ορίσατε!",
+           "Երևան, თბილისი, και Αθήνα – երեք մայրքաղաքներ: բարև, სტუმრები, και Καλώς ήρθατε!");
+
+    // ~200 characters in ASCII English, Traditional Chinese, and Russian, describing their capitals.
+    append("London, the iconic capital of the United Kingdom, seamlessly blends centuries-old traditions with bold "
+           "modernity;"
+           "倫敦作為英國的標誌性首都，其歷史沉澱與當代創新彼此交融，展現獨特風範;"
+           "Лондон, столица Великобритании, объединяет древние традиции с динамичной современностью, "
+           "offering a rich tapestry of cultural heritage and visionary progress.", // First string ends here ;)
+           "London, the renowned capital of the UK, fuses its rich historical legacy with a spirit of modern "
+           "innovation;"
+           "倫敦，作為英國的著名首都，以悠久歷史與現代創意相互融合，呈現獨特都市風貌;"
+           "Лондон – известная столица Великобритании, где древность встречается с современной энергией, "
+           "creating an inspiring environment for cultural exploration and future development.");
+
+    // ~300 characters; a complex variant with translations and visible regions of Korean, Japanese, Chinese
+    // (traditional and simplified), German, French, Spanish.
+    append("An epic voyage through multicultural realms: "
+           "In a city where ancient traditions fuse with modern innovation, dynamic energy permeates every street. "
+           "서울의 번화한 거리에선 전통과 현대가 어우러져 감동을 주며, 東京では伝統美と未来の夢が共鳴する。在這裡, "
+           "傳統文化與現代科技和諧並存, 而这里, 传统文化与现代科技交织创新; "
+           "Deutschland zeigt eine reiche Geschichte, "
+           "la France révèle une élégance subtile, "
+           "y España irradia pasión y color.", // First string ends here ;)
+           "An epic journey through diverse cultures: "
+           "In a town where old traditions fuse with innovation, energy permeates every historic street. "
+           "서울의 번화한 거리는 전통과 현대가 어울려 독특한 풍경을 이루며, "
+           "東京では伝統美と未来への展望が響き合う。在這裡, 傳統與現代科技融合無間, 而这里, 传统与现代科技紧密相连; "
+           "Deutschland offenbart eine stolze Geschichte, "
+           "la France incarne une élégance fine, "
+           "y España resplandece con pasión y vivacidad.");
 
     // First check with a batch-size of 1
     using score_t = score_type_;
