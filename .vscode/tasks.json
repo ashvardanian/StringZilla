@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build Test: Debug",
+            "label": "Build Test: Debug C++",
             "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringzilla_test_cpp20",
             "args": [],
             "type": "shell",
@@ -18,6 +18,30 @@
                     }
                 ]
             }
+        },
+        {
+            "label": "Build Test: Debug Parallel C++",
+            "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringcuzilla_test_cpp20",
+            "args": [],
+            "type": "shell",
+            "osx": {
+                "environment": [
+                    {
+                        "name": "CXX",
+                        "value": "$(brew --prefix llvm)/bin/clang++"
+                    },
+                    {
+                        "name": "CC",
+                        "value": "$(brew --prefix llvm)/bin/clang"
+                    }
+                ]
+            }
+        },
+        {
+            "label": "Build Test: Debug CUDA",
+            "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringcuzilla_test_cu20",
+            "args": [],
+            "type": "shell",
         },
         {
             "label": "Build Benchmarks: Debug",
