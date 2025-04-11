@@ -37,8 +37,14 @@ int main(int argc, char const **argv) {
     std::printf("Hi, dear tester! You look nice today!\n");
     if (auto code = sz::scripts::log_environment(); code != 0) return code;
 
-    sz::scripts::test_similarity_scores_equivalence();
-    sz::scripts::test_similarity_scores_memory_usage();
+    try {
+        sz::scripts::test_similarity_scores_equivalence();
+        sz::scripts::test_similarity_scores_memory_usage();
+    }
+    catch (std::exception const &e) {
+        std::fprintf(stderr, "Failed with: %s\n", e.what());
+        return 1;
+    }
 
     std::printf("All tests passed... Unbelievable!\n");
     return 0;
