@@ -727,9 +727,13 @@ typedef union sz_u128_vec_t {
     uint64x2_t u64x2;
 #endif
     sz_u64_t u64s[2];
+    sz_i64_t i64s[2];
     sz_u32_t u32s[4];
+    sz_i32_t i32s[4];
     sz_u16_t u16s[8];
+    sz_i16_t i16s[8];
     sz_u8_t u8s[16];
+    sz_i8_t i8s[16];
 } sz_u128_vec_t;
 
 /**
@@ -749,9 +753,13 @@ typedef union sz_u256_vec_t {
     uint64x2_t u64x2s[2];
 #endif
     sz_u64_t u64s[4];
+    sz_i64_t i64s[4];
     sz_u32_t u32s[8];
+    sz_i32_t i32s[8];
     sz_u16_t u16s[16];
+    sz_i16_t i16s[16];
     sz_u8_t u8s[32];
+    sz_i8_t i8s[32];
 } sz_u256_vec_t;
 
 /**
@@ -778,7 +786,9 @@ typedef union sz_u512_vec_t {
     sz_u32_t u32s[16];
     sz_i32_t i32s[16];
     sz_u16_t u16s[32];
+    sz_i16_t i16s[32];
     sz_u8_t u8s[64];
+    sz_i8_t i8s[64];
 } sz_u512_vec_t;
 
 #pragma endregion
