@@ -68,7 +68,7 @@
 #error "This test requires C++11 or later."
 #endif
 
-#include "test.hpp" // `global_random_generator`, `random_string`
+#include "test_stringzilla.hpp" // `global_random_generator`, `random_string`
 
 namespace sz = ashvardanian::stringzilla;
 using namespace sz::scripts;

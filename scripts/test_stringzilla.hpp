@@ -1,6 +1,6 @@
 /**
  *  @brief  Helper structures and functions for C++ unit- and stress-tests.
- *  @file   test.hpp
+ *  @file   test_stringzilla.hpp
  *  @author Ash Vardanian
  */
 #pragma once
