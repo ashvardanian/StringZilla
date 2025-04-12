@@ -4824,7 +4824,7 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
         _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
         _mm512_mask_storeu_epi8(target + head_length + body_length, tail_mask,
-                                _mm512_maskz_loadu_epi8(tail_mask, source));
+                                _mm512_maskz_loadu_epi8(tail_mask, source + head_length + body_length));
 
         // Now in the main loop, we can use non-temporal loads and stores,
         // performing the operation in both directions.
