@@ -61,6 +61,9 @@
 namespace ashvardanian {
 namespace stringzilla {
 
+struct error_costs_256x256_t;
+struct error_costs_26x26ascii_t;
+
 /**
  *  @brief  Helper method to guess the amount of SRAM we want to effectively process the input
  *          without fetching from RAM/VRAM all the time, including the space for 3 diagonals
@@ -812,7 +815,7 @@ struct levenshtein_distance_utf8 {
  */
 template <                                              //
     typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_uniform_t, //
+    typename substituter_type_ = error_costs_256x256_t, //
     typename allocator_type_ = dummy_alloc_t,           //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
@@ -905,7 +908,7 @@ struct needleman_wunsch_score {
  */
 template <                                              //
     typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_uniform_t, //
+    typename substituter_type_ = error_costs_256x256_t, //
     typename allocator_type_ = dummy_alloc_t,           //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
@@ -1153,7 +1156,7 @@ struct levenshtein_distances_utf8 {
 
 template <                                              //
     typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_uniform_t, //
+    typename substituter_type_ = error_costs_256x256_t, //
     typename allocator_type_ = dummy_alloc_t,           //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
@@ -1195,7 +1198,7 @@ struct needleman_wunsch_scores {
 
 template <                                              //
     typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_uniform_t, //
+    typename substituter_type_ = error_costs_256x256_t, //
     typename allocator_type_ = dummy_alloc_t,           //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
