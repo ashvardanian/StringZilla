@@ -263,9 +263,9 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
  *          as well as the similarity scoring functions for bioinformatics-like workloads
  *          on a @b fixed set of different representative ASCII and UTF-8 strings.
  */
-template <typename score_type_, typename base_operator_, typename simd_operator_>
+template <typename score_type_, typename base_operator_, typename simd_operator_, typename... extra_args_>
 void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                  std::string_view allowed_chars = {}) {
+                                  std::string_view allowed_chars = {}, extra_args_ &&...extra_args) {
 
     std::vector<std::pair<std::string, std::string>> test_cases;
     auto append = [&test_cases](std::string const &first, std::string const &second) {
@@ -346,7 +346,11 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
     unified_vector<score_t> results_base(1), results_simd(1);
     arrow_strings_tape_t first_tape, second_tape;
     bool contains_missing_in_any_case = false;
-    for (auto [first, second] : test_cases) {
+
+    // Old C-style for-loops are much more debuggable than range-based loops!
+    for (std::size_t test_idx = 0; test_idx != test_cases.size(); ++test_idx) {
+        auto const &first = test_cases[test_idx].first;
+        auto const &second = test_cases[test_idx].second;
 
         // Check if the input strings fit into our allowed characters set
         if (!allowed_chars.empty()) {
@@ -364,7 +368,7 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
-        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data());
+        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), extra_args...);
         _sz_assert(status_base == status_t::success_k);
         _sz_assert(status_simd == status_t::success_k);
         if (results_base[0] != results_simd[0])
@@ -384,7 +388,7 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
-        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data());
+        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), extra_args...);
         _sz_assert(status_base == status_t::success_k);
         _sz_assert(status_simd == status_t::success_k);
 
@@ -446,11 +450,12 @@ void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_
     }
 }
 
-template <typename score_type_, typename base_operator_, typename simd_operator_>
+template <typename score_type_, typename base_operator_, typename simd_operator_, typename... extra_args_>
 void test_similarity_scores_fixed_and_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                            std::string_view allowed_chars = {}, fuzzy_config_t config = {}) {
-    test_similarity_scores_fixed<score_type_>(base_operator, simd_operator, allowed_chars);
-    test_similarity_scores_fuzzy<score_type_>(base_operator, simd_operator, config);
+                                            std::string_view allowed_chars = {}, fuzzy_config_t config = {},
+                                            extra_args_ &&...extra_args) {
+    test_similarity_scores_fixed<score_type_>(base_operator, simd_operator, allowed_chars, extra_args...);
+    test_similarity_scores_fuzzy<score_type_>(base_operator, simd_operator, config, extra_args...);
 }
 
 /**
@@ -541,10 +546,14 @@ void test_similarity_scores_equivalence() {
 #endif
 
 #if SZ_USE_CUDA
+    gpu_specs_t first_gpu_specs = *gpu_specs();
+#endif
+
+#if SZ_USE_CUDA
     // CUDA Levenshtein distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(          //
         levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
-        levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {});
+        levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {}, {}, {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_HOPPER && 0
@@ -555,15 +564,13 @@ void test_similarity_scores_equivalence() {
 #endif
 
 #if SZ_USE_CUDA
-    // CUDA Needleman-Wunsch distance against Multi-threaded on CPU,
-    // using a compressed smaller matrix to fit into GPU shared memory
-    std::string_view ascii_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    // CUDA Needleman-Wunsch distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
         needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_caps_sp_k> {blosum62_matrix,
                                                                                blosum62_gap_extension_cost}, //
         needleman_wunsch_scores<char, error_matrix_t, dummy_alloc_t, sz_cap_cuda_k> {blosum62_matrix,
                                                                                      blosum62_gap_extension_cost},
-        ascii_alphabet);
+        {}, {}, first_gpu_specs);
 #endif
 }
 
