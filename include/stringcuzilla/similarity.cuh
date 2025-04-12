@@ -728,12 +728,10 @@ cuda_status_t _levenshtein_via_cuda_warp(                                       
     }
 
     // In most cases we should be able to fit many blocks per SM.
-    sz_size_t count_blocks = specs.shared_memory_per_multiprocessor() / shared_memory_per_block;
-    if (count_blocks > specs.max_blocks_per_multiprocessor) count_blocks = specs.max_blocks_per_multiprocessor;
-    if (count_blocks > first_strings.size()) count_blocks = first_strings.size();
-    // std::printf("max blocks to fit memory: %zu.\n", count_blocks);
-    // std::printf("max blocks to match SM thread-count: %zu.\n", count_blocks);
-    // std::printf("max blocks to match input size: %zu.\n", count_blocks);
+    sz_size_t count_blocks_per_multiprocessor = specs.shared_memory_per_multiprocessor() / shared_memory_per_block;
+    if (count_blocks_per_multiprocessor > specs.max_blocks_per_multiprocessor)
+        count_blocks_per_multiprocessor = specs.max_blocks_per_multiprocessor;
+    if (count_blocks_per_multiprocessor > first_strings.size()) count_blocks_per_multiprocessor = first_strings.size();
 
     // Let's use all 32 threads in a warp.
     constexpr sz_size_t threads_per_block = 32u;
@@ -749,8 +747,9 @@ cuda_status_t _levenshtein_via_cuda_warp(                                       
     // On Volta and newer GPUs, there is an extra flag to be set to use more than 48 KB of shared memory per block.
     // CUDA reserves 1 KB of shared memory per thread block, so on H100 we can use up to 227 KB of shared memory.
     // https://docs.nvidia.com/cuda/hopper-tuning-guide/index.html#unified-shared-memory-l1-texture-cache
-    cudaError_t attribute_error = cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                                       specs.shared_memory_per_multiprocessor() - count_blocks * 1024);
+    cudaError_t attribute_error =
+        cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                             specs.shared_memory_per_multiprocessor() - count_blocks_per_multiprocessor * 1024);
     if (attribute_error != cudaSuccess) return {status_t::unknown_k, attribute_error};
 
     // Create CUDA events for timing
@@ -762,13 +761,13 @@ cuda_status_t _levenshtein_via_cuda_warp(                                       
     cudaEventRecord(start_event, stream);
 
     // Enqueue the kernel for execution:
-    cudaError_t launch_error = cudaLaunchKernel( //
-        reinterpret_cast<void *>(kernel),        // Kernel function pointer
-        dim3(count_blocks),                      // Grid dimensions
-        dim3(threads_per_block),                 // Block dimensions
-        kernel_args,                             // Array of kernel argument pointers
-        shared_memory_per_block,                 // Shared memory per block (in bytes)
-        stream);                                 // CUDA stream
+    cudaError_t launch_error = cudaLaunchKernel(                                 //
+        reinterpret_cast<void *>(kernel),                                        // Kernel function pointer
+        dim3(count_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
+        dim3(threads_per_block),                                                 // Block dimensions
+        kernel_args,                                                             // Array of kernel argument pointers
+        shared_memory_per_block,                                                 // Shared memory per block (in bytes)
+        stream);                                                                 // CUDA stream
     if (launch_error != cudaSuccess)
         if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
         else { return {status_t::unknown_k, launch_error}; }
@@ -953,9 +952,10 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
     }
 
     // In most cases we should be able to fit many blocks per SM.
-    sz_size_t count_blocks = specs.shared_memory_per_multiprocessor() / shared_memory_per_block;
-    if (count_blocks > specs.max_blocks_per_multiprocessor) count_blocks = specs.max_blocks_per_multiprocessor;
-    if (count_blocks > first_strings.size()) count_blocks = first_strings.size();
+    sz_size_t count_blocks_per_multiprocessor = specs.shared_memory_per_multiprocessor() / shared_memory_per_block;
+    if (count_blocks_per_multiprocessor > specs.max_blocks_per_multiprocessor)
+        count_blocks_per_multiprocessor = specs.max_blocks_per_multiprocessor;
+    if (count_blocks_per_multiprocessor > first_strings.size()) count_blocks_per_multiprocessor = first_strings.size();
 
     // Let's use all 32 threads in a warp.
     constexpr sz_size_t threads_per_block = 32u;
@@ -970,8 +970,9 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
     // On Volta and newer GPUs, there is an extra flag to be set to use more than 48 KB of shared memory per block.
     // CUDA reserves 1 KB of shared memory per thread block, so on H100 we can use up to 227 KB of shared memory.
     // https://docs.nvidia.com/cuda/hopper-tuning-guide/index.html#unified-shared-memory-l1-texture-cache
-    cudaError_t attribute_error = cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                                       specs.shared_memory_per_multiprocessor() - count_blocks * 1024);
+    cudaError_t attribute_error =
+        cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                             specs.shared_memory_per_multiprocessor() - count_blocks_per_multiprocessor * 1024);
     if (attribute_error != cudaSuccess) return {status_t::unknown_k, attribute_error};
 
     // Create CUDA events for timing
@@ -988,13 +989,13 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
     if (copy_error != cudaSuccess) return {status_t::unknown_k, copy_error};
 
     // Enqueue the kernel for execution:
-    cudaError_t launch_error = cudaLaunchKernel( //
-        reinterpret_cast<void *>(kernel),        // Kernel function pointer
-        dim3(count_blocks),                      // Grid dimensions
-        dim3(threads_per_block),                 // Block dimensions
-        kernel_args,                             // Array of kernel argument pointers
-        shared_memory_per_block,                 // Shared memory per block (in bytes)
-        stream);                                 // CUDA stream
+    cudaError_t launch_error = cudaLaunchKernel(                                 //
+        reinterpret_cast<void *>(kernel),                                        // Kernel function pointer
+        dim3(count_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
+        dim3(threads_per_block),                                                 // Block dimensions
+        kernel_args,                                                             // Array of kernel argument pointers
+        shared_memory_per_block,                                                 // Shared memory per block (in bytes)
+        stream);                                                                 // CUDA stream
     if (launch_error != cudaSuccess)
         if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
         else { return {status_t::unknown_k, launch_error}; }
