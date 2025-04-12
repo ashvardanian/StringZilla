@@ -542,31 +542,27 @@ void test_similarity_scores_equivalence() {
 
 #if SZ_USE_CUDA
     // CUDA Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(               //
-        levenshtein_distances<char, malloc_t, sz_cap_parallel_k> {}, //
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(          //
+        levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
         levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {});
 #endif
 
 #if SZ_USE_HOPPER && 0
     // CUDA Levenshtein distance on Hopper against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(               //
-        levenshtein_distances<char, malloc_t, sz_cap_parallel_k> {}, //
-        levenshtein_distances<char, sz_cap_hopper_k> {});
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(          //
+        levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
+        levenshtein_distances<char, dummy_alloc_t, sz_cap_hopper_k> {});
 #endif
-
-    // Switch to the GPU, using an identical matrix, but move it into unified memory
-    unified_vector<error_mat_t> blosum62_unified(1);
-    blosum62_unified[0] = blosum62_mat;
 
 #if SZ_USE_CUDA
     // CUDA Needleman-Wunsch distance against Multi-threaded on CPU,
     // using a compressed smaller matrix to fit into GPU shared memory
     std::string_view ascii_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_cap_parallel_k> {blosum62_matrix,
-                                                                                    blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<char, error_mat_t *, sz_cap_cuda_k> {blosum62_unified.data(),
-                                                                     blosum62_gap_extension_cost},
+        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_caps_sp_k> {blosum62_matrix,
+                                                                               blosum62_gap_extension_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, dummy_alloc_t, sz_cap_cuda_k> {blosum62_matrix,
+                                                                                     blosum62_gap_extension_cost},
         ascii_alphabet);
 #endif
 }
