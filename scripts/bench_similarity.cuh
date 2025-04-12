@@ -35,8 +35,9 @@ struct similarities_callable {
     engine_t engine = {};
     std::tuple<extra_args_...> extra_args = {};
 
-    similarities_callable(environment_t const &env, similarities_t &res, sz_size_t batch_size, extra_args_... args)
-        : env(env), results(res), extra_args(args...) {
+    similarities_callable(environment_t const &env, similarities_t &res, sz_size_t batch_size, engine_t eng = {},
+                          extra_args_... args)
+        : env(env), results(res), engine(eng), extra_args(args...) {
         if (env.tokens.size() <= batch_size) throw std::runtime_error("Batch size is too large.");
     }
 
@@ -122,7 +123,7 @@ void bench_levenshtein(environment_t const &env) {
 #if SZ_USE_CUDA
         bench_unary(
             env, "levenshtein_cuda:batch"s + std::to_string(batch_size), call_baseline,
-            similarities_callable<levenshtein_cuda_t, sz::gpu_specs_t>(env, results_accelerated, batch_size, specs),
+            similarities_callable<levenshtein_cuda_t, sz::gpu_specs_t>(env, results_accelerated, batch_size, {}, specs),
             callable_no_op_t {},        // preprocessing
             similarities_equality_t {}) // equality check
             .log(baseline);
@@ -148,6 +149,10 @@ void bench_needleman_wunsch(environment_t const &env) {
 
     using namespace std::string_literals; // for "s" suffix
 
+    constexpr error_t blosum62_gap_extension_cost = -4;
+    auto blosum62_mat = error_costs_26x26ascii_t::blosum62();
+    auto blosum62_matrix = blosum62_mat.decompressed();
+
 #if SZ_USE_CUDA
     sz::gpu_specs_t specs = *sz::gpu_specs();
 #endif
@@ -165,13 +170,15 @@ void bench_needleman_wunsch(environment_t const &env) {
         results_baseline.resize(batch_size);
         results_accelerated.resize(batch_size);
 
-        auto call_baseline = similarities_callable<needleman_wunsch_serial_t>(env, results_baseline, batch_size);
+        auto call_baseline = similarities_callable<needleman_wunsch_serial_t>(
+            env, results_baseline, batch_size, {blosum62_matrix, blosum62_gap_extension_cost});
         auto name_baseline = "needleman_wunsch_serial:batch"s + std::to_string(batch_size);
         bench_result_t baseline = bench_unary(env, name_baseline, call_baseline).log();
 
 #if SZ_USE_ICE
         bench_unary(env, "needleman_wunsch_ice:batch"s + std::to_string(batch_size), call_baseline,
-                    similarities_callable<needleman_wunsch_ice_t>(env, results_accelerated, batch_size),
+                    similarities_callable<needleman_wunsch_ice_t>(env, results_accelerated, batch_size,
+                                                                  {blosum62_matrix, blosum62_gap_extension_cost}),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(baseline);
@@ -180,8 +187,8 @@ void bench_needleman_wunsch(environment_t const &env) {
 
 #if SZ_USE_CUDA
         bench_unary(env, "needleman_wunsch_cuda:batch"s + std::to_string(batch_size), call_baseline,
-                    similarities_callable<needleman_wunsch_cuda_t, sz::gpu_specs_t>(env, results_accelerated,
-                                                                                    batch_size, specs),
+                    similarities_callable<needleman_wunsch_cuda_t, sz::gpu_specs_t>(
+                        env, results_accelerated, batch_size, {blosum62_matrix, blosum62_gap_extension_cost}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(baseline);
