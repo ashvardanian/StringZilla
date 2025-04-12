@@ -88,8 +88,8 @@ struct similarity_memory_requirements {
      *  @param[in] first_length The length of the first string in characters/codepoints.
      *  @param[in] second_length The length of the second string in characters/codepoints.
      *  @param[in] max_magnitude_change The absolute value of the maximum change in nearby cells.
-     *  @param[in] bytes_per_character The number of bytes per character, 4 for UTF-32, 1 for ASCII.
-     *  @param[in] word_alignment The alignment of the data in bytes, 4 for CUDA, 64 for AVX-512.
+     *  @param[in] bytes_per_char The number of bytes per character, 4 for UTF-32, 1 for ASCII.
+     *  @param[in] register_width The alignment of the data in bytes, 4 for CUDA, 64 for AVX-512.
      *
      *  To understand the @p max_magnitude_change parameter, consider the following example:
      *  - substitution costs ranging from -16 to +15
@@ -99,8 +99,8 @@ struct similarity_memory_requirements {
     constexpr similarity_memory_requirements(      //
         size_t first_length, size_t second_length, //
         size_t max_magnitude_change,               //
-        size_t bytes_per_character,                //
-        size_t word_alignment) noexcept {
+        size_t bytes_per_char,                     //
+        size_t register_width) noexcept {
 
         // Each diagonal in the DP matrix is only by 1 longer than the shorter string.
         size_t shorter_length = sz_min_of_two(first_length, second_length);
@@ -125,12 +125,11 @@ struct similarity_memory_requirements {
 
         // For each string we need to copy its contents, and allocate 3 bands proportional to the length
         // of the shorter string with each cell being big enough to hold the length of the longer one.
-        // The diagonals should be aligned to `word_alignment` bytes to allow for SIMD operations.
-        this->bytes_per_diagonal = round_up_to_multiple<size_t>(max_diagonal_length * bytes_per_cell, word_alignment);
-        this->total =                                                                          //
-            3 * bytes_per_diagonal +                                                           //
-            round_up_to_multiple<size_t>(first_length * bytes_per_character, word_alignment) + //
-            round_up_to_multiple<size_t>(second_length * bytes_per_character, word_alignment);
+        // The diagonals should be aligned to `register_width` bytes to allow for SIMD operations.
+        this->bytes_per_diagonal = round_up_to_multiple<size_t>(max_diagonal_length * bytes_per_cell, register_width);
+        size_t first_length_bytes = round_up_to_multiple<size_t>(first_length * bytes_per_char, register_width);
+        size_t second_length_bytes = round_up_to_multiple<size_t>(second_length * bytes_per_char, register_width);
+        this->total = 3 * bytes_per_diagonal + first_length_bytes + second_length_bytes;
     }
 };
 
@@ -218,7 +217,11 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
         score_t const *scores_pre_substitution, score_t const *scores_pre_insertion, score_t const *scores_pre_deletion,
         score_t *scores_new) noexcept {
 
-#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
+#if (capability_k & sz_cap_parallel_k)
+#pragma omp parallel for simd
+#else
+#pragma omp simd
+#endif
         for (sz_size_t i = 0; i < n; ++i) {
             score_t pre_substitution = scores_pre_substitution[i];
             score_t pre_insertion = scores_pre_insertion[i];
@@ -1685,7 +1688,11 @@ struct linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
 
-#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
+#if (capability_k & sz_cap_parallel_k)
+#pragma omp parallel for simd
+#else
+#pragma omp simd
+#endif
         // In this variant we will need at most (64 * 1024 / 32) = 2048 loops per diagonal.
         for (sz_size_t i = 0; i < n; i += 32)
             slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
@@ -1749,7 +1756,11 @@ struct linear_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, error_costs
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,     //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
 
-#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
+#if (capability_k & sz_cap_parallel_k)
+#pragma omp parallel for simd
+#else
+#pragma omp simd
+#endif
         // In this variant we will need at most (64 * 1024 / 16) = 4096 loops per diagonal.
         for (sz_size_t i = 0; i < n; i += 16)
             slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
@@ -2040,7 +2051,11 @@ struct linear_scorer<constant_iterator<char>, char const *, sz_i16_t, error_cost
 
         sz_size_t const count_slices = n / 64;
 
-#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
+#if (capability_k & sz_cap_parallel_k)
+#pragma omp parallel for simd
+#else
+#pragma omp simd
+#endif
         // Progress through the row 64 characters at a time.
         for (sz_size_t idx_slice = 0; idx_slice != count_slices; ++idx_slice)
             slice_64chars(second_slice, idx_slice * 64, gap, scores_pre_substitution, scores_pre_insertion, scores_new);
