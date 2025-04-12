@@ -926,6 +926,7 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
  *          like equality checks and relative order computing.
  */
 #define SZ_CACHE_LINE_WIDTH (64) // bytes
+#define SZ_MAX_REGISTER_WIDTH (64) // bytes
 #define SZ_SIZE_MAX ((sz_size_t)(-1))
 #define SZ_SSIZE_MAX ((sz_ssize_t)(SZ_SIZE_MAX >> 1))
 #define SZ_SSIZE_MIN ((sz_ssize_t)(-SZ_SSIZE_MAX - 1))

@@ -495,26 +495,21 @@ struct diagonal_walker_per_warp {
     }
 };
 
-template <typename first_strings_type_,
-          typename second_strings_type_>
+template <bool is_signed_, typename first_strings_type_, typename second_strings_type_>
 sz_size_t _scores_diagonally_warp_shared_memory_requirement( //
     first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-    error_cost_t max_cell_difference) noexcept {
+    sz_size_t max_magnitude_change) noexcept {
+
+    using char_t = typename first_strings_type_::value_type::value_type;
+    using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, is_signed_>;
 
     sz_size_t max_required_shared_memory = 0;
     for (sz_size_t i = 0; i < first_strings.size(); ++i) {
         sz_size_t const first_length = first_strings[i].length();
         sz_size_t const second_length = second_strings[i].length();
-        sz_size_t const shorter_length = sz_min_of_two(first_length, second_length);
-        sz_size_t const longer_length = sz_max_of_two(first_length, second_length);
-        sz_size_t const max_diagonal_length = shorter_length + 1;
-        sz_size_t const max_cell_value = (longer_length + 1) * max_cell_difference;
-        sz_size_t const bytes_per_cell = max_cell_value < 256 ? 1 : max_cell_value < 65536 ? 2 : 4;
-        // For each string we need to copy its contents, and allocate 3 bands proportional to the length
-        // of the shorter string with each cell being big enough to hold the length of the longer one.
-        // The diagonals should be aligned to 4 bytes to allow for SIMD operations.
-        sz_size_t const bytes_per_diagonal = round_up_to_multiple<sz_size_t>(max_diagonal_length * bytes_per_cell, 4);
-        sz_size_t const shared_memory_requirement = 3 * bytes_per_diagonal + first_length + second_length;
+        sz_size_t const shared_memory_requirement =
+            similarity_memory_requirements_t(first_length, second_length, max_magnitude_change, sizeof(char_t), 4)
+                .total;
         max_required_shared_memory = sz_max_of_two(max_required_shared_memory, shared_memory_requirement);
     }
     return max_required_shared_memory;
@@ -528,7 +523,8 @@ sz_size_t _scores_diagonally_warp_shared_memory_requirement( //
  *  @param[in] first_strings Array of first strings in each pair for score calculation.
  *  @param[in] second_strings Array of second strings in each pair for score calculation.
  *  @param[out] results_ptr Output array of scores for each pair of strings.
- *  @param[in] max_length Maximum length of the strings to be processed. Everything above that will be @b skipped.
+ *  @param[in] max_diagonal_length Maximum length of the strings to be processed. Everything above that will be @b
+ * skipped.
  */
 template <                                      //
     typename first_strings_type_,               //
@@ -540,7 +536,7 @@ __global__ void _levenshtein_in_cuda_warp( //
     first_strings_type_ first_strings,     //
     second_strings_type_ second_strings,   //
     score_type_ *results_ptr,              //
-    size_t max_length = SZ_SIZE_MAX) {
+    size_t max_diagonal_length = SZ_SIZE_MAX) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using first_string_t = typename first_strings_type_::value_type;
@@ -583,18 +579,20 @@ __global__ void _levenshtein_in_cuda_warp( //
         }
 
         // Estimate the maximum dimension of the DP matrix to pick the smallest fitting type.
-        sz_size_t const max_cell_value = sz_max_of_two(first_length, second_length) + 1;
-        if (max_cell_value >= max_length) continue;
+        using similarity_memory_requirements_t = similarity_memory_requirements<uint, false>;
+        similarity_memory_requirements_t requirements(first_length, second_length, 1, sizeof(char_t), 4);
+        if (requirements.max_diagonal_length >= max_diagonal_length) continue;
+
         span<char const> const first = {first_global.data(), first_length};
         span<char const> const second = {second_global.data(), second_length};
-        if (max_cell_value < 256u) {
+
+        if (requirements.bytes_per_cell == 1) {
             sz_u8_t result_u8 = (sz_u8_t)-1;
             walker_u8_t walker({}, 1);
             walker(first, second, result_u8, shared_memory_buffer);
             if (threadIdx.x == 0) result_ref = result_u8;
         }
         else {
-            _sz_assert(max_cell_value < 65536u && "Use `_levenshtein_in_cuda_device` for large inputs");
             sz_u16_t result_u16 = (sz_u16_t)-1;
             walker_u16_t walker({}, 1);
             walker(first, second, result_u16, shared_memory_buffer);
@@ -611,7 +609,8 @@ __global__ void _levenshtein_in_cuda_warp( //
  *  @param[in] first_strings Array of first strings in each pair for score calculation.
  *  @param[in] second_strings Array of second strings in each pair for score calculation.
  *  @param[out] results_ptr Output array of scores for each pair of strings.
- *  @param[in] min_length Minimum length of the strings to be processed. Everything below that will be @b skipped.
+ *  @param[in] min_diagonal_length Minimum length of the strings to be processed. Everything below that will be @b
+ * skipped.
  */
 template <                                      //
     typename first_strings_type_,               //
@@ -623,7 +622,7 @@ __global__ void _levenshtein_in_cuda_device( //
     first_strings_type_ first_strings,       //
     second_strings_type_ second_strings,     //
     score_type_ *results_ptr,                //
-    sz_size_t min_length = 0) {
+    sz_size_t min_diagonal_length = 0) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using first_string_t = typename first_strings_type_::value_type;
@@ -639,6 +638,8 @@ __global__ void _levenshtein_in_cuda_device( //
     using walker_u16_t = diagonal_walker_per_warp<char_t, sz_u16_t, error_costs_uniform_t, objective_k,
                                                   sz_similarity_global_k, capability_k>;
     using walker_u32_t = diagonal_walker_per_warp<char_t, sz_u32_t, error_costs_uniform_t, objective_k,
+                                                  sz_similarity_global_k, capability_k>;
+    using walker_u64_t = diagonal_walker_per_warp<char_t, sz_u64_t, error_costs_uniform_t, objective_k,
                                                   sz_similarity_global_k, capability_k>;
 
     // Allocating shared memory is handled on the host side.
@@ -664,22 +665,30 @@ __global__ void _levenshtein_in_cuda_device( //
         }
 
         // Estimate the maximum dimension of the DP matrix to pick the smallest fitting type.
-        sz_size_t const max_cell_value = sz_max_of_two(first_length, second_length) + 1;
-        if (max_cell_value >= min_length) continue;
+        using similarity_memory_requirements_t = similarity_memory_requirements<uint, false>;
+        similarity_memory_requirements_t requirements(first_length, second_length, 1, sizeof(char_t), 4);
+        if (requirements.max_diagonal_length >= min_diagonal_length) continue;
+
         span<char const> const first = {first_global.data(), first_length};
         span<char const> const second = {second_global.data(), second_length};
-        if (max_cell_value < 65536u) {
+
+        if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16 = (sz_u16_t)-1;
             walker_u16_t walker({}, 1);
             walker(first, second, result_u16, shared_memory_buffer);
             if (threadIdx.x == 0) result_ref = result_u16;
         }
-        else {
-            _sz_assert(max_cell_value < 4294967296u && "Use heuristics-based algorithms for large inputs");
+        else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32 = (sz_u32_t)-1;
             walker_u32_t walker({}, 1);
             walker(first, second, result_u32, shared_memory_buffer);
             if (threadIdx.x == 0) result_ref = result_u32;
+        }
+        else if (requirements.bytes_per_cell == 8) {
+            sz_u64_t result_u64 = (sz_u64_t)-1;
+            walker_u64_t walker({}, 1);
+            walker(first, second, result_u64, shared_memory_buffer);
+            if (threadIdx.x == 0) result_ref = result_u64;
         }
     }
 }
@@ -707,7 +716,7 @@ cuda_status_t _levenshtein_via_cuda_warp(                                       
     // H100 Streaming Multiprocessor can have up to 128 active warps concurrently and only 256 KB of shared memory.
     // A100 SMs had only 192 KB. We can't deal with blocks that require more memory than the SM can provide.
     sz_size_t shared_memory_per_block =
-        _scores_diagonally_warp_shared_memory_requirement(first_strings, second_strings, 1);
+        _scores_diagonally_warp_shared_memory_requirement<false>(first_strings, second_strings, 1);
     if (shared_memory_per_block > specs.shared_memory_per_multiprocessor()) return {status_t::bad_alloc_k};
 
     // It may be the case that we've only received empty strings.
@@ -738,8 +747,10 @@ cuda_status_t _levenshtein_via_cuda_warp(                                       
     };
 
     // On Volta and newer GPUs, there is an extra flag to be set to use more than 48 KB of shared memory per block.
-    cudaError_t attribute_error =
-        cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, specs.shared_memory_bytes);
+    // CUDA reserves 1 KB of shared memory per thread block, so on H100 we can use up to 227 KB of shared memory.
+    // https://docs.nvidia.com/cuda/hopper-tuning-guide/index.html#unified-shared-memory-l1-texture-cache
+    cudaError_t attribute_error = cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                       specs.shared_memory_per_multiprocessor() - count_blocks * 1024);
     if (attribute_error != cudaSuccess) return {status_t::unknown_k, attribute_error};
 
     // Create CUDA events for timing
@@ -793,7 +804,7 @@ struct levenshtein_distances<char_type_, dummy_alloc_t, sz_cap_cuda_k> {
  *          used to cheaper store and access the substitution costs for the characters.
  *  @see    CUDA constant memory docs: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#constant
  */
-__constant__ error_costs_256x256_t _error_costs_256x256_in_cuda_constant_memory;
+__constant__ char _error_costs_in_cuda_constant_memory[256 * 256];
 
 /**
  *  @brief  Needleman-Wunsch alignment cores algorithm evaluating the Dynamic Programming matrix
@@ -809,7 +820,7 @@ __constant__ error_costs_256x256_t _error_costs_256x256_in_cuda_constant_memory;
 template <                                              //
     typename first_strings_type_,                       //
     typename second_strings_type_,                      //
-    typename score_type_ = sz_size_t,                   //
+    typename score_type_ = sz_ssize_t,                  //
     typename substituter_type_ = error_costs_256x256_t, //
     sz_capability_t capability_ = sz_cap_cuda_k         //
     >
@@ -817,8 +828,9 @@ __global__ void _needleman_wunsch_in_cuda_warp( //
     first_strings_type_ first_strings,          //
     second_strings_type_ second_strings,        //
     score_type_ *results_ptr,                   //
-    error_cost_t gap_cost = 1                   //
-) {
+    error_cost_t gap_cost,                      //
+    sz_size_t max_magnitude_change) {
+
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using first_string_t = typename first_strings_type_::value_type;
     using second_string_t = typename second_strings_type_::value_type;
@@ -834,6 +846,7 @@ __global__ void _needleman_wunsch_in_cuda_warp( //
     static constexpr sz_capability_t cap_k = capability_;
     static constexpr sz_similarity_objective_t obj_k = sz_maximize_score_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
+    using walker_i8_t = diagonal_walker_per_warp<char_t, sz_i8_t, substituter_t const &, obj_k, locality_k, cap_k>;
     using walker_i16_t = diagonal_walker_per_warp<char_t, sz_i16_t, substituter_t const &, obj_k, locality_k, cap_k>;
     using walker_i32_t = diagonal_walker_per_warp<char_t, sz_i32_t, substituter_t const &, obj_k, locality_k, cap_k>;
     using walker_i64_t = diagonal_walker_per_warp<char_t, sz_i64_t, substituter_t const &, obj_k, locality_k, cap_k>;
@@ -843,7 +856,7 @@ __global__ void _needleman_wunsch_in_cuda_warp( //
 
     // We expect the substituter state to be already in the GPU constant memory.
     substituter_t const &substituter_constant =
-        *reinterpret_cast<substituter_t const *>(&_error_costs_256x256_in_cuda_constant_memory);
+        *reinterpret_cast<substituter_t const *>(_error_costs_in_cuda_constant_memory);
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
@@ -865,22 +878,33 @@ __global__ void _needleman_wunsch_in_cuda_warp( //
         }
 
         // Estimate the maximum dimension of the DP matrix to pick the smallest fitting type.
-        sz_size_t const max_cell_value = sz_max_of_two(first_length, second_length) + 1;
+        using similarity_memory_requirements_t = similarity_memory_requirements<uint, true>;
+        similarity_memory_requirements_t requirements(first_length, second_length,
+                                                      static_cast<uint>(max_magnitude_change), sizeof(char_t), 4);
+
+        // Estimate the maximum dimension of the DP matrix to pick the smallest fitting type.
         span<char const> const first = {first_global.data(), first_length};
         span<char const> const second = {second_global.data(), second_length};
-        if (max_cell_value < 256u) {
+
+        if (requirements.bytes_per_cell == 1) {
+            sz_i8_t result_i8 = std::numeric_limits<sz_i8_t>::min();
+            walker_i8_t walker(substituter_constant, gap_cost);
+            walker(first, second, result_i8, shared_memory_buffer);
+            if (threadIdx.x == 0) result_ref = result_i8;
+        }
+        else if (requirements.bytes_per_cell == 2) {
             sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
             walker_i16_t walker(substituter_constant, gap_cost);
             walker(first, second, result_i16, shared_memory_buffer);
             if (threadIdx.x == 0) result_ref = result_i16;
         }
-        else if (max_cell_value < 65536u) {
+        else if (requirements.bytes_per_cell == 4) {
             sz_i32_t result_i32 = std::numeric_limits<sz_i32_t>::min();
             walker_i32_t walker(substituter_constant, gap_cost);
             walker(first, second, result_i32, shared_memory_buffer);
             if (threadIdx.x == 0) result_ref = result_i32;
         }
-        else {
+        else if (requirements.bytes_per_cell == 8) {
             sz_i64_t result_i64 = std::numeric_limits<sz_i64_t>::min();
             walker_i64_t walker(substituter_constant, gap_cost);
             walker(first, second, result_i64, shared_memory_buffer);
@@ -916,8 +940,8 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
     // Make sure that we don't string pairs that are too large to fit 3 matrix diagonals into shared memory.
     // H100 Streaming Multiprocessor can have up to 128 active warps concurrently and only 256 KB of shared memory.
     // A100 SMs had only 192 KB. We can't deal with blocks that require more memory than the SM can provide.
-    sz_size_t shared_memory_per_block =
-        _scores_diagonally_warp_shared_memory_requirement(first_strings, second_strings, 127);
+    sz_size_t shared_memory_per_block = _scores_diagonally_warp_shared_memory_requirement<true>(
+        first_strings, second_strings, substituter.max_magnitude_change());
     if (shared_memory_per_block > specs.shared_memory_per_multiprocessor()) return {status_t::bad_alloc_k};
 
     // It may be the case that we've only received empty strings.
@@ -935,18 +959,19 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
 
     // Let's use all 32 threads in a warp.
     constexpr sz_size_t threads_per_block = 32u;
+    sz_size_t const max_magnitude_change = substituter.max_magnitude_change();
     auto kernel =
         &_needleman_wunsch_in_cuda_warp<first_strings_t, second_strings_t, score_t, substituter_t, capability_k>;
     void *kernel_args[] = {
-        (void *)&first_strings,
-        (void *)&second_strings,
-        (void *)&results,
-        (void *)&gap_cost,
+        (void *)&first_strings, (void *)&second_strings,       (void *)&results,
+        (void *)&gap_cost,      (void *)&max_magnitude_change,
     };
 
     // On Volta and newer GPUs, there is an extra flag to be set to use more than 48 KB of shared memory per block.
-    cudaError_t attribute_error =
-        cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, specs.shared_memory_bytes);
+    // CUDA reserves 1 KB of shared memory per thread block, so on H100 we can use up to 227 KB of shared memory.
+    // https://docs.nvidia.com/cuda/hopper-tuning-guide/index.html#unified-shared-memory-l1-texture-cache
+    cudaError_t attribute_error = cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                       specs.shared_memory_per_multiprocessor() - count_blocks * 1024);
     if (attribute_error != cudaSuccess) return {status_t::unknown_k, attribute_error};
 
     // Create CUDA events for timing
@@ -958,9 +983,8 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
     cudaEventRecord(start_event, stream);
 
     // Enqueue the transfer of the substituter to the constant memory:
-    cudaError_t copy_error =
-        cudaMemcpyToSymbolAsync((void *)&_error_costs_256x256_in_cuda_constant_memory, (void const *)&substituter,
-                                sizeof(substituter_t), 0, cudaMemcpyHostToDevice, stream);
+    cudaError_t copy_error = cudaMemcpyToSymbolAsync(_error_costs_in_cuda_constant_memory, (void const *)&substituter,
+                                                     sizeof(substituter_t), 0, cudaMemcpyHostToDevice, stream);
     if (copy_error != cudaSuccess) return {status_t::unknown_k, copy_error};
 
     // Enqueue the kernel for execution:

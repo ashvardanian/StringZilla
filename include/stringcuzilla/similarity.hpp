@@ -68,24 +68,71 @@ struct error_costs_256x256_t;
 struct error_costs_26x26ascii_t;
 
 /**
- *  @brief  Helper method to guess the amount of SRAM we want to effectively process the input
+ *  @brief  Helper object to guess the amount of SRAM we want to effectively process the input
  *          without fetching from RAM/VRAM all the time, including the space for 3 diagonals
  *          and the strings themselves.
+ *
+ *  @tparam size_type_ The type of the size, usually `sz_size_t` for large inputs or `uint` on small inputs in CUDA.
  */
-inline sz_size_t _diagonal_similarity_memory_usage( //
-    sz_size_t first_length, sz_size_t second_length, error_cost_t max_cell_difference) noexcept {
-    sz_size_t shorter_length = sz_min_of_two(first_length, second_length);
-    sz_size_t longer_length = sz_max_of_two(first_length, second_length);
-    sz_size_t max_diagonal_length = shorter_length + 1;
-    sz_size_t max_cell_value = (longer_length + 1) * max_cell_difference;
-    sz_size_t bytes_per_cell = max_cell_value < 256 ? 1 : max_cell_value < 65536 ? 2 : 4;
-    // For each string we need to copy its contents, and allocate 3 bands proportional to the length
-    // of the shorter string with each cell being big enough to hold the length of the longer one.
-    // The diagonals should be aligned to 4 bytes to allow for SIMD operations.
-    sz_size_t bytes_per_diagonal = round_up_to_multiple<sz_size_t>(max_diagonal_length * bytes_per_cell, 4);
-    sz_size_t shared_memory_requirement = 3 * bytes_per_diagonal + first_length + second_length;
-    return shared_memory_requirement;
-}
+template <typename size_type_, bool is_signed_ = false>
+struct similarity_memory_requirements {
+    using size_t = size_type_;
+    static constexpr bool is_signed_k = is_signed_;
+
+    size_t max_diagonal_length = 0;
+    size_t bytes_per_cell = 0;
+    size_t bytes_per_diagonal = 0;
+    size_t total = 0;
+
+    /**
+     *  @param[in] first_length The length of the first string in characters/codepoints.
+     *  @param[in] second_length The length of the second string in characters/codepoints.
+     *  @param[in] max_magnitude_change The absolute value of the maximum change in nearby cells.
+     *  @param[in] bytes_per_character The number of bytes per character, 4 for UTF-32, 1 for ASCII.
+     *  @param[in] word_alignment The alignment of the data in bytes, 4 for CUDA, 64 for AVX-512.
+     *
+     *  To understand the @p max_magnitude_change parameter, consider the following example:
+     *  - substitution costs ranging from -16 to +15
+     *  - gap costs equal to -10
+     *  In that case, the biggest change will be `abs(-16) = 16`, so the passed argument should be 16.
+     */
+    constexpr similarity_memory_requirements(      //
+        size_t first_length, size_t second_length, //
+        size_t max_magnitude_change,               //
+        size_t bytes_per_character,                //
+        size_t word_alignment) noexcept {
+
+        // Each diagonal in the DP matrix is only by 1 longer than the shorter string.
+        size_t shorter_length = sz_min_of_two(first_length, second_length);
+        size_t longer_length = sz_max_of_two(first_length, second_length);
+        this->max_diagonal_length = shorter_length + 1;
+
+        // The amount of memory we need per diagonal, depends on the maximum number of the differences
+        // between 2 strings and the maximum cost of each change.
+        size_t max_cell_value = (longer_length + 1) * max_magnitude_change;
+        if constexpr (!is_signed_k)
+            this->bytes_per_cell = //
+                max_cell_value < 256          ? 1
+                : max_cell_value < 65536      ? 2
+                : max_cell_value < 4294967296 ? 4
+                                              : 8;
+        else
+            this->bytes_per_cell = //
+                max_cell_value < 127          ? 1
+                : max_cell_value < 32767      ? 2
+                : max_cell_value < 2147483647 ? 4
+                                              : 8;
+
+        // For each string we need to copy its contents, and allocate 3 bands proportional to the length
+        // of the shorter string with each cell being big enough to hold the length of the longer one.
+        // The diagonals should be aligned to `word_alignment` bytes to allow for SIMD operations.
+        this->bytes_per_diagonal = round_up_to_multiple<size_t>(max_diagonal_length * bytes_per_cell, word_alignment);
+        this->total =                                                                          //
+            3 * bytes_per_diagonal +                                                           //
+            round_up_to_multiple<size_t>(first_length * bytes_per_character, word_alignment) + //
+            round_up_to_multiple<size_t>(second_length * bytes_per_character, word_alignment);
+    }
+};
 
 /**
  *  @brief  An operator to be applied to be applied to all 2x2 blocks of the DP matrix to produce
@@ -659,42 +706,48 @@ struct levenshtein_distance {
             return status_t::success_k;
         }
 
-        // Estimate the maximum dimension of the DP matrix
-        sz_size_t const min_dim = sz_min_of_two(first_length, second_length) + 1;
-        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        // Estimate the maximum dimension of the DP matrix and choose the best type for it.
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
+        similarity_memory_requirements_t requirements(first_length, second_length, 1, sizeof(char_t),
+                                                      SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
-        status_t status = status_t::success_k;
-        if (min_dim < 16u) {
-            sz_u8_t result_u8;
-            status = horizontal_u8_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u8);
-            if (status == status_t::success_k) result_ref = result_u8;
+        error_costs_uniform_t substituter;
+        if (requirements.max_diagonal_length < 16) {
+            sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
+            status_t status = horizontal_u8_t {substituter, 1, alloc_}(first, second, result_u8);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u8;
         }
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        if (max_dim < 256u) {
-            sz_u8_t result_u8;
-            status = diagonal_u8_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u8);
-            if (status == status_t::success_k) result_ref = result_u8;
+        if (requirements.bytes_per_cell == 1) {
+            sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
+            status_t status = diagonal_u8_t {substituter, 1, alloc_}(first, second, result_u8);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u8;
         }
-        else if (max_dim < 65536u) {
-            sz_u16_t result_u16;
-            status = diagonal_u16_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u16);
-            if (status == status_t::success_k) result_ref = result_u16;
+        else if (requirements.bytes_per_cell == 2) {
+            sz_u16_t result_u16 = std::numeric_limits<sz_u16_t>::max();
+            status_t status = diagonal_u16_t {substituter, 1, alloc_}(first, second, result_u16);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u16;
         }
-        else if (max_dim < 4294967296u) {
-            sz_u32_t result_u32;
-            status = diagonal_u32_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u32);
-            if (status == status_t::success_k) result_ref = result_u32;
+        else if (requirements.bytes_per_cell == 4) {
+            sz_u32_t result_u32 = std::numeric_limits<sz_u32_t>::max();
+            status_t status = diagonal_u32_t {substituter, 1, alloc_}(first, second, result_u32);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u32;
         }
-        else {
-            sz_u64_t result_u64;
-            status = diagonal_u64_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u64);
-            if (status == status_t::success_k) result_ref = result_u64;
+        else if (requirements.bytes_per_cell == 8) {
+            sz_u64_t result_u64 = std::numeric_limits<sz_u64_t>::max();
+            status_t status = diagonal_u64_t {substituter, 1, alloc_}(first, second, result_u64);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u64;
         }
 
-        return status;
+        return status_t::success_k;
     }
 };
 
@@ -771,44 +824,51 @@ struct levenshtein_distance_utf8 {
              progress_utf8 += rune_length, ++progress_utf32, ++second_length_utf32)
             sz_rune_parse(second.data() + progress_utf8, second_data_utf32 + progress_utf32, &rune_length);
 
-        // Estimate the maximum dimension of the DP matrix
-        sz_size_t const min_dim = sz_min_of_two(first_length, second_length) + 1;
-        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        // Estimate the maximum dimension of the DP matrix and choose the best type for it.
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
+        similarity_memory_requirements_t requirements(first_length, second_length, 1, sizeof(sz_rune_t),
+                                                      SZ_MAX_REGISTER_WIDTH);
+
         span<sz_rune_t const> const first_utf32 {first_data_utf32, first_length_utf32};
         span<sz_rune_t const> const second_utf32 {second_data_utf32, second_length_utf32};
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
-        status_t status = status_t::success_k;
-        if (min_dim < 16u) {
-            sz_u8_t result_u8;
-            status = horizontal_u8_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u8);
-            if (status == status_t::success_k) result_ref = result_u8;
+        error_costs_uniform_t substituter;
+        if (requirements.max_diagonal_length < 16) {
+            sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
+            status_t status = horizontal_u8_t {substituter, 1, alloc_}(first_utf32, second_utf32, result_u8);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u8;
         }
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        if (max_dim < 256u) {
-            sz_u8_t result_u8;
-            status = diagonal_u8_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u8);
-            if (status == status_t::success_k) result_ref = result_u8;
+        if (requirements.bytes_per_cell == 1) {
+            sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
+            status_t status = diagonal_u8_t {substituter, 1, alloc_}(first_utf32, second_utf32, result_u8);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u8;
         }
-        else if (max_dim < 65536u) {
-            sz_u16_t result_u16;
-            status = diagonal_u16_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u16);
-            if (status == status_t::success_k) result_ref = result_u16;
+        else if (requirements.bytes_per_cell == 2) {
+            sz_u16_t result_u16 = std::numeric_limits<sz_u16_t>::max();
+            status_t status = diagonal_u16_t {substituter, 1, alloc_}(first_utf32, second_utf32, result_u16);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u16;
         }
-        else if (max_dim < 4294967296u) {
-            sz_u32_t result_u32;
-            status = diagonal_u32_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u32);
-            if (status == status_t::success_k) result_ref = result_u32;
+        else if (requirements.bytes_per_cell == 4) {
+            sz_u32_t result_u32 = std::numeric_limits<sz_u32_t>::max();
+            status_t status = diagonal_u32_t {substituter, 1, alloc_}(first_utf32, second_utf32, result_u32);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u32;
         }
-        else {
-            sz_u64_t result_u64;
-            status = diagonal_u64_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u64);
-            if (status == status_t::success_k) result_ref = result_u64;
+        else if (requirements.bytes_per_cell == 8) {
+            sz_u64_t result_u64 = std::numeric_limits<sz_u64_t>::max();
+            status_t status = diagonal_u64_t {substituter, 1, alloc_}(first_utf32, second_utf32, result_u64);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u64;
         }
 
-        return status;
+        return status_t::success_k;
     }
 };
 
@@ -867,36 +927,33 @@ struct needleman_wunsch_score {
             return status_t::success_k;
         }
 
-        // Estimate the maximum dimension of the DP matrix
-        sz_size_t const min_dim = sz_min_of_two(first_length, second_length) + 1;
-        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        // Estimate the maximum dimension of the DP matrix and choose the best type for it.
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
+        similarity_memory_requirements_t requirements(first_length, second_length, substituter_.max_magnitude_change(),
+                                                      sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
         status_t status = status_t::success_k;
-        if (min_dim < 16u) {
-            sz_i16_t result_i16;
+        if (requirements.max_diagonal_length < 16) {
+            sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
             status = horizontal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
             if (status == status_t::success_k) result_ref = result_i16;
         }
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        // Assuming each individual cost falls in [-128, 127], the `i16` range of [-32768, 32767] is sufficient
-        // for inputs under (32768 / 128) = 256 characters.
-        if (max_dim < 256u) {
-            sz_i16_t result_i16;
+        else if (requirements.bytes_per_cell == 2) {
+            sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
             status = diagonal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
             if (status == status_t::success_k) result_ref = result_i16;
         }
-        // Assuming each individual cost falls in [-128, 127], the `i32` range of [-2147483648, 2147483647] is
-        // sufficient for inputs under (2147483648 / 128) = 16777216 characters.
-        else if (max_dim < 16777216u) {
-            sz_i32_t result_i32;
+        else if (requirements.bytes_per_cell == 4) {
+            sz_i32_t result_i32 = std::numeric_limits<sz_i32_t>::min();
             status = diagonal_i32_t {substituter_, gap_cost_, alloc_}(first, second, result_i32);
             if (status == status_t::success_k) result_ref = result_i32;
         }
-        else {
-            sz_i64_t result_i64;
+        else if (requirements.bytes_per_cell == 8) {
+            sz_i64_t result_i64 = std::numeric_limits<sz_i64_t>::min();
             status = diagonal_i64_t {substituter_, gap_cost_, alloc_}(first, second, result_i64);
             if (status == status_t::success_k) result_ref = result_i64;
         }
@@ -956,41 +1013,41 @@ struct smith_waterman_score {
             return status_t::success_k;
         }
 
-        // Estimate the maximum dimension of the DP matrix
-        sz_size_t const min_dim = sz_min_of_two(first_length, second_length) + 1;
-        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        // Estimate the maximum dimension of the DP matrix and choose the best type for it.
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
+        similarity_memory_requirements_t requirements(first_length, second_length, substituter_.max_magnitude_change(),
+                                                      sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
-        status_t status = status_t::success_k;
-        if (min_dim < 16u) {
-            sz_i16_t result_i16;
-            status = horizontal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
-            if (status == status_t::success_k) result_ref = result_i16;
+        if (requirements.max_diagonal_length < 16) {
+            sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
+            status_t status = horizontal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i16;
         }
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        // Assuming each individual cost falls in [-128, 127], the `i16` range of [-32768, 32767] is sufficient
-        // for inputs under (32768 / 128) = 256 characters.
-        if (max_dim < 256u) {
-            sz_i16_t result_i16;
-            status = diagonal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
-            if (status == status_t::success_k) result_ref = result_i16;
+        else if (requirements.bytes_per_cell == 2) {
+            sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
+            status_t status = diagonal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i16;
         }
-        // Assuming each individual cost falls in [-128, 127], the `i32` range of [-2147483648, 2147483647] is
-        // sufficient for inputs under (2147483648 / 128) = 16777216 characters.
-        else if (max_dim < 16777216u) {
-            sz_i32_t result_i32;
-            status = diagonal_i32_t {substituter_, gap_cost_, alloc_}(first, second, result_i32);
-            if (status == status_t::success_k) result_ref = result_i32;
+        else if (requirements.bytes_per_cell == 4) {
+            sz_i32_t result_i32 = std::numeric_limits<sz_i32_t>::min();
+            status_t status = diagonal_i32_t {substituter_, gap_cost_, alloc_}(first, second, result_i32);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i32;
         }
-        else {
-            sz_i64_t result_i64;
-            status = diagonal_i64_t {substituter_, gap_cost_, alloc_}(first, second, result_i64);
-            if (status == status_t::success_k) result_ref = result_i64;
+        else if (requirements.bytes_per_cell == 8) {
+            sz_i64_t result_i64 = std::numeric_limits<sz_i64_t>::min();
+            status_t status = diagonal_i64_t {substituter_, gap_cost_, alloc_}(first, second, result_i64);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i64;
         }
 
-        return status;
+        return status_t::success_k;
     }
 };
 
@@ -1011,10 +1068,12 @@ status_t _score_in_parallel(                         //
     core_per_input_type_ &&core_per_input,           //
     all_cores_per_input_type_ &&all_cores_per_input, //
     first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, results_type_ &&results,
-    error_cost_t max_cell_difference, cpu_specs_t specs = {}) noexcept {
+    sz_size_t max_magnitude_change, cpu_specs_t specs = {}) noexcept {
 
     using score_t = score_type_;
-    sz_unused(specs);
+    constexpr bool score_is_signed_k = std::is_signed_v<score_t>;
+    using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, score_is_signed_k>;
+    using char_t = typename core_per_input_type_::char_t;
 
     auto first_size = first_strings.size();
     auto second_size = second_strings.size();
@@ -1033,9 +1092,9 @@ status_t _score_in_parallel(                         //
         auto const &second = second_strings[i];
 
         // ! Longer strings will be handled separately
-        auto const shared_memory_requirement =
-            _diagonal_similarity_memory_usage(first.length(), second.length(), max_cell_difference);
-        if (shared_memory_requirement >= specs.l2_bytes) continue;
+        similarity_memory_requirements_t requirements(first.length(), second.length(), max_magnitude_change,
+                                                      sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
+        if (requirements.total >= specs.l2_bytes) continue;
         status_t status = core_per_input({first.data(), first.length()}, {second.data(), second.length()}, result);
         if (status == status_t::success_k) { results[i] = result; }
         else { error.store(status); }
@@ -1046,9 +1105,9 @@ status_t _score_in_parallel(                         //
         score_t result = 0;
         auto const &first = first_strings[i];
         auto const &second = second_strings[i];
-        auto const shared_memory_requirement =
-            _diagonal_similarity_memory_usage(first.length(), second.length(), max_cell_difference);
-        if (shared_memory_requirement < specs.l2_bytes) continue;
+        similarity_memory_requirements_t requirements(first.length(), second.length(), max_magnitude_change,
+                                                      sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
+        if (requirements.total < specs.l2_bytes) continue;
         status_t status = all_cores_per_input({first.data(), first.length()}, {second.data(), second.length()}, result);
         if (status == status_t::success_k) { results[i] = result; }
         else { error.store(status); }
@@ -1110,12 +1169,12 @@ struct levenshtein_distances {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results) const noexcept {
+                        results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
 
         if constexpr (capability_k & sz_cap_parallel_k)
             return _score_in_parallel<sz_size_t>(core_per_input_t {alloc_}, all_cores_per_input_t {alloc_},
-                                                 first_strings, second_strings, std::forward<results_type_>(results),
-                                                 1);
+                                                 first_strings, second_strings, std::forward<results_type_>(results), 1,
+                                                 specs);
         else
             return _score_sequentially<sz_size_t>(all_cores_per_input_t {alloc_}, first_strings, second_strings,
                                                   std::forward<results_type_>(results));
@@ -1145,12 +1204,12 @@ struct levenshtein_distances_utf8 {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results) const noexcept {
+                        results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
 
         if constexpr (capability_k & sz_cap_parallel_k)
             return _score_in_parallel<sz_size_t>(core_per_input_t {alloc_}, all_cores_per_input_t {alloc_},
-                                                 first_strings, second_strings, std::forward<results_type_>(results),
-                                                 1);
+                                                 first_strings, second_strings, std::forward<results_type_>(results), 1,
+                                                 specs);
         else
             return _score_sequentially<sz_size_t>(all_cores_per_input_t {alloc_}, first_strings, second_strings,
                                                   std::forward<results_type_>(results));
@@ -1186,13 +1245,13 @@ struct needleman_wunsch_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results) const noexcept {
+                        results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
 
         if constexpr (capability_k & sz_cap_parallel_k)
             return _score_in_parallel<sz_ssize_t>(core_per_input_t {substituter_, gap_cost_, alloc_},
                                                   all_cores_per_input_t {substituter_, gap_cost_, alloc_},
                                                   first_strings, second_strings, std::forward<results_type_>(results),
-                                                  127);
+                                                  substituter_.max_magnitude_change(), specs);
         else
             return _score_sequentially<sz_ssize_t>(all_cores_per_input_t {substituter_, gap_cost_, alloc_},
                                                    first_strings, second_strings, std::forward<results_type_>(results));
@@ -1228,13 +1287,13 @@ struct smith_waterman_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results) const noexcept {
+                        results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
 
         if constexpr (capability_k & sz_cap_parallel_k)
             return _score_in_parallel<sz_ssize_t>(core_per_input_t {substituter_, gap_cost_, alloc_},
                                                   all_cores_per_input_t {substituter_, gap_cost_, alloc_},
                                                   first_strings, second_strings, std::forward<results_type_>(results),
-                                                  127);
+                                                  substituter_.max_magnitude_change(), specs);
         else
             return _score_sequentially<sz_ssize_t>(all_cores_per_input_t {substituter_, gap_cost_, alloc_},
                                                    first_strings, second_strings, std::forward<results_type_>(results));
@@ -1266,6 +1325,14 @@ struct error_costs_256x256_t {
             for (int j = 0; j != 256; ++j) //
                 result.cells[i][j] = i == j ? match_score : mismatch_score;
         return result;
+    }
+
+    constexpr sz_size_t max_magnitude_change() const noexcept {
+        sz_size_t max_magnitude = 0;
+        for (int i = 0; i != 256; ++i)
+            for (int j = 0; j != 256; ++j) //
+                max_magnitude = std::max(max_magnitude, (sz_size_t)std::abs((int)cells[i][j]));
+        return max_magnitude;
     }
 };
 
@@ -1347,6 +1414,14 @@ struct error_costs_26x26ascii_t {
             for (int j = 0; j != 26; ++j) //
                 result.cells[i + 65][j + 65] = cells[i][j];
         return result;
+    }
+
+    constexpr sz_size_t max_magnitude_change() const noexcept {
+        sz_size_t max_magnitude = 0;
+        for (int i = 0; i != 26; ++i)
+            for (int j = 0; j != 26; ++j) //
+                max_magnitude = std::max(max_magnitude, (sz_size_t)std::abs((int)cells[i][j]));
+        return max_magnitude;
     }
 
     /**
@@ -1731,30 +1806,39 @@ struct levenshtein_distance<char, allocator_type_, capability_, std::enable_if_t
         }
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
-        status_t status = status_t::success_k;
-        if (max_dim < 256u) {
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
+        similarity_memory_requirements_t requirements(first_length, second_length, 1, sizeof(char_t),
+                                                      SZ_MAX_REGISTER_WIDTH);
+
+        // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
+        // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
+        error_costs_uniform_t substituter;
+        if (requirements.bytes_per_cell == 1) {
             sz_u8_t result_u8;
-            status = diagonal_u8_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u8);
-            if (status == status_t::success_k) result_ref = result_u8;
+            status_t status = diagonal_u8_t {substituter, 1, alloc_}(first, second, result_u8);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u8;
         }
-        else if (max_dim < 65536u) {
+        else if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16;
-            status = diagonal_u16_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u16);
-            if (status == status_t::success_k) result_ref = result_u16;
+            status_t status = diagonal_u16_t {substituter, 1, alloc_}(first, second, result_u16);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u16;
         }
-        else if (max_dim < 4294967296u) {
+        else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32;
-            status = diagonal_u32_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u32);
-            if (status == status_t::success_k) result_ref = result_u32;
+            status_t status = diagonal_u32_t {substituter, 1, alloc_}(first, second, result_u32);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u32;
         }
-        else {
+        else if (requirements.bytes_per_cell == 8) {
             sz_u64_t result_u64;
-            status = diagonal_u64_t {error_costs_uniform_t {}, 1, alloc_}(first, second, result_u64);
-            if (status == status_t::success_k) result_ref = result_u64;
+            status_t status = diagonal_u64_t {substituter, 1, alloc_}(first, second, result_u64);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u64;
         }
 
-        return status;
+        return status_t::success_k;
     }
 };
 
@@ -1826,32 +1910,41 @@ struct levenshtein_distance_utf8<char, allocator_type_, capability_, std::enable
             sz_rune_parse(second.data() + progress_utf8, second_data_utf32 + progress_utf32, &rune_length);
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
+        similarity_memory_requirements_t requirements(first_length, second_length, 1, sizeof(sz_rune_t),
+                                                      SZ_MAX_REGISTER_WIDTH);
+
+        // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
+        // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
+        error_costs_uniform_t substituter;
         span<sz_rune_t const> const first_utf32 {first_data_utf32, first_length_utf32};
         span<sz_rune_t const> const second_utf32 {second_data_utf32, second_length_utf32};
-        status_t status = status_t::success_k;
-        if (max_dim < 256u) {
+        if (requirements.bytes_per_cell == 1) {
             sz_u8_t result_u8;
-            status = diagonal_u8_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u8);
-            if (status == status_t::success_k) result_ref = result_u8;
+            status_t status = diagonal_u8_t {substituter, 1, alloc_}(first_utf32, second_utf32, result_u8);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u8;
         }
-        else if (max_dim < 65536u) {
+        else if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16;
-            status = diagonal_u16_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u16);
-            if (status == status_t::success_k) result_ref = result_u16;
+            status_t status = diagonal_u16_t {substituter, 1, alloc_}(first_utf32, second_utf32, result_u16);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u16;
         }
-        else if (max_dim < 4294967296u) {
+        else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32;
-            status = diagonal_u32_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u32);
-            if (status == status_t::success_k) result_ref = result_u32;
+            status_t status = diagonal_u32_t {substituter, 1, alloc_}(first_utf32, second_utf32, result_u32);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u32;
         }
-        else {
+        else if (requirements.bytes_per_cell == 8) {
             sz_u64_t result_u64;
-            status = diagonal_u64_t {error_costs_uniform_t {}, 1, alloc_}(first_utf32, second_utf32, result_u64);
-            if (status == status_t::success_k) result_ref = result_u64;
+            status_t status = diagonal_u64_t {substituter, 1, alloc_}(first_utf32, second_utf32, result_u64);
+            if (status != status_t::success_k) return status;
+            result_ref = result_u64;
         }
 
-        return status;
+        return status_t::success_k;
     }
 };
 
@@ -2105,33 +2198,33 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, allocator_type_, capa
             return status_t::success_k;
         }
 
-        // Estimate the maximum dimension of the DP matrix
-        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        // Estimate the maximum dimension of the DP matrix and choose the best type for it.
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
+        similarity_memory_requirements_t requirements(first_length, second_length, substituter_.max_magnitude_change(),
+                                                      sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        // Assuming each individual cost falls in [-128, 127], the `i16` range of [-32768, 32767] is sufficient
-        // for inputs under (32768 / 128) = 256 characters.
-        status_t status = status_t::success_k;
-        if (max_dim < 256u) {
+        if (requirements.bytes_per_cell == 2) {
             sz_i16_t result_i16;
-            status = horizontal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
-            if (status == status_t::success_k) result_ref = result_i16;
+            status_t status = horizontal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i16;
         }
-        // Assuming each individual cost falls in [-128, 127], the `i32` range of [-2147483648, 2147483647] is
-        // sufficient for inputs under (2147483648 / 128) = 16777216 characters.
-        else if (max_dim < 16777216u) {
+        else if (requirements.bytes_per_cell == 4) {
             sz_i32_t result_i32;
-            status = horizontal_i32_t {substituter_, gap_cost_, alloc_}(first, second, result_i32);
-            if (status == status_t::success_k) result_ref = result_i32;
+            status_t status = horizontal_i32_t {substituter_, gap_cost_, alloc_}(first, second, result_i32);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i32;
         }
-        else {
+        else if (requirements.bytes_per_cell == 8) {
             sz_i64_t result_i64;
-            status = horizontal_i64_t {substituter_, gap_cost_, alloc_}(first, second, result_i64);
-            if (status == status_t::success_k) result_ref = result_i64;
+            status_t status = horizontal_i64_t {substituter_, gap_cost_, alloc_}(first, second, result_i64);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i64;
         }
 
-        return status;
+        return status_t::success_k;
     }
 };
 
@@ -2184,34 +2277,33 @@ struct smith_waterman_score<char, error_costs_256x256_t, allocator_type_, capabi
             return status_t::success_k;
         }
 
-        // Estimate the maximum dimension of the DP matrix
-        sz_size_t const min_dim = sz_min_of_two(first_length, second_length) + 1;
-        sz_size_t const max_dim = sz_max_of_two(first_length, second_length) + 1;
+        // Estimate the maximum dimension of the DP matrix and choose the best type for it.
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
+        similarity_memory_requirements_t requirements(first_length, second_length, substituter_.max_magnitude_change(),
+                                                      sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        // Assuming each individual cost falls in [-128, 127], the `i16` range of [-32768, 32767] is sufficient
-        // for inputs under (32768 / 128) = 256 characters.
-        status_t status = status_t::success_k;
-        if (max_dim < 256u) {
+        if (requirements.bytes_per_cell == 2) {
             sz_i16_t result_i16;
-            status = horizontal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
-            if (status == status_t::success_k) result_ref = result_i16;
+            status_t status = horizontal_i16_t {substituter_, gap_cost_, alloc_}(first, second, result_i16);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i16;
         }
-        // Assuming each individual cost falls in [-128, 127], the `i32` range of [-2147483648, 2147483647] is
-        // sufficient for inputs under (2147483648 / 128) = 16777216 characters.
-        else if (max_dim < 16777216u) {
+        else if (requirements.bytes_per_cell == 4) {
             sz_i32_t result_i32;
-            status = horizontal_i32_t {substituter_, gap_cost_, alloc_}(first, second, result_i32);
-            if (status == status_t::success_k) result_ref = result_i32;
+            status_t status = horizontal_i32_t {substituter_, gap_cost_, alloc_}(first, second, result_i32);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i32;
         }
-        else {
+        else if (requirements.bytes_per_cell == 8) {
             sz_i64_t result_i64;
-            status = horizontal_i64_t {substituter_, gap_cost_, alloc_}(first, second, result_i64);
-            if (status == status_t::success_k) result_ref = result_i64;
+            status_t status = horizontal_i64_t {substituter_, gap_cost_, alloc_}(first, second, result_i64);
+            if (status != status_t::success_k) return status;
+            result_ref = result_i64;
         }
 
-        return status;
+        return status_t::success_k;
     }
 };
 
