@@ -56,7 +56,10 @@
 #include "stringzilla/memory.h"  // `sz_move`
 #include "stringzilla/types.hpp" // `sz::error_cost_t`
 
-#include <atomic> // `std::atomic` to synchronize OpenMP threads
+#include <atomic>      // `std::atomic` to synchronize OpenMP threads
+#include <type_traits> // `std::enable_if_t` for meta-programming
+#include <limits>      // `std::numeric_limits` for numeric types
+#include <iterator>    // `std::iterator_traits` for iterators
 
 namespace ashvardanian {
 namespace stringzilla {
