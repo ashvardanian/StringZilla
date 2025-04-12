@@ -64,6 +64,7 @@ int main(int argc, char const **argv) {
 
         std::printf("Starting string similarity benchmarks...\n");
         bench_levenshtein(env);
+        bench_needleman_wunsch(env);
     }
     catch (std::exception const &e) {
         std::fprintf(stderr, "Failed with: %s\n", e.what());
