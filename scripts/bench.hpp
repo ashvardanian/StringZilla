@@ -410,12 +410,12 @@ inline environment_t build_environment(                                        /
     env.tokens.resize(bit_floor(env.tokens.size())); // Shrink to the nearest power of two
 
     // In "RELEASE" mode, shuffle tokens to avoid bias.
-    char const *seed_message = " (not used in DEBUG mode)";
-#if !defined(SZ_DEBUG) || !SZ_DEBUG
-    std::mt19937_64 generator(static_cast<unsigned long>(env.seed));
-    std::shuffle(env.tokens.begin(), env.tokens.end(), generator);
-    seed_message = "";
-#endif
+    char const *seed_message = " (will avoid shuffling)";
+    if (env.seed != 0) {
+        std::mt19937_64 generator(static_cast<unsigned long>(env.seed));
+        std::shuffle(env.tokens.begin(), env.tokens.end(), generator);
+        seed_message = " (will shuffle tokens)";
+    }
 
     auto const mean_token_length =
         std::accumulate(env.tokens.begin(), env.tokens.end(), (std::size_t)0u,
