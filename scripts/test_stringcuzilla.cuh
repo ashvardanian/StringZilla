@@ -5,6 +5,7 @@
  *  @file    test_stringcuzilla.cuh
  *  @author  Ash Vardanian
  */
+#include "stringcuzilla/find_many.hpp"
 #include "stringcuzilla/similarity.hpp"
 
 #if SZ_USE_CUDA
@@ -348,9 +349,9 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
     bool contains_missing_in_any_case = false;
 
     // Old C-style for-loops are much more debuggable than range-based loops!
-    for (std::size_t test_idx = 0; test_idx != test_cases.size(); ++test_idx) {
-        auto const &first = test_cases[test_idx].first;
-        auto const &second = test_cases[test_idx].second;
+    for (std::size_t pair_idx = 0; pair_idx != test_cases.size(); ++pair_idx) {
+        auto const &first = test_cases[pair_idx].first;
+        auto const &second = test_cases[pair_idx].second;
 
         // Check if the input strings fit into our allowed characters set
         if (!allowed_chars.empty()) {
@@ -626,6 +627,193 @@ void test_similarity_scores_memory_usage() {
             levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {}, experiment, first_gpu_specs);
 #endif
     }
+}
+
+struct find_many_baselines_t {
+    using state_id_t = sz_u32_t;
+    using match_t = find_many_match_t;
+
+    arrow_strings_tape_t needles_;
+
+    template <typename needles_type_>
+    status_t try_build(needles_type_ &&needles) noexcept {
+        return needles_.try_assign(needles.begin(), needles.end());
+    }
+
+    void reset() noexcept { needles_.reset(); }
+
+    template <typename haystacks_type_, typename needles_type_, typename match_callback_type_>
+    void iterate_through_unsorted_matches(haystacks_type_ &&haystacks, needles_type_ &&needles,
+                                          match_callback_type_ &&callback) const noexcept {
+        for (std::size_t i = 0; i != haystacks.size(); ++i) {
+            auto const &haystack = haystacks[i];
+            for (std::size_t j = 0; j != needles.size(); ++j) {
+                auto const &needle = needles[j];
+                // Define iterators for the current haystack and the needle.
+                auto haystack_begin = haystack.begin();
+                auto haystack_end = haystack.end();
+                auto needle_begin = needle.begin();
+                auto needle_end = needle.end();
+
+                // Use `std::search` to find all occurrences of needle in haystack.
+                while (true) {
+                    auto it = std::search(haystack_begin, haystack_end, needle_begin, needle_end);
+                    if (it == haystack_end) break;
+
+                    // Compute the starting index of the found occurrence.
+                    std::size_t found = static_cast<std::size_t>(std::distance(haystack.begin(), it));
+
+                    // Construct a match record.
+                    match_t match;
+                    match.haystack_index = i;
+                    match.needle_index = j;
+                    match.haystack = {haystack.data(), haystack.size()};
+                    match.needle = {haystack.data() + found, needle.size()};
+
+                    // Invoke the callback. If it returns false, abort all further processing.
+                    if (!callback(match)) return;
+
+                    // Advance the starting iterator for the next search.
+                    haystack_begin = it + 1;
+                }
+            }
+        }
+    }
+
+    template <typename haystacks_type_>
+    size_t count(haystacks_type_ &&haystacks, span<size_t> counts) const noexcept {
+        size_t count_total = 0;
+        for (size_t &count : counts) count = 0;
+        iterate_through_unsorted_matches(haystacks, needles_, [&](match_t const &match) {
+            counts[match.haystack_index] += 1;
+            count_total += 1;
+            return true;
+        });
+        return count_total;
+    }
+
+    template <typename haystacks_type_, typename output_matches_type_>
+    size_t find(haystacks_type_ &&haystacks, output_matches_type_ &&matches) const noexcept {
+        size_t count_found = 0, count_allowed = matches.size();
+        iterate_through_unsorted_matches(haystacks, needles_, [&](match_t const &match) {
+            matches[count_found] = match;
+            count_found += 1;
+            return count_found < count_allowed;
+        });
+        return count_found;
+    }
+};
+
+using find_many_serial_t = find_many<sz_u32_t, malloc_t, sz_cap_serial_k>;
+using find_many_parallel_t = find_many<sz_u32_t, malloc_t, sz_caps_sp_k>;
+
+/**
+ *  @brief  Tests the correctness of the string class Levenshtein distance computation,
+ *          as well as the similarity scoring functions for bioinformatics-like workloads
+ *          on a @b fixed set of different representative ASCII and UTF-8 strings.
+ */
+template <typename base_operator_, typename simd_operator_, typename... extra_args_>
+void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_operator, extra_args_ &&...extra_args) {
+
+    std::vector<std::string> haystacks, needles;
+
+    // Some vary basic variants:
+    needles.emplace_back("his");
+    needles.emplace_back("is");
+    needles.emplace_back("she");
+    needles.emplace_back("her");
+
+    // Haystacks should contain arbitrary strings including those needles
+    // in different positions, potentially interleaving
+    haystacks.emplace_back("That is a test string"); // ? "only "is"
+    haystacks.emplace_back("This is a test string"); // ? "his", 2x "is"
+
+    using match_t = find_many_match_t;
+
+    // First check with a batch-size of 1
+    unified_vector<size_t> counts_base(1), counts_simd(1);
+    unified_vector<match_t> matches_base(1), matches_simd(1);
+    arrow_strings_tape_t haystacks_tape, needles_tape;
+    needles_tape.try_assign(needles.data(), needles.data() + needles.size());
+
+    // Old C-style for-loops are much more debuggable than range-based loops!
+    for (std::size_t haystack_idx = 0; haystack_idx != haystacks.size(); ++haystack_idx) {
+        auto const &haystack = haystacks[haystack_idx];
+
+        // Reset the tapes and results
+        counts_base[0] = 0, counts_simd[0] = 0;
+        matches_base.clear(), matches_simd.clear();
+        haystacks_tape.try_assign(&haystack, &haystack + 1);
+
+        // Construct the matchers
+        status_t status_base = base_operator.try_build(needles_tape.view());
+        status_t status_simd = simd_operator.try_build(needles_tape.view());
+        _sz_assert(status_base == status_t::success_k);
+        _sz_assert(status_simd == status_t::success_k);
+
+        // Count with both backends
+        span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
+        span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
+        size_t total_found_base = base_operator.count(haystacks_tape, counts_base_span);
+        size_t total_found_simd = simd_operator.count(haystacks_tape, counts_simd_span, extra_args...);
+        _sz_assert(total_found_base == total_found_simd);
+        _sz_assert(counts_base[0] == counts_simd[0]);
+
+        // Check the matches themselves
+        matches_base.resize(total_found_base);
+        matches_simd.resize(total_found_simd);
+        size_t total_matched_base = base_operator.find(haystacks_tape, matches_base);
+        size_t total_matched_simd = simd_operator.find(haystacks_tape, matches_simd, extra_args...);
+        _sz_assert(total_matched_base == total_matched_simd);
+
+        // Check the contents and order of the matches
+        for (std::size_t i = 0; i != total_matched_base; ++i) {
+            _sz_assert(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
+            _sz_assert(matches_base[i].needle.data() == matches_simd[i].needle.data());
+            _sz_assert(matches_base[i].needle_index == matches_simd[i].needle_index);
+        }
+    }
+
+    // Now test all the haystacks simultaneously
+    {
+        haystacks_tape.try_assign(haystacks.data(), haystacks.data() + haystacks.size());
+        counts_base.resize(haystacks.size());
+        counts_simd.resize(haystacks.size());
+
+        // Count with both backends
+        span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
+        span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
+        size_t total_found_base = base_operator.count(haystacks_tape, counts_base_span);
+        size_t total_found_simd = simd_operator.count(haystacks_tape, counts_simd_span, extra_args...);
+        _sz_assert(total_found_base == total_found_simd);
+
+        // Check the matches themselves
+        matches_base.resize(total_found_base);
+        matches_simd.resize(total_found_simd);
+        size_t total_matched_base = base_operator.find(haystacks_tape, matches_base);
+        size_t total_matched_simd = simd_operator.find(haystacks_tape, matches_simd, extra_args...);
+        _sz_assert(total_matched_base == total_matched_simd);
+
+        // Check the contents and order of the matches
+        for (std::size_t i = 0; i != total_matched_base; ++i) {
+            _sz_assert(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
+            _sz_assert(matches_base[i].needle.data() == matches_simd[i].needle.data());
+            _sz_assert(matches_base[i].needle_index == matches_simd[i].needle_index);
+        }
+    }
+}
+
+/**
+ *  @brief  Tests the multi-pattern exact substring search algorithm
+ *          against a baseline implementation for predefined and random inputs.
+ */
+void test_find_many_equivalence() {
+
+    // Single-threaded serial Levenshtein distance implementation
+    test_find_many_fixed(find_many_baselines_t {}, find_many_serial_t {});
+
+    // Multi-threaded parallel Levenshtein distance implementation
+    test_find_many_fixed(find_many_baselines_t {}, find_many_parallel_t {});
 }
 
 } // namespace scripts
