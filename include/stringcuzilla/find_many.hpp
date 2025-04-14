@@ -81,6 +81,7 @@ struct aho_corasick_dictionary {
 
     static constexpr state_id_t alphabet_size_k = 256;
     static constexpr state_id_t invalid_state_k = std::numeric_limits<state_id_t>::max();
+    static constexpr size_t invalid_length_k = std::numeric_limits<size_t>::max();
 
     using state_transitions_t = state_id_t[alphabet_size_k];
 
@@ -101,96 +102,120 @@ struct aho_corasick_dictionary {
     span<state_id_t> failures_;
     /**
      *  @brief  Number of states in the FSM, which should be smaller than the capacity of the transitions.
+     *          The value grows on each successful `try_insert` call, and doesn't change even in `try_build`.
      */
-    size_t count_ = 0;
+    size_t count_states_ = 0;
+    /**
+     *  @brief  Contains the lengths of the needles ending at each state, at least `count_states_` in size.
+     *          The values grow on each successful `try_insert` call, and doesn't change even in `try_build`.
+     */
+    span<size_t> outputs_lengths_;
+    /**
+     *  @brief  Contains number of needles ending at each state, at least `count_states_` in size.
+     *          The values grow on each successful `try_insert` call, and doesn't change even in `try_build`.
+     */
+    span<size_t> outputs_counts_;
+
     allocator_t alloc_;
 
     aho_corasick_dictionary() = default;
     ~aho_corasick_dictionary() noexcept { reset(); }
 
+    aho_corasick_dictionary(aho_corasick_dictionary const &) = delete;
+    aho_corasick_dictionary(aho_corasick_dictionary &&) = delete;
+    aho_corasick_dictionary &operator=(aho_corasick_dictionary const &) = delete;
+    aho_corasick_dictionary &operator=(aho_corasick_dictionary &&) = delete;
+
     void reset() noexcept {
         if (transitions_.data())
-            alloc_.deallocate(reinterpret_cast<char *>(transitions_.data()),
-                              transitions_.size() * sizeof(state_transitions_t));
-        if (failures_.data())
-            alloc_.deallocate(reinterpret_cast<char *>(failures_.data()), failures_.size() * sizeof(state_id_t));
-        if (outputs_.data())
-            alloc_.deallocate(reinterpret_cast<char *>(outputs_.data()), outputs_.size() * sizeof(state_id_t));
+            alloc_.deallocate((char *)(transitions_.data()), transitions_.size() * sizeof(state_transitions_t));
+        if (failures_.data()) alloc_.deallocate((char *)(failures_.data()), failures_.size() * sizeof(state_id_t));
+        if (outputs_.data()) alloc_.deallocate((char *)(outputs_.data()), outputs_.size() * sizeof(state_id_t));
+        if (outputs_lengths_.data())
+            alloc_.deallocate((char *)(outputs_lengths_.data()), outputs_lengths_.size() * sizeof(size_t));
         transitions_ = {};
         failures_ = {};
         outputs_ = {};
-        count_ = 0;
+        outputs_lengths_ = {};
+        count_states_ = 0;
     }
 
-    size_t size() const noexcept { return count_; }
+    size_t size() const noexcept { return count_states_; }
     size_t capacity() const noexcept { return transitions_.size(); }
 
     status_t try_reserve(size_t new_capacity) noexcept {
 
         // Allocate new memory blocks.
         state_transitions_t *new_transitions =
-            reinterpret_cast<state_transitions_t *>(alloc_.allocate(new_capacity * sizeof(state_transitions_t)));
-        state_id_t *new_failures = reinterpret_cast<state_id_t *>(alloc_.allocate(new_capacity * sizeof(state_id_t)));
-        state_id_t *new_outputs = reinterpret_cast<state_id_t *>(alloc_.allocate(new_capacity * sizeof(state_id_t)));
-        if (!new_transitions || !new_failures || !new_outputs) {
+            (state_transitions_t *)(alloc_.allocate(new_capacity * sizeof(state_transitions_t)));
+        state_id_t *new_failures = (state_id_t *)(alloc_.allocate(new_capacity * sizeof(state_id_t)));
+        state_id_t *new_outputs = (state_id_t *)(alloc_.allocate(new_capacity * sizeof(state_id_t)));
+        size_t *new_lengths = (size_t *)(alloc_.allocate(new_capacity * sizeof(size_t)));
+        if (!new_transitions || !new_failures || !new_outputs || !new_lengths) {
             if (new_transitions)
-                alloc_.deallocate(reinterpret_cast<char *>(new_transitions),
-                                  new_capacity * sizeof(state_transitions_t));
-            if (new_failures)
-                alloc_.deallocate(reinterpret_cast<char *>(new_failures), new_capacity * sizeof(state_id_t));
-            if (new_outputs)
-                alloc_.deallocate(reinterpret_cast<char *>(new_outputs), new_capacity * sizeof(state_id_t));
+                alloc_.deallocate((char *)(new_transitions), new_capacity * sizeof(state_transitions_t));
+            if (new_failures) alloc_.deallocate((char *)(new_failures), new_capacity * sizeof(state_id_t));
+            if (new_outputs) alloc_.deallocate((char *)(new_outputs), new_capacity * sizeof(state_id_t));
+            if (new_lengths) alloc_.deallocate((char *)(new_lengths), new_capacity * sizeof(size_t));
             return status_t::bad_alloc_k;
         }
 
-        // Copy existing states.
-        for (size_t state = 0; state < count_; ++state) {
-            for (size_t index = 0; index < alphabet_size_k; ++index)
-                new_transitions[state][index] = transitions_[state][index];
-            new_failures[state] = failures_[state];
-            new_outputs[state] = outputs_[state];
+        size_t old_count = count_states_;
+
+        // Copy existing states data. Use memcpy for POD types if spans are contiguous.
+        if (old_count > 0) {
+            sz_copy((sz_ptr_t)new_transitions, (sz_cptr_t)transitions_.data(), old_count * sizeof(state_transitions_t));
+            sz_copy((sz_ptr_t)new_outputs, (sz_cptr_t)outputs_.data(), old_count * sizeof(state_id_t));
+            sz_copy((sz_ptr_t)new_lengths, (sz_cptr_t)outputs_lengths_.data(), old_count * sizeof(size_t));
+            sz_copy((sz_ptr_t)new_failures, (sz_cptr_t)failures_.data(), old_count * sizeof(state_id_t));
         }
 
         // Initialize new states.
-        for (size_t state = count_; state < new_capacity; ++state) {
+        for (size_t state = old_count; state < new_capacity; ++state) {
             for (size_t index = 0; index < alphabet_size_k; ++index) new_transitions[state][index] = invalid_state_k;
-            new_failures[state] = 0;
             new_outputs[state] = invalid_state_k;
+            new_lengths[state] = invalid_length_k;
+            new_failures[state] = 0; // Default failure to root
         }
 
         // Free old memory and update pointers.
-        size_t old_count = count_;
         reset();
-        count_ = std::max<size_t>(old_count, 1); // The effective size doesn't change, but we now have a root!
         transitions_ = {new_transitions, new_capacity};
         failures_ = {new_failures, new_capacity};
         outputs_ = {new_outputs, new_capacity};
+        outputs_lengths_ = {new_lengths, new_capacity};
+        count_states_ = std::max<size_t>(old_count, 1); // The effective size doesn't change, but we now have a root!
         return status_t::success_k;
     }
 
+    /**
+     *  @brief Adds a single @p needle to the vocabulary, assigning it a unique @p needle_id.
+     */
     status_t try_insert(span<char const> needle, state_id_t needle_id) noexcept {
+        if (!needle.size()) return status_t::success_k; // Don't care about empty needles.
+
         state_id_t current_state = 0;
         for (size_t pos = 0; pos < needle.size(); ++pos) {
             unsigned char const symbol = static_cast<unsigned char>(needle[pos]);
             state_id_t *current_row = transitions_[current_state];
             bool const has_root_state = transitions_.data() != nullptr;
             if (!has_root_state || current_row[symbol] == invalid_state_k) {
-                if (count_ >= transitions_.size()) {
+                if (count_states_ >= transitions_.size()) {
                     status_t reserve_status = try_reserve(sz_size_bit_ceil(transitions_.size() + 1 + !has_root_state));
                     if (reserve_status != status_t::success_k) return reserve_status;
                     current_row = transitions_[current_state]; // Update the pointer!
                 }
-                current_row[symbol] = static_cast<state_id_t>(count_);
-                state_id_t new_state = static_cast<state_id_t>(count_);
-                for (size_t index = 0; index < alphabet_size_k; ++index)
-                    transitions_[new_state][index] = invalid_state_k;
-                failures_[new_state] = 0;
-                outputs_[new_state] = invalid_state_k;
-                ++count_;
+
+                // Use the next available state ID
+                state_id_t new_state = static_cast<state_id_t>(count_states_);
+                current_row[symbol] = new_state;
+                ++count_states_;
             }
             current_state = current_row[symbol];
         }
+
         outputs_[current_state] = needle_id;
+        outputs_lengths_[current_state] = static_cast<size_t>(needle.size());
         return status_t::success_k;
     }
 
@@ -295,7 +320,7 @@ struct find_many {
             status_t status = dict_.try_insert(needle, static_cast<state_id_t>(dict_.size()));
             if (status != status_t::success_k) return status;
         }
-        return status_t::success_k;
+        return dict_.try_build();
     }
 
     void reset() noexcept { dict_.reset(); }
