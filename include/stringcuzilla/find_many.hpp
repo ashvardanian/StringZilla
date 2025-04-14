@@ -269,8 +269,9 @@ struct aho_corasick_dictionary {
             unsigned char symbol = static_cast<unsigned char>(haystack[pos]);
             current_state = transitions_[current_state][symbol];
             if (outputs_[current_state] != invalid_state_k) {
-                span<char const> match_span(&haystack[pos], haystack.size() - pos);
-                match_t match {haystack, match_span, outputs_[current_state]};
+                size_t match_length = outputs_lengths_[current_state];
+                span<char const> match_span(&haystack[pos + 1 - match_length], match_length);
+                match_t match {haystack, match_span, 0, outputs_[current_state]};
                 if (!callback(match)) break;
             }
         }
@@ -351,7 +352,8 @@ struct find_many {
     size_t find(haystacks_type_ &&haystacks, output_matches_type_ &&matches) const noexcept {
         size_t count_found = 0, count_allowed = matches.size();
         for (auto it = haystacks.begin(); it != haystacks.end() && count_found != count_allowed; ++it)
-            dict_.find(*it, [&](match_t const &match) {
+            dict_.find(*it, [&](match_t match) {
+                match.haystack_index = static_cast<size_t>(it - haystacks.begin());
                 matches[count_found] = match;
                 count_found++;
                 return count_found < count_allowed;
