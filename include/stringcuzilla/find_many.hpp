@@ -316,9 +316,11 @@ struct find_many {
 
     template <typename needles_type_>
     status_t try_build(needles_type_ &&needles_strings) noexcept {
+        state_id_t needle_id = 0;
         for (auto const &needle : needles_strings) {
-            status_t status = dict_.try_insert(needle, static_cast<state_id_t>(dict_.size()));
+            status_t status = dict_.try_insert(needle, needle_id);
             if (status != status_t::success_k) return status;
+            needle_id++;
         }
         return dict_.try_build();
     }
