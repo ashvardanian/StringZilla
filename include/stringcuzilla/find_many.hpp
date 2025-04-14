@@ -222,8 +222,8 @@ struct aho_corasick_dictionary {
     status_t try_build() noexcept {
 
         // Allocate a queue for Breadth-First Search (BFS) traversal.
-        size_t queue_capacity = count_;
-        size_t *work_queue = reinterpret_cast<size_t *>(alloc_.allocate(queue_capacity * sizeof(size_t)));
+        size_t queue_capacity = count_states_;
+        state_id_t *work_queue = (state_id_t *)(alloc_.allocate(queue_capacity * sizeof(state_id_t)));
         if (!work_queue) return status_t::bad_alloc_k;
 
         // Reset all root transitions to point to itself - forming a loop.
@@ -234,13 +234,13 @@ struct aho_corasick_dictionary {
         }
 
         while (queue_begin < queue_end) {
-            size_t current_state = work_queue[queue_begin++];
+            state_id_t current_state = work_queue[queue_begin++];
             for (size_t symbol = 0; symbol < alphabet_size_k; ++symbol) {
 
                 state_id_t next_state = transitions_[current_state][symbol];
                 if (next_state != invalid_state_k) {
 
-                    size_t failure_state = failures_[current_state];
+                    state_id_t failure_state = failures_[current_state];
                     while (transitions_[failure_state][symbol] == invalid_state_k)
                         failure_state = failures_[failure_state];
 
@@ -252,7 +252,7 @@ struct aho_corasick_dictionary {
                 else { transitions_[current_state][symbol] = transitions_[failures_[current_state]][symbol]; }
             }
         }
-        alloc_.deallocate(work_queue, queue_capacity * sizeof(size_t));
+        alloc_.deallocate((char *)work_queue, queue_capacity * sizeof(state_id_t));
         return status_t::success_k;
     }
 
