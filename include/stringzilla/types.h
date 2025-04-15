@@ -443,8 +443,10 @@ typedef enum sz_status_t {
     sz_invalid_utf8_k = -2,
     /** For algorithms that take collections of unique elements, this status indicates presence of duplicates. */
     sz_contains_duplicates_k = -3,
+    /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types. */
+    sz_overflow_risk_k = -4,
     /** A sink-hole status for unknown errors. */
-    sz_status_unknown_k = -4,
+    sz_status_unknown_k = -5,
 } sz_status_t;
 
 /**

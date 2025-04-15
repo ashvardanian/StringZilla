@@ -119,6 +119,7 @@ enum class status_t {
     bad_alloc_k = sz_bad_alloc_k,
     invalid_utf8_k = sz_invalid_utf8_k,
     contains_duplicates_k = sz_contains_duplicates_k,
+    overflow_risk_k = sz_overflow_risk_k,
     unknown_k = sz_status_unknown_k,
 };
 
@@ -794,6 +795,8 @@ struct cpu_specs_t {
     size_t cache_line_width = 64;      // ? 64 bytes on x86, sometimes 128 on ARM
     size_t cores_per_socket = 1;       // ? at least 1 core
     size_t sockets = 1;                // ? at least 1 socket
+
+    size_t cores_total() const noexcept { return cores_per_socket * sockets; }
 };
 
 /**
