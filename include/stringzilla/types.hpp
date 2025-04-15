@@ -141,11 +141,16 @@ struct span {
     value_type *data_ {};
     size_type size_ {};
 
+    constexpr span() noexcept = default;
+    constexpr span(value_type *data, size_type size) noexcept : data_(data), size_(size) {}
+    constexpr span(value_type *data, value_type *end) noexcept : data_(data), size_(end - data) {}
+
     constexpr value_type *begin() const noexcept { return data_; }
     constexpr value_type *end() const noexcept { return data_ + size_; }
     constexpr value_type *data() const noexcept { return data_; }
     constexpr size_type size() const noexcept { return size_; }
     constexpr size_type length() const noexcept { return size_; }
+    constexpr size_type size_bytes() const noexcept { return size_ * sizeof(value_type); }
     constexpr value_type &operator[](size_type i) const noexcept { return data_[i]; }
 };
 
