@@ -552,6 +552,29 @@ struct constant_iterator {
     difference_type pos_;
 };
 
+template <typename begin_type_, typename end_type_>
+struct random_access_range {
+
+    using value_type = typename std::iterator_traits<begin_type_>::value_type;
+    using reference_type = typename std::iterator_traits<begin_type_>::reference;
+    using difference_type = typename std::iterator_traits<begin_type_>::difference_type;
+
+    begin_type_ begin_;
+    end_type_ end_;
+
+    constexpr std::size_t size() const { return static_cast<std::size_t>(end_ - begin_); }
+    constexpr begin_type_ begin() const { return begin_; }
+    constexpr end_type_ end() const { return end_; }
+
+    decltype(auto) operator[](std::size_t index) const {
+        _sz_assert(index < size());
+        return *(begin_ + index);
+    }
+};
+
+template <typename begin_type_, typename end_type_>
+random_access_range(begin_type_, end_type_) -> random_access_range<begin_type_, end_type_>;
+
 template <typename value_type_, size_t count_>
 struct safe_array {
     using value_type = value_type_;
