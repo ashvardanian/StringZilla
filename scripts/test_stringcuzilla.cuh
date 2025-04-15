@@ -736,6 +736,12 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
     arrow_strings_tape_t haystacks_tape, needles_tape;
     needles_tape.try_assign(needles.data(), needles.data() + needles.size());
 
+    // Construct the matchers
+    status_t status_base = base_operator.try_build(needles_tape.view());
+    status_t status_simd = simd_operator.try_build(needles_tape.view());
+    _sz_assert(status_base == status_t::success_k);
+    _sz_assert(status_simd == status_t::success_k);
+
     // Old C-style for-loops are much more debuggable than range-based loops!
     for (std::size_t haystack_idx = 0; haystack_idx != haystacks.size(); ++haystack_idx) {
         auto const &haystack = haystacks[haystack_idx];
@@ -744,12 +750,6 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         counts_base[0] = 0, counts_simd[0] = 0;
         matches_base.clear(), matches_simd.clear();
         haystacks_tape.try_assign(&haystack, &haystack + 1);
-
-        // Construct the matchers
-        status_t status_base = base_operator.try_build(needles_tape.view());
-        status_t status_simd = simd_operator.try_build(needles_tape.view());
-        _sz_assert(status_base == status_t::success_k);
-        _sz_assert(status_simd == status_t::success_k);
 
         // Count with both backends
         span<size_t> counts_base_span {counts_base.data(), counts_base.size()};

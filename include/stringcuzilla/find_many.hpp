@@ -83,60 +83,97 @@ struct aho_corasick_dictionary {
     static constexpr state_id_t invalid_state_k = std::numeric_limits<state_id_t>::max();
     static constexpr size_t invalid_length_k = std::numeric_limits<size_t>::max();
 
-    using state_transitions_t = state_id_t[alphabet_size_k];
+    using state_transitions_t = safe_array<state_id_t, alphabet_size_k>;
+    static_assert(std::is_unsigned_v<state_id_t>, "State ID should be unsigned");
+
+    using size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
+    using state_id_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<state_id_t>;
+    using state_transitions_allocator_t =
+        typename std::allocator_traits<allocator_t>::template rebind_alloc<state_transitions_t>;
 
     /**
      *  @brief  State transitions for each state, at least `count_states_ * alphabet_size_k` in binary size.
-     *  @note   The transitions are being populated both during vocabulary construction and during search.
+     *          The transitions are being populated both during vocabulary construction and during search.
      */
-    span<state_transitions_t> transitions_;
+    safe_vector<state_transitions_t, state_transitions_allocator_t> transitions_;
+
     /**
-     *  @brief  Output needle IDs for each state, at least `count_states_` in size.
-     *  @note   They are being populated both during vocabulary construction and during search.
+     *  @brief  The IDs of the output transitions per state.
+     *
+     *  During `try_insert`, contains exactly one entry per state, generally set to `invalid_state_k`.
+     *  After `try_build`, contains at least as many entries as the number of unique needles provided,
+     *  or potentially more, given how failure links are being merged, if needles have shared suffixes.
      */
-    span<state_id_t> outputs_;
+    safe_vector<state_id_t, state_id_allocator_t> outputs_;
+
     /**
-     *  @brief  Failure links for each state, at least `count_states_` in size.
-     *  @note   The failure links aren't very needed after the FSM construction, if we stick to a dense layout.
+     *  @brief  Failure links for each state, exactly `count_states_` in effective size, potentially larger capacity.
+     *          The failure links aren't very needed after the FSM construction, if we stick to a dense layout.
      */
-    span<state_id_t> failures_;
+    safe_vector<state_id_t, state_id_allocator_t> failures_;
+
     /**
      *  @brief  Number of states in the FSM, which should be smaller than the capacity of the transitions.
      *          The value grows on each successful `try_insert` call, and doesn't change even in `try_build`.
      */
     size_t count_states_ = 0;
+
     /**
-     *  @brief  Contains the lengths of the needles ending at each state, at least `count_states_` in size.
-     *          The values grow on each successful `try_insert` call, and doesn't change even in `try_build`.
+     *  @brief  Contains number of needles ending at each state, exactly `count_states_` in size.
+     *          We can use any `size_t`-like counter, but the `state_id_t` is probably the smallest safe type here.
+     *
+     *  This object is used to navigate into the `outputs_` array after the FSM construction. For any state `I`, the
+     *  following slice defines all matches: `outputs_[outputs_offsets_[I], outputs_offsets_[I] + outputs_counts_[I]]`.
      */
-    span<size_t> outputs_lengths_;
+    safe_vector<state_id_t, state_id_allocator_t> outputs_counts_;
+
     /**
-     *  @brief  Contains number of needles ending at each state, at least `count_states_` in size.
-     *          The values grow on each successful `try_insert` call, and doesn't change even in `try_build`.
+     *  @brief  Contains number of merged needles & failure outputs ending before each state, `count_states_` in size.
+     *          We can use any `size_t`-like counter, but the `state_id_t` is probably the smallest safe type here.
+     *
+     *  This object is used to navigate into the `outputs_` array after the FSM construction. It contains effectively
+     *  the exclusive prefix sum of `outputs_counts_`. For any state `I`, the following slice defines all matches:
+     *  `outputs_[outputs_offsets_[I], outputs_offsets_[I] + outputs_counts_[I]]`.
      */
-    span<size_t> outputs_counts_;
+    safe_vector<state_id_t, state_id_allocator_t> outputs_offsets_;
+
+    /**
+     *  @brief  Contains the lengths of needles.
+     *          The array grows on each successful `try_insert` call, and doesn't change even in `try_build`.
+     */
+    safe_vector<size_t, size_allocator_t> needles_lengths_;
 
     allocator_t alloc_;
 
     aho_corasick_dictionary() = default;
     ~aho_corasick_dictionary() noexcept { reset(); }
 
+    aho_corasick_dictionary(allocator_t alloc) noexcept
+        : transitions_(alloc), failures_(alloc), outputs_(alloc), outputs_counts_(alloc), outputs_offsets_(alloc),
+          needles_lengths_(alloc), alloc_(alloc) {}
+
     aho_corasick_dictionary(aho_corasick_dictionary const &) = delete;
     aho_corasick_dictionary(aho_corasick_dictionary &&) = delete;
     aho_corasick_dictionary &operator=(aho_corasick_dictionary const &) = delete;
     aho_corasick_dictionary &operator=(aho_corasick_dictionary &&) = delete;
 
+    void clear() noexcept {
+        transitions_.clear();
+        failures_.clear();
+        outputs_.clear();
+        needles_lengths_.clear();
+        outputs_counts_.clear();
+        outputs_offsets_.clear();
+        count_states_ = 0;
+    }
+
     void reset() noexcept {
-        if (transitions_.data())
-            alloc_.deallocate((char *)(transitions_.data()), transitions_.size() * sizeof(state_transitions_t));
-        if (failures_.data()) alloc_.deallocate((char *)(failures_.data()), failures_.size() * sizeof(state_id_t));
-        if (outputs_.data()) alloc_.deallocate((char *)(outputs_.data()), outputs_.size() * sizeof(state_id_t));
-        if (outputs_lengths_.data())
-            alloc_.deallocate((char *)(outputs_lengths_.data()), outputs_lengths_.size() * sizeof(size_t));
-        transitions_ = {};
-        failures_ = {};
-        outputs_ = {};
-        outputs_lengths_ = {};
+        transitions_.reset();
+        failures_.reset();
+        outputs_.reset();
+        needles_lengths_.reset();
+        outputs_counts_.reset();
+        outputs_offsets_.reset();
         count_states_ = 0;
     }
 
@@ -146,64 +183,48 @@ struct aho_corasick_dictionary {
     status_t try_reserve(size_t new_capacity) noexcept {
 
         // Allocate new memory blocks.
-        state_transitions_t *new_transitions =
-            (state_transitions_t *)(alloc_.allocate(new_capacity * sizeof(state_transitions_t)));
-        state_id_t *new_failures = (state_id_t *)(alloc_.allocate(new_capacity * sizeof(state_id_t)));
-        state_id_t *new_outputs = (state_id_t *)(alloc_.allocate(new_capacity * sizeof(state_id_t)));
-        size_t *new_lengths = (size_t *)(alloc_.allocate(new_capacity * sizeof(size_t)));
-        if (!new_transitions || !new_failures || !new_outputs || !new_lengths) {
-            if (new_transitions)
-                alloc_.deallocate((char *)(new_transitions), new_capacity * sizeof(state_transitions_t));
-            if (new_failures) alloc_.deallocate((char *)(new_failures), new_capacity * sizeof(state_id_t));
-            if (new_outputs) alloc_.deallocate((char *)(new_outputs), new_capacity * sizeof(state_id_t));
-            if (new_lengths) alloc_.deallocate((char *)(new_lengths), new_capacity * sizeof(size_t));
-            return status_t::bad_alloc_k;
-        }
-
-        size_t old_count = count_states_;
-
-        // Copy existing states data. Use memcpy for POD types if spans are contiguous.
-        if (old_count > 0) {
-            sz_copy((sz_ptr_t)new_transitions, (sz_cptr_t)transitions_.data(), old_count * sizeof(state_transitions_t));
-            sz_copy((sz_ptr_t)new_outputs, (sz_cptr_t)outputs_.data(), old_count * sizeof(state_id_t));
-            sz_copy((sz_ptr_t)new_lengths, (sz_cptr_t)outputs_lengths_.data(), old_count * sizeof(size_t));
-            sz_copy((sz_ptr_t)new_failures, (sz_cptr_t)failures_.data(), old_count * sizeof(state_id_t));
-        }
+        if (transitions_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
+        if (failures_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
+        if (outputs_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
+        if (outputs_counts_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
+        if (outputs_offsets_.try_resize(new_capacity) != status_t::success_k) return status_t::bad_alloc_k;
 
         // Initialize new states.
+        size_t old_count = count_states_;
         for (size_t state = old_count; state < new_capacity; ++state) {
-            for (size_t index = 0; index < alphabet_size_k; ++index) new_transitions[state][index] = invalid_state_k;
-            new_outputs[state] = invalid_state_k;
-            new_lengths[state] = invalid_length_k;
-            new_failures[state] = 0; // Default failure to root
+            for (size_t index = 0; index < alphabet_size_k; ++index) transitions_[state][index] = invalid_state_k;
+            outputs_[state] = invalid_state_k;
+            failures_[state] = 0;       // Default failure to root
+            outputs_counts_[state] = 0; // Default count to zero
+            outputs_offsets_[state] = invalid_state_k;
         }
 
-        // Free old memory and update pointers.
-        reset();
-        transitions_ = {new_transitions, new_capacity};
-        failures_ = {new_failures, new_capacity};
-        outputs_ = {new_outputs, new_capacity};
-        outputs_lengths_ = {new_lengths, new_capacity};
-        count_states_ = std::max<size_t>(old_count, 1); // The effective size doesn't change, but we now have a root!
+        // The effective size doesn't change, but we now have a root!
+        count_states_ = std::max<size_t>(old_count, 1);
         return status_t::success_k;
     }
 
     /**
      *  @brief Adds a single @p needle to the vocabulary, assigning it a unique @p needle_id.
+     *  @note  Can't be called after `try_build`. Can't be called from multiple threads at the same time.
      */
-    status_t try_insert(span<char const> needle, state_id_t needle_id) noexcept {
+    status_t try_insert(span<char const> needle) noexcept {
         if (!needle.size()) return status_t::success_k; // Don't care about empty needles.
+
+        state_id_t const needle_id = static_cast<state_id_t>(needles_lengths_.size());
+        if (needles_lengths_.try_reserve(sz_size_bit_ceil(needles_lengths_.size() + 1)) != status_t::success_k)
+            return status_t::bad_alloc_k;
 
         state_id_t current_state = 0;
         for (size_t pos = 0; pos < needle.size(); ++pos) {
             unsigned char const symbol = static_cast<unsigned char>(needle[pos]);
-            state_id_t *current_row = transitions_[current_state];
+            state_id_t *current_row = &transitions_[current_state][0];
             bool const has_root_state = transitions_.data() != nullptr;
             if (!has_root_state || current_row[symbol] == invalid_state_k) {
                 if (count_states_ >= transitions_.size()) {
                     status_t reserve_status = try_reserve(sz_size_bit_ceil(transitions_.size() + 1 + !has_root_state));
                     if (reserve_status != status_t::success_k) return reserve_status;
-                    current_row = transitions_[current_state]; // Update the pointer!
+                    current_row = &transitions_[current_state][0]; // Update the pointer to the row of state transitions
                 }
 
                 // Use the next available state ID
@@ -215,16 +236,38 @@ struct aho_corasick_dictionary {
         }
 
         outputs_[current_state] = needle_id;
-        outputs_lengths_[current_state] = static_cast<size_t>(needle.size());
+        needles_lengths_.try_push_back(needle.size()); // ? Can't fail due to `try_reserve` above
+        outputs_counts_[current_state] = 1; // ? This will snowball in `try_build` if needles have shared suffixes
+        outputs_offsets_[current_state] = current_state;
         return status_t::success_k;
     }
 
+    /**
+     *  @brief  Construct the Finite State Machine (FSM) from the vocabulary. Can only be called @b once!
+     *  @note   This function is not thread safe and allocates a significant amount of memory, so it can fail.
+     */
     status_t try_build() noexcept {
 
         // Allocate a queue for Breadth-First Search (BFS) traversal.
-        size_t queue_capacity = count_states_;
-        state_id_t *work_queue = (state_id_t *)(alloc_.allocate(queue_capacity * sizeof(state_id_t)));
-        if (!work_queue) return status_t::bad_alloc_k;
+        safe_vector<state_id_t, state_id_allocator_t> work_queue(alloc_);
+        if (work_queue.try_resize(count_states_) != status_t::success_k) return status_t::bad_alloc_k;
+
+        // We will construct nested dynamically growing arrays (yes, too many memory allocations, I know),
+        // to expand and track all of the outputs for each state, merging the failure links.
+        // We will later use `outputs_merged` to populate `outputs_`, `outputs_offsets_`, and `outputs_counts_`.
+        using state_ids_vector_t = safe_vector<state_id_t, state_id_allocator_t>;
+        using state_ids_vector_allocator_t =
+            typename std::allocator_traits<allocator_t>::template rebind_alloc<state_ids_vector_t>;
+        using state_ids_per_state_vector_t = safe_vector<state_ids_vector_t, state_ids_vector_allocator_t>;
+        state_ids_per_state_vector_t outputs_merged(alloc_);
+        if (outputs_merged.try_resize(count_states_) != status_t::success_k) return status_t::bad_alloc_k;
+
+        // Populate the `outputs_merged` with the initial outputs.
+        for (size_t state = 0; state < count_states_; ++state) {
+            state_ids_vector_t &outputs = outputs_merged[state];
+            if (outputs_[state] != invalid_state_k && outputs.try_push_back(outputs_[state]) != status_t::success_k)
+                return status_t::bad_alloc_k;
+        }
 
         // Reset all root transitions to point to itself - forming a loop.
         size_t queue_begin = 0, queue_end = 0;
@@ -243,8 +286,13 @@ struct aho_corasick_dictionary {
                     state_id_t failure_state = failures_[current_state];
                     while (transitions_[failure_state][symbol] == invalid_state_k)
                         failure_state = failures_[failure_state];
-
                     failures_[next_state] = transitions_[failure_state][symbol];
+
+                    // Aggregate the outputs of the failure links
+                    if (outputs_merged[next_state].try_append(outputs_merged[failures_[next_state]]) !=
+                        status_t::success_k)
+                        return status_t::bad_alloc_k;
+
                     if (outputs_[failures_[next_state]] != invalid_state_k && outputs_[next_state] == invalid_state_k)
                         outputs_[next_state] = outputs_[failures_[next_state]];
                     work_queue[queue_end++] = next_state;
@@ -252,7 +300,24 @@ struct aho_corasick_dictionary {
                 else { transitions_[current_state][symbol] = transitions_[failures_[current_state]][symbol]; }
             }
         }
-        alloc_.deallocate((char *)work_queue, queue_capacity * sizeof(state_id_t));
+
+        // Re-populate the `outputs_` with a flattened version of `outputs_merged`.
+        // Also populate the `outputs_counts_` with the number of needles ending at each state.
+        size_t total_count = 0;
+        for (size_t state = 0; state < count_states_; ++state) {
+            state_ids_vector_t &outputs = outputs_merged[state];
+            outputs_counts_[state] = static_cast<state_id_t>(outputs.size());
+            outputs_offsets_[state] = static_cast<state_id_t>(total_count);
+            total_count += outputs.size();
+        }
+
+        // Now in the second pass, perform the flattening of the `outputs_merged` into `outputs_`.
+        if (outputs_.try_resize(total_count) != status_t::success_k) return status_t::bad_alloc_k;
+        for (size_t state = 0; state < count_states_; ++state) {
+            state_ids_vector_t &outputs = outputs_merged[state];
+            for (size_t i = 0; i < outputs.size(); ++i) outputs_[outputs_offsets_[state] + i] = outputs[i];
+        }
+
         return status_t::success_k;
     }
 
@@ -268,10 +333,15 @@ struct aho_corasick_dictionary {
         for (size_t pos = 0; pos < haystack.size(); ++pos) {
             unsigned char symbol = static_cast<unsigned char>(haystack[pos]);
             current_state = transitions_[current_state][symbol];
-            if (outputs_[current_state] != invalid_state_k) {
-                size_t match_length = outputs_lengths_[current_state];
+
+            size_t outputs_count = outputs_counts_[current_state];
+            if (outputs_count == 0) continue;
+            size_t outputs_offset = outputs_offsets_[current_state];
+            for (size_t i = 0; i < outputs_count; ++i) { // In small vocabulary, this is generally just 1 iteration
+                size_t needle_id = outputs_[outputs_offset + i];
+                size_t match_length = needles_lengths_[needle_id];
                 span<char const> match_span(&haystack[pos + 1 - match_length], match_length);
-                match_t match {haystack, match_span, 0, outputs_[current_state]};
+                match_t match {haystack, match_span, 0, needle_id};
                 if (!callback(match)) break;
             }
         }
@@ -287,7 +357,7 @@ struct aho_corasick_dictionary {
         for (size_t pos = 0; pos < haystack.size(); ++pos) {
             unsigned char symbol = static_cast<unsigned char>(haystack[pos]);
             current_state = transitions_[current_state][symbol];
-            count += outputs_[current_state] != invalid_state_k;
+            count += outputs_counts_[current_state];
         }
         return count;
     }
@@ -317,11 +387,9 @@ struct find_many {
 
     template <typename needles_type_>
     status_t try_build(needles_type_ &&needles_strings) noexcept {
-        state_id_t needle_id = 0;
         for (auto const &needle : needles_strings) {
-            status_t status = dict_.try_insert(needle, needle_id);
+            status_t status = dict_.try_insert(needle);
             if (status != status_t::success_k) return status;
-            needle_id++;
         }
         return dict_.try_build();
     }
