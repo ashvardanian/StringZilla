@@ -184,6 +184,120 @@ struct dummy_alloc {
 using dummy_alloc_t = dummy_alloc<char>;
 
 /**
+ *  @brief  Random access iterator for any immutable container with indexed element lookup support.
+ *  @note   Designed for `arrow_strings_tape` and `arrow_strings_view` compatibility with STL algorithms and ranges.
+ */
+template <typename container_type_>
+struct indexed_container_iterator {
+    using container_t = container_type_;
+    using value_t = typename container_t::value_type;
+
+    using difference_type = sz_ssize_t;
+    using value_type = value_t;
+    using reference = value_t; // ! As our view returns by value
+    using pointer = void;      // ! Not providing direct pointer semantics
+
+#if !SZ_AVOID_STL
+    using iterator_category = std::random_access_iterator_tag;
+#endif
+
+  private:
+    container_t const *parent_;
+    size_t index_;
+
+  public:
+    constexpr indexed_container_iterator() noexcept : parent_(nullptr), index_(0) {}
+    constexpr indexed_container_iterator(container_t const &parent, size_t index) noexcept
+        : parent_(&parent), index_(index) {}
+    constexpr reference operator*() const noexcept { return (*parent_)[index_]; }
+
+    struct proxy {
+        value_type value;
+        constexpr proxy(value_type v) noexcept : value(v) {}
+        constexpr value_type const *operator->() const noexcept { return &value; }
+    };
+
+    constexpr proxy operator->() const noexcept { return proxy(operator*()); }
+    constexpr indexed_container_iterator &operator++() noexcept {
+        ++index_;
+        return *this;
+    }
+
+    constexpr indexed_container_iterator operator++(int) noexcept {
+        indexed_container_iterator temp = *this;
+        ++index_;
+        return temp;
+    }
+
+    constexpr indexed_container_iterator &operator--() noexcept {
+        --index_;
+        return *this;
+    }
+
+    constexpr indexed_container_iterator operator--(int) noexcept {
+        indexed_container_iterator temp = *this;
+        --index_;
+        return temp;
+    }
+
+    constexpr indexed_container_iterator &operator+=(difference_type n) noexcept {
+        index_ += n;
+        return *this;
+    }
+
+    constexpr indexed_container_iterator &operator-=(difference_type n) noexcept {
+        index_ -= n;
+        return *this;
+    }
+
+    constexpr indexed_container_iterator operator+(difference_type n) const noexcept {
+        indexed_container_iterator temp = *this;
+        return temp += n;
+    }
+
+    constexpr indexed_container_iterator operator-(difference_type n) const noexcept {
+        indexed_container_iterator temp = *this;
+        return temp -= n;
+    }
+
+    constexpr difference_type operator-(indexed_container_iterator const &other) const noexcept {
+        return static_cast<difference_type>(index_) - static_cast<difference_type>(other.index_);
+    }
+
+    constexpr value_type operator[](difference_type n) const noexcept { return *(*this + n); }
+
+    friend constexpr bool operator==(indexed_container_iterator const &lhs,
+                                     indexed_container_iterator const &rhs) noexcept {
+        return lhs.parent_ == rhs.parent_ && lhs.index_ == rhs.index_;
+    }
+
+    friend constexpr bool operator!=(indexed_container_iterator const &lhs,
+                                     indexed_container_iterator const &rhs) noexcept {
+        return !(lhs == rhs);
+    }
+
+    friend constexpr bool operator<(indexed_container_iterator const &lhs,
+                                    indexed_container_iterator const &rhs) noexcept {
+        return lhs.index_ < rhs.index_;
+    }
+
+    friend constexpr bool operator>(indexed_container_iterator const &lhs,
+                                    indexed_container_iterator const &rhs) noexcept {
+        return rhs < lhs;
+    }
+
+    friend constexpr bool operator<=(indexed_container_iterator const &lhs,
+                                     indexed_container_iterator const &rhs) noexcept {
+        return !(rhs < lhs);
+    }
+
+    friend constexpr bool operator>=(indexed_container_iterator const &lhs,
+                                     indexed_container_iterator const &rhs) noexcept {
+        return !(lhs < rhs);
+    }
+};
+
+/**
  *  @brief  Apache @b Arrow-compatible tape data-structure to store a sequence of variable length strings.
  *          Doesn't own the memory, but provides a view to the strings stored in a contiguous memory block.
  *  @sa     arrow_strings_tape
