@@ -306,19 +306,29 @@ template <typename char_type_, typename offset_type_>
 struct arrow_strings_view {
     using char_t = char_type_;
     using offset_t = offset_type_;
-    using value_t = span<char_t>;
-    using value_type = value_t; // ? For STL compatibility
+    using self_t = arrow_strings_view<char_t, offset_t>;
 
-    span<char_t> buffer_;
-    span<offset_t> offsets_;
+    using value_t = span<char_t const>;
+    using value_type = value_t; // ? For STL compatibility
+    using iterator_t = indexed_container_iterator<self_t>;
+    using iterator = iterator_t; // ? For STL compatibility
+
+    span<char_t const> buffer_;
+    span<offset_t const> offsets_;
 
     constexpr arrow_strings_view() noexcept : buffer_ {}, offsets_ {} {}
-    constexpr arrow_strings_view(span<char_t> buf, span<offset_t> offs) noexcept : buffer_(buf), offsets_(offs) {}
-    constexpr size_t size() const noexcept { return offsets_.size() - 1; }
+    constexpr arrow_strings_view(span<char_t const> buf, span<offset_t const> offs) noexcept
+        : buffer_(buf), offsets_(offs) {}
 
-    constexpr span<char_t> operator[](size_t i) const noexcept {
+    constexpr size_t size() const noexcept { return offsets_.size() - 1; }
+    constexpr value_t operator[](size_t i) const noexcept {
         return {&buffer_[offsets_[i]], offsets_[i + 1] - offsets_[i] - 1};
     }
+
+    constexpr iterator_t begin() const noexcept { return iterator_t(*this, 0); }
+    constexpr iterator_t end() const noexcept { return iterator_t(*this, size()); }
+    constexpr iterator_t cbegin() const noexcept { return begin(); }
+    constexpr iterator_t cend() const noexcept { return end(); }
 };
 
 /**
@@ -331,10 +341,13 @@ struct arrow_strings_tape {
     using char_t = char_type_;
     using offset_t = offset_type_;
     using allocator_t = allocator_type_;
+    using self_t = arrow_strings_tape<char_t, offset_t, allocator_t>;
 
-    using value_t = span<char_t>;
+    using value_t = span<char_t const>;
     using view_t = arrow_strings_view<char_t, offset_t>;
     using value_type = value_t; // ? For STL compatibility
+    using iterator_t = indexed_container_iterator<self_t>;
+    using iterator = iterator_t; // ? For STL compatibility
 
 #if _SZ_IS_CPP17
     using char_alloc_t = typename std::allocator_traits<allocator_t>::rebind_alloc<char_t>;
@@ -369,6 +382,11 @@ struct arrow_strings_tape {
             offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data_), offsets_.size_), offsets_ = {};
         count_ = 0;
     }
+
+    constexpr iterator_t begin() const noexcept { return iterator_t(*this, 0); }
+    constexpr iterator_t end() const noexcept { return iterator_t(*this, size()); }
+    constexpr iterator_t cbegin() const noexcept { return begin(); }
+    constexpr iterator_t cend() const noexcept { return end(); }
 
     template <typename strings_iterator_type_>
     status_t try_assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
@@ -467,7 +485,7 @@ struct arrow_strings_tape {
     }
 
     constexpr size_t size() const noexcept { return count_; }
-    constexpr view_t view() const noexcept { return {buffer_, {offsets_.data_, count_ + 1}}; }
+    constexpr view_t view() const noexcept { return {{buffer_.data(), buffer_.size()}, {offsets_.data_, count_ + 1}}; }
     constexpr span<char_t> const &buffer() const noexcept { return buffer_; }
     constexpr span<offset_t> const &offsets() const noexcept { return offsets_; }
 };
