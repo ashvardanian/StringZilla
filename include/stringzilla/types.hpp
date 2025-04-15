@@ -552,6 +552,164 @@ struct constant_iterator {
     difference_type pos_;
 };
 
+template <typename value_type_, size_t count_>
+struct safe_array {
+    using value_type = value_type_;
+    using size_type = size_t;
+    using iterator = value_type *;
+    using const_iterator = value_type const *;
+    static constexpr size_type count_k = count_;
+
+    value_type data_[count_k] = {};
+
+    constexpr value_type &operator[](size_type i) noexcept { return data_[i]; }
+    constexpr value_type const &operator[](size_type i) const noexcept { return data_[i]; }
+    constexpr size_type size() const noexcept { return count_k; }
+    constexpr value_type *data() noexcept { return data_; }
+    constexpr value_type const *data() const noexcept { return data_; }
+    constexpr iterator begin() noexcept { return data_; }
+    constexpr const_iterator begin() const noexcept { return data_; }
+    constexpr iterator end() noexcept { return data_ + count_k; }
+    constexpr const_iterator end() const noexcept { return data_ + count_k; }
+};
+
+/**
+ *  @brief  Safer alternative to `std::vector`, that avoids exceptions, copy constructors,
+ *          and provides alternative `try_push_back` and `try_reserve` for faulty memory allocations.
+ */
+template <typename value_type_, typename allocator_type_>
+class safe_vector {
+  public:
+    using value_type = value_type_;
+    using size_type = std::size_t;
+    using allocator_type = allocator_type_;
+
+  private:
+    value_type *data_;
+    size_type size_;
+    size_type capacity_;
+    allocator_type alloc_;
+
+  public:
+    safe_vector() noexcept : data_(nullptr), size_(0), capacity_(0), alloc_() {}
+    safe_vector(allocator_type alloc) noexcept : data_(nullptr), size_(0), capacity_(0), alloc_(alloc) {}
+    ~safe_vector() noexcept { reset(); }
+
+    void clear() noexcept {
+        if constexpr (!std::is_trivially_destructible<value_type>::value)
+            for (size_type i = 0; i < size_; ++i) data_[i].~value_type();
+        size_ = 0;
+    }
+
+    void reset() noexcept {
+        clear();
+        if (data_) alloc_.deallocate(data_, capacity_);
+        data_ = nullptr;
+        size_ = 0;
+        capacity_ = 0;
+    }
+
+    safe_vector(safe_vector const &other) = delete;
+    safe_vector &operator=(safe_vector const &other) noexcept = delete;
+
+    safe_vector(safe_vector &&other) noexcept
+        : data_(other.data_), size_(other.size_), capacity_(other.capacity_), alloc_(std::move(other.alloc_)) {
+        other.data_ = nullptr;
+        other.size_ = 0;
+        other.capacity_ = 0;
+    }
+
+    safe_vector &operator=(safe_vector &&other) noexcept {
+        if (this != &other) {
+            clear();
+            if (data_) alloc_.deallocate(data_, capacity_);
+            data_ = other.data_;
+            size_ = other.size_;
+            capacity_ = other.capacity_;
+            alloc_ = std::move(other.alloc_);
+            other.data_ = nullptr;
+            other.size_ = 0;
+            other.capacity_ = 0;
+        }
+        return *this;
+    }
+
+    status_t try_reserve(size_type new_cap) noexcept {
+        if (new_cap <= capacity_) return status_t::success_k;
+        value_type *new_data = alloc_.allocate(new_cap);
+        if (!new_data) return status_t::bad_alloc_k;
+        for (size_type i = 0; i < size_; ++i) {
+            new (new_data + i) value_type(std::move(data_[i]));
+            if constexpr (!std::is_trivially_destructible<value_type>::value) data_[i].~value_type();
+        }
+        if (data_) alloc_.deallocate(data_, capacity_);
+        data_ = new_data;
+        capacity_ = new_cap;
+        return status_t::success_k;
+    }
+
+    status_t try_resize(size_type new_size) noexcept {
+        if (new_size > capacity_ && try_reserve(new_size) != status_t::success_k) return status_t::bad_alloc_k;
+
+        if (new_size > size_) {
+            if constexpr (!std::is_trivially_constructible<value_type>::value)
+                for (size_type i = size_; i < new_size; ++i) new (data_ + i) value_type();
+        }
+        else if (new_size < size_) {
+            if constexpr (!std::is_trivially_destructible<value_type>::value)
+                for (size_type i = new_size; i < size_; ++i) data_[i].~value_type();
+        }
+
+        size_ = new_size;
+        return status_t::success_k;
+    }
+
+    status_t try_push_back(value_type const &val) noexcept {
+        if (size_ == capacity_) {
+            size_type new_cap = capacity_ ? capacity_ * 2 : 1;
+            if (try_reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
+        }
+        new (data_ + size_) value_type(val);
+        ++size_;
+        return status_t::success_k;
+    }
+
+    status_t try_push_back(value_type &&val) noexcept {
+        if (size_ == capacity_) {
+            size_type new_cap = capacity_ ? capacity_ * 2 : 1;
+            if (try_reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
+        }
+        new (data_ + size_) value_type(std::move(val));
+        ++size_;
+        return status_t::success_k;
+    }
+
+    status_t try_append(span<value_type const> source) noexcept {
+        size_type needed = size_ + source.size();
+        if (needed > capacity_) {
+            size_type new_cap = capacity_ ? capacity_ : 1;
+            while (new_cap < needed) new_cap *= 2;
+            if (try_reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
+        }
+        for (size_type i = 0; i < source.size(); ++i) new (data_ + size_ + i) value_type(source[i]);
+        size_ = needed;
+        return status_t::success_k;
+    }
+
+    value_type *begin() noexcept { return data_; }
+    value_type const *begin() const noexcept { return data_; }
+    value_type *end() noexcept { return data_ + size_; }
+    value_type const *end() const noexcept { return data_ + size_; }
+    value_type &operator[](size_type i) noexcept { return data_[i]; }
+    value_type const &operator[](size_type i) const noexcept { return data_[i]; }
+    value_type *data() noexcept { return data_; }
+    value_type const *data() const noexcept { return data_; }
+    size_type size() const noexcept { return size_; }
+    size_type capacity() const noexcept { return capacity_; }
+    operator span<value_type>() noexcept { return {data_, size_}; }
+    operator span<value_type const>() const noexcept { return {data_, size_}; }
+};
+
 template <typename first_, typename second_>
 struct is_same_type;
 
