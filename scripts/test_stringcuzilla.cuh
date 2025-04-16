@@ -406,8 +406,28 @@ struct fuzzy_config_t {
     std::size_t batch_size = 16;
     std::size_t min_string_length = 1;
     std::size_t max_string_length = 200;
-    std::size_t iterations = 10;
 };
+
+void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, arrow_strings_tape_t &tape,
+                       bool unique = false) {
+    array.resize(config.batch_size);
+
+    std::uniform_int_distribution<std::size_t> length_distribution(config.min_string_length, config.max_string_length);
+    for (std::size_t i = 0; i != config.batch_size; ++i) {
+        std::size_t length = length_distribution(global_random_generator());
+        array[i] = random_string(length, config.alphabet.data(), config.alphabet.size());
+    }
+
+    if (unique) {
+        std::sort(array.begin(), array.end());
+        auto last = std::unique(array.begin(), array.end());
+        array.erase(last, array.end());
+    }
+
+    // Convert to a GPU-friendly layout
+    status_t status = tape.try_assign(array.data(), array.data() + array.size());
+    _sz_assert(status == status_t::success_k);
+}
 
 /**
  *  @brief  Tests the correctness of the string class Levenshtein distance computation,
@@ -416,26 +436,17 @@ struct fuzzy_config_t {
  */
 template <typename score_type_, typename base_operator_, typename simd_operator_, typename... extra_args_>
 void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                  fuzzy_config_t config = {}, extra_args_ &&...extra_args) {
+                                  fuzzy_config_t config = {}, std::size_t iterations = 10,
+                                  extra_args_ &&...extra_args) {
 
-    using score_t = score_type_;
-    unified_vector<score_t> results_base(config.batch_size), results_simd(config.batch_size);
-    std::vector<std::string> first_array(config.batch_size), second_array(config.batch_size);
+    unified_vector<score_type_> results_base(config.batch_size), results_simd(config.batch_size);
+    std::vector<std::string> first_array, second_array;
     arrow_strings_tape_t first_tape, second_tape;
-    std::uniform_int_distribution<std::size_t> length_distribution(config.min_string_length, config.max_string_length);
 
     // Generate some random strings, using a small alphabet
-    for (std::size_t iteration_idx = 0; iteration_idx < config.iterations; ++iteration_idx) {
-        for (std::size_t i = 0; i != config.batch_size; ++i) {
-            std::size_t first_length = length_distribution(global_random_generator());
-            std::size_t second_length = length_distribution(global_random_generator());
-            first_array[i] = random_string(first_length, config.alphabet.data(), config.alphabet.size());
-            second_array[i] = random_string(second_length, config.alphabet.data(), config.alphabet.size());
-        }
-
-        // Convert to a GPU-friendly layout
-        first_tape.try_assign(first_array.data(), first_array.data() + config.batch_size);
-        second_tape.try_assign(second_array.data(), second_array.data() + config.batch_size);
+    for (std::size_t iteration_idx = 0; iteration_idx < iterations; ++iteration_idx) {
+        randomize_strings(config, first_array, first_tape);
+        randomize_strings(config, second_array, second_tape);
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
@@ -583,26 +594,26 @@ void test_similarity_scores_memory_usage() {
 
     std::vector<fuzzy_config_t> experiments = {
         // Single string pair of same length:
-        {.batch_size = 1, .min_string_length = 128, .max_string_length = 128, .iterations = 1},
-        {.batch_size = 1, .min_string_length = 512, .max_string_length = 512, .iterations = 1},
-        {.batch_size = 1, .min_string_length = 2048, .max_string_length = 2048, .iterations = 1},
-        {.batch_size = 1, .min_string_length = 8192, .max_string_length = 8192, .iterations = 1},
-        {.batch_size = 1, .min_string_length = 32768, .max_string_length = 32768, .iterations = 1},
-        {.batch_size = 1, .min_string_length = 131072, .max_string_length = 131072, .iterations = 1},
+        {.batch_size = 1, .min_string_length = 128, .max_string_length = 128},
+        {.batch_size = 1, .min_string_length = 512, .max_string_length = 512},
+        {.batch_size = 1, .min_string_length = 2048, .max_string_length = 2048},
+        {.batch_size = 1, .min_string_length = 8192, .max_string_length = 8192},
+        {.batch_size = 1, .min_string_length = 32768, .max_string_length = 32768},
+        {.batch_size = 1, .min_string_length = 131072, .max_string_length = 131072},
         // Two strings of a same length:
-        {.batch_size = 2, .min_string_length = 128, .max_string_length = 128, .iterations = 1},
-        {.batch_size = 2, .min_string_length = 512, .max_string_length = 512, .iterations = 1},
-        {.batch_size = 2, .min_string_length = 2048, .max_string_length = 2048, .iterations = 1},
-        {.batch_size = 2, .min_string_length = 8192, .max_string_length = 8192, .iterations = 1},
-        {.batch_size = 2, .min_string_length = 32768, .max_string_length = 32768, .iterations = 1},
-        {.batch_size = 2, .min_string_length = 131072, .max_string_length = 131072, .iterations = 1},
+        {.batch_size = 2, .min_string_length = 128, .max_string_length = 128},
+        {.batch_size = 2, .min_string_length = 512, .max_string_length = 512},
+        {.batch_size = 2, .min_string_length = 2048, .max_string_length = 2048},
+        {.batch_size = 2, .min_string_length = 8192, .max_string_length = 8192},
+        {.batch_size = 2, .min_string_length = 32768, .max_string_length = 32768},
+        {.batch_size = 2, .min_string_length = 131072, .max_string_length = 131072},
         // Ten strings of random lengths:
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 128, .iterations = 1},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 512, .iterations = 1},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 2048, .iterations = 1},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 8192, .iterations = 1},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 32768, .iterations = 1},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 131072, .iterations = 1},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 128},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 512},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 2048},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 8192},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 32768},
+        {.batch_size = 10, .min_string_length = 1, .max_string_length = 131072},
     };
 
 #if SZ_USE_CUDA
@@ -611,20 +622,19 @@ void test_similarity_scores_memory_usage() {
 
     // Progress until something fails
     for (fuzzy_config_t const &experiment : experiments) {
-        std::printf("Testing with batch size %zu, min length %zu, max length %zu, iterations %zu\n",
-                    experiment.batch_size, experiment.min_string_length, experiment.max_string_length,
-                    experiment.iterations);
+        std::printf("Testing with batch size %zu, min length %zu, max length %zu\n", experiment.batch_size,
+                    experiment.min_string_length, experiment.max_string_length);
 
         // Multi-threaded serial Levenshtein distance implementation
         test_similarity_scores_fuzzy<sz_size_t>( //
             levenshtein_baselines_t {},          //
-            levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, experiment);
+            levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, experiment, 1);
 
 #if SZ_USE_CUDA
         // CUDA Levenshtein distance against Multi-threaded on CPU
         test_similarity_scores_fuzzy<sz_size_t>(                    //
             levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
-            levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {}, experiment, first_gpu_specs);
+            levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {}, experiment, 1, first_gpu_specs);
 #endif
     }
 }
@@ -681,26 +691,26 @@ struct find_many_baselines_t {
     }
 
     template <typename haystacks_type_>
-    size_t count(haystacks_type_ &&haystacks, span<size_t> counts) const noexcept {
-        size_t count_total = 0;
+    status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts) const noexcept {
         for (size_t &count : counts) count = 0;
         iterate_through_unsorted_matches(haystacks, needles_, [&](match_t const &match) {
             counts[match.haystack_index] += 1;
-            count_total += 1;
             return true;
         });
-        return count_total;
+        return status_t::success_k;
     }
 
     template <typename haystacks_type_, typename output_matches_type_>
-    size_t find(haystacks_type_ &&haystacks, output_matches_type_ &&matches) const noexcept {
+    status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches,
+                      size_t &matches_total) const noexcept {
         size_t count_found = 0, count_allowed = matches.size();
         iterate_through_unsorted_matches(haystacks, needles_, [&](match_t const &match) {
             matches[count_found] = match;
             count_found += 1;
             return count_found < count_allowed;
         });
-        return count_found;
+        matches_total = count_found;
+        return status_t::success_k;
     }
 };
 
@@ -754,20 +764,26 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         // Count with both backends
         span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
         span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
-        size_t total_found_base = base_operator.count(haystacks_tape, counts_base_span);
-        size_t total_found_simd = simd_operator.count(haystacks_tape, counts_simd_span, extra_args...);
-        _sz_assert(total_found_base == total_found_simd);
+        status_t status_count_base = base_operator.try_count(haystacks_tape, counts_base_span);
+        status_t status_count_simd = simd_operator.try_count(haystacks_tape, counts_simd_span, extra_args...);
+        _sz_assert(status_count_base == status_t::success_k);
+        _sz_assert(status_count_simd == status_t::success_k);
         _sz_assert(counts_base[0] == counts_simd[0]);
 
         // Check the matches themselves
-        matches_base.resize(total_found_base);
-        matches_simd.resize(total_found_simd);
-        size_t total_matched_base = base_operator.find(haystacks_tape, matches_base);
-        size_t total_matched_simd = simd_operator.find(haystacks_tape, matches_simd, extra_args...);
-        _sz_assert(total_matched_base == total_matched_simd);
+        matches_base.resize(std::accumulate(counts_base.begin(), counts_base.end(), 0));
+        matches_simd.resize(std::accumulate(counts_simd.begin(), counts_simd.end(), 0));
+        size_t total_found_base = 0, total_found_simd = 0;
+        status_t status_matched_base = base_operator.try_find(haystacks_tape, matches_base, total_found_base);
+        status_t status_matched_simd =
+            simd_operator.try_find(haystacks_tape, matches_simd, total_found_simd, extra_args...);
+        _sz_assert(status_matched_base == status_t::success_k);
+        _sz_assert(status_matched_simd == status_t::success_k);
+        _sz_assert(total_found_base == matches_base.size());
+        _sz_assert(total_found_simd == matches_simd.size());
 
         // Check the contents and order of the matches
-        for (std::size_t i = 0; i != total_matched_base; ++i) {
+        for (std::size_t i = 0; i != matches_base.size(); ++i) {
             _sz_assert(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
             _sz_assert(matches_base[i].needle.data() == matches_simd[i].needle.data());
             _sz_assert(matches_base[i].needle_index == matches_simd[i].needle_index);
@@ -780,26 +796,94 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         counts_base.resize(haystacks.size());
         counts_simd.resize(haystacks.size());
 
-        // Count with both backends
+        // Count with both backends and compare all of the bounds
         span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
         span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
-        size_t total_found_base = base_operator.count(haystacks_tape, counts_base_span);
-        size_t total_found_simd = simd_operator.count(haystacks_tape, counts_simd_span, extra_args...);
-        _sz_assert(total_found_base == total_found_simd);
+        status_t status_count_base = base_operator.try_count(haystacks_tape, counts_base_span);
+        status_t status_count_simd = simd_operator.try_count(haystacks_tape, counts_simd_span, extra_args...);
+        _sz_assert(status_count_base == status_t::success_k);
+        _sz_assert(status_count_simd == status_t::success_k);
+        _sz_assert(std::equal(counts_base.begin(), counts_base.end(), counts_simd.begin()));
 
         // Check the matches themselves
-        matches_base.resize(total_found_base);
-        matches_simd.resize(total_found_simd);
-        size_t total_matched_base = base_operator.find(haystacks_tape, matches_base);
-        size_t total_matched_simd = simd_operator.find(haystacks_tape, matches_simd, extra_args...);
-        _sz_assert(total_matched_base == total_matched_simd);
+        matches_base.resize(std::accumulate(counts_base.begin(), counts_base.end(), 0));
+        matches_simd.resize(std::accumulate(counts_simd.begin(), counts_simd.end(), 0));
+        size_t total_found_base = 0, total_found_simd = 0;
+        status_t status_matched_base = base_operator.try_find(haystacks_tape, matches_base, total_found_base);
+        status_t status_matched_simd =
+            simd_operator.try_find(haystacks_tape, matches_simd, total_found_simd, extra_args...);
+        _sz_assert(status_matched_base == status_t::success_k);
+        _sz_assert(status_matched_simd == status_t::success_k);
+        _sz_assert(total_found_base == matches_base.size());
+        _sz_assert(total_found_simd == matches_simd.size());
 
         // Check the contents and order of the matches
-        for (std::size_t i = 0; i != total_matched_base; ++i) {
+        for (std::size_t i = 0; i != matches_base.size(); ++i) {
             _sz_assert(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
             _sz_assert(matches_base[i].needle.data() == matches_simd[i].needle.data());
             _sz_assert(matches_base[i].needle_index == matches_simd[i].needle_index);
         }
+    }
+}
+
+/**
+ *  @brief Fuzzy test for multi-pattern exact search algorithms using randomly-generated haystacks and needles.
+ */
+template <typename base_operator_, typename simd_operator_, typename... extra_args_>
+void test_find_many_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                          fuzzy_config_t needles_config = {}, fuzzy_config_t haystacks_config = {},
+                          std::size_t iterations = 10, extra_args_ &&...extra_args) {
+
+    using match_t = find_many_match_t;
+    unified_vector<match_t> results_base, results_simd;
+    unified_vector<size_t> counts_base, counts_simd;
+    std::vector<std::string> haystacks_array, needles_array;
+    arrow_strings_tape_t haystacks_tape, needles_tape;
+
+    // Generate some random strings, using a small alphabet
+    for (std::size_t iteration_idx = 0; iteration_idx < iterations; ++iteration_idx) {
+        randomize_strings(haystacks_config, haystacks_array, haystacks_tape);
+        randomize_strings(needles_config, needles_array, needles_tape, true);
+        counts_base.resize(haystacks_array.size());
+        counts_simd.resize(haystacks_array.size());
+
+        // Build the matchers
+        _sz_assert(base_operator.try_build(needles_tape.view()) == status_t::success_k);
+        _sz_assert(simd_operator.try_build(needles_tape.view()) == status_t::success_k);
+
+        // Count the number of matches with both backends
+        span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
+        span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
+        status_t status_count_base = base_operator.try_count(haystacks_tape.view(), counts_base_span);
+        status_t status_count_simd = simd_operator.try_count(haystacks_tape.view(), counts_simd_span, extra_args...);
+        _sz_assert(status_count_base == status_t::success_k);
+        _sz_assert(status_count_simd == status_t::success_k);
+        size_t total_count_base = std::accumulate(counts_base.begin(), counts_base.end(), 0);
+        size_t total_count_simd = std::accumulate(counts_simd.begin(), counts_simd.end(), 0);
+        _sz_assert(total_count_base == total_count_simd);
+        _sz_assert(std::equal(counts_base.begin(), counts_base.end(), counts_simd.begin()));
+
+        // Compute with both backends
+        results_base.resize(total_count_base);
+        results_simd.resize(total_count_simd);
+        size_t count_base = 0, count_simd = 0;
+        status_t status_base = base_operator.try_find(haystacks_tape.view(), results_base, count_base);
+        status_t status_simd = simd_operator.try_find(haystacks_tape.view(), results_simd, count_simd, extra_args...);
+        _sz_assert(status_base == status_t::success_k);
+        _sz_assert(status_simd == status_t::success_k);
+        _sz_assert(count_base == count_simd);
+
+        // Individually log the failed results
+        std::sort(results_base.begin(), results_base.end(), match_t::less_globally);
+        std::sort(results_simd.begin(), results_simd.end(), match_t::less_globally);
+        for (std::size_t i = 0; i != results_base.size(); ++i) {
+            _sz_assert(results_base[i].haystack_index == results_simd[i].haystack_index);
+            _sz_assert(results_base[i].needle_index == results_simd[i].needle_index);
+            _sz_assert(results_base[i].needle.data() == results_simd[i].needle.data());
+        }
+
+        base_operator.reset();
+        simd_operator.reset();
     }
 }
 
@@ -809,11 +893,34 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
  */
 void test_find_many_equivalence() {
 
+    cpu_specs_t default_cpu_specs;
+    fuzzy_config_t needles_short_config, needles_long_config, haystacks_long_config;
+    haystacks_long_config.batch_size = default_cpu_specs.cores_total() * 4;
+    haystacks_long_config.max_string_length = default_cpu_specs.l3_bytes;
+
+    needles_long_config.min_string_length = 8;
+    needles_long_config.max_string_length = 10;
+    needles_long_config.batch_size =
+        std::pow(needles_long_config.alphabet.size(), needles_long_config.max_string_length);
+
+    needles_long_config.min_string_length = 1;
+    needles_long_config.max_string_length = 6;
+    needles_long_config.batch_size =
+        std::pow(needles_long_config.alphabet.size(), needles_long_config.max_string_length);
+
     // Single-threaded serial Levenshtein distance implementation
     test_find_many_fixed(find_many_baselines_t {}, find_many_serial_t {});
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_serial_t {}, needles_short_config, haystacks_long_config,
+                         1);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_serial_t {}, needles_long_config, haystacks_long_config,
+                         1);
 
     // Multi-threaded parallel Levenshtein distance implementation
     test_find_many_fixed(find_many_baselines_t {}, find_many_parallel_t {});
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_short_config, haystacks_long_config,
+                         10);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_long_config, haystacks_long_config,
+                         10);
 }
 
 } // namespace scripts
