@@ -640,7 +640,6 @@ void test_similarity_scores_memory_usage() {
 }
 
 struct find_many_baselines_t {
-    using state_id_t = sz_u32_t;
     using match_t = find_many_match_t;
 
     arrow_strings_tape_t needles_;
@@ -652,39 +651,65 @@ struct find_many_baselines_t {
 
     void reset() noexcept { needles_.reset(); }
 
+    template <typename haystack_type_, typename needle_type_, typename match_callback_type_>
+    void one_pair(haystack_type_ const &haystack, needle_type_ const &needle,
+                  match_callback_type_ &&callback) const noexcept {
+
+        // Define iterators for the current haystack and the needle.
+        auto haystack_begin = haystack.begin();
+        auto haystack_end = haystack.end();
+        auto needle_begin = needle.begin();
+        auto needle_end = needle.end();
+
+        // Use `std::search` to find all occurrences of needle in haystack.
+        while (true) {
+            auto it = std::search(haystack_begin, haystack_end, needle_begin, needle_end);
+            if (it == haystack_end) break;
+
+            // Compute the starting index of the found occurrence.
+            std::size_t found = static_cast<std::size_t>(std::distance(haystack.begin(), it));
+
+            // Construct a match record.
+            match_t match;
+            match.haystack = {haystack.data(), haystack.size()};
+            match.needle = {haystack.data() + found, needle.size()};
+
+            // Invoke the callback. If it returns false, abort all further processing.
+            if (!callback(match)) return;
+
+            // Advance the starting iterator for the next search.
+            haystack_begin = it + 1;
+        }
+    }
+
     template <typename haystacks_type_, typename needles_type_, typename match_callback_type_>
-    void iterate_through_unsorted_matches(haystacks_type_ &&haystacks, needles_type_ &&needles,
-                                          match_callback_type_ &&callback) const noexcept {
-        for (std::size_t i = 0; i != haystacks.size(); ++i) {
-            auto const &haystack = haystacks[i];
-            for (std::size_t j = 0; j != needles.size(); ++j) {
+    void all_pairs(haystacks_type_ &&haystacks, needles_type_ &&needles,
+                   match_callback_type_ &&callback) const noexcept {
+
+        // A wise man once said, `omp parallel for collapse(2) schedule(dynamic, 1)`...
+        // But the compiler wasn't listening, and won't compile the cancellation point!
+        std::size_t const total_tasks = haystacks.size() * needles.size();
+#pragma omp parallel
+        {
+#pragma omp for schedule(dynamic, 1)
+            for (std::size_t task = 0; task != total_tasks; ++task) {
+#pragma omp cancellation point for
+                std::size_t const i = task / needles.size();
+                std::size_t const j = task % needles.size();
+
+                auto const &haystack = haystacks[i];
                 auto const &needle = needles[j];
-                // Define iterators for the current haystack and the needle.
-                auto haystack_begin = haystack.begin();
-                auto haystack_end = haystack.end();
-                auto needle_begin = needle.begin();
-                auto needle_end = needle.end();
-
-                // Use `std::search` to find all occurrences of needle in haystack.
-                while (true) {
-                    auto it = std::search(haystack_begin, haystack_end, needle_begin, needle_end);
-                    if (it == haystack_end) break;
-
-                    // Compute the starting index of the found occurrence.
-                    std::size_t found = static_cast<std::size_t>(std::distance(haystack.begin(), it));
-
-                    // Construct a match record.
-                    match_t match;
+                bool keep_going = true;
+                one_pair(haystack, needle, [&](match_t match) {
                     match.haystack_index = i;
                     match.needle_index = j;
-                    match.haystack = {haystack.data(), haystack.size()};
-                    match.needle = {haystack.data() + found, needle.size()};
-
-                    // Invoke the callback. If it returns false, abort all further processing.
-                    if (!callback(match)) return;
-
-                    // Advance the starting iterator for the next search.
-                    haystack_begin = it + 1;
+#pragma omp critical
+                    { keep_going = callback(match); }
+                    return keep_going;
+                });
+                // Quit the outer loop if the callback returns false
+                if (!keep_going) {
+#pragma omp cancel for
                 }
             }
         }
@@ -693,7 +718,7 @@ struct find_many_baselines_t {
     template <typename haystacks_type_>
     status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts) const noexcept {
         for (size_t &count : counts) count = 0;
-        iterate_through_unsorted_matches(haystacks, needles_, [&](match_t const &match) {
+        all_pairs(haystacks, needles_, [&](match_t const &match) noexcept {
             counts[match.haystack_index] += 1;
             return true;
         });
@@ -703,8 +728,9 @@ struct find_many_baselines_t {
     template <typename haystacks_type_, typename output_matches_type_>
     status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches,
                       size_t &matches_total) const noexcept {
+
         size_t count_found = 0, count_allowed = matches.size();
-        iterate_through_unsorted_matches(haystacks, needles_, [&](match_t const &match) {
+        all_pairs(haystacks, needles_, [&](match_t const &match) noexcept {
             matches[count_found] = match;
             count_found += 1;
             return count_found < count_allowed;
@@ -783,6 +809,8 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         _sz_assert(total_found_simd == matches_simd.size());
 
         // Check the contents and order of the matches
+        std::sort(matches_base.begin(), matches_base.end(), match_t::less_globally);
+        std::sort(matches_simd.begin(), matches_simd.end(), match_t::less_globally);
         for (std::size_t i = 0; i != matches_base.size(); ++i) {
             _sz_assert(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
             _sz_assert(matches_base[i].needle.data() == matches_simd[i].needle.data());
@@ -818,6 +846,8 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         _sz_assert(total_found_simd == matches_simd.size());
 
         // Check the contents and order of the matches
+        std::sort(matches_base.begin(), matches_base.end(), match_t::less_globally);
+        std::sort(matches_simd.begin(), matches_simd.end(), match_t::less_globally);
         for (std::size_t i = 0; i != matches_base.size(); ++i) {
             _sz_assert(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
             _sz_assert(matches_base[i].needle.data() == matches_simd[i].needle.data());
@@ -830,13 +860,64 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
  *  @brief Fuzzy test for multi-pattern exact search algorithms using randomly-generated haystacks and needles.
  */
 template <typename base_operator_, typename simd_operator_, typename... extra_args_>
-void test_find_many_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                          fuzzy_config_t needles_config = {}, fuzzy_config_t haystacks_config = {},
-                          std::size_t iterations = 10, extra_args_ &&...extra_args) {
+void test_find_many(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                    arrow_strings_tape_t const &haystacks_tape, arrow_strings_tape_t const &needles_tape,
+                    extra_args_ &&...extra_args) {
 
     using match_t = find_many_match_t;
     unified_vector<match_t> results_base, results_simd;
     unified_vector<size_t> counts_base, counts_simd;
+
+    counts_base.resize(haystacks_tape.size());
+    counts_simd.resize(haystacks_tape.size());
+
+    // Build the matchers
+    _sz_assert(base_operator.try_build(needles_tape.view()) == status_t::success_k);
+    _sz_assert(simd_operator.try_build(needles_tape.view()) == status_t::success_k);
+
+    // Count the number of matches with both backends
+    span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
+    span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
+    status_t status_count_base = base_operator.try_count(haystacks_tape.view(), counts_base_span);
+    status_t status_count_simd = simd_operator.try_count(haystacks_tape.view(), counts_simd_span, extra_args...);
+    _sz_assert(status_count_base == status_t::success_k);
+    _sz_assert(status_count_simd == status_t::success_k);
+    size_t total_count_base = std::accumulate(counts_base.begin(), counts_base.end(), 0);
+    size_t total_count_simd = std::accumulate(counts_simd.begin(), counts_simd.end(), 0);
+    _sz_assert(total_count_base == total_count_simd);
+    _sz_assert(std::equal(counts_base.begin(), counts_base.end(), counts_simd.begin()));
+
+    // Compute with both backends
+    results_base.resize(total_count_base);
+    results_simd.resize(total_count_simd);
+    size_t count_base = 0, count_simd = 0;
+    status_t status_base = base_operator.try_find(haystacks_tape.view(), results_base, count_base);
+    status_t status_simd = simd_operator.try_find(haystacks_tape.view(), results_simd, count_simd, extra_args...);
+    _sz_assert(status_base == status_t::success_k);
+    _sz_assert(status_simd == status_t::success_k);
+    _sz_assert(count_base == count_simd);
+
+    // Individually log the failed results
+    std::sort(results_base.begin(), results_base.end(), match_t::less_globally);
+    std::sort(results_simd.begin(), results_simd.end(), match_t::less_globally);
+    for (std::size_t i = 0; i != results_base.size(); ++i) {
+        _sz_assert(results_base[i].haystack_index == results_simd[i].haystack_index);
+        _sz_assert(results_base[i].needle_index == results_simd[i].needle_index);
+        _sz_assert(results_base[i].needle.data() == results_simd[i].needle.data());
+    }
+
+    base_operator.reset();
+    simd_operator.reset();
+}
+
+/**
+ *  @brief Fuzzy test for multi-pattern exact search algorithms using randomly-generated haystacks and needles.
+ */
+template <typename base_operator_, typename simd_operator_, typename... extra_args_>
+void test_find_many_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                          fuzzy_config_t needles_config = {}, fuzzy_config_t haystacks_config = {},
+                          std::size_t iterations = 10, extra_args_ &&...extra_args) {
+
     std::vector<std::string> haystacks_array, needles_array;
     arrow_strings_tape_t haystacks_tape, needles_tape;
 
@@ -844,46 +925,33 @@ void test_find_many_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_
     for (std::size_t iteration_idx = 0; iteration_idx < iterations; ++iteration_idx) {
         randomize_strings(haystacks_config, haystacks_array, haystacks_tape);
         randomize_strings(needles_config, needles_array, needles_tape, true);
-        counts_base.resize(haystacks_array.size());
-        counts_simd.resize(haystacks_array.size());
+        test_find_many(base_operator, simd_operator, haystacks_tape, needles_tape, extra_args...);
+    }
+}
 
-        // Build the matchers
-        _sz_assert(base_operator.try_build(needles_tape.view()) == status_t::success_k);
-        _sz_assert(simd_operator.try_build(needles_tape.view()) == status_t::success_k);
+/**
+ *  @brief  Fuzzy test for multi-pattern exact search algorithms using randomly-generated haystacks,
+ *          and using incrementally longer potentially-overlapping substrings as needles.
+ */
+template <typename base_operator_, typename simd_operator_, typename... extra_args_>
+void test_find_many_prefixes(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
+                             fuzzy_config_t haystacks_config, std::size_t needle_length_limit,
+                             std::size_t iterations = 10, extra_args_ &&...extra_args) {
 
-        // Count the number of matches with both backends
-        span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
-        span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
-        status_t status_count_base = base_operator.try_count(haystacks_tape.view(), counts_base_span);
-        status_t status_count_simd = simd_operator.try_count(haystacks_tape.view(), counts_simd_span, extra_args...);
-        _sz_assert(status_count_base == status_t::success_k);
-        _sz_assert(status_count_simd == status_t::success_k);
-        size_t total_count_base = std::accumulate(counts_base.begin(), counts_base.end(), 0);
-        size_t total_count_simd = std::accumulate(counts_simd.begin(), counts_simd.end(), 0);
-        _sz_assert(total_count_base == total_count_simd);
-        _sz_assert(std::equal(counts_base.begin(), counts_base.end(), counts_simd.begin()));
+    std::vector<std::string> haystacks_array;
+    std::vector<std::string_view> needles_array;
+    arrow_strings_tape_t haystacks_tape, needles_tape;
 
-        // Compute with both backends
-        results_base.resize(total_count_base);
-        results_simd.resize(total_count_simd);
-        size_t count_base = 0, count_simd = 0;
-        status_t status_base = base_operator.try_find(haystacks_tape.view(), results_base, count_base);
-        status_t status_simd = simd_operator.try_find(haystacks_tape.view(), results_simd, count_simd, extra_args...);
-        _sz_assert(status_base == status_t::success_k);
-        _sz_assert(status_simd == status_t::success_k);
-        _sz_assert(count_base == count_simd);
+    for (std::size_t iteration_idx = 0; iteration_idx < iterations; ++iteration_idx) {
+        randomize_strings(haystacks_config, haystacks_array, haystacks_tape);
 
-        // Individually log the failed results
-        std::sort(results_base.begin(), results_base.end(), match_t::less_globally);
-        std::sort(results_simd.begin(), results_simd.end(), match_t::less_globally);
-        for (std::size_t i = 0; i != results_base.size(); ++i) {
-            _sz_assert(results_base[i].haystack_index == results_simd[i].haystack_index);
-            _sz_assert(results_base[i].needle_index == results_simd[i].needle_index);
-            _sz_assert(results_base[i].needle.data() == results_simd[i].needle.data());
-        }
+        // Pick various substrings as needles from the first haystack
+        needles_array.resize(std::min(haystacks_array[0].size(), needle_length_limit));
+        for (std::size_t i = 0; i != needles_array.size(); ++i)
+            needles_array[i] = std::string_view(haystacks_array[0]).substr(0, i + 1);
+        needles_tape.try_assign(needles_array.data(), needles_array.data() + needles_array.size());
 
-        base_operator.reset();
-        simd_operator.reset();
+        test_find_many(base_operator, simd_operator, haystacks_tape, needles_tape, extra_args...);
     }
 }
 
@@ -894,33 +962,31 @@ void test_find_many_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_
 void test_find_many_equivalence() {
 
     cpu_specs_t default_cpu_specs;
-    fuzzy_config_t needles_short_config, needles_long_config, haystacks_long_config;
-    haystacks_long_config.batch_size = default_cpu_specs.cores_total() * 4;
-    haystacks_long_config.max_string_length = default_cpu_specs.l3_bytes;
+    fuzzy_config_t needles_short_config, needles_long_config, haystacks_config;
+    haystacks_config.batch_size = default_cpu_specs.cores_total() * 4;
+    haystacks_config.max_string_length = default_cpu_specs.l3_bytes;
 
     needles_long_config.min_string_length = 8;
     needles_long_config.max_string_length = 10;
     needles_long_config.batch_size =
         std::pow(needles_long_config.alphabet.size(), needles_long_config.max_string_length);
 
-    needles_long_config.min_string_length = 1;
-    needles_long_config.max_string_length = 6;
-    needles_long_config.batch_size =
-        std::pow(needles_long_config.alphabet.size(), needles_long_config.max_string_length);
+    needles_short_config.min_string_length = 1;
+    needles_short_config.max_string_length = 6;
+    needles_short_config.batch_size =
+        std::pow(needles_short_config.alphabet.size(), needles_short_config.max_string_length);
 
-    // Single-threaded serial Levenshtein distance implementation
+    // Single-threaded serial Aho-Corasick implementation
     test_find_many_fixed(find_many_baselines_t {}, find_many_serial_t {});
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_serial_t {}, needles_short_config, haystacks_long_config,
-                         1);
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_serial_t {}, needles_long_config, haystacks_long_config,
-                         1);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_serial_t {}, needles_short_config, haystacks_config, 1);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_serial_t {}, needles_long_config, haystacks_config, 1);
+    test_find_many_prefixes(find_many_baselines_t {}, find_many_serial_t {}, haystacks_config, 1024, 1);
 
-    // Multi-threaded parallel Levenshtein distance implementation
+    // Multi-threaded parallel Aho-Corasick implementation
     test_find_many_fixed(find_many_baselines_t {}, find_many_parallel_t {});
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_short_config, haystacks_long_config,
-                         10);
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_long_config, haystacks_long_config,
-                         10);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_short_config, haystacks_config, 10);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_long_config, haystacks_config, 10);
+    test_find_many_prefixes(find_many_baselines_t {}, find_many_parallel_t {}, haystacks_config, 1024, 10);
 }
 
 } // namespace scripts
