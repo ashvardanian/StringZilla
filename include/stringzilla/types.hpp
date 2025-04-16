@@ -800,12 +800,22 @@ struct cpu_specs_t {
 };
 
 /**
+ *  @brief Divides the @p x by @p divisor and rounds up to the nearest integer.
+ *  @note  This is equivalent to `ceil(x / divisor)`, but avoids floating-point arithmetic.
+ */
+template <typename scalar_type_>
+constexpr scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
+    _sz_assert(divisor > 0 && "Divisor must be positive");
+    return (x + divisor - 1) / divisor;
+}
+
+/**
  *  @brief Rounds @p x up to the nearest multiple of @p divisor.
  */
 template <typename scalar_type_>
 constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
     _sz_assert(divisor > 0 && "Divisor must be positive");
-    return ((x + divisor - 1) / divisor) * divisor;
+    return divide_round_up(x, divisor) * divisor;
 }
 
 } // namespace stringzilla

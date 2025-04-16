@@ -586,6 +586,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 
         _sz_assert(counts.size() == haystacks.size());
         size_t const cores_total = specs.cores_total();
+        size_t const cache_line_width = specs.cache_line_width;
 
         using haystacks_t = typename std::remove_reference_t<haystacks_type_>;
         using haystack_t = typename haystacks_t::value_type;
@@ -609,7 +610,8 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             size_t count_matches_across_cores = 0;
 #pragma omp parallel for reduction(+ : count_matches_across_cores) schedule(static, 1) num_threads(cores_total)
             for (size_t core_index = 0; core_index < cores_total; ++core_index) {
-                size_t count_matches_on_one_core = count_matches_in_one_part(haystack, core_index, cores_total);
+                size_t count_matches_on_one_core =
+                    count_matches_in_one_part(haystack, core_index, cores_total, cache_line_width);
                 count_matches_across_cores += count_matches_on_one_core;
             }
 
@@ -662,7 +664,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 
         _sz_assert(counts.size() == haystacks.size());
         size_t const cores_total = specs.cores_total();
-        size_t const max_needle_length = dict_.max_needle_length();
+        size_t const cache_line_width = specs.cache_line_width;
 
         using haystacks_t = typename std::remove_reference_t<haystacks_type_>;
         using haystack_t = typename haystacks_t::value_type;
@@ -705,7 +707,8 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             // First, on each core, estimate the number of matches in the haystack
 #pragma omp parallel for schedule(static, 1) num_threads(cores_total)
             for (size_t core_index = 0; core_index < cores_total; ++core_index)
-                counts_per_core[core_index] = count_matches_in_one_part(haystack, core_index, cores_total);
+                counts_per_core[core_index] =
+                    count_matches_in_one_part(haystack, core_index, cores_total, cache_line_width);
 
             // Now that we know the number of matches to expect per slice, we can convert the counts
             // into offsets using inclusive prefix sum
@@ -716,9 +719,13 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                     counts_per_core[core_index] += counts_per_core[core_index - 1];
             }
 
+            // We shouldn't even consider needles longer than the haystack
+            size_t const max_needle_length = std::min(dict_.max_needle_length(), haystack_length);
+
             // On each core, pick an overlapping slice and go through all of the matches in it,
             // that start before the end of the private slice.
-            size_t const bytes_per_core_optimal = haystack_length / cores_total;
+            size_t const bytes_per_core_optimal =
+                round_up_to_multiple(divide_round_up(haystack_length, cores_total), cache_line_width);
             size_t const count_matches_before_this_haystack = offsets_per_haystack[i];
 #pragma omp parallel for schedule(static, 1) num_threads(cores_total)
             for (size_t core_index = 0; core_index < cores_total; ++core_index) {
@@ -727,12 +734,12 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                     counts_per_core[core_index] - count_matches_before_this_core;
 
                 // The last core may have a smaller slice, so we need to be careful
-                size_t const bytes_per_core =
+                size_t const bytes_for_core =
                     std::min(bytes_per_core_optimal, haystack_length - core_index * bytes_per_core_optimal);
                 char_t const *optimal_start = haystack_begin + core_index * bytes_per_core_optimal;
-                char_t const *optimal_end = optimal_start + bytes_per_core;
+                char_t const *optimal_end = optimal_start + bytes_for_core;
                 char_t const *overlapping_end =
-                    std::min(optimal_start + bytes_per_core + max_needle_length - 1, haystack_begin + haystack_length);
+                    std::min(optimal_start + bytes_for_core + max_needle_length - 1, haystack_begin + haystack_length);
 
                 // Iterate through the matches in the overlapping region
                 size_t count_matches_found_on_this_core = 0;
@@ -748,6 +755,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             }
         }
 
+        // Aggregate the results
         matches_count = 0;
         for (size_t count : counts) matches_count += count;
         return status_t::success_k;
@@ -763,31 +771,33 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *          overlapping matches.
      */
     template <typename char_type_>
-    size_t count_matches_in_one_part(span<char_type_ const> haystack, size_t core_index,
-                                     size_t cores_total) const noexcept {
+    size_t count_matches_in_one_part(span<char_type_ const> haystack, size_t core_index, size_t cores_total,
+                                     size_t cache_line_width) const noexcept {
 
         using char_t = char_type_;
         char_t const *haystack_begin = haystack.data();
         size_t const haystack_length = haystack.size();
         char_t const *const haystack_end = haystack_begin + haystack_length;
-        size_t const bytes_per_core_optimal = haystack_length / cores_total;
-        size_t const max_needle_length = dict_.max_needle_length();
+        size_t const bytes_per_core_optimal =
+            round_up_to_multiple(divide_round_up(haystack_length, cores_total), cache_line_width);
+
+        // We shouldn't even consider needles longer than the haystack
+        size_t const max_needle_length = std::min(dict_.max_needle_length(), haystack_length);
 
         // The last core may have a smaller slice, so we need to be careful
-        size_t const bytes_per_core =
+        size_t const bytes_for_core =
             std::min(bytes_per_core_optimal, haystack_length - core_index * bytes_per_core_optimal);
 
         // First, each core will process its own slice excluding the overlapping regions
         char_t const *optimal_start = haystack_begin + core_index * bytes_per_core_optimal;
-        char_t const *optimal_end = optimal_start + bytes_per_core;
+        char_t const *optimal_end = optimal_start + bytes_for_core;
         size_t const count_matches_non_overlapping = dict_.count({optimal_start, optimal_end});
 
         // Now, each thread will take care of the subsequent overlapping regions,
         // but we must be careful for cases when the core-specific slice is shorter
         // than the longest needle! It's a very unlikely case in practice, but we
         // still may want an optimization for it down the road.
-        char_t const *overlapping_start =
-            std::min(optimal_start + bytes_per_core - max_needle_length + 1, haystack_end);
+        char_t const *overlapping_start = std::max(optimal_end - max_needle_length + 1, haystack_begin);
         char_t const *overlapping_end = std::min(optimal_end + max_needle_length - 1, haystack_end);
         size_t count_matches_overlapping = 0;
         dict_.find({overlapping_start, overlapping_end}, [&](match_t match) noexcept {
