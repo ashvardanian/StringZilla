@@ -18,6 +18,8 @@
 
 #include "test_stringzilla.hpp" // `arrow_strings_view_t`
 
+#include <execution> // `std::execution::par_unseq`
+
 namespace ashvardanian {
 namespace stringzilla {
 namespace scripts {
@@ -663,7 +665,7 @@ struct find_many_baselines_t {
 
         // Use `std::search` to find all occurrences of needle in haystack.
         while (true) {
-            auto it = std::search(haystack_begin, haystack_end, needle_begin, needle_end);
+            auto it = std::search(std::execution::par_unseq, haystack_begin, haystack_end, needle_begin, needle_end);
             if (it == haystack_end) break;
 
             // Compute the starting index of the found occurrence.
@@ -689,29 +691,21 @@ struct find_many_baselines_t {
         // A wise man once said, `omp parallel for collapse(2) schedule(dynamic, 1)`...
         // But the compiler wasn't listening, and won't compile the cancellation point!
         std::size_t const total_tasks = haystacks.size() * needles.size();
-#pragma omp parallel
-        {
-#pragma omp for schedule(dynamic, 1)
-            for (std::size_t task = 0; task != total_tasks; ++task) {
-#pragma omp cancellation point for
-                std::size_t const i = task / needles.size();
-                std::size_t const j = task % needles.size();
+        for (std::size_t task = 0; task != total_tasks; ++task) {
+            std::size_t const i = task / needles.size();
+            std::size_t const j = task % needles.size();
 
-                auto const &haystack = haystacks[i];
-                auto const &needle = needles[j];
-                bool keep_going = true;
-                one_pair(haystack, needle, [&](match_t match) {
-                    match.haystack_index = i;
-                    match.needle_index = j;
-#pragma omp critical
-                    { keep_going = callback(match); }
-                    return keep_going;
-                });
-                // Quit the outer loop if the callback returns false
-                if (!keep_going) {
-#pragma omp cancel for
-                }
-            }
+            auto const &haystack = haystacks[i];
+            auto const &needle = needles[j];
+            bool keep_going = true;
+            one_pair(haystack, needle, [&](match_t match) {
+                match.haystack_index = i;
+                match.needle_index = j;
+                keep_going = callback(match);
+                return keep_going;
+            });
+            // Quit the outer loop if the callback returns false
+            if (!keep_going) return;
         }
     }
 
