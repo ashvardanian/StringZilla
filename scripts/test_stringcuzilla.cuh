@@ -656,15 +656,14 @@ struct find_many_baselines_t {
 
     template <typename haystack_type_, typename needles_type_, typename match_callback_type_>
     bool one_haystack(haystack_type_ const &haystack, needles_type_ const &needles,
-                      match_callback_type_ &&single_threaded_callback) const noexcept {
+                      match_callback_type_ &&callback) const noexcept {
 
         // A wise man once said, `omp parallel for collapse(2) schedule(dynamic, 1)`...
         // But the compiler wasn't listening, and won't compile the cancellation point!
         // So we resort to a much less intricate solution:
         // - Manually slice the data per thread,
         // - Keep one atomic variable to signal cancellation,
-        // - Use absolutely minimal OpenMP functionality just to assign N slices to N threads,
-        // - Call the callback function for each match found, but just from the main thread.
+        // - Use absolutely minimal OpenMP functionality just to assign N slices to N threads.
         std::atomic<bool> aborted {false};
         std::size_t const haystack_size = haystack.size();
         std::size_t const threads_count = std::thread::hardware_concurrency();
@@ -690,9 +689,9 @@ struct find_many_baselines_t {
                     match.needle_index = needle_index;
                     match.haystack = {haystack.data(), haystack.size()};
                     match.needle = {haystack.data() + match_offset, needle.size()};
-#pragma omp critical
-                    {
-                        if (!single_threaded_callback(match)) aborted.store(true, std::memory_order_relaxed);
+                    if (!callback(match)) {
+                        aborted.store(true, std::memory_order_relaxed);
+                        break;
                     }
                 }
             }
@@ -719,7 +718,8 @@ struct find_many_baselines_t {
     status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts) const noexcept {
         for (size_t &count : counts) count = 0;
         all_pairs(haystacks, needles_, [&](match_t const &match) noexcept {
-            counts[match.haystack_index] += 1;
+            std::atomic_ref<size_t> count(counts[match.haystack_index]);
+            count.fetch_add(1, std::memory_order_relaxed);
             return true;
         });
         return status_t::success_k;
@@ -729,11 +729,12 @@ struct find_many_baselines_t {
     status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches,
                       size_t &matches_total) const noexcept {
 
-        size_t count_found = 0, count_allowed = matches.size();
+        std::atomic<size_t> count_found {0};
+        std::size_t const count_allowed {matches.size()};
         all_pairs(haystacks, needles_, [&](match_t const &match) noexcept {
-            matches[count_found] = match;
-            count_found += 1;
-            return count_found < count_allowed;
+            size_t match_index = count_found.fetch_add(1, std::memory_order_relaxed);
+            matches[match_index] = match;
+            return match_index < count_allowed;
         });
         matches_total = count_found;
         return status_t::success_k;
@@ -966,15 +967,15 @@ void test_find_many_equivalence() {
     haystacks_config.batch_size = default_cpu_specs.cores_total() * 4;
     haystacks_config.max_string_length = default_cpu_specs.l3_bytes;
 
-    needles_long_config.min_string_length = 8;
-    needles_long_config.max_string_length = 10;
-    needles_long_config.batch_size =
-        std::pow(needles_long_config.alphabet.size(), needles_long_config.max_string_length);
-
     needles_short_config.min_string_length = 1;
-    needles_short_config.max_string_length = 6;
+    needles_short_config.max_string_length = 4;
     needles_short_config.batch_size =
         std::pow(needles_short_config.alphabet.size(), needles_short_config.max_string_length);
+
+    needles_long_config.min_string_length = 3;
+    needles_long_config.max_string_length = 6;
+    needles_long_config.batch_size =
+        std::pow(needles_long_config.alphabet.size(), needles_long_config.max_string_length);
 
     // Single-threaded serial Aho-Corasick implementation
     test_find_many_fixed(find_many_baselines_t {}, find_many_serial_t {});
