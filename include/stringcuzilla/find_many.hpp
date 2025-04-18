@@ -593,16 +593,16 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 
         // On small strings, individually compute the counts
 #pragma omp parallel for schedule(dynamic, 1) num_threads(cores_total)
-        for (size_t i = 0; i < counts.size(); ++i) {
-            haystack_t const &haystack = haystacks[i];
+        for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
+            haystack_t const &haystack = haystacks[haystack_index];
             size_t haystack_length = haystack.size();
             if (haystack_length > specs.l2_bytes) continue;
-            counts[i] = dict_.count(haystack);
+            counts[haystack_index] = dict_.count(haystack);
         }
 
         // On longer strings, throw all cores on each haystack
-        for (size_t i = 0; i < counts.size(); ++i) {
-            haystack_t const &haystack = haystacks[i];
+        for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
+            haystack_t const &haystack = haystacks[haystack_index];
             size_t const haystack_length = haystack.size();
             // The shorter strings have already been processed
             if (haystack_length <= specs.l2_bytes) continue;
@@ -615,7 +615,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                 count_matches_across_cores += count_matches_on_one_core;
             }
 
-            counts[i] = count_matches_across_cores;
+            counts[haystack_index] = count_matches_across_cores;
         }
 
         return status_t::success_k;
@@ -679,26 +679,26 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 
         // Process the small haystacks, outputting their matches individually without any synchronization
 #pragma omp parallel for schedule(dynamic, 1) num_threads(cores_total)
-        for (size_t i = 0; i < counts.size(); ++i) {
-            haystack_t const &haystack = haystacks[i];
+        for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
+            haystack_t const &haystack = haystacks[haystack_index];
             size_t haystack_length = haystack.size();
             if (haystack_length > specs.l2_bytes) continue;
             size_t matches_found = 0;
             dict_.find({haystack.data(), haystack_length}, [&](match_t match) {
-                match.haystack_index = i;
-                matches[offsets_per_haystack[i] + matches_found] = match;
+                match.haystack_index = haystack_index;
+                matches[offsets_per_haystack[haystack_index] + matches_found] = match;
                 ++matches_found;
                 return true;
             });
-            _sz_assert(counts[i] == matches_found);
+            _sz_assert(counts[haystack_index] == matches_found);
         }
 
         // On longer strings, throw all cores on each haystack, but between the threads we need additional
         // memory to track the number of matches within a core-specific slice of the haystack.
         safe_vector<size_t, size_allocator_t> counts_per_core(dict_.allocator());
         if (counts_per_core.try_resize(cores_total) != status_t::success_k) return status_t::bad_alloc_k;
-        for (size_t i = 0; i < counts.size(); ++i) {
-            haystack_t const &haystack = haystacks[i];
+        for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
+            haystack_t const &haystack = haystacks[haystack_index];
             char_t const *haystack_begin = haystack.data();
             size_t const haystack_length = haystack.size();
             // The shorter strings have already been processed
@@ -726,7 +726,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             // that start before the end of the private slice.
             size_t const bytes_per_core_optimal =
                 round_up_to_multiple(divide_round_up(haystack_length, cores_total), cache_line_width);
-            size_t const count_matches_before_this_haystack = offsets_per_haystack[i];
+            size_t const count_matches_before_this_haystack = offsets_per_haystack[haystack_index];
 #pragma omp parallel for schedule(static, 1) num_threads(cores_total)
             for (size_t core_index = 0; core_index < cores_total; ++core_index) {
                 size_t const count_matches_before_this_core = core_index ? counts_per_core[core_index - 1] : 0;
@@ -746,6 +746,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                 dict_.find({optimal_start, overlapping_end}, [&](match_t match) noexcept {
                     bool blongs_to_this_core = match.needle.begin() < optimal_end;
                     if (!blongs_to_this_core) return true;
+                    match.haystack_index = haystack_index;
                     matches[count_matches_before_this_haystack + count_matches_before_this_core +
                             count_matches_found_on_this_core] = match;
                     count_matches_found_on_this_core++;
@@ -784,21 +785,31 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         // We shouldn't even consider needles longer than the haystack
         size_t const max_needle_length = std::min(dict_.max_needle_length(), haystack_length);
 
-        // The last core may have a smaller slice, so we need to be careful
-        size_t const bytes_for_core =
-            std::min(bytes_per_core_optimal, haystack_length - core_index * bytes_per_core_optimal);
+        // We may have a case of a thread receiving no data at all
+        char_t const *optimal_start = haystack_begin + core_index * bytes_per_core_optimal;
+        if (optimal_start >= haystack_end) return 0;
 
         // First, each core will process its own slice excluding the overlapping regions
-        char_t const *optimal_start = haystack_begin + core_index * bytes_per_core_optimal;
-        char_t const *optimal_end = optimal_start + bytes_for_core;
+        char_t const *optimal_end = std::min(optimal_start + bytes_per_core_optimal, haystack_end);
         size_t const count_matches_non_overlapping = dict_.count({optimal_start, optimal_end});
 
         // Now, each thread will take care of the subsequent overlapping regions,
         // but we must be careful for cases when the core-specific slice is shorter
         // than the longest needle! It's a very unlikely case in practice, but we
         // still may want an optimization for it down the road.
-        char_t const *overlapping_start = std::max(optimal_end - max_needle_length + 1, haystack_begin);
-        char_t const *overlapping_end = std::min(optimal_end + max_needle_length - 1, haystack_end);
+        char_t const *overlapping_start;
+        char_t const *overlapping_end;
+        if (optimal_start + max_needle_length >= optimal_end) {
+            // Our needles are longer than a slice for the core
+            overlapping_start = optimal_start;
+            overlapping_end = std::min(optimal_start + max_needle_length, haystack_end);
+        }
+        else {
+            overlapping_start = std::max(optimal_end - max_needle_length + 1, haystack_begin);
+            overlapping_end = std::min(optimal_end + max_needle_length - 1, haystack_end);
+        }
+
+        // Count the matches that start in one core's slice and end in another
         size_t count_matches_overlapping = 0;
         dict_.find({overlapping_start, overlapping_end}, [&](match_t match) noexcept {
             bool is_boundary = match.needle.begin() < optimal_end && match.needle.end() >= optimal_end;
