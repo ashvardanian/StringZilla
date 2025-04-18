@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
 project(
   stringzilla
-  VERSION 3.12.4
+  VERSION 3.12.5
   LANGUAGES C CXX
   DESCRIPTION "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances"
   HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla")
