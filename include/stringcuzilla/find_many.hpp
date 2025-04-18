@@ -812,7 +812,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         // Count the matches that start in one core's slice and end in another
         size_t count_matches_overlapping = 0;
         dict_.find({overlapping_start, overlapping_end}, [&](match_t match) noexcept {
-            bool is_boundary = match.needle.begin() < optimal_end && match.needle.end() >= optimal_end;
+            bool is_boundary = match.needle.begin() < optimal_end && match.needle.end() > optimal_end;
             count_matches_overlapping += is_boundary;
             return true;
         });
