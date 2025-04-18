@@ -18,7 +18,8 @@
 
 #include "test_stringzilla.hpp" // `arrow_strings_view_t`
 
-#include <execution> // `std::execution::par_unseq`
+#include <cstring> // `std::memcmp`
+#include <thread>  // `std::thread::hardware_concurrency`
 
 namespace ashvardanian {
 namespace stringzilla {
@@ -653,59 +654,64 @@ struct find_many_baselines_t {
 
     void reset() noexcept { needles_.reset(); }
 
-    template <typename haystack_type_, typename needle_type_, typename match_callback_type_>
-    void one_pair(haystack_type_ const &haystack, needle_type_ const &needle,
-                  match_callback_type_ &&callback) const noexcept {
+    template <typename haystack_type_, typename needles_type_, typename match_callback_type_>
+    bool one_haystack(haystack_type_ const &haystack, needles_type_ const &needles,
+                      match_callback_type_ &&single_threaded_callback) const noexcept {
 
-        // Define iterators for the current haystack and the needle.
-        auto haystack_begin = haystack.begin();
-        auto haystack_end = haystack.end();
-        auto needle_begin = needle.begin();
-        auto needle_end = needle.end();
+        // A wise man once said, `omp parallel for collapse(2) schedule(dynamic, 1)`...
+        // But the compiler wasn't listening, and won't compile the cancellation point!
+        // So we resort to a much less intricate solution:
+        // - Manually slice the data per thread,
+        // - Keep one atomic variable to signal cancellation,
+        // - Use absolutely minimal OpenMP functionality just to assign N slices to N threads,
+        // - Call the callback function for each match found, but just from the main thread.
+        std::atomic<bool> aborted {false};
+        std::size_t const haystack_size = haystack.size();
+        std::size_t const threads_count = std::thread::hardware_concurrency();
+        std::size_t const start_offsets_per_thread = divide_round_up(haystack_size, threads_count);
 
-        // Use `std::search` to find all occurrences of needle in haystack.
-        while (true) {
-            auto it = std::search(std::execution::par_unseq, haystack_begin, haystack_end, needle_begin, needle_end);
-            if (it == haystack_end) break;
+#pragma omp parallel for schedule(static, 1)
+        for (std::size_t thread_index = 0; thread_index != threads_count; ++thread_index) {
+            std::size_t const start_offset = std::min(thread_index * start_offsets_per_thread, haystack_size);
+            std::size_t const end_offset = std::min(start_offset + start_offsets_per_thread, haystack_size);
 
-            // Compute the starting index of the found occurrence.
-            std::size_t found = static_cast<std::size_t>(std::distance(haystack.begin(), it));
+            // Check for matches in the current slice
+            for (std::size_t match_offset = start_offset;
+                 match_offset != end_offset && !aborted.load(std::memory_order_relaxed); ++match_offset) {
+                for (std::size_t needle_index = 0; needle_index != needles.size(); ++needle_index) {
+                    auto const &needle = needles[needle_index];
+                    if (match_offset + needle.size() > haystack_size) continue;
+                    auto const same = std::memcmp(haystack.data() + match_offset, needle.data(), needle.size()) == 0;
+                    if (!same) continue;
 
-            // Construct a match record.
-            match_t match;
-            match.haystack = {haystack.data(), haystack.size()};
-            match.needle = {haystack.data() + found, needle.size()};
-
-            // Invoke the callback. If it returns false, abort all further processing.
-            if (!callback(match)) return;
-
-            // Advance the starting iterator for the next search.
-            haystack_begin = it + 1;
+                    // Create a match object
+                    match_t match;
+                    match.haystack_index = 0;
+                    match.needle_index = needle_index;
+                    match.haystack = {haystack.data(), haystack.size()};
+                    match.needle = {haystack.data() + match_offset, needle.size()};
+#pragma omp critical
+                    {
+                        if (!single_threaded_callback(match)) aborted.store(true, std::memory_order_relaxed);
+                    }
+                }
+            }
         }
+
+        return !aborted.load(std::memory_order_relaxed);
     }
 
     template <typename haystacks_type_, typename needles_type_, typename match_callback_type_>
     void all_pairs(haystacks_type_ &&haystacks, needles_type_ &&needles,
                    match_callback_type_ &&callback) const noexcept {
 
-        // A wise man once said, `omp parallel for collapse(2) schedule(dynamic, 1)`...
-        // But the compiler wasn't listening, and won't compile the cancellation point!
-        std::size_t const total_tasks = haystacks.size() * needles.size();
-        for (std::size_t task = 0; task != total_tasks; ++task) {
-            std::size_t const i = task / needles.size();
-            std::size_t const j = task % needles.size();
-
-            auto const &haystack = haystacks[i];
-            auto const &needle = needles[j];
-            bool keep_going = true;
-            one_pair(haystack, needle, [&](match_t match) {
-                match.haystack_index = i;
-                match.needle_index = j;
-                keep_going = callback(match);
-                return keep_going;
-            });
-            // Quit the outer loop if the callback returns false
-            if (!keep_going) return;
+        for (std::size_t haystack_index = 0; haystack_index != haystacks.size(); ++haystack_index) {
+            auto const &haystack = haystacks[haystack_index];
+            if (!one_haystack(haystack, needles, [&](match_t match) noexcept {
+                    match.haystack_index = haystack_index;
+                    return callback(match);
+                }))
+                return;
         }
     }
 
