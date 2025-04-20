@@ -46,6 +46,8 @@
 namespace ashvardanian {
 namespace stringzilla {
 
+#pragma region - Algorithm Building Blocks
+
 /**
  *  @brief GPU adaptation of the `scorer` on CUDA, avoiding warp-level shuffles and DPX.
  *  @note Uses 32-bit `uint` counter to iterate through the string slices, so it can't be over 4 billion characters.
@@ -221,17 +223,23 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
     }
 };
 
-#if SZ_USE_HOPPER && 0
+#if SZ_USE_KEPLER
 
 /**
  *  @brief GPU adaptation of the `scorer` - Minimizes Global Levenshtein distance.
- *  @note Requires Hopper generation GPUs with DPX to handle 4x `u8` scores at a time.
+ *  @note Requires Kepler generation GPUs to handle 4x `u8` scores at a time.
+ *
+ *  Relies on following instruction families to output 4x @b `u8` scores per call:
+ *  - @b `prmt` to shuffle bytes in 32 bit registers.
+ *  - @b `vmax4,vmin4,vadd4` video-processing instructions.
  */
 template <>
-struct scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k, sz_cap_hopper_k>
-    : public scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k, sz_cap_cuda_k> {
+struct linear_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
+                     sz_similarity_global_k, sz_caps_ck_k>
+    : public linear_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
+                           sz_similarity_global_k, sz_cap_cuda_k> {
 
-    using scorer_t::scorer; // Make the constructors visible
+    using scorer_t::linear_scorer; // Make the constructors visible
 
     __forceinline__ __device__ void operator()(                             //
         char const *first_reversed_slice, char const *second_slice, uint n, // ! Unlike CPU, uses `uint`
@@ -245,59 +253,101 @@ struct scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_min
         // We want to minimize single-byte processing in favor of 4-byte SIMD loads and min/max operations.
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
+        sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u32_vec_t first_reversed_vec, second_vec;
+        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_deletion_or_insertion_vec;
+        sz_u32_vec_t cell_score_vec;
 
-        using sz_u8x4_t = unsigned int;
-        uint const n_full_quad_bytes = n / 4;
-        for (uint i = threadIdx.x; i < n_full_quad_bytes; i += blockDim.x) {
-            sz_u8x4_t pre_substitution = ((sz_u8x4_t *)scores_pre_substitution)[i];
-            sz_u8x4_t pre_insertion = ((sz_u8x4_t *)scores_pre_insertion)[i];
-            sz_u8x4_t pre_deletion = ((sz_u8x4_t *)scores_pre_deletion)[i];
-            sz_u8x4_t &score_new = ((sz_u8x4_t *)scores_new)[i];
-
-            sz_u8x4_t first_reversed_chars = ((sz_u8x4_t *)first_reversed_slice)[i];
-            sz_u8x4_t second_chars = ((sz_u8x4_t *)second_slice)[i];
+        // ! As we are processing 4 bytes per loop, and have at least 32 threads per block (32 * 4 = 128),
+        // ! and deal with strings only under 256 bytes, this loop will fire at most twice per input.
+        for (uint i = threadIdx.x * 4; i < n; i += blockDim.x * 4) { // ! will spill outside of bounds, and it's OK!
+            pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
+            pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
+            pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
+            first_reversed_vec = sz_u32_load_unaligned(first_reversed_slice + i);
+            second_vec = sz_u32_load_unaligned(second_slice + i);
 
             // Equality comparison will output 0xFF for each matching byte.
             // Adding one to it will make it 0x00 for each matching byte, and 0x01 for each non-matching byte.
             // Perfect for substitution cost!
-            sz_u8x4_t cost_of_substitution = __vaddus4(__vcmpeq4(first_reversed_chars, second_chars), 0x01010101);
-            sz_u8x4_t if_substitution = __vaddus4(pre_substitution, cost_of_substitution);
-            sz_u8x4_t if_deletion_or_insertion = __vaddus4(__vminu4(pre_deletion, pre_insertion), 0x01010101);
-            sz_u8x4_t cell_score = __vminu4(if_deletion_or_insertion, if_substitution);
-            score_new = cell_score;
+            cost_of_substitution_vec.u32 = __vadd4(__vcmpeq4(first_reversed_vec.u32, second_vec.u32), 0x01010101);
+            if_substitution_vec.u32 = __vaddus4(pre_substitution_vec.u32, cost_of_substitution_vec.u32);
+            if_deletion_or_insertion_vec.u32 =
+                __vaddus4(__vminu4(pre_deletion_vec.u32, pre_insertion_vec.u32), 0x01010101);
+            cell_score_vec.u32 = __vminu4(if_deletion_or_insertion_vec.u32, if_substitution_vec.u32);
+
+            // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
+            scores_new[i + 0] = cell_score_vec.u8s[0];
+            scores_new[i + 1] = cell_score_vec.u8s[1];
+            scores_new[i + 2] = cell_score_vec.u8s[2];
+            scores_new[i + 3] = cell_score_vec.u8s[3];
         }
 
-        // Don't forget the last 1-3 elements of the last chunk.
-        // We can offload them to the last thread in the warp.
-        // The last element of the last chunk is the result of the global alignment.
-        if (threadIdx.x == 0) {
-            for (uint i = n_full_quad_bytes * 4; i < n; ++i) {
-                sz_u8_t pre_substitution = scores_pre_substitution[i];
-                sz_u8_t pre_insertion = scores_pre_insertion[i];
-                sz_u8_t pre_deletion = scores_pre_deletion[i];
-                error_cost_t cost_of_substitution = first_reversed_slice[i] != second_slice[i];
-                score_t if_substitution = pre_substitution + cost_of_substitution;
-                score_t if_deletion_or_insertion = std::min(pre_deletion, pre_insertion) + gap_cost;
-                score_t cell_score = std::min(if_deletion_or_insertion, if_substitution);
-                scores_new[i] = cell_score;
-            }
-            this->last_cell_ = scores_new[n - 1];
-        }
+        // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
+        if (threadIdx.x == 0) this->last_cell_ = scores_new[0];
     }
 };
 
 template <>
-struct scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k, sz_cap_hopper_k>
-    : public scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
-                    sz_cap_cuda_k> {
-    using scorer_t::scorer; // Make the constructors visible
+struct linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                     sz_similarity_global_k, sz_caps_ck_k>
+    : public linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                           sz_similarity_global_k, sz_cap_cuda_k> {
+    using scorer_t::linear_scorer; // Make the constructors visible
+
+    __forceinline__ __device__ void operator()(                             //
+        char const *first_reversed_slice, char const *second_slice, uint n, // ! Unlike CPU, uses `uint`
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
+
+        sz_u16_t const gap_cost = this->gap_cost_;
+        _sz_assert(gap_cost == 1);
+
+        // The hardest part of this kernel is dealing with unaligned loads!
+        // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
+        // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
+        // dealing with most values being unaligned!
+        sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u32_vec_t first_reversed_vec, second_vec;
+        sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_deletion_or_insertion_vec;
+        sz_u32_vec_t cell_score_vec;
+
+        // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
+        // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
+        for (uint i = threadIdx.x * 2; i < n; i += blockDim.x * 2) { // ! will spill outside of bounds, and it's OK!
+            pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
+            pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
+            pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
+            first_reversed_vec.u16s[0] = first_reversed_slice[i + 0];
+            first_reversed_vec.u16s[1] = first_reversed_slice[i + 1];
+            second_vec.u16s[0] = second_slice[i + 0];
+            second_vec.u16s[1] = second_slice[i + 1];
+
+            // Equality comparison will output 0xFFFF for each matching byte-pair.
+            // Adding one to it will make it 0x0000 for each matching byte-pair,
+            // and 0x0001 for each non-matching byte-pair. Perfect for substitution cost!
+            cost_of_substitution_vec.u32 = __vadd2(__vcmpeq2(first_reversed_vec.u32, second_vec.u32), 0x00010001);
+            if_substitution_vec.u32 = __vaddus2(pre_substitution_vec.u32, cost_of_substitution_vec.u32);
+            if_deletion_or_insertion_vec.u32 =
+                __vaddus2(__vminu2(pre_deletion_vec.u32, pre_insertion_vec.u32), 0x00010001);
+            cell_score_vec.u32 = __vminu2(if_deletion_or_insertion_vec.u32, if_substitution_vec.u32);
+
+            // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
+            scores_new[i + 0] = cell_score_vec.u16s[0];
+            scores_new[i + 1] = cell_score_vec.u16s[1];
+        }
+
+        // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
+        if (threadIdx.x == 0) this->last_cell_ = scores_new[0];
+    }
 };
 
 template <>
-struct scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k, sz_cap_hopper_k>
-    : public scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k,
-                    sz_cap_cuda_k> {
-    using scorer_t::scorer; // Make the constructors visible
+struct linear_scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k,
+                     sz_similarity_global_k, sz_caps_ck_k>
+    : public linear_scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k,
+                           sz_similarity_global_k, sz_cap_cuda_k> {
+    using scorer_t::linear_scorer; // Make the constructors visible
 };
 
 #endif
@@ -423,7 +473,7 @@ struct diagonal_walker_per_warp {
                 next_diagonal_length - 2,           // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                    // costs pre substitution
                 current_scores, current_scores + 1, // costs pre insertion/deletion
-                next_scores + 1);
+                next_scores + 1);                   // ! notice unaligned write destination
 
             // Don't forget to populate the first row and the first column of the Levenshtein matrix.
             if (threadIdx.x == 0) {
@@ -514,6 +564,10 @@ sz_size_t _scores_diagonally_warp_shared_memory_requirement( //
     }
     return max_required_shared_memory;
 }
+
+#pragma endregion
+
+#pragma region - Levenshtein Distance in CUDA
 
 /**
  *  @brief  Levenshtein edit distances algorithm evaluating the Dynamic Programming matrix
@@ -732,6 +786,7 @@ cuda_status_t _levenshtein_via_cuda_warp(                                       
     if (count_blocks_per_multiprocessor > specs.max_blocks_per_multiprocessor)
         count_blocks_per_multiprocessor = specs.max_blocks_per_multiprocessor;
     if (count_blocks_per_multiprocessor > first_strings.size()) count_blocks_per_multiprocessor = first_strings.size();
+    _sz_assert(count_blocks_per_multiprocessor > 0);
 
     // Let's use all 32 threads in a warp.
     constexpr sz_size_t threads_per_block = 32u;
@@ -788,15 +843,19 @@ cuda_status_t _levenshtein_via_cuda_warp(                                       
 }
 
 /** @brief Dispatches baseline Levenshtein edit distance algorithm to the GPU. */
-template <typename char_type_>
-struct levenshtein_distances<char_type_, dummy_alloc_t, sz_cap_cuda_k> {
+template <typename char_type_, sz_capability_t capability_>
+struct levenshtein_distances<char_type_, dummy_alloc_t, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     cuda_status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                              results_type_ &&results, gpu_specs_t specs = {}, cudaStream_t stream = 0) const noexcept {
-        return _levenshtein_via_cuda_warp<sz_cap_cuda_k>(first_strings, second_strings, results, specs, stream);
+        return _levenshtein_via_cuda_warp<capability_>(first_strings, second_strings, results, specs, stream);
     }
 };
+
+#pragma endregion
+
+#pragma region - Needleman Wunsch Scores in CUDA
 
 /**
  *  @brief  Convenience buffer of the size matching the size of the CUDA constant memory,
@@ -1036,6 +1095,8 @@ struct needleman_wunsch_scores<char_type_, substituter_type_, dummy_alloc_t, sz_
                                                               gap_cost_, specs, stream);
     }
 };
+
+#pragma endregion
 
 } // namespace stringzilla
 } // namespace ashvardanian

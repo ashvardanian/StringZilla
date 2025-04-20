@@ -17,7 +17,7 @@
 #include <optional>       // `std::optional`
 
 #if !defined(SZ_USE_HOPPER)
-#if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ < 11)
+#if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 11)
 #define SZ_USE_HOPPER (1)
 #else
 #define SZ_USE_HOPPER (0)
@@ -25,7 +25,7 @@
 #endif
 
 #if !defined(SZ_USE_KEPLER)
-#if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ < 3)
+#if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 3)
 #define SZ_USE_KEPLER (1)
 #else
 #define SZ_USE_KEPLER (0)
@@ -107,6 +107,28 @@ struct cuda_status_t {
 
     inline operator status_t() const noexcept { return status; }
 };
+
+/**
+ *  @brief  Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
+ *  @see    https://stackoverflow.com/a/40198552/2766161
+ */
+__forceinline__ __device__ sz_u32_vec_t sz_u32_load_unaligned(void const *ptr) noexcept {
+    // In reality we load 64 bits, and then, with `.f4e`, we forward-extract
+    // four consecutive bytes into a 32-bit register.
+    sz_u32_vec_t result;
+    asm("{\n\t"
+        "   .reg .b64    aligned_ptr;\n\t"
+        "   .reg .b32    low, high, alignment;\n\t"
+        "   and.b64      aligned_ptr, %1, 0xfffffffffffffffc;\n\t"
+        "   ld.u32       low, [aligned_ptr];\n\t"
+        "   ld.u32       high, [aligned_ptr+4];\n\t"
+        "   cvt.u32.u64  alignment, %1;\n\t"
+        "   prmt.b32.f4e %0, low, high, alignment;\n\t"
+        "}"
+        : "=r"(result.u32)
+        : "l"(ptr));
+    return result;
+}
 
 } // namespace stringzilla
 } // namespace ashvardanian

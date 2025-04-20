@@ -130,6 +130,16 @@ void bench_levenshtein(environment_t const &env) {
         scramble_accelerated_results();
 #endif
 
+#if SZ_USE_KEPLER
+        bench_unary(env, "levenshtein_kepler:batch"s + std::to_string(batch_size), call_baseline,
+                    similarities_callable<levenshtein_kepler_t, sz::gpu_specs_t>(env, results_accelerated, batch_size,
+                                                                                 {}, specs),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(baseline);
+        scramble_accelerated_results();
+#endif
+
         auto call_utf8_baseline = similarities_callable<levenshtein_utf8_serial_t>(env, results_baseline, batch_size);
         auto name_utf8_baseline = "levenshtein_utf8_serial:batch"s + std::to_string(batch_size);
         bench_result_t utf8_baseline = bench_unary(env, name_utf8_baseline, call_utf8_baseline).log();
