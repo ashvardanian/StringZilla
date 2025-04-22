@@ -168,6 +168,17 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
         else { return std::max(a, b); }
     }
 
+    __forceinline__ __device__ score_t pick_best_in_warp(score_t val) const noexcept {
+        // The `__shfl_down_sync` replaces `__shfl_down`
+        // https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
+        val = pick_best(__shfl_down_sync(0xffffffff, val, 16));
+        val = pick_best(__shfl_down_sync(0xffffffff, val, 8));
+        val = pick_best(__shfl_down_sync(0xffffffff, val, 4));
+        val = pick_best(__shfl_down_sync(0xffffffff, val, 2));
+        val = pick_best(__shfl_down_sync(0xffffffff, val, 1));
+        return val;
+    }
+
   public:
     __forceinline__ __device__ linear_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
         : substituter_(substituter), gap_cost_(gap_cost) {}
@@ -214,12 +225,7 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
         }
 
         // ! Don't forget to pick the best among the best scores per thread.
-        // ! Assuming, that reducing across the warp is not possible, let's output the best score per thread
-        // ! into the expired set of cells in `scores_pre_substitution`, and sequentially reduce it afterwards.
-        scores_pre_substitution[threadIdx.x] = best_score_;
-        __syncwarp();
-        if (threadIdx.x == 0)
-            for (uint i = 1; i < blockDim.x; ++i) best_score_ = pick_best(best_score_, scores_pre_substitution[i]);
+        best_score_ = pick_best_in_warp(best_score_);
     }
 };
 
