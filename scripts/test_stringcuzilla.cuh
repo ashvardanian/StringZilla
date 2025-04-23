@@ -168,6 +168,116 @@ inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, 
     return best_score;
 }
 
+/**
+ *  @brief Inefficient baseline Needleman-Wunsch-Gotoh alignment score computation, as implemented in most codebases.
+ *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ *  @see https://github.com/gata-bio/affine-gaps
+ */
+inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //
+    char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
+    std::function<error_cost_t(char, char)> substitution_cost_for,      //
+    error_cost_t gap_opening_cost, error_cost_t gap_extension_cost) noexcept(false) {
+
+    std::size_t const rows = len1 + 1;
+    std::size_t const cols = len2 + 1;
+    std::vector<std::ptrdiff_t> matrix_scores(rows * cols);
+    std::vector<std::ptrdiff_t> matrix_inserts(rows * cols);
+    std::vector<std::ptrdiff_t> matrix_deletes(rows * cols);
+
+    // Initialize the borders of the matrix.
+    matrix_scores[0] = 0;
+    for (std::size_t i = 1; i < rows; ++i) {
+        matrix_scores[i * cols + 0] /* [i][0] in 2D */ = gap_opening_cost + (i - 1) * gap_extension_cost;
+        matrix_inserts[i * cols + 0] /* [i][0] in 2D */ = gap_opening_cost * 2 + i * gap_extension_cost;
+    }
+    for (std::size_t j = 0; j < cols; ++j) {
+        matrix_scores[0 * cols + j] /* [0][j] in 2D */ = gap_opening_cost + (j - 1) * gap_extension_cost;
+        matrix_deletes[0 * cols + j] /* [0][j] in 2D */ = gap_opening_cost * 2 + j * gap_extension_cost;
+    }
+
+    // Fill in the rest of the matrix.
+    for (std::size_t i = 1; i < rows; ++i) {
+        std::ptrdiff_t const *last_row = &matrix_scores[(i - 1) * cols];
+        std::ptrdiff_t *row = &matrix_scores[i * cols];
+        std::ptrdiff_t const *last_inserts_row = &matrix_inserts[(i - 1) * cols];
+        std::ptrdiff_t *row_inserts = &matrix_inserts[i * cols];
+        std::ptrdiff_t const *last_deletes_row = &matrix_deletes[(i - 1) * cols];
+        std::ptrdiff_t *row_deletes = &matrix_deletes[i * cols];
+        for (std::size_t j = 1; j < cols; ++j) {
+            std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
+            std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
+            std::ptrdiff_t if_deletion =
+                std::max(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
+            std::ptrdiff_t if_insertion =
+                std::max(row[j - 1] + gap_opening_cost, last_inserts_row[j - 1] + gap_extension_cost);
+            std::ptrdiff_t if_deletion_or_insertion = std::max(if_deletion, if_insertion);
+            row[j] = std::max(if_deletion_or_insertion, if_substitution);
+            row_inserts[j] = if_insertion;
+            row_deletes[j] = if_deletion;
+        }
+    }
+
+    return matrix_scores.back();
+}
+
+/**
+ *  @brief Inefficient baseline Smith-Waterman-Gotoh alignment score computation, as implemented in most codebases.
+ *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ *  @see https://github.com/gata-bio/affine-gaps
+ */
+inline std::ptrdiff_t smith_waterman_gotoh_baseline(                    //
+    char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
+    std::function<error_cost_t(char, char)> substitution_cost_for,      //
+    error_cost_t gap_opening_cost, error_cost_t gap_extension_cost) noexcept(false) {
+
+    std::size_t const rows = len1 + 1;
+    std::size_t const cols = len2 + 1;
+    std::vector<std::ptrdiff_t> matrix_scores(rows * cols);
+    std::vector<std::ptrdiff_t> matrix_inserts(rows * cols);
+    std::vector<std::ptrdiff_t> matrix_deletes(rows * cols);
+
+    // Unlike the global alignment we need to track the largest score in the matrix.
+    std::ptrdiff_t best_score = 0;
+
+    // Initialize the borders of the matrix.
+    matrix_scores[0] = 0;
+    for (std::size_t i = 1; i < rows; ++i) {
+        matrix_scores[i * cols + 0] /* [i][0] in 2D */ = 0;
+        matrix_inserts[i * cols + 0] /* [i][0] in 2D */ = gap_opening_cost + gap_extension_cost;
+    }
+    for (std::size_t j = 0; j < cols; ++j) {
+        matrix_scores[0 * cols + j] /* [0][j] in 2D */ = 0;
+        matrix_deletes[0 * cols + j] /* [0][j] in 2D */ = gap_opening_cost + gap_extension_cost;
+    }
+
+    // Fill in the rest of the matrix.
+    for (std::size_t i = 1; i < rows; ++i) {
+        std::ptrdiff_t const *last_row = &matrix_scores[(i - 1) * cols];
+        std::ptrdiff_t *row = &matrix_scores[i * cols];
+        std::ptrdiff_t const *last_inserts_row = &matrix_inserts[(i - 1) * cols];
+        std::ptrdiff_t *row_inserts = &matrix_inserts[i * cols];
+        std::ptrdiff_t const *last_deletes_row = &matrix_deletes[(i - 1) * cols];
+        std::ptrdiff_t *row_deletes = &matrix_deletes[i * cols];
+        for (std::size_t j = 1; j < cols; ++j) {
+            std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
+            std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
+            std::ptrdiff_t if_deletion =
+                std::max(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
+            std::ptrdiff_t if_insertion =
+                std::max(row[j - 1] + gap_opening_cost, last_inserts_row[j - 1] + gap_extension_cost);
+            std::ptrdiff_t if_deletion_or_insertion = std::max(if_deletion, if_insertion);
+            std::ptrdiff_t if_substitution_or_reset = std::max<std::ptrdiff_t>(if_substitution, 0);
+            std::ptrdiff_t score = std::max(if_deletion_or_insertion, if_substitution_or_reset);
+            row[j] = score;
+            row_inserts[j] = if_insertion;
+            row_deletes[j] = if_deletion;
+            best_score = std::max(best_score, score);
+        }
+    }
+
+    return best_score;
+}
+
 struct levenshtein_baselines_t {
     template <typename results_type_>
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, results_type_ *results) const {
@@ -183,16 +293,28 @@ struct levenshtein_baselines_t {
 struct needleman_wunsch_baselines_t {
 
     error_costs_256x256_t substitution_costs = error_costs_256x256_t::diagonal();
-    error_cost_t gap_cost = -1;
+    error_cost_t gap_opening_cost = -1;
+    error_cost_t gap_extension_cost = -1;
+
+    needleman_wunsch_baselines_t() = default;
+    needleman_wunsch_baselines_t(error_costs_256x256_t subs, linear_gap_costs_t gap)
+        : substitution_costs(subs), gap_opening_cost(gap.open_or_extend), gap_extension_cost(gap.open_or_extend) {}
+    needleman_wunsch_baselines_t(error_costs_256x256_t subs, affine_gap_costs_t gap)
+        : substitution_costs(subs), gap_opening_cost(gap.open), gap_extension_cost(gap.extend) {}
 
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
         _sz_assert(first.size() == second.size());
 
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
-            results[i] = needleman_wunsch_baseline(first[i].data(), first[i].size(),   //
-                                                   second[i].data(), second[i].size(), //
-                                                   substitution_costs, gap_cost);
+            results[i] =
+                gap_opening_cost == gap_extension_cost
+                    ? needleman_wunsch_baseline(first[i].data(), first[i].size(),   //
+                                                second[i].data(), second[i].size(), //
+                                                substitution_costs, gap_opening_cost)
+                    : needleman_wunsch_gotoh_baseline(first[i].data(), first[i].size(),   //
+                                                      second[i].data(), second[i].size(), //
+                                                      substitution_costs, gap_opening_cost, gap_extension_cost);
         return status_t::success_k;
     }
 };
@@ -200,16 +322,27 @@ struct needleman_wunsch_baselines_t {
 struct smith_waterman_baselines_t {
 
     error_costs_256x256_t substitution_costs = error_costs_256x256_t::diagonal();
-    error_cost_t gap_cost = -1;
+    error_cost_t gap_opening_cost = -1;
+    error_cost_t gap_extension_cost = -1;
+
+    smith_waterman_baselines_t() = default;
+    smith_waterman_baselines_t(error_costs_256x256_t subs, linear_gap_costs_t gap)
+        : substitution_costs(subs), gap_opening_cost(gap.open_or_extend), gap_extension_cost(gap.open_or_extend) {}
+    smith_waterman_baselines_t(error_costs_256x256_t subs, affine_gap_costs_t gap)
+        : substitution_costs(subs), gap_opening_cost(gap.open), gap_extension_cost(gap.extend) {}
 
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
         _sz_assert(first.size() == second.size());
 
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
-            results[i] = smith_waterman_baseline(first[i].data(), first[i].size(),   //
-                                                 second[i].data(), second[i].size(), //
-                                                 substitution_costs, gap_cost);
+            results[i] = gap_opening_cost == gap_extension_cost
+                             ? smith_waterman_baseline(first[i].data(), first[i].size(),   //
+                                                       second[i].data(), second[i].size(), //
+                                                       substitution_costs, gap_opening_cost)
+                             : smith_waterman_gotoh_baseline(first[i].data(), first[i].size(),   //
+                                                             second[i].data(), second[i].size(), //
+                                                             substitution_costs, gap_opening_cost, gap_extension_cost);
         return status_t::success_k;
     }
 };
