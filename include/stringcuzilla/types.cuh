@@ -89,6 +89,7 @@ inline std::optional<gpu_specs_t> gpu_specs(int device = 0) noexcept {
     specs.streaming_multiprocessors = prop.multiProcessorCount;
     specs.constant_memory_bytes = prop.totalConstMem;
     specs.vram_bytes = prop.totalGlobalMem;
+    specs.warp_size = prop.warpSize;
 
     // Infer other global settings, that CUDA doesn't expose directly
     specs.shared_memory_bytes = prop.sharedMemPerMultiprocessor * prop.multiProcessorCount;

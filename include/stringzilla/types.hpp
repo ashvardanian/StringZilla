@@ -759,8 +759,9 @@ struct gpu_specs_t {
     size_t shared_memory_bytes = 192 * 1024 * 108; // ? On A100 it's 192 KB per SM
     size_t streaming_multiprocessors = 108;        // ? On A100
     size_t cuda_cores = 6912;                      // ? On A100 for f32/i32 logic
+    size_t reserved_memory_per_block = 1024;       // ? Typically, 1 KB per block is reserved for bookkeeping
+    size_t warp_size = 32;                         // ? Warp size is 32 threads on practically all GPUs
     size_t max_blocks_per_multiprocessor = 0;
-    size_t reserved_memory_per_block = 0;
 
     inline size_t shared_memory_per_multiprocessor() const noexcept {
         return shared_memory_bytes / streaming_multiprocessors;
