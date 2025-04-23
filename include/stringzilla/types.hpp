@@ -613,6 +613,10 @@ class safe_vector {
     using size_type = std::size_t;
     using allocator_type = allocator_type_;
 
+    using allocated_type = typename std::allocator_traits<allocator_type>::value_type;
+    static_assert(sizeof(value_type) == sizeof(allocated_type),
+                  "Allocator value type must be the same size as the vector value type");
+
   private:
     value_type *data_;
     size_type size_;
@@ -632,7 +636,7 @@ class safe_vector {
 
     void reset() noexcept {
         clear();
-        if (data_) alloc_.deallocate(data_, capacity_);
+        if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
         data_ = nullptr;
         size_ = 0;
         capacity_ = 0;
@@ -651,7 +655,7 @@ class safe_vector {
     safe_vector &operator=(safe_vector &&other) noexcept {
         if (this != &other) {
             clear();
-            if (data_) alloc_.deallocate(data_, capacity_);
+            if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
             data_ = other.data_;
             size_ = other.size_;
             capacity_ = other.capacity_;
@@ -665,13 +669,13 @@ class safe_vector {
 
     status_t try_reserve(size_type new_cap) noexcept {
         if (new_cap <= capacity_) return status_t::success_k;
-        value_type *new_data = alloc_.allocate(new_cap);
+        value_type *new_data = (value_type *)alloc_.allocate(new_cap);
         if (!new_data) return status_t::bad_alloc_k;
         for (size_type i = 0; i < size_; ++i) {
             new (new_data + i) value_type(std::move(data_[i]));
             if constexpr (!std::is_trivially_destructible<value_type>::value) data_[i].~value_type();
         }
-        if (data_) alloc_.deallocate(data_, capacity_);
+        if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
         data_ = new_data;
         capacity_ = new_cap;
         return status_t::success_k;
