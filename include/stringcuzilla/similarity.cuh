@@ -42,6 +42,8 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
+#include <cuda/pipeline>        // `cuda::pipeline`
+#include <cooperative_groups.h> // `cooperative_groups::this_grid()`
 
 namespace ashvardanian {
 namespace stringzilla {
@@ -54,8 +56,8 @@ namespace stringzilla {
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, objective_,
-                     sz_similarity_global_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, objective_,
+                   sz_similarity_global_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
@@ -71,8 +73,8 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = typename std::remove_cvref<first_char_t>::type;
 
-    using warp_scorer_t = linear_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k,
-                                        sz_similarity_global_k, capability_k>;
+    using warp_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k,
+                                      sz_similarity_global_k, capability_k>;
 
   protected:
     substituter_t substituter_;
@@ -85,7 +87,7 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
     }
 
   public:
-    __forceinline__ __device__ linear_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
+    __forceinline__ __device__ tile_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
         : substituter_(substituter), gap_cost_(gap_cost) {}
 
     /**
@@ -104,7 +106,7 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
-     *  @param first_reversed_slice The first string, @b reversed.
+     *  @param first_slice The first string, unlike the CPU variant @b NOT reversed.
      *  @param second_slice The second string.
      *
      *  @param tasks_offset The offset of the first character to compare from each string.
@@ -115,7 +117,7 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
      */
     template <typename index_type_>
     __forceinline__ __device__ void operator()(                                                      //
-        first_iterator_t first_reversed_slice, second_iterator_t second_slice,                       //
+        first_iterator_t first_slice, second_iterator_t second_slice,                                //
         index_type_ const tasks_offset, index_type_ const tasks_step, index_type_ const tasks_count, //
         score_t const *scores_pre_substitution, score_t const *scores_pre_insertion,                 //
         score_t const *scores_pre_deletion, score_t *scores_new) noexcept {
@@ -132,9 +134,7 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
 
-            // ? Note that here we are still traversing both buffers in the same order,
-            // ? because one of the strings has been reversed beforehand.
-            error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+            error_cost_t cost_of_substitution = substituter_(first_slice[tasks_count - i - 1], second_slice[i]);
             score_t if_substitution = pre_substitution + cost_of_substitution;
             score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_cost_;
             score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution);
@@ -152,8 +152,8 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, objective_,
-                     sz_similarity_local_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, objective_,
+                   sz_similarity_local_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
@@ -169,8 +169,8 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = typename std::remove_cvref<first_char_t>::type;
 
-    using warp_scorer_t = linear_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k,
-                                        sz_similarity_local_k, capability_k>;
+    using warp_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k,
+                                      sz_similarity_local_k, capability_k>;
 
   protected:
     substituter_t substituter_;
@@ -194,7 +194,7 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
     }
 
   public:
-    __forceinline__ __device__ linear_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
+    __forceinline__ __device__ tile_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
         : substituter_(substituter), gap_cost_(gap_cost) {}
 
     /**
@@ -211,7 +211,7 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
-     *  @param first_reversed_slice The first string, @b reversed.
+     *  @param first_slice The first string, unlike the CPU variant @b NOT reversed.
      *  @param second_slice The second string.
      *
      *  @param tasks_offset The offset of the first character to compare from each string.
@@ -222,7 +222,7 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
      */
     template <typename index_type_>
     __forceinline__ __device__ void operator()(                                                      //
-        first_iterator_t first_reversed_slice, second_iterator_t second_slice,                       //
+        first_iterator_t first_slice, second_iterator_t second_slice,                                //
         index_type_ const tasks_offset, index_type_ const tasks_step, index_type_ const tasks_count, //
         score_t const *scores_pre_substitution, score_t const *scores_pre_insertion,                 //
         score_t const *scores_pre_deletion, score_t *scores_new) noexcept {
@@ -239,9 +239,7 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
 
-            // ? Note that here we are still traversing both buffers in the same order,
-            // ? because one of the strings has been reversed beforehand.
-            error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+            error_cost_t cost_of_substitution = substituter_(first_slice[tasks_count - i - 1], second_slice[i]);
             score_t if_substitution = pre_substitution + cost_of_substitution;
             score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_cost_;
             score_t if_substitution_or_reset = pick_best(if_substitution, 0);
@@ -268,15 +266,15 @@ struct linear_scorer<first_iterator_type_, second_iterator_type_, score_type_, s
  *  - @b `vmax4,vmin4,vadd4` video-processing instructions.
  */
 template <>
-struct linear_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
-                     sz_similarity_global_k, sz_caps_ck_k>
-    : public linear_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
-                           sz_similarity_global_k, sz_cap_cuda_k> {
+struct tile_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
+                   sz_similarity_global_k, sz_caps_ck_k>
+    : public tile_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
+                         sz_similarity_global_k, sz_cap_cuda_k> {
 
-    using warp_scorer_t::linear_scorer; // Make the constructors visible
+    using warp_scorer_t::tile_scorer; // Make the constructors visible
 
     __forceinline__ __device__ void operator()(                                 //
-        char const *first_reversed_slice, char const *second_slice,             //
+        char const *first_slice, char const *second_slice,                      //
         uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, sz_u8_t const *scores_pre_deletion,
         sz_u8_t *scores_new) noexcept {
@@ -289,7 +287,7 @@ struct linear_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t,
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
         sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
-        sz_u32_vec_t first_reversed_vec, second_vec;
+        sz_u32_vec_t first_vec, second_vec;
         sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_deletion_or_insertion_vec;
         sz_u32_vec_t cell_score_vec;
 
@@ -299,13 +297,14 @@ struct linear_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t,
             pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
             pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
             pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            first_reversed_vec = sz_u32_load_unaligned(first_reversed_slice + i);
+            first_vec = sz_u32_load_unaligned(first_slice + tasks_count - i - 4);
             second_vec = sz_u32_load_unaligned(second_slice + i);
+            first_vec.u32 = __nv_bswap32(first_vec.u32); // ! reverse the order of bytes in the first vector
 
             // Equality comparison will output 0xFF for each matching byte.
             // Adding one to it will make it 0x00 for each matching byte, and 0x01 for each non-matching byte.
             // Perfect for substitution cost!
-            cost_of_substitution_vec.u32 = __vadd4(__vcmpeq4(first_reversed_vec.u32, second_vec.u32), 0x01010101);
+            cost_of_substitution_vec.u32 = __vadd4(__vcmpeq4(first_vec.u32, second_vec.u32), 0x01010101);
             if_substitution_vec.u32 = __vaddus4(pre_substitution_vec.u32, cost_of_substitution_vec.u32);
             if_deletion_or_insertion_vec.u32 =
                 __vaddus4(__vminu4(pre_deletion_vec.u32, pre_insertion_vec.u32), 0x01010101);
@@ -324,14 +323,14 @@ struct linear_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t,
 };
 
 template <>
-struct linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
-                     sz_similarity_global_k, sz_caps_ck_k>
-    : public linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
-                           sz_similarity_global_k, sz_cap_cuda_k> {
-    using warp_scorer_t::linear_scorer; // Make the constructors visible
+struct tile_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                   sz_similarity_global_k, sz_caps_ck_k>
+    : public tile_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
+                         sz_similarity_global_k, sz_cap_cuda_k> {
+    using warp_scorer_t::tile_scorer; // Make the constructors visible
 
     __forceinline__ __device__ void operator()(                                 //
-        char const *first_reversed_slice, char const *second_slice,             //
+        char const *first_slice, char const *second_slice,                      //
         uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
@@ -344,7 +343,7 @@ struct linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t
         // Assuming we are reading consecutive values from a buffer, in every cycle, most likely, we will be
         // dealing with most values being unaligned!
         sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
-        sz_u32_vec_t first_reversed_vec, second_vec;
+        sz_u32_vec_t first_vec, second_vec;
         sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_deletion_or_insertion_vec;
         sz_u32_vec_t cell_score_vec;
 
@@ -354,15 +353,15 @@ struct linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t
             pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
             pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
             pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            first_reversed_vec.u16s[0] = first_reversed_slice[i + 0];
-            first_reversed_vec.u16s[1] = first_reversed_slice[i + 1];
+            first_vec.u16s[0] = *(first_slice + tasks_count - i - 1); // ! with a [] lookup would underflow
+            first_vec.u16s[1] = *(first_slice + tasks_count - i - 2); // ! with a [] lookup would underflow
             second_vec.u16s[0] = second_slice[i + 0];
             second_vec.u16s[1] = second_slice[i + 1];
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             // Adding one to it will make it 0x0000 for each matching byte-pair,
             // and 0x0001 for each non-matching byte-pair. Perfect for substitution cost!
-            cost_of_substitution_vec.u32 = __vadd2(__vcmpeq2(first_reversed_vec.u32, second_vec.u32), 0x00010001);
+            cost_of_substitution_vec.u32 = __vadd2(__vcmpeq2(first_vec.u32, second_vec.u32), 0x00010001);
             if_substitution_vec.u32 = __vaddus2(pre_substitution_vec.u32, cost_of_substitution_vec.u32);
             if_deletion_or_insertion_vec.u32 =
                 __vaddus2(__vminu2(pre_deletion_vec.u32, pre_insertion_vec.u32), 0x00010001);
@@ -379,229 +378,14 @@ struct linear_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t
 };
 
 template <>
-struct linear_scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k,
-                     sz_similarity_global_k, sz_caps_ck_k>
-    : public linear_scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k,
-                           sz_similarity_global_k, sz_cap_cuda_k> {
-    using warp_scorer_t::linear_scorer; // Make the constructors visible
+struct tile_scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k,
+                   sz_similarity_global_k, sz_caps_ck_k>
+    : public tile_scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k,
+                         sz_similarity_global_k, sz_cap_cuda_k> {
+    using warp_scorer_t::tile_scorer; // Make the constructors visible
 };
 
 #endif
-
-/**
- *  @brief  Alignment Score and Edit Distance algorithm evaluating the Dynamic Programming matrix
- *          @b three skewed (reverse) diagonals at a time on a GPU, leveraging CUDA for parallelization.
- *          This function implements a logic for a single pair of strings.
- *
- *  We could have implemented the logic of this function as part of the `scores_diagonally` kernel,
- *  but we want to control the used @b `distance_type_` at the level of each warp and score computation.
- *  If all of the strings except for one are 100-ish bytes, but one is 1000-ish bytes, we want to use
- *  the 8-bit `distance_type_` for the smaller strings, and 16-bit `distance_type_` for the larger one.
- *  The smaller the type, the more likely we are to use specialized @b SIMD instructions, like DPX on Hopper.
- */
-template <                                                       //
-    typename char_type_ = char,                                  //
-    typename score_type_ = sz_size_t,                            //
-    typename substituter_type_ = error_costs_uniform_t,          //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_cuda_k,                 //
-    typename enable_ = void                                      //
-    >
-struct diagonal_walker_per_warp {
-
-    using char_t = char_type_;
-    using score_t = score_type_;
-    using substituter_t = substituter_type_;
-
-    static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_similarity_locality_t locality_k = locality_;
-    static constexpr sz_similarity_objective_t objective_k = objective_;
-
-    using warp_scorer_t =
-        linear_scorer<char_t const *, char_t const *, score_t, substituter_t, objective_k, locality_k, capability_k>;
-
-  protected:
-    substituter_t substituter_;
-    error_cost_t gap_cost_ {1};
-
-  public:
-    /**
-     *  @param[in] substituter A commutative function returning the cost of substituting one char with another.
-     *  @param[in] gap_cost The uniform cost of a gap (insertion or deletion).
-     *  @param[in] alloc A default-constructible allocator for the internal buffers.
-     */
-    __forceinline__ __device__ diagonal_walker_per_warp(substituter_t substituter, error_cost_t gap_cost) noexcept
-        : substituter_(substituter), gap_cost_(gap_cost) {}
-
-    /**
-     *  @param[in] first The first string.
-     *  @param[in] second The second string.
-     *  @param[out] result_ref Location to dump the calculated score.
-     */
-    __forceinline__ __device__ void operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
-                                               char *shared_memory_buffer) const noexcept {
-
-        // Make sure the size relation between the strings is correct.
-        char_t const *shorter_global = first.data(), *longer_global = second.data();
-        sz_size_t shorter_length = first.size(), longer_length = second.size();
-        if (shorter_length > longer_length) {
-            std::swap(shorter_global, longer_global);
-            std::swap(shorter_length, longer_length);
-        }
-        constexpr sz_size_t max_allowed_length_k = std::numeric_limits<uint>::max();
-        _sz_assert(shorter_length <= longer_length);
-        _sz_assert(shorter_length > 0 && longer_length > 0);
-        _sz_assert(longer_length < max_allowed_length_k);
-
-        // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
-        // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
-        uint const shorter_dim = static_cast<uint>(shorter_length + 1);
-        uint const longer_dim = static_cast<uint>(longer_length + 1);
-
-        // Let's say we are dealing with 3 and 5 letter words.
-        // The matrix will have size 4 x 6, parameterized as (shorter_dim x longer_dim).
-        // It will have:
-        // - 4 diagonals of increasing length, at positions: 0, 1, 2, 3.
-        // - 2 diagonals of fixed length, at positions: 4, 5.
-        // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
-        uint const diagonals_count = shorter_dim + longer_dim - 1;
-        uint const max_diagonal_length = shorter_length + 1;
-        uint const bytes_per_diagonal = round_up_to_multiple<uint>(max_diagonal_length * sizeof(score_t), 4);
-
-        // The next few pointers will be swapped around.
-        score_t *previous_scores = reinterpret_cast<score_t *>(shared_memory_buffer);
-        score_t *current_scores = reinterpret_cast<score_t *>(shared_memory_buffer + bytes_per_diagonal);
-        score_t *next_scores = reinterpret_cast<score_t *>(shared_memory_buffer + 2 * bytes_per_diagonal);
-        char_t *const longer = reinterpret_cast<char_t *>(shared_memory_buffer + 3 * bytes_per_diagonal);
-        char_t *const shorter_reversed = longer + longer_length;
-
-        // Each thread in the warp will be loading it's own set of strided characters into shared memory.
-        for (uint i = threadIdx.x; i < longer_length; i += blockDim.x) longer[i] = longer_global[i];
-        for (uint i = threadIdx.x; i < shorter_length; i += blockDim.x)
-            shorter_reversed[i] = shorter_global[shorter_length - i - 1];
-
-        // Initialize the first two diagonals:
-        warp_scorer_t diagonal_aligner {substituter_, gap_cost_};
-        if (threadIdx.x == 0) {
-            diagonal_aligner.init(previous_scores[0], 0);
-            diagonal_aligner.init(current_scores[0], 1);
-            diagonal_aligner.init(current_scores[1], 1);
-        }
-
-        // Make sure the shared memory is fully loaded.
-        __syncwarp();
-
-        // We skip diagonals 0 and 1, as they are trivial.
-        // We will start with diagonal 2, which has length 3, with the first and last elements being preset,
-        // so we are effectively computing just one value, as will be marked by a single set bit in
-        // the `next_diagonal_mask` on the very first iteration.
-        uint next_diagonal_index = 2;
-
-        // Progress through the upper-left triangle of the Levenshtein matrix.
-        for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
-
-            uint const next_diagonal_length = next_diagonal_index + 1;
-            diagonal_aligner(                                                //
-                shorter_reversed + shorter_length - next_diagonal_index + 1, // first sequence of characters
-                longer,                                                      // second sequence of characters
-                threadIdx.x, blockDim.x,                                     //
-                next_diagonal_length - 2,           // number of elements to compute with the `diagonal_aligner`
-                previous_scores,                    // costs pre substitution
-                current_scores, current_scores + 1, // costs pre insertion/deletion
-                next_scores + 1);                   // ! notice unaligned write destination
-
-            // Don't forget to populate the first row and the first column of the Levenshtein matrix.
-            if (threadIdx.x == 0) {
-                diagonal_aligner.init(next_scores[0], next_diagonal_index);
-                diagonal_aligner.init(next_scores[next_diagonal_length - 1], next_diagonal_index);
-            }
-            __syncwarp();
-
-            // Perform a circular rotation of those buffers, to reuse the memory.
-            score_t *temporary = previous_scores;
-            previous_scores = current_scores;
-            current_scores = next_scores;
-            next_scores = temporary;
-        }
-
-        // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
-        for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
-
-            uint const next_diagonal_length = shorter_dim;
-            diagonal_aligner(                                        //
-                shorter_reversed + shorter_length - shorter_dim + 1, // first sequence of characters
-                longer + next_diagonal_index - shorter_dim,          // second sequence of characters
-                threadIdx.x, blockDim.x,                             //
-                next_diagonal_length - 1,           // number of elements to compute with the `diagonal_aligner`
-                previous_scores,                    // costs pre substitution
-                current_scores, current_scores + 1, // costs pre insertion/deletion
-                next_scores);
-
-            // Don't forget to populate the first row of the Levenshtein matrix.
-            if (threadIdx.x == 0) diagonal_aligner.init(next_scores[next_diagonal_length - 1], next_diagonal_index);
-
-            __syncwarp();
-            // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
-            // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
-            // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
-            for (sz_size_t i = threadIdx.x; i + 1 < next_diagonal_length; i += blockDim.x)
-                previous_scores[i] = current_scores[i + 1];
-            __syncwarp();
-            for (sz_size_t i = threadIdx.x; i < next_diagonal_length; i += blockDim.x)
-                current_scores[i] = next_scores[i];
-            __syncwarp();
-        }
-
-        // Now let's handle the bottom-right triangle of the matrix.
-        for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
-
-            uint const next_diagonal_length = diagonals_count - next_diagonal_index;
-            diagonal_aligner(                                        //
-                shorter_reversed + shorter_length - shorter_dim + 1, // first sequence of characters
-                longer + next_diagonal_index - shorter_dim,          // second sequence of characters
-                threadIdx.x, blockDim.x,                             //
-                next_diagonal_length,               // number of elements to compute with the `diagonal_aligner`
-                previous_scores,                    // costs pre substitution
-                current_scores, current_scores + 1, // costs pre insertion/deletion
-                next_scores);
-
-            // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
-            // dropping the first element in the current array.
-            score_t *temporary = previous_scores;
-            // ! Drop the first entry among the current distances.
-            // ! Assuming every next diagonal is shorter by one element, we don't need a full-blown `sz_move`.
-            // ! to shift the array by one element.
-            previous_scores = current_scores + 1;
-            current_scores = next_scores;
-            next_scores = temporary;
-            __syncwarp();
-        }
-
-        // Export one result per each block.
-        if (threadIdx.x == 0) result_ref = diagonal_aligner.score();
-    }
-};
-
-template <bool is_signed_, typename first_strings_type_, typename second_strings_type_>
-sz_size_t _scores_diagonally_warp_shared_memory_requirement( //
-    first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-    sz_size_t max_magnitude_change) noexcept {
-
-    using char_t = typename first_strings_type_::value_type::value_type;
-    using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, is_signed_>;
-
-    sz_size_t max_required_shared_memory = 0;
-    for (sz_size_t i = 0; i < first_strings.size(); ++i) {
-        sz_size_t const first_length = first_strings[i].length();
-        sz_size_t const second_length = second_strings[i].length();
-        sz_size_t const shared_memory_requirement =
-            similarity_memory_requirements_t(first_length, second_length, max_magnitude_change, sizeof(char_t), 4)
-                .total;
-        max_required_shared_memory = sz_max_of_two(max_required_shared_memory, shared_memory_requirement);
-    }
-    return max_required_shared_memory;
-}
 
 /**
  *  @brief  String similarity scoring algorithm evaluating a @b single Dynamic Programming matrix
@@ -627,20 +411,26 @@ sz_size_t _scores_diagonally_warp_shared_memory_requirement( //
  *  - Keep everything in global memory - the strings and the diagonals.
  *  - Execute the naive algorithm, expecting the hardware to handle coalescing the memory accesses.
  */
-template <               //
-    typename char_type_, //
-    typename index_type_,
-    typename score_type_ = sz_size_t,           //
-    sz_capability_t capability_ = sz_cap_cuda_k //
+template <                                                       //
+    typename char_type_ = char,                                  //
+    typename index_type_ = uint,                                 //
+    typename score_type_ = sz_size_t,                            //
+    typename substituter_type_ = error_costs_uniform_t,          //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void _score_across_cuda_device(                              //
-    char_type_ const *shorter_reversed_ptr, index_type_ shorter_length, //
-    char_type_ const *longer_ptr, index_type_ longer_length,            //
-    score_type_ *result_ptr, score_type_ *diagonals_ptr) {
+__global__ void _score_across_cuda_device(                     //
+    char_type_ const *shorter_ptr, index_type_ shorter_length, //
+    char_type_ const *longer_ptr, index_type_ longer_length,   //
+    score_type_ *result_ptr, score_type_ *diagonals_ptr,       //
+    substituter_type_ const *substituter_ptr, error_cost_t const gap_cost) noexcept {
 
-    _sz_assert(shorter_string.size() > 0);
-    _sz_assert(longer_string.size() > 0);
-    _sz_assert(shorter_string.size() <= longer_string.size());
+    namespace cg = cooperative_groups;
+
+    _sz_assert(shorter_length > 0);
+    _sz_assert(longer_length > 0);
+    _sz_assert(shorter_length <= longer_length);
     using char_t = char_type_;
     using index_t = index_type_;
     using score_t = score_type_;
@@ -648,8 +438,9 @@ __global__ void _score_across_cuda_device(                              //
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
+    using substituter_t = error_costs_uniform_t;
     using warp_scorer_t =
-        linear_scorer<char_t const *, char_t const *, score_t, substituter_t, objective_k, locality_k, capability_k>;
+        tile_scorer<char_t const *, char_t const *, score_t, substituter_t, objective_k, locality_k, capability_k>;
 
     // Only one thread will be initializing the top row and left column and outputting the result.
     bool const is_main_thread = blockIdx.x == 0 && threadIdx.x == 0;
@@ -668,13 +459,15 @@ __global__ void _score_across_cuda_device(                              //
     index_t const max_diagonal_length = shorter_length + 1;
 
     // The next few pointers will be swapped around.
-    score_t *previous_scores = diagonals.data();
-    score_t *current_scores = diagonals.data() + max_diagonal_length;
-    score_t *next_scores = diagonals.data() + 2 * max_diagonal_length;
+    score_t *previous_scores = diagonals_ptr;
+    score_t *current_scores = diagonals_ptr + max_diagonal_length;
+    score_t *next_scores = diagonals_ptr + 2 * max_diagonal_length;
 
     // Initialize the first two diagonals:
-    warp_scorer_t diagonal_aligner {substituter_, gap_cost_};
-    if (is_main_thread == 0) {
+    substituter_t const substituter;
+    error_cost_t const gap_cost = 1;
+    warp_scorer_t diagonal_aligner {substituter, gap_cost};
+    if (is_main_thread) {
         diagonal_aligner.init(previous_scores[0], 0);
         diagonal_aligner.init(current_scores[0], 1);
         diagonal_aligner.init(current_scores[1], 1);
@@ -693,21 +486,22 @@ __global__ void _score_across_cuda_device(                              //
     // Progress through the upper-left triangle of the Levenshtein matrix.
     for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
 
-        uint const next_diagonal_length = next_diagonal_index + 1;
-        diagonal_aligner(                                                //
-            shorter_reversed + shorter_length - next_diagonal_index + 1, // first sequence of characters
-            longer,                                                      // second sequence of characters
-            global_thread_index, global_thread_step,                     //
-            next_diagonal_length - 2,           // number of elements to compute with the `diagonal_aligner`
-            previous_scores,                    // costs pre substitution
-            current_scores, current_scores + 1, // costs pre insertion/deletion
-            next_scores + 1);                   // ! notice unaligned write destination
+        index_t const next_diagonal_length = next_diagonal_index + 1;
+        diagonal_aligner(                            //
+            shorter_ptr,                             // first sequence of characters
+            longer_ptr,                              // second sequence of characters
+            global_thread_index, global_thread_step, //
+            (index_t)(next_diagonal_length - 2),     // number of elements to compute with the `diagonal_aligner`
+            previous_scores,                         // costs pre substitution
+            current_scores, current_scores + 1,      // costs pre insertion/deletion
+            next_scores + 1);                        // ! notice unaligned write destination
 
         // Don't forget to populate the first row and the first column of the Levenshtein matrix.
-        if (threadIdx.x == 0) {
+        if (is_main_thread) {
             diagonal_aligner.init(next_scores[0], next_diagonal_index);
             diagonal_aligner.init(next_scores[next_diagonal_length - 1], next_diagonal_index);
         }
+        // Guarantee that all the writes have finished, before progressing to the next diagonal.
         grid.sync();
 
         // Perform a circular rotation of those buffers, to reuse the memory.
@@ -717,100 +511,244 @@ __global__ void _score_across_cuda_device(                              //
         next_scores = temporary;
     }
 
-    if (is_main_thread) *result_ptr = current_scores;
+    __shared__ cuda::pipeline_shared_state<cuda::thread_scope_system, 2> memcpy_pipeline_state;
+    auto memcpy_pipeline = cuda::make_pipeline(grid, &memcpy_pipeline_state);
+
+    // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
+    for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
+
+        index_t const next_diagonal_length = shorter_dim;
+        diagonal_aligner(                                   //
+            shorter_ptr,                                    // first sequence of characters
+            longer_ptr + next_diagonal_index - shorter_dim, // second sequence of characters
+            global_thread_index, global_thread_step,        //
+            (index_t)(next_diagonal_length - 1),            // number of elements to compute with the `diagonal_aligner`
+            previous_scores,                                // costs pre substitution
+            current_scores, current_scores + 1,             // costs pre insertion/deletion
+            next_scores);
+
+        // Don't forget to populate the first row of the Levenshtein matrix.
+        if (is_main_thread) diagonal_aligner.init(next_scores[next_diagonal_length - 1], next_diagonal_index);
+
+        // Guarantee that all the writes have finished, before progressing to the next diagonal.
+        grid.sync();
+
+        // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
+        // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
+        // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
+        memcpy_pipeline.producer_acquire();
+        cuda::memcpy_async(grid, (void *)previous_scores, (void const *)(current_scores + 1),
+                           (next_diagonal_length - 1) * sizeof(score_t), memcpy_pipeline);
+        cuda::memcpy_async(grid, (void *)current_scores, (void const *)(next_scores),
+                           (next_diagonal_length) * sizeof(score_t), memcpy_pipeline);
+        memcpy_pipeline.producer_commit();
+        memcpy_pipeline.consumer_wait();
+        memcpy_pipeline.consumer_release();
+    }
+
+    // Now let's handle the bottom-right triangle of the matrix.
+    for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
+
+        index_t const next_diagonal_length = diagonals_count - next_diagonal_index;
+        diagonal_aligner(                                   //
+            shorter_ptr + next_diagonal_index - longer_dim, // first sequence of characters
+            longer_ptr + next_diagonal_index - shorter_dim, // second sequence of characters
+            global_thread_index, global_thread_step,        //
+            next_diagonal_length,                           // number of elements to compute with the `diagonal_aligner`
+            previous_scores,                                // costs pre substitution
+            current_scores, current_scores + 1,             // costs pre insertion/deletion
+            next_scores);
+
+        // Guarantee that all the writes have finished, before progressing to the next diagonal.
+        grid.sync();
+
+        // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
+        // dropping the first element in the current array.
+        score_t *temporary = previous_scores;
+        // ! Drop the first entry among the current distances.
+        // ! Assuming every next diagonal is shorter by one element, we don't need a full-blown `sz_move`.
+        // ! to shift the array by one element.
+        previous_scores = current_scores + 1;
+        current_scores = next_scores;
+        next_scores = temporary;
+    }
+
+    // Export one result per each block.
+    if (is_main_thread) *result_ptr = diagonal_aligner.score();
 }
-
-#pragma endregion
-
-#pragma region - Levenshtein Distance in CUDA
 
 /**
  *  @brief  Levenshtein edit distances algorithm evaluating the Dynamic Programming matrix
  *          @b three skewed (reverse) diagonals at a time on a GPU, leveraging CUDA for parallelization.
  *          Each pair of strings gets its own @b "block" of CUDA threads forming one @b warp and shared memory.
  *
- *  @param[in] first_strings Array of first strings in each pair for score calculation.
- *  @param[in] second_strings Array of second strings in each pair for score calculation.
- *  @param[out] results_ptr Output array of scores for each pair of strings.
- *  @param[in] max_diagonal_length Maximum length of the strings to process. Everything above that will be @b skipped.
+ *  @param[in] tasks Tasks containing the strings and output locations.
  */
-template <                                      //
-    typename first_strings_type_,               //
-    typename second_strings_type_,              //
-    typename score_type_ = sz_size_t,           //
-    sz_capability_t capability_ = sz_cap_cuda_k //
+template < //
+    typename task_type_,
+    typename char_type_ = char,                                  //
+    typename index_type_ = uint,                                 //
+    typename score_type_ = sz_size_t,                            //
+    typename substituter_type_ = error_costs_uniform_t,          //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void _levenshtein_in_cuda_warp( //
-    first_strings_type_ first_strings,     //
-    second_strings_type_ second_strings,   //
-    score_type_ *results_ptr,              //
-    size_t max_diagonal_length = SZ_SIZE_MAX) {
+__global__ void _score_on_each_cuda_warp(task_type_ *tasks, sz_size_t tasks_count) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
-    using first_string_t = typename first_strings_type_::value_type;
-    using second_string_t = typename second_strings_type_::value_type;
-    using first_char_t = typename first_string_t::value_type;
-    using second_char_t = typename second_string_t::value_type;
-    static_assert(sizeof(first_char_t) == sizeof(second_char_t), "Character types don't match");
-    using char_t = typename std::remove_cvref<first_char_t>::type;
+    using task_t = task_type_;
+    using char_t = char_type_;
+    using index_t = index_type_;
     using score_t = score_type_;
-
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
-    using walker_u8_t = diagonal_walker_per_warp<char_t, sz_u8_t, error_costs_uniform_t, objective_k,
-                                                 sz_similarity_global_k, capability_k>;
-    using walker_u16_t = diagonal_walker_per_warp<char_t, sz_u16_t, error_costs_uniform_t, objective_k,
-                                                  sz_similarity_global_k, capability_k>;
+    static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_similarity_objective_t objective_k = objective_;
 
     // Allocating shared memory is handled on the host side.
     extern __shared__ char shared_memory_buffer[];
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
-    for (sz_size_t pair_idx = blockIdx.x; pair_idx < first_strings.size(); pair_idx += gridDim.x) {
-        first_string_t const first_global = first_strings[pair_idx];
-        second_string_t const second_global = second_strings[pair_idx];
-        score_t &result_ref = results_ptr[pair_idx];
+    for (sz_size_t task_idx = blockIdx.x; task_idx < first_strings.size(); task_idx += gridDim.x) {
+        task_t const &task = tasks[task_idx];
+        char_t const *shorter_global = task.shorter_ptr;
+        char_t const *longer_global = task.longer_ptr;
+        sz_size_t const shorter_length = task.shorter_length;
+        sz_size_t const longer_length = task.longer_length;
+        score_t &result_ref = *task.result_ptr;
 
-        // Skip empty strings.
-        sz_size_t const first_length = first_global.length();
-        sz_size_t const second_length = second_global.length();
-        if (first_length == 0) {
-            if (threadIdx.x == 0) result_ref = second_length;
-            continue;
-        }
-        if (second_length == 0) {
-            if (threadIdx.x == 0) result_ref = first_length;
-            continue;
+        // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
+        // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
+        uint const shorter_dim = static_cast<uint>(shorter_length + 1);
+        uint const longer_dim = static_cast<uint>(longer_length + 1);
+
+        // Let's say we are dealing with 3 and 5 letter words.
+        // The matrix will have size 4 x 6, parameterized as (shorter_dim x longer_dim).
+        // It will have:
+        // - 4 diagonals of increasing length, at positions: 0, 1, 2, 3.
+        // - 2 diagonals of fixed length, at positions: 4, 5.
+        // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
+        uint const diagonals_count = shorter_dim + longer_dim - 1;
+        uint const max_diagonal_length = shorter_length + 1;
+        uint const bytes_per_diagonal = round_up_to_multiple<uint>(max_diagonal_length * sizeof(score_t), 4);
+
+        // The next few pointers will be swapped around.
+        score_t *previous_scores = reinterpret_cast<score_t *>(shared_memory_buffer);
+        score_t *current_scores = reinterpret_cast<score_t *>(shared_memory_buffer + bytes_per_diagonal);
+        score_t *next_scores = reinterpret_cast<score_t *>(shared_memory_buffer + 2 * bytes_per_diagonal);
+        char_t *const longer = reinterpret_cast<char_t *>(shared_memory_buffer + 3 * bytes_per_diagonal);
+        char_t *const shorter = longer + longer_length;
+
+        // Each thread in the warp will be loading it's own set of strided characters into shared memory.
+        for (uint i = threadIdx.x; i < longer_length; i += blockDim.x) longer[i] = longer_global[i];
+        for (uint i = threadIdx.x; i < shorter_length; i += blockDim.x) shorter[i] = shorter_global[i];
+
+        // Initialize the first two diagonals:
+        warp_scorer_t diagonal_aligner {substituter_, gap_cost_};
+        if (threadIdx.x == 0) {
+            diagonal_aligner.init(previous_scores[0], 0);
+            diagonal_aligner.init(current_scores[0], 1);
+            diagonal_aligner.init(current_scores[1], 1);
         }
 
-        // Estimate the maximum dimension of the DP matrix to pick the smallest fitting type.
-        using similarity_memory_requirements_t = similarity_memory_requirements<uint, false>;
-        similarity_memory_requirements_t requirements(first_length, second_length, 1, sizeof(char_t), 4);
-        if (requirements.max_diagonal_length >= max_diagonal_length) {
-            // ! Overwrite the value to signal the need to process it separately
-            if (threadIdx.x == 0) result_ref = std::numeric_limits<score_t>::max();
-            continue;
+        // Make sure the shared memory is fully loaded.
+        __syncwarp();
+
+        // We skip diagonals 0 and 1, as they are trivial.
+        // We will start with diagonal 2, which has length 3, with the first and last elements being preset,
+        // so we are effectively computing just one value, as will be marked by a single set bit in
+        // the `next_diagonal_mask` on the very first iteration.
+        uint next_diagonal_index = 2;
+
+        // Progress through the upper-left triangle of the Levenshtein matrix.
+        for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
+
+            uint const next_diagonal_length = next_diagonal_index + 1;
+            diagonal_aligner(                       //
+                shorter,                            // first sequence of characters
+                longer,                             // second sequence of characters
+                threadIdx.x, blockDim.x,            //
+                next_diagonal_length - 2,           // number of elements to compute with the `diagonal_aligner`
+                previous_scores,                    // costs pre substitution
+                current_scores, current_scores + 1, // costs pre insertion/deletion
+                next_scores + 1);                   // ! notice unaligned write destination
+
+            // Don't forget to populate the first row and the first column of the Levenshtein matrix.
+            if (threadIdx.x == 0) {
+                diagonal_aligner.init(next_scores[0], next_diagonal_index);
+                diagonal_aligner.init(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            }
+            __syncwarp();
+
+            // Perform a circular rotation of those buffers, to reuse the memory.
+            score_t *temporary = previous_scores;
+            previous_scores = current_scores;
+            current_scores = next_scores;
+            next_scores = temporary;
         }
 
-        span<char const> const first = {first_global.data(), first_length};
-        span<char const> const second = {second_global.data(), second_length};
+        // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
+        for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
 
-        if (requirements.bytes_per_cell == 1) {
-            sz_u8_t result_u8 = (sz_u8_t)-1;
-            walker_u8_t walker({}, 1);
-            walker(first, second, result_u8, shared_memory_buffer);
-            if (threadIdx.x == 0) result_ref = result_u8;
+            uint const next_diagonal_length = shorter_dim;
+            diagonal_aligner(                               //
+                shorter,                                    // first sequence of characters
+                longer + next_diagonal_index - shorter_dim, // second sequence of characters
+                threadIdx.x, blockDim.x,                    //
+                next_diagonal_length - 1,                   // number of elements to compute with the `diagonal_aligner`
+                previous_scores,                            // costs pre substitution
+                current_scores, current_scores + 1,         // costs pre insertion/deletion
+                next_scores);
+
+            // Don't forget to populate the first row of the Levenshtein matrix.
+            if (threadIdx.x == 0) diagonal_aligner.init(next_scores[next_diagonal_length - 1], next_diagonal_index);
+
+            __syncwarp();
+            // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
+            // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
+            // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
+            for (sz_size_t i = threadIdx.x; i + 1 < next_diagonal_length; i += blockDim.x)
+                previous_scores[i] = current_scores[i + 1];
+            __syncwarp();
+            for (sz_size_t i = threadIdx.x; i < next_diagonal_length; i += blockDim.x)
+                current_scores[i] = next_scores[i];
+            __syncwarp();
         }
-        else {
-            _sz_assert(requirements.bytes_per_cell == 2);
-            sz_u16_t result_u16 = (sz_u16_t)-1;
-            walker_u16_t walker({}, 1);
-            walker(first, second, result_u16, shared_memory_buffer);
-            if (threadIdx.x == 0) result_ref = result_u16;
+
+        // Now let's handle the bottom-right triangle of the matrix.
+        for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
+
+            uint const next_diagonal_length = diagonals_count - next_diagonal_index;
+            diagonal_aligner(                               //
+                shorter + next_diagonal_index - longer_dim, // first sequence of characters
+                longer + next_diagonal_index - shorter_dim, // second sequence of characters
+                threadIdx.x, blockDim.x,                    //
+                next_diagonal_length,                       // number of elements to compute with the `diagonal_aligner`
+                previous_scores,                            // costs pre substitution
+                current_scores, current_scores + 1,         // costs pre insertion/deletion
+                next_scores);
+
+            // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
+            // dropping the first element in the current array.
+            score_t *temporary = previous_scores;
+            // ! Drop the first entry among the current distances.
+            // ! Assuming every next diagonal is shorter by one element, we don't need a full-blown `sz_move`.
+            // ! to shift the array by one element.
+            previous_scores = current_scores + 1;
+            current_scores = next_scores;
+            next_scores = temporary;
+            __syncwarp();
         }
+
+        // Export one result per each block.
+        if (threadIdx.x == 0) result_ref = diagonal_aligner.score();
     }
 }
+
+#pragma endregion
+
+#pragma region - Levenshtein Distance in CUDA
 
 /** @brief Dispatches on @b `_levenshtein_in_cuda_warp` on the device side from the host side. */
 template <                                       //
@@ -829,13 +767,23 @@ cuda_status_t _levenshtein_distances_implementation(                            
     static constexpr sz_capability_t capability_k = capability_;
     using first_strings_t = first_strings_type_;
     using second_strings_t = second_strings_type_;
-    using score_t = score_type_;
+    using allocator_t = allocator_type_;
     static_assert(std::is_trivially_copyable<first_strings_t>() && std::is_trivially_copyable<second_strings_t>(),
                   "The first and second strings must be trivially copyable types - consider `arrow_strings_view`.");
+    using first_string_t = typename first_strings_t::value_type;
+    using second_string_t = typename second_strings_t::value_type;
+    static_assert(std::is_trivially_copyable<first_string_t>() && std::is_trivially_copyable<second_string_t>(),
+                  "The first and second strings must be trivially copyable types - consider `span<char>`.");
+    using first_char_t = typename first_string_t::value_type;
+    using second_char_t = typename second_string_t::value_type;
+    static_assert(sizeof(first_char_t) == sizeof(second_char_t), "Character types don't match");
+    using char_t = typename std::remove_cvref<first_char_t>::type;
+    using score_t = score_type_;
 
     // Make sure that we don't string pairs that are too large to fit 3 matrix diagonals into shared memory.
     // H100 Streaming Multiprocessor can have up to 128 active warps concurrently and only 256 KB of shared memory.
     // A100 SMs had only 192 KB. We can't deal with blocks that require more memory than the SM can provide.
+    using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
     sz_size_t shared_memory_per_block =
         _scores_diagonally_warp_shared_memory_requirement<false>(first_strings, second_strings, 1);
     if (shared_memory_per_block > specs.shared_memory_per_multiprocessor()) return {status_t::bad_alloc_k};
@@ -858,8 +806,8 @@ cuda_status_t _levenshtein_distances_implementation(                            
     // Let's use all 32 threads in a warp.
     constexpr sz_size_t threads_per_block = 32u;
     sz_size_t const max_input_length = 1024u * 16u;
-    auto kernel = &_levenshtein_in_cuda_warp<first_strings_t, second_strings_t, score_t, capability_k>;
-    void *kernel_args[] = {
+    auto warp_level_kernel = &_levenshtein_in_cuda_warp<first_strings_t, second_strings_t, score_t, capability_k>;
+    void *warp_level_kernel_args[] = {
         (void *)&first_strings,
         (void *)&second_strings,
         (void *)&results,
@@ -870,7 +818,7 @@ cuda_status_t _levenshtein_distances_implementation(                            
     // CUDA reserves 1 KB of shared memory per thread block, so on H100 we can use up to 227 KB of shared memory.
     // https://docs.nvidia.com/cuda/hopper-tuning-guide/index.html#unified-shared-memory-l1-texture-cache
     cudaError_t attribute_error =
-        cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
+        cudaFuncSetAttribute(warp_level_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
                              specs.shared_memory_per_multiprocessor() - count_blocks_per_multiprocessor * 1024);
     if (attribute_error != cudaSuccess) return {status_t::unknown_k, attribute_error};
 
@@ -882,58 +830,239 @@ cuda_status_t _levenshtein_distances_implementation(                            
     // Record the start event
     cudaEventRecord(start_event, stream);
 
-    // Enqueue the kernel for execution:
+    // Enqueue the warp_level_kernel for execution:
     cudaError_t launch_error = cudaLaunchKernel(                                 //
-        reinterpret_cast<void *>(kernel),                                        // Kernel function pointer
+        reinterpret_cast<void *>(warp_level_kernel),                             // Kernel function pointer
         dim3(count_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
         dim3(threads_per_block),                                                 // Block dimensions
-        kernel_args,                                                             // Array of kernel argument pointers
+        warp_level_kernel_args,                                                  // Array of kernel argument pointers
         shared_memory_per_block,                                                 // Shared memory per block (in bytes)
         stream);                                                                 // CUDA stream
     if (launch_error != cudaSuccess)
         if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
         else { return {status_t::unknown_k, launch_error}; }
 
-    cudaEventRecord(stop_event, stream);
-
     // Fetch the execution error:
     float execution_milliseconds = 0;
-    cudaError_t execution_error = cudaStreamSynchronize(stream);
-    cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
-
-    if (execution_error != cudaSuccess)
-        if (execution_error == cudaErrorMemoryAllocation) {
-            return {status_t::bad_alloc_k, execution_error, execution_milliseconds};
+    cudaError_t shorts_execution_error = cudaStreamSynchronize(stream);
+    if (shorts_execution_error != cudaSuccess)
+        if (shorts_execution_error == cudaErrorMemoryAllocation) {
+            return {status_t::bad_alloc_k, shorts_execution_error, execution_milliseconds};
         }
-        else { return {status_t::unknown_k, execution_error, execution_milliseconds}; }
+        else { return {status_t::unknown_k, shorts_execution_error, execution_milliseconds}; }
 
     // Go through the results and check if any of them were too big to be processed
     // by the warp-level implementation, and should be processed by the `_score_across_cuda_device`.
-    // Assuming we need to pre-reverse the shorter string in each such pair
-    sz_size_t combined_length_of_strings_to_reverse = 0;
+    sz_size_t count_longer_strings = 0;
+    sz_size_t longest_string_length = 0;
     for (sz_size_t i = 0; i < first_strings.size(); ++i) {
-        if (results[i] != std::numeric_limits<score_t>::max()) continue;
-        // We need to process this string pair separately.
-        auto const &first_global = first_strings[i];
-        auto const &second_global = second_strings[i];
-        auto const &shorter_global = first_global.length() < second_global.length() ? first_global : second_global;
-        auto const &longer_global = first_global.length() < second_global.length() ? second_global : first_global;
-
-        _score_across_cuda_device;
+        count_longer_strings += results[i] == std::numeric_limits<score_t>::max();
+        longest_string_length =
+            sz_max_of_two(longest_string_length, sz_max_of_two(first_strings[i].length(), second_strings[i].length()));
     }
+
+    if (count_longer_strings) {
+        auto device_level_u16index_kernel = &_score_across_cuda_device<char_t, sz_u16_t, score_t, capability_k>;
+        auto device_level_u32index_kernel = &_score_across_cuda_device<char_t, sz_u32_t, score_t, capability_k>;
+        auto device_level_u64index_kernel = &_score_across_cuda_device<char_t, sz_u64_t, score_t, capability_k>;
+        void *device_level_kernel_args[6];
+        safe_vector<score_t, allocator_t> diagonals_buffer(allocator);
+        if (diagonals_buffer.try_resize((longest_string_length + 1) * 3) == status_t::bad_alloc_k)
+            return {status_t::bad_alloc_k};
+
+        // We will enqueue many such kernels one after another, without waiting for a completion of the previous one.
+        for (sz_size_t i = 0; i < first_strings.size(); ++i) {
+            if (results[i] != std::numeric_limits<score_t>::max()) continue;
+            // We need to process this string pair separately.
+            auto const &first_global = first_strings[i];
+            auto const &second_global = second_strings[i];
+
+            // Pick the shorter and longer string.
+            char_t const *shorter_ptr, *longer_ptr;
+            sz_size_t shorter_length, longer_length;
+            if (first_global.length() < second_global.length()) {
+                shorter_ptr = first_global.data(), longer_ptr = second_global.data(),
+                shorter_length = first_global.length(), longer_length = second_global.length();
+            }
+            else {
+                shorter_ptr = second_global.data(), longer_ptr = first_global.data(),
+                shorter_length = second_global.length(), longer_length = first_global.length();
+            }
+        }
+    }
+
+    // Wait until everything is done.
+    cudaEventRecord(stop_event, stream);
+    cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
+    cudaError_t longs_execution_error = cudaStreamSynchronize(stream);
+    if (longs_execution_error != cudaSuccess)
+        if (longs_execution_error == cudaErrorMemoryAllocation) {
+            return {status_t::bad_alloc_k, longs_execution_error, execution_milliseconds};
+        }
+        else { return {status_t::unknown_k, longs_execution_error, execution_milliseconds}; }
 
     return {status_t::success_k, cudaSuccess, execution_milliseconds};
 }
 
-/** @brief Dispatches baseline Levenshtein edit distance algorithm to the GPU. */
+/**
+ *  @brief  Dispatches baseline Levenshtein edit distance algorithm to the GPU.
+ *          Before starting the kernels, bins them by size to maximize the number of blocks
+ *          per grid that can run simultaneously, while fitting into the shared memory.
+ */
 template <typename char_type_, typename allocator_type_, sz_capability_t capability_>
 struct levenshtein_distances<char_type_, allocator_type_, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+
+    using char_t = char_type_;
+    using allocator_t = allocator_type_;
+    using scores_allocator_t = typename allocator_t::template rebind<sz_size_t>::other;
+
+    struct task_t {
+        char_t const *shorter_ptr = nullptr;
+        size_t shorter_length = 0;
+        char_t const *longer_ptr = nullptr;
+        size_t longer_length = 0;
+        size_t memory_requirement = 0;
+        size_t original_index = 0;
+
+        constexpr task_t(char_t const *first_ptr, size_t first_length, char_t const *second_ptr,
+                         size_t second_length) noexcept {
+            if (first_length < second_length)
+                shorter_ptr = first_ptr, shorter_length = first_length, longer_ptr = second_ptr,
+                longer_length = second_length;
+            else
+                shorter_ptr = second_ptr, shorter_length = second_length, longer_ptr = first_ptr,
+                longer_length = first_length;
+        }
+
+        constexpr size_t max_diagonal_length() const noexcept {
+            return sz_max_of_two(shorter_length, longer_length) + 1;
+        }
+    };
+    using tasks_allocator_t = typename allocator_t::template rebind<task_t>::other;
+
+    allocator_t allocator = {};
+
+    levenshtein_distances(allocator_t const &allocator = {}) noexcept : allocator(allocator) {}
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     cuda_status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                              results_type_ &&results, gpu_specs_t specs = {}, cudaStream_t stream = 0) const noexcept {
-        return _levenshtein_distances_implementation<capability_>(first_strings, second_strings, results, specs,
-                                                                  stream);
+
+        score_t *const results_ptr = results.data();
+        safe_vector<task_t, tasks_allocator_t> tasks(allocator_);
+        if (!tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+
+        // Export all the tasks and sort them by decreasing memory requirement.
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, is_signed_>;
+        for (sz_size_t i = 0; i < first_strings.size(); ++i) {
+            tasks[i] = task_t(                                      //
+                first_strings[i].data(), first_strings[i].length(), //
+                second_strings[i].data(), second_strings[i].length());
+            tasks[i].original_index = i;
+            tasks[i].memory_requirement = //
+                similarity_memory_requirements_t(tasks[i].shorter_length, tasks[i].longer_length, 1, sizeof(char_t), 4)
+                    .total;
+        }
+        std::sort(tasks.begin(), tasks.end(),
+                  [](task_t const &a, task_t const &b) { return a.memory_requirement > b.memory_requirement; });
+
+        // On very large inputs we will keep the diagonals in shared memory.
+        safe_vector<sz_u64_t, scores_allocator_t> diagonals_u64_buffer(allocator_);
+        auto device_level_u16_kernel = &_score_across_cuda_device<char_t, sz_u16_t, sz_u16_t, capability_k>;
+        auto device_level_u32_kernel = &_score_across_cuda_device<char_t, sz_u32_t, sz_u32_t, capability_k>;
+        auto device_level_u64_kernel = &_score_across_cuda_device<char_t, sz_u64_t, sz_u64_t, capability_k>;
+        void *device_level_kernel_args[6];
+
+        // Now we need to bin them based on the number of blocks per multiprocessor,
+        // starting with problems, that can't fit into the memory of a single SM.
+        size_t count_tasks_processed = 0;
+        size_t count_tasks_for_entire_device = 0;
+        for (; count_tasks_processed != tasks.size(); ++count_tasks_processed, ++count_tasks_for_entire_device) {
+            // Check if we've finally reached small-enough inputs.
+            task_t const &task = tasks[count_tasks_processed];
+            size_t const requirement_with_one_warp = task.memory_requirement + specs.reserved_memory_per_block * 1;
+            if (requirement_with_one_warp < specs.shared_memory_per_multiprocessor()) break;
+
+            // As tasks decrease in size, this can only fail on first iteration.
+            if (diagonals_u64_buffer.try_resize(task.max_diagonal_length() * 3) == status_t::bad_alloc_k)
+                return {status_t::bad_alloc_k};
+            device_level_kernel_args[0] = (void *)(task.shorter_ptr);
+            device_level_kernel_args[1] = (void *)(&task.shorter_length);
+            device_level_kernel_args[2] = (void *)(task.longer_ptr);
+            device_level_kernel_args[3] = (void *)(&task.longer_length);
+            device_level_kernel_args[4] = (void *)(results_ptr + i);
+            device_level_kernel_args[5] = (void *)(diagonals_u64_buffer.data());
+
+            // Pick the smallest fitting type for the diagonals.
+            void *device_level_kernel = reinterpret_cast<void *>(device_level_u16_kernel);
+            if (task.max_diagonal_length() >= std::numeric_limits<sz_u16_t>::max())
+                device_level_kernel = reinterpret_cast<void *>(device_level_u32_kernel);
+            if (task.max_diagonal_length() >= std::numeric_limits<sz_u32_t>::max())
+                device_level_kernel = reinterpret_cast<void *>(device_level_u64_kernel);
+
+            // TODO: We can be wiser about the dimensions of this grid.
+            uint const random_block_size = 128;
+            uint const random_blocks_per_multiprocessor = 32;
+            cudaError_t launch_error = cudaLaunchCooperativeKernel(                       //
+                reinterpret_cast<void *>(device_level_u64index_kernel),                   // Kernel function pointer
+                dim3(random_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
+                dim3(random_block_size),                                                  // Block dimensions
+                device_level_kernel_args, // Array of kernel argument pointers
+                0,                        // Shared memory per block (in bytes)
+                stream);                  // CUDA stream
+            if (launch_error != cudaSuccess)
+                if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
+                else { return {status_t::unknown_k, launch_error}; }
+        }
+
+        // Now process remaining warp-level tasks, checking warp densities in reverse order.
+        // From the highest possible number of warps per multiprocessor to the lowest.
+        std::initializer_list<size_t> warps_per_multiprocessor_densities = {32, 16, 8, 4, 2, 1};
+        auto warp_level_u8_kernel = &_score_on_each_cuda_warp<task_t, char_t, sz_u8_t, sz_u8_t, capability_k>;
+        auto warp_level_u16_kernel = &_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_u16_t, capability_k>;
+        size_t count_tasks_for_this_density = 0;
+        for (size_t warps_per_multiprocessor_density : warps_per_multiprocessor_densities) {
+            for (; count_tasks_processed != tasks.size(); ++count_tasks_processed, ++count_tasks_for_this_density) {
+                // Check if the current warp density is still optimal.
+                task_t const &task = tasks[count_tasks_processed];
+                size_t const requirement_with_current_warp_density =
+                    task.memory_requirement + specs.reserved_memory_per_block * warps_per_multiprocessor_density;
+                if (requirement_with_current_warp_density > specs.shared_memory_per_multiprocessor()) break;
+            }
+
+            // Now check if any tasks of that size have been found and if their quantity is sufficient
+            // to fill the entire device with warps. If we don't have enough tasks for this density,
+            // part of our GPU will just sit idle...
+            //
+            //     Theoretically, that isn't true. On paper, several CUDA kernels can run concurrently
+            //     on the same physical device. It makes sense, assuming the Multi-Instance GPU (MIG)
+            //     virtualization feature on them. But even when pulling `cudaGetDeviceProperties`
+            //     and logging `cudaDeviceProp::concurrentKernels` for the H200 GPU with 140 GB of VRAM,
+            //     it states 1!
+            //
+            // Moreover, we need to overwrite the maximum addressable shared memory for that kernel
+            // as the default limits our blocks (in our case, single-warp blocks) to 48 KB, while
+            // device supports 4-5x more! Still, that API is synchronous and we must block the current
+            // thread to what until the task completes to change the shared memory amount.
+
+            device_level_kernel_args[0] = (void *)(task.shorter_ptr);
+            device_level_kernel_args[1] = (void *)(&task.shorter_length);
+            device_level_kernel_args[2] = (void *)(task.longer_ptr);
+            device_level_kernel_args[3] = (void *)(&task.longer_length);
+            device_level_kernel_args[4] = (void *)(results_ptr + i);
+            device_level_kernel_args[5] = (void *)(diagonals_u64_buffer.data());
+
+            // Pick the smallest fitting type for the diagonals.
+            void *device_level_kernel = reinterpret_cast<void *>(warp_level_u8_kernel);
+            if (task.max_diagonal_length() >= std::numeric_limits<sz_u8_t>::max())
+                device_level_kernel = reinterpret_cast<void *>(warp_level_u16_kernel);
+        }
+
+        // Now that everything went well, export the results back into the `results` array.
+        for (size_t i = 0; i < count_tasks_processed; ++i) {
+            task_t const &task = tasks[i];
+            results[task.original_index] = *task.result_ptr;
+        }
     }
 };
 
@@ -1159,8 +1288,8 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
 }
 
 /** @brief Dispatches baseline Needleman Wunsch algorithm to the GPU. */
-template <typename char_type_, typename substituter_type_>
-struct needleman_wunsch_scores<char_type_, substituter_type_, dummy_alloc_t, sz_cap_cuda_k> {
+template <typename char_type_, typename allocator_type_, typename substituter_type_>
+struct needleman_wunsch_scores<char_type_, substituter_type_, allocator_type_, sz_cap_cuda_k> {
 
     using char_t = char_type_;
     using substituter_t = substituter_type_;
