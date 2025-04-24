@@ -1407,7 +1407,7 @@ struct levenshtein_distance {
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
-        if (requirements.max_diagonal_length < 16) {
+        if (requirements.bytes_per_cell <= 1 && requirements.max_diagonal_length < 16) {
             sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
             status_t status = horizontal_u8_t {substituter_, gap_costs_, alloc_}(first, second, result_u8);
             if (status != status_t::success_k) return status;
@@ -1540,7 +1540,7 @@ struct levenshtein_distance_utf8 {
         span<sz_rune_t const> const second_utf32 {second_data_utf32, second_length_utf32};
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
-        if (requirements.max_diagonal_length < 16) {
+        if (requirements.bytes_per_cell <= 1 && requirements.max_diagonal_length < 16) {
             sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
             status_t status = horizontal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8);
             if (status != status_t::success_k) return status;
@@ -1637,7 +1637,7 @@ struct needleman_wunsch_score {
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
         status_t status = status_t::success_k;
-        if (requirements.max_diagonal_length < 16) {
+        if (requirements.bytes_per_cell <= 2 && requirements.max_diagonal_length < 16) {
             sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
             status = horizontal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16);
             if (status == status_t::success_k) result_ref = result_i16;
@@ -1730,7 +1730,7 @@ struct smith_waterman_score {
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
-        if (requirements.max_diagonal_length < 16) {
+        if (requirements.bytes_per_cell <= 2 && requirements.max_diagonal_length < 16) {
             sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
             status_t status = horizontal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16);
             if (status != status_t::success_k) return status;
