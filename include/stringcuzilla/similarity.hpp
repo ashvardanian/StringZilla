@@ -665,7 +665,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
                                                            pre_insertion_expansion + gap_costs_.extend);
             score_t if_deletion_or_insertion = min_or_max<objective_k>(if_deletion, if_insertion);
             // ! This is the main difference with global alignment:
-            score_t if_substitution_or_reset = min_or_max<objective_k>(if_substitution, 0);
+            score_t if_substitution_or_reset = min_or_max<objective_k, score_t>(if_substitution, 0);
             score_t cell_score = min_or_max<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
 
             // Export results.
@@ -2280,19 +2280,48 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    inline void slice(                                                                        //
+    sz_u512_vec_t match_cost_vec_;
+    sz_u512_vec_t mismatch_cost_vec_;
+    sz_u512_vec_t gap_cost_vec_;
+
+    inline void slice_64chars(                                                       //
+        char const *first_reversed_slice, char const *second_slice, sz_size_t i,     //
+        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, //
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) const noexcept {
+
+        __mmask64 match_mask;
+        sz_u512_vec_t first_vec, second_vec;
+        sz_u512_vec_t pre_substitution_vec, pre_insert_vec, pre_delete_vec;
+        sz_u512_vec_t cost_of_substitution_vec;
+        sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+
+        // ? Note that here we are still traversing both buffers in the same order,
+        // ? because one of the strings has been reversed beforehand.
+        first_vec.zmm = _mm512_loadu_epi8(first_reversed_slice + i);
+        second_vec.zmm = _mm512_loadu_epi8(second_slice + i);
+        pre_substitution_vec.zmm = _mm512_loadu_epi8(scores_pre_substitution + i);
+        pre_insert_vec.zmm = _mm512_loadu_epi8(scores_pre_insertion + i);
+        pre_delete_vec.zmm = _mm512_loadu_epi8(scores_pre_deletion + i);
+
+        match_mask = _mm512_cmpeq_epi8_mask(first_vec.zmm, second_vec.zmm);
+        cost_of_substitution_vec.zmm = _mm512_mask_blend_epi8(match_mask, mismatch_cost_vec_.zmm, match_cost_vec_.zmm);
+        cost_if_substitution_vec.zmm = _mm512_add_epi8(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
+        cost_if_gap_vec.zmm =
+            _mm512_add_epi8(_mm512_min_epu8(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec_.zmm);
+        cell_score_vec.zmm = _mm512_min_epu8(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
+        _mm512_storeu_epi8(scores_new + i, cell_score_vec.zmm);
+    }
+
+    inline void slice_under64chars(                                                           //
         char const *first_reversed_slice, char const *second_slice, sz_size_t i, sz_size_t n, //
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,          //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) const noexcept {
 
-        __mmask64 load_mask, mismatch_mask;
+        __mmask64 load_mask, match_mask;
         sz_u512_vec_t first_vec, second_vec;
-        sz_u512_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u512_vec_t pre_substitution_vec, pre_insert_vec, pre_delete_vec;
+        sz_u512_vec_t cost_of_substitution_vec;
         sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
-
-        // Initialize constats:
-        sz_u512_vec_t gap_cost_vec;
-        gap_cost_vec.zmm = _mm512_set1_epi8(1);
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
@@ -2300,14 +2329,14 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         first_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, first_reversed_slice + i);
         second_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, second_slice + i);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_substitution + i);
-        pre_insertion_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_insertion + i);
-        pre_deletion_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_deletion + i);
+        pre_insert_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_insertion + i);
+        pre_delete_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_deletion + i);
 
-        mismatch_mask = _mm512_cmpneq_epi8_mask(first_vec.zmm, second_vec.zmm);
-        cost_if_substitution_vec.zmm =
-            _mm512_mask_add_epi8(pre_substitution_vec.zmm, mismatch_mask, pre_substitution_vec.zmm, gap_cost_vec.zmm);
+        match_mask = _mm512_cmpeq_epi8_mask(first_vec.zmm, second_vec.zmm);
+        cost_of_substitution_vec.zmm = _mm512_mask_blend_epi8(match_mask, mismatch_cost_vec_.zmm, match_cost_vec_.zmm);
+        cost_if_substitution_vec.zmm = _mm512_add_epi8(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
         cost_if_gap_vec.zmm =
-            _mm512_add_epi8(_mm512_min_epu8(pre_insertion_vec.zmm, pre_deletion_vec.zmm), gap_cost_vec.zmm);
+            _mm512_add_epi8(_mm512_min_epu8(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec_.zmm);
         cell_score_vec.zmm = _mm512_min_epu8(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
         _mm512_mask_storeu_epi8(scores_new + i, load_mask, cell_score_vec.zmm);
     }
@@ -2317,10 +2346,19 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) noexcept {
 
+        // Initialize constats:
+        match_cost_vec_.zmm = _mm512_set1_epi8(this->substituter_.match);
+        mismatch_cost_vec_.zmm = _mm512_set1_epi8(this->substituter_.mismatch);
+        gap_cost_vec_.zmm = _mm512_set1_epi8(this->gap_costs_.open_or_extend);
+
         // In this variant we will need at most 4 loops per diagonal
-        for (sz_size_t i = 0; i < n; i += 64)
-            slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
-                  scores_pre_deletion, scores_new);
+        sz_size_t i = 0;
+        for (; i + 64 <= n; i += 64)
+            slice_64chars(first_reversed_slice, second_slice, i, scores_pre_substitution, scores_pre_insertion,
+                          scores_pre_deletion, scores_new);
+        if (i < n)
+            slice_under64chars(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
+                               scores_pre_deletion, scores_new);
 
         // The last element of the last chunk is the result of the global alignment.
         if (n == 1) this->last_score_ = scores_new[0];
@@ -2344,19 +2382,47 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    inline void slice(                                                                                  //
+    sz_u128_vec_t match_cost_vec_;
+    sz_u128_vec_t mismatch_cost_vec_;
+    sz_u128_vec_t gap_cost_vec_;
+
+    inline void slice_16chars(                                                             //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t i, //
+        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,       //
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) const noexcept {
+
+        __mmask16 match_mask;
+        sz_u512_vec_t first_vec, second_vec;
+        sz_u128_vec_t pre_substitution_vec, pre_insert_vec, pre_delete_vec;
+        sz_u128_vec_t cost_of_substitution_vec;
+        sz_u128_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+
+        // ? Note that here we are still traversing both buffers in the same order,
+        // ? because one of the strings has been reversed beforehand.
+        first_vec.zmm = _mm512_loadu_epi32(first_reversed_slice + i);
+        second_vec.zmm = _mm512_loadu_epi32(second_slice + i);
+        pre_substitution_vec.xmm = _mm_loadu_epi8(scores_pre_substitution + i);
+        pre_insert_vec.xmm = _mm_loadu_epi8(scores_pre_insertion + i);
+        pre_delete_vec.xmm = _mm_loadu_epi8(scores_pre_deletion + i);
+
+        match_mask = _mm512_cmpeq_epi32_mask(first_vec.zmm, second_vec.zmm);
+        cost_of_substitution_vec.xmm = _mm_mask_blend_epi8(match_mask, mismatch_cost_vec_.xmm, match_cost_vec_.xmm);
+        cost_if_substitution_vec.xmm = _mm_add_epi8(pre_substitution_vec.xmm, cost_of_substitution_vec.xmm);
+        cost_if_gap_vec.xmm = _mm_add_epi8(_mm_min_epu8(pre_insert_vec.xmm, pre_delete_vec.xmm), gap_cost_vec_.xmm);
+        cell_score_vec.xmm = _mm_min_epu8(cost_if_substitution_vec.xmm, cost_if_gap_vec.xmm);
+        _mm_storeu_epi8(scores_new + i, cell_score_vec.xmm);
+    }
+
+    inline void slice_under16chars(                                                                     //
         sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t i, sz_size_t n, //
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,                    //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) const noexcept {
 
-        __mmask16 load_mask, mismatch_mask;
+        __mmask16 load_mask, match_mask;
         sz_u512_vec_t first_vec, second_vec;
-        sz_u128_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u128_vec_t pre_substitution_vec, pre_insert_vec, pre_delete_vec;
+        sz_u128_vec_t cost_of_substitution_vec;
         sz_u128_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
-
-        // Initialize constats:
-        sz_u128_vec_t gap_cost_vec;
-        gap_cost_vec.xmm = _mm_set1_epi8(1);
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
@@ -2364,13 +2430,13 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
         first_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, first_reversed_slice + i);
         second_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, second_slice + i);
         pre_substitution_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_substitution + i);
-        pre_insertion_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_insertion + i);
-        pre_deletion_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_deletion + i);
+        pre_insert_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_insertion + i);
+        pre_delete_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_deletion + i);
 
-        mismatch_mask = _mm512_cmpneq_epi32_mask(first_vec.zmm, second_vec.zmm);
-        cost_if_substitution_vec.xmm =
-            _mm_mask_add_epi8(pre_substitution_vec.xmm, mismatch_mask, pre_substitution_vec.xmm, gap_cost_vec.xmm);
-        cost_if_gap_vec.xmm = _mm_add_epi8(_mm_min_epu8(pre_insertion_vec.xmm, pre_deletion_vec.xmm), gap_cost_vec.xmm);
+        match_mask = _mm512_cmpeq_epi32_mask(first_vec.zmm, second_vec.zmm);
+        cost_of_substitution_vec.xmm = _mm_mask_blend_epi8(match_mask, mismatch_cost_vec_.xmm, match_cost_vec_.xmm);
+        cost_if_substitution_vec.xmm = _mm_add_epi8(pre_substitution_vec.xmm, cost_of_substitution_vec.xmm);
+        cost_if_gap_vec.xmm = _mm_add_epi8(_mm_min_epu8(pre_insert_vec.xmm, pre_delete_vec.xmm), gap_cost_vec_.xmm);
         cell_score_vec.xmm = _mm_min_epu8(cost_if_substitution_vec.xmm, cost_if_gap_vec.xmm);
         _mm_mask_storeu_epi8(scores_new + i, load_mask, cell_score_vec.xmm);
     }
@@ -2380,10 +2446,19 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,       //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) noexcept {
 
+        // Initialize constats:
+        match_cost_vec_.xmm = _mm_set1_epi8(this->substituter_.match);
+        mismatch_cost_vec_.xmm = _mm_set1_epi8(this->substituter_.mismatch);
+        gap_cost_vec_.xmm = _mm_set1_epi8(this->gap_costs_.open_or_extend);
+
         // In this variant we will need at most (256 / 16) = 16 loops per diagonal.
-        for (sz_size_t i = 0; i < n; i += 16)
-            slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
-                  scores_pre_deletion, scores_new);
+        sz_size_t i = 0;
+        for (; i + 16 <= n; i += 16)
+            slice_16chars(first_reversed_slice, second_slice, i, scores_pre_substitution, scores_pre_insertion,
+                          scores_pre_deletion, scores_new);
+        if (i < n)
+            slice_under16chars(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
+                               scores_pre_deletion, scores_new);
 
         // The last element of the last chunk is the result of the global alignment.
         if (n == 1) this->last_score_ = scores_new[0];
@@ -2407,19 +2482,48 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    inline void slice(                                                                        //
+    sz_u512_vec_t match_cost_vec_;
+    sz_u512_vec_t mismatch_cost_vec_;
+    sz_u512_vec_t gap_cost_vec_;
+
+    inline void slice_32chars(                                                         //
+        char const *first_reversed_slice, char const *second_slice, sz_size_t i,       //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) const noexcept {
+
+        __mmask32 match_mask;
+        sz_u256_vec_t first_vec, second_vec;
+        sz_u512_vec_t pre_substitution_vec, pre_insert_vec, pre_delete_vec;
+        sz_u512_vec_t cost_of_substitution_vec;
+        sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+
+        // ? Note that here we are still traversing both buffers in the same order,
+        // ? because one of the strings has been reversed beforehand.
+        first_vec.ymm = _mm256_loadu_epi8(first_reversed_slice + i);
+        second_vec.ymm = _mm256_loadu_epi8(second_slice + i);
+        pre_substitution_vec.zmm = _mm512_loadu_epi16(scores_pre_substitution + i);
+        pre_insert_vec.zmm = _mm512_loadu_epi16(scores_pre_insertion + i);
+        pre_delete_vec.zmm = _mm512_loadu_epi16(scores_pre_deletion + i);
+
+        match_mask = _mm256_cmpeq_epi8_mask(first_vec.ymm, second_vec.ymm);
+        cost_of_substitution_vec.zmm = _mm512_mask_blend_epi16(match_mask, mismatch_cost_vec_.zmm, match_cost_vec_.zmm);
+        cost_if_substitution_vec.zmm = _mm512_add_epi16(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
+        cost_if_gap_vec.zmm =
+            _mm512_add_epi16(_mm512_min_epu16(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec_.zmm);
+        cell_score_vec.zmm = _mm512_min_epu16(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
+        _mm512_storeu_epi16(scores_new + i, cell_score_vec.zmm);
+    }
+
+    inline void slice_under32chars(                                                           //
         char const *first_reversed_slice, char const *second_slice, sz_size_t i, sz_size_t n, //
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,        //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) const noexcept {
 
-        __mmask32 load_mask, mismatch_mask;
+        __mmask32 load_mask, match_mask;
         sz_u256_vec_t first_vec, second_vec;
-        sz_u512_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u512_vec_t pre_substitution_vec, pre_insert_vec, pre_delete_vec;
+        sz_u512_vec_t cost_of_substitution_vec;
         sz_u512_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
-
-        // Initialize constats:
-        sz_u512_vec_t gap_cost_vec;
-        gap_cost_vec.zmm = _mm512_set1_epi16(1);
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
@@ -2427,14 +2531,14 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         first_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, first_reversed_slice + i);
         second_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, second_slice + i);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
-        pre_insertion_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
-        pre_deletion_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_deletion + i);
+        pre_insert_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
+        pre_delete_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_deletion + i);
 
-        mismatch_mask = _mm256_cmpneq_epi8_mask(first_vec.ymm, second_vec.ymm);
-        cost_if_substitution_vec.zmm =
-            _mm512_mask_add_epi16(pre_substitution_vec.zmm, mismatch_mask, pre_substitution_vec.zmm, gap_cost_vec.zmm);
+        match_mask = _mm256_cmpeq_epi8_mask(first_vec.ymm, second_vec.ymm);
+        cost_of_substitution_vec.zmm = _mm512_mask_blend_epi16(match_mask, mismatch_cost_vec_.zmm, match_cost_vec_.zmm);
+        cost_if_substitution_vec.zmm = _mm512_add_epi16(pre_substitution_vec.zmm, cost_of_substitution_vec.zmm);
         cost_if_gap_vec.zmm =
-            _mm512_add_epi16(_mm512_min_epu16(pre_insertion_vec.zmm, pre_deletion_vec.zmm), gap_cost_vec.zmm);
+            _mm512_add_epi16(_mm512_min_epu16(pre_insert_vec.zmm, pre_delete_vec.zmm), gap_cost_vec_.zmm);
         cell_score_vec.zmm = _mm512_min_epu16(cost_if_substitution_vec.zmm, cost_if_gap_vec.zmm);
         _mm512_mask_storeu_epi16(scores_new + i, load_mask, cell_score_vec.zmm);
     }
@@ -2444,15 +2548,25 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
 
+        // Initialize constats:
+        match_cost_vec_.zmm = _mm512_set1_epi16(this->substituter_.match);
+        mismatch_cost_vec_.zmm = _mm512_set1_epi16(this->substituter_.mismatch);
+        gap_cost_vec_.zmm = _mm512_set1_epi16(this->gap_costs_.open_or_extend);
+
+        // Precompute the number of elements processed in full-size slices for OpenMP compatibility.
+        sz_size_t const n_rounded = (n / 32) * 32;
+        sz_size_t const n_remainder = n - n_rounded;
+
 #if (capability_k & sz_cap_parallel_k)
-#pragma omp parallel for simd
-#else
-#pragma omp simd
+#pragma omp parallel for
 #endif
         // In this variant we will need at most (64 * 1024 / 32) = 2048 loops per diagonal.
-        for (sz_size_t i = 0; i < n; i += 32)
-            slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
-                  scores_pre_deletion, scores_new);
+        for (sz_size_t i = 0; i < n_rounded; i += 32)
+            slice_32chars(first_reversed_slice, second_slice, i, scores_pre_substitution, scores_pre_insertion,
+                          scores_pre_deletion, scores_new);
+        if (n_remainder > 0)
+            slice_under32chars(first_reversed_slice, second_slice, n_rounded, n, scores_pre_substitution,
+                               scores_pre_insertion, scores_pre_deletion, scores_new);
 
         // The last element of the last chunk is the result of the global alignment.
         if (n == 1) this->last_score_ = scores_new[0];
@@ -2476,19 +2590,48 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    inline void slice(                                                                                  //
+    sz_u256_vec_t match_cost_vec_;
+    sz_u256_vec_t mismatch_cost_vec_;
+    sz_u256_vec_t gap_cost_vec_;
+
+    inline void slice_16chars(                                                             //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t i, //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,     //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) const noexcept {
+
+        __mmask16 match_mask;
+        sz_u512_vec_t first_vec, second_vec;
+        sz_u256_vec_t pre_substitution_vec, pre_insert_vec, pre_delete_vec;
+        sz_u256_vec_t cost_of_substitution_vec;
+        sz_u256_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
+
+        // ? Note that here we are still traversing both buffers in the same order,
+        // ? because one of the strings has been reversed beforehand.
+        first_vec.zmm = _mm512_loadu_epi32(first_reversed_slice + i);
+        second_vec.zmm = _mm512_loadu_epi32(second_slice + i);
+        pre_substitution_vec.ymm = _mm256_loadu_epi16(scores_pre_substitution + i);
+        pre_insert_vec.ymm = _mm256_loadu_epi16(scores_pre_insertion + i);
+        pre_delete_vec.ymm = _mm256_loadu_epi16(scores_pre_deletion + i);
+
+        match_mask = _mm512_cmpeq_epi32_mask(first_vec.zmm, second_vec.zmm);
+        cost_of_substitution_vec.ymm = _mm256_mask_blend_epi16(match_mask, mismatch_cost_vec_.ymm, match_cost_vec_.ymm);
+        cost_if_substitution_vec.ymm = _mm256_add_epi16(pre_substitution_vec.ymm, cost_of_substitution_vec.ymm);
+        cost_if_gap_vec.ymm =
+            _mm256_add_epi16(_mm256_min_epu16(pre_insert_vec.ymm, pre_delete_vec.ymm), gap_cost_vec_.ymm);
+        cell_score_vec.ymm = _mm256_min_epu16(cost_if_substitution_vec.ymm, cost_if_gap_vec.ymm);
+        _mm256_storeu_epi16(scores_new + i, cell_score_vec.ymm);
+    }
+
+    inline void slice_under16chars(                                                                     //
         sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t i, sz_size_t n, //
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,                  //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) const noexcept {
 
-        __mmask16 load_mask, mismatch_mask;
+        __mmask16 load_mask, match_mask;
         sz_u512_vec_t first_vec, second_vec;
-        sz_u256_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
+        sz_u256_vec_t pre_substitution_vec, pre_insert_vec, pre_delete_vec;
+        sz_u256_vec_t cost_of_substitution_vec;
         sz_u256_vec_t cost_if_substitution_vec, cost_if_gap_vec, cell_score_vec;
-
-        // Initialize constats:
-        sz_u256_vec_t gap_cost_vec;
-        gap_cost_vec.ymm = _mm256_set1_epi16(1);
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
@@ -2496,14 +2639,14 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
         first_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, first_reversed_slice + i);
         second_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, second_slice + i);
         pre_substitution_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
-        pre_insertion_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
-        pre_deletion_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_deletion + i);
+        pre_insert_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
+        pre_delete_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_deletion + i);
 
-        mismatch_mask = _mm512_cmpneq_epi32_mask(first_vec.zmm, second_vec.zmm);
-        cost_if_substitution_vec.ymm =
-            _mm256_mask_add_epi16(pre_substitution_vec.ymm, mismatch_mask, pre_substitution_vec.ymm, gap_cost_vec.ymm);
+        match_mask = _mm512_cmpeq_epi32_mask(first_vec.zmm, second_vec.zmm);
+        cost_of_substitution_vec.ymm = _mm256_mask_blend_epi16(match_mask, mismatch_cost_vec_.ymm, match_cost_vec_.ymm);
+        cost_if_substitution_vec.ymm = _mm256_add_epi16(pre_substitution_vec.ymm, cost_of_substitution_vec.ymm);
         cost_if_gap_vec.ymm =
-            _mm256_add_epi16(_mm256_min_epu16(pre_insertion_vec.ymm, pre_deletion_vec.ymm), gap_cost_vec.ymm);
+            _mm256_add_epi16(_mm256_min_epu16(pre_insert_vec.ymm, pre_delete_vec.ymm), gap_cost_vec_.ymm);
         cell_score_vec.ymm = _mm256_min_epu16(cost_if_substitution_vec.ymm, cost_if_gap_vec.ymm);
         _mm256_mask_storeu_epi16(scores_new + i, load_mask, cell_score_vec.ymm);
     }
@@ -2513,15 +2656,25 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,     //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
 
+        // Initialize constats:
+        match_cost_vec_.ymm = _mm256_set1_epi16(this->substituter_.match);
+        mismatch_cost_vec_.ymm = _mm256_set1_epi16(this->substituter_.mismatch);
+        gap_cost_vec_.ymm = _mm256_set1_epi16(this->gap_costs_.open_or_extend);
+
+        // Precompute the number of elements processed in full-size slices for OpenMP compatibility.
+        sz_size_t const n_rounded = (n / 16) * 16;
+        sz_size_t const n_remainder = n - n_rounded;
+
 #if (capability_k & sz_cap_parallel_k)
-#pragma omp parallel for simd
-#else
-#pragma omp simd
+#pragma omp parallel for
 #endif
         // In this variant we will need at most (64 * 1024 / 16) = 4096 loops per diagonal.
-        for (sz_size_t i = 0; i < n; i += 16)
-            slice(first_reversed_slice, second_slice, i, n, scores_pre_substitution, scores_pre_insertion,
-                  scores_pre_deletion, scores_new);
+        for (sz_size_t i = 0; i < n_rounded; i += 16)
+            slice_16chars(first_reversed_slice, second_slice, i, scores_pre_substitution, scores_pre_insertion,
+                          scores_pre_deletion, scores_new);
+        if (n_remainder > 0)
+            slice_under16chars(first_reversed_slice, second_slice, n_rounded, n, scores_pre_substitution,
+                               scores_pre_insertion, scores_pre_deletion, scores_new);
 
         // The last element of the last chunk is the result of the global alignment.
         if (n == 1) this->last_score_ = scores_new[0];
