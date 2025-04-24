@@ -127,7 +127,7 @@ enum class status_t {
  *  @brief A trivial function object for uniform character substitution costs in Levenshtein-like similarity algorithms.
  *  @sa error_costs_256x256_t, error_costs_26x26ascii_t
  */
-struct error_costs_uniform_t {
+struct error_costs_unary_t {
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? 0 : 1; }
     constexpr error_cost_t operator()(sz_rune_t a, sz_rune_t b) const noexcept { return a == b ? 0 : 1; }
     constexpr sz_size_t max_magnitude_change() const noexcept { return 1; }
@@ -153,6 +153,7 @@ struct span {
     constexpr size_type length() const noexcept { return size_; }
     constexpr size_type size_bytes() const noexcept { return size_ * sizeof(value_type); }
     constexpr value_type &operator[](size_type i) const noexcept { return data_[i]; }
+    constexpr bool empty() const noexcept { return size_ == 0; }
 };
 
 template <typename value_type_>
