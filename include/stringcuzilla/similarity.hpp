@@ -2432,7 +2432,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u16_clamp_mask_until(n - i);
+        load_mask = _sz_u16_mask_until(n - i);
         first_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, first_reversed_slice + i);
         second_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, second_slice + i);
         pre_substitution_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_substitution + i);
@@ -2533,7 +2533,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u32_clamp_mask_until(n - i);
+        load_mask = _sz_u32_mask_until(n - i);
         first_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, first_reversed_slice + i);
         second_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, second_slice + i);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
@@ -2641,7 +2641,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u16_clamp_mask_until(n - i);
+        load_mask = _sz_u16_mask_until(n - i);
         first_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, first_reversed_slice + i);
         second_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, second_slice + i);
         pre_substitution_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
@@ -3060,7 +3060,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
         gap_cost_vec.zmm = _mm512_set1_epi16(gap);
 
         // Load the data with a mask:
-        load_mask = _sz_u32_clamp_mask_until(n - i);
+        load_mask = _sz_u32_mask_until(n - i);
         second_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, second_slice + i);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
         pre_gap_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
