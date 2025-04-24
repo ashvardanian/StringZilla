@@ -210,10 +210,10 @@ inline std::size_t levenshtein_gotoh_baseline(                          //
         for (std::size_t j = 1; j < cols; ++j) {
             std::size_t substitution_cost = (s1[i - 1] == s2[j - 1]) ? match_cost : mismatch_cost;
             std::size_t if_substitution = last_row[j - 1] + substitution_cost;
-            std::size_t if_deletion =
-                std::min<std::size_t>(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
             std::size_t if_insertion =
                 std::min<std::size_t>(row[j - 1] + gap_opening_cost, row_inserts[j - 1] + gap_extension_cost);
+            std::size_t if_deletion =
+                std::min<std::size_t>(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
             std::size_t if_deletion_or_insertion = std::min(if_deletion, if_insertion);
             row[j] = std::min(if_deletion_or_insertion, if_substitution);
             row_inserts[j] = if_insertion;
@@ -255,17 +255,16 @@ inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //
     for (std::size_t i = 1; i < rows; ++i) {
         std::ptrdiff_t const *last_row = &matrix_scores[(i - 1) * cols];
         std::ptrdiff_t *row = &matrix_scores[i * cols];
-        std::ptrdiff_t const *last_inserts_row = &matrix_inserts[(i - 1) * cols];
         std::ptrdiff_t *row_inserts = &matrix_inserts[i * cols];
         std::ptrdiff_t const *last_deletes_row = &matrix_deletes[(i - 1) * cols];
         std::ptrdiff_t *row_deletes = &matrix_deletes[i * cols];
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
             std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
+            std::ptrdiff_t if_insertion =
+                std::max(row[j - 1] + gap_opening_cost, row_inserts[j - 1] + gap_extension_cost);
             std::ptrdiff_t if_deletion =
                 std::max(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
-            std::ptrdiff_t if_insertion =
-                std::max(row[j - 1] + gap_opening_cost, last_inserts_row[j - 1] + gap_extension_cost);
             std::ptrdiff_t if_deletion_or_insertion = std::max(if_deletion, if_insertion);
             row[j] = std::max(if_deletion_or_insertion, if_substitution);
             row_inserts[j] = if_insertion;
@@ -310,17 +309,16 @@ inline std::ptrdiff_t smith_waterman_gotoh_baseline(                    //
     for (std::size_t i = 1; i < rows; ++i) {
         std::ptrdiff_t const *last_row = &matrix_scores[(i - 1) * cols];
         std::ptrdiff_t *row = &matrix_scores[i * cols];
-        std::ptrdiff_t const *last_inserts_row = &matrix_inserts[(i - 1) * cols];
         std::ptrdiff_t *row_inserts = &matrix_inserts[i * cols];
         std::ptrdiff_t const *last_deletes_row = &matrix_deletes[(i - 1) * cols];
         std::ptrdiff_t *row_deletes = &matrix_deletes[i * cols];
         for (std::size_t j = 1; j < cols; ++j) {
             std::ptrdiff_t substitution_cost = substitution_cost_for(s1[i - 1], s2[j - 1]);
             std::ptrdiff_t if_substitution = last_row[j - 1] + substitution_cost;
+            std::ptrdiff_t if_insertion =
+                std::max(row[j - 1] + gap_opening_cost, row_inserts[j - 1] + gap_extension_cost);
             std::ptrdiff_t if_deletion =
                 std::max(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
-            std::ptrdiff_t if_insertion =
-                std::max(row[j - 1] + gap_opening_cost, last_inserts_row[j - 1] + gap_extension_cost);
             std::ptrdiff_t if_deletion_or_insertion = std::max(if_deletion, if_insertion);
             std::ptrdiff_t if_substitution_or_reset = std::max<std::ptrdiff_t>(if_substitution, 0);
             std::ptrdiff_t score = std::max(if_deletion_or_insertion, if_substitution_or_reset);
