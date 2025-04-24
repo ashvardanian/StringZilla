@@ -79,22 +79,24 @@ int log_environment() {
  *  @brief Inefficient baseline Levenshtein distance computation, as implemented in most codebases.
  *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  */
-inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char const *s2,
-                                        std::size_t len2) noexcept(false) {
+inline std::size_t levenshtein_baseline(                                //
+    char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
+    error_cost_t match_cost = 0, error_cost_t mismatch_cost = 1, error_cost_t gap_cost = 1) noexcept(false) {
+
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
     std::vector<std::size_t> matrix_buffer(rows * cols);
 
     // Initialize the borders of the matrix.
-    for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = i;
-    for (std::size_t j = 0; j < cols; ++j) matrix_buffer[0 * cols + j] /* [0][j] in 2D */ = j;
+    for (std::size_t i = 0; i < rows; ++i) matrix_buffer[i * cols + 0] /* [i][0] in 2D */ = i * gap_cost;
+    for (std::size_t j = 0; j < cols; ++j) matrix_buffer[0 * cols + j] /* [0][j] in 2D */ = j * gap_cost;
 
     for (std::size_t i = 1; i < rows; ++i) {
         std::size_t const *last_row = &matrix_buffer[(i - 1) * cols];
         std::size_t *row = &matrix_buffer[i * cols];
         for (std::size_t j = 1; j < cols; ++j) {
-            std::size_t substitution_cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
-            std::size_t if_deletion_or_insertion = std::min(last_row[j], row[j - 1]) + 1;
+            std::size_t substitution_cost = (s1[i - 1] == s2[j - 1]) ? match_cost : mismatch_cost;
+            std::size_t if_deletion_or_insertion = std::min(last_row[j], row[j - 1]) + gap_cost;
             row[j] = std::min(if_deletion_or_insertion, last_row[j - 1] + substitution_cost);
         }
     }
@@ -106,9 +108,10 @@ inline std::size_t levenshtein_baseline(char const *s1, std::size_t len1, char c
  *  @brief Inefficient baseline Needleman-Wunsch alignment score computation, as implemented in most codebases.
  *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  */
-inline std::ptrdiff_t needleman_wunsch_baseline(char const *s1, std::size_t len1, char const *s2, std::size_t len2,
-                                                std::function<error_cost_t(char, char)> substitution_cost_for,
-                                                error_cost_t gap_cost) noexcept(false) {
+inline std::ptrdiff_t needleman_wunsch_baseline(                        //
+    char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
+    std::function<error_cost_t(char, char)> substitution_cost_for, error_cost_t gap_cost) noexcept(false) {
+
     std::size_t const rows = len1 + 1;
     std::size_t const cols = len2 + 1;
     std::vector<std::ptrdiff_t> matrix_buffer(rows * cols);
@@ -169,6 +172,59 @@ inline std::ptrdiff_t smith_waterman_baseline(char const *s1, std::size_t len1, 
 }
 
 /**
+ *  @brief Inefficient baseline Levenshtein-Gotoh distance computation, as implemented in most codebases.
+ *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
+ */
+inline std::size_t levenshtein_gotoh_baseline(                          //
+    char const *s1, std::size_t len1, char const *s2, std::size_t len2, //
+    error_cost_t match_cost, error_cost_t mismatch_cost,                //
+    error_cost_t gap_opening_cost, error_cost_t gap_extension_cost) noexcept(false) {
+
+    std::size_t const rows = len1 + 1;
+    std::size_t const cols = len2 + 1;
+    std::vector<std::size_t> matrix_scores(rows * cols);
+    std::vector<std::size_t> matrix_inserts(rows * cols);
+    std::vector<std::size_t> matrix_deletes(rows * cols);
+
+    // Initialize the borders of the matrix.
+    // The supplementary matrices are initialized with values of higher magnitude,
+    // which is equivalent to discarding them. That's better than using `SIZE_MAX`
+    // as subsequent additions won't overflow.
+    matrix_scores[0] = 0;
+    for (std::size_t j = 1; j < cols; ++j) {
+        matrix_scores[0 * cols + j] = gap_opening_cost + (j - 1) * gap_extension_cost;
+        matrix_deletes[0 * cols + j] = matrix_scores[0 * cols + j] + gap_opening_cost + gap_extension_cost;
+    }
+    for (std::size_t i = 1; i < rows; ++i) {
+        matrix_scores[i * cols + 0] = gap_opening_cost + (i - 1) * gap_extension_cost;
+        matrix_inserts[i * cols + 0] = matrix_scores[i * cols + 0] + gap_opening_cost + gap_extension_cost;
+    }
+
+    // Fill in the rest of the matrix.
+    for (std::size_t i = 1; i < rows; ++i) {
+        std::size_t const *last_row = &matrix_scores[(i - 1) * cols];
+        std::size_t *row = &matrix_scores[i * cols];
+        std::size_t *row_inserts = &matrix_inserts[i * cols];
+        std::size_t const *last_deletes_row = &matrix_deletes[(i - 1) * cols];
+        std::size_t *row_deletes = &matrix_deletes[i * cols];
+        for (std::size_t j = 1; j < cols; ++j) {
+            std::size_t substitution_cost = (s1[i - 1] == s2[j - 1]) ? match_cost : mismatch_cost;
+            std::size_t if_substitution = last_row[j - 1] + substitution_cost;
+            std::size_t if_deletion =
+                std::min<std::size_t>(last_row[j] + gap_opening_cost, last_deletes_row[j] + gap_extension_cost);
+            std::size_t if_insertion =
+                std::min<std::size_t>(row[j - 1] + gap_opening_cost, row_inserts[j - 1] + gap_extension_cost);
+            std::size_t if_deletion_or_insertion = std::min(if_deletion, if_insertion);
+            row[j] = std::min(if_deletion_or_insertion, if_substitution);
+            row_inserts[j] = if_insertion;
+            row_deletes[j] = if_deletion;
+        }
+    }
+
+    return matrix_scores.back();
+}
+
+/**
  *  @brief Inefficient baseline Needleman-Wunsch-Gotoh alignment score computation, as implemented in most codebases.
  *  @warning Allocates a new matrix on every call, with rows potentially scattered around memory.
  *  @see https://github.com/gata-bio/affine-gaps
@@ -187,12 +243,12 @@ inline std::ptrdiff_t needleman_wunsch_gotoh_baseline(                  //
     // Initialize the borders of the matrix.
     matrix_scores[0] = 0;
     for (std::size_t i = 1; i < rows; ++i) {
-        matrix_scores[i * cols + 0] /* [i][0] in 2D */ = gap_opening_cost + (i - 1) * gap_extension_cost;
-        matrix_inserts[i * cols + 0] /* [i][0] in 2D */ = gap_opening_cost * 2 + i * gap_extension_cost;
+        matrix_scores[i * cols + 0] = gap_opening_cost + (i - 1) * gap_extension_cost;
+        matrix_inserts[i * cols + 0] = matrix_scores[i * cols + 0] + gap_opening_cost + gap_extension_cost;
     }
-    for (std::size_t j = 0; j < cols; ++j) {
-        matrix_scores[0 * cols + j] /* [0][j] in 2D */ = gap_opening_cost + (j - 1) * gap_extension_cost;
-        matrix_deletes[0 * cols + j] /* [0][j] in 2D */ = gap_opening_cost * 2 + j * gap_extension_cost;
+    for (std::size_t j = 1; j < cols; ++j) {
+        matrix_scores[0 * cols + j] = gap_opening_cost + (j - 1) * gap_extension_cost;
+        matrix_deletes[0 * cols + j] = matrix_scores[0 * cols + j] + gap_opening_cost + gap_extension_cost;
     }
 
     // Fill in the rest of the matrix.
@@ -242,12 +298,12 @@ inline std::ptrdiff_t smith_waterman_gotoh_baseline(                    //
     // Initialize the borders of the matrix.
     matrix_scores[0] = 0;
     for (std::size_t i = 1; i < rows; ++i) {
-        matrix_scores[i * cols + 0] /* [i][0] in 2D */ = 0;
-        matrix_inserts[i * cols + 0] /* [i][0] in 2D */ = gap_opening_cost + gap_extension_cost;
+        matrix_scores[i * cols + 0] = 0;
+        matrix_inserts[i * cols + 0] = gap_opening_cost + gap_extension_cost;
     }
-    for (std::size_t j = 0; j < cols; ++j) {
-        matrix_scores[0 * cols + j] /* [0][j] in 2D */ = 0;
-        matrix_deletes[0 * cols + j] /* [0][j] in 2D */ = gap_opening_cost + gap_extension_cost;
+    for (std::size_t j = 1; j < cols; ++j) {
+        matrix_scores[0 * cols + j] = 0;
+        matrix_deletes[0 * cols + j] = gap_opening_cost + gap_extension_cost;
     }
 
     // Fill in the rest of the matrix.
@@ -279,13 +335,31 @@ inline std::ptrdiff_t smith_waterman_gotoh_baseline(                    //
 }
 
 struct levenshtein_baselines_t {
+
+    uniform_substitution_costs_t substitution_costs = {0, 1};
+    error_cost_t gap_opening_cost = {1};
+    error_cost_t gap_extension_cost = {1};
+
+    levenshtein_baselines_t() = default;
+    levenshtein_baselines_t(uniform_substitution_costs_t subs, linear_gap_costs_t gap)
+        : substitution_costs(subs), gap_opening_cost(gap.open_or_extend), gap_extension_cost(gap.open_or_extend) {}
+    levenshtein_baselines_t(uniform_substitution_costs_t subs, affine_gap_costs_t gap)
+        : substitution_costs(subs), gap_opening_cost(gap.open), gap_extension_cost(gap.extend) {}
+
     template <typename results_type_>
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, results_type_ *results) const {
         _sz_assert(first.size() == second.size());
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
-            results[i] = levenshtein_baseline(first[i].data(), first[i].size(), //
-                                              second[i].data(), second[i].size());
+            results[i] =
+                gap_opening_cost == gap_extension_cost
+                    ? levenshtein_baseline(first[i].data(), first[i].size(),   //
+                                           second[i].data(), second[i].size(), //
+                                           substitution_costs.match, substitution_costs.mismatch, gap_opening_cost)
+                    : levenshtein_gotoh_baseline(first[i].data(), first[i].size(),   //
+                                                 second[i].data(), second[i].size(), //
+                                                 substitution_costs.match, substitution_costs.mismatch,
+                                                 gap_opening_cost, gap_extension_cost);
         return status_t::success_k;
     }
 };
@@ -348,39 +422,59 @@ struct smith_waterman_baselines_t {
 };
 
 using malloc_t = std::allocator<char>;
+#if SZ_USE_CUDA
+using ualloc_t = unified_alloc<char>;
+#endif
 
 /**
  *  In non-SIMD backends we still leverage OpenMP for parallelism.
  */
-using levenshtein_serial_t = levenshtein_distances<char, malloc_t, sz_caps_sp_k>;
-using levenshtein_utf8_serial_t = levenshtein_distances_utf8<char, malloc_t, sz_caps_sp_k>;
-using needleman_wunsch_serial_t = needleman_wunsch_scores<char, error_costs_256x256_t, malloc_t, sz_caps_sp_k>;
-using smith_waterman_serial_t = smith_waterman_scores<char, error_costs_256x256_t, malloc_t, sz_caps_sp_k>;
+using levenshtein_serial_t = levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k>;
+using levenshtein_utf8_serial_t = levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k>;
+using needleman_wunsch_serial_t =
+    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k>;
+using smith_waterman_serial_t =
+    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k>;
+
+using affine_levenshtein_serial_t = levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_sp_k>;
+using affine_levenshtein_utf8_serial_t = levenshtein_distances_utf8<char, affine_gap_costs_t, malloc_t, sz_caps_sp_k>;
+using affine_needleman_wunsch_serial_t =
+    needleman_wunsch_scores<char, error_costs_256x256_t, affine_gap_costs_t, malloc_t, sz_caps_sp_k>;
+using affine_smith_waterman_serial_t =
+    smith_waterman_scores<char, error_costs_256x256_t, affine_gap_costs_t, malloc_t, sz_caps_sp_k>;
 
 /**
  *  In @b AVX-512:
  *  - for Global Alignments, we can vectorize the min-max calculation for diagonal "walkers"
  *  - for Local Alignments, we can vectorize the character substitution lookups for horizontal "walkers"
  */
-using levenshtein_ice_t = levenshtein_distances<char, malloc_t, sz_caps_spi_k>;
-using levenshtein_utf8_ice_t = levenshtein_distances_utf8<char, malloc_t, sz_caps_spi_k>;
-using needleman_wunsch_ice_t = needleman_wunsch_scores<char, error_costs_256x256_t, malloc_t, sz_caps_spi_k>;
-using smith_waterman_ice_t = smith_waterman_scores<char, error_costs_256x256_t, malloc_t, sz_caps_spi_k>;
+using levenshtein_ice_t = levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_spi_k>;
+using levenshtein_utf8_ice_t = levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_spi_k>;
+using needleman_wunsch_ice_t =
+    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_spi_k>;
+using smith_waterman_ice_t =
+    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_spi_k>;
 
+#if SZ_USE_CUDA
 /**
  *  In @b CUDA:
  *  - for GPUs before Hopper, we can use the @b SIMT model for warp-level parallelism using diagonal "walkers"
  *  - for GPUs after Hopper, we compound that with thread-level @b SIMD via @b DPX instructions for min-max
  */
-using levenshtein_cuda_t = levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k>;
-using levenshtein_utf8_cuda_t = levenshtein_distances_utf8<char, dummy_alloc_t, sz_cap_cuda_k>;
-using needleman_wunsch_cuda_t = needleman_wunsch_scores<char, error_costs_256x256_t, dummy_alloc_t, sz_cap_cuda_k>;
-using smith_waterman_cuda_t = smith_waterman_scores<char, error_costs_256x256_t, dummy_alloc_t, sz_cap_cuda_k>;
+using levenshtein_cuda_t = levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+using levenshtein_utf8_cuda_t = levenshtein_distances_utf8<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+using needleman_wunsch_cuda_t =
+    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+using smith_waterman_cuda_t =
+    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
 
-using levenshtein_hopper_t = levenshtein_distances<char, dummy_alloc_t, sz_caps_ckh_k>;
-using levenshtein_utf8_hopper_t = levenshtein_distances_utf8<char, dummy_alloc_t, sz_caps_ckh_k>;
-using needleman_wunsch_hopper_t = needleman_wunsch_scores<char, error_costs_256x256_t, dummy_alloc_t, sz_caps_ckh_k>;
-using smith_waterman_hopper_t = smith_waterman_scores<char, error_costs_256x256_t, dummy_alloc_t, sz_caps_ckh_k>;
+using levenshtein_kepler_t = levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k>;
+using levenshtein_utf8_hopper_t = levenshtein_distances_utf8<char, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+using needleman_wunsch_hopper_t =
+    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+using smith_waterman_hopper_t =
+    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+#endif
 
 template <typename score_type_>
 void edit_distance_log_mismatch(std::string const &first, std::string const &second, //
@@ -423,6 +517,10 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
     append("ggbuzgjux{}l", "gbuzgjux{}l"); // one (prepended) insertion; distance ~ 1
     append("ABC", "ADC");                  // one substitution; distance ~ 1
     append("APPLE", "APLE");               // distance ~ 1
+
+    // Longer strings made of simple characters:
+    append("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"); // same string; distance ~ 0
+    append("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "ABCD_FGHI_KLMNOP_RSTU_WXYZ"); // same length; 4 substitutions; distance ~ 4
 
     // Short Unicode samples that we also use on the Python side:
     append("αβγδ", "αγδ");                      // Each Greek symbol is 2 bytes in size; 2 bytes, 1 runes diff.
@@ -504,8 +602,12 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
         second_tape.try_assign(&second, &second + 1);
 
         // Compute with both backends
-        status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
-        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), extra_args...);
+        arrow_strings_view_t first_view = first_tape.view();
+        arrow_strings_view_t second_view = second_tape.view();
+        score_t *results_base_ptr = results_base.data();
+        score_t *results_simd_ptr = results_simd.data();
+        status_t status_base = base_operator(first_view, second_view, results_base_ptr);
+        status_t status_simd = simd_operator(first_view, second_view, results_simd_ptr, extra_args...);
         _sz_assert(status_base == status_t::success_k);
         _sz_assert(status_simd == status_t::success_k);
         if (results_base[0] != results_simd[0])
@@ -603,7 +705,7 @@ void test_similarity_scores_fixed_and_fuzzy(base_operator_ &&base_operator, simd
                                             std::string_view allowed_chars = {}, fuzzy_config_t config = {},
                                             extra_args_ &&...extra_args) {
     test_similarity_scores_fixed<score_type_>(base_operator, simd_operator, allowed_chars, extra_args...);
-    test_similarity_scores_fuzzy<score_type_>(base_operator, simd_operator, config, extra_args...);
+    test_similarity_scores_fuzzy<score_type_>(base_operator, simd_operator, config, 1, extra_args...);
 }
 
 /**
@@ -619,11 +721,11 @@ void test_similarity_scores_equivalence() {
     // Our logic of computing NW and SW alignment similarity scores differs in sign from most implementations.
     // It's similar to how the "cosine distance" is the inverse of the "cosine similarity".
     // In our case we compute the "distance" and by negating the sign, we can compute the "similarity".
-    constexpr error_t unary_match_score = 1;
-    constexpr error_t unary_mismatch_score = 0;
-    constexpr error_t unary_gap_score = 0;
-    error_matrix_t substituter_unary = error_matrix_t::diagonal(unary_match_score, unary_mismatch_score);
     {
+        constexpr error_t unary_match_score = 1;
+        constexpr error_t unary_mismatch_score = 0;
+        constexpr error_t unary_gap_score = 0;
+        error_matrix_t substituter_unary = error_matrix_t::diagonal(unary_match_score, unary_mismatch_score);
         auto distance_l = levenshtein_baseline("abcdefg", 7, "abc_efg", 7);
         auto similarity_nw = needleman_wunsch_baseline("abcdefg", 7, "abc_efg", 7, substituter_unary, unary_gap_score);
         auto similarity_sw = smith_waterman_baseline("abcdefg", 7, "abc_efg", 7, substituter_unary, unary_gap_score);
@@ -635,61 +737,86 @@ void test_similarity_scores_equivalence() {
         _sz_assert(distance_sw == 1);
     }
 
+    // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:
+    constexpr linear_gap_costs_t weird_linear {3};
+    constexpr affine_gap_costs_t weird_affine {4, 2};
+    constexpr uniform_substitution_costs_t weird_uniform {1, 3};
+
     // Single-threaded serial Levenshtein distance implementation
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
         levenshtein_baselines_t {},                    //
-        levenshtein_distances<char, malloc_t, sz_cap_serial_k> {});
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {});
 
     // Multi-threaded parallel Levenshtein distance implementation
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
         levenshtein_baselines_t {},                    //
-        levenshtein_distances<char, malloc_t, sz_caps_sp_k> {});
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {});
+
+    // Single-threaded serial Levenshtein distance implementation with weird linear costs
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
+        levenshtein_baselines_t {weird_uniform, weird_linear}, //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear});
+
+    // Multi-threaded parallel Levenshtein distance implementation with weird linear costs
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
+        levenshtein_baselines_t {weird_uniform, weird_linear}, //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {weird_uniform, weird_linear});
+
+    // Single-threaded serial Levenshtein distance implementation with weird affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
+        levenshtein_baselines_t {weird_uniform, weird_affine}, //
+        levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine});
+
+    // Multi-threaded parallel Levenshtein distance implementation with weird affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
+        levenshtein_baselines_t {weird_uniform, weird_affine}, //
+        levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_sp_k> {weird_uniform, weird_affine});
 
     // Now let's take non-unary substitution costs, like BLOSUM62
-    constexpr error_t blosum62_gap_extension_cost = -4;
+    constexpr linear_gap_costs_t blosum62_gap_extension_cost {-4};
     error_mat_t blosum62_mat = error_costs_26x26ascii_t::blosum62();
     error_matrix_t blosum62_matrix = blosum62_mat.decompressed();
 
     // Single-threaded serial NW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                              //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
-                                                                                  blosum62_gap_extension_cost});
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_gap_extension_cost});
 
     // Multi-threaded parallel NW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                              //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_caps_sp_k> {blosum62_matrix,
-                                                                               blosum62_gap_extension_cost});
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {
+            blosum62_matrix, blosum62_gap_extension_cost});
 
     // Single-threaded serial SW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                            //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        smith_waterman_scores<char, error_matrix_t, malloc_t, sz_cap_serial_k> {blosum62_matrix,
-                                                                                blosum62_gap_extension_cost});
+        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_gap_extension_cost});
 
     // Multi-threaded parallel SW implementation
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                            //
         smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        smith_waterman_scores<char, error_matrix_t, malloc_t, sz_caps_sp_k> {blosum62_matrix,
-                                                                             blosum62_gap_extension_cost});
+        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {
+            blosum62_matrix, blosum62_gap_extension_cost});
 
 #if SZ_USE_ICE
     // Ice Lake Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(          //
-        levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
-        levenshtein_distances<char, malloc_t, sz_caps_spi_k> {});
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                              //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_spi_k> {});
 
     // Ice Lake Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(               //
-        levenshtein_distances_utf8<char, malloc_t, sz_caps_sp_k> {}, //
-        levenshtein_distances_utf8<char, malloc_t, sz_caps_spi_k> {});
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                   //
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_spi_k> {});
 
     // Ice Lake Needleman-Wunsch distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                              //
         needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_caps_spi_k> {blosum62_matrix,
-                                                                                blosum62_gap_extension_cost});
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_spi_k> {
+            blosum62_matrix, blosum62_gap_extension_cost});
 
 #endif
 
@@ -699,25 +826,25 @@ void test_similarity_scores_equivalence() {
 
 #if SZ_USE_CUDA
     // CUDA Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(          //
-        levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
-        levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {}, {}, {}, first_gpu_specs);
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                              //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
+        levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {}, {}, {}, first_gpu_specs);
 #endif
 
-#if SZ_USE_HOPPER && 0
-    // CUDA Levenshtein distance on Hopper against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(          //
-        levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
-        levenshtein_distances<char, dummy_alloc_t, sz_cap_hopper_k> {});
+#if SZ_USE_KEPLER
+    // CUDA Levenshtein distance on Kepler against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                              //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
+        levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {}, {}, {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_CUDA
     // CUDA Needleman-Wunsch distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        needleman_wunsch_scores<char, error_matrix_t, malloc_t, sz_caps_sp_k> {blosum62_matrix,
-                                                                               blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, dummy_alloc_t, sz_cap_cuda_k> {blosum62_matrix,
-                                                                                     blosum62_gap_extension_cost},
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {
+            blosum62_matrix, blosum62_gap_extension_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_gap_extension_cost},
         {}, {}, first_gpu_specs);
 #endif
 }
@@ -764,13 +891,22 @@ void test_similarity_scores_memory_usage() {
         // Multi-threaded serial Levenshtein distance implementation
         test_similarity_scores_fuzzy<sz_size_t>( //
             levenshtein_baselines_t {},          //
-            levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, experiment, 1);
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, experiment, 1);
 
 #if SZ_USE_CUDA
         // CUDA Levenshtein distance against Multi-threaded on CPU
-        test_similarity_scores_fuzzy<sz_size_t>(                    //
-            levenshtein_distances<char, malloc_t, sz_caps_sp_k> {}, //
-            levenshtein_distances<char, dummy_alloc_t, sz_cap_cuda_k> {}, experiment, 1, first_gpu_specs);
+        test_similarity_scores_fuzzy<sz_size_t>(                                        //
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
+            levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {}, experiment, 10,
+            first_gpu_specs);
+#endif
+
+#if SZ_USE_KEPLER
+        // CUDA Levenshtein distance on Kepler against Multi-threaded on CPU
+        test_similarity_scores_fuzzy<sz_size_t>(                                        //
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
+            levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {}, experiment, 10,
+            first_gpu_specs);
 #endif
     }
 }
