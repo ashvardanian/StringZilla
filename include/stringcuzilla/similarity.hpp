@@ -83,11 +83,15 @@ void rotate_three(value_type_ &a, value_type_ &b, value_type_ &c) noexcept {
 
 struct linear_gap_costs_t {
     error_cost_t open_or_extend = 1;
+
+    constexpr sz_size_t magnitude() const noexcept { return std::abs(open_or_extend); }
 };
 
 struct affine_gap_costs_t {
     error_cost_t open = 1;
     error_cost_t extend = 1;
+
+    constexpr sz_size_t magnitude() const noexcept { return std::max(std::abs(open), std::abs(extend)); }
 };
 
 template <typename gap_costs_type_>
@@ -109,7 +113,7 @@ struct uniform_substitution_costs_t {
 
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? match : mismatch; }
     constexpr error_cost_t operator()(sz_rune_t a, sz_rune_t b) const noexcept { return a == b ? match : mismatch; }
-    constexpr sz_size_t max_magnitude_change() const noexcept { return std::max(std::abs(match), std::abs(mismatch)); }
+    constexpr sz_size_t magnitude() const noexcept { return std::max(std::abs(match), std::abs(mismatch)); }
 };
 
 #pragma region - Algorithm Building Blocks
@@ -133,23 +137,22 @@ struct similarity_memory_requirements {
     size_t total = 0;
 
     /**
-     *  @param[in] first_length The length of the first string in characters/codepoints.
-     *  @param[in] second_length The length of the second string in characters/codepoints.
-     *  @param[in] max_magnitude_change The absolute value of the maximum change in nearby cells.
+     *  @param[in] first_length,second_length The lengths of strings in characters/codepoints/runes.
+     *  @param[in] substitute_magnitude,gap_magnitude The absolute value of the maximum change in nearby cells.
      *  @param[in] bytes_per_char The number of bytes per character, 4 for UTF-32, 1 for ASCII.
      *  @param[in] register_width The alignment of the data in bytes, 4 for CUDA, 64 for AVX-512.
      *
-     *  To understand the @p max_magnitude_change parameter, consider the following example:
+     *  To understand the @p magnitude() parameter, consider the following example:
      *  - substitution costs ranging from -16 to +15
      *  - gap costs equal to -10
      *  In that case, the biggest change will be `abs(-16) = 16`, so the passed argument should be 16.
      *  In case of default Levenshtein distance, the maximum change is 1, so the passed argument should be 1.
      */
-    constexpr similarity_memory_requirements(      //
-        size_t first_length, size_t second_length, //
-        sz_similarity_gaps_t gap_type,             //
-        size_t max_magnitude_change,               //
-        size_t bytes_per_char,                     //
+    constexpr similarity_memory_requirements(              //
+        size_t first_length, size_t second_length,         //
+        sz_similarity_gaps_t gap_type,                     //
+        size_t substitute_magnitude, size_t gap_magnitude, //
+        size_t bytes_per_char,                             //
         size_t register_width) noexcept {
 
         // Each diagonal in the DP matrix is only by 1 longer than the shorter string.
@@ -159,7 +162,8 @@ struct similarity_memory_requirements {
 
         // The amount of memory we need per diagonal, depends on the maximum number of the differences
         // between 2 strings and the maximum cost of each change.
-        size_t max_cell_value = (longer_length + 1) * max_magnitude_change;
+        size_t magnitude = sz_max_of_two(substitute_magnitude, gap_magnitude);
+        size_t max_cell_value = (longer_length + 1) * magnitude;
         if constexpr (!is_signed_k)
             this->bytes_per_cell = //
                 max_cell_value < 256          ? 1
@@ -1401,9 +1405,9 @@ struct levenshtein_distance {
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
-        similarity_memory_requirements_t requirements(                    //
-            first.size(), second.size(),                                  //
-            gap_type<gap_costs_t>(), substituter_.max_magnitude_change(), //
+        similarity_memory_requirements_t requirements(                                 //
+            first.size(), second.size(),                                               //
+            gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
@@ -1531,9 +1535,9 @@ struct levenshtein_distance_utf8 {
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
-        similarity_memory_requirements_t requirements(                    //
-            first.size(), second.size(),                                  //
-            gap_type<gap_costs_t>(), substituter_.max_magnitude_change(), //
+        similarity_memory_requirements_t requirements(                                 //
+            first.size(), second.size(),                                               //
+            gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(sz_rune_t), SZ_MAX_REGISTER_WIDTH);
 
         span<sz_rune_t const> const first_utf32 {first_data_utf32, first_length_utf32};
@@ -1630,9 +1634,9 @@ struct needleman_wunsch_score {
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
-        similarity_memory_requirements_t requirements(                    //
-            first.size(), second.size(),                                  //
-            gap_type<gap_costs_t>(), substituter_.max_magnitude_change(), //
+        similarity_memory_requirements_t requirements(                                 //
+            first.size(), second.size(),                                               //
+            gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
@@ -1724,9 +1728,9 @@ struct smith_waterman_score {
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
-        similarity_memory_requirements_t requirements(                    //
-            first.size(), second.size(),                                  //
-            gap_type<gap_costs_t>(), substituter_.max_magnitude_change(), //
+        similarity_memory_requirements_t requirements(                                 //
+            first.size(), second.size(),                                               //
+            gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with very small inputs, we may want to use a simpler Wagner-Fischer algorithm.
@@ -1783,7 +1787,7 @@ status_t _score_in_parallel(                         //
     core_per_input_type_ &&core_per_input,           //
     all_cores_per_input_type_ &&all_cores_per_input, //
     first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, results_type_ &&results,
-    sz_size_t max_magnitude_change, cpu_specs_t specs = {}) noexcept {
+    size_t substitute_magnitude, size_t gap_magnitude, cpu_specs_t specs = {}) noexcept {
 
     using score_t = score_type_;
     constexpr bool score_is_signed_k = std::is_signed_v<score_t>;
@@ -1808,9 +1812,9 @@ status_t _score_in_parallel(                         //
         auto const &second = second_strings[i];
 
         // ! Longer strings will be handled separately
-        similarity_memory_requirements_t requirements(     //
-            first.size(), second.size(),                   //
-            gap_type<gap_costs_t>(), max_magnitude_change, //
+        similarity_memory_requirements_t requirements(                    //
+            first.size(), second.size(),                                  //
+            gap_type<gap_costs_t>(), substitute_magnitude, gap_magnitude, //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         if (requirements.total >= specs.l1_bytes) continue;
@@ -1824,9 +1828,9 @@ status_t _score_in_parallel(                         //
         score_t result = 0;
         auto const &first = first_strings[i];
         auto const &second = second_strings[i];
-        similarity_memory_requirements_t requirements(     //
-            first.size(), second.size(),                   //
-            gap_type<gap_costs_t>(), max_magnitude_change, //
+        similarity_memory_requirements_t requirements(                    //
+            first.size(), second.size(),                                  //
+            gap_type<gap_costs_t>(), substitute_magnitude, gap_magnitude, //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         if (requirements.total < specs.l1_bytes) continue;
@@ -1901,10 +1905,11 @@ struct levenshtein_distances {
                         results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
 
         if constexpr (capability_k & sz_cap_parallel_k)
-            return _score_in_parallel<sz_size_t>(                         //
-                core_per_input_t {substituter_, gap_costs_, alloc_},      //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
-                first_strings, second_strings, std::forward<results_type_>(results), 1, specs);
+            return _score_in_parallel<sz_size_t>(                                    //
+                core_per_input_t {substituter_, gap_costs_, alloc_},                 //
+                all_cores_per_input_t {substituter_, gap_costs_, alloc_},            //
+                first_strings, second_strings, std::forward<results_type_>(results), //
+                substituter_.magnitude(), gap_costs_.magnitude(), specs);
         else
             return _score_sequentially<sz_size_t>(                        //
                 all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
@@ -1945,10 +1950,11 @@ struct levenshtein_distances_utf8 {
                         results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
 
         if constexpr (capability_k & sz_cap_parallel_k)
-            return _score_in_parallel<sz_size_t>(                         //
-                core_per_input_t {substituter_, gap_costs_, alloc_},      //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
-                first_strings, second_strings, std::forward<results_type_>(results), 1, specs);
+            return _score_in_parallel<sz_size_t>(                                    //
+                core_per_input_t {substituter_, gap_costs_, alloc_},                 //
+                all_cores_per_input_t {substituter_, gap_costs_, alloc_},            //
+                first_strings, second_strings, std::forward<results_type_>(results), //
+                substituter_.magnitude(), gap_costs_.magnitude(), specs);
         else
             return _score_sequentially<sz_size_t>(                        //
                 all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
@@ -1991,11 +1997,11 @@ struct needleman_wunsch_scores {
                         results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
 
         if constexpr (capability_k & sz_cap_parallel_k)
-            return _score_in_parallel<sz_ssize_t>(                        //
-                core_per_input_t {substituter_, gap_costs_, alloc_},      //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
-                first_strings, second_strings, std::forward<results_type_>(results),
-                substituter_.max_magnitude_change(), specs);
+            return _score_in_parallel<sz_ssize_t>(                                   //
+                core_per_input_t {substituter_, gap_costs_, alloc_},                 //
+                all_cores_per_input_t {substituter_, gap_costs_, alloc_},            //
+                first_strings, second_strings, std::forward<results_type_>(results), //
+                substituter_.magnitude(), gap_costs_.magnitude(), specs);
         else
             return _score_sequentially<sz_ssize_t>(                       //
                 all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
@@ -2038,11 +2044,11 @@ struct smith_waterman_scores {
                         results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
 
         if constexpr (capability_k & sz_cap_parallel_k)
-            return _score_in_parallel<sz_ssize_t>(                        //
-                core_per_input_t {substituter_, gap_costs_, alloc_},      //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
-                first_strings, second_strings, std::forward<results_type_>(results),
-                substituter_.max_magnitude_change(), specs);
+            return _score_in_parallel<sz_ssize_t>(                                   //
+                core_per_input_t {substituter_, gap_costs_, alloc_},                 //
+                all_cores_per_input_t {substituter_, gap_costs_, alloc_},            //
+                first_strings, second_strings, std::forward<results_type_>(results), //
+                substituter_.magnitude(), gap_costs_.magnitude(), specs);
         else
             return _score_sequentially<sz_ssize_t>(                       //
                 all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
@@ -2081,7 +2087,7 @@ struct error_costs_256x256_t {
         return result;
     }
 
-    constexpr sz_size_t max_magnitude_change() const noexcept {
+    constexpr sz_size_t magnitude() const noexcept {
         sz_size_t max_magnitude = 0;
         for (int i = 0; i != 256; ++i)
             for (int j = 0; j != 256; ++j) //
@@ -2170,7 +2176,7 @@ struct error_costs_26x26ascii_t {
         return result;
     }
 
-    constexpr sz_size_t max_magnitude_change() const noexcept {
+    constexpr sz_size_t magnitude() const noexcept {
         sz_size_t max_magnitude = 0;
         for (int i = 0; i != 26; ++i)
             for (int j = 0; j != 26; ++j) //
@@ -2728,9 +2734,9 @@ struct levenshtein_distance<char, linear_gap_costs_t, allocator_type_, capabilit
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
-        similarity_memory_requirements_t requirements(                    //
-            first.size(), second.size(),                                  //
-            gap_type<gap_costs_t>(), substituter_.max_magnitude_change(), //
+        similarity_memory_requirements_t requirements(                                 //
+            first.size(), second.size(),                                               //
+            gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
@@ -2833,9 +2839,9 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
-        similarity_memory_requirements_t requirements(                    //
-            first.size(), second.size(),                                  //
-            gap_type<gap_costs_t>(), substituter_.max_magnitude_change(), //
+        similarity_memory_requirements_t requirements(                                 //
+            first.size(), second.size(),                                               //
+            gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(sz_rune_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
@@ -3121,9 +3127,9 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, a
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
-        similarity_memory_requirements_t requirements(                    //
-            first.size(), second.size(),                                  //
-            gap_type<gap_costs_t>(), substituter_.max_magnitude_change(), //
+        similarity_memory_requirements_t requirements(                                 //
+            first.size(), second.size(),                                               //
+            gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
@@ -3195,9 +3201,9 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
-        similarity_memory_requirements_t requirements(                    //
-            first.size(), second.size(),                                  //
-            gap_type<gap_costs_t>(), substituter_.max_magnitude_change(), //
+        similarity_memory_requirements_t requirements(                                 //
+            first.size(), second.size(),                                               //
+            gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.

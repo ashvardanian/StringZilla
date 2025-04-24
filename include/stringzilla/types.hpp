@@ -130,7 +130,7 @@ enum class status_t {
 struct error_costs_unary_t {
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? 0 : 1; }
     constexpr error_cost_t operator()(sz_rune_t a, sz_rune_t b) const noexcept { return a == b ? 0 : 1; }
-    constexpr sz_size_t max_magnitude_change() const noexcept { return 1; }
+    constexpr sz_size_t magnitude() const noexcept { return 1; }
 };
 
 template <typename value_type_>
