@@ -510,7 +510,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the top row and left column of the matrix.
      */
     void init_score(score_t &cell, sz_size_t diagonal_index) const noexcept {
-        cell = gap_costs_.open + gap_costs_.extend * (diagonal_index - 1);
+        cell = diagonal_index ? gap_costs_.open + gap_costs_.extend * (diagonal_index - 1) : 0;
     }
 
     void init_gap(score_t &cell, sz_size_t diagonal_index) const noexcept {
@@ -518,7 +518,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // The supplementary matrices are initialized with values of higher magnitude,
         // which is equivalent to discarding them. That's better than using `SIZE_MAX`
         // as subsequent additions won't overflow.
-        cell = gap_costs_.open * 2 + gap_costs_.extend * diagonal_index;
+        cell = gap_costs_.open + gap_costs_.extend +
+               (diagonal_index ? gap_costs_.open + gap_costs_.extend * (diagonal_index - 1) : 0);
     }
 
     /**
@@ -850,14 +851,12 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
 
             // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
             // dropping the first element in the current array.
-            score_t *temporary = previous_scores;
+            rotate_three(previous_scores, current_scores, next_scores);
 
             // ! Drop the first entry among the current scores.
-            // ! Assuming every next diagonal is shorter by one element, we don't need a full-blown `sz_move`.
-            // ! to shift the array by one element.
-            previous_scores = current_scores + 1;
-            current_scores = next_scores;
-            next_scores = temporary;
+            // ! Assuming every next diagonal is shorter by one element,
+            // ! we don't need a full-blown `sz_move` to shift the array by one element.
+            previous_scores++;
         }
 
         // Export the scalar before `free` call.
@@ -1061,22 +1060,14 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
 
             // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
             // dropping the first element in the current array.
-            score_t *temporary = previous_scores;
+            rotate_three(previous_scores, current_scores, next_scores);
+            std::swap(current_inserts, next_inserts);
+            std::swap(current_deletes, next_deletes);
 
             // ! Drop the first entry among the current scores.
-            // ! Assuming every next diagonal is shorter by one element, we don't need a full-blown `sz_move`.
-            // ! to shift the array by one element.
-            previous_scores = current_scores + 1;
-            current_scores = next_scores;
-            next_scores = temporary;
-
-            // ! Drop the first entry among the current insertions and deletions.
-            temporary = current_inserts;
-            current_inserts = next_inserts + 0;
-            next_inserts = temporary;
-            temporary = current_deletes;
-            current_deletes = next_deletes + 0;
-            next_deletes = temporary;
+            // ! Assuming every next diagonal is shorter by one element,
+            // ! we don't need a full-blown `sz_move` to shift the array by one element.
+            previous_scores++;
         }
 
         // Export the scalar before `free` call.
