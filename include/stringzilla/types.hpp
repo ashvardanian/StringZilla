@@ -85,6 +85,12 @@
 #define sz_constexpr_if_cpp20
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#define SZ_FORCE_INLINE inline __attribute__((always_inline))
+#else
+#define SZ_FORCE_INLINE inline
+#endif
+
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
@@ -822,6 +828,42 @@ template <typename scalar_type_>
 constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
     _sz_assert(divisor > 0 && "Divisor must be positive");
     return divide_round_up(x, divisor) * divisor;
+}
+
+/**
+ *  @brief  Helper structure for dividing a range of data into three parts: head, body, and tail,
+ *          generally used to minimize misaligned (split) stores and operate on aligned pages.
+ */
+struct head_body_tail_t {
+    size_t head = 0;
+    size_t body = 0;
+    size_t tail = 0;
+};
+
+template <size_t elements_per_page_, typename element_type_>
+constexpr head_body_tail_t head_body_tail(element_type_ *first_address, size_t total_length) noexcept {
+    constexpr size_t bytes_per_element = sizeof(element_type_);
+    constexpr size_t bytes_per_page = elements_per_page_ * bytes_per_element;
+    static_assert(bytes_per_page > 0 && "Slice size must be positive");
+
+    // To split into head, body, and tail, we need the `first_address` to be
+    // a multiple of `bytes_per_element`, otherwise the `body` will always be a zero!
+    _sz_assert((size_t)first_address % bytes_per_element == 0);
+    size_t bytes_misalignment = (size_t)first_address % bytes_per_page;
+    size_t bytes_in_head = (bytes_per_page - bytes_misalignment) % bytes_per_page;
+    size_t elements_in_head = bytes_in_head / bytes_per_element;
+
+    // Round down the remaining count to a multiple of `elements_per_page_`.
+    size_t aligned_pages = (total_length - elements_in_head) / elements_per_page_;
+    size_t elements_in_body = aligned_pages * elements_per_page_;
+
+    // Tail is simply what remains:
+    size_t elements_in_tail = total_length - elements_in_head - elements_in_body;
+    _sz_assert(elements_in_head < elements_per_page_ && elements_in_head <= total_length);
+    _sz_assert(elements_in_tail < elements_per_page_ && elements_in_tail <= total_length);
+    _sz_assert(elements_in_body % elements_per_page_ == 0);
+
+    return {elements_in_head, elements_in_body, elements_in_tail};
 }
 
 } // namespace stringzilla
