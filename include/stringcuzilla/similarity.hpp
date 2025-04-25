@@ -142,7 +142,7 @@ struct similarity_memory_requirements {
      *  @param[in] bytes_per_char The number of bytes per character, 4 for UTF-32, 1 for ASCII.
      *  @param[in] register_width The alignment of the data in bytes, 4 for CUDA, 64 for AVX-512.
      *
-     *  To understand the @p magnitude() parameter, consider the following example:
+     *  To understand the @p substitute_magnitude,gap_magnitude parameters, consider the following example:
      *  - substitution costs ranging from -16 to +15
      *  - gap costs equal to -10
      *  In that case, the biggest change will be `abs(-16) = 16`, so the passed argument should be 16.
@@ -193,6 +193,27 @@ struct similarity_memory_requirements {
 
 #pragma region - Core Templates
 
+template <typename iterator_type_>
+concept pointer_like = requires(iterator_type_ iterator, std::size_t idx) {
+    { ++iterator } -> std::same_as<iterator_type_ &>; // pre-increment
+    { *iterator };                                    // dereference
+    { iterator[idx] };                                // random access
+};
+
+template <typename value_type_>
+concept score_like = std::integral<value_type_> && std::is_trivial_v<value_type_>;
+
+template <typename substituter_type_>
+concept substituter_like = requires(substituter_type_ costs) {
+    { costs.magnitude() } -> std::convertible_to<std::size_t>;                 // retrieving the magnitude
+    { costs.operator()(char(), char()) } -> std::convertible_to<error_cost_t>; // cost of substitution
+};
+
+template <typename gap_costs_type_>
+concept gap_costs_like = requires(gap_costs_type_ costs) {
+    { costs.magnitude() } -> std::convertible_to<std::size_t>; // retrieving the magnitude
+};
+
 /**
  *  @brief  An operator to be applied to be applied to all @b 2x2 tiles of the DP matrix to produce
  *          the bottom-right value from the 3x others when populating the Dynamic Programming matrix.
@@ -207,16 +228,16 @@ struct similarity_memory_requirements {
  *  @tparam capability_ The SIMD capabilities of the target architecture.
  *  @tparam enable_ Used to enable/disable the specialization.
  */
-template <                                                       //
-    typename first_iterator_type_ = char const *,                //
-    typename second_iterator_type_ = char const *,               //
-    typename score_type_ = sz_size_t,                            //
-    typename substituter_type_ = uniform_substitution_costs_t,   //
-    typename gap_costs_type_ = linear_gap_costs_t,               //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_serial_k,               //
-    typename enable_ = void                                      //
+template <                                                             //
+    pointer_like first_iterator_type_ = char const *,                  //
+    pointer_like second_iterator_type_ = char const *,                 //
+    score_like score_type_ = sz_size_t,                                //
+    substituter_like substituter_type_ = uniform_substitution_costs_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,        //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k,       //
+    sz_capability_t capability_ = sz_cap_serial_k,                     //
+    typename enable_ = void                                            //
     >
 struct tile_scorer;
 
@@ -241,16 +262,16 @@ struct tile_scorer;
  *  @tparam capability_ Whether to use OpenMP for @b multi-threading or some form of @b SIMD vectorization, or both.
  *  @tparam enable_ Used to enable/disable the specialization.
  */
-template <                                                       //
-    typename char_type_ = char,                                  //
-    typename score_type_ = sz_size_t,                            //
-    typename substituter_type_ = uniform_substitution_costs_t,   //
-    typename gap_costs_type_ = linear_gap_costs_t,               //
-    typename allocator_type_ = dummy_alloc_t,                    //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_serial_k,               //
-    typename enable_ = void                                      //
+template <                                                             //
+    typename char_type_ = char,                                        //
+    score_like score_type_ = sz_size_t,                                //
+    substituter_like substituter_type_ = uniform_substitution_costs_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
+    typename allocator_type_ = dummy_alloc_t,                          //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,        //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k,       //
+    sz_capability_t capability_ = sz_cap_serial_k,                     //
+    typename enable_ = void                                            //
     >
 struct diagonal_walker;
 
@@ -277,16 +298,16 @@ struct diagonal_walker;
  *  @sa     For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
  *  @sa     For bulk API, use `sz::levenshtein_scores[_utf8]`.
  */
-template <                                                       //
-    typename char_type_ = char,                                  //
-    typename score_type_ = sz_size_t,                            //
-    typename substituter_type_ = uniform_substitution_costs_t,   //
-    typename gap_costs_type_ = linear_gap_costs_t,               //
-    typename allocator_type_ = dummy_alloc_t,                    //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_serial_k,               //
-    typename enable_ = void                                      //
+template <                                                             //
+    typename char_type_ = char,                                        //
+    score_like score_type_ = sz_size_t,                                //
+    substituter_like substituter_type_ = uniform_substitution_costs_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
+    typename allocator_type_ = dummy_alloc_t,                          //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,        //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k,       //
+    sz_capability_t capability_ = sz_cap_serial_k,                     //
+    typename enable_ = void                                            //
     >
 struct horizontal_walker;
 
@@ -304,8 +325,8 @@ constexpr bool is_serial_or_parallel(sz_capability_t capability) noexcept {
  *  - Only @b Linear gaps, not Affine!
  *  - Both auto-vectorized @b Serial and @b Parallel execution, but not hand-rolled SIMD!
  */
-template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
-          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
+          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, linear_gap_costs_t,
                    objective_, sz_similarity_global_k, capability_,
                    std::enable_if_t<is_serial_or_parallel(capability_)>> {
@@ -390,8 +411,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  - Only @b Linear gaps, not Affine!
  *  - Both auto-vectorized @b Serial and @b Parallel execution, but not hand-rolled SIMD!
  */
-template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
-          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
+          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, linear_gap_costs_t,
                    objective_, sz_similarity_local_k, capability_,
                    std::enable_if_t<is_serial_or_parallel(capability_)>> {
@@ -454,7 +475,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             score_t if_substitution = pre_substitution + cost_of_substitution;
             score_t if_deletion_or_insertion = min_or_max<objective_k>(pre_deletion, pre_insertion) + gap_cost;
             // ! This is the main difference with global alignment:
-            score_t if_substitution_or_reset = min_or_max<objective_k>(if_substitution, (score_t)0);
+            score_t if_substitution_or_reset = min_or_max<objective_k, score_t>(if_substitution, 0);
             score_t cell_score = min_or_max<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
             scores_new[i] = cell_score;
 
@@ -471,8 +492,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  - Only @b Affine gaps, not Linear!
  *  - Both auto-vectorized @b Serial and @b Parallel execution, but not hand-rolled SIMD!
  */
-template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
-          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
+          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, affine_gap_costs_t,
                    objective_, sz_similarity_global_k, capability_,
                    std::enable_if_t<is_serial_or_parallel(capability_)>> {
@@ -580,8 +601,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  - Only @b Affine gaps, not Linear!
  *  - Both auto-vectorized @b Serial and @b Parallel execution, but not hand-rolled SIMD!
  */
-template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
-          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
+          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, affine_gap_costs_t,
                    objective_, sz_similarity_local_k, capability_,
                    std::enable_if_t<is_serial_or_parallel(capability_)>> {
@@ -688,7 +709,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *
  *  Allocates 3x diagonals of the DP matrix.
  */
-template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
+template <typename char_type_, score_like score_type_, substituter_like substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename enable_>
 struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_costs_t, allocator_type_, objective_,
@@ -870,7 +891,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
  *
  *  Allocates 3x diagonals of the DP matrix and 2x diagonals of 2x affine gaps matrices.
  */
-template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
+template <typename char_type_, score_like score_type_, substituter_like substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename enable_>
 struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_costs_t, allocator_type_, objective_,
@@ -1084,7 +1105,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
  *
  *  Allocates 2x rows of the DP matrix.
  */
-template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
+template <typename char_type_, score_like score_type_, substituter_like substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename enable_>
 struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_costs_t, allocator_type_, objective_,
@@ -1199,7 +1220,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
  *
  *  Allocates 2x rows of the DP matrix and 2x rows of 2x affine gaps matrices.
  */
-template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
+template <typename char_type_, score_like score_type_, substituter_like substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename enable_>
 struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_costs_t, allocator_type_, objective_,
@@ -1336,12 +1357,12 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
  *  @tparam gap_costs_type_ Can be either `linear_gap_costs_t` or `affine_gap_costs_t`.
  *  @tparam capability_ Can be either `sz_cap_serial_k`, `sz_caps_sp_k`, `sz_caps_spi_k`, `sz_cap_cuda_k`.
  */
-template <                                         //
-    typename char_type_ = char,                    //
-    typename gap_costs_type_ = linear_gap_costs_t, //
-    typename allocator_type_ = dummy_alloc_t,      //
-    sz_capability_t capability_ = sz_cap_serial_k, //
-    typename enable_ = void                        //
+template <                                               //
+    typename char_type_ = char,                          //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t, //
+    typename allocator_type_ = dummy_alloc_t,            //
+    sz_capability_t capability_ = sz_cap_serial_k,       //
+    typename enable_ = void                              //
     >
 struct levenshtein_distance {
 
@@ -1445,12 +1466,12 @@ struct levenshtein_distance {
  *  @brief  Computes the @b rune-level Levenshtein distance between two UTF-8 strings using the OpenMP backend.
  *  @sa     `levenshtein_distance` for binary strings.
  */
-template <                                         //
-    typename char_type_ = char,                    //
-    typename gap_costs_type_ = linear_gap_costs_t, //
-    typename allocator_type_ = dummy_alloc_t,      //
-    sz_capability_t capability_ = sz_cap_serial_k, //
-    typename enable_ = void                        //
+template <                                               //
+    typename char_type_ = char,                          //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t, //
+    typename allocator_type_ = dummy_alloc_t,            //
+    sz_capability_t capability_ = sz_cap_serial_k,       //
+    typename enable_ = void                              //
     >
 struct levenshtein_distance_utf8 {
 
@@ -1578,13 +1599,13 @@ struct levenshtein_distance_utf8 {
  *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the OpenMP backend.
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
-template <                                              //
-    typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_256x256_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,      //
-    typename allocator_type_ = dummy_alloc_t,           //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
-    typename enable_ = void                             //
+template <                                                      //
+    typename char_type_ = char,                                 //
+    substituter_like substituter_type_ = error_costs_256x256_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,        //
+    typename allocator_type_ = dummy_alloc_t,                   //
+    sz_capability_t capability_ = sz_cap_serial_k,              //
+    typename enable_ = void                                     //
     >
 struct needleman_wunsch_score {
 
@@ -1665,13 +1686,13 @@ struct needleman_wunsch_score {
  *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the OpenMP backend.
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
-template <                                              //
-    typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_256x256_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,      //
-    typename allocator_type_ = dummy_alloc_t,           //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
-    typename enable_ = void                             //
+template <                                                      //
+    typename char_type_ = char,                                 //
+    substituter_like substituter_type_ = error_costs_256x256_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,        //
+    typename allocator_type_ = dummy_alloc_t,                   //
+    sz_capability_t capability_ = sz_cap_serial_k,              //
+    typename enable_ = void                                     //
     >
 struct smith_waterman_score {
 
@@ -1769,7 +1790,7 @@ struct smith_waterman_score {
  *          cache hits. For smaller strings, each core computes its own distance.
  */
 template <                                                       //
-    typename score_type_,                                        //
+    score_like score_type_,                                      //
     typename core_per_input_type_,                               //
     typename all_cores_per_input_type_,                          //
     typename first_strings_type_, typename second_strings_type_, //
@@ -1834,7 +1855,7 @@ status_t _score_in_parallel(                         //
 }
 
 template <                                                       //
-    typename score_type_,                                        //
+    score_like score_type_,                                      //
     typename scoring_type_,                                      //
     typename first_strings_type_, typename second_strings_type_, //
     typename results_type_                                       //
@@ -1864,12 +1885,12 @@ status_t _score_sequentially(scoring_type_ &&scoring, first_strings_type_ const 
  *          For pairs of very large strings, all cores cooperate to compute one distance maximizing
  *          cache hits. For smaller strings, each core computes its own distance.
  */
-template <                                         //
-    typename char_type_ = char,                    //
-    typename gap_costs_type_ = linear_gap_costs_t, //
-    typename allocator_type_ = dummy_alloc_t,      //
-    sz_capability_t capability_ = sz_cap_serial_k, //
-    typename enable_ = void                        //
+template <                                               //
+    typename char_type_ = char,                          //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t, //
+    typename allocator_type_ = dummy_alloc_t,            //
+    sz_capability_t capability_ = sz_cap_serial_k,       //
+    typename enable_ = void                              //
     >
 struct levenshtein_distances {
 
@@ -1909,12 +1930,12 @@ struct levenshtein_distances {
     }
 };
 
-template <                                         //
-    typename char_type_ = char,                    //
-    typename gap_costs_type_ = linear_gap_costs_t, //
-    typename allocator_type_ = dummy_alloc_t,      //
-    sz_capability_t capability_ = sz_cap_serial_k, //
-    typename enable_ = void                        //
+template <                                               //
+    typename char_type_ = char,                          //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t, //
+    typename allocator_type_ = dummy_alloc_t,            //
+    sz_capability_t capability_ = sz_cap_serial_k,       //
+    typename enable_ = void                              //
     >
 struct levenshtein_distances_utf8 {
 
@@ -1954,13 +1975,13 @@ struct levenshtein_distances_utf8 {
     }
 };
 
-template <                                              //
-    typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_256x256_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,      //
-    typename allocator_type_ = dummy_alloc_t,           //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
-    typename enable_ = void                             //
+template <                                                      //
+    typename char_type_ = char,                                 //
+    substituter_like substituter_type_ = error_costs_256x256_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,        //
+    typename allocator_type_ = dummy_alloc_t,                   //
+    sz_capability_t capability_ = sz_cap_serial_k,              //
+    typename enable_ = void                                     //
     >
 struct needleman_wunsch_scores {
 
@@ -2001,13 +2022,13 @@ struct needleman_wunsch_scores {
     }
 };
 
-template <                                              //
-    typename char_type_ = char,                         //
-    typename substituter_type_ = error_costs_256x256_t, //
-    typename gap_costs_type_ = linear_gap_costs_t,      //
-    typename allocator_type_ = dummy_alloc_t,           //
-    sz_capability_t capability_ = sz_cap_serial_k,      //
-    typename enable_ = void                             //
+template <                                                      //
+    typename char_type_ = char,                                 //
+    substituter_like substituter_type_ = error_costs_256x256_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,        //
+    typename allocator_type_ = dummy_alloc_t,                   //
+    sz_capability_t capability_ = sz_cap_serial_k,              //
+    typename enable_ = void                                     //
     >
 struct smith_waterman_scores {
 
