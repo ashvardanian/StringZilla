@@ -34,8 +34,8 @@
  *  | Plagiarism/Code Similarity    | 1,000 – 100,000         | 1.024 MB – 102.4 MB     |
  *  | Product Catalog Matching      | 100,000 – 1,000,000     | 102.4 MB – 1.024 GB     |
  */
-#ifndef STRINGZILLA_FIND_MANY_HPP_
-#define STRINGZILLA_FIND_MANY_HPP_
+#ifndef STRINGCUZILLA_FIND_MANY_HPP_
+#define STRINGCUZILLA_FIND_MANY_HPP_
 
 #include "stringzilla/memory.h"  // `sz_move`
 #include "stringzilla/types.hpp" // `status_t::status_t`
@@ -827,4 +827,4 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 } // namespace stringzilla
 } // namespace ashvardanian
 
-#endif // STRINGZILLA_FIND_MANY_HPP_
+#endif // STRINGCUZILLA_FIND_MANY_HPP_

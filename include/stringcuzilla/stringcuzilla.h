@@ -4,11 +4,11 @@
  *          On modern CPUs it uses AVX2, AVX-512, NEON, SVE, & SVE2 @b SIMD instructions & provides SWAR for older CPUs.
  *          On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
  *
- *  @file   stringzilla.cuh
+ *  @file   stringcuzilla.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGZILLA_CUH_
-#define STRINGZILLA_CUH_
+#ifndef STRINGCUZILLA_H_
+#define STRINGCUZILLA_H_
 
 #include "stringzilla.h"
 
@@ -34,4 +34,4 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_u32tape( //
 }
 #endif // __cplusplus
 
-#endif // STRINGZILLA_CUH_
+#endif // STRINGCUZILLA_H_

@@ -8,8 +8,8 @@
  *
  *  - `unified_alloc` - a custom allocator that uses CUDA Unified Memory for allocation.
  */
-#ifndef STRINGZILLA_TYPES_CUH_
-#define STRINGZILLA_TYPES_CUH_
+#ifndef STRINGCUZILLA_TYPES_CUH_
+#define STRINGCUZILLA_TYPES_CUH_
 
 #include "stringzilla/types.hpp"
 
@@ -134,4 +134,4 @@ __forceinline__ __device__ sz_u32_vec_t sz_u32_load_unaligned(void const *ptr) n
 } // namespace stringzilla
 } // namespace ashvardanian
 
-#endif // STRINGZILLA_TYPES_CUH_
+#endif // STRINGCUZILLA_TYPES_CUH_

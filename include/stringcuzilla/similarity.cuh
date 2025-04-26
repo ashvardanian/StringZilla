@@ -34,8 +34,8 @@
  *  - `levenshtein_distances`: {CUDA and Kepler} for any chars and lengths, {Hopper} for 8-bit and 16-bit lengths.
  *  - `needleman_wunsch_score`.
  */
-#ifndef STRINGZILLA_SIMILARITIES_CUH_
-#define STRINGZILLA_SIMILARITIES_CUH_
+#ifndef STRINGCUZILLA_SIMILARITY_CUH_
+#define STRINGCUZILLA_SIMILARITY_CUH_
 
 #include "stringcuzilla/types.cuh"
 #include "stringcuzilla/similarity.hpp"
@@ -1314,4 +1314,4 @@ struct needleman_wunsch_scores<char_type_, substituter_type_, allocator_type_, s
 } // namespace stringzilla
 } // namespace ashvardanian
 
-#endif // STRINGZILLA_SIMILARITIES_CUH_
+#endif // STRINGCUZILLA_SIMILARITY_CUH_
