@@ -50,11 +50,12 @@
  *
  *  TODO: For @b sparse algorithms, the algorithms are constructed differently.
  */
-#ifndef STRINGZILLA_SIMILARITY_HPP_
-#define STRINGZILLA_SIMILARITY_HPP_
+#ifndef STRINGCUZILLA_SIMILARITY_HPP_
+#define STRINGCUZILLA_SIMILARITY_HPP_
 
-#include "stringzilla/memory.h"  // `sz_move`
-#include "stringzilla/types.hpp" // `sz::error_cost_t`
+#include "stringzilla/types.hpp"   // `sz::error_cost_t`
+#include "stringzilla/memory.h"    // `sz_move`
+#include "stringcuzilla/types.hpp" // `sz::executor_like`
 
 #include <atomic>      // `std::atomic` to synchronize OpenMP threads
 #include <type_traits> // `std::enable_if_t` for meta-programming
@@ -84,14 +85,14 @@ void rotate_three(value_type_ &a, value_type_ &b, value_type_ &c) noexcept {
 struct linear_gap_costs_t {
     error_cost_t open_or_extend = 1;
 
-    constexpr sz_size_t magnitude() const noexcept { return std::abs(open_or_extend); }
+    constexpr size_t magnitude() const noexcept { return std::abs(open_or_extend); }
 };
 
 struct affine_gap_costs_t {
     error_cost_t open = 1;
     error_cost_t extend = 1;
 
-    constexpr sz_size_t magnitude() const noexcept { return std::max(std::abs(open), std::abs(extend)); }
+    constexpr size_t magnitude() const noexcept { return std::max(std::abs(open), std::abs(extend)); }
 };
 
 template <typename gap_costs_type_>
@@ -113,7 +114,7 @@ struct uniform_substitution_costs_t {
 
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? match : mismatch; }
     constexpr error_cost_t operator()(sz_rune_t a, sz_rune_t b) const noexcept { return a == b ? match : mismatch; }
-    constexpr sz_size_t magnitude() const noexcept { return std::max(std::abs(match), std::abs(mismatch)); }
+    constexpr size_t magnitude() const noexcept { return std::max(std::abs(match), std::abs(mismatch)); }
 };
 
 #pragma region - Algorithm Building Blocks
@@ -123,7 +124,7 @@ struct uniform_substitution_costs_t {
  *          without fetching from RAM/VRAM all the time, including the space for 3 diagonals
  *          and the strings themselves.
  *
- *  @tparam size_type_ The type of the size, usually `sz_size_t` for large inputs or `uint` on small inputs in CUDA.
+ *  @tparam size_type_ The type of the size, usually `size_t` for large inputs or `uint` on small inputs in CUDA.
  *  @tparam is_signed_ Whether the similarity scores can be negative or not.
  */
 template <typename size_type_, bool is_signed_>
@@ -205,13 +206,13 @@ concept score_like = std::integral<value_type_> && std::is_trivial_v<value_type_
 
 template <typename substituter_type_>
 concept substituter_like = requires(substituter_type_ costs) {
-    { costs.magnitude() } -> std::convertible_to<std::size_t>;                 // retrieving the magnitude
+    { costs.magnitude() } -> std::convertible_to<size_t>;                      // retrieving the magnitude
     { costs.operator()(char(), char()) } -> std::convertible_to<error_cost_t>; // cost of substitution
 };
 
 template <typename gap_costs_type_>
 concept gap_costs_like = requires(gap_costs_type_ costs) {
-    { costs.magnitude() } -> std::convertible_to<std::size_t>; // retrieving the magnitude
+    { costs.magnitude() } -> std::convertible_to<size_t>; // retrieving the magnitude
 };
 
 /**
@@ -220,7 +221,7 @@ concept gap_costs_like = requires(gap_costs_type_ costs) {
  *
  *  @tparam first_iterator_type_ Typically `char*`, `sz_rune_t*`, or a `constant_iterator`.
  *  @tparam second_iterator_type_ Typically `char*` or `sz_rune_t*`.
- *  @tparam score_type_ The type of the score, typically `sz_size_t` or `sz_ssize_t`.
+ *  @tparam score_type_ The type of the score, typically `size_t` or `sz_ssize_t`.
  *  @tparam substituter_type_ Typically `uniform_substitution_costs_t` or a lookup table.
  *  @tparam gap_costs_type_ Either `linear_gap_costs_t` or `sz_gaps_affine_k`.
  *  @tparam objective_ Either `sz_minimize_distance_k` or `sz_maximize_score_k`.
@@ -231,7 +232,7 @@ concept gap_costs_like = requires(gap_costs_type_ costs) {
 template <                                                             //
     pointer_like first_iterator_type_ = char const *,                  //
     pointer_like second_iterator_type_ = char const *,                 //
-    score_like score_type_ = sz_size_t,                                //
+    score_like score_type_ = size_t,                                   //
     substituter_like substituter_type_ = uniform_substitution_costs_t, //
     gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
     sz_similarity_objective_t objective_ = sz_maximize_score_k,        //
@@ -264,7 +265,7 @@ struct tile_scorer;
  */
 template <                                                             //
     typename char_type_ = char,                                        //
-    score_like score_type_ = sz_size_t,                                //
+    score_like score_type_ = size_t,                                   //
     substituter_like substituter_type_ = uniform_substitution_costs_t, //
     gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
     typename allocator_type_ = dummy_alloc_t,                          //
@@ -300,7 +301,7 @@ struct diagonal_walker;
  */
 template <                                                             //
     typename char_type_ = char,                                        //
-    score_like score_type_ = sz_size_t,                                //
+    score_like score_type_ = size_t,                                   //
     substituter_like substituter_type_ = uniform_substitution_costs_t, //
     gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
     typename allocator_type_ = dummy_alloc_t,                          //
@@ -315,10 +316,6 @@ struct horizontal_walker;
 
 #pragma region - Autovectorized Tile Scorer
 
-constexpr bool is_serial_or_parallel(sz_capability_t capability) noexcept {
-    return (capability == sz_cap_serial_k) || (capability == (sz_capability_t)(sz_cap_serial_k | sz_cap_parallel_k));
-}
-
 /**
  *  This overload handles:
  *  - Only @b Global alignment, not Local!
@@ -326,10 +323,9 @@ constexpr bool is_serial_or_parallel(sz_capability_t capability) noexcept {
  *  - Both auto-vectorized @b Serial and @b Parallel execution, but not hand-rolled SIMD!
  */
 template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
-          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+          substituter_like substituter_type_, sz_similarity_objective_t objective_>
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, linear_gap_costs_t,
-                   objective_, sz_similarity_global_k, capability_,
-                   std::enable_if_t<is_serial_or_parallel(capability_)>> {
+                   objective_, sz_similarity_global_k, sz_cap_serial_k, void> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
@@ -339,15 +335,15 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
     static constexpr sz_similarity_objective_t objective_k = objective_;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
-    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = typename std::remove_cvref<first_char_t>::type;
 
-    using scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t, objective_k,
-                                 locality_k, capability_k>;
+    using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
+                                      objective_k, locality_k, capability_k>;
 
   protected:
     substituter_t substituter_ {};
@@ -363,7 +359,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the diagonals outside of the bottom-right triangle.
      *  @note Should only be called for the top row and left column of the matrix.
      */
-    void init_score(score_t &cell, sz_size_t diagonal_index) const noexcept {
+    void init_score(score_t &cell, size_t diagonal_index) const noexcept {
         cell = gap_costs_.open_or_extend * diagonal_index;
     }
 
@@ -378,15 +374,15 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param second_slice The second string.
      *  @param n The length of the diagonal to evaluate and the number of characters to compare from each string.
      */
-    void operator()(                                                                        //
-        first_iterator_t first_reversed_slice, second_iterator_t second_slice, sz_size_t n, //
+    template <executor_like executor_type_ = dummy_executor_t>
+    void operator()(                                                                     //
+        first_iterator_t first_reversed_slice, second_iterator_t second_slice, size_t n, //
         score_t const *scores_pre_substitution, score_t const *scores_pre_insertion, score_t const *scores_pre_deletion,
-        score_t *scores_new) noexcept {
+        score_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
         error_cost_t const gap_cost = gap_costs_.open_or_extend;
 
-#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
-        for (sz_size_t i = 0; i < n; ++i) {
+        executor.slice(n, [&](size_t i) {
             score_t pre_substitution = scores_pre_substitution[i];
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
@@ -398,7 +394,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             score_t if_deletion_or_insertion = min_or_max<objective_k>(pre_deletion, pre_insertion) + gap_cost;
             score_t cell_score = min_or_max<objective_k>(if_deletion_or_insertion, if_substitution);
             scores_new[i] = cell_score;
-        }
+        });
 
         // The last element of the last chunk is the result of the global alignment.
         last_score_ = scores_new[n - 1];
@@ -412,10 +408,9 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  - Both auto-vectorized @b Serial and @b Parallel execution, but not hand-rolled SIMD!
  */
 template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
-          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+          substituter_like substituter_type_, sz_similarity_objective_t objective_>
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, linear_gap_costs_t,
-                   objective_, sz_similarity_local_k, capability_,
-                   std::enable_if_t<is_serial_or_parallel(capability_)>> {
+                   objective_, sz_similarity_local_k, sz_cap_serial_k, void> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
@@ -425,15 +420,15 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
     static constexpr sz_similarity_objective_t objective_k = objective_;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
-    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
     static_assert(std::is_same<first_char_t, second_char_t>(), "String characters must be of the same type.");
     using char_t = first_char_t;
 
-    using scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t, objective_k,
-                                 locality_k, capability_k>;
+    using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
+                                      objective_k, locality_k, capability_k>;
 
   protected:
     substituter_t substituter_ {};
@@ -449,40 +444,44 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the diagonals outside of the bottom-right triangle.
      *  @note Should only be called for the top row and left column of the matrix.
      */
-    void init_score(score_t &cell, sz_size_t /* diagonal_index */) const noexcept { cell = 0; }
+    void init_score(score_t &cell, size_t /* diagonal_index */) const noexcept { cell = 0; }
 
     /**
      *  @brief Extract the final result of the scoring operation which will be maximum encountered value.
      */
     score_t score() const noexcept { return best_score_; }
 
-    void operator()(                                                                              //
-        first_iterator_t first_reversed_slice, second_iterator_t second_slice, sz_size_t const n, //
+    template <executor_like executor_type_ = dummy_executor_t>
+    void operator()(                                                                           //
+        first_iterator_t first_reversed_slice, second_iterator_t second_slice, size_t const n, //
         score_t const *scores_pre_substitution, score_t const *scores_pre_insertion, score_t const *scores_pre_deletion,
-        score_t *scores_new) noexcept {
+        score_t *scores_new, executor_type_ &&executor = {}) noexcept {
 
         error_cost_t const gap_cost = gap_costs_.open_or_extend;
+        std::atomic<score_t> atomic_best_score {best_score_};
+        executor.slice_range(n, [&](size_t i_start, size_t i_end) {
+            score_t local_best_score = atomic_best_score;
+            for (size_t i = i_start; i < i_end; ++i) {
+                score_t pre_substitution = scores_pre_substitution[i];
+                score_t pre_insertion = scores_pre_insertion[i];
+                score_t pre_deletion = scores_pre_deletion[i];
 
-#pragma omp parallel for if (capability_k & sz_cap_parallel_k)
-        for (sz_size_t i = 0; i < n; ++i) {
-            score_t pre_substitution = scores_pre_substitution[i];
-            score_t pre_insertion = scores_pre_insertion[i];
-            score_t pre_deletion = scores_pre_deletion[i];
+                // ? Note that here we are still traversing both buffers in the same order,
+                // ? because one of the strings has been reversed beforehand.
+                error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+                score_t if_substitution = pre_substitution + cost_of_substitution;
+                score_t if_deletion_or_insertion = min_or_max<objective_k>(pre_deletion, pre_insertion) + gap_cost;
+                // ! This is the main difference with global alignment:
+                score_t if_substitution_or_reset = min_or_max<objective_k, score_t>(if_substitution, 0);
+                score_t cell_score = min_or_max<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
+                scores_new[i] = cell_score;
 
-            // ? Note that here we are still traversing both buffers in the same order,
-            // ? because one of the strings has been reversed beforehand.
-            error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
-            score_t if_substitution = pre_substitution + cost_of_substitution;
-            score_t if_deletion_or_insertion = min_or_max<objective_k>(pre_deletion, pre_insertion) + gap_cost;
-            // ! This is the main difference with global alignment:
-            score_t if_substitution_or_reset = min_or_max<objective_k, score_t>(if_substitution, 0);
-            score_t cell_score = min_or_max<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
-            scores_new[i] = cell_score;
-
-            // ! Update the global maximum score if this cell beats it - this is the costliest operation:
-#pragma omp critical
-            { best_score_ = min_or_max<objective_k>(best_score_, cell_score); }
-        }
+                // ! Update the global maximum score if this cell beats it - this is the costliest operation:
+                local_best_score = min_or_max<objective_k>(local_best_score, cell_score);
+            }
+            atomic_best_score = min_or_max<objective_k, score_t>(atomic_best_score, local_best_score);
+        });
+        best_score_ = min_or_max<objective_k, score_t>(best_score_, atomic_best_score);
     }
 };
 
@@ -493,10 +492,9 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  - Both auto-vectorized @b Serial and @b Parallel execution, but not hand-rolled SIMD!
  */
 template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
-          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+          substituter_like substituter_type_, sz_similarity_objective_t objective_>
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, affine_gap_costs_t,
-                   objective_, sz_similarity_global_k, capability_,
-                   std::enable_if_t<is_serial_or_parallel(capability_)>> {
+                   objective_, sz_similarity_global_k, sz_cap_serial_k, void> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
@@ -506,15 +504,15 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
     static constexpr sz_similarity_objective_t objective_k = objective_;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
-    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = typename std::remove_cvref<first_char_t>::type;
 
-    using scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t, objective_k,
-                                 locality_k, capability_k>;
+    using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
+                                      objective_k, locality_k, capability_k>;
 
   protected:
     substituter_t substituter_ {};
@@ -530,11 +528,11 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the diagonals outside of the bottom-right triangle.
      *  @note Should only be called for the top row and left column of the matrix.
      */
-    void init_score(score_t &cell, sz_size_t diagonal_index) const noexcept {
+    void init_score(score_t &cell, size_t diagonal_index) const noexcept {
         cell = diagonal_index ? gap_costs_.open + gap_costs_.extend * (diagonal_index - 1) : 0;
     }
 
-    void init_gap(score_t &cell, sz_size_t diagonal_index) const noexcept {
+    void init_gap(score_t &cell, size_t diagonal_index) const noexcept {
         // Make sure the initial value of the gap is not smaller in magnitude than the primary.
         // The supplementary matrices are initialized with values of higher magnitude,
         // which is equivalent to discarding them. That's better than using `SIZE_MAX`
@@ -554,19 +552,20 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param second_slice The second string.
      *  @param n The length of the diagonal to evaluate and the number of characters to compare from each string.
      */
-    void operator()(                                                                        //
-        first_iterator_t first_reversed_slice, second_iterator_t second_slice, sz_size_t n, //
-        score_t const *scores_pre_substitution,                                             //
-        score_t const *scores_pre_insertion,                                                //
-        score_t const *scores_pre_deletion,                                                 //
-        score_t const *scores_running_insertions,                                           //
-        score_t const *scores_running_deletions,                                            //
-        score_t *scores_new,                                                                //
-        score_t *scores_new_insertions,                                                     //
-        score_t *scores_new_deletions) noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    void operator()(                                                                     //
+        first_iterator_t first_reversed_slice, second_iterator_t second_slice, size_t n, //
+        score_t const *scores_pre_substitution,                                          //
+        score_t const *scores_pre_insertion,                                             //
+        score_t const *scores_pre_deletion,                                              //
+        score_t const *scores_running_insertions,                                        //
+        score_t const *scores_running_deletions,                                         //
+        score_t *scores_new,                                                             //
+        score_t *scores_new_insertions,                                                  //
+        score_t *scores_new_deletions,                                                   //
+        executor_type_ &&executor = {}) noexcept {
 
-#pragma omp parallel for simd if (capability_k & sz_cap_parallel_k)
-        for (sz_size_t i = 0; i < n; ++i) {
+        executor.slice(n, [&](size_t i) {
             score_t pre_substitution = scores_pre_substitution[i];
             score_t pre_insertion_opening = scores_pre_insertion[i];
             score_t pre_deletion_opening = scores_pre_deletion[i];
@@ -588,7 +587,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             scores_new[i] = cell_score;
             scores_new_insertions[i] = if_insertion;
             scores_new_deletions[i] = if_deletion;
-        }
+        });
 
         // The last element of the last chunk is the result of the global alignment.
         last_score_ = scores_new[n - 1];
@@ -602,10 +601,9 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  - Both auto-vectorized @b Serial and @b Parallel execution, but not hand-rolled SIMD!
  */
 template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
-          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+          substituter_like substituter_type_, sz_similarity_objective_t objective_>
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, affine_gap_costs_t,
-                   objective_, sz_similarity_local_k, capability_,
-                   std::enable_if_t<is_serial_or_parallel(capability_)>> {
+                   objective_, sz_similarity_local_k, sz_cap_serial_k, void> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
@@ -615,15 +613,15 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
     static constexpr sz_similarity_objective_t objective_k = objective_;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
-    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
     static_assert(std::is_same<first_char_t, second_char_t>(), "String characters must be of the same type.");
     using char_t = first_char_t;
 
-    using scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t, objective_k,
-                                 locality_k, capability_k>;
+    using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
+                                      objective_k, locality_k, capability_k>;
 
   protected:
     substituter_t substituter_ {};
@@ -639,8 +637,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the diagonals outside of the bottom-right triangle.
      *  @note Should only be called for the top row and left column of the matrix.
      */
-    void init_score(score_t &cell, sz_size_t /* diagonal_index */) const noexcept { cell = 0; }
-    void init_gap(score_t &cell, sz_size_t /* diagonal_index */) const noexcept {
+    void init_score(score_t &cell, size_t /* diagonal_index */) const noexcept { cell = 0; }
+    void init_gap(score_t &cell, size_t /* diagonal_index */) const noexcept {
         // Make sure the initial value of the gap is not smaller in magnitude than the primary.
         // The supplementary matrices are initialized with values of higher magnitude,
         // which is equivalent to discarding them. That's better than using `SIZE_MAX`
@@ -653,47 +651,53 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      */
     score_t score() const noexcept { return best_score_; }
 
-    void operator()(                                                                              //
-        first_iterator_t first_reversed_slice, second_iterator_t second_slice, sz_size_t const n, //
-        score_t const *scores_pre_substitution,                                                   //
-        score_t const *scores_pre_insertion,                                                      //
-        score_t const *scores_pre_deletion,                                                       //
-        score_t const *scores_running_insertions,                                                 //
-        score_t const *scores_running_deletions,                                                  //
-        score_t *scores_new,                                                                      //
-        score_t *scores_new_insertions,                                                           //
-        score_t *scores_new_deletions) noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    void operator()(                                                                           //
+        first_iterator_t first_reversed_slice, second_iterator_t second_slice, size_t const n, //
+        score_t const *scores_pre_substitution,                                                //
+        score_t const *scores_pre_insertion,                                                   //
+        score_t const *scores_pre_deletion,                                                    //
+        score_t const *scores_running_insertions,                                              //
+        score_t const *scores_running_deletions,                                               //
+        score_t *scores_new,                                                                   //
+        score_t *scores_new_insertions,                                                        //
+        score_t *scores_new_deletions,                                                         //
+        executor_type_ &&executor = {}) noexcept {
 
-#pragma omp parallel for if (capability_k & sz_cap_parallel_k)
-        for (sz_size_t i = 0; i < n; ++i) {
-            score_t pre_substitution = scores_pre_substitution[i];
-            score_t pre_insertion_opening = scores_pre_insertion[i];
-            score_t pre_deletion_opening = scores_pre_deletion[i];
-            score_t pre_insertion_expansion = scores_running_insertions[i];
-            score_t pre_deletion_expansion = scores_running_deletions[i];
+        std::atomic<score_t> atomic_best_score {best_score_};
+        executor.slice_range(n, [&](size_t i_start, size_t i_end) {
+            score_t local_best_score = atomic_best_score;
+            for (size_t i = i_start; i < i_end; ++i) {
+                score_t pre_substitution = scores_pre_substitution[i];
+                score_t pre_insertion_opening = scores_pre_insertion[i];
+                score_t pre_deletion_opening = scores_pre_deletion[i];
+                score_t pre_insertion_expansion = scores_running_insertions[i];
+                score_t pre_deletion_expansion = scores_running_deletions[i];
 
-            // ? Note that here we are still traversing both buffers in the same order,
-            // ? because one of the strings has been reversed beforehand.
-            error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
-            score_t if_substitution = pre_substitution + cost_of_substitution;
-            score_t if_deletion = min_or_max<objective_k>(pre_deletion_opening + gap_costs_.open,
-                                                          pre_deletion_expansion + gap_costs_.extend);
-            score_t if_insertion = min_or_max<objective_k>(pre_insertion_opening + gap_costs_.open,
-                                                           pre_insertion_expansion + gap_costs_.extend);
-            score_t if_deletion_or_insertion = min_or_max<objective_k>(if_deletion, if_insertion);
-            // ! This is the main difference with global alignment:
-            score_t if_substitution_or_reset = min_or_max<objective_k, score_t>(if_substitution, 0);
-            score_t cell_score = min_or_max<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
+                // ? Note that here we are still traversing both buffers in the same order,
+                // ? because one of the strings has been reversed beforehand.
+                error_cost_t cost_of_substitution = substituter_(first_reversed_slice[i], second_slice[i]);
+                score_t if_substitution = pre_substitution + cost_of_substitution;
+                score_t if_deletion = min_or_max<objective_k>(pre_deletion_opening + gap_costs_.open,
+                                                              pre_deletion_expansion + gap_costs_.extend);
+                score_t if_insertion = min_or_max<objective_k>(pre_insertion_opening + gap_costs_.open,
+                                                               pre_insertion_expansion + gap_costs_.extend);
+                score_t if_deletion_or_insertion = min_or_max<objective_k>(if_deletion, if_insertion);
+                // ! This is the main difference with global alignment:
+                score_t if_substitution_or_reset = min_or_max<objective_k, score_t>(if_substitution, 0);
+                score_t cell_score = min_or_max<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
 
-            // Export results.
-            scores_new[i] = cell_score;
-            scores_new_deletions[i] = if_deletion;
-            scores_new_insertions[i] = if_insertion;
+                // Export results.
+                scores_new[i] = cell_score;
+                scores_new_deletions[i] = if_deletion;
+                scores_new_insertions[i] = if_insertion;
 
-            // ! Update the global maximum score if this cell beats it - this is the costliest operation:
-#pragma omp critical
-            { best_score_ = min_or_max<objective_k>(best_score_, cell_score); }
-        }
+                // ! Update the global maximum score if this cell beats it - this is the costliest operation:
+                local_best_score = min_or_max<objective_k>(local_best_score, cell_score);
+            }
+            atomic_best_score = min_or_max<objective_k, score_t>(atomic_best_score, local_best_score);
+        });
+        best_score_ = min_or_max<objective_k, score_t>(best_score_, atomic_best_score);
     }
 };
 
@@ -727,8 +731,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
 
     using allocated_t = typename allocator_t::value_type;
     static_assert(sizeof(allocated_t) == sizeof(char), "Allocator must be byte-aligned");
-    using scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
-                                 locality_k, capability_k>;
+    using tile_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
+                                      locality_k, capability_k>;
 
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -749,7 +753,9 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref) const noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+                        executor_type_ &&executor = {}) const noexcept {
 
         // Early exit for empty strings.
         if (first.empty() || second.empty()) {
@@ -763,7 +769,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
 
         // Make sure the size relation between the strings is correct.
         char_t const *shorter = first.data(), *longer = second.data();
-        sz_size_t shorter_length = first.size(), longer_length = second.size();
+        size_t shorter_length = first.size(), longer_length = second.size();
         if (shorter_length > longer_length) {
             std::swap(shorter, longer);
             std::swap(shorter_length, longer_length);
@@ -771,8 +777,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
 
         // We are going to store 3 diagonals of the matrix.
         // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
-        sz_size_t const shorter_dim = shorter_length + 1;
-        sz_size_t const longer_dim = longer_length + 1;
+        size_t const shorter_dim = shorter_length + 1;
+        size_t const longer_dim = longer_length + 1;
 
         // Let's say we are dealing with 3 and 5 letter words.
         // The matrix will have size 4 x 6, parameterized as (shorter_dim x longer_dim).
@@ -780,12 +786,12 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
         // - 4 diagonals of increasing length, at positions: 0, 1, 2, 3.
         // - 2 diagonals of fixed length, at positions: 4, 5.
         // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
-        sz_size_t const diagonals_count = shorter_dim + longer_dim - 1;
-        sz_size_t const max_diagonal_length = shorter_length + 1;
+        size_t const diagonals_count = shorter_dim + longer_dim - 1;
+        size_t const max_diagonal_length = shorter_length + 1;
 
         // We want to avoid reverse-order iteration over the shorter string.
         // Let's allocate a bit more memory and reverse-export our shorter string into that buffer.
-        sz_size_t const buffer_length = sizeof(score_t) * max_diagonal_length * 3 + shorter_length * sizeof(char_t);
+        size_t const buffer_length = sizeof(score_t) * max_diagonal_length * 3 + shorter_length * sizeof(char_t);
         score_t *const buffer = (score_t *)alloc_.allocate(buffer_length);
         if (!buffer) return status_t::bad_alloc_k;
 
@@ -796,35 +802,36 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
         char_t *const shorter_reversed = (char_t *)(next_scores + max_diagonal_length);
 
         // Export the reversed string into the buffer.
-        for (sz_size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
+        for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
 
         // Initialize the first two diagonals:
-        scorer_t diagonal_aligner {substituter_, gap_costs_};
-        diagonal_aligner.init_score(previous_scores[0], 0);
-        diagonal_aligner.init_score(current_scores[0], 1);
-        diagonal_aligner.init_score(current_scores[1], 1);
+        tile_scorer_t scorer {substituter_, gap_costs_};
+        scorer.init_score(previous_scores[0], 0);
+        scorer.init_score(current_scores[0], 1);
+        scorer.init_score(current_scores[1], 1);
 
         // We skip diagonals 0 and 1, as they are trivial.
         // We will start with diagonal 2, which has length 3, with the first and last elements being preset,
         // so we are effectively computing just one value, as will be marked by a single set bit in
         // the `next_diagonal_mask` on the very first iteration.
-        sz_size_t next_diagonal_index = 2;
+        size_t next_diagonal_index = 2;
 
         // Progress through the upper-left triangle of the Levenshtein matrix.
         for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
 
-            sz_size_t const next_diagonal_length = next_diagonal_index + 1;
-            diagonal_aligner(                                                //
+            size_t const next_diagonal_length = next_diagonal_index + 1;
+            scorer(                                                          //
                 shorter_reversed + shorter_length - next_diagonal_index + 1, // first sequence of characters
                 longer,                                                      // second sequence of characters
-                next_diagonal_length - 2,           // number of elements to compute with the `diagonal_aligner`
+                next_diagonal_length - 2,           // number of elements to compute with the `scorer`
                 previous_scores,                    // costs pre substitution
                 current_scores, current_scores + 1, // costs pre insertion/deletion
-                next_scores + 1);
+                next_scores + 1,                    // new scores for the next diagonal
+                executor);                          // parallel execution within the diagonal
 
             // Don't forget to populate the first row and the first column of the Levenshtein matrix.
-            diagonal_aligner.init_score(next_scores[0], next_diagonal_index);
-            diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            scorer.init_score(next_scores[0], next_diagonal_index);
+            scorer.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
 
             // Perform a circular rotation of those buffers, to reuse the memory.
             rotate_three(previous_scores, current_scores, next_scores);
@@ -833,17 +840,18 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
         // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
         for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
 
-            sz_size_t const next_diagonal_length = shorter_dim;
-            diagonal_aligner(                                        //
+            size_t const next_diagonal_length = shorter_dim;
+            scorer(                                                  //
                 shorter_reversed + shorter_length - shorter_dim + 1, // first sequence of characters
                 longer + next_diagonal_index - shorter_dim,          // second sequence of characters
-                next_diagonal_length - 1,           // number of elements to compute with the `diagonal_aligner`
-                previous_scores,                    // costs pre substitution
-                current_scores, current_scores + 1, // costs pre insertion/deletion
-                next_scores);
+                next_diagonal_length - 1,                            // number of elements to compute with the `scorer`
+                previous_scores,                                     // costs pre substitution
+                current_scores, current_scores + 1,                  // costs pre insertion/deletion
+                next_scores,                                         // new scores for the next diagonal
+                executor);                                           // parallel execution within the diagonal
 
             // Don't forget to populate the first row of the Levenshtein matrix.
-            diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            scorer.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
 
             // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
             // dropping the first element in the current array.
@@ -857,14 +865,15 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
         // Now let's handle the bottom-right triangle of the matrix.
         for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
 
-            sz_size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
-            diagonal_aligner(                                        //
+            size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
+            scorer(                                                  //
                 shorter_reversed + shorter_length - shorter_dim + 1, // first sequence of characters
                 longer + next_diagonal_index - shorter_dim,          // second sequence of characters
-                next_diagonal_length,               // number of elements to compute with the `diagonal_aligner`
-                previous_scores,                    // costs pre substitution
-                current_scores, current_scores + 1, // costs pre insertion/deletion
-                next_scores);
+                next_diagonal_length,                                // number of elements to compute with the `scorer`
+                previous_scores,                                     // costs pre substitution
+                current_scores, current_scores + 1,                  // costs pre insertion/deletion
+                next_scores,                                         // new scores for the next diagonal
+                executor);                                           // parallel execution within the diagonal
 
             // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
             // dropping the first element in the current array.
@@ -877,7 +886,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
         }
 
         // Export the scalar before `free` call.
-        result_ref = diagonal_aligner.score();
+        result_ref = scorer.score();
         alloc_.deallocate((allocated_t *)buffer, buffer_length);
         return status_t::success_k;
     }
@@ -910,8 +919,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
 
     using allocated_t = typename allocator_t::value_type;
     static_assert(sizeof(allocated_t) == sizeof(char), "Allocator must be byte-aligned");
-    using scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
-                                 locality_k, capability_k>;
+    using tile_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
+                                      locality_k, capability_k>;
 
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
@@ -932,7 +941,9 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref) const noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
+                        executor_type_ &&executor = {}) const noexcept {
 
         // Early exit for empty strings.
         if (first.empty() || second.empty()) {
@@ -950,7 +961,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
 
         // Make sure the size relation between the strings is correct.
         char_t const *shorter = first.data(), *longer = second.data();
-        sz_size_t shorter_length = first.size(), longer_length = second.size();
+        size_t shorter_length = first.size(), longer_length = second.size();
         if (shorter_length > longer_length) {
             std::swap(shorter, longer);
             std::swap(shorter_length, longer_length);
@@ -958,8 +969,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
 
         // We are going to store 7 diagonals of the matrix.
         // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
-        sz_size_t const shorter_dim = shorter_length + 1;
-        sz_size_t const longer_dim = longer_length + 1;
+        size_t const shorter_dim = shorter_length + 1;
+        size_t const longer_dim = longer_length + 1;
 
         // Let's say we are dealing with 3 and 5 letter words.
         // The matrix will have size 4 x 6, parameterized as (shorter_dim x longer_dim).
@@ -967,12 +978,12 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
         // - 4 diagonals of increasing length, at positions: 0, 1, 2, 3.
         // - 2 diagonals of fixed length, at positions: 4, 5.
         // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
-        sz_size_t const diagonals_count = shorter_dim + longer_dim - 1;
-        sz_size_t const max_diagonal_length = shorter_length + 1;
+        size_t const diagonals_count = shorter_dim + longer_dim - 1;
+        size_t const max_diagonal_length = shorter_length + 1;
 
         // We want to avoid reverse-order iteration over the shorter string.
         // Let's allocate a bit more memory and reverse-export our shorter string into that buffer.
-        sz_size_t const buffer_length = sizeof(score_t) * max_diagonal_length * 7 + shorter_length * sizeof(char_t);
+        size_t const buffer_length = sizeof(score_t) * max_diagonal_length * 7 + shorter_length * sizeof(char_t);
         score_t *const buffer = (score_t *)alloc_.allocate(buffer_length);
         if (!buffer) return status_t::bad_alloc_k;
 
@@ -987,42 +998,43 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
         char_t *const shorter_reversed = (char_t *)(next_deletes + max_diagonal_length);
 
         // Export the reversed string into the buffer.
-        for (sz_size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
+        for (size_t i = 0; i != shorter_length; ++i) shorter_reversed[i] = shorter[shorter_length - 1 - i];
 
         // Initialize the first two diagonals:
-        scorer_t diagonal_aligner {substituter_, gap_costs_};
-        diagonal_aligner.init_score(previous_scores[0], 0);
-        diagonal_aligner.init_score(current_scores[0], 1);
-        diagonal_aligner.init_score(current_scores[1], 1);
-        diagonal_aligner.init_gap(current_inserts[0], 1);
-        diagonal_aligner.init_gap(current_deletes[1], 1);
+        tile_scorer_t scorer {substituter_, gap_costs_};
+        scorer.init_score(previous_scores[0], 0);
+        scorer.init_score(current_scores[0], 1);
+        scorer.init_score(current_scores[1], 1);
+        scorer.init_gap(current_inserts[0], 1);
+        scorer.init_gap(current_deletes[1], 1);
 
         // We skip diagonals 0 and 1, as they are trivial.
         // We will start with diagonal 2, which has length 3, with the first and last elements being preset,
         // so we are effectively computing just one value, as will be marked by a single set bit in
         // the `next_diagonal_mask` on the very first iteration.
-        sz_size_t next_diagonal_index = 2;
+        size_t next_diagonal_index = 2;
 
         // Progress through the upper-left triangle of the Levenshtein matrix.
         for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
 
-            sz_size_t const next_diagonal_length = next_diagonal_index + 1;
-            diagonal_aligner(                                                //
+            size_t const next_diagonal_length = next_diagonal_index + 1;
+            scorer(                                                          //
                 shorter_reversed + shorter_length - next_diagonal_index + 1, // first sequence of characters
                 longer,                                                      // second sequence of characters
-                next_diagonal_length - 2,             // number of elements to compute with the `diagonal_aligner`
+                next_diagonal_length - 2,             // number of elements to compute with the `scorer`
                 previous_scores,                      // costs pre substitution
                 current_scores, current_scores + 1,   // costs pre insertion/deletion opening
                 current_inserts, current_deletes + 1, // costs pre insertion/deletion extension
                 next_scores + 1,                      // updated similarity scores
-                next_inserts + 1, next_deletes + 1    // updated insertion/deletion extensions
+                next_inserts + 1, next_deletes + 1,   // updated insertion/deletion extensions
+                executor                              // parallel execution within the diagonal
             );
 
             // Don't forget to populate the first row and the first column of the Levenshtein matrix.
-            diagonal_aligner.init_score(next_scores[0], next_diagonal_index);
-            diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
-            diagonal_aligner.init_gap(next_inserts[0], next_diagonal_index);
-            diagonal_aligner.init_gap(next_deletes[next_diagonal_length - 1], next_diagonal_index);
+            scorer.init_score(next_scores[0], next_diagonal_index);
+            scorer.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            scorer.init_gap(next_inserts[0], next_diagonal_index);
+            scorer.init_gap(next_deletes[next_diagonal_length - 1], next_diagonal_index);
 
             // Perform a circular rotation of those buffers, to reuse the memory.
             rotate_three(previous_scores, current_scores, next_scores);
@@ -1033,21 +1045,22 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
         // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
         for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
 
-            sz_size_t const next_diagonal_length = shorter_dim;
-            diagonal_aligner(                                        //
+            size_t const next_diagonal_length = shorter_dim;
+            scorer(                                                  //
                 shorter_reversed + shorter_length - shorter_dim + 1, // first sequence of characters
                 longer + next_diagonal_index - shorter_dim,          // second sequence of characters
-                next_diagonal_length - 1,             // number of elements to compute with the `diagonal_aligner`
-                previous_scores,                      // costs pre substitution
-                current_scores, current_scores + 1,   // costs pre insertion/deletion opening
-                current_inserts, current_deletes + 1, // costs pre insertion/deletion extension
-                next_scores,                          // updated similarity scores
-                next_inserts, next_deletes            // updated insertion/deletion extensions
+                next_diagonal_length - 1,                            // number of elements to compute with the `scorer`
+                previous_scores,                                     // costs pre substitution
+                current_scores, current_scores + 1,                  // costs pre insertion/deletion opening
+                current_inserts, current_deletes + 1,                // costs pre insertion/deletion extension
+                next_scores,                                         // updated similarity scores
+                next_inserts, next_deletes,                          // updated insertion/deletion extensions
+                executor                                             // parallel execution within the diagonal
             );
 
             // Don't forget to populate the first row of the Levenshtein matrix.
-            diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
-            diagonal_aligner.init_gap(next_deletes[next_diagonal_length - 1], next_diagonal_index);
+            scorer.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            scorer.init_gap(next_deletes[next_diagonal_length - 1], next_diagonal_index);
 
             // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
             // dropping the first element in the current array.
@@ -1063,16 +1076,17 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
         // Now let's handle the bottom-right triangle of the matrix.
         for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
 
-            sz_size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
-            diagonal_aligner(                                        //
+            size_t const next_diagonal_length = diagonals_count - next_diagonal_index;
+            scorer(                                                  //
                 shorter_reversed + shorter_length - shorter_dim + 1, // first sequence of characters
                 longer + next_diagonal_index - shorter_dim,          // second sequence of characters
-                next_diagonal_length,                 // number of elements to compute with the `diagonal_aligner`
-                previous_scores,                      // costs pre substitution
-                current_scores, current_scores + 1,   // costs pre insertion/deletion opening
-                current_inserts, current_deletes + 1, // costs pre insertion/deletion extension
-                next_scores,                          // updated similarity scores
-                next_inserts, next_deletes            // updated insertion/deletion extensions
+                next_diagonal_length,                                // number of elements to compute with the `scorer`
+                previous_scores,                                     // costs pre substitution
+                current_scores, current_scores + 1,                  // costs pre insertion/deletion opening
+                current_inserts, current_deletes + 1,                // costs pre insertion/deletion extension
+                next_scores,                                         // updated similarity scores
+                next_inserts, next_deletes,                          // updated insertion/deletion extensions
+                executor                                             // parallel execution within the diagonal
             );
 
             // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
@@ -1088,7 +1102,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
         }
 
         // Export the scalar before `free` call.
-        result_ref = diagonal_aligner.score();
+        result_ref = scorer.score();
         alloc_.deallocate((allocated_t *)buffer, buffer_length);
         return status_t::success_k;
     }
@@ -1106,10 +1120,9 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
  *  Allocates 2x rows of the DP matrix.
  */
 template <typename char_type_, score_like score_type_, substituter_like substituter_type_, typename allocator_type_,
-          sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
-          typename enable_>
+          sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>
 struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_costs_t, allocator_type_, objective_,
-                         locality_, capability_, enable_> {
+                         locality_, sz_cap_serial_k, void> {
 
     using char_t = char_type_;
     using score_t = score_type_;
@@ -1119,12 +1132,14 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
 
     static constexpr sz_similarity_objective_t objective_k = objective_;
     static constexpr sz_similarity_locality_t locality_k = locality_;
-    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
+    using walker_t = horizontal_walker<char_t, score_t, substituter_t, gap_costs_t, allocator_t, objective_k,
+                                       locality_k, capability_k, void>;
 
     using allocated_t = typename allocator_t::value_type;
     static_assert(sizeof(allocated_t) == sizeof(char), "Allocator must be byte-aligned");
-    using scorer_t = tile_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, gap_costs_t,
-                                 objective_k, locality_k, capability_k>;
+    using tile_scorer_t = tile_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, gap_costs_t,
+                                      objective_k, locality_k, capability_k>;
 
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -1160,7 +1175,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
 
         // Make sure the size relation between the strings is correct.
         char_t const *shorter = first.data(), *longer = second.data();
-        sz_size_t shorter_length = first.size(), longer_length = second.size();
+        size_t shorter_length = first.size(), longer_length = second.size();
         if (shorter_length > longer_length) {
             std::swap(shorter, longer);
             std::swap(shorter_length, longer_length);
@@ -1169,11 +1184,11 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
         // We are going to store 2 rows of the matrix. It will be either 2 rows of length `shorter_length + 1`
         // or 2 rows of length `longer_length + 1`, depending on our preference - either minimizing the memory
         // consumption or the inner loop performance.
-        sz_size_t const shorter_dim = shorter_length + 1;
-        sz_size_t const longer_dim = longer_length + 1;
+        size_t const shorter_dim = shorter_length + 1;
+        size_t const longer_dim = longer_length + 1;
 
         // We decide to use less memory!
-        sz_size_t const buffer_length = sizeof(score_t) * shorter_dim * 2;
+        size_t const buffer_length = sizeof(score_t) * shorter_dim * 2;
         score_t *const buffer = (score_t *)alloc_.allocate(buffer_length);
         if (!buffer) return status_t::bad_alloc_k;
 
@@ -1182,23 +1197,22 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
         score_t *current_scores = previous_scores + shorter_dim;
 
         // Initialize the first row:
-        scorer_t horizontal_aligner {substituter_, gap_costs_};
-        for (sz_size_t col_idx = 0; col_idx < shorter_dim; ++col_idx)
-            horizontal_aligner.init_score(previous_scores[col_idx], col_idx);
+        tile_scorer_t scorer {substituter_, gap_costs_};
+        for (size_t col_idx = 0; col_idx < shorter_dim; ++col_idx) scorer.init_score(previous_scores[col_idx], col_idx);
 
         // Progress through the matrix row-by-row:
-        for (sz_size_t row_idx = 1; row_idx < longer_dim; ++row_idx) {
+        for (size_t row_idx = 1; row_idx < longer_dim; ++row_idx) {
 
             // Don't forget to populate the first column of each row:
-            horizontal_aligner.init_score(current_scores[0], row_idx);
+            scorer.init_score(current_scores[0], row_idx);
 
-            horizontal_aligner(                                  //
+            scorer(                                              //
                 constant_iterator<char_t> {longer[row_idx - 1]}, // first sequence of characters
                 shorter,                                         // second sequence of characters
-                shorter_dim - 1,     // number of elements to compute with the `horizontal_aligner`
-                previous_scores,     // costs pre substitution
-                previous_scores + 1, // costs pre insertion
-                current_scores,      // costs pre deletion
+                shorter_dim - 1,                                 // number of elements to compute with the `scorer`
+                previous_scores,                                 // costs pre substitution
+                previous_scores + 1,                             // costs pre insertion
+                current_scores,                                  // costs pre deletion
                 current_scores + 1);
 
             // Reuse the memory.
@@ -1206,7 +1220,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
         }
 
         // Export the scalar before `free` call.
-        result_ref = horizontal_aligner.score();
+        result_ref = scorer.score();
         alloc_.deallocate((allocated_t *)buffer, buffer_length);
         return status_t::success_k;
     }
@@ -1221,10 +1235,9 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
  *  Allocates 2x rows of the DP matrix and 2x rows of 2x affine gaps matrices.
  */
 template <typename char_type_, score_like score_type_, substituter_like substituter_type_, typename allocator_type_,
-          sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
-          typename enable_>
+          sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>
 struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_costs_t, allocator_type_, objective_,
-                         locality_, capability_, enable_> {
+                         locality_, sz_cap_serial_k, void> {
 
     using char_t = char_type_;
     using score_t = score_type_;
@@ -1234,12 +1247,14 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
 
     static constexpr sz_similarity_objective_t objective_k = objective_;
     static constexpr sz_similarity_locality_t locality_k = locality_;
-    static constexpr sz_capability_t capability_k = capability_;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
+    using walker_t = horizontal_walker<char_t, score_t, substituter_t, gap_costs_t, allocator_t, objective_k,
+                                       locality_k, capability_k, void>;
 
     using allocated_t = typename allocator_t::value_type;
     static_assert(sizeof(allocated_t) == sizeof(char), "Allocator must be byte-aligned");
-    using scorer_t = tile_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, gap_costs_t,
-                                 objective_k, locality_k, capability_k>;
+    using tile_scorer_t = tile_scorer<constant_iterator<char_t>, char_t const *, score_t, substituter_t, gap_costs_t,
+                                      objective_k, locality_k, capability_k>;
 
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
@@ -1279,7 +1294,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
 
         // Make sure the size relation between the strings is correct.
         char_t const *shorter = first.data(), *longer = second.data();
-        sz_size_t shorter_length = first.size(), longer_length = second.size();
+        size_t shorter_length = first.size(), longer_length = second.size();
         if (shorter_length > longer_length) {
             std::swap(shorter, longer);
             std::swap(shorter_length, longer_length);
@@ -1288,11 +1303,11 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
         // We are going to store 2 rows of the matrix. It will be either 2 rows of length `shorter_length + 1`
         // or 2 rows of length `longer_length + 1`, depending on our preference - either minimizing the memory
         // consumption or the inner loop performance.
-        sz_size_t const shorter_dim = shorter_length + 1;
-        sz_size_t const longer_dim = longer_length + 1;
+        size_t const shorter_dim = shorter_length + 1;
+        size_t const longer_dim = longer_length + 1;
 
         // We decide to use less memory!
-        sz_size_t const buffer_length = sizeof(score_t) * shorter_dim * 2 * 3; // 2x rows of 3x matrices
+        size_t const buffer_length = sizeof(score_t) * shorter_dim * 2 * 3; // 2x rows of 3x matrices
         score_t *const buffer = (score_t *)alloc_.allocate(buffer_length);
         if (!buffer) return status_t::bad_alloc_k;
 
@@ -1305,29 +1320,29 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
         score_t *current_deletes = previous_deletes + shorter_dim;
 
         // Initialize the first row:
-        scorer_t horizontal_aligner {substituter_, gap_costs_};
+        tile_scorer_t scorer {substituter_, gap_costs_};
         previous_scores[0] = 0;
-        for (sz_size_t col_idx = 1; col_idx < shorter_dim; ++col_idx) {
-            horizontal_aligner.init_score(previous_scores[col_idx], col_idx);
-            horizontal_aligner.init_gap(previous_deletes[col_idx], col_idx);
+        for (size_t col_idx = 1; col_idx < shorter_dim; ++col_idx) {
+            scorer.init_score(previous_scores[col_idx], col_idx);
+            scorer.init_gap(previous_deletes[col_idx], col_idx);
         }
 
         // Progress through the matrix row-by-row:
-        for (sz_size_t row_idx = 1; row_idx < longer_dim; ++row_idx) {
+        for (size_t row_idx = 1; row_idx < longer_dim; ++row_idx) {
 
             // Don't forget to populate the first column of each row:
-            horizontal_aligner.init_score(current_scores[0], row_idx);
-            horizontal_aligner.init_gap(current_inserts[0], row_idx);
+            scorer.init_score(current_scores[0], row_idx);
+            scorer.init_gap(current_inserts[0], row_idx);
 
-            horizontal_aligner(                                  //
+            scorer(                                              //
                 constant_iterator<char_t> {longer[row_idx - 1]}, // first sequence of characters
                 shorter,                                         // second sequence of characters
-                shorter_dim - 1,                         // number of elements to compute with the `horizontal_aligner`
-                previous_scores,                         // costs pre substitution
-                current_scores, previous_scores + 1,     // costs pre insertion/deletion opening
-                current_inserts, previous_deletes + 1,   // costs pre insertion/deletion extension
-                current_scores + 1,                      // updated similarity scores
-                current_inserts + 1, current_deletes + 1 // updated insertion/deletion extensions
+                shorter_dim - 1,                                 // number of elements to compute with the `scorer`
+                previous_scores,                                 // costs pre substitution
+                current_scores, previous_scores + 1,             // costs pre insertion/deletion opening
+                current_inserts, previous_deletes + 1,           // costs pre insertion/deletion extension
+                current_scores + 1,                              // updated similarity scores
+                current_inserts + 1, current_deletes + 1         // updated insertion/deletion extensions
             );
 
             // Reuse the memory.
@@ -1337,7 +1352,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
         }
 
         // Export the scalar before `free` call.
-        result_ref = horizontal_aligner.score();
+        result_ref = scorer.score();
         alloc_.deallocate((allocated_t *)buffer, buffer_length);
         return status_t::success_k;
     }
@@ -1355,7 +1370,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
  *
  *  @tparam char_type_ Can be any POD integer type, but @b `char` and @b `sz_rune_t` are preferred.
  *  @tparam gap_costs_type_ Can be either `linear_gap_costs_t` or `affine_gap_costs_t`.
- *  @tparam capability_ Can be either `sz_cap_serial_k`, `sz_caps_sp_k`, `sz_caps_spi_k`, `sz_cap_cuda_k`.
+ *  @tparam capability_ Can be either `sz_cap_serial_k`, `sz_caps_si_k`, `sz_cap_cuda_k`.
  */
 template <                                               //
     typename char_type_ = char,                          //
@@ -1405,7 +1420,9 @@ struct levenshtein_distance {
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, sz_size_t &result_ref) const noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+                        executor_type_ &&executor = {}) const noexcept {
 
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
@@ -1413,11 +1430,11 @@ struct levenshtein_distance {
             if (gap_costs_.open == gap_costs_.extend) {
                 linear_gap_costs_t linear_gap(gap_costs_.open);
                 linearized_fallback_t linear_backend(substituter_, linear_gap, alloc_);
-                return linear_backend(first, second, result_ref);
+                return linear_backend(first, second, result_ref, executor);
             }
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
+        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, false>;
         similarity_memory_requirements_t requirements(                                 //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
@@ -1435,25 +1452,25 @@ struct levenshtein_distance {
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell == 1) {
             sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
-            status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first, second, result_u8);
+            status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first, second, result_u8, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u8;
         }
         else if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16 = std::numeric_limits<sz_u16_t>::max();
-            status_t status = diagonal_u16_t {substituter_, gap_costs_, alloc_}(first, second, result_u16);
+            status_t status = diagonal_u16_t {substituter_, gap_costs_, alloc_}(first, second, result_u16, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32 = std::numeric_limits<sz_u32_t>::max();
-            status_t status = diagonal_u32_t {substituter_, gap_costs_, alloc_}(first, second, result_u32);
+            status_t status = diagonal_u32_t {substituter_, gap_costs_, alloc_}(first, second, result_u32, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_u64_t result_u64 = std::numeric_limits<sz_u64_t>::max();
-            status_t status = diagonal_u64_t {substituter_, gap_costs_, alloc_}(first, second, result_u64);
+            status_t status = diagonal_u64_t {substituter_, gap_costs_, alloc_}(first, second, result_u64, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u64;
         }
@@ -1515,7 +1532,9 @@ struct levenshtein_distance_utf8 {
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, sz_size_t &result_ref) const noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+                        executor_type_ &&executor = {}) const noexcept {
 
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
@@ -1523,31 +1542,31 @@ struct levenshtein_distance_utf8 {
             if (gap_costs_.open == gap_costs_.extend) {
                 linear_gap_costs_t linear_gap(gap_costs_.open);
                 linearized_fallback_t linear_backend(substituter_, linear_gap, alloc_);
-                return linear_backend(first, second, result_ref);
+                return linear_backend(first, second, result_ref, executor);
             }
 
         // Check if the strings are entirely composed of ASCII characters,
         // and default to a simpler algorithm in that case.
         if (sz_isascii(first.data(), first.size()) && sz_isascii(second.data(), second.size()))
-            return ascii_fallback_t {substituter_, gap_costs_, alloc_}(first, second, result_ref);
+            return ascii_fallback_t {substituter_, gap_costs_, alloc_}(first, second, result_ref, executor);
 
         // Allocate some memory to expand UTF-8 strings into UTF-32.
-        sz_size_t const max_utf32_bytes = first.size() * 4 + second.size() * 4;
+        size_t const max_utf32_bytes = first.size() * 4 + second.size() * 4;
         sz_rune_t *const first_data_utf32 = (sz_rune_t *)alloc_.allocate(max_utf32_bytes);
         sz_rune_t *const second_data_utf32 = first_data_utf32 + first.size();
 
         // Export into UTF-32 buffer.
         sz_rune_length_t rune_length;
-        sz_size_t first_length_utf32 = 0, second_length_utf32 = 0;
-        for (sz_size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < first.size();
+        size_t first_length_utf32 = 0, second_length_utf32 = 0;
+        for (size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < first.size();
              progress_utf8 += rune_length, ++progress_utf32, ++first_length_utf32)
             sz_rune_parse(first.data() + progress_utf8, first_data_utf32 + progress_utf32, &rune_length);
-        for (sz_size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < second.size();
+        for (size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < second.size();
              progress_utf8 += rune_length, ++progress_utf32, ++second_length_utf32)
             sz_rune_parse(second.data() + progress_utf8, second_data_utf32 + progress_utf32, &rune_length);
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
+        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, false>;
         similarity_memory_requirements_t requirements(                                 //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
@@ -1568,25 +1587,29 @@ struct levenshtein_distance_utf8 {
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell == 1) {
             sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
-            status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8);
+            status_t status =
+                diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u8;
         }
         else if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16 = std::numeric_limits<sz_u16_t>::max();
-            status_t status = diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16);
+            status_t status =
+                diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32 = std::numeric_limits<sz_u32_t>::max();
-            status_t status = diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32);
+            status_t status =
+                diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_u64_t result_u64 = std::numeric_limits<sz_u64_t>::max();
-            status_t status = diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64);
+            status_t status =
+                diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u64;
         }
@@ -1643,10 +1666,12 @@ struct needleman_wunsch_score {
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref) const noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
+                        executor_type_ &&executor = {}) const noexcept {
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
+        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, true>;
         similarity_memory_requirements_t requirements(                                 //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
@@ -1664,17 +1689,17 @@ struct needleman_wunsch_score {
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell == 2) {
             sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
-            status = diagonal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16);
+            status = diagonal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16, executor);
             if (status == status_t::success_k) result_ref = result_i16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_i32_t result_i32 = std::numeric_limits<sz_i32_t>::min();
-            status = diagonal_i32_t {substituter_, gap_costs_, alloc_}(first, second, result_i32);
+            status = diagonal_i32_t {substituter_, gap_costs_, alloc_}(first, second, result_i32, executor);
             if (status == status_t::success_k) result_ref = result_i32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_i64_t result_i64 = std::numeric_limits<sz_i64_t>::min();
-            status = diagonal_i64_t {substituter_, gap_costs_, alloc_}(first, second, result_i64);
+            status = diagonal_i64_t {substituter_, gap_costs_, alloc_}(first, second, result_i64, executor);
             if (status == status_t::success_k) result_ref = result_i64;
         }
 
@@ -1730,17 +1755,19 @@ struct smith_waterman_score {
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref) const noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
+                        executor_type_ &&executor = {}) const noexcept {
 
-        sz_size_t const first_length = first.size();
-        sz_size_t const second_length = second.size();
+        size_t const first_length = first.size();
+        size_t const second_length = second.size();
         if (first_length == 0 || second_length == 0) {
             result_ref = 0;
             return status_t::success_k;
         }
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
+        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, true>;
         similarity_memory_requirements_t requirements(                                 //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
@@ -1758,19 +1785,19 @@ struct smith_waterman_score {
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         else if (requirements.bytes_per_cell == 2) {
             sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
-            status_t status = diagonal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16);
+            status_t status = diagonal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_i16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_i32_t result_i32 = std::numeric_limits<sz_i32_t>::min();
-            status_t status = diagonal_i32_t {substituter_, gap_costs_, alloc_}(first, second, result_i32);
+            status_t status = diagonal_i32_t {substituter_, gap_costs_, alloc_}(first, second, result_i32, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_i32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_i64_t result_i64 = std::numeric_limits<sz_i64_t>::min();
-            status_t status = diagonal_i64_t {substituter_, gap_costs_, alloc_}(first, second, result_i64);
+            status_t status = diagonal_i64_t {substituter_, gap_costs_, alloc_}(first, second, result_i64, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_i64;
         }
@@ -1789,24 +1816,24 @@ struct smith_waterman_score {
  *          For pairs of very large strings, all cores cooperate to compute one distance maximizing
  *          cache hits. For smaller strings, each core computes its own distance.
  */
-template <                                                       //
-    score_like score_type_,                                      //
-    typename core_per_input_type_,                               //
-    typename all_cores_per_input_type_,                          //
-    typename first_strings_type_, typename second_strings_type_, //
-    typename results_type_                                       //
+template <                                          //
+    score_like score_type_,                         //
+    typename scoring_type_,                         //
+    typename first_strings_type_,                   //
+    typename second_strings_type_,                  //
+    typename results_type_,                         //
+    executor_like executor_type_ = dummy_executor_t //
     >
-status_t _score_in_parallel(                         //
-    core_per_input_type_ &&core_per_input,           //
-    all_cores_per_input_type_ &&all_cores_per_input, //
-    first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, results_type_ &&results,
-    size_t substitute_magnitude, size_t gap_magnitude, cpu_specs_t specs = {}) noexcept {
+status_t _score_in_parallel(                                                                                       //
+    scoring_type_ &&scoring, first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
+    results_type_ &&results, size_t substitute_magnitude, size_t gap_magnitude,                                    //
+    executor_type_ &&executor = {}, cpu_specs_t specs = {}) noexcept {
 
     using score_t = score_type_;
     constexpr bool score_is_signed_k = std::is_signed_v<score_t>;
-    using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, score_is_signed_k>;
-    using char_t = typename core_per_input_type_::char_t;
-    using gap_costs_t = typename core_per_input_type_::gap_costs_t;
+    using similarity_memory_requirements_t = similarity_memory_requirements<size_t, score_is_signed_k>;
+    using char_t = typename scoring_type_::char_t;
+    using gap_costs_t = typename scoring_type_::gap_costs_t;
 
     auto first_size = first_strings.size();
     auto second_size = second_strings.size();
@@ -1817,9 +1844,8 @@ status_t _score_in_parallel(                         //
 
     // ? There may be a huge variance in the lengths of the strings,
     // ? so we need to use a dynamic schedule.
-#pragma omp parallel for schedule(dynamic, 1)
-    for (sz_size_t i = 0; i < first_size; ++i) {
-        if (error.load() != status_t::success_k) continue;
+    executor.eager(first_size, [&](size_t i) {
+        if (error.load() != status_t::success_k) return;
         score_t result = 0;
         auto const &first = first_strings[i];
         auto const &second = second_strings[i];
@@ -1830,14 +1856,14 @@ status_t _score_in_parallel(                         //
             gap_type<gap_costs_t>(), substitute_magnitude, gap_magnitude, //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
-        if (requirements.total >= specs.l1_bytes) continue;
-        status_t status = core_per_input({first.data(), first.size()}, {second.data(), second.size()}, result);
+        if (requirements.total >= specs.l1_bytes) return;
+        status_t status = scoring({first.data(), first.size()}, {second.data(), second.size()}, result);
         if (status == status_t::success_k) { results[i] = result; }
         else { error.store(status); }
-    }
+    });
 
     // Now handle the longer strings.
-    for (sz_size_t i = 0; i < first_size && error.load() == status_t::success_k; ++i) {
+    for (size_t i = 0; i < first_size && error.load() == status_t::success_k; ++i) {
         score_t result = 0;
         auto const &first = first_strings[i];
         auto const &second = second_strings[i];
@@ -1847,21 +1873,23 @@ status_t _score_in_parallel(                         //
             sizeof(char_t), SZ_MAX_REGISTER_WIDTH);
 
         if (requirements.total < specs.l1_bytes) continue;
-        status_t status = all_cores_per_input({first.data(), first.size()}, {second.data(), second.size()}, result);
+        status_t status = scoring({first.data(), first.size()}, {second.data(), second.size()}, result, executor);
         if (status == status_t::success_k) { results[i] = result; }
         else { error.store(status); }
     }
     return error.load();
 }
 
-template <                                                       //
-    score_like score_type_,                                      //
-    typename scoring_type_,                                      //
-    typename first_strings_type_, typename second_strings_type_, //
-    typename results_type_                                       //
+template <                         //
+    score_like score_type_,        //
+    typename scoring_type_,        //
+    typename first_strings_type_,  //
+    typename second_strings_type_, //
+    typename results_type_         //
     >
-status_t _score_sequentially(scoring_type_ &&scoring, first_strings_type_ const &first_strings,
-                             second_strings_type_ const &second_strings, results_type_ &&results) noexcept {
+status_t _score_sequentially(                                                                                      //
+    scoring_type_ &&scoring, first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
+    results_type_ &&results) noexcept {
 
     using score_t = score_type_;
 
@@ -1869,7 +1897,7 @@ status_t _score_sequentially(scoring_type_ &&scoring, first_strings_type_ const 
     auto second_size = second_strings.size();
     _sz_assert(first_size == second_size && "Expect equal number of strings");
 
-    for (sz_size_t i = 0; i < first_size; ++i) {
+    for (size_t i = 0; i < first_size; ++i) {
         score_t result = 0;
         auto const &first = first_strings[i];
         auto const &second = second_strings[i];
@@ -1899,10 +1927,7 @@ struct levenshtein_distances {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
-
-    using all_cores_per_input_t = levenshtein_distance<char_t, gap_costs_t, allocator_t, capability_k>;
-    using core_per_input_t = levenshtein_distance<char_t, gap_costs_t, allocator_t, capability_serialized_k>;
+    using scoring_t = levenshtein_distance<char_t, gap_costs_t, allocator_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -1915,18 +1940,21 @@ struct levenshtein_distances {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
+                        results_type_ &&results) const noexcept {
+        return _score_sequentially<size_t>(               //
+            scoring_t {substituter_, gap_costs_, alloc_}, //
+            first_strings, second_strings, std::forward<results_type_>(results));
+    }
 
-        if constexpr (capability_k & sz_cap_parallel_k)
-            return _score_in_parallel<sz_size_t>(                                    //
-                core_per_input_t {substituter_, gap_costs_, alloc_},                 //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_},            //
-                first_strings, second_strings, std::forward<results_type_>(results), //
-                substituter_.magnitude(), gap_costs_.magnitude(), specs);
-        else
-            return _score_sequentially<sz_size_t>(                        //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
-                first_strings, second_strings, std::forward<results_type_>(results));
+    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
+              executor_like executor_type_>
+    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
+                        results_type_ &&results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) const noexcept {
+        return _score_in_parallel<size_t>(                                       //
+            scoring_t {substituter_, gap_costs_, alloc_},                        //
+            first_strings, second_strings, std::forward<results_type_>(results), //
+            substituter_.magnitude(), gap_costs_.magnitude(), executor, specs);
     }
 };
 
@@ -1944,10 +1972,7 @@ struct levenshtein_distances_utf8 {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
-
-    using all_cores_per_input_t = levenshtein_distance_utf8<char_t, gap_costs_t, allocator_t, capability_k>;
-    using core_per_input_t = levenshtein_distance_utf8<char_t, gap_costs_t, allocator_t, capability_serialized_k>;
+    using scoring_t = levenshtein_distance_utf8<char_t, gap_costs_t, allocator_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -1960,18 +1985,21 @@ struct levenshtein_distances_utf8 {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
+                        results_type_ &&results) const noexcept {
+        return _score_sequentially<size_t>(               //
+            scoring_t {substituter_, gap_costs_, alloc_}, //
+            first_strings, second_strings, std::forward<results_type_>(results));
+    }
 
-        if constexpr (capability_k & sz_cap_parallel_k)
-            return _score_in_parallel<sz_size_t>(                                    //
-                core_per_input_t {substituter_, gap_costs_, alloc_},                 //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_},            //
-                first_strings, second_strings, std::forward<results_type_>(results), //
-                substituter_.magnitude(), gap_costs_.magnitude(), specs);
-        else
-            return _score_sequentially<sz_size_t>(                        //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
-                first_strings, second_strings, std::forward<results_type_>(results));
+    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
+              executor_like executor_type_>
+    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
+                        results_type_ &&results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) const noexcept {
+        return _score_in_parallel<size_t>(                                       //
+            scoring_t {substituter_, gap_costs_, alloc_},                        //
+            first_strings, second_strings, std::forward<results_type_>(results), //
+            substituter_.magnitude(), gap_costs_.magnitude(), executor, specs);
     }
 };
 
@@ -1991,11 +2019,7 @@ struct needleman_wunsch_scores {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
-
-    using all_cores_per_input_t = needleman_wunsch_score<char_t, substituter_t, gap_costs_t, allocator_t, capability_k>;
-    using core_per_input_t =
-        needleman_wunsch_score<char_t, substituter_t, gap_costs_t, allocator_t, capability_serialized_k>;
+    using scoring_t = needleman_wunsch_score<char_t, substituter_t, gap_costs_t, allocator_t, capability_k>;
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -2007,18 +2031,21 @@ struct needleman_wunsch_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
+                        results_type_ &&results) const noexcept {
+        return _score_sequentially<ssize_t>(              //
+            scoring_t {substituter_, gap_costs_, alloc_}, //
+            first_strings, second_strings, std::forward<results_type_>(results));
+    }
 
-        if constexpr (capability_k & sz_cap_parallel_k)
-            return _score_in_parallel<sz_ssize_t>(                                   //
-                core_per_input_t {substituter_, gap_costs_, alloc_},                 //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_},            //
-                first_strings, second_strings, std::forward<results_type_>(results), //
-                substituter_.magnitude(), gap_costs_.magnitude(), specs);
-        else
-            return _score_sequentially<sz_ssize_t>(                       //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
-                first_strings, second_strings, std::forward<results_type_>(results));
+    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
+              executor_like executor_type_>
+    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
+                        results_type_ &&results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) const noexcept {
+        return _score_in_parallel<ssize_t>(                                      //
+            scoring_t {substituter_, gap_costs_, alloc_},                        //
+            first_strings, second_strings, std::forward<results_type_>(results), //
+            substituter_.magnitude(), gap_costs_.magnitude(), executor, specs);
     }
 };
 
@@ -2038,11 +2065,7 @@ struct smith_waterman_scores {
     using allocator_t = allocator_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
-
-    using all_cores_per_input_t = smith_waterman_score<char_t, substituter_t, gap_costs_t, allocator_t, capability_k>;
-    using core_per_input_t =
-        smith_waterman_score<char_t, substituter_t, gap_costs_t, allocator_t, capability_serialized_k>;
+    using scoring_t = smith_waterman_score<char_t, substituter_t, gap_costs_t, allocator_t, capability_k>;
 
     substituter_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -2054,18 +2077,21 @@ struct smith_waterman_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                        results_type_ &&results, cpu_specs_t const &specs = {}) const noexcept {
+                        results_type_ &&results) const noexcept {
+        return _score_sequentially<ssize_t>(              //
+            scoring_t {substituter_, gap_costs_, alloc_}, //
+            first_strings, second_strings, std::forward<results_type_>(results));
+    }
 
-        if constexpr (capability_k & sz_cap_parallel_k)
-            return _score_in_parallel<sz_ssize_t>(                                   //
-                core_per_input_t {substituter_, gap_costs_, alloc_},                 //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_},            //
-                first_strings, second_strings, std::forward<results_type_>(results), //
-                substituter_.magnitude(), gap_costs_.magnitude(), specs);
-        else
-            return _score_sequentially<sz_ssize_t>(                       //
-                all_cores_per_input_t {substituter_, gap_costs_, alloc_}, //
-                first_strings, second_strings, std::forward<results_type_>(results));
+    template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
+              executor_like executor_type_>
+    status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
+                        results_type_ &&results, executor_type_ &&executor,
+                        cpu_specs_t const &specs = {}) const noexcept {
+        return _score_in_parallel<ssize_t>(                                      //
+            scoring_t {substituter_, gap_costs_, alloc_},                        //
+            first_strings, second_strings, std::forward<results_type_>(results), //
+            substituter_.magnitude(), gap_costs_.magnitude(), executor, specs);
     }
 };
 
@@ -2100,11 +2126,11 @@ struct error_costs_256x256_t {
         return result;
     }
 
-    constexpr sz_size_t magnitude() const noexcept {
-        sz_size_t max_magnitude = 0;
+    constexpr size_t magnitude() const noexcept {
+        size_t max_magnitude = 0;
         for (int i = 0; i != 256; ++i)
             for (int j = 0; j != 256; ++j) //
-                max_magnitude = std::max(max_magnitude, (sz_size_t)std::abs((int)cells[i][j]));
+                max_magnitude = std::max(max_magnitude, (size_t)std::abs((int)cells[i][j]));
         return max_magnitude;
     }
 };
@@ -2189,11 +2215,11 @@ struct error_costs_26x26ascii_t {
         return result;
     }
 
-    constexpr sz_size_t magnitude() const noexcept {
-        sz_size_t max_magnitude = 0;
+    constexpr size_t magnitude() const noexcept {
+        size_t max_magnitude = 0;
         for (int i = 0; i != 26; ++i)
             for (int j = 0; j != 26; ++j) //
-                max_magnitude = std::max(max_magnitude, (sz_size_t)std::abs((int)cells[i][j]));
+                max_magnitude = std::max(max_magnitude, (size_t)std::abs((int)cells[i][j]));
         return max_magnitude;
     }
 
@@ -2293,13 +2319,13 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
     : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer_t::tile_scorer; // Make the constructors visible
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    static constexpr sz_size_t step_k = 64;
+    static constexpr size_t step_k = 64;
 
     /**
      *  @brief  Computes one diagonal of the `u8` DM matrix for exactly 64 characters,
@@ -2340,7 +2366,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
      *          using unaligned loads and stores.
      */
     SZ_FORCE_INLINE void slice_upto64chars(                                          //
-        char const *first_reversed_slice, char const *second_slice, sz_size_t n,     //
+        char const *first_reversed_slice, char const *second_slice, size_t n,        //
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                     //
         sz_u512_vec_t match_cost_vec, sz_u512_vec_t mismatch_cost_vec,               //
@@ -2370,10 +2396,13 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         _mm512_mask_storeu_epi8(scores_new, load_mask, cell_score_vec.zmm);
     }
 
-    inline void operator()(                                                                 //
-        char const *first_reversed_slice, char const *second_slice, sz_size_t const length, //
-        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,        //
-        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) noexcept {
+    inline void operator()(                                                              //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,     //
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                         //
+        dummy_executor_t executor = {}) noexcept {
+
+        sz_unused(executor); // On such small inputs, we don't need to worry about parallelism.
 
         // Initialize constats:
         sz_u512_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec;
@@ -2405,10 +2434,10 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
             scores_pre_insertion += hbt.head, scores_pre_deletion += hbt.head, scores_new += hbt.head;
 
         // In this variant we will need at most 4 loops per diagonal:
-        for (sz_size_t progress = 0; progress < hbt.body; //
-             progress += step_k,                          //
+        for (size_t progress = 0; progress < hbt.body; //
+             progress += step_k,                       //
              first_reversed_slice += step_k, second_slice += step_k, scores_pre_substitution += step_k,
-                       scores_pre_insertion += step_k, scores_pre_deletion += step_k, scores_new += step_k)
+                    scores_pre_insertion += step_k, scores_pre_deletion += step_k, scores_new += step_k)
             slice_aligned64chars(                                                               //
                 first_reversed_slice, second_slice,                                             //
                 scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
@@ -2437,13 +2466,13 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
     : public tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substitution_costs_t,
                          linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer_t::tile_scorer; // Make the constructors visible
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    static constexpr sz_size_t step_k = 16;
+    static constexpr size_t step_k = 16;
 
     /**
      *  @brief  Computes one diagonal of the `u8` DM matrix for exactly 16 characters,
@@ -2482,11 +2511,11 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
      *  @brief  Computes one diagonal of the `u8` DM matrix for up to 16 characters,
      *          using unaligned loads and stores.
      */
-    SZ_FORCE_INLINE void slice_upto16chars(                                                //
-        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t n, //
-        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,       //
-        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                           //
-        sz_u128_vec_t match_cost_vec, sz_u128_vec_t mismatch_cost_vec,                     //
+    SZ_FORCE_INLINE void slice_upto16chars(                                             //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, size_t n, //
+        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,    //
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                        //
+        sz_u128_vec_t match_cost_vec, sz_u128_vec_t mismatch_cost_vec,                  //
         sz_u128_vec_t gap_cost_vec) const noexcept {
 
         __mmask16 load_mask, match_mask;
@@ -2512,10 +2541,13 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
         _mm_mask_storeu_epi8(scores_new, load_mask, cell_score_vec.xmm);
     }
 
-    inline void operator()(                                                                           //
-        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t const length, //
-        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,                  //
-        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new) noexcept {
+    inline void operator()(                                                                        //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, size_t const length, //
+        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,               //
+        sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                                   //
+        dummy_executor_t executor = {}) noexcept {
+
+        sz_unused(executor); // On such small inputs, we don't need to worry about parallelism.
 
         // Initialize constats:
         sz_u128_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec;
@@ -2547,10 +2579,10 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
             scores_pre_insertion += hbt.head, scores_pre_deletion += hbt.head, scores_new += hbt.head;
 
         // In this variant we will need at most (256 / 16) = 16 loops per diagonal.
-        for (sz_size_t progress = 0; progress < hbt.body; //
-             progress += step_k,                          //
+        for (size_t progress = 0; progress < hbt.body; //
+             progress += step_k,                       //
              first_reversed_slice += step_k, second_slice += step_k, scores_pre_substitution += step_k,
-                       scores_pre_insertion += step_k, scores_pre_deletion += step_k, scores_new += step_k)
+                    scores_pre_insertion += step_k, scores_pre_deletion += step_k, scores_new += step_k)
             slice_aligned16chars(                                                               //
                 first_reversed_slice, second_slice,                                             //
                 scores_pre_substitution, scores_pre_insertion, scores_pre_deletion, scores_new, //
@@ -2579,13 +2611,13 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer_t::tile_scorer; // Make the constructors visible
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    static constexpr sz_size_t step_k = 32;
+    static constexpr size_t step_k = 32;
 
     /**
      *  @brief  Computes one diagonal of the `u16` DM matrix for exactly 16 characters,
@@ -2621,7 +2653,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     }
 
     SZ_FORCE_INLINE void slice_upto32chars(                                            //
-        char const *first_reversed_slice, char const *second_slice, sz_size_t n,       //
+        char const *first_reversed_slice, char const *second_slice, size_t n,          //
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new,                     //
         sz_u512_vec_t match_cost_vec, sz_u512_vec_t mismatch_cost_vec, sz_u512_vec_t gap_cost_vec) const noexcept {
@@ -2650,10 +2682,12 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         _mm512_mask_storeu_epi16(scores_new, load_mask, cell_score_vec.zmm);
     }
 
-    inline void operator()(                                                                 //
-        char const *first_reversed_slice, char const *second_slice, sz_size_t const length, //
-        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,      //
-        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    inline void operator()(                                                              //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,   //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new,                       //
+        executor_type_ &&executor = {}) noexcept {
 
         // Initialize constats:
         sz_u512_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec;
@@ -2691,12 +2725,14 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
                 match_cost_vec, mismatch_cost_vec, gap_cost_vec);
 
         // In this variant we will need at most (64 * 1024 / 32) = 2048 loops per diagonal.
-#pragma omp parallel for if (capability_k & sz_cap_parallel_k)
-        for (sz_size_t progress = 0; progress < hbt.body; progress += step_k)
+        size_t const body_pages = hbt.body / step_k;
+        executor.slice(body_pages, [&](size_t const page) {
+            size_t const progress = page * step_k;
             slice_aligned32chars(                                                                             //
                 first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress, //
                 scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,       //
                 match_cost_vec, mismatch_cost_vec, gap_cost_vec);
+        });
 
         // The last element of the last chunk is the result of the global alignment.
         if (length == 1) this->last_score_ = scores_new[0];
@@ -2714,13 +2750,13 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
     : public tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_substitution_costs_t,
                          linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer_t::tile_scorer; // Make the constructors visible
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    static constexpr sz_size_t step_k = 16;
+    static constexpr size_t step_k = 16;
 
     /**
      *  @brief  Computes one diagonal of the `u16` DM matrix for exactly 16 characters,
@@ -2759,10 +2795,10 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
      *  @brief  Computes one diagonal of the `u16` DM matrix for up to 16 characters,
      *          using unaligned loads and stores.
      */
-    SZ_FORCE_INLINE void slice_upto16chars(                                                //
-        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t n, //
-        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,     //
-        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new,                         //
+    SZ_FORCE_INLINE void slice_upto16chars(                                             //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, size_t n, //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,  //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new,                      //
         sz_u256_vec_t match_cost_vec, sz_u256_vec_t mismatch_cost_vec, sz_u256_vec_t gap_cost_vec) const noexcept {
 
         __mmask16 load_mask, match_mask;
@@ -2789,10 +2825,12 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
         _mm256_mask_storeu_epi16(scores_new, load_mask, cell_score_vec.ymm);
     }
 
-    inline void operator()(                                                                           //
-        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, sz_size_t const length, //
-        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,                //
-        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    inline void operator()(                                                                        //
+        sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, size_t const length, //
+        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,             //
+        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new,                                 //
+        executor_type_ &&executor = {}) noexcept {
 
         // Initialize constats:
         sz_u256_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec;
@@ -2829,13 +2867,15 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
                 scores_pre_deletion + hbt.body, scores_new + hbt.body,               //
                 match_cost_vec, mismatch_cost_vec, gap_cost_vec);
 
-// In this variant we will need at most (64 * 1024 / 16) = 4096 loops per diagonal.
-#pragma omp parallel for if (capability_k & sz_cap_parallel_k)
-        for (sz_size_t progress = 0; progress < hbt.body; progress += step_k)
+        // In this variant we will need at most (64 * 1024 / 16) = 4096 loops per diagonal.
+        size_t const body_pages = hbt.body / step_k;
+        executor.slice(body_pages, [&](size_t const page) {
+            size_t const progress = page * step_k;
             slice_aligned16chars(                                                                             //
                 first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress, //
                 scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,       //
                 match_cost_vec, mismatch_cost_vec, gap_cost_vec);
+        });
 
         // The last element of the last chunk is the result of the global alignment.
         if (length == 1) this->last_score_ = scores_new[0];
@@ -2853,13 +2893,13 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
     : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer_t::tile_scorer; // Make the constructors visible
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = capability_;
 
-    static constexpr sz_size_t step_k = 16;
+    static constexpr size_t step_k = 16;
 
     /**
      *  @brief  Computes one diagonal of the `u32` DM matrix for exactly 16 characters,
@@ -2899,7 +2939,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
      *          using unaligned loads and stores.
      */
     SZ_FORCE_INLINE void slice_upto16chars(                                            //
-        char const *first_reversed_slice, char const *second_slice, sz_size_t n,       //
+        char const *first_reversed_slice, char const *second_slice, size_t n,          //
         sz_u32_t const *scores_pre_substitution, sz_u32_t const *scores_pre_insertion, //
         sz_u32_t const *scores_pre_deletion, sz_u32_t *scores_new,                     //
         sz_u512_vec_t match_cost_vec, sz_u512_vec_t mismatch_cost_vec, sz_u512_vec_t gap_cost_vec) const noexcept {
@@ -2928,10 +2968,12 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
         _mm512_mask_storeu_epi32(scores_new, load_mask, cell_score_vec.zmm);
     }
 
-    inline void operator()(                                                                 //
-        char const *first_reversed_slice, char const *second_slice, sz_size_t const length, //
-        sz_u32_t const *scores_pre_substitution, sz_u32_t const *scores_pre_insertion,      //
-        sz_u32_t const *scores_pre_deletion, sz_u32_t *scores_new) noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    inline void operator()(                                                              //
+        char const *first_reversed_slice, char const *second_slice, size_t const length, //
+        sz_u32_t const *scores_pre_substitution, sz_u32_t const *scores_pre_insertion,   //
+        sz_u32_t const *scores_pre_deletion, sz_u32_t *scores_new,                       //
+        executor_type_ &&executor = {}) noexcept {
 
         // Initialize constats:
         sz_u512_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec;
@@ -2968,12 +3010,14 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
                 scores_pre_deletion + hbt.body, scores_new + hbt.body,               //
                 match_cost_vec, mismatch_cost_vec, gap_cost_vec);
 
-#pragma omp parallel for if (capability_k & sz_cap_parallel_k)
-        for (sz_size_t progress = 0; progress < hbt.body; progress += step_k)
+        size_t const body_pages = hbt.body / step_k;
+        executor.slice(body_pages, [&](size_t const page) {
+            size_t const progress = page * step_k;
             slice_aligned16chars(                                                                             //
                 first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress, //
                 scores_pre_insertion + progress, scores_pre_deletion + progress, scores_new + progress,       //
                 match_cost_vec, mismatch_cost_vec, gap_cost_vec);
+        });
 
         // The last element of the last chunk is the result of the global alignment.
         if (length == 1) this->last_score_ = scores_new[0];
@@ -2994,11 +3038,10 @@ struct levenshtein_distance<char, linear_gap_costs_t, allocator_type_, capabilit
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
     using diagonal_u8_t =                                                                               //
         diagonal_walker<char_t, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t, allocator_t, //
-                        sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
+                        sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
     using diagonal_u16_t =                                                                               //
         diagonal_walker<char_t, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t, allocator_t, //
                         sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
@@ -3023,10 +3066,12 @@ struct levenshtein_distance<char, linear_gap_costs_t, allocator_type_, capabilit
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, sz_size_t &result_ref) const noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+                        executor_type_ &&executor = {}) const noexcept {
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
+        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, false>;
         similarity_memory_requirements_t requirements(                                 //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
@@ -3036,25 +3081,25 @@ struct levenshtein_distance<char, linear_gap_costs_t, allocator_type_, capabilit
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         if (requirements.bytes_per_cell == 1) {
             sz_u8_t result_u8;
-            status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first, second, result_u8);
+            status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first, second, result_u8 /* executor */);
             if (status != status_t::success_k) return status;
             result_ref = result_u8;
         }
         else if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16;
-            status_t status = diagonal_u16_t {substituter_, gap_costs_, alloc_}(first, second, result_u16);
+            status_t status = diagonal_u16_t {substituter_, gap_costs_, alloc_}(first, second, result_u16, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32;
-            status_t status = diagonal_u32_t {substituter_, gap_costs_, alloc_}(first, second, result_u32);
+            status_t status = diagonal_u32_t {substituter_, gap_costs_, alloc_}(first, second, result_u32, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_u64_t result_u64;
-            status_t status = diagonal_u64_t {substituter_, gap_costs_, alloc_}(first, second, result_u64);
+            status_t status = diagonal_u64_t {substituter_, gap_costs_, alloc_}(first, second, result_u64, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u64;
         }
@@ -3077,11 +3122,10 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
     using diagonal_u8_t =                                                                                  //
         diagonal_walker<sz_rune_t, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t, allocator_t, //
-                        sz_minimize_distance_k, sz_similarity_global_k, capability_serialized_k>;
+                        sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
     using diagonal_u16_t =                                                                                  //
         diagonal_walker<sz_rune_t, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t, allocator_t, //
                         sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
@@ -3108,30 +3152,32 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
-    status_t operator()(span<char_t const> first, span<char_t const> second, sz_size_t &result_ref) const noexcept {
+    template <executor_like executor_type_ = dummy_executor_t>
+    status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
+                        executor_type_ &&executor = {}) const noexcept {
 
         // Check if the strings are entirely composed of ASCII characters,
         // and default to a simpler algorithm in that case.
         if (sz_isascii(first.data(), first.size()) && sz_isascii(second.data(), second.size()))
-            return ascii_fallback_t {substituter_, gap_costs_, alloc_}(first, second, result_ref);
+            return ascii_fallback_t {substituter_, gap_costs_, alloc_}(first, second, result_ref, executor);
 
         // Allocate some memory to expand UTF-8 strings into UTF-32.
-        sz_size_t const max_utf32_bytes = first.size() * 4 + second.size() * 4;
+        size_t const max_utf32_bytes = first.size() * 4 + second.size() * 4;
         sz_rune_t *const first_data_utf32 = (sz_rune_t *)alloc_.allocate(max_utf32_bytes);
         sz_rune_t *const second_data_utf32 = first_data_utf32 + first.size();
 
         // Export into UTF-32 buffer.
         sz_rune_length_t rune_length;
-        sz_size_t first_length_utf32 = 0, second_length_utf32 = 0;
-        for (sz_size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < first.size();
+        size_t first_length_utf32 = 0, second_length_utf32 = 0;
+        for (size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < first.size();
              progress_utf8 += rune_length, ++progress_utf32, ++first_length_utf32)
             sz_rune_parse(first.data() + progress_utf8, first_data_utf32 + progress_utf32, &rune_length);
-        for (sz_size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < second.size();
+        for (size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < second.size();
              progress_utf8 += rune_length, ++progress_utf32, ++second_length_utf32)
             sz_rune_parse(second.data() + progress_utf8, second_data_utf32 + progress_utf32, &rune_length);
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
+        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, false>;
         similarity_memory_requirements_t requirements(                                 //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
@@ -3143,25 +3189,29 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
         span<sz_rune_t const> const second_utf32 {second_data_utf32, second_length_utf32};
         if (requirements.bytes_per_cell == 1) {
             sz_u8_t result_u8;
-            status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8);
+            status_t status =
+                diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8 /* executor */);
             if (status != status_t::success_k) return status;
             result_ref = result_u8;
         }
         else if (requirements.bytes_per_cell == 2) {
             sz_u16_t result_u16;
-            status_t status = diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16);
+            status_t status =
+                diagonal_u16_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u16, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u16;
         }
         else if (requirements.bytes_per_cell == 4) {
             sz_u32_t result_u32;
-            status_t status = diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32);
+            status_t status =
+                diagonal_u32_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u32, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u32;
         }
         else if (requirements.bytes_per_cell == 8) {
             sz_u64_t result_u64;
-            status_t status = diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64);
+            status_t status =
+                diagonal_u64_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u64, executor);
             if (status != status_t::success_k) return status;
             result_ref = result_u64;
         }
@@ -3228,8 +3278,7 @@ struct lookup_in256bytes_ice_t {
 };
 
 /**
- *  @brief  Helper object for Ice Lake CPUs. It's designed for horizontal layout "walkers", operating over 16-bit
- * costs.
+ *  @brief  Helper object for Ice Lake CPUs, designed for horizontal layout "walkers", operating over 16-bit costs.
  *
  *  This is a common abstraction for both:
  *  - Local SW and global NW alignment.
@@ -3253,7 +3302,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
     lookup_in256bytes_ice_t lookup_;
 
     void operator()(                                                                   //
-        constant_iterator<char> first_char, char const *second_slice, sz_size_t n,     //
+        constant_iterator<char> first_char, char const *second_slice, size_t n,        //
         sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
         sz_i16_t const *scores_pre_deletion, sz_i16_t *scores_new) noexcept {
 
@@ -3263,13 +3312,13 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
         lookup_.reload(substitutions_row);
 
         // Progress through the row 64 characters at a time.
-        sz_size_t const count_slices = n / 64;
+        size_t const count_slices = n / 64;
 #pragma omp parallel for if (capability_k & sz_cap_parallel_k)
-        for (sz_size_t idx_slice = 0; idx_slice != count_slices; ++idx_slice)
+        for (size_t idx_slice = 0; idx_slice != count_slices; ++idx_slice)
             slice_64chars(second_slice, idx_slice * 64, gap, scores_pre_substitution, scores_pre_insertion, scores_new);
 
         // Handle the tail with a less efficient kernel - at most 2 iterations of the following loop:
-        for (sz_size_t idx_half_slice = count_slices * 2; idx_half_slice * 32 < n; ++idx_half_slice)
+        for (size_t idx_half_slice = count_slices * 2; idx_half_slice * 32 < n; ++idx_half_slice)
             slice_upto32chars(second_slice, idx_half_slice * 32, n, gap, scores_pre_substitution, scores_pre_insertion,
                               scores_new);
 
@@ -3286,7 +3335,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
         this->last_score_ = last_in_row;
     }
 
-    void slice_64chars(char const *second_slice, sz_size_t i, sz_i16_t gap,                           //
+    void slice_64chars(char const *second_slice, size_t i, sz_i16_t gap,                              //
                        sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
                        sz_i16_t *scores_new) const noexcept {
 
@@ -3334,7 +3383,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
         _mm512_storeu_epi16(scores_new + i + 32, cell_score_vecs[1].zmm);
     }
 
-    void slice_upto32chars(char const *second_slice, sz_size_t i, sz_size_t n, sz_i16_t gap,              //
+    void slice_upto32chars(char const *second_slice, size_t i, size_t n, sz_i16_t gap,                    //
                            sz_i16_t const *scores_pre_substitution, sz_i16_t const *scores_pre_insertion, //
                            sz_i16_t *scores_new) const noexcept {
 
@@ -3372,14 +3421,29 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
     }
 };
 
+/** @brief Redirects the Ice Lake template specialization to the serial version. */
+template <typename char_type_, score_like score_type_, substituter_like substituter_type_,
+          gap_costs_like gap_costs_type_, typename allocator_type_, sz_similarity_objective_t objective_,
+          sz_similarity_locality_t locality_>
+struct horizontal_walker<char_type_, score_type_, substituter_type_, gap_costs_type_, allocator_type_, objective_,
+                         locality_, sz_caps_si_k, void>
+    : public horizontal_walker<char_type_, score_type_, substituter_type_, gap_costs_type_, allocator_type_, objective_,
+                               locality_, sz_cap_serial_k, void> {
+
+    using base_t = horizontal_walker<char_type_, score_type_, substituter_type_, gap_costs_type_, allocator_type_,
+                                     objective_, locality_, sz_cap_serial_k, void>;
+
+    using base_t::horizontal_walker;
+    using base_t::operator();
+};
+
 /**
- *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the Ice Lake (+OpenMP)
- * backend.
+ *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the Ice Lake backend.
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
 template <typename allocator_type_, sz_capability_t capability_>
 struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, allocator_type_, capability_,
-                              std::enable_if_t<capability_ & sz_cap_ice_k>> {
+                              std::enable_if_t<(capability_ & sz_cap_ice_k) && !(capability_ & sz_cap_parallel_k)>> {
 
     using char_t = char;
     using substituter_t = error_costs_256x256_t;
@@ -3388,11 +3452,10 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, a
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
     using horizontal_i16_t =                                                         //
         horizontal_walker<char_t, sz_i16_t, substituter_t, gap_costs_t, allocator_t, //
-                          sz_maximize_score_k, sz_similarity_global_k, capability_serialized_k>;
+                          sz_maximize_score_k, sz_similarity_global_k, capability_k>;
     using horizontal_i32_t =                                                         //
         horizontal_walker<char_t, sz_i32_t, substituter_t, gap_costs_t, allocator_t, //
                           sz_maximize_score_k, sz_similarity_global_k, capability_wout_simd_k>;
@@ -3416,7 +3479,7 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, a
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref) const noexcept {
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
+        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, true>;
         similarity_memory_requirements_t requirements(                                 //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
@@ -3448,13 +3511,12 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, a
 };
 
 /**
- *  @brief  Computes the @b byte-level Smith-Waterman score between two strings using the Ice Lake (+OpenMP)
- * backend.
+ *  @brief  Computes the @b byte-level Smith-Waterman score between two strings using the Ice Lake backend.
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
 template <typename allocator_type_, sz_capability_t capability_>
 struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, allocator_type_, capability_,
-                            std::enable_if_t<capability_ & sz_cap_ice_k>> {
+                            std::enable_if_t<(capability_ & sz_cap_ice_k) && !(capability_ & sz_cap_parallel_k)>> {
 
     using char_t = char;
     using substituter_t = error_costs_256x256_t;
@@ -3463,11 +3525,10 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
-    static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
 
     using horizontal_i16_t =                                                                //
         horizontal_walker<char_t, sz_i16_t, substituter_t, linear_gap_costs_t, allocator_t, //
-                          sz_maximize_score_k, sz_similarity_local_k, capability_serialized_k>;
+                          sz_maximize_score_k, sz_similarity_local_k, capability_k>;
     using horizontal_i32_t =                                                                //
         horizontal_walker<char_t, sz_i32_t, substituter_t, linear_gap_costs_t, allocator_t, //
                           sz_maximize_score_k, sz_similarity_local_k, capability_wout_simd_k>;
@@ -3491,7 +3552,7 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref) const noexcept {
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
-        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
+        using similarity_memory_requirements_t = similarity_memory_requirements<size_t, true>;
         similarity_memory_requirements_t requirements(                                 //
             first.size(), second.size(),                                               //
             gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
@@ -3530,4 +3591,4 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
 } // namespace stringzilla
 } // namespace ashvardanian
 
-#endif // STRINGZILLA_SIMILARITY_HPP_
+#endif // STRINGCUZILLA_SIMILARITY_HPP_
