@@ -315,8 +315,13 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, sz_u8_t const *scores_pre_deletion,
         sz_u8_t *scores_new) noexcept {
 
+        sz_u8_t const match_cost = this->substituter_.match;
+        sz_u8_t const mismatch_cost = this->substituter_.mismatch;
         sz_u8_t const gap_cost = this->gap_costs_.open_or_extend;
-        _sz_assert(gap_cost == 1);
+        sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
+        match_cost_vec.u32 = match_cost * 0x01010101u;       // ! 4x `u8` match costs
+        mismatch_cost_vec.u32 = mismatch_cost * 0x01010101u; // ! 4x `u8` mismatch costs
+        gap_cost_vec.u32 = gap_cost * 0x01010101u;           // ! 4x `u8` gap costs
 
         // The hardest part of this kernel is dealing with unaligned loads!
         // We want to minimize single-byte processing in favor of 4-byte SIMD loads and min/max operations.
@@ -338,12 +343,13 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
             first_vec.u32 = __nv_bswap32(first_vec.u32); // ! reverse the order of bytes in the first vector
 
             // Equality comparison will output 0xFF for each matching byte.
-            // Adding one to it will make it 0x00 for each matching byte, and 0x01 for each non-matching byte.
-            // Perfect for substitution cost!
-            cost_of_substitution_vec.u32 = __vadd4(__vcmpeq4(first_vec.u32, second_vec.u32), 0x01010101);
+            equality_vec.u32 = __vcmpeq4(first_vec.u32, second_vec.u32);
+            cost_of_substitution_vec.u32 =                //
+                (equality_vec.u32 & match_cost_vec.u32) + //
+                (~equality_vec.u32 & mismatch_cost_vec.u32);
             if_substitution_vec.u32 = __vaddus4(pre_substitution_vec.u32, cost_of_substitution_vec.u32);
             if_deletion_or_insertion_vec.u32 =
-                __vaddus4(__vminu4(pre_deletion_vec.u32, pre_insertion_vec.u32), 0x01010101);
+                __vaddus4(__vminu4(pre_deletion_vec.u32, pre_insertion_vec.u32), gap_cost_vec.u32);
             cell_score_vec.u32 = __vminu4(if_deletion_or_insertion_vec.u32, if_substitution_vec.u32);
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -371,8 +377,13 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
 
+        sz_u16_t const match_cost = this->substituter_.match;
+        sz_u16_t const mismatch_cost = this->substituter_.mismatch;
         sz_u16_t const gap_cost = this->gap_costs_.open_or_extend;
-        _sz_assert(gap_cost == 1);
+        sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
+        match_cost_vec.u32 = match_cost * 0x00010001;       // ! 2x `u16` match costs
+        mismatch_cost_vec.u32 = mismatch_cost * 0x00010001; // ! 2x `u16` mismatch costs
+        gap_cost_vec.u32 = gap_cost * 0x00010001;           // ! 2x `u16` gap costs
 
         // The hardest part of this kernel is dealing with unaligned loads!
         // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
@@ -395,12 +406,13 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
             second_vec.u16s[1] = second_slice[i + 1];
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
-            // Adding one to it will make it 0x0000 for each matching byte-pair,
-            // and 0x0001 for each non-matching byte-pair. Perfect for substitution cost!
-            cost_of_substitution_vec.u32 = __vadd2(__vcmpeq2(first_vec.u32, second_vec.u32), 0x00010001);
+            equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
+            cost_of_substitution_vec.u32 =                //
+                (equality_vec.u32 & match_cost_vec.u32) + //
+                (~equality_vec.u32 & mismatch_cost_vec.u32);
             if_substitution_vec.u32 = __vaddus2(pre_substitution_vec.u32, cost_of_substitution_vec.u32);
             if_deletion_or_insertion_vec.u32 =
-                __vaddus2(__vminu2(pre_deletion_vec.u32, pre_insertion_vec.u32), 0x00010001);
+                __vaddus2(__vminu2(pre_deletion_vec.u32, pre_insertion_vec.u32), gap_cost_vec.u32);
             cell_score_vec.u32 = __vminu2(if_deletion_or_insertion_vec.u32, if_substitution_vec.u32);
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
