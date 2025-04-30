@@ -183,7 +183,7 @@ struct similarity_memory_requirements {
     static constexpr bool is_signed_k = is_signed_;
 
     size_t max_diagonal_length = 0;
-    size_t bytes_per_cell = 0;
+    bytes_per_cell_t bytes_per_cell = zero_bytes_per_cell_k;
     size_t bytes_per_diagonal = 0;
     size_t total = 0;
 
@@ -206,8 +206,17 @@ struct similarity_memory_requirements {
         size_t bytes_per_char,                             //
         size_t register_width) noexcept {
 
-        // Each diagonal in the DP matrix is only by 1 longer than the shorter string.
+        // If any of the strings is empty, we don't need any memory to perform the similarity scoring.
         size_t shorter_length = sz_min_of_two(first_length, second_length);
+        if (shorter_length == 0) {
+            this->max_diagonal_length = 0;
+            this->bytes_per_cell = zero_bytes_per_cell_k;
+            this->bytes_per_diagonal = 0;
+            this->total = 0;
+            return;
+        }
+
+        // Each diagonal in the DP matrix is only by 1 longer than the shorter string.
         size_t longer_length = sz_max_of_two(first_length, second_length);
         this->max_diagonal_length = shorter_length + 1;
 
@@ -217,16 +226,16 @@ struct similarity_memory_requirements {
         size_t max_cell_value = (longer_length + 1) * magnitude;
         if constexpr (!is_signed_k)
             this->bytes_per_cell = //
-                max_cell_value < 256          ? 1
-                : max_cell_value < 65536      ? 2
-                : max_cell_value < 4294967296 ? 4
-                                              : 8;
+                max_cell_value < 256          ? one_byte_per_cell_k
+                : max_cell_value < 65536      ? two_bytes_per_cell_k
+                : max_cell_value < 4294967296 ? four_bytes_per_cell_k
+                                              : eight_bytes_per_cell_k;
         else
             this->bytes_per_cell = //
-                max_cell_value < 127          ? 1
-                : max_cell_value < 32767      ? 2
-                : max_cell_value < 2147483647 ? 4
-                                              : 8;
+                max_cell_value < 127          ? one_byte_per_cell_k
+                : max_cell_value < 32767      ? two_bytes_per_cell_k
+                : max_cell_value < 2147483647 ? four_bytes_per_cell_k
+                                              : eight_bytes_per_cell_k;
 
         // For each string we need to copy its contents, and allocate 3 bands proportional to the length
         // of the shorter string with each cell being big enough to hold the length of the longer one.

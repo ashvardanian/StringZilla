@@ -13,6 +13,14 @@
 namespace ashvardanian {
 namespace stringzilla {
 
+enum bytes_per_cell_t : uint {
+    zero_bytes_per_cell_k = 0,
+    one_byte_per_cell_k = 1,
+    two_bytes_per_cell_k = 2,
+    four_bytes_per_cell_k = 4,
+    eight_bytes_per_cell_k = 8,
+};
+
 struct dummy_executor_t {
 
     /**
