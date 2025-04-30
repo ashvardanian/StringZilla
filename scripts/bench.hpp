@@ -740,7 +740,7 @@ bench_result_t bench_unary(    //
 
     // For profiling, we will first run the benchmark just once to get a rough estimate of the time.
     // But then we will repeat it in an unrolled fashion for a more accurate measurement.
-    result.profiled_seconds += seconds_per_call([&] {
+    auto const first_call_duration = seconds_per_call([&] {
         std::uint64_t cpu_cycles_at_start = cpu_cycle_counter();
         call_result_t const call_result = callable((std::size_t)0); //? Use the first token
         std::uint64_t cpu_cycles_at_end = cpu_cycle_counter();
@@ -752,10 +752,11 @@ bench_result_t bench_unary(    //
         result.profiled_cpu_cycles += cpu_cycles_at_end - cpu_cycles_at_start;
         result.cpu_cycles_histogram[cpu_cycles_at_end - cpu_cycles_at_start] += 1;
     });
-    if (result.profiled_seconds >= env.benchmark_seconds) return result;
+    result.profiled_seconds = first_call_duration;
+    if (first_call_duration >= env.benchmark_seconds) return result;
 
     // Repeat the benchmarks in unrolled batches until the time limit is reached.
-    for (auto running_seconds : repeat_up_to(env.benchmark_seconds - result.profiled_seconds)) {
+    for (auto running_seconds : repeat_up_to(env.benchmark_seconds - first_call_duration)) {
         std::uint64_t t0 = cpu_cycle_counter();
         call_result_t r0 = callable((result.profiled_calls + 0) & lookup_mask);
         std::uint64_t t1 = cpu_cycle_counter();
@@ -783,6 +784,7 @@ bench_result_t bench_unary(    //
         result.cpu_cycles_histogram[t4 - t3] += 1;
     }
 
+    result.profiled_seconds += first_call_duration;
     return result;
 }
 
