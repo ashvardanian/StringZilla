@@ -6,6 +6,8 @@
 #ifndef STRINGCUZILLA_TYPES_HPP_
 #define STRINGCUZILLA_TYPES_HPP_
 
+#include <thread> // `std::thread::hardware_concurrency`
+
 #include "stringzilla/types.hpp"
 
 namespace ashvardanian {
@@ -19,7 +21,7 @@ struct dummy_executor_t {
      *          the same thread.
      */
     template <typename function_type_>
-    inline void slice(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each(size_t n, function_type_ &&function) const noexcept {
         for (size_t i = 0; i < n; ++i) function(i);
     }
 
@@ -30,7 +32,7 @@ struct dummy_executor_t {
      *          handled by a particular thread.
      */
     template <typename function_type_>
-    inline void slice_range(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each_range(size_t n, function_type_ &&function) const noexcept {
         function(0, n);
     }
 
@@ -53,7 +55,7 @@ struct openmp_executor_t {
      *          the same thread.
      */
     template <typename function_type_>
-    inline void slice(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each(size_t n, function_type_ &&function) const noexcept {
 #pragma omp parallel for
         for (size_t i = 0; i < n; ++i) function(i);
     }
@@ -65,7 +67,7 @@ struct openmp_executor_t {
      *          handled by a particular thread.
      */
     template <typename function_type_>
-    inline void slice_range(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each_range(size_t n, function_type_ &&function) const noexcept {
         // OpenMP won't use more threads than the number of available cores
         // and by using STL to query that number, we avoid the need to link
         // against OpenMP libraries.
@@ -94,10 +96,10 @@ struct openmp_executor_t {
 template <typename executor_type_>
 concept executor_like = requires(executor_type_ executor) {
     {
-        executor.slice(0u, [](size_t) {})
+        executor.for_each(0u, [](size_t) {})
     } -> std::same_as<void>;
     {
-        executor.slice_range(0u, [](size_t, size_t) {})
+        executor.for_each_range(0u, [](size_t, size_t) {})
     } -> std::same_as<void>;
     {
         executor.eager(0u, [](size_t) {})
