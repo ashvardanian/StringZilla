@@ -54,15 +54,16 @@ namespace stringzilla {
  *  @brief GPU adaptation of the `scorer` on CUDA, avoiding warp-level shuffles and DPX.
  *  @note Uses 32-bit `uint` counter to iterate through the string slices, so it can't be over 4 billion characters.
  */
-template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
-          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, objective_,
-                   sz_similarity_global_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
+          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, linear_gap_costs_t,
+                   objective_, sz_similarity_global_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
     using score_t = score_type_;
     using substituter_t = substituter_type_;
+    using gap_costs_t = linear_gap_costs_t;
 
     static constexpr sz_similarity_objective_t objective_k = objective_;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
@@ -73,12 +74,12 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = typename std::remove_cvref<first_char_t>::type;
 
-    using warp_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k,
-                                      sz_similarity_global_k, capability_k>;
+    using warp_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, linear_gap_costs_t,
+                                      objective_k, sz_similarity_global_k, capability_k>;
 
   protected:
-    substituter_t substituter_;
-    error_cost_t gap_cost_ {1};
+    substituter_t substituter_ {};
+    linear_gap_costs_t gap_costs_ {};
     score_t last_cell_ {0};
 
     __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
@@ -87,8 +88,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     }
 
   public:
-    __forceinline__ __device__ tile_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
-        : substituter_(substituter), gap_cost_(gap_cost) {}
+    __forceinline__ __device__ tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept
+        : substituter_(subs), gap_costs_(gaps) {}
 
     /**
      *  @brief Initializes a boundary value within a certain diagonal.
@@ -96,7 +97,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @note Should only be called for the top row and left column of the matrix.
      */
     __forceinline__ __device__ void init(score_t &cell, sz_size_t diagonal_index) const noexcept {
-        cell = gap_cost_ * diagonal_index;
+        cell = gap_costs_.open_or_extend * diagonal_index;
     }
 
     /**
@@ -123,6 +124,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         score_t const *scores_pre_deletion, score_t *scores_new) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
+        score_t const gap_costs = gap_costs_.open_or_extend;
         _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
 
         // ? One weird observation, is that even though we can avoid fetching `pre_insertion`
@@ -136,7 +138,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
             error_cost_t cost_of_substitution = substituter_(first_slice[tasks_count - i - 1], second_slice[i]);
             score_t if_substitution = pre_substitution + cost_of_substitution;
-            score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_cost_;
+            score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_costs;
             score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution);
             scores_new[i] = cell_score;
         }
@@ -150,10 +152,10 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  @brief GPU adaptation of the `local_scorer` on CUDA, avoiding warp-level shuffles and DPX.
  *  @note Uses 32-bit `uint` counter to iterate through the string slices, so it can't be over 4 billion characters.
  */
-template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
-          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, objective_,
-                   sz_similarity_local_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
+          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, linear_gap_costs_t,
+                   objective_, sz_similarity_local_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
     using first_iterator_t = first_iterator_type_;
     using second_iterator_t = second_iterator_type_;
@@ -169,12 +171,12 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = typename std::remove_cvref<first_char_t>::type;
 
-    using warp_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, objective_k,
-                                      sz_similarity_local_k, capability_k>;
+    using warp_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, linear_gap_costs_t,
+                                      objective_k, sz_similarity_local_k, capability_k>;
 
   protected:
-    substituter_t substituter_;
-    error_cost_t gap_cost_ {1};
+    substituter_t substituter_ {};
+    linear_gap_costs_t gap_costs_ {};
     score_t best_score_ {0};
 
     __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
@@ -194,8 +196,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     }
 
   public:
-    __forceinline__ __device__ tile_scorer(substituter_t substituter, error_cost_t gap_cost) noexcept
-        : substituter_(substituter), gap_cost_(gap_cost) {}
+    __forceinline__ __device__ tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept
+        : substituter_(subs), gap_costs_(gaps) {}
 
     /**
      *  @brief Initializes a boundary value within a certain diagonal.
@@ -228,6 +230,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         score_t const *scores_pre_deletion, score_t *scores_new) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
+        error_cost_t const gap_cost = gap_costs_.open_or_extend;
         _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
 
         // ? One weird observation, is that even though we can avoid fetching `pre_insertion`
@@ -241,7 +244,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
             error_cost_t cost_of_substitution = substituter_(first_slice[tasks_count - i - 1], second_slice[i]);
             score_t if_substitution = pre_substitution + cost_of_substitution;
-            score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_cost_;
+            score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_cost;
             score_t if_substitution_or_reset = pick_best(if_substitution, 0);
             score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution_or_reset);
             scores_new[i] = cell_score;
@@ -266,10 +269,10 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  - @b `vmax4,vmin4,vadd4` video-processing instructions.
  */
 template <>
-struct tile_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
-                   sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, sz_minimize_distance_k,
-                         sz_similarity_global_k, sz_cap_cuda_k> {
+struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
+    : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using warp_scorer_t::tile_scorer; // Make the constructors visible
 
@@ -279,7 +282,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, s
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, sz_u8_t const *scores_pre_deletion,
         sz_u8_t *scores_new) noexcept {
 
-        sz_u8_t const gap_cost = this->gap_cost_;
+        sz_u8_t const gap_cost = this->gap_costs_.open_or_extend;
         _sz_assert(gap_cost == 1);
 
         // The hardest part of this kernel is dealing with unaligned loads!
@@ -323,10 +326,10 @@ struct tile_scorer<char const *, char const *, sz_u8_t, error_costs_uniform_t, s
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
-                   sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, sz_minimize_distance_k,
-                         sz_similarity_global_k, sz_cap_cuda_k> {
+struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
+    : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
     using warp_scorer_t::tile_scorer; // Make the constructors visible
 
     __forceinline__ __device__ void operator()(                                 //
@@ -335,7 +338,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, 
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
 
-        sz_u16_t const gap_cost = this->gap_cost_;
+        sz_u16_t const gap_cost = this->gap_costs_.open_or_extend;
         _sz_assert(gap_cost == 1);
 
         // The hardest part of this kernel is dealing with unaligned loads!
@@ -378,10 +381,10 @@ struct tile_scorer<char const *, char const *, sz_u16_t, error_costs_uniform_t, 
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k,
-                   sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, sz_minimize_distance_k,
-                         sz_similarity_global_k, sz_cap_cuda_k> {
+struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                   sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
+    : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                         sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
     using warp_scorer_t::tile_scorer; // Make the constructors visible
 };
 
@@ -411,20 +414,22 @@ struct tile_scorer<char const *, char const *, sz_u32_t, error_costs_uniform_t, 
  *  - Keep everything in global memory - the strings and the diagonals.
  *  - Execute the naive algorithm, expecting the hardware to handle coalescing the memory accesses.
  */
-template <                                                       //
-    typename char_type_ = char,                                  //
-    typename index_type_ = uint,                                 //
-    typename score_type_ = sz_size_t,                            //
-    typename substituter_type_ = error_costs_uniform_t,          //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_cuda_k                  //
+template <                                                             //
+    typename char_type_ = char,                                        //
+    typename index_type_ = uint,                                       //
+    score_like score_type_ = sz_size_t,                                //
+    score_like final_score_type_ = sz_size_t,                          //
+    substituter_like substituter_type_ = uniform_substitution_costs_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,        //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k,       //
+    sz_capability_t capability_ = sz_cap_cuda_k                        //
     >
 __global__ void _score_across_cuda_device(                     //
     char_type_ const *shorter_ptr, index_type_ shorter_length, //
     char_type_ const *longer_ptr, index_type_ longer_length,   //
-    score_type_ *result_ptr, score_type_ *diagonals_ptr,       //
-    substituter_type_ const *substituter_ptr, error_cost_t const gap_cost) noexcept {
+    final_score_type_ *result_ptr, score_type_ *diagonals_ptr, //
+    substituter_type_ const *substituter_ptr, gap_costs_type_ const *gaps_costs_ptr) noexcept {
 
     namespace cg = cooperative_groups;
 
@@ -434,13 +439,20 @@ __global__ void _score_across_cuda_device(                     //
     using char_t = char_type_;
     using index_t = index_type_;
     using score_t = score_type_;
+    using final_score_t = final_score_type_;
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
-    using substituter_t = error_costs_uniform_t;
-    using warp_scorer_t =
-        tile_scorer<char_t const *, char_t const *, score_t, substituter_t, objective_k, locality_k, capability_k>;
+
+    // Pre-load the substituter and gap costs.
+    using substituter_t = substituter_type_;
+    using gap_costs_t = gap_costs_type_;
+    substituter_t const substituter = *substituter_ptr;
+    gap_costs_t const gap_costs = *gaps_costs_ptr;
+
+    using warp_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
+                                      locality_k, capability_k>;
 
     // Only one thread will be initializing the top row and left column and outputting the result.
     bool const is_main_thread = blockIdx.x == 0 && threadIdx.x == 0;
@@ -464,9 +476,7 @@ __global__ void _score_across_cuda_device(                     //
     score_t *next_scores = diagonals_ptr + 2 * max_diagonal_length;
 
     // Initialize the first two diagonals:
-    substituter_t const substituter;
-    error_cost_t const gap_cost = 1;
-    warp_scorer_t diagonal_aligner {substituter, gap_cost};
+    warp_scorer_t diagonal_aligner {substituter, gap_costs};
     if (is_main_thread) {
         diagonal_aligner.init(previous_scores[0], 0);
         diagonal_aligner.init(current_scores[0], 1);
@@ -574,7 +584,7 @@ __global__ void _score_across_cuda_device(                     //
     }
 
     // Export one result per each block.
-    if (is_main_thread) *result_ptr = diagonal_aligner.score();
+    if (is_main_thread) *result_ptr = static_cast<final_score_t>(diagonal_aligner.score());
 }
 
 /**
@@ -586,15 +596,18 @@ __global__ void _score_across_cuda_device(                     //
  */
 template < //
     typename task_type_,
-    typename char_type_ = char,                                  //
-    typename index_type_ = uint,                                 //
-    typename score_type_ = sz_size_t,                            //
-    typename substituter_type_ = error_costs_uniform_t,          //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
-    sz_capability_t capability_ = sz_cap_cuda_k                  //
+    typename char_type_ = char,                                        //
+    typename index_type_ = uint,                                       //
+    score_like score_type_ = sz_size_t,                                //
+    substituter_like substituter_type_ = uniform_substitution_costs_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,        //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k,       //
+    sz_capability_t capability_ = sz_cap_cuda_k                        //
     >
-__global__ void _score_on_each_cuda_warp(task_type_ *tasks, sz_size_t tasks_count) {
+__global__ void _score_on_each_cuda_warp(     //
+    task_type_ *tasks, sz_size_t tasks_count, //
+    substituter_type_ const *substituter_ptr, gap_costs_type_ const *gap_costs_ptr) noexcept {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using task_t = task_type_;
@@ -605,18 +618,27 @@ __global__ void _score_on_each_cuda_warp(task_type_ *tasks, sz_size_t tasks_coun
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_similarity_objective_t objective_k = objective_;
 
+    // Pre-load the substituter and gap costs.
+    using substituter_t = substituter_type_;
+    using gap_costs_t = gap_costs_type_;
+    substituter_t const substituter = *substituter_ptr;
+    gap_costs_t const gap_costs = *gap_costs_ptr;
+
+    using warp_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
+                                      locality_k, capability_k>;
+
     // Allocating shared memory is handled on the host side.
     extern __shared__ char shared_memory_buffer[];
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
-    for (sz_size_t task_idx = blockIdx.x; task_idx < first_strings.size(); task_idx += gridDim.x) {
+    for (sz_size_t task_idx = blockIdx.x; task_idx < tasks_count; task_idx += gridDim.x) {
         task_t const &task = tasks[task_idx];
         char_t const *shorter_global = task.shorter_ptr;
         char_t const *longer_global = task.longer_ptr;
         sz_size_t const shorter_length = task.shorter_length;
         sz_size_t const longer_length = task.longer_length;
-        score_t &result_ref = *task.result_ptr;
+        auto &result_ref = task.result;
 
         // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
         // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
@@ -645,7 +667,7 @@ __global__ void _score_on_each_cuda_warp(task_type_ *tasks, sz_size_t tasks_coun
         for (uint i = threadIdx.x; i < shorter_length; i += blockDim.x) shorter[i] = shorter_global[i];
 
         // Initialize the first two diagonals:
-        warp_scorer_t diagonal_aligner {substituter_, gap_cost_};
+        warp_scorer_t diagonal_aligner {substituter, gap_costs};
         if (threadIdx.x == 0) {
             diagonal_aligner.init(previous_scores[0], 0);
             diagonal_aligner.init(current_scores[0], 1);
@@ -750,171 +772,20 @@ __global__ void _score_on_each_cuda_warp(task_type_ *tasks, sz_size_t tasks_coun
 
 #pragma region - Levenshtein Distance in CUDA
 
-/** @brief Dispatches on @b `_levenshtein_in_cuda_warp` on the device side from the host side. */
-template <                                       //
-    sz_capability_t capability_ = sz_cap_cuda_k, //
-    typename first_strings_type_,                //
-    typename second_strings_type_,               //
-    typename allocator_type_,                    //
-    typename score_type_ = sz_size_t             //
-    >
-cuda_status_t _levenshtein_distances_implementation(                                      //
-    first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
-    score_type_ *results, allocator_type_ const &allocator = {}, gpu_specs_t specs = {},  //
-    cudaStream_t stream = 0) noexcept(false) {
-
-    // We need to be able to copy these function arguments into GPU memory:
-    static constexpr sz_capability_t capability_k = capability_;
-    using first_strings_t = first_strings_type_;
-    using second_strings_t = second_strings_type_;
-    using allocator_t = allocator_type_;
-    static_assert(std::is_trivially_copyable<first_strings_t>() && std::is_trivially_copyable<second_strings_t>(),
-                  "The first and second strings must be trivially copyable types - consider `arrow_strings_view`.");
-    using first_string_t = typename first_strings_t::value_type;
-    using second_string_t = typename second_strings_t::value_type;
-    static_assert(std::is_trivially_copyable<first_string_t>() && std::is_trivially_copyable<second_string_t>(),
-                  "The first and second strings must be trivially copyable types - consider `span<char>`.");
-    using first_char_t = typename first_string_t::value_type;
-    using second_char_t = typename second_string_t::value_type;
-    static_assert(sizeof(first_char_t) == sizeof(second_char_t), "Character types don't match");
-    using char_t = typename std::remove_cvref<first_char_t>::type;
-    using score_t = score_type_;
-
-    // Make sure that we don't string pairs that are too large to fit 3 matrix diagonals into shared memory.
-    // H100 Streaming Multiprocessor can have up to 128 active warps concurrently and only 256 KB of shared memory.
-    // A100 SMs had only 192 KB. We can't deal with blocks that require more memory than the SM can provide.
-    using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, true>;
-    sz_size_t shared_memory_per_block =
-        _scores_diagonally_warp_shared_memory_requirement<false>(first_strings, second_strings, 1);
-    if (shared_memory_per_block > specs.shared_memory_per_multiprocessor()) return {status_t::bad_alloc_k};
-
-    // It may be the case that we've only received empty strings.
-    if (shared_memory_per_block == 0) {
-        for (sz_size_t i = 0; i < first_strings.size(); ++i)
-            if (first_strings[i].length() == 0) { results[i] = second_strings[i].length(); }
-            else if (second_strings[i].length() == 0) { results[i] = first_strings[i].length(); }
-        return {status_t::success_k};
-    }
-
-    // In most cases we should be able to fit many blocks per SM.
-    sz_size_t count_blocks_per_multiprocessor = specs.shared_memory_per_multiprocessor() / shared_memory_per_block;
-    if (count_blocks_per_multiprocessor > specs.max_blocks_per_multiprocessor)
-        count_blocks_per_multiprocessor = specs.max_blocks_per_multiprocessor;
-    if (count_blocks_per_multiprocessor > first_strings.size()) count_blocks_per_multiprocessor = first_strings.size();
-    _sz_assert(count_blocks_per_multiprocessor > 0);
-
-    // Let's use all 32 threads in a warp.
-    constexpr sz_size_t threads_per_block = 32u;
-    sz_size_t const max_input_length = 1024u * 16u;
-    auto warp_level_kernel = &_levenshtein_in_cuda_warp<first_strings_t, second_strings_t, score_t, capability_k>;
-    void *warp_level_kernel_args[] = {
-        (void *)&first_strings,
-        (void *)&second_strings,
-        (void *)&results,
-        (void *)&max_input_length,
-    };
-
-    // On Volta and newer GPUs, there is an extra flag to be set to use more than 48 KB of shared memory per block.
-    // CUDA reserves 1 KB of shared memory per thread block, so on H100 we can use up to 227 KB of shared memory.
-    // https://docs.nvidia.com/cuda/hopper-tuning-guide/index.html#unified-shared-memory-l1-texture-cache
-    cudaError_t attribute_error =
-        cudaFuncSetAttribute(warp_level_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                             specs.shared_memory_per_multiprocessor() - count_blocks_per_multiprocessor * 1024);
-    if (attribute_error != cudaSuccess) return {status_t::unknown_k, attribute_error};
-
-    // Create CUDA events for timing
-    cudaEvent_t start_event, stop_event;
-    cudaEventCreate(&start_event);
-    cudaEventCreate(&stop_event);
-
-    // Record the start event
-    cudaEventRecord(start_event, stream);
-
-    // Enqueue the warp_level_kernel for execution:
-    cudaError_t launch_error = cudaLaunchKernel(                                 //
-        reinterpret_cast<void *>(warp_level_kernel),                             // Kernel function pointer
-        dim3(count_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
-        dim3(threads_per_block),                                                 // Block dimensions
-        warp_level_kernel_args,                                                  // Array of kernel argument pointers
-        shared_memory_per_block,                                                 // Shared memory per block (in bytes)
-        stream);                                                                 // CUDA stream
-    if (launch_error != cudaSuccess)
-        if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
-        else { return {status_t::unknown_k, launch_error}; }
-
-    // Fetch the execution error:
-    float execution_milliseconds = 0;
-    cudaError_t shorts_execution_error = cudaStreamSynchronize(stream);
-    if (shorts_execution_error != cudaSuccess)
-        if (shorts_execution_error == cudaErrorMemoryAllocation) {
-            return {status_t::bad_alloc_k, shorts_execution_error, execution_milliseconds};
-        }
-        else { return {status_t::unknown_k, shorts_execution_error, execution_milliseconds}; }
-
-    // Go through the results and check if any of them were too big to be processed
-    // by the warp-level implementation, and should be processed by the `_score_across_cuda_device`.
-    sz_size_t count_longer_strings = 0;
-    sz_size_t longest_string_length = 0;
-    for (sz_size_t i = 0; i < first_strings.size(); ++i) {
-        count_longer_strings += results[i] == std::numeric_limits<score_t>::max();
-        longest_string_length =
-            sz_max_of_two(longest_string_length, sz_max_of_two(first_strings[i].length(), second_strings[i].length()));
-    }
-
-    if (count_longer_strings) {
-        auto device_level_u16index_kernel = &_score_across_cuda_device<char_t, sz_u16_t, score_t, capability_k>;
-        auto device_level_u32index_kernel = &_score_across_cuda_device<char_t, sz_u32_t, score_t, capability_k>;
-        auto device_level_u64index_kernel = &_score_across_cuda_device<char_t, sz_u64_t, score_t, capability_k>;
-        void *device_level_kernel_args[6];
-        safe_vector<score_t, allocator_t> diagonals_buffer(allocator);
-        if (diagonals_buffer.try_resize((longest_string_length + 1) * 3) == status_t::bad_alloc_k)
-            return {status_t::bad_alloc_k};
-
-        // We will enqueue many such kernels one after another, without waiting for a completion of the previous one.
-        for (sz_size_t i = 0; i < first_strings.size(); ++i) {
-            if (results[i] != std::numeric_limits<score_t>::max()) continue;
-            // We need to process this string pair separately.
-            auto const &first_global = first_strings[i];
-            auto const &second_global = second_strings[i];
-
-            // Pick the shorter and longer string.
-            char_t const *shorter_ptr, *longer_ptr;
-            sz_size_t shorter_length, longer_length;
-            if (first_global.length() < second_global.length()) {
-                shorter_ptr = first_global.data(), longer_ptr = second_global.data(),
-                shorter_length = first_global.length(), longer_length = second_global.length();
-            }
-            else {
-                shorter_ptr = second_global.data(), longer_ptr = first_global.data(),
-                shorter_length = second_global.length(), longer_length = first_global.length();
-            }
-        }
-    }
-
-    // Wait until everything is done.
-    cudaEventRecord(stop_event, stream);
-    cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
-    cudaError_t longs_execution_error = cudaStreamSynchronize(stream);
-    if (longs_execution_error != cudaSuccess)
-        if (longs_execution_error == cudaErrorMemoryAllocation) {
-            return {status_t::bad_alloc_k, longs_execution_error, execution_milliseconds};
-        }
-        else { return {status_t::unknown_k, longs_execution_error, execution_milliseconds}; }
-
-    return {status_t::success_k, cudaSuccess, execution_milliseconds};
-}
-
 /**
  *  @brief  Dispatches baseline Levenshtein edit distance algorithm to the GPU.
  *          Before starting the kernels, bins them by size to maximize the number of blocks
  *          per grid that can run simultaneously, while fitting into the shared memory.
  */
-template <typename char_type_, typename allocator_type_, sz_capability_t capability_>
-struct levenshtein_distances<char_type_, allocator_type_, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
+template <typename char_type_, gap_costs_like gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
+struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capability_,
+                             std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
     using char_t = char_type_;
+    using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
     using scores_allocator_t = typename allocator_t::template rebind<sz_size_t>::other;
+    static constexpr sz_capability_t capability_k = capability_;
 
     struct task_t {
         char_t const *shorter_ptr = nullptr;
@@ -922,10 +793,14 @@ struct levenshtein_distances<char_type_, allocator_type_, capability_, std::enab
         char_t const *longer_ptr = nullptr;
         size_t longer_length = 0;
         size_t memory_requirement = 0;
+        size_t bytes_per_cell = 0;
         size_t original_index = 0;
+        size_t result = 0;
 
-        constexpr task_t(char_t const *first_ptr, size_t first_length, char_t const *second_ptr,
-                         size_t second_length) noexcept {
+        constexpr task_t() = default;
+        constexpr task_t(                                 //
+            char_t const *first_ptr, size_t first_length, //
+            char_t const *second_ptr, size_t second_length) noexcept {
             if (first_length < second_length)
                 shorter_ptr = first_ptr, shorter_length = first_length, longer_ptr = second_ptr,
                 longer_length = second_length;
@@ -940,38 +815,60 @@ struct levenshtein_distances<char_type_, allocator_type_, capability_, std::enab
     };
     using tasks_allocator_t = typename allocator_t::template rebind<task_t>::other;
 
-    allocator_t allocator = {};
+    uniform_substitution_costs_t substituter_ {};
+    gap_costs_t gap_costs_ {};
+    allocator_t alloc_ {};
 
-    levenshtein_distances(allocator_t const &allocator = {}) noexcept : allocator(allocator) {}
+    levenshtein_distances(allocator_t const &alloc = {}) noexcept : alloc_(alloc) {}
+    levenshtein_distances(uniform_substitution_costs_t subs, gap_costs_t gaps,
+                          allocator_t const &alloc = allocator_t {}) noexcept
+        : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
-    cuda_status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                             results_type_ &&results, gpu_specs_t specs = {}, cudaStream_t stream = 0) const noexcept {
+    cuda_status_t operator()(                                                                 //
+        first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
+        results_type_ *results_ptr,                                                           //
+        gpu_specs_t specs = {}, cuda_executor_t executor = {}) const noexcept {
 
-        score_t *const results_ptr = results.data();
-        safe_vector<task_t, tasks_allocator_t> tasks(allocator_);
-        if (!tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
+        using final_score_t = results_type_;
+        safe_vector<task_t, tasks_allocator_t> tasks(alloc_);
+        if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
         // Export all the tasks and sort them by decreasing memory requirement.
-        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, is_signed_>;
+        using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
         for (sz_size_t i = 0; i < first_strings.size(); ++i) {
-            tasks[i] = task_t(                                      //
+            task_t task(                                            //
                 first_strings[i].data(), first_strings[i].length(), //
                 second_strings[i].data(), second_strings[i].length());
-            tasks[i].original_index = i;
-            tasks[i].memory_requirement = //
-                similarity_memory_requirements_t(tasks[i].shorter_length, tasks[i].longer_length, 1, sizeof(char_t), 4)
-                    .total;
+            similarity_memory_requirements_t requirement(                                  //
+                task.shorter_length, task.longer_length,                                   //
+                gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
+                sizeof(char_t), 4);
+
+            task.result = std::numeric_limits<final_score_t>::max(); // Signal that we are not done yet.
+            task.original_index = i;
+            task.memory_requirement = requirement.total;
+            task.bytes_per_cell = requirement.bytes_per_cell;
+            tasks[i] = task;
         }
         std::sort(tasks.begin(), tasks.end(),
                   [](task_t const &a, task_t const &b) { return a.memory_requirement > b.memory_requirement; });
 
         // On very large inputs we will keep the diagonals in shared memory.
-        safe_vector<sz_u64_t, scores_allocator_t> diagonals_u64_buffer(allocator_);
-        auto device_level_u16_kernel = &_score_across_cuda_device<char_t, sz_u16_t, sz_u16_t, capability_k>;
-        auto device_level_u32_kernel = &_score_across_cuda_device<char_t, sz_u32_t, sz_u32_t, capability_k>;
-        auto device_level_u64_kernel = &_score_across_cuda_device<char_t, sz_u64_t, sz_u64_t, capability_k>;
-        void *device_level_kernel_args[6];
+        safe_vector<sz_u64_t, scores_allocator_t> diagonals_u64_buffer(alloc_);
+        auto device_level_u16_kernel =
+            &_score_across_cuda_device<char_t, sz_u16_t, sz_u16_t, final_score_t, uniform_substitution_costs_t,
+                                       linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
+                                       capability_k>;
+        auto device_level_u32_kernel =
+            &_score_across_cuda_device<char_t, sz_u32_t, sz_u32_t, final_score_t, uniform_substitution_costs_t,
+                                       linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
+                                       capability_k>;
+        auto device_level_u64_kernel =
+            &_score_across_cuda_device<char_t, sz_u64_t, sz_u64_t, final_score_t, uniform_substitution_costs_t,
+                                       linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
+                                       capability_k>;
+        void *device_level_kernel_args[8];
 
         // Now we need to bin them based on the number of blocks per multiprocessor,
         // starting with problems, that can't fit into the memory of a single SM.
@@ -990,26 +887,28 @@ struct levenshtein_distances<char_type_, allocator_type_, capability_, std::enab
             device_level_kernel_args[1] = (void *)(&task.shorter_length);
             device_level_kernel_args[2] = (void *)(task.longer_ptr);
             device_level_kernel_args[3] = (void *)(&task.longer_length);
-            device_level_kernel_args[4] = (void *)(results_ptr + i);
+            device_level_kernel_args[4] = (void *)(&task.result);
             device_level_kernel_args[5] = (void *)(diagonals_u64_buffer.data());
+            device_level_kernel_args[6] = (void *)(&substituter_);
+            device_level_kernel_args[7] = (void *)(&gap_costs_);
 
             // Pick the smallest fitting type for the diagonals.
             void *device_level_kernel = reinterpret_cast<void *>(device_level_u16_kernel);
-            if (task.max_diagonal_length() >= std::numeric_limits<sz_u16_t>::max())
+            if (task.bytes_per_cell >= sizeof(sz_u32_t))
                 device_level_kernel = reinterpret_cast<void *>(device_level_u32_kernel);
-            if (task.max_diagonal_length() >= std::numeric_limits<sz_u32_t>::max())
+            if (task.bytes_per_cell >= sizeof(sz_u64_t))
                 device_level_kernel = reinterpret_cast<void *>(device_level_u64_kernel);
 
             // TODO: We can be wiser about the dimensions of this grid.
             uint const random_block_size = 128;
             uint const random_blocks_per_multiprocessor = 32;
             cudaError_t launch_error = cudaLaunchCooperativeKernel(                       //
-                reinterpret_cast<void *>(device_level_u64index_kernel),                   // Kernel function pointer
+                reinterpret_cast<void *>(device_level_kernel),                            // Kernel function pointer
                 dim3(random_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
                 dim3(random_block_size),                                                  // Block dimensions
                 device_level_kernel_args, // Array of kernel argument pointers
                 0,                        // Shared memory per block (in bytes)
-                stream);                  // CUDA stream
+                executor.stream);         // CUDA stream
             if (launch_error != cudaSuccess)
                 if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
                 else { return {status_t::unknown_k, launch_error}; }
@@ -1018,17 +917,33 @@ struct levenshtein_distances<char_type_, allocator_type_, capability_, std::enab
         // Now process remaining warp-level tasks, checking warp densities in reverse order.
         // From the highest possible number of warps per multiprocessor to the lowest.
         std::initializer_list<size_t> warps_per_multiprocessor_densities = {32, 16, 8, 4, 2, 1};
-        auto warp_level_u8_kernel = &_score_on_each_cuda_warp<task_t, char_t, sz_u8_t, sz_u8_t, capability_k>;
-        auto warp_level_u16_kernel = &_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_u16_t, capability_k>;
+        auto warp_level_u8_kernel =
+            &_score_on_each_cuda_warp<task_t, char_t, sz_u8_t, sz_u8_t, uniform_substitution_costs_t,
+                                      linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
+        auto warp_level_u16_kernel =
+            &_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_u16_t, uniform_substitution_costs_t,
+                                      linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
+        void *warp_level_kernel_args[4];
         size_t count_tasks_for_this_density = 0;
         for (size_t warps_per_multiprocessor_density : warps_per_multiprocessor_densities) {
             for (; count_tasks_processed != tasks.size(); ++count_tasks_processed, ++count_tasks_for_this_density) {
                 // Check if the current warp density is still optimal.
-                task_t const &task = tasks[count_tasks_processed];
+                size_t const count_tasks_for_warp_processed = count_tasks_processed - count_tasks_for_entire_device;
+                task_t const &task = tasks[tasks.size() - count_tasks_for_warp_processed - 1];
                 size_t const requirement_with_current_warp_density =
                     task.memory_requirement + specs.reserved_memory_per_block * warps_per_multiprocessor_density;
                 if (requirement_with_current_warp_density > specs.shared_memory_per_multiprocessor()) break;
             }
+
+            // If there are no more tasks left - exit!
+            if (!count_tasks_for_this_density) break;
+
+            // If we don't even have enough tasks to keep the entire device busy - continue shrinking
+            // the number of warps per multiprocessor, until we find a fitting density.
+            // ... Unless we are already at the lowest density.
+            if (count_tasks_for_this_density < (specs.streaming_multiprocessors * warps_per_multiprocessor_density) &&
+                warps_per_multiprocessor_density > 1)
+                continue;
 
             // Now check if any tasks of that size have been found and if their quantity is sufficient
             // to fill the entire device with warps. If we don't have enough tasks for this density,
@@ -1044,32 +959,48 @@ struct levenshtein_distances<char_type_, allocator_type_, capability_, std::enab
             // as the default limits our blocks (in our case, single-warp blocks) to 48 KB, while
             // device supports 4-5x more! Still, that API is synchronous and we must block the current
             // thread to what until the task completes to change the shared memory amount.
-
-            device_level_kernel_args[0] = (void *)(task.shorter_ptr);
-            device_level_kernel_args[1] = (void *)(&task.shorter_length);
-            device_level_kernel_args[2] = (void *)(task.longer_ptr);
-            device_level_kernel_args[3] = (void *)(&task.longer_length);
-            device_level_kernel_args[4] = (void *)(results_ptr + i);
-            device_level_kernel_args[5] = (void *)(diagonals_u64_buffer.data());
+            size_t const count_tasks_for_warp_processed = count_tasks_processed - count_tasks_for_entire_device;
+            size_t const first_task_index =
+                tasks.size() - count_tasks_for_warp_processed - count_tasks_for_this_density;
+            warp_level_kernel_args[0] = (void *)(tasks.data() + first_task_index);
+            warp_level_kernel_args[1] = (void *)(&count_tasks_for_this_density);
+            warp_level_kernel_args[2] = (void *)(&substituter_);
+            warp_level_kernel_args[3] = (void *)(&gap_costs_);
 
             // Pick the smallest fitting type for the diagonals.
-            void *device_level_kernel = reinterpret_cast<void *>(warp_level_u8_kernel);
-            if (task.max_diagonal_length() >= std::numeric_limits<sz_u8_t>::max())
-                device_level_kernel = reinterpret_cast<void *>(warp_level_u16_kernel);
+            void *warp_level_kernel = reinterpret_cast<void *>(warp_level_u8_kernel);
+            if (tasks[first_task_index].bytes_per_cell >= sizeof(sz_u16_t))
+                warp_level_kernel = reinterpret_cast<void *>(warp_level_u16_kernel);
+
+            // Warp-level algorithm clearly aligns with the warp size.
+            uint const warp_block_size = static_cast<uint>(specs.warp_size);
+            uint const warp_blocks_per_multiprocessor = static_cast<uint>(warps_per_multiprocessor_density);
+            size_t const shared_memory_per_block = tasks[first_task_index].memory_requirement;
+            cudaError_t launch_error = cudaLaunchCooperativeKernel(                     //
+                reinterpret_cast<void *>(warp_level_kernel),                            // Kernel function pointer
+                dim3(warp_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
+                dim3(warp_block_size),                                                  // Block dimensions
+                device_level_kernel_args, // Array of kernel argument pointers
+                shared_memory_per_block,  // Shared memory per block (in bytes)
+                executor.stream);         // CUDA stream
+            if (launch_error != cudaSuccess)
+                if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
+                else { return {status_t::unknown_k, launch_error}; }
         }
 
         // Now that everything went well, export the results back into the `results` array.
         for (size_t i = 0; i < count_tasks_processed; ++i) {
             task_t const &task = tasks[i];
-            results[task.original_index] = *task.result_ptr;
+            results_ptr[task.original_index] = task.result;
         }
+        return {status_t::success_k};
     }
 };
 
 #pragma endregion
 
 #pragma region - Needleman Wunsch Scores in CUDA
-
+#if 0
 /**
  *  @brief  Convenience buffer of the size matching the size of the CUDA constant memory,
  *          used to cheaper store and access the substitution costs for the characters.
@@ -1088,19 +1019,19 @@ __constant__ char _error_costs_in_cuda_constant_memory[256 * 256];
  *
  *  @tparam substituter_type_ Must be a trivially copyable object already placed in the GPU @b constant memory.
  */
-template <                                              //
-    typename first_strings_type_,                       //
-    typename second_strings_type_,                      //
-    typename score_type_ = sz_ssize_t,                  //
-    typename substituter_type_ = error_costs_256x256_t, //
-    sz_capability_t capability_ = sz_cap_cuda_k         //
+template <                                                      //
+    typename first_strings_type_,                               //
+    typename second_strings_type_,                              //
+    score_like score_type_ = sz_ssize_t,                        //
+    substituter_like substituter_type_ = error_costs_256x256_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t,        //
+    sz_capability_t capability_ = sz_cap_cuda_k                 //
     >
 __global__ void _needleman_wunsch_in_cuda_warp( //
     first_strings_type_ first_strings,          //
     second_strings_type_ second_strings,        //
     score_type_ *results_ptr,                   //
-    error_cost_t gap_cost,                      //
-    sz_size_t max_magnitude_change) {
+    gap_costs_type_ gaps) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using first_string_t = typename first_strings_type_::value_type;
@@ -1150,8 +1081,8 @@ __global__ void _needleman_wunsch_in_cuda_warp( //
 
         // Estimate the maximum dimension of the DP matrix to pick the smallest fitting type.
         using similarity_memory_requirements_t = similarity_memory_requirements<uint, true>;
-        similarity_memory_requirements_t requirements(first_length, second_length,
-                                                      static_cast<uint>(max_magnitude_change), sizeof(char_t), 4);
+        similarity_memory_requirements_t requirements(first_length, second_length, static_cast<uint>(magnitude()),
+                                                      sizeof(char_t), 4);
 
         // Estimate the maximum dimension of the DP matrix to pick the smallest fitting type.
         span<char const> const first = {first_global.data(), first_length};
@@ -1185,19 +1116,20 @@ __global__ void _needleman_wunsch_in_cuda_warp( //
 }
 
 /** @brief Dispatches on @b `_needleman_wunsch_in_cuda_warp` on the device side from the host side. */
-template <                                             //
-    sz_capability_t capability_ = sz_cap_cuda_k,       //
-    typename first_strings_type_,                      //
-    typename second_strings_type_,                     //
-    typename score_type_ = sz_ssize_t,                 //
-    typename substituter_type_ = error_costs_256x256_t //
+template <                                                      //
+    sz_capability_t capability_ = sz_cap_cuda_k,                //
+    typename first_strings_type_,                               //
+    typename second_strings_type_,                              //
+    score_like score_type_ = sz_ssize_t,                        //
+    substituter_like substituter_type_ = error_costs_256x256_t, //
+    gap_costs_like gap_costs_type_ = linear_gap_costs_t         //
     >
 cuda_status_t _needleman_wunsch_via_cuda_warp(                                            //
     first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
     score_type_ *results,
     substituter_type_ const &substituter, //
     error_cost_t gap_cost = 1,            //
-    gpu_specs_t specs = {}, cudaStream_t stream = 0) noexcept(false) {
+    gpu_specs_t specs = {}, cuda_executor_t executor = {}) noexcept(false) {
 
     // We need to be able to copy these function arguments into GPU memory:
     static constexpr sz_capability_t capability_k = capability_;
@@ -1211,8 +1143,8 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
     // Make sure that we don't string pairs that are too large to fit 3 matrix diagonals into shared memory.
     // H100 Streaming Multiprocessor can have up to 128 active warps concurrently and only 256 KB of shared memory.
     // A100 SMs had only 192 KB. We can't deal with blocks that require more memory than the SM can provide.
-    sz_size_t shared_memory_per_block = _scores_diagonally_warp_shared_memory_requirement<true>(
-        first_strings, second_strings, substituter.max_magnitude_change());
+    sz_size_t shared_memory_per_block =
+        _scores_diagonally_warp_shared_memory_requirement<true>(first_strings, second_strings, substituter.magnitude());
     if (shared_memory_per_block > specs.shared_memory_per_multiprocessor()) return {status_t::bad_alloc_k};
 
     // It may be the case that we've only received empty strings.
@@ -1231,12 +1163,11 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
 
     // Let's use all 32 threads in a warp.
     constexpr sz_size_t threads_per_block = 32u;
-    sz_size_t const max_magnitude_change = substituter.max_magnitude_change();
+    sz_size_t const magnitude() = substituter.magnitude();
     auto kernel =
         &_needleman_wunsch_in_cuda_warp<first_strings_t, second_strings_t, score_t, substituter_t, capability_k>;
     void *kernel_args[] = {
-        (void *)&first_strings, (void *)&second_strings,       (void *)&results,
-        (void *)&gap_cost,      (void *)&max_magnitude_change,
+        (void *)&first_strings, (void *)&second_strings, (void *)&results, (void *)&gap_cost, (void *)&magnitude(),
     };
 
     // On Volta and newer GPUs, there is an extra flag to be set to use more than 48 KB of shared memory per block.
@@ -1253,11 +1184,11 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
     cudaEventCreate(&stop_event);
 
     // Record the start event
-    cudaEventRecord(start_event, stream);
+    cudaEventRecord(start_event, executor.stream);
 
     // Enqueue the transfer of the substituter to the constant memory:
     cudaError_t copy_error = cudaMemcpyToSymbolAsync(_error_costs_in_cuda_constant_memory, (void const *)&substituter,
-                                                     sizeof(substituter_t), 0, cudaMemcpyHostToDevice, stream);
+                                                     sizeof(substituter_t), 0, cudaMemcpyHostToDevice, executor.stream);
     if (copy_error != cudaSuccess) return {status_t::unknown_k, copy_error};
 
     // Enqueue the kernel for execution:
@@ -1267,16 +1198,16 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
         dim3(threads_per_block),                                                 // Block dimensions
         kernel_args,                                                             // Array of kernel argument pointers
         shared_memory_per_block,                                                 // Shared memory per block (in bytes)
-        stream);                                                                 // CUDA stream
+        executor.stream);                                                        // CUDA stream
     if (launch_error != cudaSuccess)
         if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
         else { return {status_t::unknown_k, launch_error}; }
 
-    cudaEventRecord(stop_event, stream);
+    cudaEventRecord(stop_event, executor.stream);
 
     // Fetch the execution error:
     float execution_milliseconds = 0;
-    cudaError_t execution_error = cudaStreamSynchronize(stream);
+    cudaError_t execution_error = cudaStreamSynchronize(executor.stream);
     cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
 
     if (execution_error != cudaSuccess)
@@ -1288,27 +1219,32 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
 }
 
 /** @brief Dispatches baseline Needleman Wunsch algorithm to the GPU. */
-template <typename char_type_, typename allocator_type_, typename substituter_type_>
-struct needleman_wunsch_scores<char_type_, substituter_type_, allocator_type_, sz_cap_cuda_k> {
+template <typename char_type_, substituter_like substituter_type_, gap_costs_like gap_costs_type_,
+          typename allocator_type_>
+struct needleman_wunsch_scores<char_type_, substituter_type_, gap_costs_type_, allocator_type_, sz_cap_cuda_k> {
 
     using char_t = char_type_;
     using substituter_t = substituter_type_;
+    using gap_costs_t = gap_costs_type_;
+    using allocator_t = allocator_type_;
 
     substituter_t substituter_ {};
-    error_cost_t gap_cost_ {1};
+    error_cost_t gap_costs_ {1};
+    allocator_t alloc_ {};
 
-    needleman_wunsch_scores() noexcept {}
-    needleman_wunsch_scores(substituter_t subs, error_cost_t gap_cost) noexcept
-        : substituter_(subs), gap_cost_(gap_cost) {}
+    needleman_wunsch_scores(allocator_t const &alloc = {}) noexcept : alloc_(alloc) {}
+    needleman_wunsch_scores(substituter_t subs, gap_costs_t gaps, allocator_t alloc = allocator_t {}) noexcept
+        : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
     cuda_status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
-                             results_type_ &&results, gpu_specs_t specs = {}, cudaStream_t stream = 0) const noexcept {
+                             results_type_ &&results, gpu_specs_t specs = {},
+                             cuda_executor_t executor = {}) const noexcept {
         return _needleman_wunsch_via_cuda_warp<sz_cap_cuda_k>(first_strings, second_strings, results, substituter_,
-                                                              gap_cost_, specs, stream);
+                                                              gap_costs_, specs, executor);
     }
 };
-
+#endif
 #pragma endregion
 
 } // namespace stringzilla
