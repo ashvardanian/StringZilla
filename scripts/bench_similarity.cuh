@@ -31,7 +31,6 @@ struct similarities_callable {
 
     environment_t const &env;
     similarities_t &results;
-    sz_size_t bound = SZ_SIZE_MAX;
     engine_t engine = {};
     std::tuple<extra_args_...> extra_args = {};
 
