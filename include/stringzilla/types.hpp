@@ -159,6 +159,8 @@ struct span {
     constexpr size_type length() const noexcept { return size_; }
     constexpr size_type size_bytes() const noexcept { return size_ * sizeof(value_type); }
     constexpr value_type &operator[](size_type i) const noexcept { return data_[i]; }
+    constexpr value_type &front() const noexcept { return data_[0]; }
+    constexpr value_type &back() const noexcept { return data_[size_ - 1]; }
     constexpr bool empty() const noexcept { return size_ == 0; }
 };
 
@@ -744,6 +746,10 @@ class safe_vector {
     value_type const &operator[](size_type i) const noexcept { return data_[i]; }
     value_type *data() noexcept { return data_; }
     value_type const *data() const noexcept { return data_; }
+    value_type &front() noexcept { return data_[0]; }
+    value_type const &front() const noexcept { return data_[0]; }
+    value_type &back() noexcept { return data_[size_ - 1]; }
+    value_type const &back() const noexcept { return data_[size_ - 1]; }
     size_type size() const noexcept { return size_; }
     size_type capacity() const noexcept { return capacity_; }
     operator span<value_type>() noexcept { return {data_, size_}; }

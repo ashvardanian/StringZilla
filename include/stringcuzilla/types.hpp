@@ -127,6 +127,33 @@ concept continuous_like = requires(continuous_type_ container) {
 static_assert(continuous_like<span<char>>);
 static_assert(!continuous_like<int>);
 
+/**
+ *  @brief  A function that takes a range of elements and a @p callback function and groups the elements
+ *          that @p equality function considers equal. Analogous to `std::ranges::group_by`.
+ *  @return The number of groups formed.
+ */
+template <typename begin_iterator_type_, typename end_iterator_type_, typename equality_type_,
+          typename slice_callback_type_>
+size_t group_by(begin_iterator_type_ const begin, end_iterator_type_ const end, equality_type_ &&equality,
+                slice_callback_type_ &&slice_callback) {
+
+    auto const size = std::distance(begin, end);
+    auto slice_start = begin;
+    size_t group_count = 0;
+
+    while (slice_start != end) {
+        // Find the end of the current group by advancing `slice_end`
+        auto slice_end = slice_start + 1;
+        while (slice_end != end && equality(*slice_start, *slice_end)) ++slice_end;
+        slice_callback(slice_start, slice_end);
+        group_count++;
+        // Move `slice_start` to the beginning of the next potential group
+        slice_start = slice_end;
+    }
+
+    return group_count;
+}
+
 } // namespace stringzilla
 } // namespace ashvardanian
 
