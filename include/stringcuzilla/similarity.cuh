@@ -37,16 +37,41 @@
 #ifndef STRINGCUZILLA_SIMILARITY_CUH_
 #define STRINGCUZILLA_SIMILARITY_CUH_
 
-#include "stringcuzilla/types.cuh"
-#include "stringcuzilla/similarity.hpp"
-
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda/pipeline>        // `cuda::pipeline`
 #include <cooperative_groups.h> // `cooperative_groups::this_grid()`
 
+#include "stringcuzilla/types.cuh"
+#include "stringcuzilla/similarity.hpp"
+
 namespace ashvardanian {
 namespace stringzilla {
+
+#pragma region - Common Aliases
+
+using ualloc_t = unified_alloc<char>;
+
+/**
+ *  In @b CUDA:
+ *  - for GPUs before Hopper, we can use the @b SIMT model for warp-level parallelism using diagonal "walkers"
+ *  - for GPUs after Hopper, we compound that with thread-level @b SIMD via @b DPX instructions for min-max
+ */
+using levenshtein_cuda_t = levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+using levenshtein_utf8_cuda_t = levenshtein_distances_utf8<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+using needleman_wunsch_cuda_t =
+    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+using smith_waterman_cuda_t =
+    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
+
+using levenshtein_kepler_t = levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k>;
+using levenshtein_utf8_hopper_t = levenshtein_distances_utf8<char, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+using needleman_wunsch_hopper_t =
+    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+using smith_waterman_hopper_t =
+    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
+
+#pragma endregion - Common Aliases
 
 #pragma region - Algorithm Building Blocks
 
@@ -54,8 +79,12 @@ namespace stringzilla {
  *  @brief GPU adaptation of the `scorer` on CUDA, avoiding warp-level shuffles and DPX.
  *  @note Uses 32-bit `uint` counter to iterate through the string slices, so it can't be over 4 billion characters.
  */
-template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
-          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
+          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+#if _SZ_IS_CPP20
+    requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
+             substituter_like<substituter_type_>
+#endif
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, linear_gap_costs_t,
                    objective_, sz_similarity_global_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
@@ -152,8 +181,12 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  @brief GPU adaptation of the `local_scorer` on CUDA, avoiding warp-level shuffles and DPX.
  *  @note Uses 32-bit `uint` counter to iterate through the string slices, so it can't be over 4 billion characters.
  */
-template <pointer_like first_iterator_type_, pointer_like second_iterator_type_, score_like score_type_,
-          substituter_like substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
+          typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
+#if _SZ_IS_CPP20
+    requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
+             substituter_like<substituter_type_>
+#endif
 struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, substituter_type_, linear_gap_costs_t,
                    objective_, sz_similarity_local_k, capability_, std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
@@ -414,22 +447,22 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
  *  - Keep everything in global memory - the strings and the diagonals.
  *  - Execute the naive algorithm, expecting the hardware to handle coalescing the memory accesses.
  */
-template <                                                             //
-    typename char_type_ = char,                                        //
-    typename index_type_ = uint,                                       //
-    score_like score_type_ = sz_size_t,                                //
-    score_like final_score_type_ = sz_size_t,                          //
-    substituter_like substituter_type_ = uniform_substitution_costs_t, //
-    gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,        //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k,       //
-    sz_capability_t capability_ = sz_cap_cuda_k                        //
+template <                                                       //
+    typename char_type_ = char,                                  //
+    typename index_type_ = uint,                                 //
+    typename score_type_ = sz_size_t,                            //
+    typename final_score_type_ = sz_size_t,                      //
+    typename substituter_type_ = uniform_substitution_costs_t,   //
+    typename gap_costs_type_ = linear_gap_costs_t,               //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
 __global__ void _score_across_cuda_device(                     //
     char_type_ const *shorter_ptr, index_type_ shorter_length, //
     char_type_ const *longer_ptr, index_type_ longer_length,   //
     final_score_type_ *result_ptr, score_type_ *diagonals_ptr, //
-    substituter_type_ const *substituter_ptr, gap_costs_type_ const *gaps_costs_ptr) noexcept {
+    substituter_type_ const substituter, gap_costs_type_ const gap_costs) {
 
     namespace cg = cooperative_groups;
 
@@ -448,8 +481,8 @@ __global__ void _score_across_cuda_device(                     //
     // Pre-load the substituter and gap costs.
     using substituter_t = substituter_type_;
     using gap_costs_t = gap_costs_type_;
-    substituter_t const substituter = *substituter_ptr;
-    gap_costs_t const gap_costs = *gaps_costs_ptr;
+    static_assert(std::is_trivially_copyable<substituter_t>::value, "Substituter must be trivially copyable.");
+    static_assert(std::is_trivially_copyable<gap_costs_t>::value, "Gap costs must be trivially copyable.");
 
     using warp_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
                                       locality_k, capability_k>;
@@ -593,21 +626,23 @@ __global__ void _score_across_cuda_device(                     //
  *          Each pair of strings gets its own @b "block" of CUDA threads forming one @b warp and shared memory.
  *
  *  @param[in] tasks Tasks containing the strings and output locations.
+ *  @param[in] tasks_count The number of tasks to process.
+ *
  */
 template < //
     typename task_type_,
-    typename char_type_ = char,                                        //
-    typename index_type_ = uint,                                       //
-    score_like score_type_ = sz_size_t,                                //
-    substituter_like substituter_type_ = uniform_substitution_costs_t, //
-    gap_costs_like gap_costs_type_ = linear_gap_costs_t,               //
-    sz_similarity_objective_t objective_ = sz_maximize_score_k,        //
-    sz_similarity_locality_t locality_ = sz_similarity_global_k,       //
-    sz_capability_t capability_ = sz_cap_cuda_k                        //
+    typename char_type_ = char,                                  //
+    typename index_type_ = uint,                                 //
+    typename score_type_ = sz_size_t,                            //
+    typename substituter_type_ = uniform_substitution_costs_t,   //
+    typename gap_costs_type_ = linear_gap_costs_t,               //
+    sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
+    sz_similarity_locality_t locality_ = sz_similarity_global_k, //
+    sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
 __global__ void _score_on_each_cuda_warp(     //
     task_type_ *tasks, sz_size_t tasks_count, //
-    substituter_type_ const *substituter_ptr, gap_costs_type_ const *gap_costs_ptr) noexcept {
+    substituter_type_ const substituter, gap_costs_type_ const gap_costs) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using task_t = task_type_;
@@ -621,8 +656,8 @@ __global__ void _score_on_each_cuda_warp(     //
     // Pre-load the substituter and gap costs.
     using substituter_t = substituter_type_;
     using gap_costs_t = gap_costs_type_;
-    substituter_t const substituter = *substituter_ptr;
-    gap_costs_t const gap_costs = *gap_costs_ptr;
+    static_assert(std::is_trivially_copyable<substituter_t>::value, "Substituter must be trivially copyable.");
+    static_assert(std::is_trivially_copyable<gap_costs_t>::value, "Gap costs must be trivially copyable.");
 
     using warp_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
                                       locality_k, capability_k>;
@@ -633,7 +668,7 @@ __global__ void _score_on_each_cuda_warp(     //
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
     for (sz_size_t task_idx = blockIdx.x; task_idx < tasks_count; task_idx += gridDim.x) {
-        task_t const &task = tasks[task_idx];
+        task_t &task = tasks[task_idx];
         char_t const *shorter_global = task.shorter_ptr;
         char_t const *longer_global = task.longer_ptr;
         sz_size_t const shorter_length = task.shorter_length;
@@ -777,7 +812,7 @@ __global__ void _score_on_each_cuda_warp(     //
  *          Before starting the kernels, bins them by size to maximize the number of blocks
  *          per grid that can run simultaneously, while fitting into the shared memory.
  */
-template <typename char_type_, gap_costs_like gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
+template <typename char_type_, typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capability_,
                              std::enable_if_t<capability_ & sz_cap_cuda_k>> {
 
@@ -793,9 +828,10 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         char_t const *longer_ptr = nullptr;
         size_t longer_length = 0;
         size_t memory_requirement = 0;
-        size_t bytes_per_cell = 0;
         size_t original_index = 0;
-        size_t result = 0;
+        size_t result = std::numeric_limits<size_t>::max();       // ? Signal that we are not done yet.
+        bytes_per_cell_t bytes_per_cell = eight_bytes_per_cell_k; // ? Worst case, need the most memory per scalar.
+        warp_tasks_density_t density = warps_working_together_k;  // ? Worst case, we are not using shared memory.
 
         constexpr task_t() = default;
         constexpr task_t(                                 //
@@ -819,8 +855,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    levenshtein_distances(allocator_t const &alloc = {}) noexcept : alloc_(alloc) {}
-    levenshtein_distances(uniform_substitution_costs_t subs, gap_costs_t gaps,
+    levenshtein_distances(uniform_substitution_costs_t subs = {}, gap_costs_t gaps = {},
                           allocator_t const &alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
@@ -830,11 +865,21 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         results_type_ *results_ptr,                                                           //
         gpu_specs_t specs = {}, cuda_executor_t executor = {}) const noexcept {
 
+        // Preallocate the events for GPU timing.
+        cudaEvent_t start_event, stop_event;
+        cudaEventCreate(&start_event, cudaEventBlockingSync);
+        cudaEventCreate(&stop_event, cudaEventBlockingSync);
+
         using final_score_t = results_type_;
         safe_vector<task_t, tasks_allocator_t> tasks(alloc_);
         if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
+        // Record the start event
+        cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream);
+        if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
+
         // Export all the tasks and sort them by decreasing memory requirement.
+        size_t count_empty_tasks = 0;
         using similarity_memory_requirements_t = similarity_memory_requirements<sz_size_t, false>;
         for (sz_size_t i = 0; i < first_strings.size(); ++i) {
             task_t task(                                            //
@@ -845,155 +890,160 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 gap_type<gap_costs_t>(), substituter_.magnitude(), gap_costs_.magnitude(), //
                 sizeof(char_t), 4);
 
-            task.result = std::numeric_limits<final_score_t>::max(); // Signal that we are not done yet.
             task.original_index = i;
             task.memory_requirement = requirement.total;
             task.bytes_per_cell = requirement.bytes_per_cell;
+            task.density = warp_tasks_density(requirement.total, specs);
+            if (task.density == infinite_warps_per_multiprocessor_k)
+                task.result = task.longer_length * gap_costs_.open_or_extend, count_empty_tasks++;
             tasks[i] = task;
         }
-        std::sort(tasks.begin(), tasks.end(),
-                  [](task_t const &a, task_t const &b) { return a.memory_requirement > b.memory_requirement; });
 
-        // On very large inputs we will keep the diagonals in shared memory.
-        safe_vector<sz_u64_t, scores_allocator_t> diagonals_u64_buffer(alloc_);
-        auto device_level_u16_kernel =
-            &_score_across_cuda_device<char_t, sz_u16_t, sz_u16_t, final_score_t, uniform_substitution_costs_t,
-                                       linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
-                                       capability_k>;
-        auto device_level_u32_kernel =
-            &_score_across_cuda_device<char_t, sz_u32_t, sz_u32_t, final_score_t, uniform_substitution_costs_t,
-                                       linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
-                                       capability_k>;
-        auto device_level_u64_kernel =
-            &_score_across_cuda_device<char_t, sz_u64_t, sz_u64_t, final_score_t, uniform_substitution_costs_t,
-                                       linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
-                                       capability_k>;
-        void *device_level_kernel_args[8];
+        auto [device_level_tasks, warp_level_tasks, empty_tasks] =
+            warp_tasks_grouping<task_t>({tasks.data(), tasks.size()}, specs);
 
-        // Now we need to bin them based on the number of blocks per multiprocessor,
-        // starting with problems, that can't fit into the memory of a single SM.
-        size_t count_tasks_processed = 0;
-        size_t count_tasks_for_entire_device = 0;
-        for (; count_tasks_processed != tasks.size(); ++count_tasks_processed, ++count_tasks_for_entire_device) {
-            // Check if we've finally reached small-enough inputs.
-            task_t const &task = tasks[count_tasks_processed];
-            size_t const requirement_with_one_warp = task.memory_requirement + specs.reserved_memory_per_block * 1;
-            if (requirement_with_one_warp < specs.shared_memory_per_multiprocessor()) break;
+        if (device_level_tasks.size()) {
+            auto device_level_u16_kernel =
+                &_score_across_cuda_device<char_t, sz_u16_t, sz_u16_t, final_score_t, uniform_substitution_costs_t,
+                                           linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
+                                           capability_k>;
+            auto device_level_u32_kernel =
+                &_score_across_cuda_device<char_t, sz_u32_t, sz_u32_t, final_score_t, uniform_substitution_costs_t,
+                                           linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
+                                           capability_k>;
+            auto device_level_u64_kernel =
+                &_score_across_cuda_device<char_t, sz_u64_t, sz_u64_t, final_score_t, uniform_substitution_costs_t,
+                                           linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
+                                           capability_k>;
+            void *device_level_kernel_args[8];
 
-            // As tasks decrease in size, this can only fail on first iteration.
-            if (diagonals_u64_buffer.try_resize(task.max_diagonal_length() * 3) == status_t::bad_alloc_k)
+            // On very large inputs we can't fit the diagonals in shared memory, and use the global one.
+            safe_vector<sz_u64_t, scores_allocator_t> diagonals_u64_buffer(alloc_);
+            task_t const &largest_task = device_level_tasks[0];
+            _sz_assert(largest_task.max_diagonal_length() >= device_level_tasks.back().max_diagonal_length());
+            if (diagonals_u64_buffer.try_resize(largest_task.max_diagonal_length() * 3) == status_t::bad_alloc_k)
                 return {status_t::bad_alloc_k};
-            device_level_kernel_args[0] = (void *)(task.shorter_ptr);
-            device_level_kernel_args[1] = (void *)(&task.shorter_length);
-            device_level_kernel_args[2] = (void *)(task.longer_ptr);
-            device_level_kernel_args[3] = (void *)(&task.longer_length);
-            device_level_kernel_args[4] = (void *)(&task.result);
-            device_level_kernel_args[5] = (void *)(diagonals_u64_buffer.data());
-            device_level_kernel_args[6] = (void *)(&substituter_);
-            device_level_kernel_args[7] = (void *)(&gap_costs_);
 
-            // Pick the smallest fitting type for the diagonals.
-            void *device_level_kernel = reinterpret_cast<void *>(device_level_u16_kernel);
-            if (task.bytes_per_cell >= sizeof(sz_u32_t))
-                device_level_kernel = reinterpret_cast<void *>(device_level_u32_kernel);
-            if (task.bytes_per_cell >= sizeof(sz_u64_t))
-                device_level_kernel = reinterpret_cast<void *>(device_level_u64_kernel);
+            // Individually submit each task to the GPU.
+            void *const diagonals_buffer_ptr = (void *)diagonals_u64_buffer.data();
+            for (size_t i = 0; i < device_level_tasks.size(); ++i) {
+                task_t const &task = device_level_tasks[i];
+                device_level_kernel_args[0] = (void *)(&task.shorter_ptr);
+                device_level_kernel_args[1] = (void *)(&task.shorter_length);
+                device_level_kernel_args[2] = (void *)(&task.longer_ptr);
+                device_level_kernel_args[3] = (void *)(&task.longer_length);
+                device_level_kernel_args[4] = (void *)(&task.result);
+                device_level_kernel_args[5] = (void *)(&diagonals_buffer_ptr);
+                device_level_kernel_args[6] = (void *)(&substituter_);
+                device_level_kernel_args[7] = (void *)(&gap_costs_);
 
-            // TODO: We can be wiser about the dimensions of this grid.
-            uint const random_block_size = 128;
-            uint const random_blocks_per_multiprocessor = 32;
-            cudaError_t launch_error = cudaLaunchCooperativeKernel(                       //
-                reinterpret_cast<void *>(device_level_kernel),                            // Kernel function pointer
-                dim3(random_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
-                dim3(random_block_size),                                                  // Block dimensions
-                device_level_kernel_args, // Array of kernel argument pointers
-                0,                        // Shared memory per block (in bytes)
-                executor.stream);         // CUDA stream
-            if (launch_error != cudaSuccess)
-                if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
-                else { return {status_t::unknown_k, launch_error}; }
+                // Pick the smallest fitting type for the diagonals.
+                void *device_level_kernel = reinterpret_cast<void *>(device_level_u16_kernel);
+                if (task.bytes_per_cell >= sizeof(sz_u32_t))
+                    device_level_kernel = reinterpret_cast<void *>(device_level_u32_kernel);
+                if (task.bytes_per_cell >= sizeof(sz_u64_t))
+                    device_level_kernel = reinterpret_cast<void *>(device_level_u64_kernel);
+
+                // TODO: We can be wiser about the dimensions of this grid.
+                uint const random_block_size = 128;
+                uint const random_blocks_per_multiprocessor = 32;
+                cudaError_t launch_error = cudaLaunchCooperativeKernel(                       //
+                    reinterpret_cast<void *>(device_level_kernel),                            // Kernel function pointer
+                    dim3(random_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
+                    dim3(random_block_size),                                                  // Block dimensions
+                    device_level_kernel_args, // Array of kernel argument pointers
+                    0,                        // Shared memory per block (in bytes)
+                    executor.stream);         // CUDA stream
+                if (launch_error != cudaSuccess)
+                    if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
+                    else { return {status_t::unknown_k, launch_error}; }
+            }
         }
 
         // Now process remaining warp-level tasks, checking warp densities in reverse order.
         // From the highest possible number of warps per multiprocessor to the lowest.
-        std::initializer_list<size_t> warps_per_multiprocessor_densities = {32, 16, 8, 4, 2, 1};
-        auto warp_level_u8_kernel =
-            &_score_on_each_cuda_warp<task_t, char_t, sz_u8_t, sz_u8_t, uniform_substitution_costs_t,
-                                      linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
-        auto warp_level_u16_kernel =
-            &_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_u16_t, uniform_substitution_costs_t,
-                                      linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, capability_k>;
-        void *warp_level_kernel_args[4];
-        size_t count_tasks_for_this_density = 0;
-        for (size_t warps_per_multiprocessor_density : warps_per_multiprocessor_densities) {
-            for (; count_tasks_processed != tasks.size(); ++count_tasks_processed, ++count_tasks_for_this_density) {
-                // Check if the current warp density is still optimal.
-                size_t const count_tasks_for_warp_processed = count_tasks_processed - count_tasks_for_entire_device;
-                task_t const &task = tasks[tasks.size() - count_tasks_for_warp_processed - 1];
-                size_t const requirement_with_current_warp_density =
-                    task.memory_requirement + specs.reserved_memory_per_block * warps_per_multiprocessor_density;
-                if (requirement_with_current_warp_density > specs.shared_memory_per_multiprocessor()) break;
-            }
+        if (warp_level_tasks.size()) {
+            auto warp_level_u8_kernel =
+                &_score_on_each_cuda_warp<task_t, char_t, sz_u8_t, sz_u8_t, uniform_substitution_costs_t,
+                                          linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
+                                          capability_k>;
+            auto warp_level_u16_kernel =
+                &_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_u16_t, uniform_substitution_costs_t,
+                                          linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k,
+                                          capability_k>;
+            void *warp_level_kernel_args[4];
 
-            // If there are no more tasks left - exit!
-            if (!count_tasks_for_this_density) break;
+            cuda_status_t result;
+            auto const task_size_equality = [](task_t const &lhs, task_t const &rhs) {
+                return lhs.bytes_per_cell == rhs.bytes_per_cell && lhs.density == rhs.density;
+            };
+            auto const task_group_callback = [&](task_t const *tasks_begin, task_t const *tasks_end) {
+                // Check if we need to stop processing.
+                if (result.status != status_t::success_k) return;
 
-            // If we don't even have enough tasks to keep the entire device busy - continue shrinking
-            // the number of warps per multiprocessor, until we find a fitting density.
-            // ... Unless we are already at the lowest density.
-            if (count_tasks_for_this_density < (specs.streaming_multiprocessors * warps_per_multiprocessor_density) &&
-                warps_per_multiprocessor_density > 1)
-                continue;
+                size_t const count_tasks = tasks_end - tasks_begin;
+                warp_level_kernel_args[0] = (void *)(&tasks_begin);
+                warp_level_kernel_args[1] = (void *)(&count_tasks);
+                warp_level_kernel_args[2] = (void *)(&substituter_);
+                warp_level_kernel_args[3] = (void *)(&gap_costs_);
 
-            // Now check if any tasks of that size have been found and if their quantity is sufficient
-            // to fill the entire device with warps. If we don't have enough tasks for this density,
-            // part of our GPU will just sit idle...
-            //
-            //     Theoretically, that isn't true. On paper, several CUDA kernels can run concurrently
-            //     on the same physical device. It makes sense, assuming the Multi-Instance GPU (MIG)
-            //     virtualization feature on them. But even when pulling `cudaGetDeviceProperties`
-            //     and logging `cudaDeviceProp::concurrentKernels` for the H200 GPU with 140 GB of VRAM,
-            //     it states 1!
-            //
-            // Moreover, we need to overwrite the maximum addressable shared memory for that kernel
-            // as the default limits our blocks (in our case, single-warp blocks) to 48 KB, while
-            // device supports 4-5x more! Still, that API is synchronous and we must block the current
-            // thread to what until the task completes to change the shared memory amount.
-            size_t const count_tasks_for_warp_processed = count_tasks_processed - count_tasks_for_entire_device;
-            size_t const first_task_index =
-                tasks.size() - count_tasks_for_warp_processed - count_tasks_for_this_density;
-            warp_level_kernel_args[0] = (void *)(tasks.data() + first_task_index);
-            warp_level_kernel_args[1] = (void *)(&count_tasks_for_this_density);
-            warp_level_kernel_args[2] = (void *)(&substituter_);
-            warp_level_kernel_args[3] = (void *)(&gap_costs_);
+                // Pick the smallest fitting type for the diagonals.
+                task_t const &indicative_task = tasks_begin[0];
+                void *warp_level_kernel = reinterpret_cast<void *>(warp_level_u8_kernel);
+                if (indicative_task.bytes_per_cell >= sizeof(sz_u16_t))
+                    warp_level_kernel = reinterpret_cast<void *>(warp_level_u16_kernel);
 
-            // Pick the smallest fitting type for the diagonals.
-            void *warp_level_kernel = reinterpret_cast<void *>(warp_level_u8_kernel);
-            if (tasks[first_task_index].bytes_per_cell >= sizeof(sz_u16_t))
-                warp_level_kernel = reinterpret_cast<void *>(warp_level_u16_kernel);
+                // Update the selected kernels properties.
+                size_t const shared_memory_per_block =
+                    indicative_task.memory_requirement * static_cast<size_t>(indicative_task.density);
+                _sz_assert(shared_memory_per_block > 0);
+                _sz_assert(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
+                cudaError_t attribute_error = cudaFuncSetAttribute(
+                    warp_level_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory_per_block);
+                if (attribute_error != cudaSuccess) {
+                    result = {status_t::unknown_k, attribute_error};
+                    return;
+                }
 
-            // Warp-level algorithm clearly aligns with the warp size.
-            uint const warp_block_size = static_cast<uint>(specs.warp_size);
-            uint const warp_blocks_per_multiprocessor = static_cast<uint>(warps_per_multiprocessor_density);
-            size_t const shared_memory_per_block = tasks[first_task_index].memory_requirement;
-            cudaError_t launch_error = cudaLaunchCooperativeKernel(                     //
-                reinterpret_cast<void *>(warp_level_kernel),                            // Kernel function pointer
-                dim3(warp_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
-                dim3(warp_block_size),                                                  // Block dimensions
-                device_level_kernel_args, // Array of kernel argument pointers
-                shared_memory_per_block,  // Shared memory per block (in bytes)
-                executor.stream);         // CUDA stream
-            if (launch_error != cudaSuccess)
-                if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
-                else { return {status_t::unknown_k, launch_error}; }
+                // Warp-level algorithm clearly aligns with the warp size.
+                uint const warp_block_size = static_cast<uint>(specs.warp_size);
+                uint const warp_blocks_per_multiprocessor = static_cast<uint>(indicative_task.density);
+                cudaError_t launch_error = cudaLaunchKernel(                                //
+                    reinterpret_cast<void *>(warp_level_kernel),                            // Kernel function pointer
+                    dim3(warp_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
+                    dim3(warp_block_size),                                                  // Block dimensions
+                    warp_level_kernel_args,  // Array of kernel argument pointers
+                    shared_memory_per_block, // Shared memory per block (in bytes)
+                    executor.stream);        // CUDA stream
+                if (launch_error != cudaSuccess) {
+                    result = {launch_error == cudaErrorMemoryAllocation ? status_t::bad_alloc_k : status_t::unknown_k,
+                              launch_error};
+                    return;
+                }
+
+                // Wait until everything completes, as on the next iteration we will update the properties again.
+                cudaError_t execution_error = cudaStreamSynchronize(executor.stream);
+                if (execution_error != cudaSuccess) {
+                    result = {status_t::unknown_k, execution_error};
+                    return;
+                }
+            };
+            group_by(warp_level_tasks.begin(), warp_level_tasks.end(), task_size_equality, task_group_callback);
+            if (result.status != status_t::success_k) return result;
         }
 
+        // Calculate the duration:
+        cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream);
+        if (stop_event_error != cudaSuccess) return {status_t::unknown_k, stop_event_error};
+        float execution_milliseconds = 0;
+        cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
+
         // Now that everything went well, export the results back into the `results` array.
-        for (size_t i = 0; i < count_tasks_processed; ++i) {
+        for (size_t i = 0; i < tasks.size(); ++i) {
             task_t const &task = tasks[i];
             results_ptr[task.original_index] = task.result;
         }
-        return {status_t::success_k};
+        return {status_t::success_k, cudaSuccess, execution_milliseconds};
     }
 };
 

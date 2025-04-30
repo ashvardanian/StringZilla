@@ -14,7 +14,9 @@
 #include "stringzilla/types.hpp"
 
 #include <cuda_runtime.h> // `cudaMallocManaged`, `cudaFree`, `cudaSuccess`, `cudaGetErrorString`
-#include <optional>       // `std::optional`
+
+#include <optional>  // `std::optional`
+#include <algorithm> // `std::sort`, `std::partition`
 
 #if !defined(SZ_USE_HOPPER)
 #if defined(__CUDACC__) && (__CUDACC_VER_MAJOR__ >= 11)
@@ -109,6 +111,10 @@ struct cuda_status_t {
     inline operator status_t() const noexcept { return status; }
 };
 
+struct cuda_executor_t {
+    cudaStream_t stream = 0;
+};
+
 /**
  *  @brief  Loads 32 bits from an unaligned address using the well known @b `prmt` trick.
  *  @see    https://stackoverflow.com/a/40198552/2766161
@@ -128,6 +134,149 @@ __forceinline__ __device__ sz_u32_vec_t sz_u32_load_unaligned(void const *ptr) n
         "}"
         : "=r"(result.u32)
         : "l"(ptr));
+    return result;
+}
+
+enum warp_tasks_density_t : uint {
+    warps_working_together_k = 0,
+    one_warp_per_multiprocessor_k = 1,
+    two_warps_per_multiprocessor_k = 2,
+    four_warps_per_multiprocessor_k = 4,
+    eight_warps_per_multiprocessor_k = 8,
+    sixteen_warps_per_multiprocessor_k = 16,
+    thirty_two_warps_per_multiprocessor_k = 32,
+    infinite_warps_per_multiprocessor_k = 0xFFFFFFFF
+};
+
+inline warp_tasks_density_t warp_tasks_density(size_t task_memory_requirement, gpu_specs_t const &specs) noexcept {
+    std::initializer_list<warp_tasks_density_t> densities {
+        thirty_two_warps_per_multiprocessor_k, sixteen_warps_per_multiprocessor_k, eight_warps_per_multiprocessor_k,
+        four_warps_per_multiprocessor_k,       two_warps_per_multiprocessor_k,     one_warp_per_multiprocessor_k};
+    if (task_memory_requirement == 0) return infinite_warps_per_multiprocessor_k;
+    for (auto density : densities) {
+        size_t required_block_memory = task_memory_requirement * density + specs.reserved_memory_per_block * density;
+        if (required_block_memory < specs.shared_memory_per_multiprocessor()) return density;
+    }
+    return warps_working_together_k;
+}
+
+template <typename task_type_>
+struct warp_tasks_groups {
+    span<task_type_> device_level_tasks;
+    span<task_type_> warp_level_tasks;
+    span<task_type_> empty_tasks;
+};
+
+/**
+ *  Let's say you have a list of GPU tasks of similar nature, but all of them require different amount of
+ *  shared memory for efficiency. Ideally, we want each warp to receive it's own task (independent of the
+ *  others), and have enough shared memory for more than one warp per multiprocessor.
+ *
+ *  To optimize the scheduling we will look into several factors of individual tasks.
+ *
+ *  @p `tasks[i].bytes_per_cell` - defines the actual kernel template to be used and serves as the natural boundary,
+ *  as different kernels *kind of* can't run concurrently.
+ *
+ *      Theoretically, that isn't true. On paper, several CUDA kernels can run concurrently on the same physical device.
+ *      It makes sense, assuming the Multi-Instance GPU (MIG) virtualization feature on them. But even when pulling
+ *      the `cudaGetDeviceProperties` and logging @b `cudaDeviceProp::concurrentKernels` for the H200 GPU with 140 GB
+ *      of VRAM, it states 1. 🤯
+ *
+ *  @p `tasks[i].density` - max number of warps per multiprocessor, executing simultaneously. It's inferred from the
+ *  shared memory amount, supported by device, which is of the order of 100-200 KB, minus the reserved memory per block.
+ *
+ *      Theoretically, it's true, but in practice, to address more than 48 KB of shared memory from a single block,
+ *      you need to override that @b `cudaFuncAttributeMaxDynamicSharedMemorySize` setting for each individual kernel,
+ *      also subtracting the reserved memory for the expected number of blocks. 🤯
+ *      Moreover, calling @b `cudaFuncSetAttribute` is a synchronous operation, so say goodbye to asynchronous kernel
+ *      launches and latency hiding. So to reduce the overall runtime, we need to have as few individual launches
+ *      as possible.
+ *
+ *  @p `specs.shared_memory_per_multiprocessor()` and @p `specs.reserved_memory_per_block` - our memory limits.
+ *  @p `specs.streaming_multiprocessors` - the actual number of physical multiprocessors on the device. It defines
+ *  the reasonable lower bound for a single kernel launch. On H100 it would be 132, so if a particular group of inputs
+ *  can have 2 simultaneous warps per multiprocessor, but has fewer than (132 / 2 = 66) blocks, it would be better to
+ *  merge it with a more memory-hungry group to avoid the overhead of additional kernel launches.
+ *
+ *  It's possible to have a very memory-efficient task, that allows for 32 warps per multiprocessor, and it would be
+ *  best schedule them in the largest possible block size - 1024 threads.
+ *
+ *  @throws `std::bad_alloc` if the `std::sort` or `std::partition` fails to allocate memory.
+ *
+ *  @post The @p tasks are sorted in-place, first containing the returned number of device-wide tasks,
+ *  and then the warp-wide tasks grouped by ( @p bytes_per_cell, @p density ) pairs. Use @b `group_by`
+ *  to navigate the output.
+ */
+template <typename task_type_>
+warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_specs_t const &specs) noexcept(false) {
+
+    using task_t = task_type_;
+    warp_tasks_groups<task_t> result;
+
+    // Determine if there are tasks that require the whole device memory.
+    size_t const device_level_tasks =
+        std::partition(tasks.begin(), tasks.end(),
+                       [](task_t const &task) { return task.density == warps_working_together_k; }) -
+        tasks.begin();
+
+    // Determine the number of empty tasks and put them aside.
+    auto const warp_tasks_begin = tasks.begin() + device_level_tasks;
+    size_t const non_empty_tasks =
+        std::partition(warp_tasks_begin, tasks.end(),
+                       [](task_t const &task) { return task.density != infinite_warps_per_multiprocessor_k; }) -
+        warp_tasks_begin;
+
+    // The remaining tasks will be sorted from smallest memory consumption to largest.
+    auto const warp_tasks_end = warp_tasks_begin + non_empty_tasks;
+    std::sort(warp_tasks_begin, warp_tasks_end, [](task_t const &lhs, task_t const &rhs) {
+        return lhs.bytes_per_cell == rhs.bytes_per_cell ? lhs.density < rhs.density
+                                                        : lhs.bytes_per_cell < rhs.bytes_per_cell;
+    });
+
+    result.device_level_tasks = {tasks.begin(), warp_tasks_begin};
+    result.warp_level_tasks = {warp_tasks_begin, warp_tasks_end};
+    result.empty_tasks = {warp_tasks_end, tasks.end()};
+
+    // The naive next step would be to simply group them by their memory requirements,
+    // but we our high-level goal isn't maximum utilization of the GPU, but rather
+    // the fastest execution time. And assuming the scheduling & synchronization
+    // costs, we may want to combine consecutive groups of tasks to ensure they are large enough.
+    size_t tasks_remaining = result.warp_level_tasks.size() - device_level_tasks;
+    while (tasks_remaining > 1) { // 1 task or less ~ nothing to merge
+        size_t const first_task_index = result.warp_level_tasks.size() - tasks_remaining;
+        task_t &indicative_task = tasks[first_task_index];
+        size_t const tasks_with_same_density =
+            std::find_if(&indicative_task, result.warp_level_tasks.end(),
+                         [&](task_t const &task) {
+                             return task.bytes_per_cell != indicative_task.bytes_per_cell ||
+                                    task.density != indicative_task.density;
+                         }) -
+            &indicative_task;
+        size_t const following_tasks = tasks_remaining - tasks_with_same_density;
+        if (!following_tasks) break; // No more tasks to merge
+
+        // Check if we have enough tasks to keep all the warps busy.
+        size_t const possible_warps = size_t(indicative_task.density) * specs.streaming_multiprocessors;
+        if (tasks_with_same_density > possible_warps) {
+            tasks_remaining -= tasks_with_same_density;
+            continue; // Jump to the next group
+        }
+
+        // If the next task has a different cell size, we can't merge them.
+        task_t &next_indicative_task = tasks[first_task_index + tasks_with_same_density];
+        if (indicative_task.bytes_per_cell != next_indicative_task.bytes_per_cell) {
+            tasks_remaining -= tasks_with_same_density;
+            continue; // Jump to the next group
+        }
+
+        // Update all the operations in the current group to have the same "sparser" density
+        // as the next group.
+        for (size_t i = 0; i < tasks_with_same_density; ++i) {
+            task_t &task = tasks[first_task_index + i];
+            task.density = next_indicative_task.density;
+        }
+    }
+
     return result;
 }
 
