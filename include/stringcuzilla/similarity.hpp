@@ -1666,7 +1666,7 @@ struct levenshtein_distance {
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        else if (requirements.bytes_per_cell == 1) {
+        else if (requirements.bytes_per_cell <= 1) {
             sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
             status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first, second, result_u8, executor);
             if (status != status_t::success_k) return status;
@@ -1807,7 +1807,7 @@ struct levenshtein_distance_utf8 {
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        else if (requirements.bytes_per_cell == 1) {
+        else if (requirements.bytes_per_cell <= 1) {
             sz_u8_t result_u8 = std::numeric_limits<sz_u8_t>::max();
             status_t status =
                 diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8, executor);
@@ -3302,7 +3302,7 @@ struct levenshtein_distance<char, linear_gap_costs_t, allocator_type_, capabilit
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        if (requirements.bytes_per_cell == 1) {
+        if (requirements.bytes_per_cell <= 1) {
             sz_u8_t result_u8;
             status_t status = diagonal_u8_t {substituter_, gap_costs_, alloc_}(first, second, result_u8 /* executor */);
             if (status != status_t::success_k) return status;
@@ -3413,7 +3413,7 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
         span<sz_rune_t const> const first_utf32 {first_data_utf32, first_length_utf32};
         span<sz_rune_t const> const second_utf32 {second_data_utf32, second_length_utf32};
-        if (requirements.bytes_per_cell == 1) {
+        if (requirements.bytes_per_cell <= 1) {
             sz_u8_t result_u8;
             status_t status =
                 diagonal_u8_t {substituter_, gap_costs_, alloc_}(first_utf32, second_utf32, result_u8 /* executor */);
@@ -3712,7 +3712,7 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, a
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        if (requirements.bytes_per_cell == 2) {
+        if (requirements.bytes_per_cell <= 2) {
             sz_i16_t result_i16;
             status_t status = horizontal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16);
             if (status != status_t::success_k) return status;
@@ -3785,7 +3785,7 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        if (requirements.bytes_per_cell == 2) {
+        if (requirements.bytes_per_cell <= 2) {
             sz_i16_t result_i16;
             status_t status = horizontal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16);
             if (status != status_t::success_k) return status;
