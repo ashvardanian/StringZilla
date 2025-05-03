@@ -431,6 +431,17 @@ typedef enum sz_similarity_objective_t {
 } sz_similarity_objective_t;
 
 /**
+ *  @brief Describes the cost model for gap opening vs extension in string similarity algorithms.
+ *  @sa sz_gaps_linear_k, sz_gaps_affine_k
+ */
+typedef enum sz_similarity_gaps_t {
+    /** Linear costs require us to build only 1 DP matrix. */
+    sz_gaps_linear_k = 1,
+    /** Affine costs require us to build 3 DP matrices. */
+    sz_gaps_affine_k = 3
+} sz_similarity_gaps_t;
+
+/**
  *  @brief A simple signed integer type describing the status of a faulty operation.
  *  @sa sz_success_k, sz_bad_alloc_k, sz_invalid_utf8_k, sz_contains_duplicates_k
  */
@@ -473,6 +484,7 @@ typedef enum sz_capability_t {
     sz_cap_hopper_k = 1 << 22, ///< CUDA capability with support for Hopper's DPX instructions
 
     sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k,                 ///< Serial code with OpenMP
+    sz_caps_si_k = sz_cap_serial_k | sz_cap_ice_k,                      ///< Serial code with Ice Lake
     sz_caps_spi_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_ice_k, ///< Serial code with OpenMP and Ice Lake
     sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with OpenMP and SVE
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
@@ -928,7 +940,7 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
  *  @brief  Cache-line width, that will affect the execution of some algorithms,
  *          like equality checks and relative order computing.
  */
-#define SZ_CACHE_LINE_WIDTH (64) // bytes
+#define SZ_CACHE_LINE_WIDTH (64)   // bytes
 #define SZ_MAX_REGISTER_WIDTH (64) // bytes
 #define SZ_SIZE_MAX ((sz_size_t)(-1))
 #define SZ_SSIZE_MAX ((sz_ssize_t)(SZ_SIZE_MAX >> 1))
