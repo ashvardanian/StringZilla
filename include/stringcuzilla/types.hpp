@@ -29,7 +29,7 @@ struct dummy_executor_t {
      *          the same thread.
      */
     template <typename function_type_>
-    inline void for_each(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each_static(size_t n, function_type_ &&function) const noexcept {
         for (size_t i = 0; i < n; ++i) function(i);
     }
 
@@ -40,7 +40,7 @@ struct dummy_executor_t {
      *          handled by a particular thread.
      */
     template <typename function_type_>
-    inline void for_each_range(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each_slice(size_t n, function_type_ &&function) const noexcept {
         function(0, n);
     }
 
@@ -50,7 +50,7 @@ struct dummy_executor_t {
      *          so each thread eagerly processes the next index in the range.
      */
     template <typename function_type_>
-    inline void eager(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each_dynamic(size_t n, function_type_ &&function) const noexcept {
         for (size_t i = 0; i < n; ++i) function(i);
     }
 };
@@ -63,7 +63,7 @@ struct openmp_executor_t {
      *          the same thread.
      */
     template <typename function_type_>
-    inline void for_each(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each_static(size_t n, function_type_ &&function) const noexcept {
 #pragma omp parallel for
         for (size_t i = 0; i < n; ++i) function(i);
     }
@@ -75,7 +75,7 @@ struct openmp_executor_t {
      *          handled by a particular thread.
      */
     template <typename function_type_>
-    inline void for_each_range(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each_slice(size_t n, function_type_ &&function) const noexcept {
         // OpenMP won't use more threads than the number of available cores
         // and by using STL to query that number, we avoid the need to link
         // against OpenMP libraries.
@@ -95,7 +95,7 @@ struct openmp_executor_t {
      *          so each thread eagerly processes the next index in the range.
      */
     template <typename function_type_>
-    inline void eager(size_t n, function_type_ &&function) const noexcept {
+    inline void for_each_dynamic(size_t n, function_type_ &&function) const noexcept {
 #pragma omp parallel for schedule(dynamic, 1)
         for (size_t i = 0; i < n; ++i) function(i);
     }
@@ -103,20 +103,26 @@ struct openmp_executor_t {
 
 template <typename executor_type_>
 concept executor_like = requires(executor_type_ executor) {
+#if !defined(__NVCC__)
     {
-        executor.for_each(0u, [](size_t) {})
+        executor.for_each_static(0u, [](size_t) {})
     } -> std::same_as<void>;
     {
-        executor.for_each_range(0u, [](size_t, size_t) {})
+        executor.for_each_slice(0u, [](size_t, size_t) {})
     } -> std::same_as<void>;
     {
-        executor.eager(0u, [](size_t) {})
+        executor.for_each_dynamic(0u, [](size_t) {})
     } -> std::same_as<void>;
+#else
+    sizeof(executor) > 0;
+#endif
 };
 
+#if !defined(__NVCC__)
 static_assert(executor_like<dummy_executor_t>);
 static_assert(executor_like<openmp_executor_t>);
 static_assert(!executor_like<int>);
+#endif
 
 template <typename continuous_type_>
 concept continuous_like = requires(continuous_type_ container) {
