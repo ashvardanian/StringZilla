@@ -419,61 +419,6 @@ struct smith_waterman_baselines_t {
     }
 };
 
-using malloc_t = std::allocator<char>;
-#if SZ_USE_CUDA
-using ualloc_t = unified_alloc<char>;
-#endif
-
-/**
- *  In non-SIMD backends we still leverage OpenMP for parallelism.
- */
-using levenshtein_serial_t = levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k>;
-using levenshtein_utf8_serial_t = levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k>;
-using needleman_wunsch_serial_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k>;
-using smith_waterman_serial_t =
-    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k>;
-
-using affine_levenshtein_serial_t = levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_sp_k>;
-using affine_levenshtein_utf8_serial_t = levenshtein_distances_utf8<char, affine_gap_costs_t, malloc_t, sz_caps_sp_k>;
-using affine_needleman_wunsch_serial_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, affine_gap_costs_t, malloc_t, sz_caps_sp_k>;
-using affine_smith_waterman_serial_t =
-    smith_waterman_scores<char, error_costs_256x256_t, affine_gap_costs_t, malloc_t, sz_caps_sp_k>;
-
-/**
- *  In @b AVX-512:
- *  - for Global Alignments, we can vectorize the min-max calculation for diagonal "walkers"
- *  - for Local Alignments, we can vectorize the character substitution lookups for horizontal "walkers"
- */
-using levenshtein_ice_t = levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_spi_k>;
-using levenshtein_utf8_ice_t = levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_spi_k>;
-using needleman_wunsch_ice_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_spi_k>;
-using smith_waterman_ice_t =
-    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, malloc_t, sz_caps_spi_k>;
-
-#if SZ_USE_CUDA
-/**
- *  In @b CUDA:
- *  - for GPUs before Hopper, we can use the @b SIMT model for warp-level parallelism using diagonal "walkers"
- *  - for GPUs after Hopper, we compound that with thread-level @b SIMD via @b DPX instructions for min-max
- */
-using levenshtein_cuda_t = levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
-using levenshtein_utf8_cuda_t = levenshtein_distances_utf8<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
-using needleman_wunsch_cuda_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
-using smith_waterman_cuda_t =
-    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k>;
-
-using levenshtein_kepler_t = levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k>;
-using levenshtein_utf8_hopper_t = levenshtein_distances_utf8<char, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
-using needleman_wunsch_hopper_t =
-    needleman_wunsch_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
-using smith_waterman_hopper_t =
-    smith_waterman_scores<char, error_costs_256x256_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k>;
-#endif
-
 template <typename score_type_>
 void edit_distance_log_mismatch(std::string const &first, std::string const &second, //
                                 score_type_ result_base, score_type_ result_simd) {
@@ -748,7 +693,7 @@ void test_similarity_scores_equivalence() {
     // Multi-threaded parallel Levenshtein distance implementation
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
         levenshtein_baselines_t {},                    //
-        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {});
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {});
 
     // Single-threaded serial Levenshtein distance implementation with weird linear costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
@@ -758,7 +703,7 @@ void test_similarity_scores_equivalence() {
     // Multi-threaded parallel Levenshtein distance implementation with weird linear costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
         levenshtein_baselines_t {weird_uniform, weird_linear}, //
-        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {weird_uniform, weird_linear});
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear});
 
     // Single-threaded serial Levenshtein distance implementation with weird affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
@@ -768,53 +713,88 @@ void test_similarity_scores_equivalence() {
     // Multi-threaded parallel Levenshtein distance implementation with weird affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(         //
         levenshtein_baselines_t {weird_uniform, weird_affine}, //
-        levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_sp_k> {weird_uniform, weird_affine});
+        levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine});
 
     // Now let's take non-unary substitution costs, like BLOSUM62
-    constexpr linear_gap_costs_t blosum62_gap_extension_cost {-4};
+    constexpr linear_gap_costs_t blosum62_linear_cost {-4};
+    constexpr affine_gap_costs_t blosum62_affine_cost {-4, -1};
     error_mat_t blosum62_mat = error_costs_26x26ascii_t::blosum62();
     error_matrix_t blosum62_matrix = blosum62_mat.decompressed();
 
     // Single-threaded serial NW implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                              //
-        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_gap_extension_cost});
+            blosum62_matrix, blosum62_linear_cost});
 
     // Multi-threaded parallel NW implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                              //
-        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {
-            blosum62_matrix, blosum62_gap_extension_cost});
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost});
 
     // Single-threaded serial SW implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                            //
-        smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
         smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
-            blosum62_matrix, blosum62_gap_extension_cost});
+            blosum62_matrix, blosum62_linear_cost});
 
     // Multi-threaded parallel SW implementation
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                            //
-        smith_waterman_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {
-            blosum62_matrix, blosum62_gap_extension_cost});
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
+        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost});
+
+    // Single-threaded serial NW implementation with weird affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost});
+
+    // Multi-threaded parallel NW implementation with weird affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost});
+
+    // Single-threaded serial SW implementation with weird affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
+        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost});
+
+    // Multi-threaded parallel SW implementation with weird affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_affine_cost}, //
+        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost});
 
 #if SZ_USE_ICE
     // Ice Lake Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                              //
-        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
-        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_spi_k> {});
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                 //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {});
 
     // Ice Lake Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                   //
-        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
-        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_spi_k> {});
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                      //
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {});
+
+    // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_linear});
+
+    // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_linear});
 
     // Ice Lake Needleman-Wunsch distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                              //
-        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_gap_extension_cost}, //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_spi_k> {
-            blosum62_matrix, blosum62_gap_extension_cost});
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                       //
+        needleman_wunsch_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_si_k> {
+            blosum62_matrix, blosum62_linear_cost});
 
 #endif
 
@@ -824,25 +804,27 @@ void test_similarity_scores_equivalence() {
 
 #if SZ_USE_CUDA
     // CUDA Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                              //
-        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
-        levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {}, {}, {}, first_gpu_specs);
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
+        levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_linear}, {}, {},
+        first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
     // CUDA Levenshtein distance on Kepler against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                              //
-        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
-        levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {}, {}, {}, first_gpu_specs);
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
+        levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
+        levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {weird_uniform, weird_linear}, {}, {},
+        first_gpu_specs);
 #endif
 
-#if SZ_USE_CUDA
+#if SZ_USE_CUDA && 0
     // CUDA Needleman-Wunsch distance against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
-        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {
-            blosum62_matrix, blosum62_gap_extension_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
-            blosum62_matrix, blosum62_gap_extension_cost},
+            blosum62_matrix, blosum62_linear_cost},
         {}, {}, first_gpu_specs);
 #endif
 }
@@ -889,20 +871,20 @@ void test_similarity_scores_memory_usage() {
         // Multi-threaded serial Levenshtein distance implementation
         test_similarity_scores_fuzzy<sz_size_t>( //
             levenshtein_baselines_t {},          //
-            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, experiment, 1);
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, experiment, 1);
 
 #if SZ_USE_CUDA
         // CUDA Levenshtein distance against Multi-threaded on CPU
-        test_similarity_scores_fuzzy<sz_size_t>(                                        //
-            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
+        test_similarity_scores_fuzzy<sz_size_t>(                                           //
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
             levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {}, experiment, 10,
             first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
         // CUDA Levenshtein distance on Kepler against Multi-threaded on CPU
-        test_similarity_scores_fuzzy<sz_size_t>(                                        //
-            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_sp_k> {}, //
+        test_similarity_scores_fuzzy<sz_size_t>(                                           //
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
             levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {}, experiment, 10,
             first_gpu_specs);
 #endif
@@ -1009,7 +991,7 @@ struct find_many_baselines_t {
 };
 
 using find_many_serial_t = find_many<sz_u32_t, malloc_t, sz_cap_serial_k>;
-using find_many_parallel_t = find_many<sz_u32_t, malloc_t, sz_caps_sp_k>;
+using find_many_parallel_t = find_many<sz_u32_t, malloc_t, sz_cap_serial_k>;
 
 /**
  *  @brief  Tests the correctness of the string class Levenshtein distance computation,
