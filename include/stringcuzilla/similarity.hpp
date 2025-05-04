@@ -9,15 +9,9 @@
  *  - `sz::needleman_wunsch_score` for weighted Needleman-Wunsch @b (NW) global alignment.
  *  - `sz::smith_waterman_score` for weighted Smith-Waterman @b (SW) local alignment.
  *
- *  Using those may look like this:
- *
- *  @code{.cpp}
- *  using levenshtein_t = sz::levenshtein_distance<sz::error_costs_256x256_t>;
- *
- *
  *  Also includes their batch-capable and parallel versions:
  *
- *  - `sz::levenshtein_scores` & `sz::levenshtein_scores_utf8` for Levenshtein edit-scores.
+ *  - `sz::levenshtein_distances` & `sz::levenshtein_distances_utf8` for Levenshtein edit-scores.
  *  - `sz::needleman_wunsch_scores` for weighted Needleman-Wunsch global alignment.
  *  - `sz::smith_waterman_scores` for weighted Smith-Waterman local alignment.
  *
@@ -367,7 +361,7 @@ struct diagonal_walker;
  *          in the `stringzilla.hpp` header, making compilation times shorter for the end-user.
  *  @sa     For lower-level API, check `sz_levenshtein_distance[_utf8]` and `sz_needleman_wunsch_score`.
  *  @sa     For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
- *  @sa     For bulk API, use `sz::levenshtein_scores[_utf8]`.
+ *  @sa     For bulk API, use `sz::levenshtein_distances[_utf8]`.
  */
 template <                                                       //
     typename char_type_ = char,                                  //
@@ -3448,8 +3442,8 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
 
 /**
  *  @brief  Helper object optimizing the most expensive part of variable-substitution-cost alignment methods for
- *          Ice Lake CPUs. It's designed for horizontal layout "walkers", where we look at just one row of (256 x
- * 256) substitution matrix and can fit 256 bytes worth of costs in the registers.
+ *          Ice Lake CPUs. It's designed for horizontal layout "walkers", where we look at just one row
+ *          of (256 x 256) substitution matrix and can fit 256 bytes worth of costs in the registers.
  *
  *  This is a common abstraction for both:
  *  - Local SW and global NW alignment.
