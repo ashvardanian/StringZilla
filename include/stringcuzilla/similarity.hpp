@@ -75,7 +75,7 @@ constexpr score_type_ min_or_max(score_type_ a, score_type_ b) noexcept {
 }
 
 template <typename value_type_>
-void rotate_three(value_type_ &a, value_type_ &b, value_type_ &c) noexcept {
+constexpr void rotate_three(value_type_ &a, value_type_ &b, value_type_ &c) noexcept {
     value_type_ tmp = a;
     a = b;
     b = c;
@@ -713,7 +713,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // The supplementary matrices are initialized with values of higher magnitude,
         // which is equivalent to discarding them. That's better than using `SIZE_MAX`
         // as subsequent additions won't overflow.
-        cell = gap_costs_.open + gap_costs_.extend +
+        cell = (gap_costs_.open + gap_costs_.extend) +
                (diagonal_index ? gap_costs_.open + gap_costs_.extend * (diagonal_index - 1) : 0);
     }
 

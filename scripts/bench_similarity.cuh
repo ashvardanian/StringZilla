@@ -140,6 +140,14 @@ void bench_levenshtein(environment_t const &env) {
                     similarities_equality_t {}) // equality check
             .log(baseline);
         scramble_accelerated_results();
+
+        bench_unary(env, "affine_levenshtein_cuda:batch"s + std::to_string(batch_size), call_baseline,
+                    similarities_callable<affine_levenshtein_cuda_t, sz::gpu_specs_t>(
+                        env, results_accelerated, affine_levenshtein_cuda_t {weird_uniform, weird_affine}, specs),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(baseline);
+        scramble_accelerated_results();
 #endif
 
 #if SZ_USE_KEPLER

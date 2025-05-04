@@ -13,12 +13,12 @@
  *  ! but they come handy during development, if you want to validate
  *  ! different ISA-specific implementations.
 
-#define SZ_USE_HASWELL 0
-#define SZ_USE_SKYLAKE 0
-#define SZ_USE_ICE 0
-#define SZ_USE_NEON 0
-#define SZ_USE_SVE 0
-*/
+ #define SZ_USE_NEON 0
+ #define SZ_USE_SVE 0
+ */
+#define SZ_USE_HASWELL 1
+#define SZ_USE_SKYLAKE 1
+#define SZ_USE_ICE 1
 #define SZ_USE_OPENMP 1
 #define SZ_USE_CUDA 1
 #define SZ_USE_KEPLER 1
@@ -38,9 +38,9 @@ int main(int argc, char const **argv) {
     if (auto code = sz::scripts::log_environment(); code != 0) return code;
 
     try {
-        sz::scripts::test_find_many_equivalence();
         sz::scripts::test_similarity_scores_equivalence();
         sz::scripts::test_similarity_scores_memory_usage();
+        sz::scripts::test_find_many_equivalence();
     }
     catch (std::exception const &e) {
         std::fprintf(stderr, "Failed with: %s\n", e.what());

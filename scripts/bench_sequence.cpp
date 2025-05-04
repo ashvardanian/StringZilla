@@ -57,7 +57,7 @@
 
 #define SZ_USE_MISALIGNED_LOADS (1)
 #include "bench.hpp"
-#include "test.hpp" // `global_random_generator`
+#include "test_stringzilla.hpp" // `global_random_generator`
 
 using namespace ashvardanian::stringzilla::scripts;
 
