@@ -153,6 +153,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     get_target_property(target_type ${target} TYPE)
 
     target_include_directories(${target} PRIVATE scripts)
+    target_include_directories(${target} PRIVATE fork_union/include)
 
     # Set output directory for single-configuration generators (like Make)
     set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<0:>)
