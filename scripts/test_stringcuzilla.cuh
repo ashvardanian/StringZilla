@@ -775,17 +775,22 @@ void test_similarity_scores_equivalence() {
         levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
         levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {});
 
-    // Ice Lake Levenshtein distance against Multi-threaded on CPU
-    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                      //
-        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
-        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {});
-
     // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
         levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
         levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_linear});
 
-    // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
+    // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
+        levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}, //
+        levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_affine});
+
+    // Ice Lake Levenshtein UTF8 distance against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                      //
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
+        levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {});
+
+    // Ice Lake Levenshtein UTF8 distance against Multi-threaded on CPU with weird linear costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>( //
         levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
         levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_linear});
@@ -803,10 +808,16 @@ void test_similarity_scores_equivalence() {
 #endif
 
 #if SZ_USE_CUDA
-    // CUDA Levenshtein distance against Multi-threaded on CPU
+    // CUDA Levenshtein distance against Multi-threaded on CPU with weird linear costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
         levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
         levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_linear}, {}, {},
+        first_gpu_specs);
+
+    // CUDA Levenshtein distance against Multi-threaded on CPU with weird affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
+        levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}, //
+        levenshtein_distances<char, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_affine}, {}, {},
         first_gpu_specs);
 #endif
 
