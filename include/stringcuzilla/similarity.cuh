@@ -1041,7 +1041,10 @@ __global__ void _affine_score_across_cuda_device(              //
         );
 
         // Don't forget to populate the first row of the Levenshtein matrix.
-        if (is_main_thread) diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+        if (is_main_thread) {
+            diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            diagonal_aligner.init_gap(next_deletes[next_diagonal_length - 1], next_diagonal_index);
+        }
 
         std::swap(current_inserts, next_inserts);
         std::swap(current_deletes, next_deletes);
@@ -1429,7 +1432,10 @@ __global__ void _affine_score_on_each_cuda_warp( //
             );
 
             // Don't forget to populate the first row of the Levenshtein matrix.
-            if (is_main_thread) diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            if (is_main_thread) {
+                diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+                diagonal_aligner.init_gap(next_deletes[next_diagonal_length - 1], next_diagonal_index);
+            }
 
             std::swap(current_inserts, next_inserts);
             std::swap(current_deletes, next_deletes);
