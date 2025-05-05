@@ -1573,8 +1573,10 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
             task.bytes_per_cell = requirement.bytes_per_cell;
             task.density = warp_tasks_density(requirement.total, specs);
             if (task.density == infinite_warps_per_multiprocessor_k) {
-                if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
-                else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
+                if constexpr (!is_affine_k) task.result = task.longer_length * gap_costs_.open_or_extend;
+                else
+                    task.result =
+                        task.longer_length ? (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open : 0;
                 count_empty_tasks++;
             }
             tasks[i] = task;
