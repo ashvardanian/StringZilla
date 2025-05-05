@@ -874,6 +874,11 @@ void test_similarity_scores_memory_usage() {
     gpu_specs_t first_gpu_specs = *gpu_specs();
 #endif
 
+    // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:
+    constexpr linear_gap_costs_t weird_linear {3};
+    constexpr affine_gap_costs_t weird_affine {4, 2};
+    constexpr uniform_substitution_costs_t weird_uniform {1, 3};
+
     // Progress until something fails
     for (fuzzy_config_t const &experiment : experiments) {
         std::printf("Testing with batch size %zu, min length %zu, max length %zu\n", experiment.batch_size,
@@ -883,6 +888,37 @@ void test_similarity_scores_memory_usage() {
         test_similarity_scores_fuzzy<sz_size_t>( //
             levenshtein_baselines_t {},          //
             levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, experiment, 1);
+
+        // Multi-threaded serial Levenshtein distance implementation with weird linear costs
+        test_similarity_scores_fuzzy<sz_size_t>(                   //
+            levenshtein_baselines_t {weird_uniform, weird_linear}, //
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
+            experiment, 1);
+
+        // Multi-threaded serial Levenshtein distance implementation with weird affine costs
+        test_similarity_scores_fuzzy<sz_size_t>(                   //
+            levenshtein_baselines_t {weird_uniform, weird_affine}, //
+            levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine},
+            experiment, 1);
+
+#if SZ_USE_ICE
+        // Ice Lake Levenshtein distance against Multi-threaded on CPU
+        test_similarity_scores_fuzzy<sz_size_t>( //
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {},
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {}, experiment, 1);
+
+        // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird linear costs
+        test_similarity_scores_fuzzy<sz_size_t>( //
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear},
+            levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_linear},
+            experiment, 1);
+
+        // Ice Lake Levenshtein distance against Multi-threaded on CPU with weird affine costs
+        test_similarity_scores_fuzzy<sz_size_t>( //
+            levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine},
+            levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_caps_si_k> {weird_uniform, weird_affine},
+            experiment, 1);
+#endif
 
 #if SZ_USE_CUDA
         // CUDA Levenshtein distance against Multi-threaded on CPU
