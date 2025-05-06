@@ -802,6 +802,12 @@ void test_similarity_scores_equivalence() {
         needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_si_k> {
             blosum62_matrix, blosum62_linear_cost});
 
+    // Ice Lake Smith-Waterman distance against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>(                     //
+        smith_waterman_baselines_t {blosum62_matrix, blosum62_linear_cost}, //
+        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_caps_si_k> {blosum62_matrix,
+                                                                                                 blosum62_linear_cost});
+
 #endif
 
 #if SZ_USE_CUDA
@@ -830,13 +836,71 @@ void test_similarity_scores_equivalence() {
         first_gpu_specs);
 #endif
 
-#if SZ_USE_CUDA && 0
-    // CUDA Needleman-Wunsch distance against Multi-threaded on CPU
+#if SZ_USE_CUDA
+    // CUDA Needleman-Wunsch score against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
         needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
             blosum62_matrix, blosum62_linear_cost},
+        {}, {}, first_gpu_specs);
+
+    // CUDA Needleman-Wunsch score against Multi-threaded on CPU with affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
+            blosum62_matrix, blosum62_affine_cost},
+        {}, {}, first_gpu_specs);
+
+    // CUDA Smith-Waterman score against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}, //
+        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
+                                                                                                  blosum62_linear_cost},
+        {}, {}, first_gpu_specs);
+
+    // CUDA Smith-Waterman score against Multi-threaded on CPU with affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}, //
+        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
+                                                                                                  blosum62_affine_cost},
+        {}, {}, first_gpu_specs);
+#endif
+
+#if SZ_USE_HOPPER
+    // CUDA Needleman-Wunsch score on Hopper  against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+            blosum62_matrix, blosum62_linear_cost},
+        {}, {}, first_gpu_specs);
+
+    // CUDA Needleman-Wunsch score on Hopper  against Multi-threaded on CPU with affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}, //
+        needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
+            blosum62_matrix, blosum62_affine_cost},
+        {}, {}, first_gpu_specs);
+
+    // CUDA Smith-Waterman score on Hopper  against Multi-threaded on CPU
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_linear_cost}, //
+        smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
+                                                                                                  blosum62_linear_cost},
+        {}, {}, first_gpu_specs);
+
+    // CUDA Smith-Waterman score on Hopper  against Multi-threaded on CPU with affine costs
+    test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
+        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
+            blosum62_matrix, blosum62_affine_cost}, //
+        smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
+                                                                                                  blosum62_affine_cost},
         {}, {}, first_gpu_specs);
 #endif
 }

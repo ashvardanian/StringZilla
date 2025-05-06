@@ -186,6 +186,7 @@ struct similarity_memory_requirements {
      *  @param[in] substitute_magnitude,gap_magnitude The absolute value of the maximum change in nearby cells.
      *  @param[in] bytes_per_char The number of bytes per character, 4 for UTF-32, 1 for ASCII.
      *  @param[in] register_width The alignment of the data in bytes, 4 for CUDA, 64 for AVX-512.
+     *  @param[in] min_bytes_per_cell The minimum number of bytes per cell, if kernels for some types aren't available.
      *
      *  To understand the @p substitute_magnitude,gap_magnitude parameters, consider the following example:
      *  - substitution costs ranging from -16 to +15
@@ -198,7 +199,8 @@ struct similarity_memory_requirements {
         sz_similarity_gaps_t gap_type,                     //
         size_t substitute_magnitude, size_t gap_magnitude, //
         size_t bytes_per_char,                             //
-        size_t register_width) noexcept {
+        size_t register_width,                             //
+        bytes_per_cell_t min_bytes_per_cell = one_byte_per_cell_k) noexcept {
 
         // If any of the strings is empty, we don't need any memory to perform the similarity scoring.
         size_t shorter_length = sz_min_of_two(first_length, second_length);
@@ -230,6 +232,7 @@ struct similarity_memory_requirements {
                 : max_cell_value < 32767      ? two_bytes_per_cell_k
                 : max_cell_value < 2147483647 ? four_bytes_per_cell_k
                                               : eight_bytes_per_cell_k;
+        if (this->bytes_per_cell < min_bytes_per_cell) this->bytes_per_cell = min_bytes_per_cell;
 
         // For each string we need to copy its contents, and allocate 3 bands proportional to the length
         // of the shorter string with each cell being big enough to hold the length of the longer one.
