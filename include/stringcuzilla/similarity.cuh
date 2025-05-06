@@ -581,7 +581,9 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
     __forceinline__ __device__ void operator()(                                 //
         char const *first_slice, char const *second_slice,                      //
         uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, sz_u8_t const *scores_pre_deletion,
+        sz_u8_t const *scores_pre_substitution,                                 //
+        sz_u8_t const *scores_pre_insertion,                                    //
+        sz_u8_t const *scores_pre_deletion,                                     //
         sz_u8_t *scores_new) noexcept {
 
         sz_u8_t const match_cost = this->substituter_.match;
@@ -643,8 +645,10 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     __forceinline__ __device__ void operator()(                                 //
         char const *first_slice, char const *second_slice,                      //
         uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,
-        sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new) noexcept {
+        sz_u16_t const *scores_pre_substitution,                                //
+        sz_u16_t const *scores_pre_insertion,                                   //
+        sz_u16_t const *scores_pre_deletion,                                    //
+        sz_u16_t *scores_new) noexcept {
 
         sz_u16_t const match_cost = this->substituter_.match;
         sz_u16_t const mismatch_cost = this->substituter_.mismatch;
@@ -1119,9 +1123,10 @@ template < //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void _linear_score_on_each_cuda_warp( //
-    task_type_ *tasks, size_t tasks_count,       //
-    substituter_type_ const substituter, linear_gap_costs_t const gap_costs) {
+__global__ void _linear_score_on_each_cuda_warp(                             //
+    task_type_ *tasks, size_t tasks_count,                                   //
+    substituter_type_ const substituter, linear_gap_costs_t const gap_costs, //
+    uint const shared_memory_size) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using task_t = task_type_;
@@ -1141,12 +1146,25 @@ __global__ void _linear_score_on_each_cuda_warp( //
     using warp_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
                                       locality_k, capability_k>;
 
+    // We may have multiple warps operating in the same block.
+    uint const warp_size = warpSize;
+    size_t const global_thread_index = static_cast<uint>(blockIdx.x * blockDim.x + threadIdx.x);
+    size_t const global_warp_index = static_cast<uint>(global_thread_index / warp_size);
+    size_t const warps_per_block = static_cast<uint>(blockDim.x / warp_size);
+    size_t const warps_per_device = static_cast<uint>(gridDim.x * warps_per_block);
+    uint const warp_thread_index = static_cast<uint>(global_thread_index % warp_size);
+
     // Allocating shared memory is handled on the host side.
-    extern __shared__ char shared_memory_buffer[];
+    extern __shared__ char shared_memory_for_block[];
+    char *const shared_memory_for_warp =
+        shared_memory_for_block + (global_warp_index % warps_per_block) * (shared_memory_size / warps_per_block);
+
+    // Only one thread will be initializing the top row and left column and outputting the result.
+    bool const is_main_thread = warp_thread_index == 0;
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
-    for (size_t task_idx = blockIdx.x; task_idx < tasks_count; task_idx += gridDim.x) {
+    for (size_t task_idx = global_warp_index; task_idx < tasks_count; task_idx += warps_per_device) {
         task_t &task = tasks[task_idx];
         char_t const *shorter_global = task.shorter_ptr;
         char_t const *longer_global = task.longer_ptr;
@@ -1170,19 +1188,19 @@ __global__ void _linear_score_on_each_cuda_warp( //
         uint const bytes_per_diagonal = round_up_to_multiple<uint>(max_diagonal_length * sizeof(score_t), 4);
 
         // The next few pointers will be swapped around.
-        score_t *previous_scores = reinterpret_cast<score_t *>(shared_memory_buffer);
-        score_t *current_scores = reinterpret_cast<score_t *>(shared_memory_buffer + bytes_per_diagonal);
-        score_t *next_scores = reinterpret_cast<score_t *>(shared_memory_buffer + 2 * bytes_per_diagonal);
-        char_t *const longer = reinterpret_cast<char_t *>(shared_memory_buffer + 3 * bytes_per_diagonal);
+        score_t *previous_scores = reinterpret_cast<score_t *>(shared_memory_for_warp);
+        score_t *current_scores = reinterpret_cast<score_t *>(shared_memory_for_warp + bytes_per_diagonal);
+        score_t *next_scores = reinterpret_cast<score_t *>(shared_memory_for_warp + 2 * bytes_per_diagonal);
+        char_t *const longer = reinterpret_cast<char_t *>(shared_memory_for_warp + 3 * bytes_per_diagonal);
         char_t *const shorter = longer + longer_length;
 
         // Each thread in the warp will be loading it's own set of strided characters into shared memory.
-        for (uint i = threadIdx.x; i < longer_length; i += blockDim.x) longer[i] = longer_global[i];
-        for (uint i = threadIdx.x; i < shorter_length; i += blockDim.x) shorter[i] = shorter_global[i];
+        for (uint i = warp_thread_index; i < longer_length; i += warp_size) longer[i] = longer_global[i];
+        for (uint i = warp_thread_index; i < shorter_length; i += warp_size) shorter[i] = shorter_global[i];
 
         // Initialize the first two diagonals:
         warp_scorer_t diagonal_aligner {substituter, gap_costs};
-        if (threadIdx.x == 0) {
+        if (is_main_thread) {
             diagonal_aligner.init_score(previous_scores[0], 0);
             diagonal_aligner.init_score(current_scores[0], 1);
             diagonal_aligner.init_score(current_scores[1], 1);
@@ -1204,14 +1222,14 @@ __global__ void _linear_score_on_each_cuda_warp( //
             diagonal_aligner(                       //
                 shorter,                            // first sequence of characters
                 longer,                             // second sequence of characters
-                threadIdx.x, blockDim.x,            //
+                warp_thread_index, warp_size,       //
                 next_diagonal_length - 2,           // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                    // costs pre substitution
                 current_scores, current_scores + 1, // costs pre insertion/deletion
                 next_scores + 1);                   // ! notice unaligned write destination
 
             // Don't forget to populate the first row and the first column of the Levenshtein matrix.
-            if (threadIdx.x == 0) {
+            if (is_main_thread) {
                 diagonal_aligner.init_score(next_scores[0], next_diagonal_index);
                 diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
             }
@@ -1228,24 +1246,24 @@ __global__ void _linear_score_on_each_cuda_warp( //
             diagonal_aligner(                               //
                 shorter,                                    // first sequence of characters
                 longer + next_diagonal_index - shorter_dim, // second sequence of characters
-                threadIdx.x, blockDim.x,                    //
+                warp_thread_index, warp_size,               //
                 next_diagonal_length - 1,                   // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                            // costs pre substitution
                 current_scores, current_scores + 1,         // costs pre insertion/deletion
                 next_scores);
 
             // Don't forget to populate the first row of the Levenshtein matrix.
-            if (threadIdx.x == 0)
-                diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
+            if (is_main_thread) diagonal_aligner.init_score(next_scores[next_diagonal_length - 1], next_diagonal_index);
 
             __syncwarp();
             // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
             // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
             // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
-            for (size_t i = threadIdx.x; i + 1 < next_diagonal_length; i += blockDim.x)
+            for (size_t i = warp_thread_index; i + 1 < next_diagonal_length; i += warp_size)
                 previous_scores[i] = current_scores[i + 1];
             __syncwarp();
-            for (size_t i = threadIdx.x; i < next_diagonal_length; i += blockDim.x) current_scores[i] = next_scores[i];
+            for (size_t i = warp_thread_index; i < next_diagonal_length; i += warp_size)
+                current_scores[i] = next_scores[i];
             __syncwarp();
         }
 
@@ -1256,7 +1274,7 @@ __global__ void _linear_score_on_each_cuda_warp( //
             diagonal_aligner(                               //
                 shorter + next_diagonal_index - longer_dim, // first sequence of characters
                 longer + next_diagonal_index - shorter_dim, // second sequence of characters
-                threadIdx.x, blockDim.x,                    //
+                warp_thread_index, warp_size,               //
                 next_diagonal_length,                       // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                            // costs pre substitution
                 current_scores, current_scores + 1,         // costs pre insertion/deletion
@@ -1273,7 +1291,7 @@ __global__ void _linear_score_on_each_cuda_warp( //
         }
 
         // Export one result per each block.
-        if (threadIdx.x == 0) result_ref = diagonal_aligner.score();
+        if (is_main_thread) result_ref = diagonal_aligner.score();
     }
 }
 
@@ -1297,9 +1315,10 @@ template < //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void _affine_score_on_each_cuda_warp( //
-    task_type_ *tasks, size_t tasks_count,       //
-    substituter_type_ const substituter, affine_gap_costs_t const gap_costs) {
+__global__ void _affine_score_on_each_cuda_warp(                             //
+    task_type_ *tasks, size_t tasks_count,                                   //
+    substituter_type_ const substituter, affine_gap_costs_t const gap_costs, //
+    uint const shared_memory_size) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using task_t = task_type_;
@@ -1319,15 +1338,25 @@ __global__ void _affine_score_on_each_cuda_warp( //
     using warp_scorer_t = tile_scorer<char_t const *, char_t const *, score_t, substituter_t, gap_costs_t, objective_k,
                                       locality_k, capability_k>;
 
-    // Only one thread will be initializing the top row and left column and outputting the result.
-    bool const is_main_thread = threadIdx.x == 0; // ! Differs for device-wide
+    // We may have multiple warps operating in the same block.
+    uint const warp_size = warpSize;
+    size_t const global_thread_index = static_cast<uint>(blockIdx.x * blockDim.x + threadIdx.x);
+    size_t const global_warp_index = static_cast<uint>(global_thread_index / warp_size);
+    size_t const warps_per_block = static_cast<uint>(blockDim.x / warp_size);
+    size_t const warps_per_device = static_cast<uint>(gridDim.x * warps_per_block);
+    uint const warp_thread_index = static_cast<uint>(global_thread_index % warp_size);
 
     // Allocating shared memory is handled on the host side.
-    extern __shared__ char shared_memory_buffer[];
+    extern __shared__ char shared_memory_for_block[];
+    char *const shared_memory_for_warp =
+        shared_memory_for_block + (global_warp_index % warps_per_block) * (shared_memory_size / warps_per_block);
+
+    // Only one thread will be initializing the top row and left column and outputting the result.
+    bool const is_main_thread = warp_thread_index == 0;
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
-    for (size_t task_idx = blockIdx.x; task_idx < tasks_count; task_idx += gridDim.x) {
+    for (size_t task_idx = global_warp_index; task_idx < tasks_count; task_idx += warps_per_device) {
         task_t &task = tasks[task_idx];
         char_t const *shorter_global = task.shorter_ptr;
         char_t const *longer_global = task.longer_ptr;
@@ -1351,19 +1380,19 @@ __global__ void _affine_score_on_each_cuda_warp( //
         uint const bytes_per_diagonal = round_up_to_multiple<uint>(max_diagonal_length * sizeof(score_t), 4);
 
         // The next few pointers will be swapped around.
-        score_t *previous_scores = reinterpret_cast<score_t *>(shared_memory_buffer);
-        score_t *current_scores = reinterpret_cast<score_t *>(shared_memory_buffer + bytes_per_diagonal);
-        score_t *next_scores = reinterpret_cast<score_t *>(shared_memory_buffer + 2 * bytes_per_diagonal);
-        score_t *current_inserts = reinterpret_cast<score_t *>(shared_memory_buffer + 3 * bytes_per_diagonal);
-        score_t *next_inserts = reinterpret_cast<score_t *>(shared_memory_buffer + 4 * bytes_per_diagonal);
-        score_t *current_deletes = reinterpret_cast<score_t *>(shared_memory_buffer + 5 * bytes_per_diagonal);
-        score_t *next_deletes = reinterpret_cast<score_t *>(shared_memory_buffer + 6 * bytes_per_diagonal);
-        char_t *const longer = reinterpret_cast<char_t *>(shared_memory_buffer + 7 * bytes_per_diagonal);
+        score_t *previous_scores = reinterpret_cast<score_t *>(shared_memory_for_warp);
+        score_t *current_scores = reinterpret_cast<score_t *>(shared_memory_for_warp + bytes_per_diagonal);
+        score_t *next_scores = reinterpret_cast<score_t *>(shared_memory_for_warp + 2 * bytes_per_diagonal);
+        score_t *current_inserts = reinterpret_cast<score_t *>(shared_memory_for_warp + 3 * bytes_per_diagonal);
+        score_t *next_inserts = reinterpret_cast<score_t *>(shared_memory_for_warp + 4 * bytes_per_diagonal);
+        score_t *current_deletes = reinterpret_cast<score_t *>(shared_memory_for_warp + 5 * bytes_per_diagonal);
+        score_t *next_deletes = reinterpret_cast<score_t *>(shared_memory_for_warp + 6 * bytes_per_diagonal);
+        char_t *const longer = reinterpret_cast<char_t *>(shared_memory_for_warp + 7 * bytes_per_diagonal);
         char_t *const shorter = longer + longer_length;
 
         // Each thread in the warp will be loading it's own set of strided characters into shared memory.
-        for (uint i = threadIdx.x; i < longer_length; i += blockDim.x) longer[i] = longer_global[i];
-        for (uint i = threadIdx.x; i < shorter_length; i += blockDim.x) shorter[i] = shorter_global[i];
+        for (uint i = warp_thread_index; i < longer_length; i += warp_size) longer[i] = longer_global[i];
+        for (uint i = warp_thread_index; i < shorter_length; i += warp_size) shorter[i] = shorter_global[i];
 
         // Initialize the first two diagonals:
         warp_scorer_t diagonal_aligner {substituter, gap_costs};
@@ -1391,7 +1420,7 @@ __global__ void _affine_score_on_each_cuda_warp( //
             diagonal_aligner(                         //
                 shorter,                              // first sequence of characters
                 longer,                               // second sequence of characters
-                threadIdx.x, blockDim.x,              //
+                warp_thread_index, warp_size,         //
                 next_diagonal_length - 2,             // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                      // costs pre substitution
                 current_scores, current_scores + 1,   // costs pre insertion/deletion opening
@@ -1422,7 +1451,7 @@ __global__ void _affine_score_on_each_cuda_warp( //
             diagonal_aligner(                               //
                 shorter,                                    // first sequence of characters
                 longer + next_diagonal_index - shorter_dim, // second sequence of characters
-                threadIdx.x, blockDim.x,                    //
+                warp_thread_index, warp_size,               //
                 next_diagonal_length - 1,                   // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                            // costs pre substitution
                 current_scores, current_scores + 1,         // costs pre insertion/deletion opening
@@ -1444,10 +1473,11 @@ __global__ void _affine_score_on_each_cuda_warp( //
             // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
             // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
             // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
-            for (size_t i = threadIdx.x; i + 1 < next_diagonal_length; i += blockDim.x)
+            for (size_t i = warp_thread_index; i + 1 < next_diagonal_length; i += warp_size)
                 previous_scores[i] = current_scores[i + 1];
             __syncwarp();
-            for (size_t i = threadIdx.x; i < next_diagonal_length; i += blockDim.x) current_scores[i] = next_scores[i];
+            for (size_t i = warp_thread_index; i < next_diagonal_length; i += warp_size)
+                current_scores[i] = next_scores[i];
             __syncwarp();
         }
 
@@ -1458,7 +1488,7 @@ __global__ void _affine_score_on_each_cuda_warp( //
             diagonal_aligner(                               //
                 shorter + next_diagonal_index - longer_dim, // first sequence of characters
                 longer + next_diagonal_index - shorter_dim, // second sequence of characters
-                threadIdx.x, blockDim.x,                    //
+                warp_thread_index, warp_size,               //
                 next_diagonal_length,                       // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                            // costs pre substitution
                 current_scores, current_scores + 1,         // costs pre insertion/deletion opening
@@ -1681,7 +1711,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     : (void *)&_linear_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_u16_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>;
-            void *warp_level_kernel_args[4];
+            void *warp_level_kernel_args[5];
 
             cuda_status_t result;
             auto const task_size_equality = [](task_t const &lhs, task_t const &rhs) {
@@ -1691,21 +1721,25 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 // Check if we need to stop processing.
                 if (result.status != status_t::success_k) return;
 
-                size_t const count_tasks = tasks_end - tasks_begin;
-                warp_level_kernel_args[0] = (void *)(&tasks_begin);
-                warp_level_kernel_args[1] = (void *)(&count_tasks);
-                warp_level_kernel_args[2] = (void *)(&substituter_);
-                warp_level_kernel_args[3] = (void *)(&gap_costs_);
+                // Make sure all tasks can be handled by the same kernel template.
+                task_t const &first_task = *tasks_begin;
+                _sz_assert(std::all_of(tasks_begin, tasks_end, [&](task_t const &task) {
+                    return task.bytes_per_cell == first_task.bytes_per_cell && task.density == first_task.density;
+                }));
 
+                // Find the task in the batch that requires the most memory.
+                task_t const &indicative_task =
+                    *std::max_element(tasks_begin, tasks_end, [](task_t const &lhs, task_t const &rhs) {
+                        return lhs.memory_requirement < rhs.memory_requirement;
+                    });
                 // Pick the smallest fitting type for the diagonals.
-                task_t const &indicative_task = tasks_begin[0];
                 void *warp_level_kernel = reinterpret_cast<void *>(warp_level_u8_kernel);
                 if (indicative_task.bytes_per_cell >= sizeof(sz_u16_t))
                     warp_level_kernel = reinterpret_cast<void *>(warp_level_u16_kernel);
 
                 // Update the selected kernels properties.
-                size_t const shared_memory_per_block =
-                    indicative_task.memory_requirement * static_cast<size_t>(indicative_task.density);
+                uint const shared_memory_per_block =
+                    static_cast<uint>(indicative_task.memory_requirement * indicative_task.density);
                 _sz_assert(shared_memory_per_block > 0);
                 _sz_assert(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
                 cudaError_t attribute_error = cudaFuncSetAttribute(
@@ -1715,16 +1749,22 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     return;
                 }
 
+                size_t const count_tasks = tasks_end - tasks_begin;
+                warp_level_kernel_args[0] = (void *)(&tasks_begin);
+                warp_level_kernel_args[1] = (void *)(&count_tasks);
+                warp_level_kernel_args[2] = (void *)(&substituter_);
+                warp_level_kernel_args[3] = (void *)(&gap_costs_);
+                warp_level_kernel_args[4] = (void *)(&shared_memory_per_block);
+
                 // Warp-level algorithm clearly aligns with the warp size.
-                uint const warp_block_size = static_cast<uint>(specs.warp_size);
-                uint const warp_blocks_per_multiprocessor = static_cast<uint>(indicative_task.density);
-                cudaError_t launch_error = cudaLaunchKernel(                                //
-                    reinterpret_cast<void *>(warp_level_kernel),                            // Kernel function pointer
-                    dim3(warp_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
-                    dim3(warp_block_size),                                                  // Block dimensions
-                    warp_level_kernel_args,  // Array of kernel argument pointers
-                    shared_memory_per_block, // Shared memory per block (in bytes)
-                    executor.stream);        // CUDA stream
+                uint const threads_per_block = static_cast<uint>(specs.warp_size * indicative_task.density);
+                cudaError_t launch_error = cudaLaunchKernel(     //
+                    reinterpret_cast<void *>(warp_level_kernel), // Kernel function pointer
+                    dim3(specs.streaming_multiprocessors),       // Grid dimensions
+                    dim3(threads_per_block),                     // Block dimensions
+                    warp_level_kernel_args,                      // Array of kernel argument pointers
+                    shared_memory_per_block,                     // Shared memory per block (in bytes)
+                    executor.stream);                            // CUDA stream
                 if (launch_error != cudaSuccess) {
                     result = {launch_error == cudaErrorMemoryAllocation ? status_t::bad_alloc_k : status_t::unknown_k,
                               launch_error};
@@ -1903,12 +1943,12 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
     // Make sure that we don't string pairs that are too large to fit 3 matrix diagonals into shared memory.
     // H100 Streaming Multiprocessor can have up to 128 active warps concurrently and only 256 KB of shared memory.
     // A100 SMs had only 192 KB. We can't deal with blocks that require more memory than the SM can provide.
-    size_t shared_memory_per_block =
+    size_t shared_memory_per_multiprocessor =
         _scores_diagonally_warp_shared_memory_requirement<true>(first_strings, second_strings, substituter.magnitude());
-    if (shared_memory_per_block > specs.shared_memory_per_multiprocessor()) return {status_t::bad_alloc_k};
+    if (shared_memory_per_multiprocessor > specs.shared_memory_per_multiprocessor()) return {status_t::bad_alloc_k};
 
     // It may be the case that we've only received empty strings.
-    if (shared_memory_per_block == 0) {
+    if (shared_memory_per_multiprocessor == 0) {
         for (size_t i = 0; i < first_strings.size(); ++i)
             if (first_strings[i].length() == 0) { results[i] = second_strings[i].length(); }
             else if (second_strings[i].length() == 0) { results[i] = first_strings[i].length(); }
@@ -1916,7 +1956,7 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
     }
 
     // In most cases we should be able to fit many blocks per SM.
-    size_t count_blocks_per_multiprocessor = specs.shared_memory_per_multiprocessor() / shared_memory_per_block;
+    size_t count_blocks_per_multiprocessor = specs.shared_memory_per_multiprocessor() / shared_memory_per_multiprocessor;
     if (count_blocks_per_multiprocessor > specs.max_blocks_per_multiprocessor)
         count_blocks_per_multiprocessor = specs.max_blocks_per_multiprocessor;
     if (count_blocks_per_multiprocessor > first_strings.size()) count_blocks_per_multiprocessor = first_strings.size();
@@ -1957,7 +1997,7 @@ cuda_status_t _needleman_wunsch_via_cuda_warp(                                  
         dim3(count_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
         dim3(threads_per_block),                                                 // Block dimensions
         kernel_args,                                                             // Array of kernel argument pointers
-        shared_memory_per_block,                                                 // Shared memory per block (in bytes)
+        shared_memory_per_multiprocessor,                                                 // Shared memory per block (in bytes)
         executor.stream);                                                        // CUDA stream
     if (launch_error != cudaSuccess)
         if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }

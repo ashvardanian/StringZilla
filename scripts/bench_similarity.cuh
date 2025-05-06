@@ -164,7 +164,7 @@ void bench_levenshtein(environment_t const &env) {
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
-        scramble_accelerated_results();
+        scramble_accelerated_results(results_linear_accelerated);
 
         bench_unary(
             env, "affine_levenshtein_cuda:batch"s + std::to_string(batch_size), call_affine_baseline,
