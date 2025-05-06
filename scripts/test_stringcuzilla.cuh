@@ -524,6 +524,7 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
     unified_vector<score_t> results_base(1), results_simd(1);
     arrow_strings_tape_t first_tape, second_tape;
     bool contains_missing_in_any_case = false;
+    constexpr score_t signaling_score = std::numeric_limits<score_t>::max();
 
     // Old C-style for-loops are much more debuggable than range-based loops!
     for (std::size_t pair_idx = 0; pair_idx != test_cases.size(); ++pair_idx) {
@@ -540,7 +541,7 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
         }
 
         // Reset the tapes and results
-        results_base[0] = 0, results_simd[0] = 0;
+        results_base[0] = signaling_score, results_simd[0] = signaling_score;
         first_tape.try_assign(&first, &first + 1);
         second_tape.try_assign(&second, &second + 1);
 
@@ -559,8 +560,8 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
 
     // Unzip the test cases into two separate tapes and perform batch processing
     if (!contains_missing_in_any_case) {
-        results_base.resize(test_cases.size());
-        results_simd.resize(test_cases.size());
+        results_base.resize(test_cases.size(), signaling_score);
+        results_simd.resize(test_cases.size(), signaling_score);
         first_tape.reset();
         second_tape.reset();
         for (auto [first, second] : test_cases) {
