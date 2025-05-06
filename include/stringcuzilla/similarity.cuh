@@ -114,7 +114,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
   protected:
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
-    score_t last_score_ {0};
+    score_t final_score_ {0};
 
     __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
         if constexpr (objective_ == sz_minimize_distance_k) { return std::min(a, b); }
@@ -137,7 +137,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    __forceinline__ __device__ score_t score() const noexcept { return last_score_; }
+    __forceinline__ __device__ score_t score() const noexcept { return final_score_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -178,7 +178,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         }
 
         // The last element of the last chunk is the result of the global alignment.
-        if (tasks_offset == 0) last_score_ = scores_new[0];
+        if (tasks_offset == 0) final_score_ = scores_new[0];
     }
 };
 
@@ -215,7 +215,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
   protected:
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
-    score_t best_score_ {0};
+    score_t final_score_ {0};
 
     __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
         if constexpr (objective_k == sz_minimize_distance_k) { return std::min(a, b); }
@@ -247,7 +247,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    __forceinline__ __device__ score_t score() const noexcept { return best_score_; }
+    __forceinline__ __device__ score_t score() const noexcept { return final_score_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -288,11 +288,11 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             scores_new[i] = cell_score;
 
             // Update the global maximum score if this cell beats it.
-            best_score_ = pick_best(best_score_, cell_score);
+            final_score_ = pick_best(final_score_, cell_score);
         }
 
         // ! Don't forget to pick the best among the best scores per thread.
-        best_score_ = pick_best_in_warp(best_score_);
+        final_score_ = pick_best_in_warp(final_score_);
     }
 };
 
@@ -330,7 +330,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
   protected:
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
-    score_t last_score_ {0};
+    score_t final_score_ {0};
 
     __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
         if constexpr (objective_ == sz_minimize_distance_k) { return std::min(a, b); }
@@ -362,7 +362,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    __forceinline__ __device__ score_t score() const noexcept { return last_score_; }
+    __forceinline__ __device__ score_t score() const noexcept { return final_score_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -418,7 +418,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         }
 
         // The last element of the last chunk is the result of the global alignment.
-        if (tasks_offset == 0) last_score_ = scores_new[0];
+        if (tasks_offset == 0) final_score_ = scores_new[0];
     }
 };
 
@@ -455,7 +455,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
   protected:
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
-    score_t best_score_ {0};
+    score_t final_score_ {0};
 
     __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
         if constexpr (objective_k == sz_minimize_distance_k) { return std::min(a, b); }
@@ -494,7 +494,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     /**
      *  @brief Extract the final result of the scoring operation which will be always in the bottom-right corner.
      */
-    __forceinline__ __device__ score_t score() const noexcept { return best_score_; }
+    __forceinline__ __device__ score_t score() const noexcept { return final_score_; }
 
     /**
      *  @brief Computes one diagonal of the DP matrix, using the results of the previous 2x diagonals.
@@ -550,11 +550,11 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             scores_new_deletions[i] = if_deletion;
 
             // Update the global maximum score if this cell beats it.
-            best_score_ = pick_best(best_score_, cell_score);
+            final_score_ = pick_best(final_score_, cell_score);
         }
 
         // ! Don't forget to pick the best among the best scores per thread.
-        best_score_ = pick_best_in_warp(best_score_);
+        final_score_ = pick_best_in_warp(final_score_);
     }
 };
 
@@ -637,7 +637,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         }
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
-        if (tasks_offset == 0) this->last_score_ = scores_new[0];
+        if (tasks_offset == 0) this->final_score_ = scores_new[0];
     }
 };
 
@@ -712,7 +712,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         }
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
-        if (tasks_offset == 0) this->last_score_ = scores_new[0];
+        if (tasks_offset == 0) this->final_score_ = scores_new[0];
     }
 };
 
@@ -831,7 +831,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         }
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
-        if (tasks_offset == 0) this->last_score_ = scores_new[0];
+        if (tasks_offset == 0) this->final_score_ = scores_new[0];
     }
 };
 
@@ -921,7 +921,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         }
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
-        if (tasks_offset == 0) this->last_score_ = scores_new[0];
+        if (tasks_offset == 0) this->final_score_ = scores_new[0];
     }
 };
 
@@ -1022,7 +1022,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         }
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
-        if (tasks_offset == 0) this->last_score_ = scores_new[0];
+        if (tasks_offset == 0) this->final_score_ = scores_new[0];
     }
 };
 
@@ -1133,7 +1133,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         }
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
-        if (tasks_offset == 0) this->last_score_ = scores_new[0];
+        if (tasks_offset == 0) this->final_score_ = scores_new[0];
     }
 };
 
@@ -2063,10 +2063,9 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
             task.bytes_per_cell = requirement.bytes_per_cell;
             task.density = warp_tasks_density(requirement.total, specs);
             if (task.density == infinite_warps_per_multiprocessor_k) {
-                if constexpr (!is_affine_k) task.result = task.longer_length * gap_costs_.open_or_extend;
-                else
-                    task.result =
-                        task.longer_length ? (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open : 0;
+                if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
+                else if (!task.longer_length) { task.result = 0; }
+                else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
                 count_empty_tasks++;
             }
             tasks[i] = task;
@@ -2273,6 +2272,7 @@ struct error_costs_256x256_in_cuda_constant_memory_t {
 #if defined(__CUDA_ARCH__)
         return _error_costs_in_cuda_constant_memory[static_cast<sz_u8_t>(a) * 256 + static_cast<sz_u8_t>(b)];
 #else
+        sz_unused(a && b);
         return 0;
 #endif
     }
@@ -2306,7 +2306,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
 
         sz_i16_t const gap_cost = this->gap_costs_.open_or_extend;
         sz_u32_vec_t gap_cost_vec;
-        gap_cost_vec.u32 = gap_cost * 0x00010001; // ! 2x `i16` gap costs
+        gap_cost_vec.i16s[0] = gap_cost_vec.i16s[1] = gap_cost;
 
         // The hardest part of this kernel is dealing with unaligned loads!
         // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
@@ -2315,8 +2315,8 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         sz_u32_vec_t pre_substitution_vec, pre_insertion_vec, pre_deletion_vec;
         sz_u32_vec_t first_vec, second_vec;
         sz_u32_vec_t cost_of_substitution_vec, if_deletion_or_insertion_vec;
-        sz_u32_vec_t cell_score_vec, best_score_vec;
-        best_score_vec.i16s[0] = best_score_vec.i16s[1] = std::numeric_limits<sz_i16_t>::min();
+        sz_u32_vec_t cell_score_vec, final_score_vec;
+        final_score_vec.i16s[0] = final_score_vec.i16s[1] = 0;
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
@@ -2340,12 +2340,12 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
             if constexpr (locality_k == sz_similarity_global_k) {
                 cell_score_vec.u32 = __viaddmax_s16x2(pre_substitution_vec.u32, cost_of_substitution_vec.u32,
                                                       if_deletion_or_insertion_vec.u32);
-                sz_unused(best_score_vec);
+                sz_unused(final_score_vec);
             }
             else {
                 cell_score_vec.u32 = __viaddmax_s16x2_relu(pre_substitution_vec.u32, cost_of_substitution_vec.u32,
                                                            if_deletion_or_insertion_vec.u32);
-                best_score_vec.u32 = __vmaxs2(cell_score_vec.u32, best_score_vec.u32);
+                final_score_vec.u32 = __vmaxs2(cell_score_vec.u32, final_score_vec.u32);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -2355,10 +2355,11 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
         if constexpr (locality_k == sz_similarity_global_k) {
-            if (tasks_offset == 0) this->last_score_ = scores_new[0];
+            if (tasks_offset == 0) this->final_score_ = scores_new[0];
         }
         else { // Or the best score for local alignment.
-            this->best_score_ = this->pick_best_in_warp((std::max)(best_score_vec.i16s[0], best_score_vec.i16s[1]));
+            this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
+            this->final_score_ = this->pick_best_in_warp(this->final_score_);
         }
     }
 };
@@ -2386,7 +2387,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         // Make sure we are called for an anti-diagonal traversal order
         sz_i32_t const gap_costs = this->gap_costs_.open_or_extend;
         _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
-        sz_i32_t best_score = std::numeric_limits<sz_i32_t>::min();
+        sz_i32_t final_score = 0;
 
         for (uint i = tasks_offset; i < tasks_count; i += tasks_step) {
             sz_i32_t pre_substitution = scores_pre_substitution[i];
@@ -2401,11 +2402,11 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
             // For local scoring we should use the ReLU variants of 3-way `max`.
             if constexpr (locality_k == sz_similarity_global_k) {
                 cell_score = __viaddmax_s32(pre_substitution, cost_of_substitution, if_deletion_or_insertion);
-                sz_unused(best_score);
+                sz_unused(final_score);
             }
             else {
                 cell_score = __viaddmax_s32_relu(pre_substitution, cost_of_substitution, if_deletion_or_insertion);
-                best_score = (std::max)(cell_score, best_score);
+                final_score = (std::max)(cell_score, final_score);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -2414,10 +2415,11 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
         if constexpr (locality_k == sz_similarity_global_k) {
-            if (tasks_offset == 0) this->last_score_ = scores_new[0];
+            if (tasks_offset == 0) this->final_score_ = scores_new[0];
         }
         else { // Or the best score for local alignment.
-            this->best_score_ = this->pick_best_in_warp(best_score);
+            this->final_score_ = (std::max)(this->final_score_, final_score);
+            this->final_score_ = this->pick_best_in_warp(this->final_score_);
         }
     }
 };
@@ -2453,8 +2455,8 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         sz_i16_t const gap_open_cost = this->gap_costs_.open;
         sz_i16_t const gap_extend_cost = this->gap_costs_.extend;
         sz_u32_vec_t gap_open_cost_vec, gap_extend_cost_vec;
-        gap_open_cost_vec.u32 = gap_open_cost * 0x00010001;     // ! 2x `i16` gap costs
-        gap_extend_cost_vec.u32 = gap_extend_cost * 0x00010001; // ! 2x `i16` gap costs
+        gap_open_cost_vec.i16s[0] = gap_open_cost_vec.i16s[1] = gap_open_cost;
+        gap_extend_cost_vec.i16s[0] = gap_extend_cost_vec.i16s[1] = gap_extend_cost;
 
         // The hardest part of this kernel is dealing with unaligned loads!
         // We want to minimize single-byte processing in favor of 2-byte SIMD loads and min/max operations.
@@ -2464,8 +2466,8 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         sz_u32_vec_t pre_insertion_expansion_vec, pre_deletion_expansion_vec;
         sz_u32_vec_t first_vec, second_vec;
         sz_u32_vec_t cost_of_substitution_vec, if_substitution_vec, if_insertion_vec, if_deletion_vec;
-        sz_u32_vec_t cell_score_vec, best_score_vec;
-        best_score_vec.i16s[0] = best_score_vec.i16s[1] = std::numeric_limits<sz_i16_t>::min();
+        sz_u32_vec_t cell_score_vec, final_score_vec;
+        final_score_vec.i16s[0] = final_score_vec.i16s[1] = 0;
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
@@ -2495,12 +2497,12 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
             // For local scoring we should use the ReLU variants of 3-way `max`.
             if constexpr (locality_k == sz_similarity_global_k) {
                 cell_score_vec.u32 = __vimax3_s16x2(if_substitution_vec.u32, if_insertion_vec.u32, if_deletion_vec.u32);
-                sz_unused(best_score_vec);
+                sz_unused(final_score_vec);
             }
             else {
                 cell_score_vec.u32 =
                     __vimax3_s16x2_relu(if_substitution_vec.u32, if_insertion_vec.u32, if_deletion_vec.u32);
-                best_score_vec.u32 = __vmaxs2(cell_score_vec.u32, best_score_vec.u32);
+                final_score_vec.u32 = __vmaxs2(cell_score_vec.u32, final_score_vec.u32);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -2514,10 +2516,11 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
         if constexpr (locality_k == sz_similarity_global_k) {
-            if (tasks_offset == 0) this->last_score_ = scores_new[0];
+            if (tasks_offset == 0) this->final_score_ = scores_new[0];
         }
         else { // Or the best score for local alignment.
-            this->best_score_ = this->pick_best_in_warp((std::max)(best_score_vec.i16s[0], best_score_vec.i16s[1]));
+            this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
+            this->final_score_ = this->pick_best_in_warp(this->final_score_);
         }
     }
 };
@@ -2550,7 +2553,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         sz_i32_t const gap_open_cost = this->gap_costs_.open;
         sz_i32_t const gap_extend_cost = this->gap_costs_.extend;
         _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
-        sz_i32_t best_score = std::numeric_limits<sz_i32_t>::min();
+        sz_i32_t final_score = 0;
 
         for (uint i = tasks_offset; i < tasks_count; i += tasks_step) {
             sz_i32_t pre_substitution = scores_pre_substitution[i];
@@ -2571,11 +2574,11 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
             // For local scoring we should use the ReLU variants of 3-way `max`.
             if constexpr (locality_k == sz_similarity_global_k) {
                 cell_score = __vimax3_s32(if_substitution, if_insertion, if_deletion);
-                sz_unused(best_score);
+                sz_unused(final_score);
             }
             else {
                 cell_score = __vimax3_s32_relu(if_substitution, if_insertion, if_deletion);
-                best_score = (std::max)(cell_score, best_score);
+                final_score = (std::max)(cell_score, final_score);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -2586,10 +2589,11 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
 
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
         if constexpr (locality_k == sz_similarity_global_k) {
-            if (tasks_offset == 0) this->last_score_ = scores_new[0];
+            if (tasks_offset == 0) this->final_score_ = scores_new[0];
         }
         else { // Or the best score for local alignment.
-            this->best_score_ = this->pick_best_in_warp(best_score);
+            this->final_score_ = (std::max)(this->final_score_, final_score);
+            this->final_score_ = this->pick_best_in_warp(this->final_score_);
         }
     }
 };
@@ -2655,6 +2659,7 @@ struct _cuda_nw_or_sw_byte_level_scores {
         results_type_ *results_ptr,                                                           //
         gpu_specs_t specs = {}, cuda_executor_t executor = {}) const noexcept {
 
+        constexpr bool is_local_k = locality_k == sz_similarity_local_k;
         constexpr bool is_affine_k = std::is_same<gap_costs_t, affine_gap_costs_t>::value;
         constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
 
@@ -2694,10 +2699,10 @@ struct _cuda_nw_or_sw_byte_level_scores {
             task.bytes_per_cell = requirement.bytes_per_cell;
             task.density = warp_tasks_density(requirement.total, specs);
             if (task.density == infinite_warps_per_multiprocessor_k) {
-                if constexpr (!is_affine_k) task.result = task.longer_length * gap_costs_.open_or_extend;
-                else
-                    task.result =
-                        task.longer_length ? (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open : 0;
+                if constexpr (is_local_k) { task.result = 0; }
+                else if constexpr (!is_affine_k) { task.result = task.longer_length * gap_costs_.open_or_extend; }
+                else if (!task.longer_length) { task.result = 0; }
+                else { task.result = (task.longer_length - 1) * gap_costs_.extend + gap_costs_.open; }
                 count_empty_tasks++;
             }
             tasks[i] = task;
