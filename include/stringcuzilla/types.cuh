@@ -137,6 +137,11 @@ __forceinline__ __device__ sz_u32_vec_t sz_u32_load_unaligned(void const *ptr) n
     return result;
 }
 
+/**
+ *  @brief  Defines the upper bound on the number of warps per multi processor we may theoretically
+ *          be able to run as part of one or many blocks. Generally this number depends on the amount
+ *          of shared memory available on the device, and the amount of reserved memory per block.
+ */
 enum warp_tasks_density_t : uint {
     warps_working_together_k = 0,
     one_warp_per_multiprocessor_k = 1,
@@ -145,19 +150,42 @@ enum warp_tasks_density_t : uint {
     eight_warps_per_multiprocessor_k = 8,
     sixteen_warps_per_multiprocessor_k = 16,
     thirty_two_warps_per_multiprocessor_k = 32,
+    sixty_four_warps_per_multiprocessor_k = 64,
     infinite_warps_per_multiprocessor_k = 0xFFFFFFFF
 };
 
 inline warp_tasks_density_t warp_tasks_density(size_t task_memory_requirement, gpu_specs_t const &specs) noexcept {
     std::initializer_list<warp_tasks_density_t> densities {
-        thirty_two_warps_per_multiprocessor_k, sixteen_warps_per_multiprocessor_k, eight_warps_per_multiprocessor_k,
-        four_warps_per_multiprocessor_k,       two_warps_per_multiprocessor_k,     one_warp_per_multiprocessor_k};
+        sixty_four_warps_per_multiprocessor_k, thirty_two_warps_per_multiprocessor_k,
+        sixteen_warps_per_multiprocessor_k,    eight_warps_per_multiprocessor_k,
+        four_warps_per_multiprocessor_k,       two_warps_per_multiprocessor_k,
+        one_warp_per_multiprocessor_k,
+    };
     if (task_memory_requirement == 0) return infinite_warps_per_multiprocessor_k;
     for (auto density : densities) {
+        if (density > specs.max_blocks_per_multiprocessor) continue;
         size_t required_block_memory = task_memory_requirement * density + specs.reserved_memory_per_block * density;
         if (required_block_memory < specs.shared_memory_per_multiprocessor()) return density;
     }
     return warps_working_together_k;
+}
+
+struct speculative_warp_tasks_density_t {
+    warp_tasks_density_t density = warps_working_together_k;
+    size_t speculative_factor = 0;
+};
+
+/**
+ *  @brief  Multiple warps can run concurrently on the same multiprocessor, which helps hide the latency
+ *          of memory operations. It only happens, if we have enough shared memory, so we may want to reduce
+ *          the density of the tasks proportional to the current GPU's speculative factor.
+ */
+inline speculative_warp_tasks_density_t speculation_friendly_density(warp_tasks_density_t maximum_density) noexcept {
+    // if (maximum_density >= 16) return {static_cast<warp_tasks_density_t>(maximum_density / 16), 16};
+    // if (maximum_density >= 8) return {static_cast<warp_tasks_density_t>(maximum_density / 8), 8};
+    if (maximum_density >= 4) return {static_cast<warp_tasks_density_t>(maximum_density / 4), 4};
+    if (maximum_density >= 2) return {static_cast<warp_tasks_density_t>(maximum_density / 2), 2};
+    return {maximum_density, 1};
 }
 
 template <typename task_type_>

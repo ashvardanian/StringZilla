@@ -1732,14 +1732,19 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     *std::max_element(tasks_begin, tasks_end, [](task_t const &lhs, task_t const &rhs) {
                         return lhs.memory_requirement < rhs.memory_requirement;
                     });
+
                 // Pick the smallest fitting type for the diagonals.
                 void *warp_level_kernel = reinterpret_cast<void *>(warp_level_u8_kernel);
                 if (indicative_task.bytes_per_cell >= sizeof(sz_u16_t))
                     warp_level_kernel = reinterpret_cast<void *>(warp_level_u16_kernel);
 
+                // Even if we can fit more warps per block we sometimes should not.
+                auto const [optimal_density, speculative_factor] =
+                    speculation_friendly_density(indicative_task.density);
+
                 // Update the selected kernels properties.
                 uint const shared_memory_per_block =
-                    static_cast<uint>(indicative_task.memory_requirement * indicative_task.density);
+                    static_cast<uint>(indicative_task.memory_requirement * optimal_density);
                 _sz_assert(shared_memory_per_block > 0);
                 _sz_assert(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
                 cudaError_t attribute_error = cudaFuncSetAttribute(
@@ -1757,14 +1762,14 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 warp_level_kernel_args[4] = (void *)(&shared_memory_per_block);
 
                 // Warp-level algorithm clearly aligns with the warp size.
-                uint const threads_per_block = static_cast<uint>(specs.warp_size * indicative_task.density);
-                cudaError_t launch_error = cudaLaunchKernel(     //
-                    reinterpret_cast<void *>(warp_level_kernel), // Kernel function pointer
-                    dim3(specs.streaming_multiprocessors),       // Grid dimensions
-                    dim3(threads_per_block),                     // Block dimensions
-                    warp_level_kernel_args,                      // Array of kernel argument pointers
-                    shared_memory_per_block,                     // Shared memory per block (in bytes)
-                    executor.stream);                            // CUDA stream
+                uint const threads_per_block = static_cast<uint>(specs.warp_size * optimal_density);
+                cudaError_t launch_error = cudaLaunchKernel(                    //
+                    reinterpret_cast<void *>(warp_level_kernel),                // Kernel function pointer
+                    dim3(specs.streaming_multiprocessors * speculative_factor), // Grid dimensions
+                    dim3(threads_per_block),                                    // Block dimensions
+                    warp_level_kernel_args,                                     // Array of kernel argument pointers
+                    shared_memory_per_block,                                    // Shared memory per block (in bytes)
+                    executor.stream);                                           // CUDA stream
                 if (launch_error != cudaSuccess) {
                     result = {launch_error == cudaErrorMemoryAllocation ? status_t::bad_alloc_k : status_t::unknown_k,
                               launch_error};
