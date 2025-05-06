@@ -184,6 +184,34 @@ void bench_levenshtein(environment_t const &env) {
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
+
+        bench_unary(
+            env, "affine_levenshtein_kepler:batch"s + std::to_string(batch_size), call_affine_baseline,
+            similarities_callable<affine_levenshtein_kepler_t, sz::gpu_specs_t>(
+                env, results_affine_accelerated, affine_levenshtein_kepler_t {weird_uniform, weird_affine}, specs),
+            callable_no_op_t {},        // preprocessing
+            similarities_equality_t {}) // equality check
+            .log(linear_baseline, affine_baseline);
+        scramble_accelerated_results(results_affine_accelerated);
+#endif
+
+#if SZ_USE_HOPPER
+        bench_unary(env, "levenshtein_hopper:batch"s + std::to_string(batch_size), call_linear_baseline,
+                    similarities_callable<levenshtein_hopper_t, sz::gpu_specs_t>(
+                        env, results_linear_accelerated, levenshtein_hopper_t {weird_uniform, weird_linear}, specs),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
+            .log(linear_baseline);
+        scramble_accelerated_results(results_linear_accelerated);
+
+        bench_unary(
+            env, "affine_levenshtein_hopper:batch"s + std::to_string(batch_size), call_affine_baseline,
+            similarities_callable<affine_levenshtein_hopper_t, sz::gpu_specs_t>(
+                env, results_affine_accelerated, affine_levenshtein_hopper_t {weird_uniform, weird_affine}, specs),
+            callable_no_op_t {},        // preprocessing
+            similarities_equality_t {}) // equality check
+            .log(linear_baseline, affine_baseline);
+        scramble_accelerated_results(results_affine_accelerated);
 #endif
     }
 }
