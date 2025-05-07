@@ -23,6 +23,8 @@ enum bytes_per_cell_t : uint {
 
 struct dummy_executor_t {
 
+    constexpr size_t thread_count() const noexcept { return 1; }
+
     /**
      *  @brief  Calls the @p function for each index from 0 to @p (n) in such
      *          a way that consecutive elements are likely to be processed by
@@ -53,6 +55,36 @@ struct dummy_executor_t {
     inline void for_each_dynamic(size_t n, function_type_ &&function) const noexcept {
         for (size_t i = 0; i < n; ++i) function(i);
     }
+
+    /**
+     *  @brief  Executes a function in parallel on the current and all worker threads.
+     *  @param[in] function The callback, receiving the thread index as an argument.
+     */
+    template <typename function_type_>
+    void for_each_thread(function_type_ const &function) noexcept {
+        function(0);
+    }
+};
+
+template <typename executor_type_>
+concept executor_like = requires(executor_type_ executor) {
+#if !defined(__NVCC__)
+    { executor.thread_count() } -> std::same_as<size_t>;
+    {
+        executor.for_each_static(0u, [](size_t) {})
+    } -> std::same_as<void>;
+    {
+        executor.for_each_slice(0u, [](size_t, size_t) {})
+    } -> std::same_as<void>;
+    {
+        executor.for_each_dynamic(0u, [](size_t) {})
+    } -> std::same_as<void>;
+    {
+        executor.for_each_thread([](size_t) {})
+    } -> std::same_as<void>;
+#else
+    sizeof(executor) > 0;
+#endif
 };
 
 struct openmp_executor_t {
@@ -99,23 +131,31 @@ struct openmp_executor_t {
 #pragma omp parallel for schedule(dynamic, 1)
         for (size_t i = 0; i < n; ++i) function(i);
     }
-};
 
-template <typename executor_type_>
-concept executor_like = requires(executor_type_ executor) {
-#if !defined(__NVCC__)
-    {
-        executor.for_each_static(0u, [](size_t) {})
-    } -> std::same_as<void>;
-    {
-        executor.for_each_slice(0u, [](size_t, size_t) {})
-    } -> std::same_as<void>;
-    {
-        executor.for_each_dynamic(0u, [](size_t) {})
-    } -> std::same_as<void>;
-#else
-    sizeof(executor) > 0;
-#endif
+    /**
+     *  @brief  Executes a function in parallel on the current and all worker threads.
+     *  @param[in] function The callback, receiving the thread index as an argument.
+     */
+    template <typename function_type_>
+    void for_each_thread(function_type_ const &function) noexcept {
+        // ! Using the `omp_get_thread_num()` would force us to include the OpenMP headers
+        // ! and link to the right symbols, which is not always possible.
+        std::atomic<size_t> atomic_thread_index = 0;
+#pragma omp parallel
+        {
+            size_t const thread_index = atomic_thread_index.fetch_add(1, std::memory_order_relaxed);
+            function(thread_index);
+        }
+    }
+
+    inline size_t thread_count() const noexcept {
+        // ! Using the `omp_get_num_threads()` would force us to include the OpenMP headers
+        // ! and link to the right symbols, which is not always possible.
+        std::atomic<size_t> atomic_thread_index = 0;
+#pragma omp parallel
+        { atomic_thread_index.fetch_add(1, std::memory_order_relaxed); }
+        return atomic_thread_index.load(std::memory_order_relaxed);
+    }
 };
 
 #if !defined(__NVCC__)

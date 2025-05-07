@@ -38,8 +38,9 @@
 #ifndef STRINGCUZILLA_FIND_MANY_HPP_
 #define STRINGCUZILLA_FIND_MANY_HPP_
 
-#include "stringzilla/memory.h"  // `sz_move`
-#include "stringzilla/types.hpp" // `status_t::status_t`
+#include "stringzilla/memory.h"    // `sz_move`
+#include "stringzilla/types.hpp"   // `status_t::status_t`
+#include "stringcuzilla/types.hpp" // `dummy_executor_t`
 
 #include <memory>      // `std::allocator_traits` to re-bind the allocator
 #include <type_traits> // `std::enable_if_t` for meta-programming
@@ -544,10 +545,10 @@ struct find_many {
 
 #pragma endregion // Primary API
 
-#pragma region - Parallel OpenMP Backend
+#pragma region - Parallel Backend
 
 /**
- *  @brief  Aho-Corasick-based @b multi-threaded multi-pattern exact substring search with OpenMP.
+ *  @brief  Aho-Corasick-based @b multi-threaded multi-pattern exact substring search with.
  *  @note   Construction of the FSM is not parallelized, as it is not generally a bottleneck.
  *
  *  Implements 2 levels of parallelism: "core per input" for small haystacks and "all cores on each input"
@@ -585,27 +586,30 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @brief Counts the number of occurrences of all needles in all @p haystacks. Relevant for filtering and ranking.
      *  @param[in] haystacks The input strings to search in.
      *  @param[in] counts The output buffer for the counts of all needles in each haystack.
+     *  @param[in] executor The executor to use for parallelization.
      *  @param[in] specs The CPU specifications on the current system to pick the right multi-threading strategy.
      *  @return The total number of occurrences found.
      */
-    template <typename haystacks_type_>
-    status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts, cpu_specs_t const &specs = {}) const noexcept {
+    template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
+#if _SZ_IS_CPP20
+        requires executor_like<executor_type_>
+#endif
+    status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts, executor_type_ &&executor = {},
+                       cpu_specs_t const &specs = {}) const noexcept {
 
         _sz_assert(counts.size() == haystacks.size());
-        size_t const cores_total = specs.cores_total();
         size_t const cache_line_width = specs.cache_line_width;
 
         using haystacks_t = typename std::remove_reference_t<haystacks_type_>;
         using haystack_t = typename haystacks_t::value_type;
 
         // On small strings, individually compute the counts
-#pragma omp parallel for schedule(dynamic, 1) num_threads(cores_total)
-        for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
+        executor.for_each_dynamic(counts.size(), [&](size_t haystack_index) noexcept {
             haystack_t const &haystack = haystacks[haystack_index];
             size_t haystack_length = haystack.size();
-            if (haystack_length > specs.l2_bytes) continue;
+            if (haystack_length > specs.l2_bytes) return;
             counts[haystack_index] = dict_.count(haystack);
-        }
+        });
 
         // On longer strings, throw all cores on each haystack
         for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
@@ -614,15 +618,13 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             // The shorter strings have already been processed
             if (haystack_length <= specs.l2_bytes) continue;
 
-            size_t count_matches_across_cores = 0;
-#pragma omp parallel for reduction(+ : count_matches_across_cores) schedule(static, 1) num_threads(cores_total)
-            for (size_t core_index = 0; core_index < cores_total; ++core_index) {
-                size_t count_matches_on_one_core =
-                    count_matches_in_one_part(haystack, core_index, cores_total, cache_line_width);
-                count_matches_across_cores += count_matches_on_one_core;
-            }
-
-            counts[haystack_index] = count_matches_across_cores;
+            std::atomic<size_t> count_across_cores = 0;
+            size_t const cores_total = executor.thread_count();
+            executor.for_each_thread([&](size_t core_index) noexcept {
+                size_t count_partial = count_matches_in_one_part(haystack, core_index, cores_total, cache_line_width);
+                count_across_cores.fetch_add(count_partial, std::memory_order_relaxed);
+            });
+            counts[haystack_index] = count_across_cores;
         }
 
         return status_t::success_k;
@@ -643,15 +645,18 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *
      *  A common approach to parallelizing such algorithms is to use a little memory for
      */
-    template <typename haystacks_type_, typename output_matches_type_>
+    template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
+#if _SZ_IS_CPP20
+        requires executor_like<executor_type_>
+#endif
     status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches, size_t &matches_count,
-                      cpu_specs_t const &specs = {}) const noexcept {
+                      executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) const noexcept {
 
         safe_vector<size_t, size_allocator_t> counts_per_haystack(dict_.allocator());
         if (counts_per_haystack.try_resize(haystacks.size()) != status_t::success_k) return status_t::bad_alloc_k;
-        status_t count_status = try_count(haystacks, counts_per_haystack, specs);
+        status_t count_status = try_count(haystacks, counts_per_haystack, executor, specs);
         if (count_status != status_t::success_k) return count_status;
-        return try_find(haystacks, counts_per_haystack, matches, matches_count, specs);
+        return try_find(haystacks, counts_per_haystack, matches, matches_count, executor, specs);
     }
 
     /**
@@ -665,9 +670,13 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *
      *  A common approach to parallelizing such algorithms is to us a little memory for
      */
-    template <typename haystacks_type_, typename output_matches_type_>
+    template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
+#if _SZ_IS_CPP20
+        requires executor_like<executor_type_>
+#endif
     status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts, output_matches_type_ &&matches,
-                      size_t &matches_count, cpu_specs_t const &specs = {}) const noexcept {
+                      size_t &matches_count, executor_type_ &&executor = {},
+                      cpu_specs_t const &specs = {}) const noexcept {
 
         _sz_assert(counts.size() == haystacks.size());
         size_t const cores_total = specs.cores_total();
@@ -685,11 +694,10 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             offsets_per_haystack[i] = offsets_per_haystack[i - 1] + counts[i - 1];
 
         // Process the small haystacks, outputting their matches individually without any synchronization
-#pragma omp parallel for schedule(dynamic, 1) num_threads(cores_total)
-        for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
+        executor.for_each_dynamic(counts.size(), [&](size_t haystack_index) noexcept {
             haystack_t const &haystack = haystacks[haystack_index];
             size_t haystack_length = haystack.size();
-            if (haystack_length > specs.l2_bytes) continue;
+            if (haystack_length > specs.l2_bytes) return;
             size_t matches_found = 0;
             dict_.find({haystack.data(), haystack_length}, [&](match_t match) noexcept {
                 match.haystack_index = haystack_index;
@@ -698,7 +706,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                 return true;
             });
             _sz_assert(counts[haystack_index] == matches_found);
-        }
+        });
 
         // On longer strings, throw all cores on each haystack, but between the threads we need additional
         // memory to track the number of matches within a core-specific slice of the haystack.
@@ -712,15 +720,14 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             if (haystack_length <= specs.l2_bytes) continue;
 
             // First, on each core, estimate the number of matches in the haystack
-#pragma omp parallel for schedule(static, 1) num_threads(cores_total)
-            for (size_t core_index = 0; core_index < cores_total; ++core_index)
+            size_t const cores_total = executor.thread_count();
+            executor.for_each_thread([&](size_t core_index) noexcept {
                 counts_per_core[core_index] =
                     count_matches_in_one_part(haystack, core_index, cores_total, cache_line_width);
+            });
 
             // Now that we know the number of matches to expect per slice, we can convert the counts
             // into offsets using inclusive prefix sum
-#pragma omp barrier
-#pragma omp single
             {
                 for (size_t core_index = 1; core_index < cores_total; ++core_index)
                     counts_per_core[core_index] += counts_per_core[core_index - 1];
@@ -734,8 +741,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             size_t const bytes_per_core_optimal =
                 round_up_to_multiple(divide_round_up(haystack_length, cores_total), cache_line_width);
             size_t const count_matches_before_this_haystack = offsets_per_haystack[haystack_index];
-#pragma omp parallel for schedule(static, 1) num_threads(cores_total)
-            for (size_t core_index = 0; core_index < cores_total; ++core_index) {
+            executor.for_each_thread([&](size_t core_index) noexcept {
                 size_t const count_matches_before_this_core = core_index ? counts_per_core[core_index - 1] : 0;
                 size_t const count_matches_expected_on_this_core =
                     counts_per_core[core_index] - count_matches_before_this_core;
@@ -760,7 +766,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                     return true;
                 });
                 _sz_assert(count_matches_found_on_this_core == count_matches_expected_on_this_core);
-            }
+            });
         }
 
         // Aggregate the results
@@ -829,7 +835,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
     }
 };
 
-#pragma endregion // Parallel OpenMP Backend
+#pragma endregion // Parallel Backend
 
 } // namespace stringzilla
 } // namespace ashvardanian

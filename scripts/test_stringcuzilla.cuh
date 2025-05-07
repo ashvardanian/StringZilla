@@ -5,6 +5,11 @@
  *  @file    test_stringcuzilla.cuh
  *  @author  Ash Vardanian
  */
+#include <cstring> // `std::memcmp`
+#include <thread>  // `std::thread::hardware_concurrency`
+
+#include <fork_union.hpp> // Fork-join scoped thread pool
+
 #include "stringcuzilla/find_many.hpp"
 #include "stringcuzilla/similarity.hpp"
 
@@ -17,9 +22,6 @@
 #endif
 
 #include "test_stringzilla.hpp" // `arrow_strings_view_t`
-
-#include <cstring> // `std::memcmp`
-#include <thread>  // `std::thread::hardware_concurrency`
 
 namespace ashvardanian {
 namespace stringzilla {
@@ -1107,7 +1109,7 @@ struct find_many_baselines_t {
 };
 
 using find_many_serial_t = find_many<sz_u32_t, malloc_t, sz_cap_serial_k>;
-using find_many_parallel_t = find_many<sz_u32_t, malloc_t, sz_cap_serial_k>;
+using find_many_parallel_t = find_many<sz_u32_t, malloc_t, sz_caps_sp_k>;
 
 /**
  *  @brief  Tests the correctness of the string class Levenshtein distance computation,
@@ -1349,10 +1351,17 @@ void test_find_many_equivalence() {
     test_find_many_prefixes(find_many_baselines_t {}, find_many_serial_t {}, haystacks_config, 1024, 1);
 
     // Multi-threaded parallel Aho-Corasick implementation
+    // Let's reuse a thread-pool to amortize the cost of spawning threads.
+    fork_union_t pool;
+    if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
+    static_assert(executor_like<fork_union_t>);
+
     test_find_many_fixed(find_many_baselines_t {}, find_many_parallel_t {});
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_short_config, haystacks_config, 10);
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_long_config, haystacks_config, 10);
-    test_find_many_prefixes(find_many_baselines_t {}, find_many_parallel_t {}, haystacks_config, 1024, 10);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_short_config, haystacks_config, 10,
+                         pool);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_long_config, haystacks_config, 10,
+                         pool);
+    test_find_many_prefixes(find_many_baselines_t {}, find_many_parallel_t {}, haystacks_config, 1024, 10, pool);
 }
 
 } // namespace scripts
