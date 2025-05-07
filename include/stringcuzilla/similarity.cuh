@@ -2331,13 +2331,12 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
-        uint i = tasks_offset * 2;
-        for (; i + 2 <= tasks_count; i += tasks_step * 2) { // ! OOB is NOT OK
+        for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
             pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
             pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
             pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            first_vec.u16s[0] = first_slice[tasks_count - i - 1];
-            first_vec.u16s[1] = first_slice[tasks_count - i - 2];
+            first_vec.u16s[0] = *(first_slice + tasks_count - i - 1); // ! with a [] lookup would underflow
+            first_vec.u16s[1] = *(first_slice + tasks_count - i - 2); // ! with a [] lookup would underflow
             second_vec.u16s[0] = second_slice[i + 0];
             second_vec.u16s[1] = second_slice[i + 1];
 
@@ -2355,7 +2354,11 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
             else {
                 cell_score_vec.u32 = __viaddmax_s16x2_relu(pre_substitution_vec.u32, cost_of_substitution_vec.u32,
                                                            if_deletion_or_insertion_vec.u32);
-                final_score_vec.u32 = __vmaxs2(cell_score_vec.u32, final_score_vec.u32);
+                // In the last iteration of the loop the second half-word contains noise,
+                // so we have to discard it from affecting the final score.
+                bool const is_tail = i + 1 == tasks_count;
+                final_score_vec.i16s[0] = (std::max)(cell_score_vec.i16s[0], final_score_vec.i16s[0]);
+                final_score_vec.i16s[1] = (std::max)(cell_score_vec.i16s[1 - is_tail], final_score_vec.i16s[1]);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -2363,42 +2366,13 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
             scores_new[i + 1] = cell_score_vec.i16s[1];
         }
 
-        // Handle the tail - the single last entry
-        sz_i16_t final_score;
-        if constexpr (locality_k == sz_similarity_local_k)
-            final_score = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
-        if (i + 1 == tasks_count) {
-            sz_i16_t pre_substitution = scores_pre_substitution[i];
-            sz_i16_t pre_insertion = scores_pre_insertion[i];
-            sz_i16_t pre_deletion = scores_pre_deletion[i];
-            char first_char = first_slice[tasks_count - i - 1];
-            char second_char = second_slice[i + 0];
-
-            error_cost_t cost_of_substitution = substituter(first_char, second_char);
-            sz_i16_t if_deletion_or_insertion = (std::max)(pre_insertion, pre_deletion) + gap_cost;
-
-            // For local scoring we should use the ReLU variants of 3-way `max`.
-            sz_i16_t cell_score;
-            if constexpr (locality_k == sz_similarity_global_k) {
-                cell_score = (std::max<sz_i16_t>)(pre_substitution + cost_of_substitution, if_deletion_or_insertion);
-                sz_unused(final_score);
-            }
-            else {
-                if_deletion_or_insertion = (std::max<sz_i16_t>)(if_deletion_or_insertion, 0);
-                cell_score = (std::max<sz_i16_t>)(pre_substitution + cost_of_substitution, if_deletion_or_insertion);
-                final_score = (std::max)(cell_score, final_score);
-            }
-
-            // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
-            scores_new[i + 0] = cell_score;
-        }
-
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
         if constexpr (locality_k == sz_similarity_global_k) {
             if (tasks_offset == 0) this->final_score_ = scores_new[0];
         }
         else { // Or the best score for local alignment.
-            this->final_score_ = this->pick_best_in_warp(final_score);
+            this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
+            this->final_score_ = this->pick_best_in_warp(this->final_score_);
         }
     }
 };
@@ -2511,15 +2485,14 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
-        uint i = tasks_offset * 2;
-        for (; i + 2 <= tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
+        for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
             pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
             pre_insertion_opening_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
             pre_deletion_opening_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
             pre_insertion_expansion_vec = sz_u32_load_unaligned(scores_running_insertions + i);
             pre_deletion_expansion_vec = sz_u32_load_unaligned(scores_running_deletions + i);
-            first_vec.u16s[0] = first_slice[tasks_count - i - 1];
-            first_vec.u16s[1] = first_slice[tasks_count - i - 2];
+            first_vec.u16s[0] = *(first_slice + tasks_count - i - 1); // ! with a [] lookup would underflow
+            first_vec.u16s[1] = *(first_slice + tasks_count - i - 2); // ! with a [] lookup would underflow
             second_vec.u16s[0] = second_slice[i + 0];
             second_vec.u16s[1] = second_slice[i + 1];
 
@@ -2541,7 +2514,11 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
             else {
                 cell_score_vec.u32 =
                     __vimax3_s16x2_relu(if_substitution_vec.u32, if_insertion_vec.u32, if_deletion_vec.u32);
-                final_score_vec.u32 = __vmaxs2(cell_score_vec.u32, final_score_vec.u32);
+                // In the last iteration of the loop the second half-word contains noise,
+                // so we have to discard it from affecting the final score.
+                bool const is_tail = i + 1 == tasks_count;
+                final_score_vec.i16s[0] = (std::max)(cell_score_vec.i16s[0], final_score_vec.i16s[0]);
+                final_score_vec.i16s[1] = (std::max)(cell_score_vec.i16s[1 - is_tail], final_score_vec.i16s[1]);
             }
 
             // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
@@ -2553,50 +2530,13 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
             scores_new_deletions[i + 1] = if_deletion_vec.i16s[1];
         }
 
-        // Handle the tail - the single last entry
-        sz_i16_t final_score;
-        if constexpr (locality_k == sz_similarity_local_k)
-            final_score = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
-        if (i + 1 == tasks_count) {
-            sz_i16_t pre_substitution = scores_pre_substitution[i];
-            sz_i16_t pre_insertion_opening = scores_pre_insertion[i];
-            sz_i16_t pre_deletion_opening = scores_pre_deletion[i];
-            sz_i16_t pre_insertion_expansion = scores_running_insertions[i];
-            sz_i16_t pre_deletion_expansion = scores_running_deletions[i];
-            char first_char = first_slice[tasks_count - i - 1];
-            char second_char = second_slice[i + 0];
-
-            error_cost_t cost_of_substitution = substituter(first_char, second_char);
-            sz_i16_t if_insertion =
-                (std::max)(pre_insertion_opening + gap_open_cost, pre_insertion_expansion + gap_extend_cost);
-            sz_i16_t if_deletion =
-                (std::max)(pre_deletion_opening + gap_open_cost, pre_deletion_expansion + gap_extend_cost);
-            sz_i16_t if_deletion_or_insertion = (std::max)(if_insertion, if_deletion);
-
-            // For local scoring we should use the ReLU variants of 3-way `max`.
-            sz_i16_t cell_score;
-            if constexpr (locality_k == sz_similarity_global_k) {
-                cell_score = (std::max<sz_i16_t>)(pre_substitution + cost_of_substitution, if_deletion_or_insertion);
-                sz_unused(final_score);
-            }
-            else {
-                if_deletion_or_insertion = (std::max<sz_i16_t>)(if_deletion_or_insertion, 0);
-                cell_score = (std::max<sz_i16_t>)(pre_substitution + cost_of_substitution, if_deletion_or_insertion);
-                final_score = (std::max)(cell_score, final_score);
-            }
-
-            // When walking through the top-left triangle of the matrix, our output addresses are misaligned.
-            scores_new[i + 0] = cell_score;
-            scores_new_insertions[i + 0] = if_insertion;
-            scores_new_deletions[i + 0] = if_deletion;
-        }
-
         // Extract the bottom-right corner of the matrix, which is the result of the global alignment.
         if constexpr (locality_k == sz_similarity_global_k) {
             if (tasks_offset == 0) this->final_score_ = scores_new[0];
         }
         else { // Or the best score for local alignment.
-            this->final_score_ = this->pick_best_in_warp(final_score);
+            this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
+            this->final_score_ = this->pick_best_in_warp(this->final_score_);
         }
     }
 };
