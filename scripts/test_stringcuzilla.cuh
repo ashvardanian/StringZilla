@@ -447,18 +447,21 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
     };
 
     // Some vary basic variants:
-    append("ABC", "ABC");                  // same string; distance ~ 0
-    append("LISTEN", "SILENT");            // distance ~ 4
-    append("ATCA", "CTACTCACCC");          // distance ~ 6
-    append("A", "=");                      // distance ~ 1
+    append("ggbuzgjux{}l", "gbuzgjux{}l"); // one (prepended) insertion; distance ~ 1
     append("A", "A");                      // distance ~ 0
+    append("A", "=");                      // distance ~ 1
     append("", "");                        // distance ~ 0
+    append("ABC", "ABC");                  // same string; distance ~ 0
+    append("ABC", "AABC");                 // distance ~ 1, prepended
+    append("ABC", "ABCC");                 // distance ~ 1, appended
     append("", "ABC");                     // distance ~ 3
     append("ABC", "");                     // distance ~ 3
     append("ABC", "AC");                   // one deletion; distance ~ 1
-    append("ABC", "A_BC");                 // one insertion; distance ~ 1
-    append("ggbuzgjux{}l", "gbuzgjux{}l"); // one (prepended) insertion; distance ~ 1
-    append("ABC", "ADC");                  // one substitution; distance ~ 1
+    append("ABC", "AXBC");                 // one X insertion; distance ~ 1
+    append("ABC", "AXC");                  // one X substitution; distance ~ 1
+    append("ABCDEFG", "ABCXEFG");          // one X substitution; distance ~ 1
+    append("LISTEN", "SILENT");            // distance ~ 4
+    append("ATCA", "CTACTCACCC");          // distance ~ 6
     append("APPLE", "APLE");               // distance ~ 1
 
     // Longer strings made of simple characters:
@@ -871,7 +874,7 @@ void test_similarity_scores_equivalence() {
 #endif
 
 #if SZ_USE_HOPPER
-    // CUDA Needleman-Wunsch score on Hopper  against Multi-threaded on CPU
+    // CUDA Needleman-Wunsch score on Hopper against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
         needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
@@ -879,7 +882,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_linear_cost},
         {}, {}, first_gpu_specs);
 
-    // CUDA Needleman-Wunsch score on Hopper  against Multi-threaded on CPU with affine costs
+    // CUDA Needleman-Wunsch score on Hopper against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
         needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
@@ -887,7 +890,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_affine_cost},
         {}, {}, first_gpu_specs);
 
-    // CUDA Smith-Waterman score on Hopper  against Multi-threaded on CPU
+    // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
         smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_linear_cost}, //
@@ -895,13 +898,14 @@ void test_similarity_scores_equivalence() {
                                                                                                   blosum62_linear_cost},
         {}, {}, first_gpu_specs);
 
-    // CUDA Smith-Waterman score on Hopper  against Multi-threaded on CPU with affine costs
+    // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
         smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {
             blosum62_matrix, blosum62_affine_cost}, //
         smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
                                                                                                   blosum62_affine_cost},
         {}, {}, first_gpu_specs);
+
 #endif
 }
 
