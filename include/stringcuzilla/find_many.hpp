@@ -28,6 +28,7 @@
  *
  *  | Use Case                      | Number of States        | Memory Usage            |
  *  |-------------------------------|-------------------------|-------------------------|
+ *  | UTF-32 Mapping                | 10,000 – 100,000        | 10.24 MB – 102.4 MB     |
  *  | Malware/Intrusion Detection   | 10,000 – 1,000,000      | 10.24 MB – 1.024 GB     |
  *  | DNA/RNA Motif Scanning        | 100 – 100,000           | 0.1 MB – 102.4 MB       |
  *  | Keyword Filtering/Moderation  | 100 – 10,000            | 0.1 MB – 10.24 MB       |
@@ -65,6 +66,10 @@ struct find_many_match_t {
     size_t haystack_index {};
     size_t needle_index {};
 
+    /**
+     *  @brief  Helper function discouraged outside of testing and debugging, used to sort match lists
+     *          in many-to-many search, to compare the outputs of multiple algorithms.
+     */
     inline static bool less_globally(find_many_match_t const &lhs, find_many_match_t const &rhs) noexcept {
         return lhs.needle.data() < rhs.needle.data() ||
                (lhs.needle.data() == rhs.needle.data() && lhs.needle.end() < rhs.needle.end());
@@ -303,7 +308,7 @@ struct aho_corasick_dictionary {
 
         state_id_t current_state = 0;
         for (size_t pos = 0; pos < needle.size(); ++pos) {
-            unsigned char const symbol = static_cast<unsigned char>(needle[pos]);
+            sz_u8_t const symbol = static_cast<sz_u8_t>(needle[pos]);
             state_id_t *current_row = &transitions_[current_state][0];
             bool const has_root_state = transitions_.data() != nullptr;
             if (!has_root_state || current_row[symbol] == invalid_state_k) {
@@ -420,17 +425,19 @@ struct aho_corasick_dictionary {
     template <typename callback_type_>
     void find(span<char const> haystack, callback_type_ &&callback) const noexcept {
         state_id_t current_state = 0;
-        for (size_t pos = 0; pos < haystack.size(); ++pos) {
-            unsigned char symbol = static_cast<unsigned char>(haystack[pos]);
+        for (size_t haystack_offset = 0; haystack_offset < haystack.size(); ++haystack_offset) {
+            sz_u8_t symbol = static_cast<sz_u8_t>(haystack[haystack_offset]);
             current_state = transitions_[current_state][symbol];
 
-            size_t outputs_count = outputs_counts_[current_state];
+            size_t const outputs_count = outputs_counts_[current_state];
             if (outputs_count == 0) continue;
-            size_t outputs_offset = outputs_offsets_[current_state];
-            for (size_t i = 0; i < outputs_count; ++i) { // In small vocabulary, this is generally just 1 iteration
-                size_t needle_id = outputs_[outputs_offset + i];
+            size_t const outputs_offset = outputs_offsets_[current_state];
+
+            // In a small & diverse vocabulary, the following loop generally does just 1 iteration
+            for (size_t output_index = 0; output_index < outputs_count; ++output_index) {
+                size_t needle_id = outputs_[outputs_offset + output_index];
                 size_t match_length = needles_lengths_[needle_id];
-                span<char const> match_span(&haystack[pos + 1 - match_length], match_length);
+                span<char const> match_span(&haystack[haystack_offset + 1 - match_length], match_length);
                 match_t match {haystack, match_span, 0, needle_id};
                 if (!callback(match)) break;
             }
@@ -444,8 +451,8 @@ struct aho_corasick_dictionary {
     size_t count(span<char const> haystack) const noexcept {
         size_t count = 0;
         state_id_t current_state = 0;
-        for (size_t pos = 0; pos < haystack.size(); ++pos) {
-            unsigned char symbol = static_cast<unsigned char>(haystack[pos]);
+        for (size_t haystack_offset = 0; haystack_offset < haystack.size(); ++haystack_offset) {
+            sz_u8_t symbol = static_cast<sz_u8_t>(haystack[haystack_offset]);
             current_state = transitions_[current_state][symbol];
             count += outputs_counts_[current_state];
         }
@@ -521,7 +528,7 @@ struct find_many {
                       size_t &matches_count) const noexcept {
         size_t count_found = 0, count_allowed = matches.size();
         for (auto it = haystacks.begin(); it != haystacks.end() && count_found != count_allowed; ++it)
-            dict_.find(*it, [&](match_t match) {
+            dict_.find(*it, [&](match_t match) noexcept {
                 match.haystack_index = static_cast<size_t>(it - haystacks.begin());
                 matches[count_found] = match;
                 count_found++;
@@ -684,7 +691,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             size_t haystack_length = haystack.size();
             if (haystack_length > specs.l2_bytes) continue;
             size_t matches_found = 0;
-            dict_.find({haystack.data(), haystack_length}, [&](match_t match) {
+            dict_.find({haystack.data(), haystack_length}, [&](match_t match) noexcept {
                 match.haystack_index = haystack_index;
                 matches[offsets_per_haystack[haystack_index] + matches_found] = match;
                 ++matches_found;
