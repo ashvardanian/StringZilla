@@ -88,6 +88,55 @@ using affine_smith_waterman_hopper_t =
 
 #pragma endregion - Common Aliases
 
+#pragma region - Common Helpers
+
+/**
+ *  @brief  Dispatches min or max operation based on the compile-time objective.
+ */
+template <sz_similarity_objective_t objective_, typename scalar_type_>
+__forceinline__ __device__ scalar_type_ _pick_best(scalar_type_ a, scalar_type_ b) noexcept {
+    if constexpr (objective_ == sz_minimize_distance_k) { return std::min(a, b); }
+    else { return std::max(a, b); }
+}
+
+template <sz_similarity_objective_t objective_, typename scalar_type_>
+__forceinline__ __device__ scalar_type_ _pick_best_in_warp(scalar_type_ x) noexcept {
+    // The `__shfl_down_sync` replaces `__shfl_down`
+    // https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
+    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 16), x);
+    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 8), x);
+    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 4), x);
+    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 2), x);
+    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 1), x);
+    return x;
+}
+
+/**
+ *  @brief  Loads data with a hint, that it's frequently accessed and immutable throughout the kernel.
+ *  @see    https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#read-only-data-cache-load-function
+ *  @see    https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#global-memory-5-x
+ */
+template <typename scalar_type_>
+__forceinline__ __device__ scalar_type_ _load_immutable(scalar_type_ const *ptr) noexcept {
+    // The `__ldg` intrinsic translates into the `ld.global.nc` PTX instruction.
+    // It reads a value from global memory and caches it in the non-coherent cache.
+    // return __ldg(ptr);
+    return *ptr;
+}
+
+/**
+ *  @brief  Loads data with a cache hint, that it will not be accessed again.
+ *  @see    https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#load-functions-using-cache-hints
+ *  @see    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#cache-operators
+ */
+template <typename scalar_type_>
+__forceinline__ __device__ scalar_type_ _load_last_use(scalar_type_ const *ptr) noexcept {
+    // return __ldlu(ptr);
+    return *ptr;
+}
+
+#pragma endregion - Common Helpers
+
 #pragma region - Algorithm Building Blocks
 
 /**
@@ -125,11 +174,6 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
     score_t final_score_ {0};
-
-    __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
-        if constexpr (objective_ == sz_minimize_distance_k) { return std::min(a, b); }
-        else { return std::max(a, b); }
-    }
 
   public:
     __forceinline__ __device__ tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept
@@ -176,14 +220,16 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // ? and allowing them to reuse the previous `pre_deletion` as the new `pre_insertion`,
         // ? that code ends up being slower than the one below.
         for (index_type_ i = tasks_offset; i < tasks_count; i += tasks_step) {
-            score_t pre_substitution = scores_pre_substitution[i];
+            score_t pre_substitution = _load_last_use(scores_pre_substitution + i);
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
+            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
+            char second_char = _load_immutable(second_slice + i);
 
-            error_cost_t cost_of_substitution = substituter_(first_slice[tasks_count - i - 1], second_slice[i]);
+            error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
-            score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_costs;
-            score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution);
+            score_t if_deletion_or_insertion = _pick_best<objective_k>(pre_deletion, pre_insertion) + gap_costs;
+            score_t cell_score = _pick_best<objective_k>(if_deletion_or_insertion, if_substitution);
             scores_new[i] = cell_score;
         }
 
@@ -226,22 +272,6 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
     score_t final_score_ {0};
-
-    __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
-        if constexpr (objective_k == sz_minimize_distance_k) { return std::min(a, b); }
-        else { return std::max(a, b); }
-    }
-
-    __forceinline__ __device__ score_t pick_best_in_warp(score_t val) const noexcept {
-        // The `__shfl_down_sync` replaces `__shfl_down`
-        // https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 16), val);
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 8), val);
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 4), val);
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 2), val);
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 1), val);
-        return val;
-    }
 
   public:
     __forceinline__ __device__ tile_scorer(substituter_t subs, linear_gap_costs_t gaps) noexcept
@@ -286,23 +316,25 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // ? and allowing them to reuse the previous `pre_deletion` as the new `pre_insertion`,
         // ? that code ends up being slower than the one below.
         for (index_type_ i = tasks_offset; i < tasks_count; i += tasks_step) {
-            score_t pre_substitution = scores_pre_substitution[i];
+            score_t pre_substitution = _load_last_use(scores_pre_substitution + i);
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
+            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
+            char second_char = _load_immutable(second_slice + i);
 
-            error_cost_t cost_of_substitution = substituter_(first_slice[tasks_count - i - 1], second_slice[i]);
+            error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
-            score_t if_deletion_or_insertion = pick_best(pre_deletion, pre_insertion) + gap_cost;
-            score_t if_substitution_or_reset = pick_best(if_substitution, 0);
-            score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution_or_reset);
+            score_t if_deletion_or_insertion = _pick_best<objective_k>(pre_deletion, pre_insertion) + gap_cost;
+            score_t if_substitution_or_reset = _pick_best<objective_k, score_t>(if_substitution, 0);
+            score_t cell_score = _pick_best<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
             scores_new[i] = cell_score;
 
             // Update the global maximum score if this cell beats it.
-            final_score_ = pick_best(final_score_, cell_score);
+            final_score_ = _pick_best<objective_k>(final_score_, cell_score);
         }
 
         // ! Don't forget to pick the best among the best scores per thread.
-        final_score_ = pick_best_in_warp(final_score_);
+        final_score_ = _pick_best_in_warp<objective_k>(final_score_);
     }
 };
 
@@ -341,11 +373,6 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
     score_t final_score_ {0};
-
-    __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
-        if constexpr (objective_ == sz_minimize_distance_k) { return std::min(a, b); }
-        else { return std::max(a, b); }
-    }
 
   public:
     __forceinline__ __device__ tile_scorer(substituter_t subs, affine_gap_costs_t gaps) noexcept
@@ -406,20 +433,22 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // ? and allowing them to reuse the previous `pre_deletion` as the new `pre_insertion`,
         // ? that code ends up being slower than the one below.
         for (index_type_ i = tasks_offset; i < tasks_count; i += tasks_step) {
-            score_t pre_substitution = scores_pre_substitution[i];
+            score_t pre_substitution = _load_last_use(scores_pre_substitution + i);
             score_t pre_insertion_opening = scores_pre_insertion[i];
             score_t pre_deletion_opening = scores_pre_deletion[i];
             score_t pre_insertion_expansion = scores_running_insertions[i];
             score_t pre_deletion_expansion = scores_running_deletions[i];
+            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
+            char second_char = _load_immutable(second_slice + i);
 
-            error_cost_t cost_of_substitution = substituter_(first_slice[tasks_count - i - 1], second_slice[i]);
+            error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
             score_t if_insertion = min_or_max<objective_k>(pre_insertion_opening + gap_costs_.open,
                                                            pre_insertion_expansion + gap_costs_.extend);
             score_t if_deletion = min_or_max<objective_k>(pre_deletion_opening + gap_costs_.open,
                                                           pre_deletion_expansion + gap_costs_.extend);
             score_t if_deletion_or_insertion = min_or_max<objective_k>(if_deletion, if_insertion);
-            score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution);
+            score_t cell_score = _pick_best<objective_k>(if_deletion_or_insertion, if_substitution);
 
             // Export results.
             scores_new[i] = cell_score;
@@ -466,22 +495,6 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
     score_t final_score_ {0};
-
-    __forceinline__ __device__ score_t pick_best(score_t a, score_t b) const noexcept {
-        if constexpr (objective_k == sz_minimize_distance_k) { return std::min(a, b); }
-        else { return std::max(a, b); }
-    }
-
-    __forceinline__ __device__ score_t pick_best_in_warp(score_t val) const noexcept {
-        // The `__shfl_down_sync` replaces `__shfl_down`
-        // https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 16), val);
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 8), val);
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 4), val);
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 2), val);
-        val = pick_best(__shfl_down_sync(0xffffffff, val, 1), val);
-        return val;
-    }
 
   public:
     __forceinline__ __device__ tile_scorer(substituter_t subs, affine_gap_costs_t gaps) noexcept
@@ -538,21 +551,23 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // ? and allowing them to reuse the previous `pre_deletion` as the new `pre_insertion`,
         // ? that code ends up being slower than the one below.
         for (index_type_ i = tasks_offset; i < tasks_count; i += tasks_step) {
-            score_t pre_substitution = scores_pre_substitution[i];
+            score_t pre_substitution = _load_last_use(scores_pre_substitution + i);
             score_t pre_insertion_opening = scores_pre_insertion[i];
             score_t pre_deletion_opening = scores_pre_deletion[i];
             score_t pre_insertion_expansion = scores_running_insertions[i];
             score_t pre_deletion_expansion = scores_running_deletions[i];
+            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
+            char second_char = _load_immutable(second_slice + i);
 
-            error_cost_t cost_of_substitution = substituter_(first_slice[tasks_count - i - 1], second_slice[i]);
+            error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
             score_t if_deletion = min_or_max<objective_k>(pre_deletion_opening + gap_costs_.open,
                                                           pre_deletion_expansion + gap_costs_.extend);
             score_t if_insertion = min_or_max<objective_k>(pre_insertion_opening + gap_costs_.open,
                                                            pre_insertion_expansion + gap_costs_.extend);
             score_t if_deletion_or_insertion = min_or_max<objective_k>(if_deletion, if_insertion);
-            score_t if_substitution_or_reset = pick_best(if_substitution, 0);
-            score_t cell_score = pick_best(if_deletion_or_insertion, if_substitution_or_reset);
+            score_t if_substitution_or_reset = _pick_best<objective_k, score_t>(if_substitution, 0);
+            score_t cell_score = _pick_best<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
 
             // Export results.
             scores_new[i] = cell_score;
@@ -560,11 +575,11 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             scores_new_deletions[i] = if_deletion;
 
             // Update the global maximum score if this cell beats it.
-            final_score_ = pick_best(final_score_, cell_score);
+            final_score_ = _pick_best<objective_k>(final_score_, cell_score);
         }
 
         // ! Don't forget to pick the best among the best scores per thread.
-        final_score_ = pick_best_in_warp(final_score_);
+        final_score_ = _pick_best_in_warp<objective_k>(final_score_);
     }
 };
 
@@ -625,8 +640,8 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
             pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
             pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
             pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            first_vec = sz_u32_load_unaligned(first_slice + tasks_count - i - 4);
-            second_vec = sz_u32_load_unaligned(second_slice + i);
+            first_vec = sz_u32_load_unaligned(first_slice + tasks_count - i - 4); // ! this may be OOB
+            second_vec = sz_u32_load_unaligned(second_slice + i);                 // ! this may be OOB, but padded
             first_vec.u32 = __nv_bswap32(first_vec.u32); // ! reverse the order of bytes in the first vector
 
             // Equality comparison will output 0xFF for each matching byte.
@@ -698,13 +713,16 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
         for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
-            pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
-            pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
-            pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            first_vec.u16s[0] = *(first_slice + tasks_count - i - 1); // ! with a [] lookup would underflow
-            first_vec.u16s[1] = *(first_slice + tasks_count - i - 2); // ! with a [] lookup would underflow
-            second_vec.u16s[0] = second_slice[i + 0];
-            second_vec.u16s[1] = second_slice[i + 1];
+            pre_substitution_vec.u16s[0] = scores_pre_substitution[i + 0];
+            pre_substitution_vec.u16s[1] = scores_pre_substitution[i + 1];
+            pre_insertion_vec.u16s[0] = scores_pre_insertion[i + 0];
+            pre_insertion_vec.u16s[1] = scores_pre_insertion[i + 1];
+            pre_deletion_vec.u16s[0] = scores_pre_deletion[i + 0];
+            pre_deletion_vec.u16s[1] = scores_pre_deletion[i + 1];
+            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
+            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -809,8 +827,8 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
             pre_deletion_opening_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
             pre_insertion_expansion_vec = sz_u32_load_unaligned(scores_running_insertions + i);
             pre_deletion_expansion_vec = sz_u32_load_unaligned(scores_running_deletions + i);
-            first_vec = sz_u32_load_unaligned(first_slice + tasks_count - i - 4);
-            second_vec = sz_u32_load_unaligned(second_slice + i);
+            first_vec = sz_u32_load_unaligned(first_slice + tasks_count - i - 4); // ! this may be OOB
+            second_vec = sz_u32_load_unaligned(second_slice + i);                 // ! this may be OOB, but padded
             first_vec.u32 = __nv_bswap32(first_vec.u32); // ! reverse the order of bytes in the first vector
 
             // Equality comparison will output 0xFF for each matching byte.
@@ -899,15 +917,20 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
         for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
-            pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
-            pre_insertion_opening_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
-            pre_deletion_opening_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            pre_insertion_expansion_vec = sz_u32_load_unaligned(scores_running_insertions + i);
-            pre_deletion_expansion_vec = sz_u32_load_unaligned(scores_running_deletions + i);
-            first_vec.u16s[0] = *(first_slice + tasks_count - i - 1); // ! with a [] lookup would underflow
-            first_vec.u16s[1] = *(first_slice + tasks_count - i - 2); // ! with a [] lookup would underflow
-            second_vec.u16s[0] = second_slice[i + 0];
-            second_vec.u16s[1] = second_slice[i + 1];
+            pre_substitution_vec.u16s[0] = scores_pre_substitution[i + 0];
+            pre_substitution_vec.u16s[1] = scores_pre_substitution[i + 1];
+            pre_insertion_opening_vec.u16s[0] = scores_pre_insertion[i + 0];
+            pre_insertion_opening_vec.u16s[1] = scores_pre_insertion[i + 1];
+            pre_deletion_opening_vec.u16s[0] = scores_pre_deletion[i + 0];
+            pre_deletion_opening_vec.u16s[1] = scores_pre_deletion[i + 1];
+            pre_insertion_expansion_vec.u16s[0] = scores_running_insertions[i + 0];
+            pre_insertion_expansion_vec.u16s[1] = scores_running_insertions[i + 1];
+            pre_deletion_expansion_vec.u16s[0] = scores_running_deletions[i + 0];
+            pre_deletion_expansion_vec.u16s[1] = scores_running_deletions[i + 1];
+            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
+            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -1008,13 +1031,16 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
         for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
-            pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
-            pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
-            pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            first_vec.u16s[0] = *(first_slice + tasks_count - i - 1); // ! with a [] lookup would underflow
-            first_vec.u16s[1] = *(first_slice + tasks_count - i - 2); // ! with a [] lookup would underflow
-            second_vec.u16s[0] = second_slice[i + 0];
-            second_vec.u16s[1] = second_slice[i + 1];
+            pre_substitution_vec.u16s[0] = scores_pre_substitution[i + 0];
+            pre_substitution_vec.u16s[1] = scores_pre_substitution[i + 1];
+            pre_insertion_vec.u16s[0] = scores_pre_insertion[i + 0];
+            pre_insertion_vec.u16s[1] = scores_pre_insertion[i + 1];
+            pre_deletion_vec.u16s[0] = scores_pre_deletion[i + 0];
+            pre_deletion_vec.u16s[1] = scores_pre_deletion[i + 1];
+            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
+            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -1109,15 +1135,20 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
         for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
-            pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
-            pre_insertion_opening_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
-            pre_deletion_opening_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            pre_insertion_expansion_vec = sz_u32_load_unaligned(scores_running_insertions + i);
-            pre_deletion_expansion_vec = sz_u32_load_unaligned(scores_running_deletions + i);
-            first_vec.u16s[0] = *(first_slice + tasks_count - i - 1); // ! with a [] lookup would underflow
-            first_vec.u16s[1] = *(first_slice + tasks_count - i - 2); // ! with a [] lookup would underflow
-            second_vec.u16s[0] = second_slice[i + 0];
-            second_vec.u16s[1] = second_slice[i + 1];
+            pre_substitution_vec.u16s[0] = scores_pre_substitution[i + 0];
+            pre_substitution_vec.u16s[1] = scores_pre_substitution[i + 1];
+            pre_insertion_opening_vec.u16s[0] = scores_pre_insertion[i + 0];
+            pre_insertion_opening_vec.u16s[1] = scores_pre_insertion[i + 1];
+            pre_deletion_opening_vec.u16s[0] = scores_pre_deletion[i + 0];
+            pre_deletion_opening_vec.u16s[1] = scores_pre_deletion[i + 1];
+            pre_insertion_expansion_vec.u16s[0] = scores_running_insertions[i + 0];
+            pre_insertion_expansion_vec.u16s[1] = scores_running_insertions[i + 1];
+            pre_deletion_expansion_vec.u16s[0] = scores_running_deletions[i + 0];
+            pre_deletion_expansion_vec.u16s[1] = scores_running_deletions[i + 1];
+            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
+            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -2301,6 +2332,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
                          linear_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
     using tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_cuda_constant_memory_t,
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
@@ -2332,13 +2364,16 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
         for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
-            pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
-            pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
-            pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            first_vec.u16s[0] = *(first_slice + tasks_count - i - 1); // ! with a [] lookup would underflow
-            first_vec.u16s[1] = *(first_slice + tasks_count - i - 2); // ! with a [] lookup would underflow
-            second_vec.u16s[0] = second_slice[i + 0];
-            second_vec.u16s[1] = second_slice[i + 1];
+            pre_substitution_vec.i16s[0] = _load_last_use(scores_pre_substitution + i + 0);
+            pre_substitution_vec.i16s[1] = _load_last_use(scores_pre_substitution + i + 1);
+            pre_insertion_vec.i16s[0] = scores_pre_insertion[i + 0];
+            pre_insertion_vec.i16s[1] = scores_pre_insertion[i + 1];
+            pre_deletion_vec.i16s[0] = scores_pre_deletion[i + 0];
+            pre_deletion_vec.i16s[1] = scores_pre_deletion[i + 1];
+            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
+            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
 
             cost_of_substitution_vec.i16s[0] = substituter(first_vec.u16s[0], second_vec.u16s[0]);
             cost_of_substitution_vec.i16s[1] = substituter(first_vec.u16s[1], second_vec.u16s[1]);
@@ -2372,7 +2407,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         }
         else { // Or the best score for local alignment.
             this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
-            this->final_score_ = this->pick_best_in_warp(this->final_score_);
+            this->final_score_ = _pick_best_in_warp<objective_k>(this->final_score_);
         }
     }
 };
@@ -2384,6 +2419,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
                          linear_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
     using tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_cuda_constant_memory_t,
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
@@ -2398,17 +2434,19 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         sz_i32_t *scores_new) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
-        sz_i32_t const gap_costs = this->gap_costs_.open_or_extend;
         _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
+        error_costs_256x256_in_cuda_constant_memory_t substituter;
+        sz_i32_t const gap_costs = this->gap_costs_.open_or_extend;
         sz_i32_t final_score = 0;
 
         for (uint i = tasks_offset; i < tasks_count; i += tasks_step) {
-            sz_i32_t pre_substitution = scores_pre_substitution[i];
+            sz_i32_t pre_substitution = _load_last_use(scores_pre_substitution + i);
             sz_i32_t pre_insertion = scores_pre_insertion[i];
             sz_i32_t pre_deletion = scores_pre_deletion[i];
+            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
+            char second_char = _load_immutable(second_slice + i);
 
-            error_cost_t cost_of_substitution =
-                error_costs_256x256_in_cuda_constant_memory_t {}(first_slice[tasks_count - i - 1], second_slice[i]);
+            error_cost_t cost_of_substitution = substituter(first_char, second_char);
             sz_i32_t if_deletion_or_insertion = (std::max)(pre_deletion, pre_insertion) + gap_costs;
             sz_i32_t cell_score;
 
@@ -2432,7 +2470,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         }
         else { // Or the best score for local alignment.
             this->final_score_ = (std::max)(this->final_score_, final_score);
-            this->final_score_ = this->pick_best_in_warp(this->final_score_);
+            this->final_score_ = _pick_best_in_warp<objective_k>(this->final_score_);
         }
     }
 };
@@ -2448,6 +2486,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
                          affine_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
     using tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_cuda_constant_memory_t,
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
@@ -2486,15 +2525,20 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
         for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
-            pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
-            pre_insertion_opening_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
-            pre_deletion_opening_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
-            pre_insertion_expansion_vec = sz_u32_load_unaligned(scores_running_insertions + i);
-            pre_deletion_expansion_vec = sz_u32_load_unaligned(scores_running_deletions + i);
-            first_vec.u16s[0] = *(first_slice + tasks_count - i - 1); // ! with a [] lookup would underflow
-            first_vec.u16s[1] = *(first_slice + tasks_count - i - 2); // ! with a [] lookup would underflow
-            second_vec.u16s[0] = second_slice[i + 0];
-            second_vec.u16s[1] = second_slice[i + 1];
+            pre_substitution_vec.i16s[0] = _load_last_use(scores_pre_substitution + i + 0);
+            pre_substitution_vec.i16s[1] = _load_last_use(scores_pre_substitution + i + 1);
+            pre_insertion_opening_vec.i16s[0] = scores_pre_insertion[i + 0];
+            pre_insertion_opening_vec.i16s[1] = scores_pre_insertion[i + 1];
+            pre_deletion_opening_vec.i16s[0] = scores_pre_deletion[i + 0];
+            pre_deletion_opening_vec.i16s[1] = scores_pre_deletion[i + 1];
+            pre_insertion_expansion_vec.i16s[0] = scores_running_insertions[i + 0];
+            pre_insertion_expansion_vec.i16s[1] = scores_running_insertions[i + 1];
+            pre_deletion_expansion_vec.i16s[0] = scores_running_deletions[i + 0];
+            pre_deletion_expansion_vec.i16s[1] = scores_running_deletions[i + 1];
+            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
+            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
 
             cost_of_substitution_vec.i16s[0] = substituter(first_vec.u16s[0], second_vec.u16s[0]);
             cost_of_substitution_vec.i16s[1] = substituter(first_vec.u16s[1], second_vec.u16s[1]);
@@ -2536,7 +2580,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         }
         else { // Or the best score for local alignment.
             this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
-            this->final_score_ = this->pick_best_in_warp(this->final_score_);
+            this->final_score_ = _pick_best_in_warp<objective_k>(this->final_score_);
         }
     }
 };
@@ -2548,6 +2592,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
                          affine_gap_costs_t, sz_maximize_score_k, locality_, sz_cap_cuda_k> {
 
     static constexpr sz_similarity_locality_t locality_k = locality_;
+    static constexpr sz_similarity_objective_t objective_k = sz_maximize_score_k;
 
     using tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_cuda_constant_memory_t,
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
@@ -2566,20 +2611,22 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         sz_i32_t *scores_new_deletions) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
+        _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
         sz_i32_t const gap_open_cost = this->gap_costs_.open;
         sz_i32_t const gap_extend_cost = this->gap_costs_.extend;
-        _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
+        error_costs_256x256_in_cuda_constant_memory_t substituter;
         sz_i32_t final_score = 0;
 
         for (uint i = tasks_offset; i < tasks_count; i += tasks_step) {
-            sz_i32_t pre_substitution = scores_pre_substitution[i];
+            sz_i32_t pre_substitution = _load_last_use(scores_pre_substitution + i);
             sz_i32_t pre_insertion_opening = scores_pre_insertion[i];
             sz_i32_t pre_deletion_opening = scores_pre_deletion[i];
             sz_i32_t pre_insertion_expansion = scores_running_insertions[i];
             sz_i32_t pre_deletion_expansion = scores_running_deletions[i];
+            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
+            char second_char = _load_immutable(second_slice + i);
 
-            error_cost_t cost_of_substitution =
-                error_costs_256x256_in_cuda_constant_memory_t {}(first_slice[tasks_count - i - 1], second_slice[i]);
+            error_cost_t cost_of_substitution = substituter(first_char, second_char);
             sz_i32_t if_substitution = pre_substitution + cost_of_substitution;
             sz_i32_t if_insertion =
                 __viaddmax_s32(pre_insertion_opening, gap_open_cost, pre_insertion_expansion + gap_extend_cost);
@@ -2609,7 +2656,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         }
         else { // Or the best score for local alignment.
             this->final_score_ = (std::max)(this->final_score_, final_score);
-            this->final_score_ = this->pick_best_in_warp(this->final_score_);
+            this->final_score_ = _pick_best_in_warp<objective_k>(this->final_score_);
         }
     }
 };
