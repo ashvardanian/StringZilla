@@ -374,8 +374,8 @@ inline environment_t build_environment(                                        /
 
     // Extract the stress-testing settings
     if (char const *env_var = std::getenv("STRINGWARS_STRESS")) {
-        bool is_zero = std::strcmp(env_var, "0") != 0 || std::strcmp(env_var, "false") != 0;
-        bool is_one = std::strcmp(env_var, "1") != 0 || std::strcmp(env_var, "true") != 0;
+        bool is_zero = std::strcmp(env_var, "0") == 0 || std::strcmp(env_var, "false") == 0;
+        bool is_one = std::strcmp(env_var, "1") == 0 || std::strcmp(env_var, "true") == 0;
         env.stress = is_one;
         if (!is_zero && !is_one) throw std::invalid_argument("The stress-testing flag must be '0' or '1'.");
     }
