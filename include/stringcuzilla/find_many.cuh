@@ -9,8 +9,16 @@
  *  may fit into the Shared Memory (~ 50 MB), and, in rare cases, may fit into the Constant Memory (~ 50 KB).
  *  The haystacks, however, may be huge in size and can be fetched from external memory (e.g., NVMe SSDs).
  *
+ *  That means we may be inclined to compress the FSM into a smaller representation, so that it can fit into
+ *  the Shared Memory (as constant memory is too slow), but we will then likely increase the number of individual
+ *  loads... and the problem will resurface again.
+ *
+ *  @see How slow is constant memory? https://leimao.github.io/blog/CUDA-Constant-Memory/
+ *
  *  That means, the coalesced memory is extremely important. Moreover, assuming we are mostly fetching each
  *  haystack byte only once, we want to make the transfer asynchronous, using @b `cp.async` PTX instructions.
+ *
+ *
  */
 #ifndef STRINGCUZILLA_FIND_MANY_CUH_
 #define STRINGCUZILLA_FIND_MANY_CUH_
@@ -24,59 +32,95 @@
 namespace ashvardanian {
 namespace stringzilla {
 
-#pragma region - Compressed State Machine
-
-/**
- *  @brief  Reordered bit-unzipped form of @b `aho_corasick_dictionary` for CUDA.
- *
- *  GPUs have many levels of memory hierarchy, and the performance of a kernel heavily
- *  depends on its utilization. Instead of branching the state into 256 next states,
- *
- *  - Constant Memory (~ 50 KB):
- *      - for 256-level branching, and 4 bytes per state, fits ~ 50 states.
- *      - for 256-level branching, and 1 bytes per state, fits ~ 200 states.
- *      - for 2-level branching, and 4 bytes per state, fits ~ 6'000 states.
- *      - for 2-level branching, and 2 bytes per state, fits ~ 12'000 states.
- */
-struct compressed_aho_corasick_dictionary_t {
-
-    using u16s_allocator_t = unified_alloc<sz_u16_t>;
-    using u32s_allocator_t = unified_alloc<sz_u32_t>;
-    using u64s_allocator_t = unified_alloc<sz_u64_t>;
-
-    safe_vector<sz_u16_t, u16s_allocator_t> transitions_u16x2_;
-    safe_vector<sz_u32_t, u32s_allocator_t> transitions_u32x2_;
-    safe_vector<sz_u64_t, u64s_allocator_t> transitions_u64x2_;
-
-    safe_vector<sz_u32_t, u32s_allocator_t> outputs_counts_;
-    safe_vector<sz_u32_t, u32s_allocator_t> needles_lengths_;
-
-    template <typename state_id_type_, typename allocator_type_>
-    status_t try_build(aho_corasick_dictionary<state_id_type_, allocator_type_> const &dict) noexcept {
-        // We need to reorder the states, so that the most frequently used can be represented
-        // as `uint8_t`, next as `uint16_t`, and the rest as `uint32_t` and `uint64_t`.
-
-        //
-        return status_t::success_k;
-    }
-};
-
-#pragma endregion // Compressed State Machine
-
 #pragma region - General Purpose CUDA Backend
 
 /**
- *  @brief  Multi-pattern exact substring search on CUDA-capable GPUs, assigning one or more warps
- *          per haystack string, using atomic writes to global memory for final output.
+ *  @brief  Multi-pattern exact substring search on CUDA-capable GPUs, assigning just one warp per haystack.
+ *
+ *  The serial Aho-Corasick algorithm's super-power is looking at each symbol of the haystack just once.
+ *  If we have a warp of @b (WS=32) threads, we have several strategies to enumerate the haystack:
+ *
+ *  - Simple algorithm: split each haystack into WS continuous parts and assign each part to a thread.
+ *    That works great until the length of the longest needle is much smaller than the (haystack.size() / WS).
+ *  - Advanced algorithm: WS threads are walking through the haystack 2xWS symbols at a time, combining SIMT and
+ *    SIMD-style processing.
+ *
+ *  The problem with the "simple" solution is - imagine a haystack of 1 MB and a collection of 100 short needles
+ *  and just 1 long needle almost 1 MB in size. In the worst-case scenario, the first of WS=32 threads will immediately
+ *  start matching the longest needle. The (WS-1=31) will finish early, while 1 thread will have a WS longer runtime.
+ *  Assuming all the WS threads share a scheduler, our algorithm will be at least (WS-1) times slower than it can be.
+ *
+ *  The problem with the "advanced" solution is - with frequent failure links reaching back to the root, the threads
+ *  within the warp will be effectively observing the same paths once they receive the next character. So despite being
+ *  much more hardware-friendly with only sequential coalesced memory access, it directly harms the AC algorithm logic.
  */
 template < //
     typename state_id_type_,
     typename haystacks_strings_type_,           //
     sz_capability_t capability_ = sz_cap_cuda_k //
     >
-__global__ void _count_many_in_cuda_block( //
+__global__ void _count_matches_with_haystack_per_warp( //
     haystacks_strings_type_ haystacks, size_t const count_states, state_id_type_ const *transitions,
-    state_id_type_ const *count_outputs_per_state) {}
+    state_id_type_ const *count_outputs_per_state) {
+
+    using haystack_t = typename haystacks_strings_type_::value_type;
+    using char_t = typename haystack_t::value_type;
+    using state_id_t = state_id_type_;
+
+    // We may have multiple warps operating in the same block.
+    uint const warp_size = warpSize;
+    size_t const global_thread_index = static_cast<uint>(blockIdx.x * blockDim.x + threadIdx.x);
+    size_t const global_warp_index = static_cast<uint>(global_thread_index / warp_size);
+    size_t const warps_per_block = static_cast<uint>(blockDim.x / warp_size);
+    size_t const warps_per_device = static_cast<uint>(gridDim.x * warps_per_block);
+    uint const warp_thread_index = static_cast<uint>(global_thread_index % warp_size);
+    bool const is_last_in_warp = (warp_thread_index + 1 == warp_size);
+
+    for (size_t haystack_index = global_warp_index; haystack_index < haystacks.size();
+         haystack_index += warps_per_device) {
+        // Each warp is assigned to a single haystack.
+        haystack_t haystack = haystacks[haystack_index];
+        size_t const haystack_size = haystack.size();
+        size_t const haystack_offset = 0;
+        state_id_t current_state = 0;
+        state_id_t thread_matches_count = 0;
+
+        // Our text processing is happening left to right.
+        // On each cycle we could load 1 char, but we also can prefetch the one that will be used
+        // at the next warp-level shuffle. Sadly, there is `__shfl_down_sync` doesn't support circular
+        // rotation, so we need to use a reverse processing order for the `next_cycle_char`.
+        char_t current_char = haystack[warp_thread_index];
+        char_t next_cycle_char = haystack[warp_size + warp_thread_index];
+
+        // Fetch the new state and the number of possible matches ending here.
+        state_id_t next_state = transitions[current_state * 256 + static_cast<uint>(current_char)];
+        state_id_t current_output_count = count_outputs_per_state[next_state];
+
+        // Aggregate.
+        current_state = next_state;
+        thread_matches_count += current_output_count;
+
+#pragma unroll
+        for (size_t window_offset = 0; window_offset < warp_size; ++window_offset) {
+            // Shift down the current character, so all the threads except the last one - step forward.
+            current_char = __shfl_down_sync(0xFFFFFFFF, current_char, 1, warp_size);
+            // Select what is the end of the logical window observed by all threads in warp at `window_offset`.
+            char_t last_char_in_window = __shfl_sync(0xFFFFFFFF, next_cycle_char, window_offset, warp_size);
+            // Update the current character for the last thread in the warp.
+            current_char = is_last_in_warp ? current_char : last_char_in_window; // ? Hope this is branch-free
+
+            // Fetch the new state and the number of possible matches ending here.
+            next_state = transitions[current_state * 256 + static_cast<uint>(current_char)];
+            current_output_count = count_outputs_per_state[next_state];
+
+            // Aggregate.
+            current_state = next_state;
+            thread_matches_count += current_output_count;
+        }
+
+        // Now that we've went through `warp_size` starting positions,
+    }
+}
 
 /**
  *  @brief Aho-Corasick-based @b SIMT multi-pattern exact substring search.
