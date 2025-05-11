@@ -3,7 +3,7 @@
  *  @brief  Benchmarks STL associative containers with @b `std::string_view`-compatible keys.
  *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the lookup operations.
  *
- *  This file is the sibling of `bench_sequence.cpp`, `bench_search.cpp` and `bench_token.cpp`.
+ *  This file is the sibling of `bench_sequence.cpp`, `bench_find.cpp` and `bench_token.cpp`.
  *  It accepts a file with a list of words, constructs associative containers with string keys,
  *  using `std::string`, `std::string_view`, `sz::string_view`, and `sz::string`, and then
  *  evaluates the latency of lookups.
