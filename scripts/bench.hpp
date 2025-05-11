@@ -150,7 +150,7 @@ struct repeat_up_to {
         inline bool operator!=(end_sentinel) const {
             accurate_clock_t::time_point current_time = accurate_clock_t::now();
             passed_seconds_ = stdc::duration_cast<stdc::nanoseconds>(current_time - start_time_).count() / 1.e9;
-            return passed_seconds_ < max_seconds_;
+            return max_seconds_ != 0 && passed_seconds_ < max_seconds_;
         }
         inline double operator*() const { return passed_seconds_; }
         constexpr void operator++() {} // No-op
@@ -438,6 +438,7 @@ inline environment_t build_environment(                                        /
     default: std::printf("%zu-grams\n", static_cast<std::size_t>(env.tokenization)); break;
     }
     std::printf(" - Seed: %zu%s\n", env.seed, seed_message);
+    std::printf(" - Stress-testing: %s\n", env.stress ? "yes" : "no");
     std::printf(" - Loaded dataset size: %zu bytes\n", env.dataset.size());
     std::printf(" - Number of tokens: %zu\n", env.tokens.size());
     std::printf(" - Mean token length: %.2f bytes\n", mean_token_length);
@@ -648,7 +649,7 @@ bench_result_t bench_nullary(  //
 
     // Perform the testing against the baseline, if provided.
     if constexpr (!std::is_same<baseline_type_, callable_no_op_t>())
-        for (auto running_seconds : repeat_up_to(env.stress_seconds)) {
+        for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
             call_result_t const accelerated_result = callable();
             call_result_t const baseline_result = baseline();
             ++result.stress_calls;
@@ -721,7 +722,7 @@ bench_result_t bench_unary(    //
 
     std::size_t const lookup_mask = bit_floor(env.tokens.size()) - 1;
     if constexpr (!std::is_same<baseline_type_, callable_no_op_t>())
-        for (auto running_seconds : repeat_up_to(env.stress_seconds)) {
+        for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
             std::size_t const token_index = (result.stress_calls++) & lookup_mask;
             call_result_t const accelerated_result = callable(token_index);
             call_result_t const baseline_result = baseline(token_index);
