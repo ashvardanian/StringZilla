@@ -618,24 +618,27 @@ struct bench_result_t {
 };
 
 /**
- *  @brief Loops over all tokens (in loop-unrolled batches) in environment and applies the given @b nullary function.
+ *  @brief Repeatedly calls and profiles a given @b nullary function, comparing it against a baseline.
  *  @param[in] env Environment with the dataset and tokens.
  *  @param[in] name Name of the benchmark, used for logging.
  *  @param[in] baseline Optional serial analog, against which the accelerated function will be stress-tested.
  *  @param[in] callable Nullary function taking no arguments and returning a @b `call_result_t`.
+ *  @param[in] check_validator Optional function to validate the results of the benchmark.
  *  @return Profiling results, including the number of cycles, bytes processed, and error counts.
  */
-template <                                          //
-    typename callable_type_,                        //
-    typename baseline_type_ = callable_no_op_t,     //
-    typename preprocessing_type_ = callable_no_op_t //
+template <                                                        //
+    typename callable_type_,                                      //
+    typename baseline_type_ = callable_no_op_t,                   //
+    typename preprocessing_type_ = callable_no_op_t,              //
+    typename check_validator_type_ = std::equal_to<check_value_t> //
     >
 bench_result_t bench_nullary(  //
     environment_t const &env,  //
     std::string const &name,   //
     baseline_type_ &&baseline, //
     callable_type_ &&callable, //
-    preprocessing_type_ &&preprocessing = callable_no_op_t()) {
+    preprocessing_type_ &&preprocessing = preprocessing_type_ {},
+    check_validator_type_ &&check_validator = check_validator_type_ {}) {
 
     bench_result_t result;
     result.name = name;
@@ -654,7 +657,7 @@ bench_result_t bench_nullary(  //
             call_result_t const baseline_result = baseline();
             ++result.stress_calls;
             result.stress_inputs += accelerated_result.inputs_processed;
-            if (accelerated_result.check_value == baseline_result.check_value) continue; // No failures
+            if (check_validator(accelerated_result.check_value, baseline_result.check_value)) continue; // No failures
 
             // If we got here, the error needs to be reported and investigated.
             ++result.errors;
