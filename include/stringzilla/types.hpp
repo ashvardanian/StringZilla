@@ -622,9 +622,12 @@ class safe_vector {
     using size_type = std::size_t;
     using allocator_type = allocator_type_;
 
-    using allocated_type = typename std::allocator_traits<allocator_type>::value_type;
+    using allocator_traits = std::allocator_traits<allocator_type>;
+    using allocated_type = typename allocator_traits::value_type;
     static_assert(sizeof(value_type) == sizeof(allocated_type),
                   "Allocator value type must be the same size as the vector value type");
+    static_assert(allocator_traits::propagate_on_container_move_assignment::value,
+                  "Allocator must propagate on move assignment, otherwise the move assignment won't be `noexcept`.");
 
   private:
     value_type *data_;
@@ -651,8 +654,10 @@ class safe_vector {
         capacity_ = 0;
     }
 
+    /** @warning Use `try_assign` instead to handle out-of-memory failures. */
     safe_vector(safe_vector const &other) = delete;
-    safe_vector &operator=(safe_vector const &other) noexcept = delete;
+    /** @warning Use `try_assign` instead to handle out-of-memory failures. */
+    safe_vector &operator=(safe_vector const &other) = delete;
 
     safe_vector(safe_vector &&other) noexcept
         : data_(other.data_), size_(other.size_), capacity_(other.capacity_), alloc_(std::move(other.alloc_)) {
@@ -674,6 +679,29 @@ class safe_vector {
             other.capacity_ = 0;
         }
         return *this;
+    }
+
+    template <typename other_allocator_type_ = allocator_type>
+    status_t try_assign(safe_vector<value_type, other_allocator_type_> const &other) noexcept {
+        reset();
+
+        if constexpr (allocator_traits::propagate_on_container_copy_assignment::value) alloc_ = other.alloc_;
+        if (other.size_ == 0) return status_t::success_k; // Nothing to do :)
+
+        // Allocate exact needed capacity
+        size_type new_cap = other.size_;
+        allocated_type *raw = allocator_traits::allocate(alloc_, new_cap);
+        if (!raw) return status_t::bad_alloc_k;
+        data_ = reinterpret_cast<value_type *>(raw);
+        capacity_ = new_cap;
+
+        // Copy‐construct each element
+        if constexpr (!std::is_trivially_constructible<value_type>::value)
+            for (size_type i = 0; i < other.size_; ++i) new (data_ + i) value_type(other.data_[i]);
+        else
+            for (size_type i = 0; i < other.size_; ++i) data_[i] = other.data_[i];
+        size_ = other.size_;
+        return status_t::success_k;
     }
 
     status_t try_reserve(size_type new_cap) noexcept {
