@@ -11,6 +11,7 @@
 #include <vector>     // `std::vector`
 #include <array>      // `std::array`
 #include <functional> // `std::function`
+#include <algorithm>  // `std::copy`, `std::generate`
 
 #include "stringzilla/types.hpp"
 #if SZ_USE_CUDA
