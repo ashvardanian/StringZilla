@@ -391,6 +391,7 @@ typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__I
 sz_static_assert(sizeof(sz_size_t) == sizeof(void *), sz_size_t_must_be_pointer_size);
 sz_static_assert(sizeof(sz_ssize_t) == sizeof(void *), sz_ssize_t_must_be_pointer_size);
 
+typedef unsigned char sz_byte_t; // A byte is an 8-bit unsigned integer
 typedef char *sz_ptr_t;          // A type alias for `char *`
 typedef char const *sz_cptr_t;   // A type alias for `char const *`
 typedef sz_i8_t sz_error_cost_t; // Character mismatch cost for fuzzy matching functions
@@ -449,15 +450,17 @@ typedef enum sz_status_t {
     /** For algorithms that return a status, this status indicates that the operation was successful. */
     sz_success_k = 0,
     /** For algorithms that require memory allocation, this status indicates that the allocation failed. */
-    sz_bad_alloc_k = -1,
+    sz_bad_alloc_k = -10,
     /** For algorithms that require UTF8 input, this status indicates that the input is invalid. */
-    sz_invalid_utf8_k = -2,
+    sz_invalid_utf8_k = -12,
     /** For algorithms that take collections of unique elements, this status indicates presence of duplicates. */
-    sz_contains_duplicates_k = -3,
+    sz_contains_duplicates_k = -13,
     /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types. */
-    sz_overflow_risk_k = -4,
+    sz_overflow_risk_k = -14,
+    /** For algorithms with multi-stage pipelines indicates input/output size mismatch. */
+    sz_unexpected_dimensions_k = -15,
     /** A sink-hole status for unknown errors. */
-    sz_status_unknown_k = -5,
+    sz_status_unknown_k = -1,
 } sz_status_t;
 
 /**

@@ -45,8 +45,8 @@ struct find_many_callable {
 
     call_result_t operator()() noexcept(false) {
 
-        token_view_t const dataset_view = {env.dataset.data(), env.dataset.size()};
-        std::span<token_view_t const> haystacks = {&dataset_view, 1};
+        span<char const> const dataset_view = {env.dataset.data(), env.dataset.size()};
+        span<span<char const> const> haystacks = {&dataset_view, 1};
 
         sz::status_t status = engine.try_build(dictionary);
         if (status != sz::status_t::success_k) throw std::runtime_error("Failed to build dictionary.");
@@ -159,14 +159,16 @@ void bench_find_many(environment_t const &env) {
         // Parallel search
         bench_nullary( //
             env, "count_many_parallel:"s + shape_suffix, call_count_baseline,
-            find_many_callable<find_many_u32_parallel_t, counts_t>(env, counts_accelerated, matches_accelerated, dict),
+            find_many_callable<find_many_u32_parallel_t, counts_t, fork_union_t &>( //
+                env, counts_accelerated, matches_accelerated, dict, {}, pool),
             callable_no_op_t {},  // preprocessing
             counts_equality_t {}) // equality check
             .log(count_baseline);
 
         bench_nullary( //
             env, "find_many_parallel:"s + shape_suffix, call_find_baseline,
-            find_many_callable<find_many_u32_parallel_t, matches_t>(env, counts_accelerated, matches_accelerated, dict),
+            find_many_callable<find_many_u32_parallel_t, matches_t, fork_union_t &>( //
+                env, counts_accelerated, matches_accelerated, dict, {}, pool),
             callable_no_op_t {},   // preprocessing
             matches_equality_t {}) // equality check
             .log(find_baseline);

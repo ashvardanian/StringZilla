@@ -56,7 +56,7 @@ int main(int argc, char const **argv) {
         environment_t env = build_environment( //
             argc, argv,                        //
             "xlsum.csv",                       // Preferred for UTF-8 content
-            environment_t::tokenization_t::lines_k);
+            environment_t::tokenization_t::words_k);
 
         std::printf("Starting string multi-pattern search benchmarks...\n");
         bench_find_many(env);

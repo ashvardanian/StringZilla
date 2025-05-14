@@ -1054,8 +1054,8 @@ struct find_many_baselines_t {
                     match_t match;
                     match.haystack_index = 0;
                     match.needle_index = needle_index;
-                    match.haystack = {haystack.data(), haystack.size()};
-                    match.needle = {haystack.data() + match_offset, needle.size()};
+                    match.haystack = {reinterpret_cast<byte_t const *>(haystack.data()), haystack.size()};
+                    match.needle = {reinterpret_cast<byte_t const *>(haystack.data() + match_offset), needle.size()};
                     if (!callback(match)) {
                         aborted.store(true, std::memory_order_relaxed);
                         break;
@@ -1093,9 +1093,10 @@ struct find_many_baselines_t {
     }
 
     template <typename haystacks_type_, typename output_matches_type_>
-    status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches,
-                      size_t &matches_total) const noexcept {
+    status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts,
+                      output_matches_type_ &&matches) const noexcept {
 
+        sz_unused(counts);
         std::atomic<size_t> count_found {0};
         std::size_t const count_allowed {matches.size()};
         all_pairs(haystacks, needles_, [&](match_t const &match) noexcept {
@@ -1103,13 +1104,9 @@ struct find_many_baselines_t {
             matches[match_index] = match;
             return match_index < count_allowed;
         });
-        matches_total = count_found;
         return status_t::success_k;
     }
 };
-
-using find_many_serial_t = find_many<sz_u32_t, malloc_t, sz_cap_serial_k>;
-using find_many_parallel_t = find_many<sz_u32_t, malloc_t, sz_caps_sp_k>;
 
 /**
  *  @brief  Tests the correctness of the string class Levenshtein distance computation,
@@ -1127,11 +1124,39 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
     needles.emplace_back("she");
     needles.emplace_back("her");
 
+    needles.emplace_back("école"), needles.emplace_back("école");                   // decomposed
+    needles.emplace_back("Schön"), needles.emplace_back("Scho\u0308n");             // combining diaeresis
+    needles.emplace_back("naïve"), needles.emplace_back("naive");                   // stripped diaeresis
+    needles.emplace_back("façade"), needles.emplace_back("facade");                 // no cedilla
+    needles.emplace_back("office"), needles.emplace_back("ofﬁce");                  // “fi” ligature
+    needles.emplace_back("Straße"), needles.emplace_back("Strasse");                // ß vs ss
+    needles.emplace_back("ABBA"), needles.emplace_back("\u0410\u0412\u0412\u0410"); // Latin vs Cyrillic
+    needles.emplace_back("中国"), needles.emplace_back("中國");                     // simplified vs traditional
+    needles.emplace_back("🙂"), needles.emplace_back("☺️");                          // emoji variants
+    needles.emplace_back("€100"), needles.emplace_back("EUR 100");                  // currency symbol vs abbreviation
+
     // Haystacks should contain arbitrary strings including those needles
     // in different positions, potentially interleaving
     haystacks.emplace_back("That is a test string"); // ? "only "is"
     haystacks.emplace_back("This is a test string"); // ? "his", 2x "is"
+    haystacks.emplace_back("ahishers");              // textbook example
+    haystacks.emplace_back("hishishersherishis");    // heavy overlap, prefix & suffix collisions
+    haystacks.emplace_back("si siht si a tset gnirts; reh ton si ehs, tub sih ti si."); // no real matches
+    haystacks.emplace_back("his\0is\r\nshe\0her");                                      // null-included
 
+    // ~260 chars – dense English with overlapping words (“his”, “is”, “she”, “her”)
+    haystacks.emplace_back(R"(
+    In this historic thesis, the historian highlights his findings: this is the synthesis of data.
+    She examined the theory, he shared her methodology. In this chapter, he lists his equipment:
+    microscope, test kit, sensor. It is here that she erred: misalignment arises.
+    )");
+
+    // ~320 chars – multilingual snippet with needles in Latin, Arabic, Chinese, English
+    haystacks.emplace_back(R"(
+    The conference in 北京 attracted researchers from across the globe. His presentation “AI in Healthcare”
+    was a hit—she received awards. الباحثون استعرضوا الأبحاث، واستشارت her colleagues. 这是一次重要的会议。
+    She said: “This is only the beginning.” In her report, his name appears seventeen times.
+    )");
     using match_t = find_many_match_t;
 
     // First check with a batch-size of 1
@@ -1167,14 +1192,11 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         // Check the matches themselves
         matches_base.resize(std::accumulate(counts_base.begin(), counts_base.end(), 0));
         matches_simd.resize(std::accumulate(counts_simd.begin(), counts_simd.end(), 0));
-        size_t total_found_base = 0, total_found_simd = 0;
-        status_t status_matched_base = base_operator.try_find(haystacks_tape, matches_base, total_found_base);
+        status_t status_matched_base = base_operator.try_find(haystacks_tape, counts_base_span, matches_base);
         status_t status_matched_simd =
-            simd_operator.try_find(haystacks_tape, matches_simd, total_found_simd, extra_args...);
+            simd_operator.try_find(haystacks_tape, counts_simd_span, matches_simd, extra_args...);
         _sz_assert(status_matched_base == status_t::success_k);
         _sz_assert(status_matched_simd == status_t::success_k);
-        _sz_assert(total_found_base == matches_base.size());
-        _sz_assert(total_found_simd == matches_simd.size());
 
         // Check the contents and order of the matches
         std::sort(matches_base.begin(), matches_base.end(), match_t::less_globally);
@@ -1204,14 +1226,11 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         // Check the matches themselves
         matches_base.resize(std::accumulate(counts_base.begin(), counts_base.end(), 0));
         matches_simd.resize(std::accumulate(counts_simd.begin(), counts_simd.end(), 0));
-        size_t total_found_base = 0, total_found_simd = 0;
-        status_t status_matched_base = base_operator.try_find(haystacks_tape, matches_base, total_found_base);
+        status_t status_matched_base = base_operator.try_find(haystacks_tape, counts_base_span, matches_base);
         status_t status_matched_simd =
-            simd_operator.try_find(haystacks_tape, matches_simd, total_found_simd, extra_args...);
+            simd_operator.try_find(haystacks_tape, counts_simd_span, matches_simd, extra_args...);
         _sz_assert(status_matched_base == status_t::success_k);
         _sz_assert(status_matched_simd == status_t::success_k);
-        _sz_assert(total_found_base == matches_base.size());
-        _sz_assert(total_found_simd == matches_simd.size());
 
         // Check the contents and order of the matches
         std::sort(matches_base.begin(), matches_base.end(), match_t::less_globally);
@@ -1259,8 +1278,8 @@ void test_find_many(base_operator_ &&base_operator, simd_operator_ &&simd_operat
     results_base.resize(total_count_base);
     results_simd.resize(total_count_simd);
     size_t count_base = 0, count_simd = 0;
-    status_t status_base = base_operator.try_find(haystacks_tape.view(), results_base, count_base);
-    status_t status_simd = simd_operator.try_find(haystacks_tape.view(), results_simd, count_simd, extra_args...);
+    status_t status_base = base_operator.try_find(haystacks_tape.view(), counts_base_span, results_base);
+    status_t status_simd = simd_operator.try_find(haystacks_tape.view(), counts_simd_span, results_simd, extra_args...);
     _sz_assert(status_base == status_t::success_k);
     _sz_assert(status_simd == status_t::success_k);
     _sz_assert(count_base == count_simd);
@@ -1344,24 +1363,29 @@ void test_find_many_equivalence() {
     needles_long_config.batch_size =
         std::pow(needles_long_config.alphabet.size(), needles_long_config.max_string_length);
 
-    // Single-threaded serial Aho-Corasick implementation
-    test_find_many_fixed(find_many_baselines_t {}, find_many_serial_t {});
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_serial_t {}, needles_short_config, haystacks_config, 1);
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_serial_t {}, needles_long_config, haystacks_config, 1);
-    test_find_many_prefixes(find_many_baselines_t {}, find_many_serial_t {}, haystacks_config, 1024, 1);
-
-    // Multi-threaded parallel Aho-Corasick implementation
     // Let's reuse a thread-pool to amortize the cost of spawning threads.
     fork_union_t pool;
     if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
     static_assert(executor_like<fork_union_t>);
 
-    test_find_many_fixed(find_many_baselines_t {}, find_many_parallel_t {});
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_short_config, haystacks_config, 10,
-                         pool);
-    test_find_many_fuzzy(find_many_baselines_t {}, find_many_parallel_t {}, needles_long_config, haystacks_config, 10,
-                         pool);
-    test_find_many_prefixes(find_many_baselines_t {}, find_many_parallel_t {}, haystacks_config, 1024, 10, pool);
+    // Single-threaded serial Aho-Corasick implementation
+    test_find_many_fixed(find_many_baselines_t {}, find_many_u32_serial_t {});
+
+    // Multi-threaded parallel Aho-Corasick implementation
+    test_find_many_fixed(find_many_baselines_t {}, find_many_u32_parallel_t {}, pool);
+
+    // Fuzzy tests with random inputs
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_u32_serial_t {}, needles_short_config, haystacks_config,
+                         1);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_u32_serial_t {}, needles_long_config, haystacks_config, 1);
+    test_find_many_prefixes(find_many_baselines_t {}, find_many_u32_serial_t {}, haystacks_config, 1024, 1);
+
+    // Fuzzy tests with random inputs for multi-threaded CPU backend
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_u32_parallel_t {}, needles_short_config, haystacks_config,
+                         10, pool);
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_u32_parallel_t {}, needles_long_config, haystacks_config,
+                         10, pool);
+    test_find_many_prefixes(find_many_baselines_t {}, find_many_u32_parallel_t {}, haystacks_config, 1024, 10, pool);
 }
 
 } // namespace scripts

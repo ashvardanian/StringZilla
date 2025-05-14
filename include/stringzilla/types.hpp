@@ -108,6 +108,7 @@ using u64_t = sz_u64_t;
 using i64_t = sz_i64_t;
 using size_t = sz_size_t;
 using ssize_t = sz_ssize_t;
+using byte_t = sz_byte_t;
 
 using ptr_t = sz_ptr_t;
 using cptr_t = sz_cptr_t;
@@ -126,6 +127,7 @@ enum class status_t {
     invalid_utf8_k = sz_invalid_utf8_k,
     contains_duplicates_k = sz_contains_duplicates_k,
     overflow_risk_k = sz_overflow_risk_k,
+    unexpected_dimensions_k = sz_unexpected_dimensions_k,
     unknown_k = sz_status_unknown_k,
 };
 
@@ -162,6 +164,14 @@ struct span {
     constexpr value_type &front() const noexcept { return data_[0]; }
     constexpr value_type &back() const noexcept { return data_[size_ - 1]; }
     constexpr bool empty() const noexcept { return size_ == 0; }
+
+    operator span<value_type const>() const noexcept { return span<value_type const>(data_, size_); }
+
+    template <typename other_value_type_>
+    constexpr span<other_value_type_> cast() const noexcept {
+        return span<other_value_type_>(reinterpret_cast<other_value_type_ *>(data_),
+                                       size_ * sizeof(value_type) / sizeof(other_value_type_));
+    }
 };
 
 template <typename value_type_>
