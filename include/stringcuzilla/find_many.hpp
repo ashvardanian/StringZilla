@@ -58,12 +58,12 @@ namespace stringzilla {
  */
 struct find_many_match_t {
 
-    span<char const> haystack {};
+    span<byte_t const> haystack {};
     /**
      *  @brief  The substring of the @p haystack that matched the needle.
      *          Can be used to infer the offset of the needle in the haystack.
      */
-    span<char const> needle {};
+    span<byte_t const> needle {};
     size_t haystack_index {};
     size_t needle_index {};
 
@@ -115,16 +115,16 @@ struct aho_corasick_metadata_t {
 };
 
 /**
- *  @brief Aho-Corasick dictionary for multi-pattern exact byte-level substring search.
+ *  @brief Dense @b byte-level Aho-Corasick dictionary for multi-pattern exact substring search.
  *  @note As FSM construction is almost never a bottleneck, we don't optimize it for speed.
- *  @tparam state_id_type_ The type of the state ID. Default is `sz_u32_t`.
+ *  @tparam state_id_type_ The type of the state ID. Default is `u32_t`.
  *  @tparam allocator_type_ The type of the allocator. Default is `dummy_alloc_t`.
  *
  *  Similar to the rest of the library, doesn't use `std::vector` or other STL containers
  *  and avoid `std::bad_alloc` and other exceptions in favor of `status_t::status_t` error codes
  *  and `try_`-prefixed functions.
  */
-template <typename state_id_type_ = sz_u32_t, typename allocator_type_ = dummy_alloc_t>
+template <typename state_id_type_ = u32_t, typename allocator_type_ = dummy_alloc_t>
 struct aho_corasick_dictionary {
 
     using state_id_t = state_id_type_;
@@ -236,19 +236,19 @@ struct aho_corasick_dictionary {
         safe_vector<size_t, size_allocator_t> needles_lengths(alloc);
 
         status_t s;
-        if ((s = transitions.try_reserve(other.transitions_.size()))) return s;
-        if ((s = outputs.try_reserve(other.outputs_.size()))) return s;
-        if ((s = failures.try_reserve(other.failures_.size()))) return s;
-        if ((s = outputs_counts.try_reserve(other.outputs_counts_.size()))) return s;
-        if ((s = outputs_offsets.try_reserve(other.outputs_offsets_.size()))) return s;
-        if ((s = needles_lengths.try_reserve(other.needles_lengths_.size()))) return s;
+        if ((s = transitions.try_reserve(other.transitions_.size())) != status_t::success_k) return s;
+        if ((s = outputs.try_reserve(other.outputs_.size())) != status_t::success_k) return s;
+        if ((s = failures.try_reserve(other.failures_.size())) != status_t::success_k) return s;
+        if ((s = outputs_counts.try_reserve(other.outputs_counts_.size())) != status_t::success_k) return s;
+        if ((s = outputs_offsets.try_reserve(other.outputs_offsets_.size())) != status_t::success_k) return s;
+        if ((s = needles_lengths.try_reserve(other.needles_lengths_.size())) != status_t::success_k) return s;
 
-        sz_assert(transitions.try_assign(other.transitions_) == status_t::success_k);
-        sz_assert(outputs.try_assign(other.outputs_) == status_t::success_k);
-        sz_assert(failures.try_assign(other.failures_) == status_t::success_k);
-        sz_assert(outputs_counts.try_assign(other.outputs_counts_) == status_t::success_k);
-        sz_assert(outputs_offsets.try_assign(other.outputs_offsets_) == status_t::success_k);
-        sz_assert(needles_lengths.try_assign(other.needles_lengths_) == status_t::success_k);
+        _sz_assert(transitions.try_assign(other.transitions_) == status_t::success_k);
+        _sz_assert(outputs.try_assign(other.outputs_) == status_t::success_k);
+        _sz_assert(failures.try_assign(other.failures_) == status_t::success_k);
+        _sz_assert(outputs_counts.try_assign(other.outputs_counts_) == status_t::success_k);
+        _sz_assert(outputs_offsets.try_assign(other.outputs_offsets_) == status_t::success_k);
+        _sz_assert(needles_lengths.try_assign(other.needles_lengths_) == status_t::success_k);
 
         alloc_ = std::move(alloc);
         transitions_ = std::move(transitions);
@@ -296,6 +296,11 @@ struct aho_corasick_dictionary {
     }
 
     allocator_t const &allocator() const noexcept { return alloc_; }
+
+    span<state_transitions_t const> transitions() const noexcept { return transitions_; }
+    span<state_id_t const> outputs() const noexcept { return outputs_; }
+    span<state_id_t const> failures() const noexcept { return failures_; }
+    span<state_id_t const> outputs_counts() const noexcept { return outputs_counts_; }
 
     /**
      *  @brief Returns the metadata for the Aho-Corasick dictionary.
@@ -360,7 +365,7 @@ struct aho_corasick_dictionary {
      *  @retval `status_t::overflow_risk_k` Too many needles for the current state ID type.
      *  @retval `status_t::contains_duplicates_k` The needle is already in the vocabulary.
      */
-    status_t try_insert(span<char const> needle) noexcept {
+    status_t try_insert(span<byte_t const> needle) noexcept {
         if (!needle.size()) return status_t::success_k; // Don't care about empty needles.
 
         state_id_t const needle_id = static_cast<state_id_t>(needles_lengths_.size());
@@ -368,11 +373,11 @@ struct aho_corasick_dictionary {
             return status_t::bad_alloc_k;
 
         state_id_t current_state = 0;
-        for (size_t pos = 0; pos < needle.size(); ++pos) {
-            sz_u8_t const symbol = static_cast<sz_u8_t>(needle[pos]);
+        for (size_t needle_offset = 0; needle_offset < needle.size(); ++needle_offset) {
+            byte_t const needle_byte = needle[needle_offset];
             state_id_t *current_row = &transitions_[current_state][0];
             bool const has_root_state = transitions_.data() != nullptr;
-            if (!has_root_state || current_row[symbol] == invalid_state_k) {
+            if (!has_root_state || current_row[needle_byte] == invalid_state_k) {
                 if (count_states_ >= transitions_.size()) {
                     status_t reserve_status = try_reserve(sz_size_bit_ceil(transitions_.size() + 1 + !has_root_state));
                     if (reserve_status != status_t::success_k) return reserve_status;
@@ -381,10 +386,10 @@ struct aho_corasick_dictionary {
 
                 // Use the next available state ID
                 state_id_t new_state = static_cast<state_id_t>(count_states_);
-                current_row[symbol] = new_state;
+                current_row[needle_byte] = new_state;
                 ++count_states_;
             }
-            current_state = current_row[symbol];
+            current_state = current_row[needle_byte];
         }
 
         // If the terminal state's output is already set, the needle already exists.
@@ -397,6 +402,8 @@ struct aho_corasick_dictionary {
         outputs_offsets_[current_state] = current_state;
         return status_t::success_k;
     }
+
+    status_t try_insert(span<char const> needle) noexcept { return try_insert(needle.template cast<byte_t const>()); }
 
     /**
      *  @brief Construct the Finite State Machine (FSM) from the vocabulary. Can only be called @b once!
@@ -484,11 +491,11 @@ struct aho_corasick_dictionary {
      *  @param[in] callback The handler for a @b `match_t` match, returning `true` to continue.
      */
     template <typename callback_type_>
-    void find(span<char const> haystack, callback_type_ &&callback) const noexcept {
+    void find(span<byte_t const> haystack, callback_type_ &&callback) const noexcept {
         state_id_t current_state = 0;
         for (size_t haystack_offset = 0; haystack_offset < haystack.size(); ++haystack_offset) {
-            sz_u8_t symbol = static_cast<sz_u8_t>(haystack[haystack_offset]);
-            current_state = transitions_[current_state][symbol];
+            byte_t const haystack_byte = haystack[haystack_offset];
+            current_state = transitions_[current_state][haystack_byte];
 
             size_t const outputs_count = outputs_counts_[current_state];
             if (outputs_count == 0) continue;
@@ -498,7 +505,7 @@ struct aho_corasick_dictionary {
             for (size_t output_index = 0; output_index < outputs_count; ++output_index) {
                 size_t needle_id = outputs_[outputs_offset + output_index];
                 size_t match_length = needles_lengths_[needle_id];
-                span<char const> match_span(&haystack[haystack_offset + 1 - match_length], match_length);
+                span<byte_t const> match_span(&haystack[haystack_offset + 1 - match_length], match_length);
                 match_t match {haystack, match_span, 0, needle_id};
                 if (!callback(match)) break;
             }
@@ -509,16 +516,25 @@ struct aho_corasick_dictionary {
      *  @brief Count the number of occurrences of all the needles in the @p haystack.
      *  @return The number of potentially-overlapping occurrences.
      */
-    inline size_t count(span<char const> haystack) const noexcept {
+    inline size_t count(span<byte_t const> haystack) const noexcept {
         size_t count = 0;
         state_id_t current_state = 0;
-        sz_u8_t const *haystack_data = reinterpret_cast<sz_u8_t const *>(haystack.data());
-        sz_u8_t const *haystack_end = haystack_data + haystack.size();
+        byte_t const *haystack_data = haystack.data();
+        byte_t const *const haystack_end = haystack_data + haystack.size();
         for (; haystack_data != haystack_end; ++haystack_data) {
             current_state = transitions_[current_state][*haystack_data];
             count += outputs_counts_[current_state];
         }
         return count;
+    }
+
+    template <typename callback_type_>
+    void find(span<char const> haystack, callback_type_ &&callback) const noexcept {
+        return find(haystack.template cast<byte_t const>(), std::forward<callback_type_>(callback));
+    }
+
+    inline size_t count(span<char const> haystack) const noexcept {
+        return count(haystack.template cast<byte_t const>());
     }
 };
 
@@ -528,12 +544,12 @@ struct aho_corasick_dictionary {
 
 /**
  *  @brief Aho-Corasick-based @b single-threaded multi-pattern exact substring search.
- *  @tparam state_id_type_ The type of the state ID. Default is `sz_u32_t`.
+ *  @tparam state_id_type_ The type of the state ID. Default is `u32_t`.
  *  @tparam allocator_type_ The type of the allocator. Default is `dummy_alloc_t`.
  *  @tparam capability_ The capability of the dictionary. Default is `sz_cap_serial_k`.
  */
 template <                                         //
-    typename state_id_type_ = sz_u32_t,            //
+    typename state_id_type_ = u32_t,               //
     typename allocator_type_ = dummy_alloc_t,      //
     sz_capability_t capability_ = sz_cap_serial_k, //
     typename enable_ = void                        //
@@ -547,6 +563,11 @@ struct find_many {
     find_many(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
     void reset() noexcept { dict_.reset(); }
     dictionary_t const &dictionary() const noexcept { return dict_; }
+
+    template <typename other_allocator_type_>
+    status_t try_build(aho_corasick_dictionary<state_id_t, other_allocator_type_> const &other) noexcept {
+        return dict_.try_assign(other);
+    }
 
     /**
      *  @brief Indexes all of the @p needles strings into the FSM.
@@ -580,51 +601,16 @@ struct find_many {
     /**
      *  @brief Finds all occurrences of all needles in all the @p haystacks.
      *  @param[in] haystacks The input strings to search in, with support for random access iterators.
-     *  @param[in] counts The number of needle matches in each haystack precomputed with `try_count`.
      *  @param[in] matches The output buffer for the matches, with support for random access iterators.
-     *  @pre Expects the @p matches.size() to match `try_count` for the @p haystacks.
      *  @note The @p matches reference objects should be assignable from @b `match_t`.
      */
     template <typename haystacks_type_, typename output_matches_type_ = span<find_many_match_t>>
     status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts,
                       output_matches_type_ &&matches) const noexcept {
-        sz_unused(counts);
-        size_t matches_expected = matches.size();
-        size_t matches_found = 0;
-        status_t status = try_find(haystacks, matches, matches_found);
-        if (status != status_t::success_k) return status;
-        if (matches_found != matches_expected) return status_t::unexpected_dimensions_k;
-        return status_t::success_k;
-    }
 
-    /**
-     *  @brief Finds all occurrences of all needles in all the @p haystacks.
-     *  @param[in] haystacks The input strings to search in, with support for random access iterators.
-     *  @param[in] matches The output buffer for the matches, with support for random access iterators.
-     *  @pre Expects the @p matches.size() to match `try_count` for the @p haystacks.
-     *  @note The @p matches reference objects should be assignable from @b `match_t`.
-     */
-    template <typename haystacks_type_, typename output_matches_type_ = span<find_many_match_t>>
-    status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches) const noexcept {
-        size_t matches_expected = matches.size();
-        size_t matches_found = 0;
-        status_t status = try_find(haystacks, matches, matches_found);
-        if (status != status_t::success_k) return status;
-        if (matches_found != matches_expected) return status_t::unexpected_dimensions_k;
-        return status_t::success_k;
-    }
-
-    /**
-     *  @brief Finds all occurrences of all needles in all the @p haystacks.
-     *  @param[in] haystacks The input strings to search in, with support for random access iterators.
-     *  @param[in] matches The output buffer for the matches, with support for random access iterators.
-     *  @param[out] matches_count The number of matches found.
-     *  @note The @p matches reference objects should be assignable from @b `match_t`.
-     */
-    template <typename haystacks_type_, typename output_matches_type_ = span<find_many_match_t>>
-    status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches,
-                      size_t &matches_count) const noexcept {
-        size_t count_found = 0, count_allowed = matches.size();
+        sz_unused(counts); // ? We only keep it for API compatibility with parallel algos
+        size_t count_found = 0;
+        size_t const count_allowed = matches.size();
         for (auto it = haystacks.begin(); it != haystacks.end() && count_found != count_allowed; ++it)
             dict_.find(*it, [&](match_t match) noexcept {
                 match.haystack_index = static_cast<size_t>(it - haystacks.begin());
@@ -632,7 +618,7 @@ struct find_many {
                 count_found++;
                 return count_found < count_allowed;
             });
-        matches_count = count_found;
+        if (count_found != count_allowed) return status_t::unexpected_dimensions_k;
         return status_t::success_k;
     }
 
@@ -674,6 +660,11 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
     void reset() noexcept { dict_.reset(); }
     dictionary_t const &dictionary() const noexcept { return dict_; }
 
+    template <typename other_allocator_type_>
+    status_t try_build(aho_corasick_dictionary<state_id_t, other_allocator_type_> const &other) noexcept {
+        return dict_.try_assign(other);
+    }
+
     /**
      *  @brief Indexes all of the @p needles strings into the FSM.
      *  @retval `status_t::success_k` The needle was successfully added.
@@ -709,21 +700,23 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 
         using haystacks_t = typename std::remove_reference_t<haystacks_type_>;
         using haystack_t = typename haystacks_t::value_type;
+        static_assert(std::is_trivially_copyable_v<haystack_t>,
+                      "The haystack should be trivially copyable for higher compatibility.");
 
         // On small strings, individually compute the counts
-        executor.for_each_dynamic(counts.size(), [&](size_t haystack_index) noexcept {
-            haystack_t const &haystack = haystacks[haystack_index];
-            size_t haystack_length = haystack.size();
-            if (haystack_length > specs.l2_bytes) return;
-            counts[haystack_index] = dict_.count(haystack);
-        });
+        // executor.for_each_dynamic(counts.size(), [&](size_t haystack_index) noexcept {
+        //     haystack_t const &haystack = haystacks[haystack_index];
+        //     size_t haystack_length = haystack.size();
+        //     if (haystack_length > specs.l2_bytes) return;
+        //     counts[haystack_index] = dict_.count(haystack);
+        // });
 
         // On longer strings, throw all cores on each haystack
         for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
             haystack_t const &haystack = haystacks[haystack_index];
             size_t const haystack_length = haystack.size();
             // The shorter strings have already been processed
-            if (haystack_length <= specs.l2_bytes) continue;
+            // if (haystack_length <= specs.l2_bytes) continue;
 
             std::atomic<size_t> count_across_cores = 0;
             size_t const cores_total = executor.thread_count();
@@ -752,22 +745,20 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @brief Finds all occurrences of all needles in all the @p haystacks.
      *  @param[in] haystacks The input strings to search in, with support for random access iterators.
      *  @param[in] matches The output buffer for the matches, with support for random access iterators.
-     *  @param[out] matches_count The number of matches found.
-     *  @return The number of matches found across all the @p haystacks.
      *  @note The @p matches reference objects should be assignable from @b `match_t`.
      */
     template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
 #if _SZ_IS_CPP20
         requires executor_like<executor_type_>
 #endif
-    status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches, size_t &matches_count,
+    status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches, //
                       executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) const noexcept {
 
         safe_vector<size_t, size_allocator_t> counts_per_haystack(dict_.allocator());
         if (counts_per_haystack.try_resize(haystacks.size()) != status_t::success_k) return status_t::bad_alloc_k;
         status_t count_status = try_count(haystacks, counts_per_haystack, executor, specs);
         if (count_status != status_t::success_k) return count_status;
-        return try_find(haystacks, counts_per_haystack, matches, matches_count, executor, specs);
+        return try_find(haystacks, counts_per_haystack, matches, executor, specs);
     }
 
     /**
@@ -775,8 +766,6 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @param[in] haystacks The input strings to search in, with support for random access iterators.
      *  @param[in] counts The input counts for the number of matches in each haystack.
      *  @param[in] matches The output buffer for the matches, with support for random access iterators.
-     *  @param[out] matches_count The number of matches found.
-     *  @return The number of matches found across all the @p haystacks.
      *  @note The @p matches reference objects should be assignable from @b `match_t`.
      */
     template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
@@ -784,8 +773,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         requires executor_like<executor_type_>
 #endif
     status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts, output_matches_type_ &&matches,
-                      size_t &matches_count, executor_type_ &&executor = {},
-                      cpu_specs_t const &specs = {}) const noexcept {
+                      executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) const noexcept {
 
         _sz_assert(counts.size() == haystacks.size());
         size_t const cores_total = specs.cores_total();
@@ -805,10 +793,12 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         // Process the small haystacks, outputting their matches individually without any synchronization
         executor.for_each_dynamic(counts.size(), [&](size_t haystack_index) noexcept {
             haystack_t const &haystack = haystacks[haystack_index];
-            size_t haystack_length = haystack.size();
-            if (haystack_length > specs.l2_bytes) return;
+            byte_t const *const haystack_data = reinterpret_cast<byte_t const *>(haystack.data());
+            size_t const haystack_bytes_length = haystack.size() * sizeof(char_t);
+            if (haystack_bytes_length > specs.l2_bytes) return;
+
             size_t matches_found = 0;
-            dict_.find({haystack.data(), haystack_length}, [&](match_t match) noexcept {
+            dict_.find({haystack_data, haystack_bytes_length}, [&](match_t match) noexcept {
                 match.haystack_index = haystack_index;
                 matches[offsets_per_haystack[haystack_index] + matches_found] = match;
                 ++matches_found;
@@ -823,10 +813,11 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         if (counts_per_core.try_resize(cores_total) != status_t::success_k) return status_t::bad_alloc_k;
         for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
             haystack_t const &haystack = haystacks[haystack_index];
-            char_t const *haystack_begin = haystack.data();
-            size_t const haystack_length = haystack.size();
+            byte_t const *const haystack_data = reinterpret_cast<byte_t const *>(haystack.data());
+            size_t const haystack_bytes_length = haystack.size() * sizeof(char_t);
+            byte_t const *const haystack_end = haystack_data + haystack_bytes_length;
             // The shorter strings have already been processed
-            if (haystack_length <= specs.l2_bytes) continue;
+            if (haystack_bytes_length <= specs.l2_bytes) continue;
 
             // First, on each core, estimate the number of matches in the haystack
             size_t const cores_total = executor.thread_count();
@@ -843,12 +834,12 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             }
 
             // We shouldn't even consider needles longer than the haystack
-            size_t const max_needle_length = std::min(dict_.max_needle_length(), haystack_length);
+            size_t const max_needle_length = std::min(dict_.max_needle_length(), haystack_bytes_length);
 
             // On each core, pick an overlapping slice and go through all of the matches in it,
             // that start before the end of the private slice.
             size_t const bytes_per_core_optimal =
-                round_up_to_multiple(divide_round_up(haystack_length, cores_total), cache_line_width);
+                round_up_to_multiple(divide_round_up(haystack_bytes_length, cores_total), cache_line_width);
             size_t const count_matches_before_this_haystack = offsets_per_haystack[haystack_index];
             executor.for_each_thread([&](size_t core_index) noexcept {
                 size_t const count_matches_before_this_core = core_index ? counts_per_core[core_index - 1] : 0;
@@ -856,12 +847,10 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                     counts_per_core[core_index] - count_matches_before_this_core;
 
                 // The last core may have a smaller slice, so we need to be careful
-                size_t const bytes_for_core =
-                    std::min(bytes_per_core_optimal, haystack_length - core_index * bytes_per_core_optimal);
-                char_t const *optimal_start = haystack_begin + core_index * bytes_per_core_optimal;
-                char_t const *optimal_end = optimal_start + bytes_for_core;
-                char_t const *overlapping_end =
-                    std::min(optimal_start + bytes_for_core + max_needle_length - 1, haystack_begin + haystack_length);
+                byte_t const *optimal_start =
+                    std::min(haystack_data + core_index * bytes_per_core_optimal, haystack_end);
+                byte_t const *const optimal_end = std::min(optimal_start + bytes_per_core_optimal, haystack_end);
+                byte_t const *const overlapping_end = std::min(optimal_end + max_needle_length - 1, haystack_end);
 
                 // Iterate through the matches in the overlapping region
                 size_t count_matches_found_on_this_core = 0;
@@ -878,9 +867,6 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             });
         }
 
-        // Aggregate the results
-        matches_count = 0;
-        for (size_t count : counts) matches_count += count;
         return status_t::success_k;
     }
 
@@ -898,40 +884,38 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                                      size_t cache_line_width) const noexcept {
 
         using char_t = char_type_;
-        char_t const *haystack_begin = haystack.data();
-        size_t const haystack_length = haystack.size();
-        char_t const *const haystack_end = haystack_begin + haystack_length;
+        byte_t const *const haystack_data = reinterpret_cast<byte_t const *>(haystack.data());
+        size_t const haystack_bytes_length = haystack.size() * sizeof(char_t);
+        byte_t const *const haystack_end = haystack_data + haystack_bytes_length;
         size_t const bytes_per_core_optimal =
-            round_up_to_multiple(divide_round_up(haystack_length, cores_total), cache_line_width);
+            round_up_to_multiple(divide_round_up(haystack_bytes_length, cores_total), cache_line_width);
 
         // We shouldn't even consider needles longer than the haystack
-        size_t const max_needle_length = std::min(dict_.max_needle_length(), haystack_length);
+        size_t const max_needle_length = std::min(dict_.max_needle_length(), haystack_bytes_length);
 
         // We may have a case of a thread receiving no data at all
-        char_t const *optimal_start = haystack_begin + core_index * bytes_per_core_optimal;
+        byte_t const *optimal_start = haystack_data + core_index * bytes_per_core_optimal;
         if (optimal_start >= haystack_end) return 0;
 
         // First, each core will process its own slice excluding the overlapping regions
-        char_t const *optimal_end = std::min(optimal_start + bytes_per_core_optimal, haystack_end);
+        byte_t const *optimal_end = std::min(optimal_start + bytes_per_core_optimal, haystack_end);
         size_t const count_matches_non_overlapping = dict_.count({optimal_start, optimal_end});
 
         // Now, each thread will take care of the subsequent overlapping regions,
         // but we must be careful for cases when the core-specific slice is shorter
         // than the longest needle! It's a very unlikely case in practice, but we
         // still may want an optimization for it down the road.
-        char_t const *overlapping_start;
-        char_t const *overlapping_end;
+        byte_t const *overlapping_start;
+        byte_t const *overlapping_end;
         if (optimal_start + max_needle_length >= optimal_end) {
             // Our needles are longer than a slice for the core
             overlapping_start = optimal_start;
             overlapping_end = std::min(optimal_start + max_needle_length, haystack_end);
         }
         else {
-            overlapping_start = std::max(optimal_end - max_needle_length + 1, haystack_begin);
+            overlapping_start = std::max(optimal_end - max_needle_length + 1, haystack_data);
             overlapping_end = std::min(optimal_end + max_needle_length - 1, haystack_end);
         }
-        // A great optimization, is keeping track of entries found in the prefix of the current slice,
-        // that also began in this slice, which will help us
 
         // Count the matches that start in one core's slice and end in another
         size_t count_matches_overlapping = 0;
@@ -956,8 +940,6 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  A more optimized alternative to the `count_matches_in_one_part`, that assumes that the length of the longest
      *  needle is smaller than the length of a single core slice. It means that in the least convenient case, the
      *  match can only spill into 2 core regions, starting in one and ending in another.
-     *
-     *  In such case, we can keep
      */
     template <typename char_type_>
     count_short_needle_matches_in_one_part_t count_short_needle_matches_in_one_part(
@@ -965,32 +947,42 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         size_t cache_line_width) const noexcept {
 
         using char_t = char_type_;
-        char_t const *haystack_begin = haystack.data();
-        size_t const haystack_length = haystack.size();
-        char_t const *const haystack_end = haystack_begin + haystack_length;
+        byte_t const *const haystack_data = reinterpret_cast<byte_t const *>(haystack.data());
+        size_t const haystack_bytes_length = haystack.size() * sizeof(char_t);
+        byte_t const *const haystack_end = haystack_data + haystack_bytes_length;
         size_t const bytes_per_core_optimal =
-            round_up_to_multiple(divide_round_up(haystack_length, cores_total), cache_line_width);
+            round_up_to_multiple(divide_round_up(haystack_bytes_length, cores_total), cache_line_width);
 
         // We won't face needles longer than the slice for the core
         size_t const max_needle_length = dict_.max_needle_length();
         _sz_assert(max_needle_length < bytes_per_core_optimal);
 
         // We may have a case of a thread receiving no data at all
-        char_t const *optimal_start = std::min(haystack_begin + core_index * bytes_per_core_optimal, haystack_end);
-        char_t const *prefix_end = std::min(optimal_start + max_needle_length - 1, haystack_end);
-        char_t const *overlapping_end =
+        byte_t const *optimal_start = std::min(haystack_data + core_index * bytes_per_core_optimal, haystack_end);
+        byte_t const *const prefix_end = std::min(optimal_start + max_needle_length - 1, haystack_end);
+        byte_t const *const overlapping_end =
             std::min(optimal_start + bytes_per_core_optimal + max_needle_length, haystack_end);
 
-        // Reimplement the serial `count` keeping track of the matches, entirely fitting in the prefix
+        // Reimplement the serial `aho_corasick_dictionary::count` keeping track of the matches,
+        // entirely fitting in the prefix
         count_short_needle_matches_in_one_part_t result;
+        state_id_t current_state = 0;
+        auto const outputs_counts = dict_.outputs_counts();
+        auto const transitions = dict_.transitions();
+        for (; optimal_start != overlapping_end; ++optimal_start) {
+            current_state = transitions[current_state][*optimal_start];
+            auto const outputs_count = outputs_counts[current_state];
+            result.total += outputs_count;
+            result.prefix += outputs_count * (optimal_start < prefix_end);
+        }
 
         return result;
     }
 };
 
-using find_many_u32_dictionary_t = aho_corasick_dictionary<sz_u32_t, std::allocator<char>>;
-using find_many_u32_serial_t = find_many<sz_u32_t, std::allocator<char>, sz_cap_serial_k>;
-using find_many_u32_parallel_t = find_many<sz_u32_t, std::allocator<char>, sz_caps_sp_k>;
+using find_many_u32_dictionary_t = aho_corasick_dictionary<u32_t, std::allocator<char>>;
+using find_many_u32_serial_t = find_many<u32_t, std::allocator<char>, sz_cap_serial_k>;
+using find_many_u32_parallel_t = find_many<u32_t, std::allocator<char>, sz_caps_sp_k>;
 
 #pragma endregion // Parallel Backend
 
