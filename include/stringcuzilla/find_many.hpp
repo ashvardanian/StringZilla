@@ -776,7 +776,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                       executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) const noexcept {
 
         _sz_assert(counts.size() == haystacks.size());
-        size_t const cores_total = specs.cores_total();
+        size_t const cores_total = executor.thread_count();
         size_t const cache_line_width = specs.cache_line_width;
 
         using haystacks_t = typename std::remove_reference_t<haystacks_type_>;
@@ -820,7 +820,6 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             if (haystack_bytes_length <= specs.l2_bytes) continue;
 
             // First, on each core, estimate the number of matches in the haystack
-            size_t const cores_total = executor.thread_count();
             executor.for_each_thread([&](size_t core_index) noexcept {
                 counts_per_core[core_index] =
                     count_matches_in_one_part(haystack, core_index, cores_total, cache_line_width);
