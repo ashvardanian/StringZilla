@@ -106,7 +106,12 @@ void bench_find_many(environment_t const &env) {
 #if SZ_USE_CUDA
     sz::gpu_specs_t specs = *sz::gpu_specs();
 #endif
-    std::vector<std::size_t> vocabulary_sizes = {1, 64, 1024, 32 * 1024};
+    std::vector<std::size_t> vocabulary_sizes = {
+        1024,
+        64,
+        32 * 1024,
+        1,
+    };
 #if SZ_DEBUG
     vocabulary_sizes = {1, 2, 64};
 #endif
@@ -126,17 +131,20 @@ void bench_find_many(environment_t const &env) {
     };
 
     for (std::size_t vocabulary_size : vocabulary_sizes) {
-        auto shape_suffix = std::to_string(vocabulary_size) + "needles"s;
+        auto shape_suffix = vocabulary_size == 1 ? std::to_string(vocabulary_size) + "needle"s
+                                                 : std::to_string(vocabulary_size) + "needles"s;
         if (vocabulary_size > env.tokens.size()) continue;
 
         // Construct the dictionary for the current vocabulary size
         find_many_u32_dictionary_t dict;
         if (dict.try_reserve(vocabulary_size) != sz::status_t::success_k)
             throw std::runtime_error("Failed to reserve space for dictionary.");
-        for (std::size_t token_index = 0; token_index < vocabulary_size; ++token_index) {
+        for (std::size_t token_index = 0; dict.count_needles() < vocabulary_size && token_index < env.tokens.size();
+             ++token_index) {
             auto const &token = env.tokens[token_index];
-            if (dict.try_insert({token.data(), token.size()}) != sz::status_t::success_k)
-                throw std::runtime_error("Failed to insert token into dictionary.");
+            auto status = dict.try_insert({token.data(), token.size()});
+            if (status == sz::status_t::contains_duplicates_k) continue; // Skip duplicates
+            if (status != sz::status_t::success_k) throw std::runtime_error("Failed to insert token into dictionary.");
         }
         if (dict.try_build() != sz::status_t::success_k) throw std::runtime_error("Failed to build dictionary.");
 
