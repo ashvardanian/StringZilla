@@ -48,7 +48,8 @@ struct find_many_callable {
         span<char const> const dataset_view = {env.dataset.data(), env.dataset.size()};
         span<span<char const> const> haystacks = {&dataset_view, 1};
 
-        sz::status_t status = engine.try_build(dictionary);
+        // Without `volatile`, the serial logic keeps being optimized out!
+        volatile sz::status_t status = engine.try_build(dictionary);
         if (status != sz::status_t::success_k) throw std::runtime_error("Failed to build dictionary.");
         span<size_t> counts_span = {results_counts_per_haystack.data(), results_counts_per_haystack.size()};
         span<find_many_match_t> matches_span = {results_matches_per_haystack.data(),
@@ -57,16 +58,25 @@ struct find_many_callable {
         // Unpack the extra arguments from `std::tuple` into the engine call using `std::apply`
         constexpr bool only_counts_k = std::is_same_v<results_t, counts_t>;
         if constexpr (only_counts_k)
-            status = std::apply([&](auto &&...rest) { return engine.try_count(haystacks, counts_span, rest...); },
-                                extra_args);
+            status = std::apply(
+                [&](auto &&...rest) {
+                    auto result = engine.try_count(haystacks, counts_span, rest...);
+                    for (auto &count : counts_span) do_not_optimize(count);
+                    return result;
+                },
+                extra_args);
         else
             status = std::apply(
-                [&](auto &&...rest) { return engine.try_find(haystacks, counts_span, matches_span, rest...); },
+                [&](auto &&...rest) {
+                    auto result = engine.try_find(haystacks, counts_span, matches_span, rest...);
+                    for (auto &match : matches_span) do_not_optimize(match);
+                    return result;
+                },
                 extra_args);
-        do_not_optimize(status);
 
+        do_not_optimize(status);
         if (status != sz::status_t::success_k) throw std::runtime_error("Failed multi-pattern search.");
-        do_not_optimize(counts_span);
+
         std::size_t needle_characters = engine.dictionary().total_needles_length();
         std::size_t bytes_passed = 0, character_comparisons = 0;
         for (std::size_t i = 0; i < haystacks.size(); ++i) {
