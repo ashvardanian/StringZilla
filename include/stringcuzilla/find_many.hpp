@@ -959,7 +959,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 
         // We may have a case of a thread receiving no data at all
         byte_t const *optimal_start = std::min(haystack_data + core_index * bytes_per_core_optimal, haystack_end);
-        byte_t const *const prefix_end = std::min(optimal_start + max_needle_length - 1, haystack_end);
+        byte_t const *const prefix_end = std::min(optimal_start + max_needle_length, haystack_end);
         byte_t const *const overlapping_end =
             std::min(optimal_start + bytes_per_core_optimal + max_needle_length, haystack_end);
 
