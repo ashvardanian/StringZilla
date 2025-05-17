@@ -854,8 +854,9 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                 // Iterate through the matches in the overlapping region
                 size_t count_matches_found_on_this_core = 0;
                 dict_.find({optimal_start, overlapping_end}, [&](match_t match) noexcept {
-                    bool blongs_to_this_core = match.needle.begin() < optimal_end;
-                    if (!blongs_to_this_core) return true;
+                    bool belongs_to_this_core = match.needle.begin() < optimal_end;
+                    if (!belongs_to_this_core) return true;
+                    match.haystack = {haystack_data, haystack_bytes_length};
                     match.haystack_index = haystack_index;
                     matches[count_matches_before_this_haystack + count_matches_before_this_core +
                             count_matches_found_on_this_core] = match;
