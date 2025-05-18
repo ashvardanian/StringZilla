@@ -704,19 +704,19 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                       "The haystack should be trivially copyable for higher compatibility.");
 
         // On small strings, individually compute the counts
-        // executor.for_each_dynamic(counts.size(), [&](size_t haystack_index) noexcept {
-        //     haystack_t const &haystack = haystacks[haystack_index];
-        //     size_t haystack_length = haystack.size();
-        //     if (haystack_length > specs.l2_bytes) return;
-        //     counts[haystack_index] = dict_.count(haystack);
-        // });
+        executor.for_each_dynamic(counts.size(), [&](size_t haystack_index) noexcept {
+            haystack_t const &haystack = haystacks[haystack_index];
+            size_t haystack_length = haystack.size();
+            if (haystack_length > specs.l2_bytes) return;
+            counts[haystack_index] = dict_.count(haystack);
+        });
 
         // On longer strings, throw all cores on each haystack
         for (size_t haystack_index = 0; haystack_index < counts.size(); ++haystack_index) {
             haystack_t const &haystack = haystacks[haystack_index];
             size_t const haystack_length = haystack.size();
             // The shorter strings have already been processed
-            // if (haystack_length <= specs.l2_bytes) continue;
+            if (haystack_length <= specs.l2_bytes) continue;
 
             std::atomic<size_t> count_across_cores = 0;
             size_t const cores_total = executor.thread_count();
