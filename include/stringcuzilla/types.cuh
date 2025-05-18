@@ -47,6 +47,12 @@ struct unified_alloc {
     using size_type = sz_size_t;
     using difference_type = sz_ssize_t;
 
+    /*  Those are needed for compatibility with our custom containers.
+     *  @see https://en.cppreference.com/w/cpp/memory/allocator_traits
+     */
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_copy_assignment = std::false_type;
+
     template <typename other_value_type_>
     struct rebind {
         using other = unified_alloc<other_value_type_>;
