@@ -2407,7 +2407,9 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         }
         else { // Or the best score for local alignment.
             this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
-            this->final_score_ = _pick_best_in_warp<objective_k>(this->final_score_);
+            // On Hopper we can use specialized warp reductions for up-to 32-bit values:
+            // this->final_score_ = _pick_best_in_warp<sz_maximize_score_k>(this->final_score_);
+            this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
         }
     }
 };
@@ -2470,7 +2472,9 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         }
         else { // Or the best score for local alignment.
             this->final_score_ = (std::max)(this->final_score_, final_score);
-            this->final_score_ = _pick_best_in_warp<objective_k>(this->final_score_);
+            // On Hopper we can use specialized warp reductions for up-to 32-bit values:
+            // this->final_score_ = _pick_best_in_warp<sz_maximize_score_k>(this->final_score_);
+            this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
         }
     }
 };
@@ -2580,7 +2584,9 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         }
         else { // Or the best score for local alignment.
             this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
-            this->final_score_ = _pick_best_in_warp<objective_k>(this->final_score_);
+            // On Hopper we can use specialized warp reductions for up-to 32-bit values:
+            // this->final_score_ = _pick_best_in_warp<sz_maximize_score_k>(this->final_score_);
+            this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
         }
     }
 };
@@ -2656,7 +2662,9 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         }
         else { // Or the best score for local alignment.
             this->final_score_ = (std::max)(this->final_score_, final_score);
-            this->final_score_ = _pick_best_in_warp<objective_k>(this->final_score_);
+            // On Hopper we can use specialized warp reductions for up-to 32-bit values:
+            // this->final_score_ = _pick_best_in_warp<sz_maximize_score_k>(this->final_score_);
+            this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
         }
     }
 };
