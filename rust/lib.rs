@@ -1104,7 +1104,7 @@ pub mod sz {
     /// A 256x256 array of `i8`, where each element represents the substitution cost
     /// between two characters (byte values). Matching characters are assigned a cost
     /// of 0, and non-matching characters are assigned a cost of -1.
-    pub fn unary_substitution_costs() -> [[i8; 256]; 256] {
+    pub fn error_costs_256x256_unary() -> [[i8; 256]; 256] {
         let mut result = [[0i8; 256]; 256];
 
         for i in 0..256 {
@@ -1852,7 +1852,7 @@ where
     ///
     /// let first = "kitten";
     /// let second = "sitting";
-    /// let matrix = sz::unary_substitution_costs();
+    /// let matrix = sz::error_costs_256x256_unary();
     /// let gap_penalty = -1;
     /// assert_eq!(first.sz_needleman_wunsch_score(second.as_bytes(), matrix, gap_penalty), Ok(-3));
     /// ```
@@ -2166,7 +2166,7 @@ mod tests {
 
     #[test]
     fn needleman() {
-        let costs_vector = sz::unary_substitution_costs();
+        let costs_vector = sz::error_costs_256x256_unary();
         assert_eq!(sz::alignment_score("listen", "silent", costs_vector, -1), Ok(-4));
         assert_eq!(
             sz::alignment_score("abcdefgABCDEFG", "ABCDEFGabcdefg", costs_vector, -1),
