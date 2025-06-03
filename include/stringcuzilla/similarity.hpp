@@ -19,7 +19,7 @@
  *  or @b `sz::horizontal_walker` conventional Wagner-Fischer algorithm template, that may be more suitable
  *  for large 256x256 substitution matrices on x86 CPUs.
  *
- *  @section    Why not reimplement this in pure C 99?
+ *  @section Why not reimplement this in pure C 99?
  *
  *  In bioinformatics and other string processing applications we are exposed to too much variability in the
  *  form of inputs and the kind of processing optimizations we want to apply. Many of those optimizations are
@@ -36,7 +36,7 @@
  *
  *  Each of those may just be a 2 line change in the core logic, but can produce a @b 1000 lines of boilerplate!
  *
- *  @section    Abstraction layers
+ *  @section Abstraction layers
  *
  *  Under the hood, each @b dense high-level algorithm, like Levenshtein, NW, or SW, builds on top of a "walker"
  *  template object, which in turn builds on top of an "scorer" template object:
@@ -49,6 +49,22 @@
  *  penalty for the break itself, and a lower penalty for extending it. This is called "affine" scoring.
  *
  *  TODO: For @b sparse algorithms, the algorithms are constructed differently.
+ *
+ *  @section Other Sequence Similarity Tools
+ *
+ *  "Many-against-Many SEQuence Searching" v2 @b (MMseqs2) and the "Basic Local Alignment Search Tool" @b (BLAST)
+ *  libraries are the two most popular sequence alignment libraries.
+ *
+ *  @see https://github.com/soedinglab/mmseqs2
+ *  @see https://blast.ncbi.nlm.nih.gov/Blast.cgi
+ *
+ *  "WaveFront Alignment" v2 algorithm library is a well-known collection of exact alignment algorithms using
+ *  various heuristics to avoid enumerating a quadratic number of DP cells. A GPU port of that library is also
+ *  available:
+ *
+ *  @see https://github.com/smarco/WFA2-lib
+ *  @see https://github.com/quim0/WFA-GPU
+ *  @see https://github.com/asbschmidt/CUDASW4
  */
 #ifndef STRINGCUZILLA_SIMILARITY_HPP_
 #define STRINGCUZILLA_SIMILARITY_HPP_
@@ -2370,7 +2386,7 @@ struct smith_waterman_scores {
  *          scoring or protein sequences, which conveniently require only 26 and 20 letters respectively.
  *  @note   All lookups are performed by indexing rows/columns from the 'A' character, which is 65 in ASCII.
  *
- *  @section    Biological Data
+ *  @section Biological Data
  *
  *  For proteins, a (26 x 26) matrix takes 676 bytes, which is a steep 43% increase from (20 x 20) ~ 400 bytes.
  *  Still, its an acceptable tradeoff given the convenience of using ASCII arithmetic for lookups, and occasional
