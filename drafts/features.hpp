@@ -27,6 +27,8 @@
  *    - output hashes into a hash-map with counts.
  *    - output hashes into a high-dimensional bit-vector.
  *
+ *  @see https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfTransformer.html
+ *  @see https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html
  */
 #ifndef STRINGZILLA_FEATURES_HPP_
 #define STRINGZILLA_FEATURES_HPP_

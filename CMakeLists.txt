@@ -23,7 +23,7 @@
 #
 # Benchmarks:
 #
-# * stringzilla_bench_search: A benchmark for substring search operations.
+# * stringzilla_bench_find: A benchmark for substring search operations.
 # * stringzilla_bench_similarity: A benchmark for similarity operations.
 # * stringzilla_bench_sequence: A benchmark for string array-level operations.
 # * stringzilla_bench_token: A benchmark for comparators and hash functions.
@@ -351,14 +351,16 @@ function (define_gpu_launcher exec_name source cuda_standard target_arch)
 endfunction ()
 
 if (${STRINGZILLA_BUILD_BENCHMARK})
-    define_launcher(stringzilla_bench_search scripts/bench_search.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_find scripts/bench_find.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_sequence scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_token scripts/bench_token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_container scripts/bench_container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_memory scripts/bench_memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_similarity scripts/bench_similarity.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_find_many scripts/bench_find_many.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     if (ENABLE_CUDA)
         define_gpu_launcher(stringcuzilla_bench_similarity scripts/bench_similarity.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        # define_gpu_launcher(stringcuzilla_bench_find_many scripts/bench_find_many.cu 20 "${STRINGZILLA_TARGET_ARCH}")
     endif ()
 endif ()
 

@@ -5,6 +5,14 @@ Depending on the type of contribution, you may need to follow different steps.
 
 ---
 
+Before building the first time, please pull `git` submodules.
+That's how we bring in `fork_union` and other optional dependencies to test all of the available functionality.
+
+
+```sh
+git submodule update --init --recursive
+```
+
 ## Project Structure
 
 The project is split into the following parts:
@@ -25,14 +33,14 @@ At the C++ level all benchmarks also validate the results against the STL baseli
 They have the broadest coverage of the library, and are the most important to keep up-to-date:
 
 - `scripts/bench_token.cpp` - token-level ops, like hashing, ordering, equality checks.
-- `scripts/bench_search.cpp` - bidirectional substring search, both exact and fuzzy.
+- `scripts/bench_find.cpp` - bidirectional substring search, both exact and fuzzy.
 - `scripts/bench_similarity.cpp` - benchmark all edit distance backends.
 - `scripts/bench_sequence.cpp` - sorting, partitioning, merging.
 - `scripts/bench_container.cpp` - STL containers with different string keys.
 
 The role of Python benchmarks is less to provide absolute number, but to compare against popular tools in the Python ecosystem.
 
-- `scripts/bench_search.(py|ipynb)` - compares against native Python `str`.
+- `scripts/bench_find.(py|ipynb)` - compares against native Python `str`.
 - `scripts/bench_sequence.(py|ipynb)` - compares against `pandas`.
 - `scripts/bench_similarity.(ipynb)` - compares against `jellyfish`, `editdistance`, etc.
 
@@ -85,7 +93,7 @@ Modern IDEs, like VS Code, can be configured to automatically format the code on
 For C++ code:
 
 - Explicitly use `std::` or `sz::` namespaces over global `memcpy`, `uint64_t`, etc.
-- Explicitly mark `noexcept` or `noexcept(false)` for all library interfaces.
+- Explicitly mark `noexcept` or `noexcept(false)` for all library interfaces, except for `__global__` CUDA functions.
 - Document all possible exceptions of an interface using `@throw` in Doxygen.
 - Avoid C-style variadic arguments in favor of templates.
 - Avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, and `const_cast`, except for places where a C function is called.
@@ -168,7 +176,7 @@ For benchmarks, you can use the following commands:
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
 cmake --build build_release --config Release  # Produces the following targets:
 build_release/stringzilla_bench_memory        # - for string copies and fills
-build_release/stringzilla_bench_search        # - for substring search
+build_release/stringzilla_bench_find        # - for substring search
 build_release/stringzilla_bench_token         # - for hashing, equality comparisons, etc.
 build_release/stringzilla_bench_sequence      # - for sorting arrays of strings
 build_release/stringzilla_bench_container     # - for STL containers with string keys
@@ -177,6 +185,7 @@ build_release/stringzilla_bench_container     # - for STL containers with string
 There are also parallel algorithms that need a very different benchmarking setup:
 
 ```sh
+build_release/stringzilla_bench_find_many     # - for parallel multi-pattern search on CPU
 build_release/stringzilla_bench_similarity    # - for parallel edit distances and alignment scores on CPU
 build_release/stringcuzilla_bench_similarity  # - for parallel edit distances and alignment scores on GPU
 ```
@@ -186,8 +195,13 @@ Let's say you want to benchmark large-batch DNA similarity scoring kernels:
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release --target stringcuzilla_bench_similarity
-STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_100k_1k.txt" build_release/stringcuzilla_bench_similarity
+cmake --build build_release --config Release --target stringzilla_bench_similarity      # CPU
+cmake --build build_release --config Release --target stringcuzilla_bench_similarity    # GPU
+STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench_similarity
+STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench_similarity
+
+STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringcuzilla_bench_similarity
+STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringcuzilla_bench_similarity
 ```
 
 Each benchmark originates from an identically named single-source file in the `scripts/` directory.
@@ -375,6 +389,25 @@ cmake -D CMAKE_BUILD_TYPE=Release \
 cmake --build build_artifacts --config Release
 ```
 
+## Contributing in Parallel C++ and CUDA
+
+```sh
+cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug
+cmake --build build_debug --config Debug --target stringcuzilla_test_cpp20
+cmake --build build_debug --config Debug --target stringcuzilla_test_cu20
+```
+
+```sh
+cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -B build_release
+cmake --build build_release --config Release --target stringcuzilla_test_cpp20
+cmake --build build_release --config Release --target stringcuzilla_test_cu20
+```
+
+```sh
+cuda-gdb ./build_debug/stringcuzilla_test_cu20
+cuda-memcheck ./build_debug/stringcuzilla_test_cu20
+```
+
 ## Contributing in Python
 
 Python bindings are implemented using pure CPython, so you wouldn't need to install SWIG, PyBind11, or any other third-party library.
@@ -438,8 +471,8 @@ For high-performance low-latency benchmarking, stick to C/C++ native benchmarks,
 For benchmarking, the following scripts are provided.
 
 ```sh
-python scripts/bench_search.py --haystack_path "your file" --needle "your pattern" # real data
-python scripts/bench_search.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce" # synthetic data
+python scripts/bench_find.py --haystack_path "your file" --needle "your pattern" # real data
+python scripts/bench_find.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce" # synthetic data
 python scripts/similarity_bench.py --text_path "your file" # edit distance computations
 ```
 
