@@ -165,8 +165,11 @@ struct span {
     constexpr value_type &back() const noexcept { return data_[size_ - 1]; }
     constexpr bool empty() const noexcept { return size_ == 0; }
 
-    operator span<value_type const>() const noexcept { return span<value_type const>(data_, size_); }
-
+    template <typename same_value_type_ = value_type,
+              typename = std::enable_if_t<!std::is_const<same_value_type_>::value>>
+    constexpr operator span<std::add_const_t<same_value_type_>>() const noexcept {
+        return {data_, size_};
+    }
     template <typename other_value_type_>
     constexpr span<other_value_type_> cast() const noexcept {
         return span<other_value_type_>(reinterpret_cast<other_value_type_ *>(data_),
@@ -691,15 +694,13 @@ class safe_vector {
         return *this;
     }
 
-    template <typename other_allocator_type_ = allocator_type>
-    status_t try_assign(safe_vector<value_type, other_allocator_type_> const &other) noexcept {
+    status_t try_assign(span<value_type const> const other) noexcept {
         reset();
 
-        if constexpr (allocator_traits::propagate_on_container_copy_assignment::value) alloc_ = other.alloc_;
-        if (other.size_ == 0) return status_t::success_k; // Nothing to do :)
+        if (other.size() == 0) return status_t::success_k; // Nothing to do :)
 
         // Allocate exact needed capacity
-        size_type new_cap = other.size_;
+        size_type new_cap = other.size();
         allocated_type *raw = allocator_traits::allocate(alloc_, new_cap);
         if (!raw) return status_t::bad_alloc_k;
         data_ = reinterpret_cast<value_type *>(raw);
@@ -707,11 +708,17 @@ class safe_vector {
 
         // Copy‐construct each element
         if constexpr (!std::is_trivially_constructible<value_type>::value)
-            for (size_type i = 0; i < other.size_; ++i) new (data_ + i) value_type(other.data_[i]);
+            for (size_type i = 0; i < other.size(); ++i) new (data_ + i) value_type(other[i]);
         else
-            for (size_type i = 0; i < other.size_; ++i) data_[i] = other.data_[i];
-        size_ = other.size_;
+            for (size_type i = 0; i < other.size(); ++i) data_[i] = other[i];
+        size_ = other.size();
         return status_t::success_k;
+    }
+
+    template <typename other_allocator_type_ = allocator_type>
+    status_t try_assign(safe_vector<value_type, other_allocator_type_> const &other) noexcept {
+        if constexpr (allocator_traits::propagate_on_container_copy_assignment::value) alloc_ = other.alloc_;
+        return try_assign(span<value_type>(other.data(), other.size()));
     }
 
     status_t try_reserve(size_type new_cap) noexcept {
