@@ -360,7 +360,7 @@ if (${STRINGZILLA_BUILD_BENCHMARK})
     define_launcher(stringzilla_bench_find_many scripts/bench_find_many.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     if (ENABLE_CUDA)
         define_gpu_launcher(stringcuzilla_bench_similarity scripts/bench_similarity.cu 20 "${STRINGZILLA_TARGET_ARCH}")
-        # define_gpu_launcher(stringcuzilla_bench_find_many scripts/bench_find_many.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringcuzilla_bench_find_many scripts/bench_find_many.cu 20 "${STRINGZILLA_TARGET_ARCH}")
     endif ()
 endif ()
 

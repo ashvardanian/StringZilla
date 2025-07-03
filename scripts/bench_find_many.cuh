@@ -59,16 +59,16 @@ struct find_many_callable {
         constexpr bool only_counts_k = std::is_same_v<results_t, counts_t>;
         if constexpr (only_counts_k)
             status = std::apply(
-                [&](auto &&...rest) {
-                    auto result = engine.try_count(haystacks, counts_span, rest...);
+                [&](auto &&...rest) mutable {
+                    volatile auto result = engine.try_count(haystacks, counts_span, rest...);
                     for (auto &count : counts_span) do_not_optimize(count);
                     return result;
                 },
                 extra_args);
         else
             status = std::apply(
-                [&](auto &&...rest) {
-                    auto result = engine.try_find(haystacks, counts_span, matches_span, rest...);
+                [&](auto &&...rest) mutable {
+                    volatile auto result = engine.try_find(haystacks, counts_span, matches_span, rest...);
                     for (auto &match : matches_span) do_not_optimize(match);
                     return result;
                 },
@@ -83,13 +83,13 @@ struct find_many_callable {
             bytes_passed += haystacks[i].size();
             character_comparisons += haystacks[i].size() * needle_characters;
         }
-        call_result_t call_result;
+        volatile call_result_t call_result;
         call_result.bytes_passed = bytes_passed;
         call_result.operations = character_comparisons;
         call_result.inputs_processed = haystacks.size();
         call_result.check_value = only_counts_k ? reinterpret_cast<check_value_t>(&results_counts_per_haystack)
                                                 : reinterpret_cast<check_value_t>(&results_matches_per_haystack);
-        return call_result;
+        return (call_result_t const &)call_result;
     }
 };
 
@@ -193,6 +193,28 @@ void bench_find_many(environment_t const &env) {
 
         scramble_accelerated_results(counts_accelerated);
         scramble_accelerated_results(matches_accelerated);
+
+        // CUDA-accelerated search
+#if SZ_USE_CUDA
+        bench_nullary( //
+            env, "count_many_cuda:"s + shape_suffix, call_count_baseline,
+            find_many_callable<find_many_u32_cuda_t, counts_t, cuda_executor_t, gpu_specs_t>( //
+                env, counts_accelerated, matches_accelerated, dict, {}, {}, specs),
+            callable_no_op_t {},  // preprocessing
+            counts_equality_t {}) // equality check
+            .log(count_baseline);
+
+        bench_nullary( //
+            env, "find_many_cuda:"s + shape_suffix, call_find_baseline,
+            find_many_callable<find_many_u32_cuda_t, matches_t, cuda_executor_t, gpu_specs_t>( //
+                env, counts_accelerated, matches_accelerated, dict, {}, {}, specs),
+            callable_no_op_t {},   // preprocessing
+            matches_equality_t {}) // equality check
+            .log(find_baseline);
+
+        scramble_accelerated_results(counts_accelerated);
+        scramble_accelerated_results(matches_accelerated);
+#endif
     }
 }
 

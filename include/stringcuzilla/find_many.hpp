@@ -632,6 +632,11 @@ struct find_many {
 
 #pragma region - Parallel Backend
 
+struct _count_short_needle_matches_in_one_part_t {
+    size_t total = 0;
+    size_t prefix = 0;
+};
+
 /**
  *  @brief  Aho-Corasick-based @b multi-threaded multi-pattern exact substring search with.
  *  @note   Construction of the FSM is not parallelized, as it is not generally a bottleneck.
@@ -726,7 +731,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
             bool const longest_needle_fits_on_one_core = padded_max_needle_length * cores_total < haystack_length;
             if (longest_needle_fits_on_one_core)
                 executor.for_each_thread([&](size_t core_index) noexcept {
-                    count_short_needle_matches_in_one_part_t partial_result =
+                    _count_short_needle_matches_in_one_part_t partial_result =
                         count_short_needle_matches_in_one_part(haystack, core_index, cores_total, cache_line_width);
                     if (core_index != 0) partial_result.total -= partial_result.prefix;
                     count_across_cores.fetch_add(partial_result.total, std::memory_order_relaxed);
@@ -931,11 +936,6 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         return count_matches_non_overlapping + count_matches_overlapping;
     }
 
-    struct count_short_needle_matches_in_one_part_t {
-        size_t total = 0;
-        size_t prefix = 0;
-    };
-
     /**
      *  @brief  Helper method implementing the core logic of the parallel `try_count` and part of `try_find`.
      *
@@ -944,7 +944,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  match can only spill into 2 core regions, starting in one and ending in another.
      */
     template <typename char_type_>
-    count_short_needle_matches_in_one_part_t count_short_needle_matches_in_one_part(
+    _count_short_needle_matches_in_one_part_t count_short_needle_matches_in_one_part(
         span<char_type_ const> haystack, size_t core_index, size_t cores_total,
         size_t cache_line_width) const noexcept {
 
@@ -967,7 +967,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
 
         // Reimplement the serial `aho_corasick_dictionary::count` keeping track of the matches,
         // entirely fitting in the prefix
-        count_short_needle_matches_in_one_part_t result;
+        _count_short_needle_matches_in_one_part_t result;
         state_id_t current_state = 0;
         auto const outputs_counts = dict_.outputs_counts();
         auto const transitions = dict_.transitions();
