@@ -160,7 +160,7 @@ struct aho_corasick_dictionary {
 
     /**
      *  @brief  Failure links for each state, exactly `count_states_` in effective size, potentially larger capacity.
-     *          The failure links aren't very needed after the FSM construction, if we stick to a dense layout.
+     *          The failure links aren't needed after the FSM construction, if we stick to a dense layout.
      */
     safe_vector<state_id_t, state_id_allocator_t> failures_;
 
@@ -236,19 +236,19 @@ struct aho_corasick_dictionary {
         safe_vector<size_t, size_allocator_t> needles_lengths(alloc);
 
         status_t s;
-        if ((s = transitions.try_reserve(other.transitions_.size())) != status_t::success_k) return s;
-        if ((s = outputs.try_reserve(other.outputs_.size())) != status_t::success_k) return s;
-        if ((s = failures.try_reserve(other.failures_.size())) != status_t::success_k) return s;
-        if ((s = outputs_counts.try_reserve(other.outputs_counts_.size())) != status_t::success_k) return s;
-        if ((s = outputs_offsets.try_reserve(other.outputs_offsets_.size())) != status_t::success_k) return s;
-        if ((s = needles_lengths.try_reserve(other.needles_lengths_.size())) != status_t::success_k) return s;
+        if ((s = transitions.try_reserve(other.transitions().size())) != status_t::success_k) return s;
+        if ((s = outputs.try_reserve(other.outputs().size())) != status_t::success_k) return s;
+        if ((s = failures.try_reserve(other.failures().size())) != status_t::success_k) return s;
+        if ((s = outputs_counts.try_reserve(other.outputs_counts().size())) != status_t::success_k) return s;
+        if ((s = outputs_offsets.try_reserve(other.outputs_offsets().size())) != status_t::success_k) return s;
+        if ((s = needles_lengths.try_reserve(other.needles_lengths().size())) != status_t::success_k) return s;
 
-        _sz_assert(transitions.try_assign(other.transitions_) == status_t::success_k);
-        _sz_assert(outputs.try_assign(other.outputs_) == status_t::success_k);
-        _sz_assert(failures.try_assign(other.failures_) == status_t::success_k);
-        _sz_assert(outputs_counts.try_assign(other.outputs_counts_) == status_t::success_k);
-        _sz_assert(outputs_offsets.try_assign(other.outputs_offsets_) == status_t::success_k);
-        _sz_assert(needles_lengths.try_assign(other.needles_lengths_) == status_t::success_k);
+        _sz_assert(transitions.try_assign(other.transitions()) == status_t::success_k);
+        _sz_assert(outputs.try_assign(other.outputs()) == status_t::success_k);
+        _sz_assert(failures.try_assign(other.failures()) == status_t::success_k);
+        _sz_assert(outputs_counts.try_assign(other.outputs_counts()) == status_t::success_k);
+        _sz_assert(outputs_offsets.try_assign(other.outputs_offsets()) == status_t::success_k);
+        _sz_assert(needles_lengths.try_assign(other.needles_lengths()) == status_t::success_k);
 
         alloc_ = std::move(alloc);
         transitions_ = std::move(transitions);
@@ -257,7 +257,7 @@ struct aho_corasick_dictionary {
         outputs_counts_ = std::move(outputs_counts);
         outputs_offsets_ = std::move(outputs_offsets);
         needles_lengths_ = std::move(needles_lengths);
-        count_states_ = other.count_states_;
+        count_states_ = other.count_states();
         return status_t::success_k;
     }
 
@@ -301,6 +301,8 @@ struct aho_corasick_dictionary {
     span<state_id_t const> outputs() const noexcept { return outputs_; }
     span<state_id_t const> failures() const noexcept { return failures_; }
     span<state_id_t const> outputs_counts() const noexcept { return outputs_counts_; }
+    span<state_id_t const> outputs_offsets() const noexcept { return outputs_offsets_; }
+    span<size_t const> needles_lengths() const noexcept { return needles_lengths_; }
 
     /**
      *  @brief Returns the metadata for the Aho-Corasick dictionary.
