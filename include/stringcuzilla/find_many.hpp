@@ -130,14 +130,14 @@ struct aho_corasick_dictionary {
     using state_id_t = state_id_type_;
     using allocator_t = allocator_type_;
     using match_t = find_many_match_t;
+    static_assert(std::is_unsigned_v<state_id_t>, "State ID should be unsigned");
 
-  private:
     static constexpr state_id_t alphabet_size_k = 256;
     static constexpr state_id_t invalid_state_k = std::numeric_limits<state_id_t>::max();
     static constexpr size_t invalid_length_k = std::numeric_limits<size_t>::max();
     using state_transitions_t = safe_array<state_id_t, alphabet_size_k>;
-    static_assert(std::is_unsigned_v<state_id_t>, "State ID should be unsigned");
 
+  private:
     using size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
     using state_id_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<state_id_t>;
     using state_transitions_allocator_t =

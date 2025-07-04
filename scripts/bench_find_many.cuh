@@ -45,8 +45,9 @@ struct find_many_callable {
 
     call_result_t operator()() noexcept(false) {
 
-        span<char const> const dataset_view = {env.dataset.data(), env.dataset.size()};
-        span<span<char const> const> haystacks = {&dataset_view, 1};
+        using chars_view_t = span<char const>;
+        chars_view_t const dataset_view = {env.dataset.data(), env.dataset.size()};
+        span<chars_view_t const> haystacks = {&dataset_view, 1};
 
         // Without `volatile`, the serial logic keeps being optimized out!
         volatile sz::status_t status = engine.try_build(dictionary);
@@ -60,7 +61,7 @@ struct find_many_callable {
         if constexpr (only_counts_k)
             status = std::apply(
                 [&](auto &&...rest) mutable {
-                    volatile auto result = engine.try_count(haystacks, counts_span, rest...);
+                    auto result = engine.try_count(haystacks, counts_span, rest...);
                     for (auto &count : counts_span) do_not_optimize(count);
                     return result;
                 },
@@ -68,7 +69,7 @@ struct find_many_callable {
         else
             status = std::apply(
                 [&](auto &&...rest) mutable {
-                    volatile auto result = engine.try_find(haystacks, counts_span, matches_span, rest...);
+                    auto result = engine.try_find(haystacks, counts_span, matches_span, rest...);
                     for (auto &match : matches_span) do_not_optimize(match);
                     return result;
                 },

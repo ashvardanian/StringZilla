@@ -61,11 +61,11 @@ __forceinline__ __device__ scalar_type_ _reduce_in_warp(scalar_type_ x) noexcept
  *
  *  @tparam small_size_type_ Helps us avoid 64-bit arithmetic in favor of smaller 16- or 32-bit offsets/lengths.
  */
-template <typename small_size_type_, typename char_type_, typename state_id_type_>
+template <typename small_size_type_, typename char_type_, typename state_id_type_, state_id_type_ alphabet_size_ = 256>
 __device__ _count_short_needle_matches_in_one_part_t _count_short_needle_matches_in_one_part_per_warp_thread( //
     char_type_ const *haystack_begin, size_t const haystack_length,                                           //
     size_t const count_states,                                                                                //
-    state_id_type_ const *transitions,                                                                        //
+    safe_array<state_id_type_, alphabet_size_> const *transitions,                                            //
     state_id_type_ const *outputs_counts,                                                                     //
     size_t const max_needle_length) noexcept {
 
@@ -96,7 +96,7 @@ __device__ _count_short_needle_matches_in_one_part_t _count_short_needle_matches
         current_state = transitions[current_state][*optimal_start];
         small_size_t const outputs_count = static_cast<small_size_t>(outputs_counts[current_state]);
         result_total += outputs_count;
-        result_prefix += non_zero_if(outputs_count, optimal_start < prefix_end);
+        result_prefix += non_zero_if<small_size_t>(outputs_count, optimal_start < prefix_end);
     }
 
     // Re-package into larger output types:
@@ -114,11 +114,11 @@ __device__ _count_short_needle_matches_in_one_part_t _count_short_needle_matches
  *  There are countless divergent branches in this solution, that depending on the vocabulary can result
  *  in extremely low performance.
  */
-template <typename small_size_type_, typename char_type_, typename state_id_type_>
+template <typename small_size_type_, typename char_type_, typename state_id_type_, state_id_type_ alphabet_size_>
 __device__ small_size_type_ _count_needle_matches_in_one_part_per_warp_thread( //
     char_type_ const *haystack_begin, size_t const haystack_length,            //
     size_t const count_states,                                                 //
-    state_id_type_ const *transitions,                                         //
+    safe_array<state_id_type_, alphabet_size_> const *transitions,             //
     state_id_type_ const *outputs,                                             //
     state_id_type_ const *outputs_counts,                                      //
     state_id_type_ const *outputs_offsets,                                     //
@@ -174,13 +174,14 @@ __device__ small_size_type_ _count_needle_matches_in_one_part_per_warp_thread( /
  */
 template < //
     typename state_id_type_,
-    typename haystacks_strings_type_,           //
+    typename haystacks_strings_type_, //
+    state_id_type_ alphabet_size_ = 256,
     sz_capability_t capability_ = sz_cap_cuda_k //
     >
 __global__ void _count_matches_with_haystack_per_warp(              //
     haystacks_strings_type_ haystacks, size_t *counts_per_haystack, //
     size_t const count_states,                                      //
-    state_id_type_ const *transitions,                              //
+    safe_array<state_id_type_, alphabet_size_> const *transitions,  //
     state_id_type_ const *outputs,                                  //
     state_id_type_ const *outputs_counts,                           //
     state_id_type_ const *outputs_offsets,                          //
@@ -216,19 +217,21 @@ __global__ void _count_matches_with_haystack_per_warp(              //
         small_size_t results_per_thread = 0;
         if (longest_needle_fits_on_one_thread) {
             _count_short_needle_matches_in_one_part_t partial_result =
-                _count_short_needle_matches_in_one_part_per_warp_thread<small_size_t, char_t, state_id_t>( //
-                    haystack_begin, haystack_length,                                                       //
-                    count_states, transitions,                                                             //
+                _count_short_needle_matches_in_one_part_per_warp_thread<small_size_t, char_t, state_id_t,
+                                                                        alphabet_size_>( //
+                    haystack_begin, haystack_length,                                     //
+                    count_states, transitions,                                           //
                     outputs_counts, max_length_among_needles);
             results_per_thread =
                 partial_result.total - non_zero_if<small_size_t>(partial_result.prefix, warp_thread_index != 0);
         }
         else {
-            results_per_thread = _count_matches_in_one_part_per_warp_thread<small_size_t, char_t, state_id_t>( //
-                haystack_begin, haystack_length,                                                               //
-                count_states, transitions,                                                                     //
-                outputs, outputs_counts, outputs_offsets,                                                      //
-                needles_lengths, max_length_among_needles);
+            results_per_thread =
+                _count_needle_matches_in_one_part_per_warp_thread<small_size_t, char_t, state_id_t, alphabet_size_>( //
+                    haystack_begin, haystack_length,                                                                 //
+                    count_states, transitions,                                                                       //
+                    outputs, outputs_counts, outputs_offsets,                                                        //
+                    needles_lengths, max_length_among_needles);
         }
 
         small_size_t results_across_warp = _reduce_in_warp(results_per_thread);
@@ -277,6 +280,9 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
     using state_id_t = typename dictionary_t::state_id_t;
     using allocator_t = typename dictionary_t::allocator_t;
     using match_t = typename dictionary_t::match_t;
+    using state_transitions_t = typename dictionary_t::state_transitions_t;
+
+    static constexpr state_id_t alphabet_size_k = dictionary_t::alphabet_size_k;
 
     find_many(allocator_t alloc = allocator_t()) noexcept : dict_(alloc) {}
     void reset() noexcept { dict_.reset(); }
@@ -315,6 +321,10 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
 
         _sz_assert(counts.size() == haystacks.size());
 
+        using haystacks_t = typename std::decay_t<haystacks_type_>;
+        static_assert(std::is_nothrow_copy_constructible_v<haystacks_t>,
+                      "Haystack type must be nothrow copy constructible");
+
         // Preallocate the events for GPU timing.
         cudaEvent_t start_event, stop_event;
         cudaEventCreate(&start_event, cudaEventBlockingSync);
@@ -325,7 +335,8 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
         if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
 
         // Allocate GPU memory buffer using safe_vector
-        safe_vector<size_t, allocator_type_> counts_buffer(dict_.allocator());
+        using size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
+        safe_vector<size_t, size_allocator_t> counts_buffer(dict_.allocator());
         if (counts_buffer.try_resize(counts.size()) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaErrorMemoryAllocation};
 
@@ -334,11 +345,12 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
         uint const blocks_per_grid = specs.streaming_multiprocessors * 2; // 2 blocks per SM
 
         // Launch the kernel
-        auto kernel = &_count_matches_with_haystack_per_warp<state_id_t, haystacks_type_, sz_cap_cuda_k>;
+        auto kernel = &_count_matches_with_haystack_per_warp<state_id_t, haystacks_t, alphabet_size_k, sz_cap_cuda_k>;
         kernel<<<blocks_per_grid, threads_per_block, 0, executor.stream>>>(
-            haystacks, counts_buffer.data(), dict_.count_states(), dict_.transitions_data(), dict_.outputs_data(),
-            dict_.outputs_counts_data(), dict_.outputs_offsets_data(), dict_.needles_lengths_data(),
-            dict_.max_needle_length());
+            haystacks, counts_buffer.data(),                                                       //
+            dict_.count_states(), dict_.transitions().data(),                                      //
+            dict_.outputs().data(), dict_.outputs_counts().data(), dict_.outputs_offsets().data(), //
+            dict_.needles_lengths().data(), dict_.max_needle_length());
 
         // Check for kernel launch errors
         cudaError_t launch_error = cudaGetLastError();
@@ -376,7 +388,7 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
      *  @note The @p matches reference objects should be assignable from @b `match_t`.
      */
     template <typename haystacks_type_, typename output_matches_type_>
-    status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches, size_t &matches_count,
+    status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts, output_matches_type_ &&matches,
                       cuda_executor_t executor = {}, gpu_specs_t const &specs = {}) const noexcept {
         size_t count_found = 0, count_allowed = matches.size();
         for (auto it = haystacks.begin(); it != haystacks.end() && count_found != count_allowed; ++it)
@@ -386,7 +398,6 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
                 count_found++;
                 return count_found < count_allowed;
             });
-        matches_count = count_found;
         return status_t::success_k;
     }
 
