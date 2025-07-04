@@ -88,7 +88,7 @@ jobs:
       - name: Test on Real World Data
         run: |
           build_artifacts/stringzilla_bench_memory ${DATASET_PATH}     # for string copies and fills
-          build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
+          build_artifacts/stringzilla_bench_find ${DATASET_PATH}     # for substring search
           build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
           build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
           build_artifacts/stringzilla_bench_sequence ${DATASET_PATH}   # for sorting arrays of strings
@@ -172,7 +172,7 @@ jobs:
         run: build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
+          build_artifacts/stringzilla_bench_find ${DATASET_PATH}     # for substring search
           build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
           build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
           build_artifacts/stringzilla_bench_sequence ${DATASET_PATH}       # for sorting arrays of strings
@@ -304,7 +304,7 @@ jobs:
         run: build_artifacts/stringzilla_test_cpp17
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_search ${DATASET_PATH}     # for substring search
+          build_artifacts/stringzilla_bench_find ${DATASET_PATH}     # for substring search
           build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
           build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
           build_artifacts/stringzilla_bench_sequence ${DATASET_PATH}       # for sorting arrays of strings
@@ -377,7 +377,7 @@ jobs:
         run: .\build_artifacts\stringzilla_test_cpp20.exe
       - name: Test on Real World Data
         run: |
-          .\build_artifacts\stringzilla_bench_search.exe ${DATASET_PATH}     # for substring search
+          .\build_artifacts\stringzilla_bench_find.exe ${DATASET_PATH}     # for substring search
           .\build_artifacts\stringzilla_bench_token.exe ${DATASET_PATH}      # for hashing, equality comparisons, etc.
           .\build_artifacts\stringzilla_bench_similarity.exe ${DATASET_PATH} # for edit distances and alignment scores
           .\build_artifacts\stringzilla_bench_sequence.exe ${DATASET_PATH}       # for sorting arrays of strings
