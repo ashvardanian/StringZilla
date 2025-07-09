@@ -882,6 +882,16 @@ constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor
 }
 
 /**
+ *  @brief Equivalent to `(condition ? value : 0)`, but avoids branching.
+ */
+template <typename value_type_>
+constexpr value_type_ non_zero_if(value_type_ value, value_type_ condition) noexcept {
+    static_assert(std::is_unsigned<value_type_>::value, "Value type must be unsigned integer");
+    _sz_assert((condition == 0 || condition == 1) && "Condition must be either 0 or 1 unsigned integer");
+    return value * condition;
+}
+
+/**
  *  @brief  Helper structure for dividing a range of data into three parts: head, body, and tail,
  *          generally used to minimize misaligned (split) stores and operate on aligned pages.
  */
