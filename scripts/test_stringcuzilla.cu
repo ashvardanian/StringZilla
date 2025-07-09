@@ -38,9 +38,9 @@ int main(int argc, char const **argv) {
     if (auto code = sz::scripts::log_environment(); code != 0) return code;
 
     try {
+        sz::scripts::test_find_many_equivalence();
         sz::scripts::test_similarity_scores_equivalence();
         sz::scripts::test_similarity_scores_memory_usage();
-        sz::scripts::test_find_many_equivalence();
     }
     catch (std::exception const &e) {
         std::fprintf(stderr, "Failed with: %s\n", e.what());
