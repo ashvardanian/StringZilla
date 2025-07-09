@@ -927,17 +927,19 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
         if (optimal_slice.begin() + max_needle_length >= optimal_slice.end()) {
             // Our needles are longer than a slice for the core
             overlapping_start = optimal_slice.begin();
-            overlapping_end = std::min(optimal_slice.begin() + max_needle_length, haystack.end());
+            overlapping_end = std::min(optimal_slice.end() + max_needle_length, haystack.end());
         }
         else {
-            overlapping_start = std::max(optimal_slice.end() - max_needle_length + 1, haystack.begin());
+            overlapping_start = std::max(optimal_slice.end() - max_needle_length + 1, optimal_slice.begin());
             overlapping_end = std::min(optimal_slice.end() + max_needle_length - 1, haystack.end());
         }
 
         // Count the matches that start in one core's slice and end in another
         size_t count_matches_overlapping = 0;
         dict_.find({overlapping_start, overlapping_end}, [&](match_t match) noexcept {
-            bool belongs_to_this_core = match.needle.begin() < optimal_slice.end();
+            bool belongs_to_this_core =                       //
+                match.needle.begin() < optimal_slice.end() && // ? Starts within the core's slice
+                match.needle.end() > optimal_slice.end();     // ? Ends in another core's slice
             count_matches_overlapping += belongs_to_this_core;
             return true;
         });
