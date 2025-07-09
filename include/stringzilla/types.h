@@ -151,7 +151,7 @@
 #define SZ_PUBLIC inline static
 #define SZ_INTERNAL inline static
 #else
-#define SZ_DYNAMIC __attribute__((visibility("default")))
+#define SZ_DYNAMIC extern __attribute__((visibility("default")))
 #define SZ_EXTERNAL extern
 #define SZ_PUBLIC __attribute__((unused)) inline static
 #define SZ_INTERNAL __attribute__((always_inline)) inline static
