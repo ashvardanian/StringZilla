@@ -35,8 +35,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_bench_find
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzilla_bench_find
+ *  cmake --build build_release --config Release --target stringzilla_bench_find_cpp20
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzilla_bench_find_cpp20
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
@@ -46,7 +46,7 @@
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
  *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
- *  build_release/stringzilla_bench_find
+ *  build_release/stringzilla_bench_find_cpp20
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.

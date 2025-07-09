@@ -1,14 +1,14 @@
 /**
- *  @brief  StringZilla is a collection of advanced string algorithms, designed to be used in Big Data applications.
+ *  @brief  StringParaZilla is a collection of advanced string algorithms, designed to be used in Big Data applications.
  *          It is generally faster than LibC, and has a broader & cleaner interface for safer @b length-bounded strings.
  *          On modern CPUs it uses AVX2, AVX-512, NEON, SVE, & SVE2 @b SIMD instructions & provides SWAR for older CPUs.
  *          On @b CUDA-capable GPUs it also provides C++ kernels for bulk processing.
  *
- *  @file   stringcuzilla.h
+ *  @file   stringparazilla.h
  *  @author Ash Vardanian
  */
-#ifndef STRINGCUZILLA_H_
-#define STRINGCUZILLA_H_
+#ifndef STRINGPARAZILLA_H_
+#define STRINGPARAZILLA_H_
 
 #include "stringzilla.h"
 
@@ -91,4 +91,4 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_u64tape(                       /
 }
 #endif // __cplusplus
 
-#endif // STRINGCUZILLA_H_
+#endif // STRINGPARAZILLA_H_

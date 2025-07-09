@@ -15,7 +15,7 @@
 
 #include "stringzilla/types.hpp"
 #if SZ_USE_CUDA
-#include "stringcuzilla/types.cuh"
+#include "stringparazilla/types.cuh"
 #endif
 
 namespace ashvardanian {

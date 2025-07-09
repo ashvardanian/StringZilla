@@ -34,19 +34,19 @@
  *  - `levenshtein_distances`: {CUDA and Kepler} for any chars and lengths, {Hopper} for 8-bit and 16-bit lengths.
  *  - `needleman_wunsch_score`.
  */
-#ifndef STRINGCUZILLA_SIMILARITY_CUH_
-#define STRINGCUZILLA_SIMILARITY_CUH_
+#ifndef STRINGPARAZILLA_SIMILARITY_CUH_
+#define STRINGPARAZILLA_SIMILARITY_CUH_
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda/pipeline>        // `cuda::pipeline`
 #include <cooperative_groups.h> // `cooperative_groups::this_grid()`
 
-#include "stringcuzilla/types.cuh"
-#include "stringcuzilla/similarity.hpp"
+#include "stringparazilla/types.cuh"
+#include "stringparazilla/similarity.hpp"
 
 namespace ashvardanian {
-namespace stringzilla {
+namespace stringparazilla {
 
 #pragma region - Common Aliases
 
@@ -2973,7 +2973,7 @@ struct smith_waterman_scores<char, error_costs_256x256_t, gap_costs_type_, alloc
 
 #pragma endregion
 
-} // namespace stringzilla
+} // namespace stringparazilla
 } // namespace ashvardanian
 
-#endif // STRINGCUZILLA_SIMILARITY_CUH_
+#endif // STRINGPARAZILLA_SIMILARITY_CUH_

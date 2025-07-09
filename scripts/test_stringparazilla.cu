@@ -28,7 +28,7 @@
 #endif
 #define SZ_DEBUG 1 // Enforce aggressive logging for this unit.
 
-#include "test_stringcuzilla.cuh"
+#include "test_stringparazilla.cuh"
 
 namespace sz = ashvardanian::stringzilla;
 

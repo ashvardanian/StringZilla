@@ -87,12 +87,21 @@ jobs:
         run: build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_memory ${DATASET_PATH}     # for string copies and fills
-          build_artifacts/stringzilla_bench_find ${DATASET_PATH}     # for substring search
-          build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
-          build_artifacts/stringzilla_bench_sequence ${DATASET_PATH}   # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+          build_artifacts/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
+          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}       # for substring search
+          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}      # for hashing, equality comparisons, etc.
+          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}   # for sorting arrays of strings
+          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH}  # for STL containers with string keys
+        env:
+          DATASET_PATH: ./README.md
+        # Don't overload GitHub with our benchmarks.
+        # The results in such an unstable environment will be meaningless anyway.
+        if: 0
+
+      - name: Test Parallel Algorithms on Real World Data
+        run: |
+          build_artifacts/stringparazilla_bench_similarity_cpp20 ${DATASET_PATH} # for edit distances and alignment scores
+          build_artifacts/stringparazilla_bench_find_many_cpp20 ${DATASET_PATH}  # for multi-needle search in many strings
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -172,11 +181,10 @@ jobs:
         run: build_artifacts/stringzilla_test_cpp20
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_find ${DATASET_PATH}     # for substring search
-          build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
-          build_artifacts/stringzilla_bench_sequence ${DATASET_PATH}       # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
+          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
+          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -304,11 +312,10 @@ jobs:
         run: build_artifacts/stringzilla_test_cpp17
       - name: Test on Real World Data
         run: |
-          build_artifacts/stringzilla_bench_find ${DATASET_PATH}     # for substring search
-          build_artifacts/stringzilla_bench_token ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          build_artifacts/stringzilla_bench_similarity ${DATASET_PATH} # for edit distances and alignment scores
-          build_artifacts/stringzilla_bench_sequence ${DATASET_PATH}       # for sorting arrays of strings
-          build_artifacts/stringzilla_bench_container ${DATASET_PATH}  # for STL containers with string keys
+          build_artifacts/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
+          build_artifacts/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+          build_artifacts/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
+          build_artifacts/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -377,11 +384,10 @@ jobs:
         run: .\build_artifacts\stringzilla_test_cpp20.exe
       - name: Test on Real World Data
         run: |
-          .\build_artifacts\stringzilla_bench_find.exe ${DATASET_PATH}     # for substring search
-          .\build_artifacts\stringzilla_bench_token.exe ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          .\build_artifacts\stringzilla_bench_similarity.exe ${DATASET_PATH} # for edit distances and alignment scores
-          .\build_artifacts\stringzilla_bench_sequence.exe ${DATASET_PATH}       # for sorting arrays of strings
-          .\build_artifacts\stringzilla_bench_container.exe ${DATASET_PATH}  # for STL containers with string keys
+          .\build_artifacts\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
+          .\build_artifacts\stringzilla_bench_token_cpp20.exe ${DATASET_PATH}     # for hashing, equality comparisons, etc.
+          .\build_artifacts\stringzilla_bench_sequence_cpp20.exe ${DATASET_PATH}  # for sorting arrays of strings
+          .\build_artifacts\stringzilla_bench_container_cpp20.exe ${DATASET_PATH} # for STL containers with string keys
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.

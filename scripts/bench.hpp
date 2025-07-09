@@ -51,7 +51,7 @@
 #include "stringzilla/stringzilla.hpp"
 
 #if SZ_USE_CUDA
-#include "stringcuzilla/types.cuh" // `unified_alloc`
+#include "stringparazilla/types.cuh" // `unified_alloc`
 #endif
 
 #include "test_stringzilla.hpp" // `read_file`

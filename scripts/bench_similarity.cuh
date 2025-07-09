@@ -6,17 +6,19 @@
 
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
-#include <stringcuzilla/similarity.hpp> // C++ templates for string similarity measures
+#include <stringparazilla/similarity.hpp> // C++ templates for string similarity measures
 
 #if SZ_USE_CUDA
-#include <stringcuzilla/similarity.cuh> // Parallel string processing in CUDA
+#include <stringparazilla/similarity.cuh> // Parallel string processing in CUDA
 #endif
 
 #include "bench.hpp"
 
 namespace ashvardanian {
-namespace stringzilla {
+namespace stringparazilla {
 namespace scripts {
+
+using namespace ashvardanian::stringzilla::scripts;
 
 using similarities_t = unified_vector<sz_ssize_t>;
 
@@ -390,5 +392,5 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 #pragma endregion
 
 } // namespace scripts
-} // namespace stringzilla
+} // namespace stringparazilla
 } // namespace ashvardanian

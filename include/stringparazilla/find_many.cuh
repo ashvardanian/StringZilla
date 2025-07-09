@@ -20,18 +20,18 @@
  *
  *
  */
-#ifndef STRINGCUZILLA_FIND_MANY_CUH_
-#define STRINGCUZILLA_FIND_MANY_CUH_
+#ifndef STRINGPARAZILLA_FIND_MANY_CUH_
+#define STRINGPARAZILLA_FIND_MANY_CUH_
 
-#include "stringcuzilla/types.cuh"
-#include "stringcuzilla/find_many.hpp"
+#include "stringparazilla/types.cuh"
+#include "stringparazilla/find_many.hpp"
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda/atomic>
 
 namespace ashvardanian {
-namespace stringzilla {
+namespace stringparazilla {
 
 #pragma region - General Purpose CUDA Backend
 
@@ -483,7 +483,7 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
 
 using find_many_u32_cuda_t = find_many<u32_t, unified_alloc<char>, sz_cap_cuda_k>;
 
-} // namespace stringzilla
+} // namespace stringparazilla
 } // namespace ashvardanian
 
-#endif // STRINGCUZILLA_FIND_MANY_CUH_
+#endif // STRINGPARAZILLA_FIND_MANY_CUH_

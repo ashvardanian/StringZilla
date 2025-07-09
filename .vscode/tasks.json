@@ -21,7 +21,7 @@
         },
         {
             "label": "Build Test: Debug Parallel C++",
-            "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringcuzilla_test_cpp20",
+            "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringparazilla_test_cpp20",
             "args": [],
             "type": "shell",
             "osx": {
@@ -39,7 +39,7 @@
         },
         {
             "label": "Build Test: Debug CUDA",
-            "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringcuzilla_test_cu20",
+            "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringparazilla_test_cu20",
             "args": [],
             "type": "shell",
         },

@@ -174,20 +174,21 @@ For benchmarks, you can use the following commands:
 
 ```bash
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release  # Produces the following targets:
-build_release/stringzilla_bench_memory        # - for string copies and fills
-build_release/stringzilla_bench_find        # - for substring search
-build_release/stringzilla_bench_token         # - for hashing, equality comparisons, etc.
-build_release/stringzilla_bench_sequence      # - for sorting arrays of strings
-build_release/stringzilla_bench_container     # - for STL containers with string keys
+cmake --build build_release --config Release    # Produces the following targets:
+build_release/stringzilla_bench_memory_cpp20    # - for string copies and fills
+build_release/stringzilla_bench_find_cpp20      # - for substring search
+build_release/stringzilla_bench_token_cpp20     # - for hashing, equality comparisons, etc.
+build_release/stringzilla_bench_sequence_cpp20  # - for sorting arrays of strings
+build_release/stringzilla_bench_container_cpp20 # - for STL containers with string keys
 ```
 
 There are also parallel algorithms that need a very different benchmarking setup:
 
 ```sh
-build_release/stringzilla_bench_find_many     # - for parallel multi-pattern search on CPU
-build_release/stringzilla_bench_similarity    # - for parallel edit distances and alignment scores on CPU
-build_release/stringcuzilla_bench_similarity  # - for parallel edit distances and alignment scores on GPU
+build_release/stringparazilla_bench_find_many_cpp20  # - for parallel multi-pattern search on CPU
+build_release/stringparazilla_bench_find_many_cu20   # - for parallel multi-pattern search on GPU
+build_release/stringparazilla_bench_similarity_cpp20 # - for parallel edit distances and alignment scores on CPU
+build_release/stringparazilla_bench_similarity_cu20  # - for parallel edit distances and alignment scores on GPU
 ```
 
 All of them support customization via environment variables.
@@ -195,13 +196,13 @@ Let's say you want to benchmark large-batch DNA similarity scoring kernels:
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release --target stringzilla_bench_similarity      # CPU
-cmake --build build_release --config Release --target stringcuzilla_bench_similarity    # GPU
-STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench_similarity
-STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench_similarity
+cmake --build build_release --config Release --target stringparazilla_bench_similarity_cpp20    # CPU
+cmake --build build_release --config Release --target stringparazilla_bench_similarity_cu20     # GPU
+STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringparazilla_bench_similarity_cpp20
+STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringparazilla_bench_similarity_cu20
 
-STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringcuzilla_bench_similarity
-STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringcuzilla_bench_similarity
+STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringparazilla_bench_similarity_cu20
+STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringparazilla_bench_similarity_cu20
 ```
 
 Each benchmark originates from an identically named single-source file in the `scripts/` directory.
@@ -248,7 +249,7 @@ cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_BENCHMARK=1 -D STRINGZILL
 ### Profiling
 
 To simplify tracing and profiling, build with symbols using the `RelWithDebInfo` configuration.
-Here is an example for profiling one target - `stringzilla_bench_token`.
+Here is an example for profiling one target - `stringzilla_bench_token_cpp20`.
 
 ```bash
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 \
@@ -256,14 +257,14 @@ cmake -D STRINGZILLA_BUILD_BENCHMARK=1 \
     -D STRINGZILLA_BUILD_SHARED=1 \
     -D CMAKE_BUILD_TYPE=RelWithDebInfo \
     -B build_profile
-cmake --build build_profile --config Release --target stringzilla_bench_token
+cmake --build build_profile --config Release --target stringzilla_bench_token_cpp20
 
 # Check that the debugging symbols are there with your favorite tool
-readelf --sections build_profile/stringzilla_bench_token | grep debug
-objdump -h build_profile/stringzilla_bench_token | grep debug
+readelf --sections build_profile/stringzilla_bench_token_cpp20 | grep debug
+objdump -h build_profile/stringzilla_bench_token_cpp20 | grep debug
 
 # Profile
-sudo perf record -g build_profile/stringzilla_bench_token ./leipzig1M.txt
+sudo perf record -g build_profile/stringzilla_bench_token_cpp20 ./leipzig1M.txt
 sudo perf report
 ```
 
@@ -393,19 +394,19 @@ cmake --build build_artifacts --config Release
 
 ```sh
 cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build build_debug --config Debug --target stringcuzilla_test_cpp20
-cmake --build build_debug --config Debug --target stringcuzilla_test_cu20
+cmake --build build_debug --config Debug --target stringparazilla_test_cpp20
+cmake --build build_debug --config Debug --target stringparazilla_test_cu20
 ```
 
 ```sh
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -B build_release
-cmake --build build_release --config Release --target stringcuzilla_test_cpp20
-cmake --build build_release --config Release --target stringcuzilla_test_cu20
+cmake --build build_release --config Release --target stringparazilla_test_cpp20
+cmake --build build_release --config Release --target stringparazilla_test_cu20
 ```
 
 ```sh
-cuda-gdb ./build_debug/stringcuzilla_test_cu20
-cuda-memcheck ./build_debug/stringcuzilla_test_cu20
+cuda-gdb ./build_debug/stringparazilla_test_cu20
+cuda-memcheck ./build_debug/stringparazilla_test_cu20
 ```
 
 ## Contributing in Python

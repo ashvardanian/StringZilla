@@ -21,14 +21,20 @@
 # * stringzilla_test_cpp20_neon: A test executable for ARM Neon.
 # * stringzilla_test_cpp20_sve: A test executable for ARM Scalable Vector Extension.
 #
-# Benchmarks:
+# Serial Benchmarks:
 #
-# * stringzilla_bench_find: A benchmark for substring search operations.
-# * stringzilla_bench_similarity: A benchmark for similarity operations.
-# * stringzilla_bench_sequence: A benchmark for string array-level operations.
-# * stringzilla_bench_token: A benchmark for comparators and hash functions.
-# * stringzilla_bench_container: A benchmark for STL containers powered by StringZilla.
-# * stringzilla_bench_memory: A benchmark for LibC-style low-level memory operations.
+# * stringzilla_bench_find_cpp20: A benchmark for substring search operations.
+# * stringzilla_bench_sequence_cpp20: A benchmark for string array-level operations.
+# * stringzilla_bench_token_cpp20: A benchmark for comparators and hash functions.
+# * stringzilla_bench_container_cpp20: A benchmark for STL containers powered by StringZilla.
+# * stringzilla_bench_memory_cpp20: A benchmark for LibC-style low-level memory operations.
+#
+# Parallel Benchmarks:
+#
+# * stringparazilla_bench_similarity_cpp20: A benchmark for similarity operations.
+# * stringparazilla_bench_similarity_cu20: A benchmark for similarity operations on GPU.
+# * stringparazilla_bench_find_many_cpp20: A benchmark for finding many substrings.
+# * stringparazilla_bench_find_many_cu20: A benchmark for finding many substrings on GPU.
 #
 # For higher-level language bindings separate build scripts are provided, native to each toolchain.
 cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
@@ -188,14 +194,22 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     # MSVC uses numeric values: > 4068 for "unknown pragmas". > 4146 for "unary minus operator applied to unsigned type,
     # result still unsigned". We also specify `/utf-8` to properly UTF-8 symbols in tests.
     if (${compiler_id} STREQUAL "GNU")
-        target_compile_options(${target} PRIVATE "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas")
+        target_compile_options(
+            ${target}
+            PRIVATE
+                "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
+        )
         target_compile_options(${target} PRIVATE "-Wno-cast-function-type;-Wno-unused-function") # ? Unique to GCC
     elseif (${compiler_id} STREQUAL "Clang" OR ${compiler_id} STREQUAL "AppleClang")
         target_compile_options(${target} PRIVATE "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas")
     elseif (${compiler_id} STREQUAL "MSVC")
         target_compile_options(${target} PRIVATE "/Bt;/wd4068;/wd4146;/utf-8;/WX")
     elseif (${compiler_id} STREQUAL "NVIDIA")
-        target_compile_options(${target} PRIVATE "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra")
+        target_compile_options(
+            ${target}
+            PRIVATE
+                "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
+        )
     endif ()
 
     # Enable OpenMP if available
@@ -351,16 +365,22 @@ function (define_gpu_launcher exec_name source cuda_standard target_arch)
 endfunction ()
 
 if (${STRINGZILLA_BUILD_BENCHMARK})
-    define_launcher(stringzilla_bench_find scripts/bench_find.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_sequence scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_token scripts/bench_token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_container scripts/bench_container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_memory scripts/bench_memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_similarity scripts/bench_similarity.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzilla_bench_find_many scripts/bench_find_many.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_find_cpp20 scripts/bench_find.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_sequence_cpp20 scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_token_cpp20 scripts/bench_token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_container_cpp20 scripts/bench_container.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzilla_bench_memory_cpp20 scripts/bench_memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+
+    # Parallel benchmarks
+    define_launcher(stringparazilla_bench_similarity_cpp20 scripts/bench_similarity.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringparazilla_bench_find_many_cpp20 scripts/bench_find_many.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     if (ENABLE_CUDA)
-        define_gpu_launcher(stringcuzilla_bench_similarity scripts/bench_similarity.cu 20 "${STRINGZILLA_TARGET_ARCH}")
-        define_gpu_launcher(stringcuzilla_bench_find_many scripts/bench_find_many.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(
+            stringparazilla_bench_similarity_cu20 scripts/bench_similarity.cu 20 "${STRINGZILLA_TARGET_ARCH}"
+        )
+        define_gpu_launcher(
+            stringparazilla_bench_find_many_cu20 scripts/bench_find_many.cu 20 "${STRINGZILLA_TARGET_ARCH}"
+        )
     endif ()
 endif ()
 
@@ -374,15 +394,15 @@ if (${STRINGZILLA_BUILD_TEST})
     define_launcher(stringzilla_test_cpp20 scripts/test_stringzilla.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
 
     # Test parallel algorithms separately
-    define_launcher(stringcuzilla_test_cpp17 scripts/test_stringcuzilla.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringcuzilla_test_cpp20 scripts/test_stringcuzilla.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringparazilla_test_cpp17 scripts/test_stringparazilla.cpp 17 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringparazilla_test_cpp20 scripts/test_stringparazilla.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
 
     # To avoid bloating our codebase with `__device__` function annotations, we only target C++14 and newer to compile
     # `constexpr` functions on both host and device side. To avoid the complexity of defining too many template objects
     # and complex SFINAE, we only target C++17 anf newer to compile `if constexpr` compile-time SIMD dispatch.
     if (ENABLE_CUDA)
-        define_gpu_launcher(stringcuzilla_test_cu17 scripts/test_stringcuzilla.cu 17 "${STRINGZILLA_TARGET_ARCH}")
-        define_gpu_launcher(stringcuzilla_test_cu20 scripts/test_stringcuzilla.cu 20 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringparazilla_test_cu17 scripts/test_stringparazilla.cu 17 "${STRINGZILLA_TARGET_ARCH}")
+        define_gpu_launcher(stringparazilla_test_cu20 scripts/test_stringparazilla.cu 20 "${STRINGZILLA_TARGET_ARCH}")
     endif ()
 
     # Check system architecture to avoid complex cross-compilation workflows, but compile multiple backends: disabling
@@ -394,18 +414,18 @@ if (${STRINGZILLA_BUILD_TEST})
             define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "AVX2")
             define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "AVX512")
             if (ENABLE_CUDA)
-                define_gpu_launcher(stringcuzilla_test_cu20_serial scripts/test_stringcuzilla.cu 20 "AVX")
-                define_gpu_launcher(stringcuzilla_test_cu20_haswell scripts/test_stringcuzilla.cu 20 "AVX2")
-                define_gpu_launcher(stringcuzilla_test_cu20_ice scripts/test_stringcuzilla.cu 20 "AVX512")
+                define_gpu_launcher(stringparazilla_test_cu20_serial scripts/test_stringparazilla.cu 20 "AVX")
+                define_gpu_launcher(stringparazilla_test_cu20_haswell scripts/test_stringparazilla.cu 20 "AVX2")
+                define_gpu_launcher(stringparazilla_test_cu20_ice scripts/test_stringparazilla.cu 20 "AVX512")
             endif ()
         else ()
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "ivybridge")
             define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "haswell")
             define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "sapphirerapids")
             if (ENABLE_CUDA)
-                define_gpu_launcher(stringcuzilla_test_cu20_serial scripts/test_stringcuzilla.cu 20 "ivybridge")
-                define_gpu_launcher(stringcuzilla_test_cu20_haswell scripts/test_stringcuzilla.cu 20 "haswell")
-                define_gpu_launcher(stringcuzilla_test_cu20_ice scripts/test_stringcuzilla.cu 20 "sapphirerapids")
+                define_gpu_launcher(stringparazilla_test_cu20_serial scripts/test_stringparazilla.cu 20 "ivybridge")
+                define_gpu_launcher(stringparazilla_test_cu20_haswell scripts/test_stringparazilla.cu 20 "haswell")
+                define_gpu_launcher(stringparazilla_test_cu20_ice scripts/test_stringparazilla.cu 20 "sapphirerapids")
             endif ()
         endif ()
     elseif (SZ_PLATFORM_ARM)
@@ -414,9 +434,9 @@ if (${STRINGZILLA_BUILD_TEST})
         define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8-a+simd")
         define_launcher(stringzilla_test_cpp20_sve scripts/test_stringzilla.cpp 20 "armv8.2-a+sve")
         if (ENABLE_CUDA)
-            define_gpu_launcher(stringcuzilla_test_cu20_serial scripts/test_stringcuzilla.cu 20 "armv8-a")
-            define_gpu_launcher(stringcuzilla_test_cu20_neon scripts/test_stringcuzilla.cu 20 "armv8-a+simd")
-            define_gpu_launcher(stringcuzilla_test_cu20_sve scripts/test_stringcuzilla.cu 20 "armv8.2-a+sve")
+            define_gpu_launcher(stringparazilla_test_cu20_serial scripts/test_stringparazilla.cu 20 "armv8-a")
+            define_gpu_launcher(stringparazilla_test_cu20_neon scripts/test_stringparazilla.cu 20 "armv8-a+simd")
+            define_gpu_launcher(stringparazilla_test_cu20_sve scripts/test_stringparazilla.cu 20 "armv8.2-a+sve")
         endif ()
     endif ()
 endif ()

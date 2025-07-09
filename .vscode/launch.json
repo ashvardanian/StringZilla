@@ -42,7 +42,7 @@
       "type": "cppdbg",
       "request": "launch",
       "preLaunchTask": "Build Test: Debug Parallel C++",
-      "program": "${workspaceFolder}/build_debug/stringcuzilla_test_cpp20",
+      "program": "${workspaceFolder}/build_debug/stringparazilla_test_cpp20",
       "cwd": "${workspaceFolder}",
       "environment": [
         {
@@ -70,7 +70,7 @@
         "MIMode": "lldb"
       },
       "windows": {
-        "program": "${workspaceFolder}\\build_debug\\stringcuzilla_test_cpp20.exe",
+        "program": "${workspaceFolder}\\build_debug\\stringparazilla_test_cpp20.exe",
         "MIMode": "gdb",
         "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
       }
@@ -80,7 +80,7 @@
       "type": "cuda-gdb",
       "request": "launch",
       "preLaunchTask": "Build Test: Debug CUDA",
-      "program": "${workspaceFolder}/build_debug/stringcuzilla_test_cu20",
+      "program": "${workspaceFolder}/build_debug/stringparazilla_test_cu20",
       "cwd": "${workspaceFolder}",
       "environment": [
         {
@@ -136,7 +136,7 @@
       "name": "Current CUDA Benchmark",
       "type": "cuda-gdb",
       "request": "launch",
-      "program": "${workspaceFolder}/build_debug/stringcuzilla_${fileBasenameNoExtension}",
+      "program": "${workspaceFolder}/build_debug/stringparazilla_${fileBasenameNoExtension}",
       "cwd": "${workspaceFolder}",
       "environment": [
         {

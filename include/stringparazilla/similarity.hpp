@@ -66,12 +66,12 @@
  *  @see https://github.com/quim0/WFA-GPU
  *  @see https://github.com/asbschmidt/CUDASW4
  */
-#ifndef STRINGCUZILLA_SIMILARITY_HPP_
-#define STRINGCUZILLA_SIMILARITY_HPP_
+#ifndef STRINGPARAZILLA_SIMILARITY_HPP_
+#define STRINGPARAZILLA_SIMILARITY_HPP_
 
-#include "stringzilla/types.hpp"   // `sz::error_cost_t`
-#include "stringzilla/memory.h"    // `sz_move`
-#include "stringcuzilla/types.hpp" // `sz::executor_like`
+#include "stringzilla/types.hpp"     // `sz::error_cost_t`
+#include "stringzilla/memory.h"      // `sz_move`
+#include "stringparazilla/types.hpp" // `sz::executor_like`
 
 #include <atomic>      // `std::atomic` to synchronize OpenMP threads
 #include <type_traits> // `std::enable_if_t` for meta-programming
@@ -79,7 +79,7 @@
 #include <iterator>    // `std::iterator_traits` for iterators
 
 namespace ashvardanian {
-namespace stringzilla {
+namespace stringparazilla {
 
 struct error_costs_256x256_t;
 struct error_costs_26x26ascii_t;
@@ -4384,7 +4384,7 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
 #endif            // SZ_USE_ICE
 #pragma endregion // Ice Lake Implementation
 
-} // namespace stringzilla
+} // namespace stringparazilla
 } // namespace ashvardanian
 
-#endif // STRINGCUZILLA_SIMILARITY_HPP_
+#endif // STRINGPARAZILLA_SIMILARITY_HPP_

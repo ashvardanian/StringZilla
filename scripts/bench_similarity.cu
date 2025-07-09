@@ -30,8 +30,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_bench_similarity
- *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=words build_release/stringzilla_bench_similarity
+ *  cmake --build build_release --config Release --target stringparazilla_bench_similarity_cu20
+ *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=words build_release/stringparazilla_bench_similarity_cu20
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
@@ -41,7 +41,7 @@
  *  @code{.sh}
  *  STRINGWARS_DATASET=proteins.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
  *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
- *  build_release/stringzilla_bench_similarity
+ *  build_release/stringparazilla_bench_similarity_cu20
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
@@ -49,11 +49,11 @@
  */
 #include "bench_similarity.cuh"
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::scripts;
+namespace szp = ashvardanian::stringparazilla;
+using namespace szp::scripts;
 
 int main(int argc, char const **argv) {
-    std::printf("Welcome to StringZilla!\n");
+    std::printf("Welcome to StringParaZilla on GPU!\n");
 
     try {
         std::printf("Building up the environment...\n");
