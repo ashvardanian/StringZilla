@@ -14,6 +14,7 @@
 #include "stringcuzilla/similarity.hpp"
 
 #if SZ_USE_CUDA
+#include "stringcuzilla/find_many.cuh"
 #include "stringcuzilla/similarity.cuh"
 #endif
 
@@ -1183,8 +1184,8 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         // Count with both backends
         span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
         span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
-        status_t status_count_base = base_operator.try_count(haystacks_tape, counts_base_span);
-        status_t status_count_simd = simd_operator.try_count(haystacks_tape, counts_simd_span, extra_args...);
+        status_t status_count_base = base_operator.try_count(haystacks_tape.view(), counts_base_span);
+        status_t status_count_simd = simd_operator.try_count(haystacks_tape.view(), counts_simd_span, extra_args...);
         _sz_assert(status_count_base == status_t::success_k);
         _sz_assert(status_count_simd == status_t::success_k);
         _sz_assert(counts_base[0] == counts_simd[0]);
@@ -1192,9 +1193,9 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         // Check the matches themselves
         matches_base.resize(std::accumulate(counts_base.begin(), counts_base.end(), 0));
         matches_simd.resize(std::accumulate(counts_simd.begin(), counts_simd.end(), 0));
-        status_t status_matched_base = base_operator.try_find(haystacks_tape, counts_base_span, matches_base);
+        status_t status_matched_base = base_operator.try_find(haystacks_tape.view(), counts_base_span, matches_base);
         status_t status_matched_simd =
-            simd_operator.try_find(haystacks_tape, counts_simd_span, matches_simd, extra_args...);
+            simd_operator.try_find(haystacks_tape.view(), counts_simd_span, matches_simd, extra_args...);
         _sz_assert(status_matched_base == status_t::success_k);
         _sz_assert(status_matched_simd == status_t::success_k);
 
@@ -1217,8 +1218,8 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         // Count with both backends and compare all of the bounds
         span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
         span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
-        status_t status_count_base = base_operator.try_count(haystacks_tape, counts_base_span);
-        status_t status_count_simd = simd_operator.try_count(haystacks_tape, counts_simd_span, extra_args...);
+        status_t status_count_base = base_operator.try_count(haystacks_tape.view(), counts_base_span);
+        status_t status_count_simd = simd_operator.try_count(haystacks_tape.view(), counts_simd_span, extra_args...);
         _sz_assert(status_count_base == status_t::success_k);
         _sz_assert(status_count_simd == status_t::success_k);
         _sz_assert(std::equal(counts_base.begin(), counts_base.end(), counts_simd.begin()));
@@ -1226,9 +1227,9 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
         // Check the matches themselves
         matches_base.resize(std::accumulate(counts_base.begin(), counts_base.end(), 0));
         matches_simd.resize(std::accumulate(counts_simd.begin(), counts_simd.end(), 0));
-        status_t status_matched_base = base_operator.try_find(haystacks_tape, counts_base_span, matches_base);
+        status_t status_matched_base = base_operator.try_find(haystacks_tape.view(), counts_base_span, matches_base);
         status_t status_matched_simd =
-            simd_operator.try_find(haystacks_tape, counts_simd_span, matches_simd, extra_args...);
+            simd_operator.try_find(haystacks_tape.view(), counts_simd_span, matches_simd, extra_args...);
         _sz_assert(status_matched_base == status_t::success_k);
         _sz_assert(status_matched_simd == status_t::success_k);
 
@@ -1368,11 +1369,25 @@ void test_find_many_equivalence() {
     if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
     static_assert(executor_like<fork_union_t>);
 
+#if SZ_USE_CUDA
+    gpu_specs_t first_gpu_specs = *gpu_specs();
+#endif
+
     // Single-threaded serial Aho-Corasick implementation
     test_find_many_fixed(find_many_baselines_t {}, find_many_u32_serial_t {});
 
     // Multi-threaded parallel Aho-Corasick implementation
     test_find_many_fixed(find_many_baselines_t {}, find_many_u32_parallel_t {}, pool);
+
+#if SZ_USE_CUDA
+    test_find_many_fixed(find_many_baselines_t {}, find_many_u32_cuda_t {}, cuda_executor_t {});
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_u32_cuda_t {}, needles_short_config, haystacks_config, 1,
+                         cuda_executor_t {});
+    test_find_many_fuzzy(find_many_baselines_t {}, find_many_u32_cuda_t {}, needles_long_config, haystacks_config, 1,
+                         cuda_executor_t {});
+    test_find_many_prefixes(find_many_baselines_t {}, find_many_u32_cuda_t {}, haystacks_config, 1024, 1,
+                            cuda_executor_t {});
+#endif
 
     // Fuzzy tests with random inputs
     test_find_many_fuzzy(find_many_baselines_t {}, find_many_u32_serial_t {}, needles_short_config, haystacks_config,
