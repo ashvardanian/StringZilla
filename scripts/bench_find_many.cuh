@@ -52,8 +52,8 @@ struct find_many_callable {
         span<chars_view_t const> haystacks = {&dataset_view, 1};
 
         // Without `volatile`, the serial logic keeps being optimized out!
-        volatile sz::status_t status = engine.try_build(dictionary);
-        if (status != sz::status_t::success_k) throw std::runtime_error("Failed to build dictionary.");
+        volatile status_t status = engine.try_build(dictionary);
+        if (status != status_t::success_k) throw std::runtime_error("Failed to build dictionary.");
         span<size_t> counts_span = {results_counts_per_haystack.data(), results_counts_per_haystack.size()};
         span<find_many_match_t> matches_span = {results_matches_per_haystack.data(),
                                                 results_matches_per_haystack.size()};
@@ -78,7 +78,7 @@ struct find_many_callable {
                 extra_args);
 
         do_not_optimize(status);
-        if (status != sz::status_t::success_k) throw std::runtime_error("Failed multi-pattern search.");
+        if (status != status_t::success_k) throw std::runtime_error("Failed multi-pattern search.");
 
         std::size_t needle_characters = engine.dictionary().total_needles_length();
         std::size_t bytes_passed = 0, character_comparisons = 0;
@@ -117,7 +117,7 @@ void bench_find_many(environment_t const &env) {
     using namespace std::string_literals; // for "s" suffix
 
 #if SZ_USE_CUDA
-    sz::gpu_specs_t specs = *sz::gpu_specs();
+    gpu_specs_t specs = *gpu_specs();
 #endif
     std::vector<std::size_t> vocabulary_sizes = {
         1024,
@@ -150,16 +150,16 @@ void bench_find_many(environment_t const &env) {
 
         // Construct the dictionary for the current vocabulary size
         find_many_u32_dictionary_t dict;
-        if (dict.try_reserve(vocabulary_size) != sz::status_t::success_k)
+        if (dict.try_reserve(vocabulary_size) != status_t::success_k)
             throw std::runtime_error("Failed to reserve space for dictionary.");
         for (std::size_t token_index = 0; dict.count_needles() < vocabulary_size && token_index < env.tokens.size();
              ++token_index) {
             auto const &token = env.tokens[token_index];
             auto status = dict.try_insert({token.data(), token.size()});
-            if (status == sz::status_t::contains_duplicates_k) continue; // Skip duplicates
-            if (status != sz::status_t::success_k) throw std::runtime_error("Failed to insert token into dictionary.");
+            if (status == status_t::contains_duplicates_k) continue; // Skip duplicates
+            if (status != status_t::success_k) throw std::runtime_error("Failed to insert token into dictionary.");
         }
-        if (dict.try_build() != sz::status_t::success_k) throw std::runtime_error("Failed to build dictionary.");
+        if (dict.try_build() != status_t::success_k) throw std::runtime_error("Failed to build dictionary.");
 
         // Estimate the amount of memory needed for the results
         std::size_t const results_count = dict.count({env.dataset.data(), env.dataset.size()});

@@ -29,9 +29,9 @@ using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, std::allocator<
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
 #else
-using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, unified_alloc<char>>;
+using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, stringparazilla::unified_alloc<char>>;
 template <typename value_type_>
-using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
+using unified_vector = std::vector<value_type_, stringparazilla::unified_alloc<value_type_>>;
 #endif
 
 inline std::string read_file(std::string path) noexcept(false) {
