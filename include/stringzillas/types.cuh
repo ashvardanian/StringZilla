@@ -8,8 +8,8 @@
  *
  *  - `unified_alloc` - a custom allocator that uses CUDA Unified Memory for allocation.
  */
-#ifndef STRINGPARAZILLA_TYPES_CUH_
-#define STRINGPARAZILLA_TYPES_CUH_
+#ifndef STRINGZILLAS_TYPES_CUH_
+#define STRINGZILLAS_TYPES_CUH_
 
 #include "stringzilla/types.hpp"
 
@@ -35,7 +35,7 @@
 #endif
 
 namespace ashvardanian {
-namespace stringparazilla {
+namespace stringzillas {
 
 /**
  *  @brief  A custom allocator that uses CUDA Unified Memory for allocation.
@@ -314,7 +314,7 @@ warp_tasks_groups<task_type_> warp_tasks_grouping(span<task_type_> tasks, gpu_sp
     return result;
 }
 
-} // namespace stringparazilla
+} // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGPARAZILLA_TYPES_CUH_
+#endif // STRINGZILLAS_TYPES_CUH_

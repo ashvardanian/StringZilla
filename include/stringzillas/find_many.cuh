@@ -21,18 +21,18 @@
  *  really long ones. Reality is often fuzzier, with a mix of both. A better scheduling approach may be to treat
  *  all haystacks as a single tape, regrouping into sub-haystack-level and haystack-level "tasks".
  */
-#ifndef STRINGPARAZILLA_FIND_MANY_CUH_
-#define STRINGPARAZILLA_FIND_MANY_CUH_
+#ifndef STRINGZILLAS_FIND_MANY_CUH_
+#define STRINGZILLAS_FIND_MANY_CUH_
 
-#include "stringparazilla/types.cuh"
-#include "stringparazilla/find_many.hpp"
+#include "stringzillas/types.cuh"
+#include "stringzillas/find_many.hpp"
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda/atomic>
 
 namespace ashvardanian {
-namespace stringparazilla {
+namespace stringzillas {
 
 #pragma region - General Purpose CUDA Backend
 
@@ -479,7 +479,7 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
 
 using find_many_u32_cuda_t = find_many<u32_t, unified_alloc<char>, sz_cap_cuda_k>;
 
-} // namespace stringparazilla
+} // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGPARAZILLA_FIND_MANY_CUH_
+#endif // STRINGZILLAS_FIND_MANY_CUH_

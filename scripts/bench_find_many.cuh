@@ -7,16 +7,16 @@
 
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
-#include <stringparazilla/find_many.hpp> // C++ templates for string processing
+#include <stringzillas/find_many.hpp> // C++ templates for string processing
 
 #if SZ_USE_CUDA
-#include <stringparazilla/find_many.cuh> // Parallel string processing in CUDA
+#include <stringzillas/find_many.cuh> // Parallel string processing in CUDA
 #endif
 
 #include "bench.hpp"
 
 namespace ashvardanian {
-namespace stringparazilla {
+namespace stringzillas {
 namespace scripts {
 
 using namespace ashvardanian::stringzilla::scripts;
@@ -224,5 +224,5 @@ void bench_find_many(environment_t const &env) {
 #pragma endregion
 
 } // namespace scripts
-} // namespace stringparazilla
+} // namespace stringzillas
 } // namespace ashvardanian

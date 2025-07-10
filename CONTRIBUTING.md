@@ -185,10 +185,10 @@ build_release/stringzilla_bench_container_cpp20 # - for STL containers with stri
 There are also parallel algorithms that need a very different benchmarking setup:
 
 ```sh
-build_release/stringparazilla_bench_find_many_cpp20  # - for parallel multi-pattern search on CPU
-build_release/stringparazilla_bench_find_many_cu20   # - for parallel multi-pattern search on GPU
-build_release/stringparazilla_bench_similarity_cpp20 # - for parallel edit distances and alignment scores on CPU
-build_release/stringparazilla_bench_similarity_cu20  # - for parallel edit distances and alignment scores on GPU
+build_release/stringzillas_bench_find_many_cpp20  # - for parallel multi-pattern search on CPU
+build_release/stringzillas_bench_find_many_cu20   # - for parallel multi-pattern search on GPU
+build_release/stringzillas_bench_similarity_cpp20 # - for parallel edit distances and alignment scores on CPU
+build_release/stringzillas_bench_similarity_cu20  # - for parallel edit distances and alignment scores on GPU
 ```
 
 All of them support customization via environment variables.
@@ -196,13 +196,13 @@ Let's say you want to benchmark large-batch DNA similarity scoring kernels:
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release --target stringparazilla_bench_similarity_cpp20    # CPU
-cmake --build build_release --config Release --target stringparazilla_bench_similarity_cu20     # GPU
-STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringparazilla_bench_similarity_cpp20
-STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringparazilla_bench_similarity_cu20
+cmake --build build_release --config Release --target stringzillas_bench_similarity_cpp20    # CPU
+cmake --build build_release --config Release --target stringzillas_bench_similarity_cu20     # GPU
+STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarity_cpp20
+STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarity_cu20
 
-STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringparazilla_bench_similarity_cu20
-STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringparazilla_bench_similarity_cu20
+STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarity_cu20
+STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarity_cu20
 ```
 
 Each benchmark originates from an identically named single-source file in the `scripts/` directory.
@@ -394,19 +394,19 @@ cmake --build build_artifacts --config Release
 
 ```sh
 cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug
-cmake --build build_debug --config Debug --target stringparazilla_test_cpp20
-cmake --build build_debug --config Debug --target stringparazilla_test_cu20
+cmake --build build_debug --config Debug --target stringzillas_test_cpp20
+cmake --build build_debug --config Debug --target stringzillas_test_cu20
 ```
 
 ```sh
 cmake -D CMAKE_BUILD_TYPE=Release -D STRINGZILLA_BUILD_TEST=1 -B build_release
-cmake --build build_release --config Release --target stringparazilla_test_cpp20
-cmake --build build_release --config Release --target stringparazilla_test_cu20
+cmake --build build_release --config Release --target stringzillas_test_cpp20
+cmake --build build_release --config Release --target stringzillas_test_cu20
 ```
 
 ```sh
-cuda-gdb ./build_debug/stringparazilla_test_cu20
-cuda-memcheck ./build_debug/stringparazilla_test_cu20
+cuda-gdb ./build_debug/stringzillas_test_cu20
+cuda-memcheck ./build_debug/stringzillas_test_cu20
 ```
 
 ## Contributing in Python

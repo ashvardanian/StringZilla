@@ -1,5 +1,5 @@
 /**
- *  @file       lib.c
+ *  @file       stringzilla.c
  *  @brief      StringZilla C library with dynamic backed dispatch for the most appropriate implementation.
  *  @author     Ash Vardanian
  *  @date       January 16, 2024

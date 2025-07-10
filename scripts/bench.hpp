@@ -51,7 +51,7 @@
 #include "stringzilla/stringzilla.hpp"
 
 #if SZ_USE_CUDA
-#include "stringparazilla/types.cuh" // `unified_alloc`
+#include "stringzillas/types.cuh" // `unified_alloc`
 #endif
 
 #include "test_stringzilla.hpp" // `read_file`
@@ -197,9 +197,9 @@ using dataset_t = std::string;
 using token_view_t = std::string_view;
 using tokens_t = std::vector<token_view_t>;
 #else
-using dataset_t = std::basic_string<char, std::char_traits<char>, stringparazilla::unified_alloc<char>>;
+using dataset_t = std::basic_string<char, std::char_traits<char>, stringzillas::unified_alloc<char>>;
 using token_view_t = stringzilla::span<char const>;
-using tokens_t = std::vector<token_view_t, stringparazilla::unified_alloc<token_view_t>>;
+using tokens_t = std::vector<token_view_t, stringzillas::unified_alloc<token_view_t>>;
 #endif
 
 /**

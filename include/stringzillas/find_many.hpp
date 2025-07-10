@@ -35,12 +35,12 @@
  *  | Plagiarism/Code Similarity    | 1,000 – 100,000         | 1.024 MB – 102.4 MB     |
  *  | Product Catalog Matching      | 100,000 – 1,000,000     | 102.4 MB – 1.024 GB     |
  */
-#ifndef STRINGPARAZILLA_FIND_MANY_HPP_
-#define STRINGPARAZILLA_FIND_MANY_HPP_
+#ifndef STRINGZILLAS_FIND_MANY_HPP_
+#define STRINGZILLAS_FIND_MANY_HPP_
 
-#include "stringzilla/memory.h"      // `sz_move`
-#include "stringzilla/types.hpp"     // `status_t::status_t`
-#include "stringparazilla/types.hpp" // `dummy_executor_t`
+#include "stringzilla/memory.h"   // `sz_move`
+#include "stringzilla/types.hpp"  // `status_t::status_t`
+#include "stringzillas/types.hpp" // `dummy_executor_t`
 
 #include <memory>      // `std::allocator_traits` to re-bind the allocator
 #include <type_traits> // `std::enable_if_t` for meta-programming
@@ -48,7 +48,7 @@
 #include <iterator>    // `std::iterator_traits` for iterators
 
 namespace ashvardanian {
-namespace stringparazilla {
+namespace stringzillas {
 
 #pragma region - Dictionary
 
@@ -1018,7 +1018,7 @@ using find_many_u32_parallel_t = find_many<u32_t, std::allocator<char>, sz_caps_
 
 #pragma endregion // Parallel Backend
 
-} // namespace stringparazilla
+} // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGPARAZILLA_FIND_MANY_HPP_
+#endif // STRINGZILLAS_FIND_MANY_HPP_

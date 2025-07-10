@@ -1,21 +1,21 @@
 /**
- *  @file       lib.cu
- *  @brief      StringParaZilla library for parallel string operations using CUDA C++ and OpenMP backends.
+ *  @file       stringzillas.cu
+ *  @brief      StringZillas library for parallel string operations using CUDA C++ and OpenMP backends.
  *  @author     Ash Vardanian
  *  @date       March 23, 2025
  */
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
-#include <stringparazilla/find_many.hpp>  // C++ templates for string processing
-#include <stringparazilla/similarity.hpp> // C++ templates for string similarity
+#include <stringzillas/find_many.hpp>  // C++ templates for string processing
+#include <stringzillas/similarity.hpp> // C++ templates for string similarity
 
 #if SZ_USE_CUDA
-#include <stringparazilla/find_many.cuh>  // Parallel string processing in CUDA
-#include <stringparazilla/similarity.cuh> // Parallel string similarity in CUDA
+#include <stringzillas/find_many.cuh>  // Parallel string processing in CUDA
+#include <stringzillas/similarity.cuh> // Parallel string similarity in CUDA
 #endif
 
 namespace sz = ashvardanian::stringzilla;
-namespace spz = ashvardanian::stringparazilla;
+namespace szs = ashvardanian::stringzillas;
 
 extern "C" {
 

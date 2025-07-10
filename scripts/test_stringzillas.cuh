@@ -2,7 +2,7 @@
  *  @brief   Extensive @b stress-testing suite for StringCuZilla parallel operations, written in CUDA C++.
  *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file    test_stringparazilla.cuh
+ *  @file    test_stringzillas.cuh
  *  @author  Ash Vardanian
  */
 #include <cstring> // `std::memcmp`
@@ -10,12 +10,12 @@
 
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
-#include "stringparazilla/find_many.hpp"
-#include "stringparazilla/similarity.hpp"
+#include "stringzillas/find_many.hpp"
+#include "stringzillas/similarity.hpp"
 
 #if SZ_USE_CUDA
-#include "stringparazilla/find_many.cuh"
-#include "stringparazilla/similarity.cuh"
+#include "stringzillas/find_many.cuh"
+#include "stringzillas/similarity.cuh"
 #endif
 
 #if !_SZ_IS_CPP17
@@ -25,8 +25,11 @@
 #include "test_stringzilla.hpp" // `arrow_strings_view_t`
 
 namespace ashvardanian {
-namespace stringparazilla {
+namespace stringzillas {
 namespace scripts {
+
+using namespace stringzilla;
+using namespace stringzilla::scripts;
 
 int log_environment() {
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
@@ -1404,5 +1407,5 @@ void test_find_many_equivalence() {
 }
 
 } // namespace scripts
-} // namespace stringparazilla
+} // namespace stringzillas
 } // namespace ashvardanian

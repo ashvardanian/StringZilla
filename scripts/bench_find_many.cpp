@@ -26,8 +26,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringparazilla_bench_find_many_cpp20
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringparazilla_bench_find_many_cpp20
+ *  cmake --build build_release --config Release --target stringzillas_bench_find_many_cpp20
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzillas_bench_find_many_cpp20
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
@@ -37,7 +37,7 @@
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
  *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
- *  build_release/stringparazilla_bench_find_many_cpp20
+ *  build_release/stringzillas_bench_find_many_cpp20
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
@@ -45,11 +45,11 @@
  */
 #include "bench_find_many.cuh"
 
-namespace szp = ashvardanian::stringparazilla;
-using namespace szp::scripts;
+namespace szs = ashvardanian::stringzillas;
+using namespace szs::scripts;
 
 int main(int argc, char const **argv) {
-    std::printf("Welcome to StringParaZilla on CPU!\n");
+    std::printf("Welcome to StringZillas on CPU!\n");
 
     try {
         std::printf("Building up the environment...\n");

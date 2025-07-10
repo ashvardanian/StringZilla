@@ -3,15 +3,15 @@
  *  @file   types.hpp
  *  @author Ash Vardanian
  */
-#ifndef STRINGPARAZILLA_TYPES_HPP_
-#define STRINGPARAZILLA_TYPES_HPP_
+#ifndef STRINGZILLAS_TYPES_HPP_
+#define STRINGZILLAS_TYPES_HPP_
 
 #include <thread> // `std::thread::hardware_concurrency`
 
 #include "stringzilla/types.hpp"
 
 namespace ashvardanian {
-namespace stringparazilla {
+namespace stringzillas {
 
 using namespace ashvardanian::stringzilla;
 
@@ -202,7 +202,7 @@ size_t group_by(begin_iterator_type_ const begin, end_iterator_type_ const end, 
     return group_count;
 }
 
-} // namespace stringparazilla
+} // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGPARAZILLA_TYPES_HPP_
+#endif // STRINGZILLAS_TYPES_HPP_
