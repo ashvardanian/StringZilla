@@ -2010,6 +2010,10 @@ __global__ void _affine_score_on_each_cuda_warp(                             //
 
 #pragma region - Levenshtein Distance in CUDA
 
+/**
+ *  @brief Wraps a single task for the CUDA-based @b byte-level "similarity" kernels.
+ *  @note Used to allow sorting/grouping inputs to differentiate device-wide and warp-wide tasks.
+ */
 template <typename char_type_>
 struct cuda_similarity_task {
     using char_t = char_type_;

@@ -15,10 +15,11 @@
  *
  *  @see How slow is constant memory? https://leimao.github.io/blog/CUDA-Constant-Memory/
  *
- *  That means, the coalesced memory is extremely important. Moreover, assuming we are mostly fetching each
- *  haystack byte only once, we want to make the transfer asynchronous, using @b `cp.async` PTX instructions.
+ *  @section Future Development
  *
- *
+ *  Current kernels oversimplify scheduling. They assume either a huge number of shorter haystacks or just a few
+ *  really long ones. Reality is often fuzzier, with a mix of both. A better scheduling approach may be to treat
+ *  all haystacks as a single tape, regrouping into sub-haystack-level and haystack-level "tasks".
  */
 #ifndef STRINGPARAZILLA_FIND_MANY_CUH_
 #define STRINGPARAZILLA_FIND_MANY_CUH_
@@ -51,36 +52,50 @@ __forceinline__ __device__ scalar_type_ _reduce_in_warp(scalar_type_ x) noexcept
 }
 
 /**
+ *  @brief Wraps a single task for the CUDA-based @b byte-level multi-needle "count" kernels.
+ *  @note Used to allow sorting/grouping inputs to differentiate device-wide and warp-wide tasks.
+ */
+struct cuda_count_many_task_t {
+    span<byte_t const> haystack {};
+    size_t task_index {0};
+    size_t result {0};
+};
+
+/**
+ *  @brief Wraps a single task for the CUDA-based @b byte-level multi-needle "find" kernels.
+ *  @note Used to allow sorting/grouping inputs to differentiate device-wide and warp-wide tasks.
+ */
+struct cuda_find_task_t {
+    span<byte_t const> haystack;
+    size_t task_index {0};
+    span<size_t> result_needle_ids {};
+    span<size_t> result_offsets {};
+    span<size_t> result_lengths {};
+};
+
+/**
  *  Each warp receives a unique haystack. All threads in a warp take continuous overlapping slices of the haystack.
  *  Overlapping match counts are reported and later aggregated in the calling function, accounting for the overlaps.
  *  It's expected, that the length of the longest needle is smaller than the length of a haystack slice.
  *
  *  @tparam small_size_type_ Helps us avoid 64-bit arithmetic in favor of smaller 16- or 32-bit offsets/lengths.
  */
-template <typename small_size_type_, typename char_type_, typename state_id_type_, state_id_type_ alphabet_size_ = 256>
+template <typename small_size_type_, typename state_id_type_>
 __device__ _count_short_needle_matches_in_one_part_t _count_short_needle_matches_in_one_part_per_warp_thread( //
-    char_type_ const *haystack_begin, size_t const haystack_length,                                           //
-    size_t const count_states,                                                                                //
-    safe_array<state_id_type_, alphabet_size_> const *transitions,                                            //
-    state_id_type_ const *outputs_counts,                                                                     //
-    size_t const max_needle_length,                                                                           //
+    span<byte_t const> const &haystack,                                                                       //
+    aho_corasick_dictionary_view<state_id_type_> const &dict,                                                 //
     size_t const thread_index, size_t const thread_pool_size) noexcept {
 
-    using char_t = char_type_;
     using state_id_t = state_id_type_;
     using small_size_t = small_size_type_;
 
-    byte_t const *const haystack_data = reinterpret_cast<byte_t const *>(haystack_begin);
-    small_size_t const haystack_bytes_length = static_cast<small_size_t>(haystack_length * sizeof(char_t));
-    byte_t const *const haystack_end = haystack_data + haystack_bytes_length;
-
-    small_size_t const bytes_per_thread_optimal = divide_round_up(haystack_bytes_length, thread_pool_size);
+    small_size_t const bytes_per_thread_optimal = divide_round_up(haystack.size(), thread_pool_size);
 
     // We may have a case of a thread receiving no data at all
-    byte_t const *optimal_start = std::min(haystack_data + thread_index * bytes_per_thread_optimal, haystack_end);
-    byte_t const *const prefix_end = std::min(optimal_start + max_needle_length, haystack_end);
+    byte_t const *optimal_start = std::min(haystack.data() + thread_index * bytes_per_thread_optimal, haystack.end());
+    byte_t const *const prefix_end = std::min(optimal_start + dict.max_needle_length, haystack.end());
     byte_t const *const overlapping_end =
-        std::min(optimal_start + bytes_per_thread_optimal + max_needle_length, haystack_end);
+        std::min(optimal_start + bytes_per_thread_optimal + dict.max_needle_length, haystack.end());
 
     // Reimplement the serial `aho_corasick_dictionary::count` keeping track of the matches,
     // entirely fitting in the prefix
@@ -88,8 +103,8 @@ __device__ _count_short_needle_matches_in_one_part_t _count_short_needle_matches
     small_size_t result_total = 0;
     small_size_t result_prefix = 0;
     for (; optimal_start != overlapping_end; ++optimal_start) {
-        current_state = transitions[current_state][*optimal_start];
-        small_size_t const outputs_count = static_cast<small_size_t>(outputs_counts[current_state]);
+        current_state = dict.transitions[current_state][*optimal_start];
+        small_size_t const outputs_count = static_cast<small_size_t>(dict.outputs_counts[current_state]);
         result_total += outputs_count;
         result_prefix += non_zero_if<small_size_t>(outputs_count, optimal_start < prefix_end);
     }
@@ -109,48 +124,42 @@ __device__ _count_short_needle_matches_in_one_part_t _count_short_needle_matches
  *  There are countless divergent branches in this solution, that depending on the vocabulary can result
  *  in extremely low performance.
  */
-template <typename small_size_type_, typename char_type_, typename state_id_type_, state_id_type_ alphabet_size_>
+template <typename small_size_type_, typename state_id_type_>
 __device__ small_size_type_ _count_needle_matches_in_one_part_per_warp_thread( //
-    char_type_ const *haystack_begin, size_t const haystack_length,            //
-    size_t const count_states,                                                 //
-    safe_array<state_id_type_, alphabet_size_> const *transitions,             //
-    state_id_type_ const *outputs,                                             //
-    state_id_type_ const *outputs_counts,                                      //
-    state_id_type_ const *outputs_offsets,                                     //
-    size_t const *needles_lengths,                                             //
-    size_t const max_needle_length,                                            //
+    span<byte_t const> const &haystack,                                        //
+    aho_corasick_dictionary_view<state_id_type_> const &dict,                  //
     size_t const thread_index, size_t const thread_pool_size) noexcept {
 
-    using char_t = char_type_;
     using state_id_t = state_id_type_;
     using small_size_t = small_size_type_;
 
-    byte_t const *const haystack_data = reinterpret_cast<byte_t const *>(haystack_begin);
-    small_size_t const haystack_bytes_length = static_cast<small_size_t>(haystack_length * sizeof(char_t));
+    byte_t const *const haystack_data = haystack.data();
+    small_size_t const haystack_bytes_length = static_cast<small_size_t>(haystack.size());
     byte_t const *const haystack_end = haystack_data + haystack_bytes_length;
 
-    small_size_t const bytes_per_thread_optimal = divide_round_up(haystack_bytes_length, thread_pool_size);
+    small_size_t const bytes_per_thread_optimal =
+        divide_round_up<small_size_t>(haystack_bytes_length, thread_pool_size);
 
     // We may have a case of a thread receiving no data at all
     byte_t const *optimal_start = std::min(haystack_data + thread_index * bytes_per_thread_optimal, haystack_end);
     byte_t const *const optimal_end = std::min(optimal_start + bytes_per_thread_optimal, haystack_end);
     byte_t const *const overlapping_end =
-        std::min(optimal_start + bytes_per_thread_optimal + max_needle_length, haystack_end);
+        std::min(optimal_start + bytes_per_thread_optimal + dict.max_needle_length, haystack_end);
 
     // Reimplement the serial `aho_corasick_dictionary::count` keeping track of the matches,
     // entirely fitting in the prefix
     state_id_t current_state = 0;
     small_size_t result_total = 0;
     for (; optimal_start != overlapping_end; ++optimal_start) {
-        current_state = transitions[current_state][*optimal_start];
-        small_size_t const outputs_count = static_cast<small_size_t>(outputs_counts[current_state]);
+        current_state = dict.transitions[current_state][*optimal_start];
+        small_size_t const outputs_count = static_cast<small_size_t>(dict.outputs_counts[current_state]);
         if (outputs_count == 0) continue;
 
         // In a small & diverse vocabulary, the following loop generally does just 1 iteration
-        size_t const outputs_offset = outputs_offsets[current_state];
+        size_t const outputs_offset = dict.outputs_offsets[current_state];
         for (size_t output_index = 0; output_index < outputs_count; ++output_index) {
-            size_t needle_id = outputs[outputs_offset + output_index];
-            size_t match_length = needles_lengths[needle_id];
+            size_t needle_id = dict.outputs[outputs_offset + output_index];
+            size_t match_length = dict.needles_lengths[needle_id];
             byte_t const *match_ptr = optimal_start + 1 - match_length;
             result_total += match_ptr < optimal_end;
         }
@@ -166,26 +175,12 @@ __device__ small_size_type_ _count_needle_matches_in_one_part_per_warp_thread( /
  *  Different threads in a warp take different continuous slices of a shared haystack.
  *  This works best for fairly short needles and a large quantity of haystacks.
  */
-template < //
-    typename state_id_type_,
-    typename haystacks_strings_type_, //
-    state_id_type_ alphabet_size_ = 256,
-    sz_capability_t capability_ = sz_cap_cuda_k //
-    >
-__global__ void _count_matches_with_haystack_per_warp(              //
-    haystacks_strings_type_ haystacks, size_t *counts_per_haystack, //
-    size_t const count_states,                                      //
-    safe_array<state_id_type_, alphabet_size_> const *transitions,  //
-    state_id_type_ const *outputs,                                  //
-    state_id_type_ const *outputs_counts,                           //
-    state_id_type_ const *outputs_offsets,                          //
-    size_t const *needles_lengths,                                  //
-    size_t const max_length_among_needles) {
+template <typename state_id_type_, sz_capability_t capability_ = sz_cap_cuda_k>
+__global__ void _count_matches_with_haystack_per_warp( //
+    span<cuda_count_many_task_t> tasks, aho_corasick_dictionary_view<state_id_type_> dict) {
 
     // We only use this kernel for small haystacks, where a smaller integer type is enough for size.
     using small_size_t = uint;
-    using haystack_t = typename haystacks_strings_type_::value_type;
-    using char_t = typename haystack_t::value_type;
     using state_id_t = state_id_type_;
 
     // We may have multiple warps operating in the same block.
@@ -196,42 +191,31 @@ __global__ void _count_matches_with_haystack_per_warp(              //
     size_t const warps_per_device = static_cast<uint>(gridDim.x * warps_per_block);
     uint const warp_thread_index = static_cast<uint>(global_thread_index % warp_size);
 
-    for (size_t haystack_index = global_warp_index; haystack_index < haystacks.size();
-         haystack_index += warps_per_device) {
-        // Each warp is assigned to a single haystack.
-        haystack_t haystack = haystacks[haystack_index];
-        char_t const *const haystack_begin = haystack.data();
+    for (size_t task_index = global_warp_index; task_index < tasks.size(); task_index += warps_per_device) {
+        // Each warp is assigned to a single task.
+        auto &task = tasks[task_index];
+        span<byte_t const> const &haystack = task.haystack;
         small_size_t const haystack_length = static_cast<small_size_t>(haystack.size());
-        small_size_t const chars_per_core_optimal = divide_round_up<small_size_t>(haystack_length, warp_size);
 
         // We shouldn't even consider needles longer than the haystack
         small_size_t const max_needle_length =
-            std::min(static_cast<small_size_t>(max_length_among_needles), haystack_length);
+            std::min(static_cast<small_size_t>(dict.max_needle_length), haystack_length);
         bool const longest_needle_fits_on_one_thread = max_needle_length * warp_size < haystack_length;
         small_size_t results_per_thread = 0;
         if (longest_needle_fits_on_one_thread) {
             _count_short_needle_matches_in_one_part_t partial_result =
-                _count_short_needle_matches_in_one_part_per_warp_thread<small_size_t, char_t, state_id_t,
-                                                                        alphabet_size_>( //
-                    haystack_begin, haystack_length,                                     //
-                    count_states, transitions,                                           //
-                    outputs_counts, max_length_among_needles,                            //
-                    warp_thread_index, warp_size);
+                _count_short_needle_matches_in_one_part_per_warp_thread<small_size_t, state_id_t>( //
+                    haystack, dict, warp_thread_index, warp_size);
             results_per_thread =
                 partial_result.total - non_zero_if<small_size_t>(partial_result.prefix, warp_thread_index != 0);
         }
         else {
-            results_per_thread =
-                _count_needle_matches_in_one_part_per_warp_thread<small_size_t, char_t, state_id_t, alphabet_size_>( //
-                    haystack_begin, haystack_length,                                                                 //
-                    count_states, transitions,                                                                       //
-                    outputs, outputs_counts, outputs_offsets,                                                        //
-                    needles_lengths, max_length_among_needles,                                                       //
-                    warp_thread_index, warp_size);
+            results_per_thread = _count_needle_matches_in_one_part_per_warp_thread<small_size_t, state_id_t>( //
+                haystack, dict, warp_thread_index, warp_size);
         }
 
         small_size_t results_across_warp = _reduce_in_warp(results_per_thread);
-        if (warp_thread_index == 0) counts_per_haystack[haystack_index] = results_across_warp;
+        if (warp_thread_index == 0) task.result = results_across_warp;
     }
 }
 
@@ -244,63 +228,37 @@ __global__ void _count_matches_with_haystack_per_warp(              //
  */
 template < //
     typename state_id_type_,
-    typename haystack_string_type_, //
-    state_id_type_ alphabet_size_ = 256,
     sz_capability_t capability_ = sz_cap_cuda_k //
     >
-__global__ void _count_matches_with_haystack_per_device(           //
-    haystack_string_type_ haystack, size_t haystack_index,         //
-    size_t const count_states,                                     //
-    safe_array<state_id_type_, alphabet_size_> const *transitions, //
-    state_id_type_ const *outputs,                                 //
-    state_id_type_ const *outputs_counts,                          //
-    state_id_type_ const *outputs_offsets,                         //
-    size_t const *needles_lengths,                                 //
-    size_t const max_length_among_needles) {
+__global__ void _count_matches_with_haystack_per_device( //
+    span<byte_t const> haystack, aho_corasick_dictionary_view<state_id_type_> dict, size_t *count_for_haystack_ptr) {
 
     // We only use this kernel for small haystacks, where a smaller integer type is enough for size.
-    using small_size_t = uint;
-    using haystack_t = haystack_string_type_;
-    using char_t = typename haystack_t::value_type;
     using state_id_t = state_id_type_;
 
     // We may have multiple warps operating in the same block.
-    uint const warp_size = warpSize;
-    size_t const global_thread_index = static_cast<uint>(blockIdx.x * blockDim.x + threadIdx.x);
-    size_t const global_warp_index = static_cast<uint>(global_thread_index / warp_size);
-    size_t const warps_per_block = static_cast<uint>(blockDim.x / warp_size);
-    size_t const warps_per_device = static_cast<uint>(gridDim.x * warps_per_block);
-    size_t const threads_per_device = warps_per_device * warp_size;
-    uint const warp_thread_index = static_cast<uint>(global_thread_index % warp_size);
+    size_t const warp_size = warpSize;
+    size_t const global_thread_index = static_cast<size_t>(blockIdx.x * blockDim.x + threadIdx.x);
+    size_t const threads_per_device = static_cast<size_t>(blockDim.x * gridDim.x);
+    size_t const warp_thread_index = static_cast<size_t>(global_thread_index % warp_size);
 
-    char_t const *const haystack_begin = haystack.data();
-    small_size_t const haystack_length = static_cast<small_size_t>(haystack.size());
-    small_size_t const chars_per_core_optimal = divide_round_up<small_size_t>(haystack_length, threads_per_device);
+    size_t const haystack_length = haystack.size();
+    size_t const chars_per_core_optimal = divide_round_up<size_t>(haystack_length, threads_per_device);
 
     // We shouldn't even consider needles longer than the haystack
-    small_size_t const max_needle_length =
-        std::min(static_cast<small_size_t>(max_length_among_needles), haystack_length);
+    size_t const max_needle_length = std::min(static_cast<size_t>(dict.max_needle_length), haystack_length);
     bool const longest_needle_fits_on_one_thread = max_needle_length * threads_per_device < haystack_length;
-    small_size_t results_per_thread = 0;
+    size_t results_per_thread = 0;
     if (longest_needle_fits_on_one_thread) {
         _count_short_needle_matches_in_one_part_t partial_result =
-            _count_short_needle_matches_in_one_part_per_warp_thread<small_size_t, char_t, state_id_t,
-                                                                    alphabet_size_>( //
-                haystack_begin, haystack_length,                                     //
-                count_states, transitions,                                           //
-                outputs_counts, max_length_among_needles,                            //
-                global_thread_index, threads_per_device);
+            _count_short_needle_matches_in_one_part_per_warp_thread<size_t, state_id_t>( //
+                haystack, dict, global_thread_index, threads_per_device);
         results_per_thread =
-            partial_result.total - non_zero_if<small_size_t>(partial_result.prefix, global_thread_index != 0);
+            partial_result.total - non_zero_if<size_t>(partial_result.prefix, global_thread_index != 0);
     }
     else {
-        results_per_thread =
-            _count_needle_matches_in_one_part_per_warp_thread<small_size_t, char_t, state_id_t, alphabet_size_>( //
-                haystack_begin, haystack_length,                                                                 //
-                count_states, transitions,                                                                       //
-                outputs, outputs_counts, outputs_offsets,                                                        //
-                needles_lengths, max_length_among_needles,                                                       //
-                global_thread_index, threads_per_device);
+        results_per_thread = _count_needle_matches_in_one_part_per_warp_thread<size_t, state_id_t>( //
+            haystack, dict, global_thread_index, threads_per_device);
     }
 
     // Instead of the efficient tree-like shared-memory reductions with subsequent writes, we simply use atomic
@@ -308,7 +266,7 @@ __global__ void _count_matches_with_haystack_per_device(           //
     // To slightly reduce the traffic, we can aggregate within the warp first.
     small_size_t results_across_warp = _reduce_in_warp(results_per_thread);
     if (warp_thread_index == 0) {
-        cuda::atomic_ref<size_t> count_for_haystack(counts_per_haystack[haystack_index]);
+        cuda::atomic_ref<size_t> count_for_haystack(*count_for_haystack_ptr);
         count_for_haystack.fetch_add(results_across_warp, cuda::std::memory_order_relaxed);
     }
 }
@@ -395,7 +353,9 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
 
         _sz_assert(counts.size() == haystacks.size());
 
-        using haystacks_t = typename std::decay_t<haystacks_type_>;
+        using haystacks_t = typename std::remove_reference_t<haystacks_type_>;
+        using haystack_t = typename haystacks_t::value_type;
+        using char_t = typename haystack_t::value_type;
         static_assert(std::is_nothrow_copy_constructible_v<haystacks_t>,
                       "Haystack type must be nothrow copy constructible");
 
@@ -409,22 +369,57 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
         if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
 
         // Allocate GPU memory buffer using safe_vector
-        using size_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
-        safe_vector<size_t, size_allocator_t> counts_buffer(dict_.allocator());
-        if (counts_buffer.try_resize(counts.size()) != status_t::success_k)
+        using task_t = cuda_count_many_task_t;
+        using task_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<task_t>;
+        safe_vector<task_t, task_allocator_t> tasks_buffer(dict_.allocator());
+        if (tasks_buffer.try_resize(counts.size()) != status_t::success_k)
             return {status_t::bad_alloc_k, cudaErrorMemoryAllocation};
+
+        // Populate the tasks buffer with haystacks
+        for (size_t i = 0; i < haystacks.size(); ++i) {
+            auto &haystack = haystacks[i];
+            auto haystack_bytes = span<char_t const>(haystack.data(), haystack.size()).template cast<byte_t const>();
+            tasks_buffer[i].haystack = haystack_bytes;
+            tasks_buffer[i].task_index = i;
+            tasks_buffer[i].result = 0; // Initialize result to zero
+        }
+
+        // Sort the tasks by size of the haystack and isolate the ones that should be processed across the device.
+        std::sort(tasks_buffer.begin(), tasks_buffer.end(),
+                  [](task_t const &a, task_t const &b) { return a.haystack.size() < b.haystack.size(); });
 
         // Calculate optimal thread and block configuration
         uint const threads_per_block = specs.warp_size * 4;               // 4 warps per block
         uint const blocks_per_grid = specs.streaming_multiprocessors * 2; // 2 blocks per SM
+        uint const threads_per_device = blocks_per_grid * threads_per_block;
+        uint const warps_per_device = threads_per_device / specs.warp_size;
 
-        // Launch the kernel
-        auto kernel = &_count_matches_with_haystack_per_warp<state_id_t, haystacks_t, alphabet_size_k, sz_cap_cuda_k>;
+        // Our warp-wide matchers are more efficient if we have enough haystacks to saturate the device.
+        // The weird corner case is having many short haystacks and just a couple of very long ones.
+        // TODO: Processing such inputs would be extremely inefficient.
+        size_t const min_length_for_device_wide_processing =
+            round_up_to_multiple<size_t>(dict_.max_needle_length(), 128) * threads_per_device;
+        size_t const haystacks_with_device_wide_processing = std::count_if(
+            tasks_buffer.begin(), tasks_buffer.end(),
+            [&](task_t const &task) { return task.haystack.size() >= min_length_for_device_wide_processing; });
+
+        // We can't move the dictionary to the GPU, but we can pass a view
+        aho_corasick_dictionary_view<state_id_t> dict_view(dict_);
+
+        // Launch the kernel for warp-wide processing of haystacks.
+        auto kernel = &_count_matches_with_haystack_per_warp<state_id_t, sz_cap_cuda_k>;
         kernel<<<blocks_per_grid, threads_per_block, 0, executor.stream>>>(
-            haystacks, counts_buffer.data(),                                                       //
-            dict_.count_states(), dict_.transitions().data(),                                      //
-            dict_.outputs().data(), dict_.outputs_counts().data(), dict_.outputs_offsets().data(), //
-            dict_.needles_lengths().data(), dict_.max_needle_length());
+            {tasks_buffer.data(), tasks_buffer.size() - haystacks_with_device_wide_processing}, dict_view);
+
+        // Handle the last haystacks that are too long for warp-wide processing.
+        for (size_t i = tasks_buffer.size() - haystacks_with_device_wide_processing; i < tasks_buffer.size(); ++i) {
+            auto &task = tasks_buffer[i];
+            auto device_kernel = &_count_matches_with_haystack_per_device<state_id_t, sz_cap_cuda_k>;
+
+            // Launch the device-wide kernel for this large haystack, passing pointer to task result
+            device_kernel<<<blocks_per_grid, threads_per_block, 0, executor.stream>>>(task.haystack, dict_view,
+                                                                                      &task.result);
+        }
 
         // Check for kernel launch errors
         cudaError_t launch_error = cudaGetLastError();
@@ -434,10 +429,11 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
         cudaError_t execution_error = cudaStreamSynchronize(executor.stream);
         if (execution_error != cudaSuccess) return {status_t::unknown_k, execution_error};
 
-        // Copy results back to host
-        cudaError_t copy_error = cudaMemcpyAsync(counts.data(), counts_buffer.data(), counts.size() * sizeof(size_t),
-                                                 cudaMemcpyDeviceToHost, executor.stream);
-        if (copy_error != cudaSuccess) return {status_t::unknown_k, copy_error};
+        // Copy results back to host - extract results from tasks and put them in the correct order
+        for (size_t i = 0; i < tasks_buffer.size(); ++i) {
+            auto &task = tasks_buffer[i];
+            counts[task.task_index] = task.result;
+        }
 
         // Record stop event and calculate timing
         cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream);

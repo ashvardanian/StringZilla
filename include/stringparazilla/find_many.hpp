@@ -540,6 +540,32 @@ struct aho_corasick_dictionary {
     }
 };
 
+/**
+ *  @brief A view into an immutable Aho-Corasick dictionary to simplify passing it to GPU-like accelerators.
+ */
+template <typename state_id_type_ = u32_t>
+struct aho_corasick_dictionary_view {
+    using state_id_t = state_id_type_;
+    static constexpr state_id_t alphabet_size_k = 256;
+    using state_transitions_t = safe_array<state_id_t, alphabet_size_k>;
+
+    state_transitions_t const *transitions = nullptr;
+    size_t count_states = 0;
+    state_id_t const *outputs = nullptr;
+    state_id_t const *outputs_counts = nullptr;
+    state_id_t const *outputs_offsets = nullptr;
+    size_t const *needles_lengths = nullptr;
+    size_t max_needle_length = 0;
+
+    constexpr aho_corasick_dictionary_view() = default;
+
+    template <typename allocator_type_>
+    explicit aho_corasick_dictionary_view(aho_corasick_dictionary<state_id_type_, allocator_type_> const &dict) noexcept
+        : transitions(dict.transitions().data()), count_states(dict.count_states()), outputs(dict.outputs().data()),
+          outputs_counts(dict.outputs_counts().data()), outputs_offsets(dict.outputs_offsets().data()),
+          needles_lengths(dict.needles_lengths().data()), max_needle_length(dict.max_needle_length()) {}
+};
+
 #pragma endregion // Dictionary
 
 #pragma region - Primary API
@@ -589,7 +615,7 @@ struct find_many {
     }
 
     /**
-     *  @brief Counts the number of occurrences of all needles in all @p haystacks. Relevant for filtering and ranking.
+     *  @brief Counts the number of occurrences of all needles in all @p haystacks. Relevant for filtering & ranking.
      *  @param[in] haystacks The input strings to search in.
      *  @param[in] counts The output buffer for the counts of all needles in each haystack.
      */
@@ -707,7 +733,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
     }
 
     /**
-     *  @brief Counts the number of occurrences of all needles in all @p haystacks. Relevant for filtering and ranking.
+     *  @brief Counts the number of occurrences of all needles in all @p haystacks. Relevant for filtering & ranking.
      *  @param[in] haystacks The input strings to search in.
      *  @param[in] counts The output buffer for the counts of all needles in each haystack.
      *  @param[in] executor The executor to use for parallelization.
