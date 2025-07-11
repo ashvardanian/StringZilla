@@ -5,6 +5,7 @@
 #include <tuple> // `std::tuple`
 #include <span>  // `std::span`
 
+#define FU_ENABLE_NUMA 0
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
 #include <stringzillas/find_many.hpp> // C++ templates for string processing

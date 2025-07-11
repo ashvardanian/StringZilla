@@ -575,7 +575,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
         error_cost_t const gap_cost = gap_costs_.open_or_extend;
 
-        executor.for_each_static(n, [&](size_t i) noexcept {
+        executor.for_n(n, [&](size_t i) noexcept {
             score_t pre_substitution = scores_pre_substitution[i];
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
@@ -659,7 +659,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
         error_cost_t const gap_cost = gap_costs_.open_or_extend;
         std::atomic<score_t> atomic_best_score {best_score_};
-        executor.for_each_slice(n, [&](size_t i_start, size_t i_end) noexcept {
+        executor.for_slices(n, [&](size_t i_start, size_t i_end) noexcept {
             score_t local_best_score = atomic_best_score;
             for (size_t i = i_start; i < i_end; ++i) {
                 score_t pre_substitution = scores_pre_substitution[i];
@@ -772,7 +772,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         score_t *scores_new_deletions,                                                   //
         executor_type_ &&executor = {}) noexcept {
 
-        executor.for_each_static(n, [&](size_t i) noexcept {
+        executor.for_n(n, [&](size_t i) noexcept {
             score_t pre_substitution = scores_pre_substitution[i];
             score_t pre_insertion_opening = scores_pre_insertion[i];
             score_t pre_deletion_opening = scores_pre_deletion[i];
@@ -879,7 +879,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         executor_type_ &&executor = {}) noexcept {
 
         std::atomic<score_t> atomic_best_score {best_score_};
-        executor.for_each_slice(n, [&](size_t i_start, size_t i_end) noexcept {
+        executor.for_slices(n, [&](size_t i_start, size_t i_end) noexcept {
             score_t local_best_score = atomic_best_score;
             for (size_t i = i_start; i < i_end; ++i) {
                 score_t pre_substitution = scores_pre_substitution[i];
@@ -2116,7 +2116,7 @@ status_t _score_in_parallel(                                                    
 
     // ? There may be a huge variance in the lengths of the strings,
     // ? so we need to use a dynamic schedule.
-    executor.for_each_dynamic(first_size, [&](size_t i) noexcept {
+    executor.for_n_dynamic(first_size, [&](size_t i) noexcept {
         if (error.load() != status_t::success_k) return;
         score_t result = 0;
         auto const &first = first_strings[i];
@@ -2975,7 +2975,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
         // In this variant we will need at most (64 * 1024 / 32) = 2048 loops per diagonal.
         size_t const body_pages = hbt.body / step_k;
-        executor.for_each_static(body_pages, [&](size_t const page) noexcept {
+        executor.for_n(body_pages, [&](size_t const page) noexcept {
             size_t const progress = page * step_k;
             slice_aligned32chars(                                                                             //
                 first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress, //
@@ -3121,7 +3121,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
 
         // In this variant we will need at most (64 * 1024 / 16) = 4096 loops per diagonal.
         size_t const body_pages = hbt.body / step_k;
-        executor.for_each_static(body_pages, [&](size_t const page) noexcept {
+        executor.for_n(body_pages, [&](size_t const page) noexcept {
             size_t const progress = page * step_k;
             slice_aligned16chars(                                                                             //
                 first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress, //
@@ -3266,7 +3266,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
                 match_cost_vec, mismatch_cost_vec, gap_cost_vec);
 
         size_t const body_pages = hbt.body / step_k;
-        executor.for_each_static(body_pages, [&](size_t const page) noexcept {
+        executor.for_n(body_pages, [&](size_t const page) noexcept {
             size_t const progress = page * step_k;
             slice_aligned16chars(                                                                             //
                 first_reversed_slice + progress, second_slice + progress, scores_pre_substitution + progress, //
@@ -3486,7 +3486,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
         // In this variant we will need at most (64 * 1024 / 32) = 2048 loops per diagonal.
         size_t const body_pages = length / step_k;
-        executor.for_each_static(body_pages, [&](size_t const page) noexcept {
+        executor.for_n(body_pages, [&](size_t const page) noexcept {
             size_t const progress = page * step_k;
             slice_upto32chars(                                                                                       //
                 first_reversed_slice + progress, second_slice + progress, step_k,                                    //
@@ -3607,7 +3607,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
 
         // Handle the body in parallel, despite having misaligned writes:
         size_t const body_pages = length / step_k;
-        executor.for_each_static(body_pages, [&](size_t const page) noexcept {
+        executor.for_n(body_pages, [&](size_t const page) noexcept {
             size_t const progress = page * step_k;
             slice_upto16chars(                                                             //
                 first_reversed_slice + progress, second_slice + progress, step_k,          //
@@ -3937,7 +3937,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
 
         // Progress through the row 64 characters at a time.
         size_t const count_slices = n / 64;
-        executor.for_each_static(count_slices, [&](size_t idx_slice) noexcept {
+        executor.for_n(count_slices, [&](size_t idx_slice) noexcept {
             slice_64chars(second_slice, idx_slice * 64, gap, scores_pre_substitution, scores_pre_insertion, scores_new);
         });
 
@@ -4077,7 +4077,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i32_t, error_costs_
 
         // Progress through the row 64 characters at a time.
         size_t const count_slices = n / 64;
-        executor.for_each_static(count_slices, [&](size_t idx_slice) noexcept {
+        executor.for_n(count_slices, [&](size_t idx_slice) noexcept {
             slice_64chars(second_slice, idx_slice * 64, gap, scores_pre_substitution, scores_pre_insertion, scores_new);
         });
 

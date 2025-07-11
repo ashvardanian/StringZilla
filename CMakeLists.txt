@@ -451,7 +451,7 @@ target_include_directories(
 if (${STRINGZILLA_BUILD_SHARED})
 
     function (define_shared target)
-        add_library(${target} SHARED c/lib.c)
+        add_library(${target} SHARED c/stringzilla.c)
         add_library(${PROJECT_NAME}::${target} ALIAS ${target})
 
         set_target_properties(

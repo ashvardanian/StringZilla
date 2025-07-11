@@ -4,6 +4,7 @@
  */
 #include <tuple> // `std::tuple`
 
+#define FU_ENABLE_NUMA 0
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
 #include <stringzillas/similarity.hpp> // C++ templates for string similarity measures
