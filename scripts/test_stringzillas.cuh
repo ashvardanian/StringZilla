@@ -8,6 +8,7 @@
 #include <cstring> // `std::memcmp`
 #include <thread>  // `std::thread::hardware_concurrency`
 
+#define FU_ENABLE_NUMA 0
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
 #include "stringzillas/find_many.hpp"
@@ -28,6 +29,7 @@ namespace ashvardanian {
 namespace stringzillas {
 namespace scripts {
 
+namespace fu = fork_union;
 using namespace stringzilla;
 using namespace stringzilla::scripts;
 
@@ -1118,49 +1120,9 @@ struct find_many_baselines_t {
  *          on a @b fixed set of different representative ASCII and UTF-8 strings.
  */
 template <typename base_operator_, typename simd_operator_, typename... extra_args_>
-void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_operator, extra_args_ &&...extra_args) {
+void test_find_many_on(std::vector<std::string> haystacks, std::vector<std::string> needles,
+                       base_operator_ &&base_operator, simd_operator_ &&simd_operator, extra_args_ &&...extra_args) {
 
-    std::vector<std::string> haystacks, needles;
-
-    // Some vary basic variants:
-    needles.emplace_back("his");
-    needles.emplace_back("is");
-    needles.emplace_back("she");
-    needles.emplace_back("her");
-
-    needles.emplace_back("école"), needles.emplace_back("école");                   // decomposed
-    needles.emplace_back("Schön"), needles.emplace_back("Scho\u0308n");             // combining diaeresis
-    needles.emplace_back("naïve"), needles.emplace_back("naive");                   // stripped diaeresis
-    needles.emplace_back("façade"), needles.emplace_back("facade");                 // no cedilla
-    needles.emplace_back("office"), needles.emplace_back("ofﬁce");                  // “fi” ligature
-    needles.emplace_back("Straße"), needles.emplace_back("Strasse");                // ß vs ss
-    needles.emplace_back("ABBA"), needles.emplace_back("\u0410\u0412\u0412\u0410"); // Latin vs Cyrillic
-    needles.emplace_back("中国"), needles.emplace_back("中國");                     // simplified vs traditional
-    needles.emplace_back("🙂"), needles.emplace_back("☺️");                          // emoji variants
-    needles.emplace_back("€100"), needles.emplace_back("EUR 100");                  // currency symbol vs abbreviation
-
-    // Haystacks should contain arbitrary strings including those needles
-    // in different positions, potentially interleaving
-    haystacks.emplace_back("That is a test string"); // ? "only "is"
-    haystacks.emplace_back("This is a test string"); // ? "his", 2x "is"
-    haystacks.emplace_back("ahishers");              // textbook example
-    haystacks.emplace_back("hishishersherishis");    // heavy overlap, prefix & suffix collisions
-    haystacks.emplace_back("si siht si a tset gnirts; reh ton si ehs, tub sih ti si."); // no real matches
-    haystacks.emplace_back("his\0is\r\nshe\0her");                                      // null-included
-
-    // ~260 chars – dense English with overlapping words (“his”, “is”, “she”, “her”)
-    haystacks.emplace_back(R"(
-    In this historic thesis, the historian highlights his findings: this is the synthesis of data.
-    She examined the theory, he shared her methodology. In this chapter, he lists his equipment:
-    microscope, test kit, sensor. It is here that she erred: misalignment arises.
-    )");
-
-    // ~320 chars – multilingual snippet with needles in Latin, Arabic, Chinese, English
-    haystacks.emplace_back(R"(
-    The conference in 北京 attracted researchers from across the globe. His presentation “AI in Healthcare”
-    was a hit—she received awards. الباحثون استعرضوا الأبحاث، واستشارت her colleagues. 这是一次重要的会议。
-    She said: “This is only the beginning.” In her report, his name appears seventeen times.
-    )");
     using match_t = find_many_match_t;
 
     // First check with a batch-size of 1
@@ -1244,6 +1206,102 @@ void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_
             _sz_assert(matches_base[i].needle.data() == matches_simd[i].needle.data());
             _sz_assert(matches_base[i].needle_index == matches_simd[i].needle_index);
         }
+    }
+}
+
+/**
+ *  @brief  Tests the correctness of the string class Levenshtein distance computation,
+ *          as well as the similarity scoring functions for bioinformatics-like workloads
+ *          on a @b fixed set of different representative ASCII and UTF-8 strings.
+ */
+template <typename base_operator_, typename simd_operator_, typename... extra_args_>
+void test_find_many_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_operator, extra_args_ &&...extra_args) {
+
+    {
+        std::vector<std::string> haystacks, needles;
+
+        // Some vary basic variants:
+        needles.emplace_back("his");
+        needles.emplace_back("is");
+        needles.emplace_back("she");
+        needles.emplace_back("her");
+
+        needles.emplace_back("école"), needles.emplace_back("école");                   // decomposed
+        needles.emplace_back("Schön"), needles.emplace_back("Scho\u0308n");             // combining diaeresis
+        needles.emplace_back("naïve"), needles.emplace_back("naive");                   // stripped diaeresis
+        needles.emplace_back("façade"), needles.emplace_back("facade");                 // no cedilla
+        needles.emplace_back("office"), needles.emplace_back("ofﬁce");                  // “fi” ligature
+        needles.emplace_back("Straße"), needles.emplace_back("Strasse");                // ß vs ss
+        needles.emplace_back("ABBA"), needles.emplace_back("\u0410\u0412\u0412\u0410"); // Latin vs Cyrillic
+        needles.emplace_back("中国"), needles.emplace_back("中國");                     // simplified vs traditional
+        needles.emplace_back("🙂"), needles.emplace_back("☺️");                          // emoji variants
+        needles.emplace_back("€100"), needles.emplace_back("EUR 100"); // currency symbol vs abbreviation
+
+        // Haystacks should contain arbitrary strings including those needles
+        // in different positions, potentially interleaving
+        haystacks.emplace_back("That is a test string"); // ? "only "is"
+        haystacks.emplace_back("This is a test string"); // ? "his", 2x "is"
+        haystacks.emplace_back("ahishers");              // textbook example
+        haystacks.emplace_back("hishishersherishis");    // heavy overlap, prefix & suffix collisions
+        haystacks.emplace_back("si siht si a tset gnirts; reh ton si ehs, tub sih ti si."); // no real matches
+        haystacks.emplace_back("his\0is\r\nshe\0her");                                      // null-included
+
+        // ~260 chars – dense English with overlapping words (“his”, “is”, “she”, “her”)
+        haystacks.emplace_back(R"(
+        In this historic thesis, the historian highlights his findings: this is the synthesis of data.
+        She examined the theory, he shared her methodology. In this chapter, he lists his equipment:
+        microscope, test kit, sensor. It is here that she erred: misalignment arises.
+        )");
+
+        // ~320 chars – multilingual snippet with needles in Latin, Arabic, Chinese, English
+        haystacks.emplace_back(R"(
+        The conference in 北京 attracted researchers from across the globe. His presentation “AI in Healthcare”
+        was a hit—she received awards. الباحثون استعرضوا الأبحاث، واستشارت her colleagues. 这是一次重要的会议。
+        She said: “This is only the beginning.” In her report, his name appears seventeen times.
+        )");
+
+        test_find_many_on(haystacks, needles, base_operator, simd_operator, extra_args...);
+    }
+
+    // Many of our algorithms depend on the idea that needles are shorter than the slices that each core may receive
+    {
+        std::vector<std::string> haystacks, needles;
+        needles.emplace_back("is");
+        needles.emplace_back("his");
+
+        haystacks.emplace_back("this is his, that is his, those are his, these are his");
+        haystacks.emplace_back("his is this, his is that, his are those, his are these");
+        haystacks.emplace_back(R"(
+        1 is this 2 is this 3 is this 4 is this 5 is this 6 is this 7 is this 8 is this
+        9 is this 10 is this 11 is this 12 is this 13 is this 14 is this 15 is this 16 is this
+        )");
+
+        test_find_many_on(haystacks, needles, base_operator, simd_operator, extra_args...);
+    }
+
+    // Try even simpler alphabets
+    {
+        std::vector<std::string> haystacks, needles;
+        needles.emplace_back("ab");
+        needles.emplace_back("aba");
+
+        haystacks.emplace_back("abababababababababababababababababababababababababababababababababab");
+        haystacks.emplace_back("abbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabbaabba");
+
+        test_find_many_on(haystacks, needles, base_operator, simd_operator, extra_args...);
+    }
+
+    // Try a combination of very short and very long needles
+    {
+        std::vector<std::string> haystacks, needles;
+        needles.emplace_back("a");
+        needles.emplace_back("b");
+        needles.emplace_back("abracadabra");
+
+        haystacks.emplace_back("abracadabra");
+        haystacks.emplace_back("abracadabracadabra");
+
+        test_find_many_on(haystacks, needles, base_operator, simd_operator, extra_args...);
     }
 }
 
@@ -1367,11 +1425,6 @@ void test_find_many_equivalence() {
     needles_long_config.batch_size =
         std::pow(needles_long_config.alphabet.size(), needles_long_config.max_string_length);
 
-    // Let's reuse a thread-pool to amortize the cost of spawning threads.
-    fork_union_t pool;
-    if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
-    static_assert(executor_like<fork_union_t>);
-
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs = *gpu_specs();
 #endif
@@ -1380,7 +1433,17 @@ void test_find_many_equivalence() {
     test_find_many_fixed(find_many_baselines_t {}, find_many_u32_serial_t {});
 
     // Multi-threaded parallel Aho-Corasick implementation
-    test_find_many_fixed(find_many_baselines_t {}, find_many_u32_parallel_t {}, pool);
+    for (std::size_t threads : {2, 3, 4, 5}) {
+        fu::basic_pool_t pool;
+        if (!pool.try_spawn(threads)) throw std::runtime_error("Failed to spawn thread pool.");
+        static_assert(executor_like<fu::basic_pool_t>);
+        test_find_many_fixed(find_many_baselines_t {}, find_many_u32_parallel_t {}, pool);
+    }
+
+    // Let's reuse a thread-pool to amortize the cost of spawning threads.
+    fu::basic_pool_t pool;
+    if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
+    static_assert(executor_like<fu::basic_pool_t>);
 
 #if SZ_USE_CUDA
     test_find_many_fixed(find_many_baselines_t {}, find_many_u32_cuda_t {}, cuda_executor_t {});
