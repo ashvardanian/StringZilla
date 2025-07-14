@@ -185,10 +185,10 @@ build_release/stringzilla_bench_container_cpp20 # - for STL containers with stri
 There are also parallel algorithms that need a very different benchmarking setup:
 
 ```sh
-build_release/stringzillas_bench_find_many_cpp20  # - for parallel multi-pattern search on CPU
-build_release/stringzillas_bench_find_many_cu20   # - for parallel multi-pattern search on GPU
-build_release/stringzillas_bench_similarity_cpp20 # - for parallel edit distances and alignment scores on CPU
-build_release/stringzillas_bench_similarity_cu20  # - for parallel edit distances and alignment scores on GPU
+build_release/stringzillas_bench_fingerprint_cpp20  # - for parallel multi-pattern search on CPU
+build_release/stringzillas_bench_fingerprint_cu20   # - for parallel multi-pattern search on GPU
+build_release/stringzillas_bench_similarity_cpp20   # - for parallel edit distances and alignment scores on CPU
+build_release/stringzillas_bench_similarity_cu20    # - for parallel edit distances and alignment scores on GPU
 ```
 
 All of them support customization via environment variables.

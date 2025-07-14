@@ -101,7 +101,7 @@ jobs:
       - name: Test Parallel Algorithms on Real World Data
         run: |
           build_artifacts/stringzillas_bench_similarity_cpp20 ${DATASET_PATH} # for edit distances and alignment scores
-          build_artifacts/stringzillas_bench_find_many_cpp20 ${DATASET_PATH}  # for multi-needle search in many strings
+          build_artifacts/stringzillas_bench_fingerprint_cpp20 ${DATASET_PATH}  # for multi-needle search in many strings
         env:
           DATASET_PATH: ./README.md
         # Don't overload GitHub with our benchmarks.

@@ -33,8 +33,8 @@
 #
 # * stringzillas_bench_similarity_cpp20: A benchmark for similarity operations.
 # * stringzillas_bench_similarity_cu20: A benchmark for similarity operations on GPU.
-# * stringzillas_bench_find_many_cpp20: A benchmark for finding many substrings.
-# * stringzillas_bench_find_many_cu20: A benchmark for finding many substrings on GPU.
+# * stringzillas_bench_fingerprint_cpp20: A benchmark for finding many substrings.
+# * stringzillas_bench_fingerprint_cu20: A benchmark for finding many substrings on GPU.
 #
 # For higher-level language bindings separate build scripts are provided, native to each toolchain.
 cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
@@ -373,13 +373,13 @@ if (${STRINGZILLA_BUILD_BENCHMARK})
 
     # Parallel benchmarks
     define_launcher(stringzillas_bench_similarity_cpp20 scripts/bench_similarity.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzillas_bench_find_many_cpp20 scripts/bench_find_many.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(stringzillas_bench_fingerprint_cpp20 scripts/bench_fingerprint.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     if (ENABLE_CUDA)
         define_gpu_launcher(
             stringzillas_bench_similarity_cu20 scripts/bench_similarity.cu 20 "${STRINGZILLA_TARGET_ARCH}"
         )
         define_gpu_launcher(
-            stringzillas_bench_find_many_cu20 scripts/bench_find_many.cu 20 "${STRINGZILLA_TARGET_ARCH}"
+            stringzillas_bench_fingerprint_cu20 scripts/bench_fingerprint.cu 20 "${STRINGZILLA_TARGET_ARCH}"
         )
     endif ()
 endif ()

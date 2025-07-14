@@ -6,12 +6,12 @@
  */
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
-#include <stringzillas/find_many.hpp>  // C++ templates for string processing
-#include <stringzillas/similarity.hpp> // C++ templates for string similarity
+#include <stringzillas/fingerprint.hpp> // C++ templates for string processing
+#include <stringzillas/similarity.hpp>  // C++ templates for string similarity
 
 #if SZ_USE_CUDA
-#include <stringzillas/find_many.cuh>  // Parallel string processing in CUDA
-#include <stringzillas/similarity.cuh> // Parallel string similarity in CUDA
+#include <stringzillas/fingerprint.cuh> // Parallel string processing in CUDA
+#include <stringzillas/similarity.cuh>  // Parallel string similarity in CUDA
 #endif
 
 namespace sz = ashvardanian::stringzilla;
