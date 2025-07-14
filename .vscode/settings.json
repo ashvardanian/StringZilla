@@ -54,6 +54,7 @@
     "cibuildwheel",
     "CONCAT",
     "constexpr",
+    "coprime",
     "copydoc",
     "Corasick",
     "cptr",

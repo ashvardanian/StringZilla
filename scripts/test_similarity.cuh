@@ -532,34 +532,6 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
     }
 }
 
-struct fuzzy_config_t {
-    std::string_view alphabet = "ABC";
-    std::size_t batch_size = 16;
-    std::size_t min_string_length = 1;
-    std::size_t max_string_length = 200;
-};
-
-void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, arrow_strings_tape_t &tape,
-                       bool unique = false) {
-    array.resize(config.batch_size);
-
-    std::uniform_int_distribution<std::size_t> length_distribution(config.min_string_length, config.max_string_length);
-    for (std::size_t i = 0; i != config.batch_size; ++i) {
-        std::size_t length = length_distribution(global_random_generator());
-        array[i] = random_string(length, config.alphabet.data(), config.alphabet.size());
-    }
-
-    if (unique) {
-        std::sort(array.begin(), array.end());
-        auto last = std::unique(array.begin(), array.end());
-        array.erase(last, array.end());
-    }
-
-    // Convert to a GPU-friendly layout
-    status_t status = tape.try_assign(array.data(), array.data() + array.size());
-    _sz_assert(status == status_t::success_k);
-}
-
 /**
  *  @brief  Tests the correctness of the string class Levenshtein distance computation,
  *          as well as the similarity scoring functions for bioinformatics-like workloads

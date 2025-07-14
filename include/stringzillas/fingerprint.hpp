@@ -113,9 +113,9 @@ struct multiplying_rolling_hasher {
 
     inline std::size_t window_width() const noexcept { return window_width_; }
 
-    inline hash_t update(hash_t old_hash, hash_t new_char) const noexcept { return old_hash * multiplier_ + new_char; }
+    inline hash_t update(hash_t old_hash, byte_t new_char) const noexcept { return old_hash * multiplier_ + new_char; }
 
-    inline hash_t update(hash_t const old_hash, hash_t const old_char, hash_t const new_char) const noexcept {
+    inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
         hash_t const without_head = old_hash - old_char * highest_power_;
         return without_head * multiplier_ + new_char;
     }
@@ -141,48 +141,49 @@ struct polynomial_rolling_hasher {
     using hash_t = hash_type_;
     using accumulator_t = accumulator_type_;
 
-    explicit polynomial_rolling_hasher(std::size_t window_width, hash_t prime, hash_t modulo_base) noexcept
-        : window_width_ {window_width}, modulo_base_ {modulo_base}, prime_ {prime}, prime_power_ {1} {
+    explicit polynomial_rolling_hasher(std::size_t window_width, hash_t multiplier, hash_t modulo) noexcept
+        : window_width_ {window_width}, modulo_ {modulo}, multiplier_ {multiplier}, discarding_multiplier_ {1} {
 
         _sz_assert(window_width_ > 1 && "Window width must be > 1");
-        _sz_assert(prime_ > 0 && "Prime must be positive");
-        _sz_assert(modulo_base_ > 1 && "Modulo base must be > 1");
+        _sz_assert(multiplier_ > 0 && "Multiplier must be positive");
+        _sz_assert(modulo_ > 1 && "Modulo base must be > 1");
 
-        for (std::size_t i = 0; i + 1 < window_width_; ++i) prime_power_ = mul_mod(prime_power_, prime_);
+        for (std::size_t i = 0; i + 1 < window_width_; ++i)
+            discarding_multiplier_ = mul_mod(discarding_multiplier_, multiplier_);
     }
 
     inline std::size_t window_width() const noexcept { return window_width_; }
 
-    inline hash_t update(hash_t old_hash, hash_t new_char) const noexcept {
-        return add_mod(mul_mod(old_hash, prime_), new_char);
+    inline hash_t update(hash_t old_hash, byte_t new_char) const noexcept {
+        return add_mod(mul_mod(old_hash, multiplier_), new_char);
     }
 
-    inline hash_t update(hash_t const old_hash, hash_t const old_char, hash_t const new_char) const noexcept {
-        hash_t const term_to_subtract = mul_mod(old_char, prime_power_);
+    inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
+        hash_t const term_to_subtract = mul_mod(old_char, discarding_multiplier_);
         hash_t const without_head = sub_mod(old_hash, term_to_subtract);
-        return add_mod(mul_mod(without_head, prime_), new_char);
+        return add_mod(mul_mod(without_head, multiplier_), new_char);
     }
 
   private:
     inline hash_t mul_mod(hash_t const a, hash_t const b) const noexcept {
         accumulator_t const prod = accumulator_t {a} * accumulator_t {b};
-        return static_cast<hash_t>(prod % modulo_base_);
+        return static_cast<hash_t>(prod % modulo_);
     }
 
     inline hash_t add_mod(hash_t const a, hash_t const b) const noexcept {
         accumulator_t const sum = accumulator_t {a} + accumulator_t {b};
-        return static_cast<hash_t>(sum % modulo_base_);
+        return static_cast<hash_t>(sum % modulo_);
     }
 
     inline hash_t sub_mod(hash_t const a, hash_t const b) const noexcept {
-        accumulator_t diff = accumulator_t {a} + modulo_base_ - accumulator_t {b};
-        return static_cast<hash_t>(diff % modulo_base_);
+        accumulator_t diff = accumulator_t {a} + modulo_ - accumulator_t {b};
+        return static_cast<hash_t>(diff % modulo_);
     }
 
     std::size_t window_width_;
-    hash_t modulo_base_;
-    hash_t prime_;
-    hash_t prime_power_;
+    hash_t modulo_;
+    hash_t multiplier_;
+    hash_t discarding_multiplier_;
 };
 
 /**
@@ -203,11 +204,11 @@ struct buz_rolling_hasher {
 
     inline std::size_t window_width() const noexcept { return window_width_; }
 
-    inline hash_t update(hash_t old_hash, hash_t new_char) const noexcept {
+    inline hash_t update(hash_t old_hash, byte_t new_char) const noexcept {
         return rotl(old_hash, 1) ^ table_[new_char & 0xFFu];
     }
 
-    inline hash_t update(hash_t const old_hash, hash_t const old_char, hash_t const new_char) const noexcept {
+    inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
         constexpr unsigned bits_k = sizeof(hash_t) * 8u;
 
         hash_t const rolled = rotl(old_hash, 1);
@@ -233,6 +234,25 @@ struct buz_rolling_hasher {
     hash_t table_[256];
 };
 
+/**
+ *  @brief Helper function to pick the second co-prime "modulo" base for the Karp-Rabin rolling hashes.
+ *  @retval 0 on failure, or a valid prime number otherwise.
+ */
+inline std::uint64_t choose_coprime_modulo(std::uint64_t multiplier, std::uint64_t limit) noexcept {
+    if (multiplier == 0 || multiplier >= limit || limit <= 1) return 0;
+
+    // Upper bound guaranteeing no overflow in non-discarding `update` calls
+    std::uint64_t max_input = std::numeric_limits<byte_t>::max() + 1u;
+    std::uint64_t bound = (limit - (max_input + 1)) / multiplier + 1;
+
+    if (!(bound & 1u)) --bound; // Make odd
+
+    for (std::uint64_t p = bound; p >= 3; p -= 2)
+        if (std::gcd(p, multiplier) != 1) continue;
+
+    return 0;
+}
+
 template <typename float_type_ = float>
 struct floating_rolling_hasher;
 
@@ -245,7 +265,7 @@ struct floating_rolling_hasher;
  *  up to (2²³ - 1) = (8'388'607).
  *
  *  Some of the large primes fitting right before that limit are:
- *      8'388'539, 8'388'547, 8'388'571, 8'388'581, 8'388'587, 8'388'593
+ *      8'388'539, 8'388'547, 8'388'571, 8'388'581, 8'388'587, 8'388'593.
  *
  *  @note It's fair to say that this hash at least 23 bits of information, but it may not be enough for many apps.
  *  @sa `floating_rolling_hasher<double>` for 52 bit variant.
@@ -257,10 +277,13 @@ struct floating_rolling_hasher<float> {
 
     constexpr static float_t limit_k = 8'388'607.0f;
 
-    explicit floating_rolling_hasher(std::size_t const window_width, hash_t const multiplier = 257,
-                                     hash_t const modulo = 8388593) noexcept
+    explicit floating_rolling_hasher(std::size_t const window_width) noexcept
+        : floating_rolling_hasher(window_width, static_cast<float_t>(257), static_cast<float_t>(8388593)) {}
+
+    explicit floating_rolling_hasher(std::size_t const window_width, hash_t const multiplier,
+                                     hash_t const modulo) noexcept
         : window_width_ {window_width}, multiplier_ {multiplier}, modulo_ {modulo}, inverse_modulo_ {1.f / modulo_},
-          negative_highest_pow_ {1.0f} {
+          negative_discarding_multiplier_ {1.0f} {
 
         _sz_assert(window_width_ > 1 && "Window width must be > 1");
         _sz_assert(multiplier_ > 0 && "Multiplier must be positive");
@@ -274,8 +297,8 @@ struct floating_rolling_hasher<float> {
         _sz_assert(largest_intermediary < limit_k && "Intermediate state overflows the limit");
 
         for (std::size_t i = 0; i + 1 < window_width_; ++i)
-            negative_highest_pow_ = std::fmodf(negative_highest_pow_ * multiplier_, modulo_);
-        negative_highest_pow_ = -negative_highest_pow_;
+            negative_discarding_multiplier_ = std::fmodf(negative_discarding_multiplier_ * multiplier_, modulo_);
+        negative_discarding_multiplier_ = -negative_discarding_multiplier_;
     }
 
     inline std::size_t window_width() const noexcept { return window_width_; }
@@ -297,15 +320,18 @@ struct floating_rolling_hasher<float> {
         float_t old_term = float_t(old_char) + 1.0f;
         float_t new_term = float_t(new_char) + 1.0f;
 
-        state = std::fmaf(state, negative_highest_pow_, old_term); // Remove tail
-        state = std::fmaf(state, multiplier_, new_term);           // Add head
+        state = std::fmaf(state, negative_discarding_multiplier_, old_term); // Remove tail
+        state = std::fmaf(state, multiplier_, new_term);                     // Add head
         state = reduce(state);
 
         return sz_bitcast(hash_t, state);
     }
 
   private:
-    /** @brief Barrett-style `std::fmodf` alternative to avoid overflow. */
+    /**
+     *  @brief Barrett-style `std::fmodf` alternative to avoid overflow.
+     *  @see https://en.cppreference.com/w/cpp/numeric/math/fmod
+     */
     inline float_t reduce(float_t h) const noexcept {
         h -= modulo_ * std::floor(h * inverse_modulo_);
         // Clamp into the [0, modulo_) range.
@@ -318,7 +344,98 @@ struct floating_rolling_hasher<float> {
     float_t multiplier_;
     float_t modulo_;
     float_t inverse_modulo_;
-    float_t negative_highest_pow_;
+    float_t negative_discarding_multiplier_;
+};
+
+/**
+ *  @brief Rabin-Karp-style Rolling hash function for double-precision floating-point numbers.
+ *  @tparam float_type_ Type of the floating-point number, e.g., `float`.
+ *
+ *  The IEEE 754 double-precision `float` has a 53-bit significand (52 explicit bits + 1 implicit bit).
+ *  For simplicity, we just focus on the 52-bit part, which is capable of exactly representing integers
+ *  up to (2⁵² - 1) = (4'503'599'627'370'495).
+ *
+ *  Some of the large primes fitting right before that limit are:
+ *      4'503'599'627'370'287, 4'503'599'627'370'299, 4'503'599'627'370'313,
+ *      4'503'599'627'370'323, 4'503'599'627'370'353, 4'503'599'627'370'449.
+ *
+ *  @sa `floating_rolling_hasher<double>` for 52 bit variant.
+ */
+template <>
+struct floating_rolling_hasher<double> {
+    using hash_t = std::uint64_t;
+    using float_t = double;
+
+    constexpr static float_t limit_k = 4503599627370495.0f;
+
+    explicit floating_rolling_hasher(std::size_t const window_width) noexcept
+        : floating_rolling_hasher(window_width, static_cast<float_t>(257), static_cast<float_t>(4503599627370449)) {}
+
+    explicit floating_rolling_hasher(std::size_t const window_width, hash_t const multiplier,
+                                     hash_t const modulo) noexcept
+        : window_width_ {window_width}, multiplier_ {multiplier}, modulo_ {modulo}, inverse_modulo_ {1.f / modulo_},
+          negative_discarding_multiplier_ {1.0} {
+
+        _sz_assert(window_width_ > 1 && "Window width must be > 1");
+        _sz_assert(multiplier_ > 0 && "Multiplier must be positive");
+        _sz_assert(modulo_ > 1 && "Modulo must be > 1");
+
+        // If we want to avoid hitting +inf or NaN, we need to make sure that the product of our post-modulo
+        // normalized number with the multiplier and added subsequent term stays within the exactly representable range.
+        float_t const largest_input_term = std::numeric_limits<byte_t>::max() + 1.0;
+        float_t const largest_normalized_state = modulo_ - 1;
+        float_t const largest_intermediary = largest_normalized_state * multiplier_ + largest_input_term;
+        _sz_assert(largest_intermediary < limit_k && "Intermediate state overflows the limit");
+
+        for (std::size_t i = 0; i + 1 < window_width_; ++i)
+            negative_discarding_multiplier_ = std::fmod(negative_discarding_multiplier_ * multiplier_, modulo_);
+        negative_discarding_multiplier_ = -negative_discarding_multiplier_;
+    }
+
+    inline std::size_t window_width() const noexcept { return window_width_; }
+
+    inline hash_t update(hash_t const old_hash, byte_t const new_char) const noexcept {
+
+        float_t state = sz_bitcast(float_t, old_hash);
+        float_t new_term = float_t(new_char) + 1.0;
+
+        state = std::fma(state, multiplier_, new_term);
+        state = reduce(state);
+
+        return sz_bitcast(hash_t, state);
+    }
+
+    inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
+
+        float_t state = sz_bitcast(float_t, old_hash);
+        float_t old_term = float_t(old_char) + 1.0;
+        float_t new_term = float_t(new_char) + 1.0;
+
+        state = std::fma(state, negative_discarding_multiplier_, old_term); // Remove tail
+        state = std::fma(state, multiplier_, new_term);                     // Add head
+        state = reduce(state);
+
+        return sz_bitcast(hash_t, state);
+    }
+
+  private:
+    /**
+     *  @brief Barrett-style `std::fmod` alternative to avoid overflow.
+     *  @see https://en.cppreference.com/w/cpp/numeric/math/fmod
+     */
+    inline float_t reduce(float_t h) const noexcept {
+        h -= modulo_ * std::floor(h * inverse_modulo_);
+        // Clamp into the [0, modulo_) range.
+        h += modulo_ * (h < 0.0);
+        h -= modulo_ * (h >= modulo_);
+        return h;
+    }
+
+    std::size_t window_width_;
+    float_t multiplier_;
+    float_t modulo_;
+    float_t inverse_modulo_;
+    float_t negative_discarding_multiplier_;
 };
 
 } // namespace stringzillas

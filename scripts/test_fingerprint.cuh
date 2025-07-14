@@ -65,10 +65,9 @@ void test_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const &
     }
 }
 
-void test_rolling_hasher() {
-
-    // Some vary basic variants:
+std::vector<std::string> rolling_hasher_basic_inputs() {
     std::vector<std::string> strings;
+
     strings.emplace_back("his");
     strings.emplace_back("is");
     strings.emplace_back("she");
@@ -92,6 +91,57 @@ void test_rolling_hasher() {
     strings.emplace_back("🙂"), strings.emplace_back("☺️");                          // emoji variants
     strings.emplace_back("€100"), strings.emplace_back("EUR 100");                  // currency symbol vs abbreviation
 
+    return strings;
+}
+
+std::vector<std::string> rolling_hasher_dna_like_inputs() {
+    std::vector<std::string> strings;
+
+    fuzzy_config_t config;
+    config.alphabet = "ACGT";
+    config.batch_size = 100;
+    config.min_string_length = 100;
+    config.max_string_length = 100 * 1024;
+
+    randomize_strings(config, strings);
+    return strings;
+}
+
+std::vector<std::string> rolling_hasher_dna_like_inputs() {
+    std::vector<std::string> strings;
+
+    fuzzy_config_t config;
+    config.alphabet = "ACGT";
+    config.batch_size = 100;
+    config.min_string_length = 100;
+    config.max_string_length = 100 * 1024;
+
+    randomize_strings(config, strings);
+    return strings;
+}
+
+std::vector<std::string> rolling_hasher_inconvenient_inputs() {
+    std::vector<std::string> strings;
+
+    static std::uint8_t const inconvenient_chars[4] = {0x00, 0x01, 0x7F, 0xFF};
+
+    fuzzy_config_t config;
+    config.alphabet = {reinterpret_cast<char const *>(&inconvenient_chars[0]), 4};
+    config.batch_size = 100;
+    config.min_string_length = 100;
+    config.max_string_length = 100 * 1024;
+
+    randomize_strings(config, strings);
+    return strings;
+}
+
+void test_rolling_hasher() {
+
+    // Some very basic variants:
+    auto unit_strings = rolling_hasher_basic_inputs();
+    auto dna_like_strings = rolling_hasher_dna_like_inputs();
+    auto inconvenient_strings = rolling_hasher_inconvenient_inputs();
+
     using u16u32_hasher_t = polynomial_rolling_hasher<u16_t, u32_t>;
     using u32u64_hasher_t = polynomial_rolling_hasher<u32_t, u64_t>;
     using u32mul_hasher_t = multiplying_rolling_hasher<u32_t>;
@@ -100,19 +150,24 @@ void test_rolling_hasher() {
     using u32buz_hasher_t = buz_rolling_hasher<u32_t>;
     using u64buz_hasher_t = buz_rolling_hasher<u64_t>;
     using f32u32_hasher_t = floating_rolling_hasher<float>;
+    using f64u64_hasher_t = floating_rolling_hasher<double>;
 
     std::vector<u16u32_hasher_t> u16u32_hashers;
     u16u32_hashers.emplace_back(3, 31, 65521);
     u16u32_hashers.emplace_back(5, 31, 65521);
     u16u32_hashers.emplace_back(7, 31, 65521);
-    for (auto hasher : u16u32_hashers) test_rolling_hasher(hasher, strings);
+    for (auto hasher : u16u32_hashers)
+        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
+            test_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u32u64_hasher_t> u32u64_hashers;
     u32u64_hashers.emplace_back(3, 31, 65521);
     u32u64_hashers.emplace_back(5, 31, 65521);
     u32u64_hashers.emplace_back(4, 257, SZ_U32_MAX_PRIME);
     u32u64_hashers.emplace_back(7, 257, SZ_U32_MAX_PRIME);
-    for (auto hasher : u32u64_hashers) test_rolling_hasher(hasher, strings);
+    for (auto hasher : u32u64_hashers)
+        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
+            test_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u32mul_hasher_t> u32mul_hashers;
     u32mul_hashers.emplace_back(3);
@@ -123,7 +178,9 @@ void test_rolling_hasher() {
     u32mul_hashers.emplace_back(5, 65521);
     u32mul_hashers.emplace_back(4, 257);
     u32mul_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
-    for (auto hasher : u32mul_hashers) test_rolling_hasher(hasher, strings);
+    for (auto hasher : u32mul_hashers)
+        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
+            test_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<i32mul_hasher_t> i32mul_hashers;
     i32mul_hashers.emplace_back(3);
@@ -134,7 +191,9 @@ void test_rolling_hasher() {
     i32mul_hashers.emplace_back(5, 65521);
     i32mul_hashers.emplace_back(4, 257);
     i32mul_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
-    for (auto hasher : i32mul_hashers) test_rolling_hasher(hasher, strings);
+    for (auto hasher : i32mul_hashers)
+        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
+            test_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u64mul_hasher_t> u64mul_hashers;
     u64mul_hashers.emplace_back(3, 31);
@@ -146,7 +205,9 @@ void test_rolling_hasher() {
     u64mul_hashers.emplace_back(4, 257);
     u64mul_hashers.emplace_back(7, SZ_U64_MAX_PRIME);
     u64mul_hashers.emplace_back(32, 257);
-    for (auto hasher : u64mul_hashers) test_rolling_hasher(hasher, strings);
+    for (auto hasher : u64mul_hashers)
+        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
+            test_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u32buz_hasher_t> u32buz_hashers;
     u32buz_hashers.emplace_back(3);
@@ -157,7 +218,9 @@ void test_rolling_hasher() {
     u32buz_hashers.emplace_back(5, 65521);
     u32buz_hashers.emplace_back(4, 257);
     u32buz_hashers.emplace_back(7, SZ_U32_MAX_PRIME);
-    for (auto hasher : u32buz_hashers) test_rolling_hasher(hasher, strings);
+    for (auto hasher : u32buz_hashers)
+        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
+            test_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<u64buz_hasher_t> u64buz_hashers;
     u64buz_hashers.emplace_back(3, 31);
@@ -169,7 +232,9 @@ void test_rolling_hasher() {
     u64buz_hashers.emplace_back(4, 257);
     u64buz_hashers.emplace_back(7, SZ_U64_MAX_PRIME);
     u64buz_hashers.emplace_back(32, 257);
-    for (auto hasher : u64buz_hashers) test_rolling_hasher(hasher, strings);
+    for (auto hasher : u64buz_hashers)
+        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
+            test_rolling_hasher(hasher, inconvenient_strings);
 
     std::vector<f32u32_hasher_t> f32u32_hashers;
     f32u32_hashers.emplace_back(3, 31);
@@ -181,10 +246,31 @@ void test_rolling_hasher() {
     f32u32_hashers.emplace_back(32, 65521);
     f32u32_hashers.emplace_back(3);
     f32u32_hashers.emplace_back(32);
-    for (auto hasher : f32u32_hashers) test_rolling_hasher(hasher, strings);
+    f32u32_hashers.emplace_back(65);
+    f32u32_hashers.emplace_back(257);   // Super-wide window
+    f32u32_hashers.emplace_back(1000);  // Super-wide window
+    f32u32_hashers.emplace_back(30000); // Super-wide window
+    for (auto hasher : f32u32_hashers)
+        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
+            test_rolling_hasher(hasher, inconvenient_strings);
 
-    void *ptr = nullptr;
-    (void)ptr;
+    std::vector<f64u64_hasher_t> f64u64_hashers;
+    f64u64_hashers.emplace_back(3, 31);
+    f64u64_hashers.emplace_back(5, 65521);
+    f64u64_hashers.emplace_back(4, 257);
+    f64u64_hashers.emplace_back(4, 257);
+    f64u64_hashers.emplace_back(4, 257);
+    f64u64_hashers.emplace_back(32, 257);
+    f64u64_hashers.emplace_back(32, 65521);
+    f64u64_hashers.emplace_back(3);
+    f64u64_hashers.emplace_back(32);
+    f64u64_hashers.emplace_back(65);
+    f64u64_hashers.emplace_back(257);   // Super-wide window
+    f64u64_hashers.emplace_back(1000);  // Super-wide window
+    f64u64_hashers.emplace_back(30000); // Super-wide window
+    for (auto hasher : f64u64_hashers)
+        test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
+            test_rolling_hasher(hasher, inconvenient_strings);
 }
 
 } // namespace scripts
