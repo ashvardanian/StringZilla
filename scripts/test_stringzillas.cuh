@@ -11,9 +11,9 @@
 #define FU_ENABLE_NUMA 0
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
-#if !_SZ_IS_CPP17
-#error "This test requires C++17 or later."
-#endif
+// #if !_SZ_IS_CPP17
+// #error "This test requires C++17 or later."
+// #endif
 
 #include "test_stringzilla.hpp" // `arrow_strings_view_t`
 
