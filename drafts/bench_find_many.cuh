@@ -97,22 +97,6 @@ struct find_many_callable {
     }
 };
 
-template <typename value_type_>
-struct arrays_equality {
-    using vector_t = unified_vector<value_type_>;
-    bool operator()(check_value_t const &a, check_value_t const &b) const noexcept {
-        vector_t const &a_ = *reinterpret_cast<vector_t const *>(a);
-        vector_t const &b_ = *reinterpret_cast<vector_t const *>(b);
-        if (a_.size() != b_.size()) return false;
-        for (std::size_t i = 0; i < a_.size(); ++i)
-            if (a_[i] != b_[i]) {
-                std::printf("Mismatch at index %zu\n", i);
-                return false;
-            }
-        return true;
-    }
-};
-
 void bench_find_many(environment_t const &env) {
 
     using namespace std::string_literals; // for "s" suffix
