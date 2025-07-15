@@ -142,8 +142,8 @@ void test_rolling_hasher() {
     auto dna_like_strings = rolling_hasher_dna_like_inputs();
     auto inconvenient_strings = rolling_hasher_inconvenient_inputs();
 
-    using u16u32_hasher_t = polynomial_rolling_hasher<u16_t, u32_t>;
-    using u32u64_hasher_t = polynomial_rolling_hasher<u32_t, u64_t>;
+    using u16u32_hasher_t = rabin_karp_rolling_hasher<u16_t, u32_t>;
+    using u32u64_hasher_t = rabin_karp_rolling_hasher<u32_t, u64_t>;
     using u32mul_hasher_t = multiplying_rolling_hasher<u32_t>;
     using i32mul_hasher_t = multiplying_rolling_hasher<i32_t>;
     using u64mul_hasher_t = multiplying_rolling_hasher<u64_t>;

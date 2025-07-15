@@ -20,6 +20,8 @@
  *  retrieval tasks. We must also keep in mind, that however costly, the "fingerprinting" is a one-time operation, and
  *  the quality of the resulting "sketch" is no less important than the speed of the algorithm.
  *
+ *  @section Rolling Hashes
+ *
  *  At its core we compute many Karp-Rabin-like "rolling hashes" over multiple window widths and multipliers.
  *  We avoid 64-bit hashes, due to the lack of hardware support for efficient multiplication and modulo operations.
  *  That's especially noticeable on GPUs, where 64-bit ops are often emulated using 32-bit and can be 8-32x slower.
@@ -79,6 +81,17 @@
  *    - on AMD Zen4: 13 cycles on ports 0 or 1.
  *
  *  So optimizations, like the Barrett reduction can still be useful.
+ *
+ *  Choosing the right "window width" is task- and domain-dependant. For example, most English words are
+ *  between 3 and 7 characters long, so a window of 4 bytes would be a good choice. For DNA sequences,
+ *  the "window width" might be a multiple of 3, as the codons are 3 (nucleotides) bytes long.
+ *  With such minimalistic alphabets of just four characters (AGCT) longer windows might be needed.
+ *  For protein sequences the alphabet is 20 characters long, so the window can be shorter, than for DNAs.
+ *
+ *  @section Min-Hashing
+ *
+ *  Computing one such hash won't help us much in large-scale retrieval tasks, but there is a common technique
+ *  called "Min-Hashing" that can be used to produce a fixed-size fingerprint of a string. For the same wind
  */
 #ifndef STRINGZILLAS_FINGERPRINT_HPP_
 #define STRINGZILLAS_FINGERPRINT_HPP_
@@ -93,6 +106,8 @@
 
 namespace ashvardanian {
 namespace stringzillas {
+
+#pragma region - Baseline Rolling Hashers
 
 /**
  *  @brief The simplest example of a rolling hash function, leveraging 2^N modulo arithmetic.
@@ -137,11 +152,13 @@ struct multiplying_rolling_hasher {
  *  @sa `multiplying_rolling_hasher`
  */
 template <typename hash_type_ = std::uint32_t, typename accumulator_type_ = std::uint64_t>
-struct polynomial_rolling_hasher {
+struct rabin_karp_rolling_hasher {
     using hash_t = hash_type_;
     using accumulator_t = accumulator_type_;
 
-    explicit polynomial_rolling_hasher(std::size_t window_width, hash_t multiplier, hash_t modulo) noexcept
+    explicit rabin_karp_rolling_hasher(std::size_t window_width);
+
+    explicit rabin_karp_rolling_hasher(std::size_t window_width, hash_t multiplier, hash_t modulo) noexcept
         : window_width_ {window_width}, modulo_ {modulo}, multiplier_ {multiplier}, discarding_multiplier_ {1} {
 
         _sz_assert(window_width_ > 1 && "Window width must be > 1");
@@ -189,7 +206,7 @@ struct polynomial_rolling_hasher {
 /**
  *  @brief BuzHash rolling hash function leveraging a fixed-size lookup table and bitwise operations.
  *  @tparam hash_type_ Type of the hash value, e.g., `std::uint64_t`.
- *  @sa `multiplying_rolling_hasher`, `polynomial_rolling_hasher`
+ *  @sa `multiplying_rolling_hasher`, `rabin_karp_rolling_hasher`
  */
 template <typename hash_type_ = std::uint64_t>
 struct buz_rolling_hasher {
@@ -262,12 +279,19 @@ struct floating_rolling_hasher;
  *
  *  The IEEE 754 single-precision `float` has a 24-bit significand (23 explicit bits + 1 implicit bit).
  *  For simplicity, we just focus on the 23-bit part, which is capable of exactly representing integers
- *  up to (2²³ - 1) = (8'388'607).
+ *  up to (2²³ - 1) = (8'388'607), available in @b `limit_k`.
  *
  *  Some of the large primes fitting right before that limit are:
  *      8'388'539, 8'388'547, 8'388'571, 8'388'581, 8'388'587, 8'388'593.
  *
- *  @note It's fair to say that this hash at least 23 bits of information, but it may not be enough for many apps.
+ *  Assuming the multipliers are typically within @b [256;~1000) and the additive factor is always within @b [1;257],
+ *  a safer choice of modulo is the largest prime under `limit_k/1000-257`:
+ *
+ *     8'089, 8'093, 8'101, 8'111, 8'117, 8'123
+ *
+ *  ! Notice how small those modulo values are, so there's going to be very little information encoded in hashes.
+ *  ! So the `floating_rolling_hasher<float>` should only be used for exploratory purposes & testing.
+ *
  *  @sa `floating_rolling_hasher<double>` for 52 bit variant.
  */
 template <>
@@ -276,13 +300,15 @@ struct floating_rolling_hasher<float> {
     using float_t = float;
 
     constexpr static float_t limit_k = 8'388'607.0f;
+    constexpr static hash_t default_alphabet_size_k = 256u;
+    constexpr static hash_t default_modulo_base_k = 8123u;
 
     explicit floating_rolling_hasher(std::size_t const window_width) noexcept
-        : floating_rolling_hasher(window_width, static_cast<float_t>(257), static_cast<float_t>(8388593)) {}
+        : floating_rolling_hasher(window_width, default_alphabet_size_k, default_modulo_base_k) {}
 
     explicit floating_rolling_hasher(std::size_t const window_width, hash_t const multiplier,
                                      hash_t const modulo) noexcept
-        : window_width_ {window_width}, multiplier_ {multiplier}, modulo_ {modulo}, inverse_modulo_ {1.f / modulo_},
+        : window_width_ {window_width}, multiplier_ {multiplier}, modulo_ {modulo}, inverse_modulo_ {1.0f / modulo_},
           negative_discarding_multiplier_ {1.0f} {
 
         _sz_assert(window_width_ > 1 && "Window width must be > 1");
@@ -353,11 +379,17 @@ struct floating_rolling_hasher<float> {
  *
  *  The IEEE 754 double-precision `float` has a 53-bit significand (52 explicit bits + 1 implicit bit).
  *  For simplicity, we just focus on the 52-bit part, which is capable of exactly representing integers
- *  up to (2⁵² - 1) = (4'503'599'627'370'495).
+ *  up to (2⁵² - 1) = (4'503'599'627'370'495), available in @b `limit_k`.
  *
  *  Some of the large primes fitting right before that limit are:
  *      4'503'599'627'370'287, 4'503'599'627'370'299, 4'503'599'627'370'313,
  *      4'503'599'627'370'323, 4'503'599'627'370'353, 4'503'599'627'370'449.
+ *
+ *  Assuming the multipliers are typically within @b [256;~1000) and the additive factor is always within @b [1;257],
+ *  a safer choice of modulo is the largest prime under `limit_k/1000-257`:
+ *
+ *      4'503'599'626'781, 4'503'599'626'783, 4'503'599'626'807,
+ *      4'503'599'626'907, 4'503'599'626'957, 4'503'599'626'977.
  *
  *  @sa `floating_rolling_hasher<double>` for 52 bit variant.
  */
@@ -366,14 +398,16 @@ struct floating_rolling_hasher<double> {
     using hash_t = std::uint64_t;
     using float_t = double;
 
-    constexpr static float_t limit_k = 4503599627370495.0f;
+    constexpr static float_t limit_k = 4503599627370495.0;
+    constexpr static hash_t default_alphabet_size_k = 256u;
+    constexpr static hash_t default_modulo_base_k = 4503599626977u;
 
     explicit floating_rolling_hasher(std::size_t const window_width) noexcept
-        : floating_rolling_hasher(window_width, static_cast<float_t>(257), static_cast<float_t>(4503599627370449)) {}
+        : floating_rolling_hasher(window_width, default_alphabet_size_k, default_modulo_base_k) {}
 
     explicit floating_rolling_hasher(std::size_t const window_width, hash_t const multiplier,
                                      hash_t const modulo) noexcept
-        : window_width_ {window_width}, multiplier_ {multiplier}, modulo_ {modulo}, inverse_modulo_ {1.f / modulo_},
+        : window_width_ {window_width}, multiplier_ {multiplier}, modulo_ {modulo}, inverse_modulo_ {1.0 / modulo_},
           negative_discarding_multiplier_ {1.0} {
 
         _sz_assert(window_width_ > 1 && "Window width must be > 1");
@@ -418,6 +452,11 @@ struct floating_rolling_hasher<double> {
         return sz_bitcast(hash_t, state);
     }
 
+    inline float_t multiplier() const noexcept { return multiplier_; }
+    inline float_t modulo() const noexcept { return modulo_; }
+    inline float_t inverse_modulo() const noexcept { return inverse_modulo_; }
+    inline float_t negative_discarding_multiplier() const noexcept { return negative_discarding_multiplier_; }
+
   private:
     /**
      *  @brief Barrett-style `std::fmod` alternative to avoid overflow.
@@ -437,6 +476,331 @@ struct floating_rolling_hasher<double> {
     float_t inverse_modulo_;
     float_t negative_discarding_multiplier_;
 };
+
+#pragma endregion - Baseline Rolling Hashers
+
+#pragma region - Optimized Rolling MinHashers
+
+/**
+ *  @brief Boring Min-Hash implementation on top of the baseline Rabin Karp algorithm just for benchmarking.
+ *  @tparam hasher_type_ Can be the Rabin-Karp, BuzHash, or anything else compatible.
+ */
+template <                                                                           //
+    typename hasher_type_ = rabin_karp_rolling_hasher<std::uint32_t, std::uint64_t>, //
+    typename allocator_type_ = std::allocator<hasher_type_>,                         //
+    typename scalar_type_ = typename hasher_type_::hash_t                            //
+    >
+struct basic_rolling_hashers {
+
+    using hasher_t = hasher_type_;
+    using min_hash_t = scalar_type_;
+    using allocator_t = allocator_type_;
+
+  private:
+    using rolling_hash_t = typename hasher_t::hash_t;
+    struct state_t {
+        rolling_hash_t last = 0;
+        min_hash_t minimum = std::numeric_limits<min_hash_t>::max();
+    };
+
+    using allocator_traits_t = std::allocator_traits<allocator_type_>;
+    using hasher_allocator_t = typename allocator_traits_t::template rebind_alloc<hasher_t>;
+    using state_allocator_t = typename allocator_traits_t::template rebind_alloc<state_t>;
+
+    using hashers_t = safe_vector<hasher_t, hasher_allocator_t>;
+    using states_t = safe_vector<state_t, state_allocator_t>;
+
+    hashers_t hashers_;
+    allocator_t allocator_;
+    std::size_t max_window_width_ = 0;
+
+  public:
+    basic_rolling_hashers(allocator_t allocator = {}) noexcept
+        : allocator_(std::move(allocator)),
+          hashers_(allocator_traits_t::select_on_container_copy_construction(allocator)) {}
+
+    /**
+     *  @brief Appends multiple new rolling hashers for a given @p window_width.
+     *
+     *  @param[in] window_width Width of the rolling window, typically 3, 4, 5, 6, or 7.
+     *  @param[in] dimensions Number of hash functions to use, typically 768, 1024, or 1536.
+     *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
+     *  @retval status_t::success_k on success, or an error code otherwise.
+     *  @retval status_t::bad_alloc_k if the memory allocation fails.
+     *
+     *  Typical usage of this interface (error handling aside) would be like:
+     *
+     *  @code{.cpp}
+     *  basic_rolling_hashers<rabin_karp_rolling_hasher<std::uint32_t>> hashers;
+     *  hashers.try_extend(3, 32); // 32 dimensions for 3-grams
+     *  hashers.try_extend(5, 32); // 32 dimensions for 5-grams
+     *  hashers.try_extend(7, 64); // 64 dimensions for 7-grams
+     *  std::array<std::uint32_t, 128> fingerprint; // 128 total dimensions
+     *  hashers("some text", fingerprint);
+     *  @endcode
+     */
+    status_t try_extend(std::size_t window_width, std::size_t dimensions, std::size_t alphabet_size = 256) noexcept {
+        if (!hashers_.reserve(dimensions)) return status_t::bad_alloc_k;
+        for (std::size_t i = 0; i < dimensions; ++i) try_append(hasher_t(window_width, alphabet_size + i));
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Appends a new rolling @p hasher to the collection via `try_append`.
+     *  @retval status_t::success_k on success, or an error code otherwise.
+     *  @retval status_t::bad_alloc_k if the memory allocation fails.
+     */
+    status_t try_append(hasher_t hasher) noexcept {
+        if (!hashers_.push_back(std::move(hasher))) return status_t::bad_alloc_k;
+
+        max_window_width_ = (std::max)(hasher.window_width(), max_window_width_);
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Computes the @p fingerprint of a single @p text on the current thread.
+     *  @param[in] text The input text to hash, typically a UTF-8 encoded string.
+     *  @param[out] fingerprint The output fingerprint, a vector of minimum hashes.
+     */
+    template <size_t dimensionality_ = SZ_SIZE_MAX>
+    status_t operator()(span<byte_t const> text, span<min_hash_t, dimensionality_> fingerprint) const noexcept {
+        _sz_assert(fingerprint.size() >= hashers_.size() && "Dimensions number & hashers number mismatch");
+
+        // Allocate states
+        states_t states(allocator_traits_t::select_on_container_copy_construction(allocator_));
+        if (!states.try_resize(hashers_.size())) return status_t::bad_alloc_k;
+
+        // Until we reach the maximum window length, use a branching code version
+        for (std::size_t i = 0; i < (std::min)(text.size(), max_window_width_); ++i) {
+            byte_t const new_char = text[i];
+            for (std::size_t j = 0; j < fingerprint.size(); ++j) {
+                auto &hasher = hashers_[j];
+                auto &state = states[j];
+                if (hasher.window_width() > i) { state.last = hasher.update(state.last, new_char); }
+                else {
+                    auto const old_char = text[i - hasher.window_width()];
+                    state.last = hasher.update(state.last, old_char, new_char);
+                    state.minimum = (std::min)(state.minimum, state.last);
+                }
+            }
+        }
+
+        // Now we can avoid a branch in the nested loop, as we are passed the longest window width
+        for (std::size_t i = max_window_width_; i < text.size(); ++i) {
+            byte_t const new_char = text[i];
+            for (std::size_t j = 0; j < fingerprint.size(); ++j) {
+                auto &hasher = hashers_[j];
+                auto &state = states[j];
+                auto const old_char = text[i - hasher.window_width()];
+                state.last = hasher.update(state.last, old_char, new_char);
+                state.minimum = (std::min)(state.minimum, state.last);
+            }
+        }
+
+        // Export the minimum hashes to the fingerprint
+        for (std::size_t j = 0; j < fingerprint.size(); ++j) {
+            auto const &hasher = hashers_[j];
+            auto &state = states[j];
+            auto &fingerprint = fingerprint[j];
+            if (hasher.window_width() < text.size()) { fingerprint = std::numeric_limits<min_hash_t>::max(); }
+            else { fingerprint = static_cast<min_hash_t>(state.minimum); }
+        }
+
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Computes many @p fingerprints in parallel for input @p texts via an @p executor.
+     *  @param[in] texts The input texts to hash, typically a UTF-8 encoded string.
+     *  @param[out] fingerprints The output fingerprints, a array of vectors of minimum hashes.
+     *  @param[in] executor The executor to use for parallel processing, defaults to a dummy executor.
+     *  @param[in] specs The CPU specifications to use, defaults to an empty `cpu_specs_t`.
+     */
+    template <typename texts_type_, typename fingerprints_type_, typename executor_type_ = dummy_executor_t>
+#if _SZ_IS_CPP20
+        requires executor_like<executor_type_>
+#endif
+    status_t operator()(                                             //
+        texts_type_ const &texts, fingerprints_type_ &&fingerprints, //
+        executor_type_ &&executor = {}, cpu_specs_t specs = {}) const noexcept {
+
+        using texts_t = typename std::decay<texts_type_>::type;
+        using text_t = typename texts_t::value_type;
+        using char_t = typename text_t::value_type;
+
+        // Depending on document sizes, choose the appropriate parallelization strategy
+        // - Either split each text into chunks across threads
+        // - Or split the texts themselves across threads
+        std::size_t const text_size_threshold = specs.l2_bytes * executor.threads_count();
+
+        // Process small texts by individual threads
+        executor.for_n_dynamic(texts.size(), [&](std::size_t i) noexcept {
+            auto const &text = texts[i];
+            if (text.size() >= text_size_threshold) continue;
+            auto &fingerprint = fingerprints[i];
+            operator()(text, fingerprint);
+        });
+
+        // Process large texts by splitting them into chunks
+        for (std::size_t i = 0; i < texts.size(); ++i) {
+            auto const &text = texts[i];
+            if (text.size() < text_size_threshold) continue;
+
+            // Split the text into chunks of the maximum window width
+            std::size_t const chunk_size = round_up_to_multiple(        //
+                divide_round_up(text.size(), executor.threads_count()), //
+                specs.cache_line_width);
+
+            executor.for_threads([&](std::size_t j) noexcept {
+                auto text_start = text.data() + std::min(text.size(), j * chunk_size);
+                auto text_end = std::min(text_start + chunk_size + window_width_k - 1, text.end());
+            });
+        }
+
+        return status_t::success_k;
+    }
+};
+
+/**
+ *  @brief Optimized rolling Min-Hashers via floats, @b constrained to a certain dimensionality & window width.
+ *
+ *  This set of CPU kernels is likely to be composed into combinations for different dimensionalities and window
+ * widths, thus covering a subset of the dimensions in a final fingerprint. An example would be, having:
+ *  - 32 dimensions for 3-grams,
+ *  - 32 dimensions for 5-grams,
+ *  - 64 dimensions for 7-grams.
+ *
+ *  @tparam capability_ The CPU capability, e.g., `sz_cap_serial_k`, `sz_cap_ice_k`, etc.
+ *  @tparam window_width_ The width of the rolling window, e.g., 3, 4, 5, 6, etc.
+ *  @tparam dimensionality_ The number of dimensions in the fingerprint, ideally a multiple of 16, like 64 or 80.
+ *  @tparam enable_ A type used to enable or disable this specialization, e.g., `void` for default.
+ */
+template <                                         //
+    sz_capability_t capability_ = sz_cap_serial_k, //
+    std::size_t window_width_ = SZ_SIZE_MAX,       //
+    std::size_t dimensionality_ = 64,              //
+    typename enable_ = void                        //
+    >
+struct floating_rolling_hashers {
+
+    using hasher_t = floating_rolling_hasher<double>;
+    using rolling_hash_t = typename hasher_t::hash_t;
+    using min_hash_t = std::uint32_t;
+    using fingerprint_span_t = span<min_hash_t, dimensionality_k>;
+
+    static constexpr std::size_t window_width_k = window_width_;
+    static constexpr std::size_t dimensionality_k = dimensionality_;
+
+  private:
+    using float_t = typename hasher_t::float_t;
+
+    float_t multipliers_[dimensionality_k];
+    float_t modulos_[dimensionality_k];
+    float_t inverse_modulos_[dimensionality_k];
+    float_t negative_discarding_multipliers_[dimensionality_k];
+
+  public:
+    inline std::size_t window_width() const noexcept { return window_width_; }
+
+    /**
+     *  @brief Initializes several rolling hashers with different multipliers and modulos.
+     *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
+     */
+    status_t try_seed(std::size_t alphabet_size = 256) noexcept {
+        for (std::size_t j = 0; j < dimensionality_k; ++j) {
+            hasher_t hasher(window_width_k, alphabet_size + j, hasher_t::default_modulo_base_k);
+            multipliers_[j] = hasher.multiplier();
+            modulos_[j] = hasher.modulo();
+            inverse_modulos_[j] = hasher.inverse_modulo();
+            negative_discarding_multipliers_[j] = hasher.negative_discarding_multiplier();
+        }
+        return status_t::success_k;
+    }
+
+    /**
+     *
+     */
+    status_t operator()(span<byte_t const> text, fingerprint_span_t fingerprint) const noexcept {
+
+        if (text.size() < window_width_k) return status_t::success_k;
+
+        // Reset states
+        rolling_hash_t last_hashes[dimensionality_k];
+        min_hash_t minimum_hashes[dimensionality_k];
+        for (std::size_t i = 0; i < dimensionality_k; ++i) {
+            last_hashes[i] = 0;
+            minimum_hashes[i] = std::numeric_limits<min_hash_t>::max();
+        }
+
+        // Until we reach the maximum window length, use a branching code version
+        for (std::size_t i = 0; i < window_width_k; ++i) {
+            byte_t const new_char = text[i];
+            float_t const new_term = static_cast<float_t>(new_char) + 1.0;
+            for (std::size_t j = 0; j < dimensionality_k; ++j) {
+                rolling_hash_t &hash = last_hashes[j];
+                float_t state = sz_bitcast(float_t, hash);
+                state += multipliers_[j] * new_term;
+                state = reduce(state);
+
+                // Save back
+                hash = sz_bitcast(rolling_hash_t, state);
+                minimum_hashes[j] = std::min(minimum_hashes[j], hash);
+            }
+        }
+
+        // Now we can avoid a branch in the nested loop, as we are passed the longest window width
+        for (std::size_t i = window_width_k; i < text.size(); ++i) {
+            byte_t const new_char = text[i];
+            byte_t const old_char = text[i - window_width_k];
+            float_t const new_term = static_cast<float_t>(new_char) + 1.0;
+            float_t const old_term = static_cast<float_t>(old_char) + 1.0;
+            for (std::size_t j = 0; j < dimensionality_k; ++j) {
+                rolling_hash_t &hash = last_hashes[j];
+                float_t state = sz_bitcast(float_t, hash);
+                state += negative_discarding_multipliers_[j] * old_term; // Remove tail
+                state += multipliers_[j] * new_term;                     // Add head
+                state = reduce(state);
+
+                // Save back
+                hash = sz_bitcast(rolling_hash_t, state);
+                minimum_hashes[j] = std::min(minimum_hashes[j], hash);
+            }
+        }
+
+        // Export the minimum hashes to the fingerprint
+        for (std::size_t j = 0; j < dimensionality_k; ++j) fingerprint[j] = static_cast<min_hash_t>(minimum_hashes[j]);
+        return status_t::success_k;
+    }
+};
+
+/**
+ *  @brief Optimized rolling Min-Hashers built around floating-point numbers.
+ *
+ *  In a single ZMM register we can store 8 `double` values, so we can process 8 hashes per register.
+ *  Assuming 32x ZMM registers, and roughly 10ish scalars for intermediaries per hash, we can unroll
+ *  2-3x times, and process 16-24 hashes in parallel.
+ */
+template <std::size_t dimensionality_>
+struct floating_rolling_hashers<sz_cap_ice_k, dimensionality_> {
+
+    using hasher_t = floating_rolling_hasher<double>;
+    using rolling_hash_t = typename hasher_t::hash_t;
+    using min_hash_t = std::uint32_t;
+    static constexpr std::size_t dimensionality_k = dimensionality_;
+
+    void operator()(span<byte_t const> text, span<hasher_t const, dimensionality_k> hashers,
+                    span<min_hash_t, dimensionality_k> fingerprint) const noexcept {
+
+        constexpr std::size_t unroll_factor_k = 2;
+        constexpr std::size_t unrolled_hashes_k = unroll_factor_k * sizeof(sz_u512_vec_t) / sizeof(rolling_hash_t);
+
+        sz_u512_vec_t window_widths[unroll_factor_k], multipliers[unroll_factor_k],
+            negative_discarding_multipliers[unroll_factor_k], modulos[unroll_factor_k],
+            inverse_modulos[unroll_factor_k], states_[unroll_factor_k], min_hashes[unroll_factor_k];
+    }
+};
+
+#pragma endregion - Optimized Rolling MinHashers
 
 } // namespace stringzillas
 } // namespace ashvardanian
@@ -459,11 +823,6 @@ extern "C" {
  *       1. Kernighan and Ritchie's function uses 31, a prime close to the size of English alphabet.
  *       2. To be friendlier to byte-arrays and UTF8, we use 257 for the second function.
  *
- *  Choosing the right ::window_width is task- and domain-dependant. For example, most English words are
- *  between 3 and 7 characters long, so a window of 4 bytes would be a good choice. For DNA sequences,
- *  the ::window_width might be a multiple of 3, as the codons are 3 (nucleotides) bytes long.
- *  With such minimalistic alphabets of just four characters (AGCT) longer windows might be needed.
- *  For protein sequences the alphabet is 20 characters long, so the window can be shorter, than for DNAs.
  *
  *  @param text             String to hash.
  *  @param length           Number of bytes in the string.
