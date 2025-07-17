@@ -34,9 +34,10 @@ They have the broadest coverage of the library, and are the most important to ke
 
 - `scripts/bench_token.cpp` - token-level ops, like hashing, ordering, equality checks.
 - `scripts/bench_find.cpp` - bidirectional substring search, both exact and fuzzy.
-- `scripts/bench_similarity.cpp` - benchmark all edit distance backends.
 - `scripts/bench_sequence.cpp` - sorting, partitioning, merging.
 - `scripts/bench_container.cpp` - STL containers with different string keys.
+- `scripts/bench_similarity.cpp` - benchmark all edit distance backends.
+- `scripts/bench_fingerprint.cpp` - benchmark all Min-Hash fingerprinting backends.
 
 The role of Python benchmarks is less to provide absolute number, but to compare against popular tools in the Python ecosystem.
 

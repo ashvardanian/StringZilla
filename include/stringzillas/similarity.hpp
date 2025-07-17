@@ -159,7 +159,7 @@ struct error_costs_256x256_t {
      *  @brief  Produces a substitution cost matrix for the Needleman-Wunsch alignment score,
      *          that would yield the same result as the negative Levenshtein distance.
      */
-    constexpr static error_costs_256x256_t diagonal(error_cost_t match_score = 0,
+    static constexpr error_costs_256x256_t diagonal(error_cost_t match_score = 0,
                                                     error_cost_t mismatch_score = -1) noexcept {
         error_costs_256x256_t result;
         for (int i = 0; i != 256; ++i)
@@ -2473,7 +2473,7 @@ struct error_costs_26x26ascii_t {
      *  @brief BLOSUM62 substitution matrix for protein analysis in bioinformatics, reorganized for ASCII lookups.
      *  @see https://en.wikipedia.org/wiki/BLOSUM
      */
-    constexpr static error_costs_26x26ascii_t blosum62() {
+    static constexpr error_costs_26x26ascii_t blosum62() {
         constexpr error_cost_t na = -128; // Placeholder for unused characters
         return {
             {{4, -2, 0, -2, -1, -2, 0, -2, -1, na, -1, -1, -1, -2, na, -1, -1, -1, 1, 0, na, 0, -3, 0, -2, -1},
@@ -2503,11 +2503,12 @@ struct error_costs_26x26ascii_t {
              {-2, -3, -2, -3, -2, 3, -3, 2, -1, na, -2, -1, -1, -2, na, -3, -1, -2, -2, -2, na, -1, 2, -1, 7, -2},
              {-1, 1, -3, 1, 4, -3, -2, 0, -3, na, 1, -3, -1, 0, na, -1, 3, 0, 0, -1, na, -2, -3, -1, -2, 4}}};
     }
+
     /**
      *  @brief NUC.4.4 substitution matrix for DNA analysis in bioinformatics, reorganized for ASCII lookups.
      *  @see https://www.biostars.org/p/73028/#93435
      */
-    constexpr static error_costs_26x26ascii_t nuc44() {
+    static constexpr error_costs_26x26ascii_t nuc44() {
         constexpr error_cost_t na = -128; // Placeholder for unused characters
         return {
             {{5, -4, -4, -1, na, na, -4, -1, na, na, -4, na, 1, -2, na, na, na, 1, -4, -4, na, -1, 1, na, -4, na},

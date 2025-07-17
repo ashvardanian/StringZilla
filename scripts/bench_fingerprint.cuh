@@ -37,11 +37,12 @@ struct fingerprint_callable {
 
     environment_t const &env;
     fingerprints_t &fingerprints;
-    engine_t engine = {};
+    engine_t const &engine;
     std::tuple<extra_args_...> extra_args = {};
 
-    fingerprint_callable(environment_t const &env, fingerprints_t &fingerprints, engine_t eng = {}, extra_args_... args)
-        : env(env), fingerprints(fingerprints), engine(std::move(eng)), extra_args(args...) {}
+    fingerprint_callable(environment_t const &env, fingerprints_t &fingerprints, engine_t const &eng,
+                         extra_args_... args)
+        : env(env), fingerprints(fingerprints), engine(eng), extra_args(args...) {}
 
     call_result_t operator()() noexcept(false) {
 
@@ -96,7 +97,8 @@ void bench_fingerprint(environment_t const &env) {
     if (multiply_u32->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Multiplying Hasher.");
 
-    using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<double>>;
+    using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<double>,
+                                                std::allocator<floating_rolling_hasher<double>>, std::uint32_t>;
     auto rolling_f64 = std::make_unique<rolling_f64_t>();
     if (rolling_f64->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Floating f64 Rolling Hasher.");

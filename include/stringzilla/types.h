@@ -176,8 +176,12 @@
 #endif
 
 /**
+ *  @brief  Largest prime number that fits into 16 bits.
+ */
+#define SZ_U16_MAX_PRIME (65521u)
+
+/**
  *  @brief  Largest prime number that fits into 31 bits.
- *  @see    https://mersenneforum.org/showthread.php?t=3471
  */
 #define SZ_U32_MAX_PRIME (2147483647u)
 
