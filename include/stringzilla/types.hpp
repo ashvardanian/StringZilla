@@ -94,6 +94,7 @@
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
+#include <type_traits>      // `std::is_same`, `std::enable_if`, etc.
 #endif
 
 namespace ashvardanian {
@@ -153,7 +154,10 @@ struct span {
 
     constexpr span() noexcept = default;
     constexpr span(value_type *data) noexcept : data_(data) {}
-    constexpr span(value_type *data) noexcept : data_(data) {}
+    sz_constexpr_if_cpp14 span(value_type *data, size_type size) noexcept : data_(data) {
+        _sz_assert(extent == size && "The second argument is only intended for compatibility");
+        sz_unused(size);
+    }
 
     constexpr value_type *begin() const noexcept { return data_; }
     constexpr value_type *end() const noexcept { return data_ + extent; }
@@ -167,14 +171,20 @@ struct span {
     constexpr bool empty() const noexcept { return extent == 0; }
 
     template <typename same_value_type_ = value_type,
-              typename = std::enable_if_t<!std::is_const<same_value_type_>::value>>
-    constexpr operator span<std::add_const_t<same_value_type_>>() const noexcept {
+              typename = typename std::enable_if<!std::is_const<same_value_type_>::value>::type>
+    constexpr operator span<typename std::add_const<same_value_type_>::type>() const noexcept {
         return {data_};
     }
+
     template <typename other_value_type_>
     constexpr span<other_value_type_, extent * sizeof(value_type) / sizeof(other_value_type_)> cast() const noexcept {
         return span<other_value_type_, extent * sizeof(value_type) / sizeof(other_value_type_)>(
             reinterpret_cast<other_value_type_ *>(data_));
+    }
+
+    sz_constexpr_if_cpp14 span<value_type, SZ_SIZE_MAX> subspan(size_type offset, size_type count) const noexcept {
+        _sz_assert(offset + count <= extent && "Subspan out of bounds");
+        return span<value_type, SZ_SIZE_MAX>(data_ + offset, count);
     }
 };
 
@@ -204,16 +214,37 @@ struct span<value_type_, SZ_SIZE_MAX> {
     constexpr bool empty() const noexcept { return size_ == 0; }
 
     template <typename same_value_type_ = value_type,
-              typename = std::enable_if_t<!std::is_const<same_value_type_>::value>>
-    constexpr operator span<std::add_const_t<same_value_type_>>() const noexcept {
+              typename = typename std::enable_if<!std::is_const<same_value_type_>::value>::type>
+    constexpr operator span<typename std::add_const<same_value_type_>::type>() const noexcept {
         return {data_, size_};
     }
+
     template <typename other_value_type_>
     constexpr span<other_value_type_> cast() const noexcept {
         return span<other_value_type_>(reinterpret_cast<other_value_type_ *>(data_),
                                        size_ * sizeof(value_type) / sizeof(other_value_type_));
     }
+
+    sz_constexpr_if_cpp14 span subspan(size_type offset, size_type count) const noexcept {
+        _sz_assert(offset + count <= size_ && "Subspan out of bounds");
+        return span(data_ + offset, count);
+    }
 };
+
+template <std::size_t extent_ = SZ_SIZE_MAX, typename container_type_ = void>
+span<typename container_type_::value_type, extent_> to_span(container_type_ &container) noexcept {
+    return {container.data(), container.size()};
+}
+
+template <std::size_t extent_ = SZ_SIZE_MAX, typename container_type_ = void>
+span<typename container_type_::value_type const, extent_> to_view(container_type_ const &container) noexcept {
+    return {container.data(), container.size()};
+}
+
+template <typename container_type_>
+span<byte_t const> to_bytes_view(container_type_ const &container) noexcept {
+    return to_view(container).template cast<byte_t const>();
+}
 
 template <typename value_type_>
 struct dummy_alloc {
