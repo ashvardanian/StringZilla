@@ -120,9 +120,9 @@ void bench_find_many(environment_t const &env) {
     using matches_equality_t = arrays_equality<find_many_match_t>;
 
     // Let's reuse a thread-pool to amortize the cost of spawning threads.
-    fork_union_t pool;
+    fu::basic_pool_t pool;
     if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
-    static_assert(executor_like<fork_union_t>);
+    static_assert(executor_like<fu::basic_pool_t>);
 
     auto scramble_accelerated_results = [&](auto &results_accelerated) {
         std::shuffle(results_accelerated.begin(), results_accelerated.end(), global_random_generator());
@@ -165,7 +165,7 @@ void bench_find_many(environment_t const &env) {
         // Parallel search
         bench_nullary( //
             env, "count_many_parallel:"s + shape_suffix, call_count_baseline,
-            find_many_callable<find_many_u32_parallel_t, counts_t, fork_union_t &>( //
+            find_many_callable<find_many_u32_parallel_t, counts_t, fu::basic_pool_t &>( //
                 env, counts_accelerated, matches_accelerated, dict, {}, pool),
             callable_no_op_t {},  // preprocessing
             counts_equality_t {}) // equality check
@@ -173,7 +173,7 @@ void bench_find_many(environment_t const &env) {
 
         bench_nullary( //
             env, "find_many_parallel:"s + shape_suffix, call_find_baseline,
-            find_many_callable<find_many_u32_parallel_t, matches_t, fork_union_t &>( //
+            find_many_callable<find_many_u32_parallel_t, matches_t, fu::basic_pool_t &>( //
                 env, counts_accelerated, matches_accelerated, dict, {}, pool),
             callable_no_op_t {},   // preprocessing
             matches_equality_t {}) // equality check
