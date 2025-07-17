@@ -23,9 +23,22 @@ enum bytes_per_cell_t : uint {
     eight_bytes_per_cell_k = 8,
 };
 
+struct dummy_mutex_t {
+    constexpr void lock() noexcept {}
+    constexpr void unlock() noexcept {}
+};
+
+struct dummy_prong_t {
+    std::size_t task = 0;
+    std::size_t thread = 0;
+
+    operator std::size_t() const noexcept { return task; }
+};
+
 struct dummy_executor_t {
 
     constexpr size_t threads_count() const noexcept { return 1; }
+    constexpr dummy_mutex_t make_mutex() const noexcept { return {}; }
 
     /**
      *  @brief  Calls the @p function for each index from 0 to @p (n) in such
@@ -34,7 +47,7 @@ struct dummy_executor_t {
      */
     template <typename function_type_>
     inline void for_n(size_t n, function_type_ &&function) const noexcept {
-        for (size_t i = 0; i < n; ++i) function(i);
+        for (size_t i = 0; i < n; ++i) function(dummy_prong_t {i, 0});
     }
 
     /**
@@ -55,7 +68,7 @@ struct dummy_executor_t {
      */
     template <typename function_type_>
     inline void for_n_dynamic(size_t n, function_type_ &&function) const noexcept {
-        for (size_t i = 0; i < n; ++i) function(i);
+        for (size_t i = 0; i < n; ++i) function(dummy_prong_t {i, 0});
     }
 
     /**
