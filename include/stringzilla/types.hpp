@@ -315,34 +315,34 @@ struct indexed_container_iterator {
     };
 
     constexpr proxy operator->() const noexcept { return proxy(operator*()); }
-    constexpr indexed_container_iterator &operator++() noexcept {
+    sz_constexpr_if_cpp14 indexed_container_iterator &operator++() noexcept {
         ++index_;
         return *this;
     }
 
-    constexpr indexed_container_iterator operator++(int) noexcept {
+    sz_constexpr_if_cpp14 indexed_container_iterator operator++(int) noexcept {
         indexed_container_iterator temp = *this;
         ++index_;
         return temp;
     }
 
-    constexpr indexed_container_iterator &operator--() noexcept {
+    sz_constexpr_if_cpp14 indexed_container_iterator &operator--() noexcept {
         --index_;
         return *this;
     }
 
-    constexpr indexed_container_iterator operator--(int) noexcept {
+    sz_constexpr_if_cpp14 indexed_container_iterator operator--(int) noexcept {
         indexed_container_iterator temp = *this;
         --index_;
         return temp;
     }
 
-    constexpr indexed_container_iterator &operator+=(difference_type n) noexcept {
+    sz_constexpr_if_cpp14 indexed_container_iterator &operator+=(difference_type n) noexcept {
         index_ += n;
         return *this;
     }
 
-    constexpr indexed_container_iterator &operator-=(difference_type n) noexcept {
+    sz_constexpr_if_cpp14 indexed_container_iterator &operator-=(difference_type n) noexcept {
         index_ -= n;
         return *this;
     }
@@ -576,7 +576,7 @@ struct arrow_strings_tape {
         return status_t::success_k;
     }
 
-    constexpr value_type operator[](size_t i) const noexcept {
+    sz_constexpr_if_cpp14 value_type operator[](size_t i) const noexcept {
         _sz_assert(i < count_ && "Index out of bounds");
         return {buffer_.data_ + offsets_.data_[i], offsets_.data_[i + 1] - offsets_.data_[i] - 1};
     }
@@ -605,35 +605,35 @@ struct constant_iterator {
     constexpr reference operator*() const { return value_; }
     constexpr pointer operator->() const { return &value_; }
 
-    constexpr constant_iterator &operator++() {
+    sz_constexpr_if_cpp14 constant_iterator &operator++() {
         ++pos_;
         return *this;
     }
-    constexpr constant_iterator operator++(int) {
+    sz_constexpr_if_cpp14 constant_iterator operator++(int) {
         constexpr constant_iterator tmp(*this);
         ++pos_;
         return tmp;
     }
-    constexpr constant_iterator &operator--() {
+    sz_constexpr_if_cpp14 constant_iterator &operator--() {
         --pos_;
         return *this;
     }
-    constexpr constant_iterator operator--(int) {
+    sz_constexpr_if_cpp14 constant_iterator operator--(int) {
         constexpr constant_iterator tmp(*this);
         --pos_;
         return tmp;
     }
-
-    constexpr constant_iterator operator+(difference_type n) const { return constant_iterator(value_, pos_ + n); }
-    constexpr constant_iterator &operator+=(difference_type n) {
+    sz_constexpr_if_cpp14 constant_iterator &operator+=(difference_type n) {
         pos_ += n;
         return *this;
     }
-    constexpr constant_iterator operator-(difference_type n) const { return constant_iterator(value_, pos_ - n); }
-    constexpr constant_iterator &operator-=(difference_type n) {
+    sz_constexpr_if_cpp14 constant_iterator &operator-=(difference_type n) {
         pos_ -= n;
         return *this;
     }
+
+    constexpr constant_iterator operator+(difference_type n) const { return constant_iterator(value_, pos_ + n); }
+    constexpr constant_iterator operator-(difference_type n) const { return constant_iterator(value_, pos_ - n); }
     constexpr difference_type operator-(constant_iterator const &other) const { return pos_ - other.pos_; }
 
     constexpr reference operator[](difference_type) const { return value_; }
@@ -663,14 +663,16 @@ struct random_access_range {
     constexpr begin_type_ begin() const { return begin_; }
     constexpr end_type_ end() const { return end_; }
 
-    decltype(auto) operator[](std::size_t index) const {
+    reference_type operator[](std::size_t index) const {
         _sz_assert(index < size());
         return *(begin_ + index);
     }
 };
 
+#if _SZ_IS_CPP17 // ? Template deduction guides are available in C++17 and later
 template <typename begin_type_, typename end_type_>
 random_access_range(begin_type_, end_type_) -> random_access_range<begin_type_, end_type_>;
+#endif
 
 template <typename value_type_, size_t count_>
 struct safe_array {
@@ -682,14 +684,14 @@ struct safe_array {
 
     value_type data_[count_k] = {};
 
-    constexpr value_type &operator[](size_type i) noexcept { return data_[i]; }
+    sz_constexpr_if_cpp14 value_type &operator[](size_type i) noexcept { return data_[i]; }
     constexpr value_type const &operator[](size_type i) const noexcept { return data_[i]; }
     constexpr size_type size() const noexcept { return count_k; }
-    constexpr value_type *data() noexcept { return data_; }
+    sz_constexpr_if_cpp14 value_type *data() noexcept { return data_; }
     constexpr value_type const *data() const noexcept { return data_; }
-    constexpr iterator begin() noexcept { return data_; }
+    sz_constexpr_if_cpp14 iterator begin() noexcept { return data_; }
     constexpr const_iterator begin() const noexcept { return data_; }
-    constexpr iterator end() noexcept { return data_ + count_k; }
+    sz_constexpr_if_cpp14 iterator end() noexcept { return data_ + count_k; }
     constexpr const_iterator end() const noexcept { return data_ + count_k; }
 };
 
@@ -936,7 +938,7 @@ struct cpu_specs_t {
  *  @note  This is equivalent to `ceil(x / divisor)`, but avoids floating-point arithmetic.
  */
 template <typename scalar_type_>
-constexpr scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
+sz_constexpr_if_cpp14 scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
     _sz_assert(divisor > 0 && "Divisor must be positive");
     return (x + divisor - 1) / divisor;
 }
@@ -945,7 +947,7 @@ constexpr scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
  *  @brief Rounds @p x up to the nearest multiple of @p divisor.
  */
 template <typename scalar_type_>
-constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
+sz_constexpr_if_cpp14 scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
     _sz_assert(divisor > 0 && "Divisor must be positive");
     return divide_round_up(x, divisor) * divisor;
 }
@@ -954,7 +956,7 @@ constexpr scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor
  *  @brief Equivalent to `(condition ? value : 0)`, but avoids branching.
  */
 template <typename value_type_>
-constexpr value_type_ non_zero_if(value_type_ value, value_type_ condition) noexcept {
+sz_constexpr_if_cpp14 value_type_ non_zero_if(value_type_ value, value_type_ condition) noexcept {
     static_assert(std::is_unsigned<value_type_>::value, "Value type must be unsigned integer");
     _sz_assert((condition == 0 || condition == 1) && "Condition must be either 0 or 1 unsigned integer");
     return value * condition;
@@ -971,7 +973,7 @@ struct head_body_tail_t {
 };
 
 template <size_t elements_per_page_, typename element_type_>
-constexpr head_body_tail_t head_body_tail(element_type_ *first_address, size_t total_length) noexcept {
+sz_constexpr_if_cpp14 head_body_tail_t head_body_tail(element_type_ *first_address, size_t total_length) noexcept {
     constexpr size_t bytes_per_element = sizeof(element_type_);
     constexpr size_t bytes_per_page = elements_per_page_ * bytes_per_element;
     static_assert(bytes_per_page > 0 && "Slice size must be positive");
