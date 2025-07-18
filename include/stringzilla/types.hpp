@@ -693,6 +693,9 @@ struct safe_array {
     constexpr const_iterator begin() const noexcept { return data_; }
     sz_constexpr_if_cpp14 iterator end() noexcept { return data_ + count_k; }
     constexpr const_iterator end() const noexcept { return data_ + count_k; }
+
+    operator span<value_type, count_k>() noexcept { return span<value_type, count_k>(data_); }
+    operator span<value_type const, count_k>() const noexcept { return span<value_type const, count_k>(data_); }
 };
 
 template <typename first_, typename second_>

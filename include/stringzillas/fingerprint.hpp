@@ -593,9 +593,9 @@ struct basic_rolling_hashers {
 
         // Allocate temporary states
         states_t states(allocator_traits_t::select_on_container_copy_construction(allocator_));
-        if (!states.try_resize(dimensions())) return status_t::bad_alloc_k;
+        if (states.try_resize(dimensions()) != status_t::success_k) return status_t::bad_alloc_k;
 
-        fingerprint(text, states, result);
+        fingerprint<dimensions_>(text, {states.data(), states.size()}, result);
         return status_t::success_k;
     }
 
@@ -988,12 +988,16 @@ struct floating_rolling_hashers<sz_cap_ice_k, dimensions_> {
     void operator()(span<byte_t const> text, span<hasher_t const, dimensions_k> hashers,
                     span<result_scalar_t, dimensions_k> fingerprint) const noexcept {
 
-        constexpr std::size_t unroll_factor_k = 2;
-        constexpr std::size_t unrolled_hashes_k = unroll_factor_k * sizeof(sz_u512_vec_t) / sizeof(rolling_hash_t);
+        // constexpr std::size_t unroll_factor_k = 2;
+        // constexpr std::size_t unrolled_hashes_k = unroll_factor_k * sizeof(sz_u512_vec_t) / sizeof(rolling_hash_t);
 
-        sz_u512_vec_t window_widths[unroll_factor_k], multipliers[unroll_factor_k],
-            negative_discarding_multipliers[unroll_factor_k], modulos[unroll_factor_k],
-            inverse_modulos[unroll_factor_k], states_[unroll_factor_k], min_hashes[unroll_factor_k];
+        // sz_u512_vec_t window_widths[unroll_factor_k], multipliers[unroll_factor_k],
+        //     negative_discarding_multipliers[unroll_factor_k], modulos[unroll_factor_k],
+        //     inverse_modulos[unroll_factor_k], states_[unroll_factor_k], min_hashes[unroll_factor_k];
+
+        sz_unused_(text);
+        sz_unused_(hashers);
+        sz_unused_(fingerprint);
     }
 };
 

@@ -225,12 +225,12 @@ void test_rolling_hasher() {
 
     std::vector<f32u32_hasher_t> f32u32_hashers;
     f32u32_hashers.emplace_back(3, 31);
-    f32u32_hashers.emplace_back(5, 65521);
+    f32u32_hashers.emplace_back(5, 7001);
     f32u32_hashers.emplace_back(4, 257);
     f32u32_hashers.emplace_back(4, 257);
     f32u32_hashers.emplace_back(4, 257);
     f32u32_hashers.emplace_back(32, 257);
-    f32u32_hashers.emplace_back(32, 65521);
+    f32u32_hashers.emplace_back(32, 7001);
     f32u32_hashers.emplace_back(3);
     f32u32_hashers.emplace_back(32);
     f32u32_hashers.emplace_back(65);
@@ -258,6 +258,68 @@ void test_rolling_hasher() {
     for (auto hasher : f64u64_hashers)
         test_rolling_hasher(hasher, unit_strings), test_rolling_hasher(hasher, dna_like_strings),
             test_rolling_hasher(hasher, inconvenient_strings);
+}
+
+/**
+ *  Compares the equivalence of SIMD backends to @b `floating_rolling_hashers<sz_cap_serial_k>`
+ *  and the simpler `basic_rolling_hashers<floating_rolling_hasher<double>, ..., std::uint32_t>`.
+ */
+template <std::size_t window_width_>
+void test_rolling_hashers_equivalence_for_width() {
+
+    constexpr std::size_t embedding_dims_k = 32;
+    constexpr std::size_t window_width_k = window_width_;
+    using fingerprint_t = safe_array<std::uint32_t, embedding_dims_k>;
+
+    auto test_against_baseline = [&](auto const &strings, auto const &baseline_hasher, auto const &accelerated_hasher) {
+        fingerprint_t fingerprint_accelerated;
+        fingerprint_t fingerprint_serial;
+
+        // Compute the fingerprints
+        for (auto const &str : strings) {
+            auto bytes = to_bytes_view(str);
+            baseline_hasher.template try_fingerprint<embedding_dims_k>(bytes, fingerprint_serial);
+            accelerated_hasher.try_fingerprint(bytes, fingerprint_accelerated);
+
+            // Compare the results
+            std::size_t const first_mismatch_index =
+                std::mismatch(fingerprint_serial.begin(), fingerprint_serial.end(), fingerprint_accelerated.begin())
+                    .first -
+                fingerprint_serial.begin();
+            sz_assert_(first_mismatch_index == fingerprint_serial.size() && "Fingerprints do not match");
+        }
+    };
+
+    // Define hasher classes
+    using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<double>,
+                                                std::allocator<floating_rolling_hasher<double>>, std::uint32_t>;
+    using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, window_width_k, embedding_dims_k>;
+    using rolling_skylake_t = floating_rolling_hashers<sz_cap_skylake_k, window_width_k, embedding_dims_k>;
+
+    // Instantiate all rolling hashers
+    rolling_f64_t rolling_f64;
+    rolling_serial_t rolling_serial;
+    rolling_skylake_t rolling_skylake;
+    sz_assert_(rolling_f64.try_extend(window_width_k, embedding_dims_k) == status_t::success_k);
+    sz_assert_(rolling_serial.try_seed() == status_t::success_k);
+    sz_assert_(rolling_skylake.try_seed() == status_t::success_k);
+
+    // Allocate test datasets
+    auto unit_strings = rolling_hasher_basic_inputs();
+    auto dna_like_strings = rolling_hasher_dna_like_inputs();
+    auto inconvenient_strings = rolling_hasher_inconvenient_inputs();
+
+    for (auto const &dataset : {unit_strings, dna_like_strings, /*inconvenient_strings*/})
+        test_against_baseline(dataset, rolling_f64, rolling_serial);
+    for (auto const &dataset : {unit_strings, dna_like_strings, /*inconvenient_strings*/})
+        test_against_baseline(dataset, rolling_f64, rolling_skylake);
+}
+
+void test_rolling_hashers_equivalence() {
+    test_rolling_hashers_equivalence_for_width<3>();
+    test_rolling_hashers_equivalence_for_width<7>();
+    test_rolling_hashers_equivalence_for_width<33>();
+    test_rolling_hashers_equivalence_for_width<64>();
 }
 
 } // namespace scripts
