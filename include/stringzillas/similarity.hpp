@@ -991,8 +991,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
         char_t const *shorter = first.data(), *longer = second.data();
         size_t shorter_length = first.size(), longer_length = second.size();
         if (shorter_length > longer_length) {
-            std::swap(shorter, longer);
-            std::swap(shorter_length, longer_length);
+            trivial_swap(shorter, longer);
+            trivial_swap(shorter_length, longer_length);
         }
 
         // We are going to store 3 diagonals of the matrix.
@@ -1189,8 +1189,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
         char_t const *shorter = first.data(), *longer = second.data();
         size_t shorter_length = first.size(), longer_length = second.size();
         if (shorter_length > longer_length) {
-            std::swap(shorter, longer);
-            std::swap(shorter_length, longer_length);
+            trivial_swap(shorter, longer);
+            trivial_swap(shorter_length, longer_length);
         }
 
         // We are going to store 7 diagonals of the matrix.
@@ -1264,8 +1264,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
 
             // Perform a circular rotation of those buffers, to reuse the memory.
             rotate_three(previous_scores, current_scores, next_scores);
-            std::swap(current_inserts, next_inserts);
-            std::swap(current_deletes, next_deletes);
+            trivial_swap(current_inserts, next_inserts);
+            trivial_swap(current_deletes, next_deletes);
         }
 
         // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
@@ -1291,8 +1291,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
             // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
             // dropping the first element in the current array.
             rotate_three(previous_scores, current_scores, next_scores);
-            std::swap(current_inserts, next_inserts);
-            std::swap(current_deletes, next_deletes);
+            trivial_swap(current_inserts, next_inserts);
+            trivial_swap(current_deletes, next_deletes);
 
             // ! Drop the first entry among the current scores.
             sz_move((sz_ptr_t)(previous_scores), (sz_ptr_t)(previous_scores + 1),
@@ -1318,8 +1318,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
             // Perform a circular rotation of those buffers, to reuse the memory, this time, with a shift,
             // dropping the first element in the current array.
             rotate_three(previous_scores, current_scores, next_scores);
-            std::swap(current_inserts, next_inserts);
-            std::swap(current_deletes, next_deletes);
+            trivial_swap(current_inserts, next_inserts);
+            trivial_swap(current_deletes, next_deletes);
 
             // ! Drop the first entry among the current scores.
             // ! Assuming every next diagonal is shorter by one element,
@@ -1411,8 +1411,8 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
         char_t const *shorter = first.data(), *longer = second.data();
         size_t shorter_length = first.size(), longer_length = second.size();
         if (shorter_length > longer_length) {
-            std::swap(shorter, longer);
-            std::swap(shorter_length, longer_length);
+            trivial_swap(shorter, longer);
+            trivial_swap(shorter_length, longer_length);
         }
 
         // We are going to store 2 rows of the matrix. It will be either 2 rows of length `shorter_length + 1`
@@ -1452,7 +1452,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
             );
 
             // Reuse the memory.
-            std::swap(previous_scores, current_scores);
+            trivial_swap(previous_scores, current_scores);
         }
 
         // Export the scalar before `free` call.
@@ -1540,8 +1540,8 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
         char_t const *shorter = first.data(), *longer = second.data();
         size_t shorter_length = first.size(), longer_length = second.size();
         if (shorter_length > longer_length) {
-            std::swap(shorter, longer);
-            std::swap(shorter_length, longer_length);
+            trivial_swap(shorter, longer);
+            trivial_swap(shorter_length, longer_length);
         }
 
         // We are going to store 2 rows of the matrix. It will be either 2 rows of length `shorter_length + 1`
@@ -1591,9 +1591,9 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
             );
 
             // Reuse the memory.
-            std::swap(previous_scores, current_scores);
-            std::swap(previous_inserts, current_inserts);
-            std::swap(previous_deletes, current_deletes);
+            trivial_swap(previous_scores, current_scores);
+            trivial_swap(previous_inserts, current_inserts);
+            trivial_swap(previous_deletes, current_deletes);
         }
 
         // Export the scalar before `free` call.
@@ -1679,7 +1679,7 @@ struct levenshtein_distance {
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
         if constexpr (std::is_same<gap_costs_t, affine_gap_costs_t>())
             if (gap_costs_.open == gap_costs_.extend) {
-                linear_gap_costs_t linear_gap(gap_costs_.open);
+                linear_gap_costs_t linear_gap {gap_costs_.open};
                 linearized_fallback_t linear_backend(substituter_, linear_gap, alloc_);
                 return linear_backend(first, second, result_ref, executor);
             }
@@ -1797,7 +1797,7 @@ struct levenshtein_distance_utf8 {
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
         if constexpr (std::is_same<gap_costs_t, affine_gap_costs_t>())
             if (gap_costs_.open == gap_costs_.extend) {
-                linear_gap_costs_t linear_gap(gap_costs_.open);
+                linear_gap_costs_t linear_gap {gap_costs_.open};
                 linearized_fallback_t linear_backend(substituter_, linear_gap, alloc_);
                 return linear_backend(first, second, result_ref, executor);
             }

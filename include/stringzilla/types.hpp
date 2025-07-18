@@ -786,6 +786,17 @@ sz_constexpr_if_cpp14 value_type_ non_zero_if(value_type_ value, value_type_ con
 }
 
 /**
+ *  @brief Analog to `std::swap` from `<utility>`, but generates also device code, unlike STL.
+ */
+template <typename value_type_>
+sz_constexpr_if_cpp14 void trivial_swap(value_type_ &x, value_type_ &y) noexcept {
+    static_assert(std::is_trivially_copyable<value_type_>::value, "Value type must be trivially copyable");
+    value_type_ temp = x;
+    x = y;
+    y = temp;
+}
+
+/**
  *  @brief  Helper structure for dividing a range of data into three parts: head, body, and tail,
  *          generally used to minimize misaligned (split) stores and operate on aligned pages.
  */

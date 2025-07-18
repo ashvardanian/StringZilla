@@ -1511,8 +1511,8 @@ __global__ void _affine_score_across_cuda_device(              //
 
         // Perform a circular rotation of those buffers, to reuse the memory.
         rotate_three(previous_scores, current_scores, next_scores);
-        std::swap(current_inserts, next_inserts);
-        std::swap(current_deletes, next_deletes);
+        trivial_swap(current_inserts, next_inserts);
+        trivial_swap(current_deletes, next_deletes);
     }
 
     __shared__ cuda::pipeline_shared_state<cuda::thread_scope_system, 2> memcpy_pipeline_state;
@@ -1540,8 +1540,8 @@ __global__ void _affine_score_across_cuda_device(              //
             diagonal_aligner.init_gap(next_deletes[next_diagonal_length - 1], next_diagonal_index);
         }
 
-        std::swap(current_inserts, next_inserts);
-        std::swap(current_deletes, next_deletes);
+        trivial_swap(current_inserts, next_inserts);
+        trivial_swap(current_deletes, next_deletes);
 
         // Guarantee that all the writes have finished, before progressing to the next diagonal.
         grid.sync();
@@ -1580,8 +1580,8 @@ __global__ void _affine_score_across_cuda_device(              //
 
         // Perform a circular rotation of those buffers, to reuse the memory.
         rotate_three(previous_scores, current_scores, next_scores);
-        std::swap(current_inserts, next_inserts);
-        std::swap(current_deletes, next_deletes);
+        trivial_swap(current_inserts, next_inserts);
+        trivial_swap(current_deletes, next_deletes);
 
         // ! Drop the first entry among the current scores.
         // ! Assuming every next diagonal is shorter by one element,
@@ -1932,8 +1932,8 @@ __global__ void _affine_score_on_each_cuda_warp(                             //
 
             // Perform a circular rotation of those buffers, to reuse the memory.
             rotate_three(previous_scores, current_scores, next_scores);
-            std::swap(current_inserts, next_inserts);
-            std::swap(current_deletes, next_deletes);
+            trivial_swap(current_inserts, next_inserts);
+            trivial_swap(current_deletes, next_deletes);
         }
 
         // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
@@ -1958,8 +1958,8 @@ __global__ void _affine_score_on_each_cuda_warp(                             //
                 diagonal_aligner.init_gap(next_deletes[next_diagonal_length - 1], next_diagonal_index);
             }
 
-            std::swap(current_inserts, next_inserts);
-            std::swap(current_deletes, next_deletes);
+            trivial_swap(current_inserts, next_inserts);
+            trivial_swap(current_deletes, next_deletes);
 
             __syncwarp();
             // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
@@ -1991,8 +1991,8 @@ __global__ void _affine_score_on_each_cuda_warp(                             //
 
             // Perform a circular rotation of those buffers, to reuse the memory.
             rotate_three(previous_scores, current_scores, next_scores);
-            std::swap(current_inserts, next_inserts);
-            std::swap(current_deletes, next_deletes);
+            trivial_swap(current_inserts, next_inserts);
+            trivial_swap(current_deletes, next_deletes);
 
             // ! Drop the first entry among the current scores.
             // ! Assuming every next diagonal is shorter by one element,

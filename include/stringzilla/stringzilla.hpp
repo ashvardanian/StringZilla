@@ -1222,7 +1222,10 @@ class basic_string_slice {
     basic_string_slice(std::nullptr_t) = delete;
 
     /**  @brief Exchanges the view with that of the `other`. */
-    void swap(string_slice &other) noexcept { std::swap(start_, other.start_), std::swap(length_, other.length_); }
+    void swap(string_slice &other) noexcept {
+        trivial_swap(start_, other.start_);
+        trivial_swap(length_, other.length_);
+    }
 
 #if !SZ_AVOID_STL
 
@@ -2136,7 +2139,7 @@ class basic_string {
 
     /**  @brief Exchanges the string contents witt the `other` string. */
     void swap(basic_string &other) noexcept {
-        // If at least one of the strings is on the stack, a basic `std::swap(string_, other.string_)` won't work,
+        // If at least one of the strings is on the stack, a basic `swap(string_, other.string_)` won't work,
         // as the pointer to the stack-allocated memory will be swapped, instead of the contents.
         sz_ptr_t first_start, second_start;
         sz_size_t first_length, second_length;
@@ -2144,7 +2147,7 @@ class basic_string {
         sz_bool_t first_is_external, second_is_external;
         sz_string_unpack(&string_, &first_start, &first_length, &first_space, &first_is_external);
         sz_string_unpack(&other.string_, &second_start, &second_length, &second_space, &second_is_external);
-        std::swap(string_, other.string_);
+        trivial_swap(string_, other.string_);
         if (!first_is_external) other.string_.internal.start = &other.string_.internal.chars[0];
         if (!second_is_external) string_.internal.start = &string_.internal.chars[0];
     }
