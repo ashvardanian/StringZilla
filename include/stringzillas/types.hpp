@@ -28,6 +28,24 @@ struct dummy_mutex_t {
     constexpr void unlock() noexcept {}
 };
 
+/**
+ *  @brief  Simple RAII lock guard analog to `std::lock_guard` for C++11 compatibility.
+ *          Automatically locks the mutex on construction and unlocks on destruction.
+ */
+template <typename mutex_type_>
+class lock_guard {
+    mutex_type_ &mutex_;
+
+  public:
+    explicit lock_guard(mutex_type_ &mutex) noexcept : mutex_(mutex) { mutex_.lock(); }
+    ~lock_guard() noexcept { mutex_.unlock(); }
+
+    lock_guard(lock_guard &&) = delete;
+    lock_guard(lock_guard const &) = delete;
+    lock_guard &operator=(lock_guard &&) = delete;
+    lock_guard &operator=(lock_guard const &) = delete;
+};
+
 struct dummy_prong_t {
     std::size_t task = 0;
     std::size_t thread = 0;

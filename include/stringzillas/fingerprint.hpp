@@ -891,7 +891,7 @@ struct floating_rolling_hashers {
                 rolling_hash_t thread_local_minimum_hashes[dimensions_k];
                 fill_states_(thread_local_text, thread_local_last_hashes, thread_local_minimum_hashes);
 
-                std::lock_guard lock(gather_mutex);
+                lock_guard lock(gather_mutex);
                 for (std::size_t dim = 0; dim < dimensions_k; ++dim)
                     minimum_hashes[dim] = (std::min)(minimum_hashes[dim], thread_local_minimum_hashes[dim]);
             });
