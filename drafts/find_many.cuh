@@ -351,7 +351,7 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
         haystacks_type_ &&haystacks, span<size_t> counts, //
         cuda_executor_t executor = {}, gpu_specs_t const &specs = {}) const noexcept {
 
-        _sz_assert(counts.size() == haystacks.size());
+        sz_assert_(counts.size() == haystacks.size());
 
         using haystacks_t = typename std::remove_reference_t<haystacks_type_>;
         using haystack_t = typename haystacks_t::value_type;

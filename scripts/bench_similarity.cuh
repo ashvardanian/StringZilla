@@ -134,7 +134,7 @@ void bench_levenshtein(environment_t const &env) {
         auto name_affine_baseline = "affine_levenshtein_serial:batch"s + std::to_string(batch_size);
         bench_result_t affine_baseline =
             bench_unary(env, name_affine_baseline, call_affine_baseline).log(linear_baseline);
-        sz_unused(affine_baseline);
+        sz_unused_(affine_baseline);
 
 #if SZ_USE_ICE
         bench_unary(env, "levenshtein_ice:batch"s + std::to_string(batch_size), call_linear_baseline,

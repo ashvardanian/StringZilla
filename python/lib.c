@@ -333,7 +333,7 @@ void wrap_current_exception(sz_cptr_t comment) {
     // ? Prior to Python 3.12 we need to fetch and restore the exception state using
     // ? `PyErr_Fetch` and `PyErr_Restore` to avoid overwriting the current exception.
     // ? After Python 3.12 we can use `PyErr_GetRaisedException` and `PyErr_SetRaisedException`.
-    sz_unused(comment);
+    sz_unused_(comment);
 }
 
 typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject **, char const **, size_t *);
@@ -2264,7 +2264,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs)
     }
 
     sz_string_view_t look_up_table_str;
-    _SZ_ALIGN64 char look_up_table[256];
+    SZ_ALIGN64 char look_up_table[256];
     if (PyDict_Check(look_up_table_obj)) {
 
         // If any character is not defined, it will be replaced with itself:

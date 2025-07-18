@@ -17,7 +17,7 @@
 #include "stringzillas/find_many.cuh"
 #endif
 
-#if !_SZ_IS_CPP17
+#if !SZ_IS_CPP17_
 #error "This test requires C++17 or later."
 #endif
 
@@ -118,7 +118,7 @@ struct find_many_baselines_t {
     status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts,
                       output_matches_type_ &&matches) const noexcept {
 
-        sz_unused(counts);
+        sz_unused_(counts);
         std::atomic<size_t> count_found {0};
         std::size_t const count_allowed {matches.size()};
         all_pairs(haystacks, needles_, [&](match_t const &match) noexcept {
@@ -150,8 +150,8 @@ void test_find_many_on(std::vector<std::string> haystacks, std::vector<std::stri
     // Construct the matchers
     status_t status_base = base_operator.try_build(needles_tape.view());
     status_t status_simd = simd_operator.try_build(needles_tape.view());
-    _sz_assert(status_base == status_t::success_k);
-    _sz_assert(status_simd == status_t::success_k);
+    sz_assert_(status_base == status_t::success_k);
+    sz_assert_(status_simd == status_t::success_k);
 
     // Old C-style for-loops are much more debuggable than range-based loops!
     for (std::size_t haystack_idx = 0; haystack_idx != haystacks.size(); ++haystack_idx) {
@@ -167,9 +167,9 @@ void test_find_many_on(std::vector<std::string> haystacks, std::vector<std::stri
         span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
         status_t status_count_base = base_operator.try_count(haystacks_tape.view(), counts_base_span);
         status_t status_count_simd = simd_operator.try_count(haystacks_tape.view(), counts_simd_span, extra_args...);
-        _sz_assert(status_count_base == status_t::success_k);
-        _sz_assert(status_count_simd == status_t::success_k);
-        _sz_assert(counts_base[0] == counts_simd[0]);
+        sz_assert_(status_count_base == status_t::success_k);
+        sz_assert_(status_count_simd == status_t::success_k);
+        sz_assert_(counts_base[0] == counts_simd[0]);
 
         // Check the matches themselves
         matches_base.resize(std::accumulate(counts_base.begin(), counts_base.end(), 0));
@@ -177,16 +177,16 @@ void test_find_many_on(std::vector<std::string> haystacks, std::vector<std::stri
         status_t status_matched_base = base_operator.try_find(haystacks_tape.view(), counts_base_span, matches_base);
         status_t status_matched_simd =
             simd_operator.try_find(haystacks_tape.view(), counts_simd_span, matches_simd, extra_args...);
-        _sz_assert(status_matched_base == status_t::success_k);
-        _sz_assert(status_matched_simd == status_t::success_k);
+        sz_assert_(status_matched_base == status_t::success_k);
+        sz_assert_(status_matched_simd == status_t::success_k);
 
         // Check the contents and order of the matches
         std::sort(matches_base.begin(), matches_base.end(), match_t::less_globally);
         std::sort(matches_simd.begin(), matches_simd.end(), match_t::less_globally);
         for (std::size_t i = 0; i != matches_base.size(); ++i) {
-            _sz_assert(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
-            _sz_assert(matches_base[i].needle.data() == matches_simd[i].needle.data());
-            _sz_assert(matches_base[i].needle_index == matches_simd[i].needle_index);
+            sz_assert_(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
+            sz_assert_(matches_base[i].needle.data() == matches_simd[i].needle.data());
+            sz_assert_(matches_base[i].needle_index == matches_simd[i].needle_index);
         }
     }
 
@@ -201,9 +201,9 @@ void test_find_many_on(std::vector<std::string> haystacks, std::vector<std::stri
         span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
         status_t status_count_base = base_operator.try_count(haystacks_tape.view(), counts_base_span);
         status_t status_count_simd = simd_operator.try_count(haystacks_tape.view(), counts_simd_span, extra_args...);
-        _sz_assert(status_count_base == status_t::success_k);
-        _sz_assert(status_count_simd == status_t::success_k);
-        _sz_assert(std::equal(counts_base.begin(), counts_base.end(), counts_simd.begin()));
+        sz_assert_(status_count_base == status_t::success_k);
+        sz_assert_(status_count_simd == status_t::success_k);
+        sz_assert_(std::equal(counts_base.begin(), counts_base.end(), counts_simd.begin()));
 
         // Check the matches themselves
         matches_base.resize(std::accumulate(counts_base.begin(), counts_base.end(), 0));
@@ -211,16 +211,16 @@ void test_find_many_on(std::vector<std::string> haystacks, std::vector<std::stri
         status_t status_matched_base = base_operator.try_find(haystacks_tape.view(), counts_base_span, matches_base);
         status_t status_matched_simd =
             simd_operator.try_find(haystacks_tape.view(), counts_simd_span, matches_simd, extra_args...);
-        _sz_assert(status_matched_base == status_t::success_k);
-        _sz_assert(status_matched_simd == status_t::success_k);
+        sz_assert_(status_matched_base == status_t::success_k);
+        sz_assert_(status_matched_simd == status_t::success_k);
 
         // Check the contents and order of the matches
         std::sort(matches_base.begin(), matches_base.end(), match_t::less_globally);
         std::sort(matches_simd.begin(), matches_simd.end(), match_t::less_globally);
         for (std::size_t i = 0; i != matches_base.size(); ++i) {
-            _sz_assert(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
-            _sz_assert(matches_base[i].needle.data() == matches_simd[i].needle.data());
-            _sz_assert(matches_base[i].needle_index == matches_simd[i].needle_index);
+            sz_assert_(matches_base[i].haystack.data() == matches_simd[i].haystack.data());
+            sz_assert_(matches_base[i].needle.data() == matches_simd[i].needle.data());
+            sz_assert_(matches_base[i].needle_index == matches_simd[i].needle_index);
         }
     }
 }
@@ -337,20 +337,20 @@ void test_find_many(base_operator_ &&base_operator, simd_operator_ &&simd_operat
     counts_simd.resize(haystacks_tape.size());
 
     // Build the matchers
-    _sz_assert(base_operator.try_build(needles_tape.view()) == status_t::success_k);
-    _sz_assert(simd_operator.try_build(needles_tape.view()) == status_t::success_k);
+    sz_assert_(base_operator.try_build(needles_tape.view()) == status_t::success_k);
+    sz_assert_(simd_operator.try_build(needles_tape.view()) == status_t::success_k);
 
     // Count the number of matches with both backends
     span<size_t> counts_base_span {counts_base.data(), counts_base.size()};
     span<size_t> counts_simd_span {counts_simd.data(), counts_simd.size()};
     status_t status_count_base = base_operator.try_count(haystacks_tape.view(), counts_base_span);
     status_t status_count_simd = simd_operator.try_count(haystacks_tape.view(), counts_simd_span, extra_args...);
-    _sz_assert(status_count_base == status_t::success_k);
-    _sz_assert(status_count_simd == status_t::success_k);
+    sz_assert_(status_count_base == status_t::success_k);
+    sz_assert_(status_count_simd == status_t::success_k);
     size_t total_count_base = std::accumulate(counts_base.begin(), counts_base.end(), 0);
     size_t total_count_simd = std::accumulate(counts_simd.begin(), counts_simd.end(), 0);
-    _sz_assert(total_count_base == total_count_simd);
-    _sz_assert(std::equal(counts_base.begin(), counts_base.end(), counts_simd.begin()));
+    sz_assert_(total_count_base == total_count_simd);
+    sz_assert_(std::equal(counts_base.begin(), counts_base.end(), counts_simd.begin()));
 
     // Compute with both backends
     results_base.resize(total_count_base);
@@ -358,17 +358,17 @@ void test_find_many(base_operator_ &&base_operator, simd_operator_ &&simd_operat
     size_t count_base = 0, count_simd = 0;
     status_t status_base = base_operator.try_find(haystacks_tape.view(), counts_base_span, results_base);
     status_t status_simd = simd_operator.try_find(haystacks_tape.view(), counts_simd_span, results_simd, extra_args...);
-    _sz_assert(status_base == status_t::success_k);
-    _sz_assert(status_simd == status_t::success_k);
-    _sz_assert(count_base == count_simd);
+    sz_assert_(status_base == status_t::success_k);
+    sz_assert_(status_simd == status_t::success_k);
+    sz_assert_(count_base == count_simd);
 
     // Individually log the failed results
     std::sort(results_base.begin(), results_base.end(), match_t::less_globally);
     std::sort(results_simd.begin(), results_simd.end(), match_t::less_globally);
     for (std::size_t i = 0; i != results_base.size(); ++i) {
-        _sz_assert(results_base[i].haystack_index == results_simd[i].haystack_index);
-        _sz_assert(results_base[i].needle_index == results_simd[i].needle_index);
-        _sz_assert(results_base[i].needle.data() == results_simd[i].needle.data());
+        sz_assert_(results_base[i].haystack_index == results_simd[i].haystack_index);
+        sz_assert_(results_base[i].needle_index == results_simd[i].needle_index);
+        sz_assert_(results_base[i].needle.data() == results_simd[i].needle.data());
     }
 
     base_operator.reset();

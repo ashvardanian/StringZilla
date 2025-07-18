@@ -34,34 +34,34 @@
  *  This will affect recent features like `operator<=>` and tests against STL.
  */
 #if __cplusplus >= 202101L
-#define _SZ_IS_CPP23 1
+#define SZ_IS_CPP23_ 1
 #else
-#define _SZ_IS_CPP23 0
+#define SZ_IS_CPP23_ 0
 #endif
 #if __cplusplus >= 202002L
-#define _SZ_IS_CPP20 1
+#define SZ_IS_CPP20_ 1
 #else
-#define _SZ_IS_CPP20 0
+#define SZ_IS_CPP20_ 0
 #endif
 #if __cplusplus >= 201703L
-#define _SZ_IS_CPP17 1
+#define SZ_IS_CPP17_ 1
 #else
-#define _SZ_IS_CPP17 0
+#define SZ_IS_CPP17_ 0
 #endif
 #if __cplusplus >= 201402L
-#define _SZ_IS_CPP14 1
+#define SZ_IS_CPP14_ 1
 #else
-#define _SZ_IS_CPP14 0
+#define SZ_IS_CPP14_ 0
 #endif
 #if __cplusplus >= 201103L
-#define _SZ_IS_CPP11 1
+#define SZ_IS_CPP11_ 1
 #else
-#define _SZ_IS_CPP11 0
+#define SZ_IS_CPP11_ 0
 #endif
 #if __cplusplus >= 199711L
-#define _SZ_IS_CPP98 1
+#define SZ_IS_CPP98_ 1
 #else
-#define _SZ_IS_CPP98 0
+#define SZ_IS_CPP98_ 0
 #endif
 
 /**
@@ -74,27 +74,27 @@
  *  - C++17: Added the `if constexpr` construct for compile-time branching.
  *  - C++20: Added some dynamic memory allocations, `virtual` functions, and `try`/`catch` blocks.
  */
-#if _SZ_IS_CPP14
+#if SZ_IS_CPP14_
 #define sz_constexpr_if_cpp14 constexpr
 #else
 #define sz_constexpr_if_cpp14
 #endif
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
 #define sz_constexpr_if_cpp20 constexpr
 #else
 #define sz_constexpr_if_cpp20
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
-#define SZ_FORCE_INLINE inline __attribute__((always_inline))
+#define SZ_INLINE inline __attribute__((always_inline))
 #else
-#define SZ_FORCE_INLINE inline
+#define SZ_INLINE inline
 #endif
 
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
-#include <type_traits>      // `std::is_same`, `std::enable_if`, etc.
+#include <type_traits>      // `is_same_type`, `std::enable_if`, etc.
 #endif
 
 namespace ashvardanian {
@@ -155,8 +155,8 @@ struct span {
     constexpr span() noexcept = default;
     constexpr span(value_type *data) noexcept : data_(data) {}
     sz_constexpr_if_cpp14 span(value_type *data, size_type size) noexcept : data_(data) {
-        _sz_assert(extent == size && "The second argument is only intended for compatibility");
-        sz_unused(size);
+        sz_assert_(extent == size && "The second argument is only intended for compatibility");
+        sz_unused_(size);
     }
 
     constexpr value_type *begin() const noexcept { return data_; }
@@ -183,7 +183,7 @@ struct span {
     }
 
     sz_constexpr_if_cpp14 span<value_type, SZ_SIZE_MAX> subspan(size_type offset, size_type count) const noexcept {
-        _sz_assert(offset + count <= extent && "Subspan out of bounds");
+        sz_assert_(offset + count <= extent && "Subspan out of bounds");
         return span<value_type, SZ_SIZE_MAX>(data_ + offset, count);
     }
 };
@@ -226,7 +226,7 @@ struct span<value_type_, SZ_SIZE_MAX> {
     }
 
     sz_constexpr_if_cpp14 span subspan(size_type offset, size_type count) const noexcept {
-        _sz_assert(offset + count <= size_ && "Subspan out of bounds");
+        sz_assert_(offset + count <= size_ && "Subspan out of bounds");
         return span(data_ + offset, count);
     }
 };
@@ -446,7 +446,7 @@ struct arrow_strings_tape {
     using iterator_t = indexed_container_iterator<self_t>;
     using iterator = iterator_t; // ? For STL compatibility
 
-#if _SZ_IS_CPP17
+#if SZ_IS_CPP17_
     using char_alloc_t = typename std::allocator_traits<allocator_t>::rebind_alloc<char_t>;
     using offset_alloc_t = typename std::allocator_traits<allocator_t>::rebind_alloc<offset_t>;
 #else
@@ -577,7 +577,7 @@ struct arrow_strings_tape {
     }
 
     sz_constexpr_if_cpp14 value_type operator[](size_t i) const noexcept {
-        _sz_assert(i < count_ && "Index out of bounds");
+        sz_assert_(i < count_ && "Index out of bounds");
         return {buffer_.data_ + offsets_.data_[i], offsets_.data_[i + 1] - offsets_.data_[i] - 1};
     }
 
@@ -664,12 +664,12 @@ struct random_access_range {
     constexpr end_type_ end() const { return end_; }
 
     reference_type operator[](std::size_t index) const {
-        _sz_assert(index < size());
+        sz_assert_(index < size());
         return *(begin_ + index);
     }
 };
 
-#if _SZ_IS_CPP17 // ? Template deduction guides are available in C++17 and later
+#if SZ_IS_CPP17_ // ? Template deduction guides are available in C++17 and later
 template <typename begin_type_, typename end_type_>
 random_access_range(begin_type_, end_type_) -> random_access_range<begin_type_, end_type_>;
 #endif
@@ -705,7 +705,6 @@ struct is_same_type<first_, first_> {
 
 template <typename first_, typename second_>
 struct is_same_type {
-    static_assert(std::is_same<first_, second_>::value, "First and second types differ!");
     static constexpr bool value = false;
 };
 
@@ -762,7 +761,7 @@ struct cpu_specs_t {
  */
 template <typename scalar_type_>
 sz_constexpr_if_cpp14 scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ divisor) {
-    _sz_assert(divisor > 0 && "Divisor must be positive");
+    sz_assert_(divisor > 0 && "Divisor must be positive");
     return (x + divisor - 1) / divisor;
 }
 
@@ -771,7 +770,7 @@ sz_constexpr_if_cpp14 scalar_type_ divide_round_up(scalar_type_ x, scalar_type_ 
  */
 template <typename scalar_type_>
 sz_constexpr_if_cpp14 scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_type_ divisor) {
-    _sz_assert(divisor > 0 && "Divisor must be positive");
+    sz_assert_(divisor > 0 && "Divisor must be positive");
     return divide_round_up(x, divisor) * divisor;
 }
 
@@ -781,7 +780,7 @@ sz_constexpr_if_cpp14 scalar_type_ round_up_to_multiple(scalar_type_ x, scalar_t
 template <typename value_type_>
 sz_constexpr_if_cpp14 value_type_ non_zero_if(value_type_ value, value_type_ condition) noexcept {
     static_assert(std::is_unsigned<value_type_>::value, "Value type must be unsigned integer");
-    _sz_assert((condition == 0 || condition == 1) && "Condition must be either 0 or 1 unsigned integer");
+    sz_assert_((condition == 0 || condition == 1) && "Condition must be either 0 or 1 unsigned integer");
     return value * condition;
 }
 
@@ -814,7 +813,7 @@ sz_constexpr_if_cpp14 head_body_tail_t head_body_tail(element_type_ *first_addre
 
     // To split into head, body, and tail, we need the `first_address` to be
     // a multiple of `bytes_per_element`, otherwise the `body` will always be a zero!
-    _sz_assert((size_t)first_address % bytes_per_element == 0);
+    sz_assert_((size_t)first_address % bytes_per_element == 0);
     size_t bytes_misalignment = (size_t)first_address % bytes_per_page;
     size_t bytes_in_head = (bytes_per_page - bytes_misalignment) % bytes_per_page;
     size_t elements_in_head = bytes_in_head / bytes_per_element;
@@ -825,9 +824,9 @@ sz_constexpr_if_cpp14 head_body_tail_t head_body_tail(element_type_ *first_addre
 
     // Tail is simply what remains:
     size_t elements_in_tail = total_length - elements_in_head - elements_in_body;
-    _sz_assert(elements_in_head < elements_per_page_ && elements_in_head <= total_length);
-    _sz_assert(elements_in_tail < elements_per_page_ && elements_in_tail <= total_length);
-    _sz_assert(elements_in_body % elements_per_page_ == 0);
+    sz_assert_(elements_in_head < elements_per_page_ && elements_in_head <= total_length);
+    sz_assert_(elements_in_tail < elements_per_page_ && elements_in_tail <= total_length);
+    sz_assert_(elements_in_body % elements_per_page_ == 0);
 
     return head_body_tail_t {elements_in_head, elements_in_body, elements_in_tail};
 }

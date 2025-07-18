@@ -139,19 +139,19 @@ SZ_PUBLIC sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr
     sz_bool_t a_shorter = (sz_bool_t)(a_length < b_length);
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
-#if SZ_USE_MISALIGNED_LOADS && !_SZ_IS_BIG_ENDIAN
+#if SZ_USE_MISALIGNED_LOADS && !SZ_IS_BIG_ENDIAN_
     for (sz_u64_vec_t a_vec, b_vec; a + 8 <= min_end; a += 8, b += 8) {
         a_vec = sz_u64_load(a);
         b_vec = sz_u64_load(b);
         if (a_vec.u64 != b_vec.u64)
-            return _sz_order_scalars(sz_u64_bytes_reverse(a_vec.u64), sz_u64_bytes_reverse(b_vec.u64));
+            return sz_order_scalars_(sz_u64_bytes_reverse(a_vec.u64), sz_u64_bytes_reverse(b_vec.u64));
     }
 #endif
     for (; a != min_end; ++a, ++b)
-        if (*a != *b) return _sz_order_scalars(*a, *b);
+        if (*a != *b) return sz_order_scalars_(*a, *b);
 
     // If the strings are equal up to `min_end`, then the shorter string is smaller
-    return _sz_order_scalars(a_length, b_length);
+    return sz_order_scalars_(a_length, b_length);
 }
 
 #pragma endregion // Serial Implementation
@@ -255,7 +255,7 @@ SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cpt
     a_head_length = a_head_length < a_length ? a_head_length : a_length;
     b_head_length = b_head_length < b_length ? b_head_length : b_length;
     sz_size_t head_length = a_head_length < b_head_length ? a_head_length : b_head_length;
-    __mmask64 head_mask = _sz_u64_mask_until(head_length);
+    __mmask64 head_mask = sz_u64_mask_until_(head_length);
     a_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, a);
     b_vec.zmm = _mm512_maskz_loadu_epi8(head_mask, b);
     __mmask64 mask_not_equal = _mm512_cmpneq_epi8_mask(a_vec.zmm, b_vec.zmm);
@@ -263,7 +263,7 @@ SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cpt
         sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
         char a_char = a_vec.u8s[first_diff];
         char b_char = b_vec.u8s[first_diff];
-        return _sz_order_scalars(a_char, b_char);
+        return sz_order_scalars_(a_char, b_char);
     }
     else if (head_length == a_length && head_length == b_length) { return sz_equal_k; }
     else { a += head_length, b += head_length, a_length -= head_length, b_length -= head_length; }
@@ -278,15 +278,15 @@ SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cpt
             sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
             char a_char = a_vec.u8s[first_diff];
             char b_char = b_vec.u8s[first_diff];
-            return _sz_order_scalars(a_char, b_char);
+            return sz_order_scalars_(a_char, b_char);
         }
         a += 64, b += 64, a_length -= 64, b_length -= 64;
     }
 
     // In most common scenarios at least one of the strings is under 64 bytes.
     if (a_length | b_length) {
-        a_mask = _sz_u64_clamp_mask_until(a_length);
-        b_mask = _sz_u64_clamp_mask_until(b_length);
+        a_mask = sz_u64_clamp_mask_until_(a_length);
+        b_mask = sz_u64_clamp_mask_until_(b_length);
         a_vec.zmm = _mm512_maskz_loadu_epi8(a_mask, a);
         b_vec.zmm = _mm512_maskz_loadu_epi8(b_mask, b);
         // The AVX-512 `_mm512_mask_cmpneq_epi8_mask` intrinsics are generally handy in such environments.
@@ -297,11 +297,11 @@ SZ_PUBLIC sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cpt
             sz_u64_t first_diff = _tzcnt_u64(mask_not_equal);
             char a_char = a_vec.u8s[first_diff];
             char b_char = b_vec.u8s[first_diff];
-            return _sz_order_scalars(a_char, b_char);
+            return sz_order_scalars_(a_char, b_char);
         }
         // From logic perspective, the hardest cases are "abc\0" and "abc".
         // The result must be `sz_greater_k`, as the latter is shorter.
-        else { return _sz_order_scalars(a_length, b_length); }
+        else { return sz_order_scalars_(a_length, b_length); }
     }
 
     return sz_equal_k;
@@ -320,7 +320,7 @@ SZ_PUBLIC sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length)
     }
 
     if (length) {
-        mask = _sz_u64_mask_until(length);
+        mask = sz_u64_mask_until_(length);
         a_vec.zmm = _mm512_maskz_loadu_epi8(mask, a);
         b_vec.zmm = _mm512_maskz_loadu_epi8(mask, b);
         // Reuse the same `mask` variable to find the bit that doesn't match

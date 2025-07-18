@@ -66,9 +66,9 @@ using strings_t = std::vector<std::string_view>;
 using permute_t = std::vector<sz_sorted_idx_t>;
 
 #if __linux__ && defined(_GNU_SOURCE) && !defined(__BIONIC__)
-#define _SZ_HAS_QSORT_R 1
+#define SZ_HAS_QSORT_R_ 1
 #elif defined(_MSC_VER)
-#define _SZ_HAS_QSORT_S 1
+#define SZ_HAS_QSORT_S_ 1
 #endif
 
 /** @brief Helper function to distill a large @b `permute_t` object down to a single comparable hash integer. */
@@ -142,7 +142,7 @@ struct argsort_strings_via_std_t {
     }
 };
 
-#if defined(_SZ_HAS_QSORT_R) || defined(_SZ_HAS_QSORT_S)
+#if defined(SZ_HAS_QSORT_R_) || defined(SZ_HAS_QSORT_S_)
 
 struct argsort_strings_via_qsort_t {
     strings_t const &input;
@@ -158,9 +158,9 @@ struct argsort_strings_via_qsort_t {
         array.handle = &input;
         array.get_start = get_start;
         array.get_length = get_length;
-#if defined(_SZ_HAS_QSORT_R)
+#if defined(SZ_HAS_QSORT_R_)
         qsort_r(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
-#elif defined(_SZ_HAS_QSORT_S)
+#elif defined(SZ_HAS_QSORT_S_)
         qsort_s(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
 #endif
 
@@ -224,7 +224,7 @@ void bench_sequenceing_strings(environment_t const &env) {
 #endif
 
     // Include POSIX and WinAPI functionality
-#if defined(_SZ_HAS_QSORT_R) || defined(_SZ_HAS_QSORT_S)
+#if defined(SZ_HAS_QSORT_R_) || defined(SZ_HAS_QSORT_S_)
     auto qsort_call = argsort_strings_via_qsort_t {env.tokens, permute_buffer};
     bench_nullary(env, "sequence_argsort<qsort>", base_call, qsort_call).log(base);
 #endif

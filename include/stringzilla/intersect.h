@@ -355,7 +355,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vnni,bmi,bmi2,aes,vaes"))), \
     apply_to = function)
 
-SZ_INTERNAL int _sz_u64x4_contains_collisions_haswell(__m256i v) {
+SZ_INTERNAL int sz_u64x4_contains_collisions_haswell_(__m256i v) {
     // Assume `v` stores values: [a, b, c, d].
     __m256i cmp1 = _mm256_cmpeq_epi64(v, _mm256_permute4x64_epi64(v, 0xB1)); // 0xB1 produces [b, a, d, c]
     __m256i cmp2 = _mm256_cmpeq_epi64(v, _mm256_permute4x64_epi64(v, 0x4E)); // 0x4E produces [c, d, a, b]
@@ -414,8 +414,8 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
     //
     // For larger entries, we will use a separate loop afterwards to decrease the likelihood of collisions
     // on the shorter entries, that can benefit from vectorized processing.
-    _sz_hash_minimal_x4_t batch_hashes_states_initial;
-    _sz_hash_minimal_x4_init_ice(&batch_hashes_states_initial, seed);
+    sz_hash_minimal_x4_t_ batch_hashes_states_initial;
+    sz_hash_minimal_x4_init_ice_(&batch_hashes_states_initial, seed);
     sz_size_t count_longer = 0;
     for (sz_size_t small_position = 0; small_position < small_sequence->count;) {
         sz_string_view_t batch[4];
@@ -453,27 +453,27 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
             // Now let's load the first bytes of each string.
             sz_u256_vec_t batch_hashes;
             sz_u512_vec_t batch_prefixes;
-            batch_prefixes.xmms[0] = _mm_maskz_loadu_epi8(_sz_u16_mask_until(batch[0].length), batch[0].start);
-            batch_prefixes.xmms[1] = _mm_maskz_loadu_epi8(_sz_u16_mask_until(batch[1].length), batch[1].start);
-            batch_prefixes.xmms[2] = _mm_maskz_loadu_epi8(_sz_u16_mask_until(batch[2].length), batch[2].start);
-            batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(_sz_u16_mask_until(batch[3].length), batch[3].start);
+            batch_prefixes.xmms[0] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[0].length), batch[0].start);
+            batch_prefixes.xmms[1] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[1].length), batch[1].start);
+            batch_prefixes.xmms[2] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[2].length), batch[2].start);
+            batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start);
 
             // Reuse the already computed state for hashes
-            _sz_hash_minimal_x4_t batch_hashes_states = batch_hashes_states_initial;
-            _sz_hash_minimal_x4_update_ice(&batch_hashes_states, batch_prefixes.zmm);
-            batch_hashes.ymm = _sz_hash_minimal_x4_finalize_ice(&batch_hashes_states, batch[0].length, batch[1].length,
+            sz_hash_minimal_x4_t_ batch_hashes_states = batch_hashes_states_initial;
+            sz_hash_minimal_x4_update_ice_(&batch_hashes_states, batch_prefixes.zmm);
+            batch_hashes.ymm = sz_hash_minimal_x4_finalize_ice_(&batch_hashes_states, batch[0].length, batch[1].length,
                                                                 batch[2].length, batch[3].length);
-            _sz_assert(batch_hashes.u64s[0] == sz_hash(batch[0].start, batch[0].length, seed));
-            _sz_assert(batch_hashes.u64s[1] == sz_hash(batch[1].start, batch[1].length, seed));
-            _sz_assert(batch_hashes.u64s[2] == sz_hash(batch[2].start, batch[2].length, seed));
-            _sz_assert(batch_hashes.u64s[3] == sz_hash(batch[3].start, batch[3].length, seed));
+            sz_assert_(batch_hashes.u64s[0] == sz_hash(batch[0].start, batch[0].length, seed));
+            sz_assert_(batch_hashes.u64s[1] == sz_hash(batch[1].start, batch[1].length, seed));
+            sz_assert_(batch_hashes.u64s[2] == sz_hash(batch[2].start, batch[2].length, seed));
+            sz_assert_(batch_hashes.u64s[3] == sz_hash(batch[3].start, batch[3].length, seed));
 
             // Now let's perform an optimistic hash-table lookup using vectorized gathers
             sz_u256_vec_t batch_slots, existing_hashes;
             batch_slots.ymm = _mm256_and_si256(batch_hashes.ymm, _mm256_set1_epi64x(hash_table_slots - 1));
 
             // In case of very small inputs, it's more likely, that some of the 4x hashes or their slots will collide
-            int const has_slot_collisions = _sz_u64x4_contains_collisions_haswell(batch_slots.ymm);
+            int const has_slot_collisions = sz_u64x4_contains_collisions_haswell_(batch_slots.ymm);
 
             // Before scattering the new positions - gather the pre-existing ones.
             // In case of `has_slot_collisions`, this will practically be a "prefetch" operation.
@@ -555,20 +555,20 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
             // Now let's load the first bytes of each string.
             sz_u256_vec_t batch_hashes;
             sz_u512_vec_t batch_prefixes;
-            batch_prefixes.xmms[0] = _mm_maskz_loadu_epi8(_sz_u16_mask_until(batch[0].length), batch[0].start);
-            batch_prefixes.xmms[1] = _mm_maskz_loadu_epi8(_sz_u16_mask_until(batch[1].length), batch[1].start);
-            batch_prefixes.xmms[2] = _mm_maskz_loadu_epi8(_sz_u16_mask_until(batch[2].length), batch[2].start);
-            batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(_sz_u16_mask_until(batch[3].length), batch[3].start);
+            batch_prefixes.xmms[0] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[0].length), batch[0].start);
+            batch_prefixes.xmms[1] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[1].length), batch[1].start);
+            batch_prefixes.xmms[2] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[2].length), batch[2].start);
+            batch_prefixes.xmms[3] = _mm_maskz_loadu_epi8(sz_u16_mask_until_(batch[3].length), batch[3].start);
 
             // Reuse the already computed state for hashes
-            _sz_hash_minimal_x4_t batch_hashes_states = batch_hashes_states_initial;
-            _sz_hash_minimal_x4_update_ice(&batch_hashes_states, batch_prefixes.zmm);
-            batch_hashes.ymm = _sz_hash_minimal_x4_finalize_ice(&batch_hashes_states, batch[0].length, batch[1].length,
+            sz_hash_minimal_x4_t_ batch_hashes_states = batch_hashes_states_initial;
+            sz_hash_minimal_x4_update_ice_(&batch_hashes_states, batch_prefixes.zmm);
+            batch_hashes.ymm = sz_hash_minimal_x4_finalize_ice_(&batch_hashes_states, batch[0].length, batch[1].length,
                                                                 batch[2].length, batch[3].length);
-            _sz_assert(batch_hashes.u64s[0] == sz_hash(batch[0].start, batch[0].length, seed));
-            _sz_assert(batch_hashes.u64s[1] == sz_hash(batch[1].start, batch[1].length, seed));
-            _sz_assert(batch_hashes.u64s[2] == sz_hash(batch[2].start, batch[2].length, seed));
-            _sz_assert(batch_hashes.u64s[3] == sz_hash(batch[3].start, batch[3].length, seed));
+            sz_assert_(batch_hashes.u64s[0] == sz_hash(batch[0].start, batch[0].length, seed));
+            sz_assert_(batch_hashes.u64s[1] == sz_hash(batch[1].start, batch[1].length, seed));
+            sz_assert_(batch_hashes.u64s[2] == sz_hash(batch[2].start, batch[2].length, seed));
+            sz_assert_(batch_hashes.u64s[3] == sz_hash(batch[3].start, batch[3].length, seed));
 
             // Now let's perform an optimistic hash-table lookup using vectorized gathers.
             sz_u256_vec_t batch_slots, existing_hashes;
@@ -724,7 +724,7 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_seque
                                                 sz_memory_allocator_t *alloc, sz_u64_t seed,
                                                 sz_size_t *intersection_size, sz_sorted_idx_t *first_positions,
                                                 sz_sorted_idx_t *second_positions) {
-    // TODO: Finalize `_sz_hash_sve2_upto16x16` and integrate here
+    // TODO: Finalize `sz_hash_sve2_upto16x16_` and integrate here
     return sz_sequence_intersect_serial( //
         first_sequence, second_sequence, //
         alloc, seed, intersection_size,  //

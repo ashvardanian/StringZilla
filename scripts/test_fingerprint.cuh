@@ -17,7 +17,7 @@
 #include "stringzillas/fingerprint.cuh"
 #endif
 
-#if !_SZ_IS_CPP17
+#if !SZ_IS_CPP17_
 #error "This test requires C++17 or later."
 #endif
 
@@ -55,12 +55,12 @@ void test_rolling_hasher(hasher_type_ &&hasher, std::vector<std::string> const &
         // Pre-populate the rolling-hash state until the first window ends
         hash_t rolling_hash = 0;
         for (std::size_t j = 0; j < window_width; ++j) rolling_hash = hasher.update(rolling_hash, str[j]);
-        _sz_assert(rolling_hash == hashes[0]);
+        sz_assert_(rolling_hash == hashes[0]);
 
         // Now compute the rolling hash and compare it to the slice hashes
         for (std::size_t j = window_width; j < str.size(); ++j) {
             rolling_hash = hasher.update(rolling_hash, str[j - window_width], str[j]);
-            _sz_assert(rolling_hash == hashes[j - window_width + 1]);
+            sz_assert_(rolling_hash == hashes[j - window_width + 1]);
         }
     }
 }

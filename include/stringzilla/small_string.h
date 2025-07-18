@@ -39,10 +39,10 @@ extern "C" {
  *  @brief  The number of bytes a stack-allocated string can hold, including the SZ_NULL termination character.
  *          ! This can't be changed from outside. Don't use the `#error` as it may already be included and set.
  */
-#ifdef _SZ_STRING_INTERNAL_SPACE
-#undef _SZ_STRING_INTERNAL_SPACE
+#ifdef SZ_STRING_INTERNAL_SPACE
+#undef SZ_STRING_INTERNAL_SPACE
 #endif
-#define _SZ_STRING_INTERNAL_SPACE (sizeof(sz_size_t) * 3 - 1) // 3 pointers minus one byte for an 8-bit length
+#define SZ_STRING_INTERNAL_SPACE (sizeof(sz_size_t) * 3 - 1) // 3 pointers minus one byte for an 8-bit length
 
 /**
  *  @brief  Tiny memory-owning string structure with a Small String Optimization (SSO).
@@ -59,7 +59,7 @@ extern "C" {
  */
 typedef union sz_string_t {
 
-#if !_SZ_IS_BIG_ENDIAN
+#if !SZ_IS_BIG_ENDIAN_
 
     struct external {
         sz_ptr_t start;
@@ -71,7 +71,7 @@ typedef union sz_string_t {
     struct internal {
         sz_ptr_t start;
         sz_u8_t length;
-        char chars[_SZ_STRING_INTERNAL_SPACE];
+        char chars[SZ_STRING_INTERNAL_SPACE];
     } internal;
 
 #else
@@ -85,7 +85,7 @@ typedef union sz_string_t {
 
     struct internal {
         sz_ptr_t start;
-        char chars[_SZ_STRING_INTERNAL_SPACE];
+        char chars[SZ_STRING_INTERNAL_SPACE];
         sz_u8_t length;
     } internal;
 
@@ -223,7 +223,7 @@ SZ_PUBLIC void sz_string_unpack( //
     // If the string is small, use branch-less approach to mask-out the top 7 bytes of the length.
     *length = string->external.length & (0x00000000000000FFull | is_big_mask);
     // In case the string is small, the `is_small - 1ull` will become 0xFFFFFFFFFFFFFFFFull.
-    *space = sz_u64_blend(_SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
+    *space = sz_u64_blend(SZ_STRING_INTERNAL_SPACE, string->external.space, is_big_mask);
     *is_external = (sz_bool_t)!is_small;
 }
 
@@ -261,7 +261,7 @@ SZ_PUBLIC sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const 
 }
 
 SZ_PUBLIC void sz_string_init(sz_string_t *string) {
-    _sz_assert(string && "String can't be SZ_NULL.");
+    sz_assert_(string && "String can't be SZ_NULL.");
 
     // Only 8 + 1 + 1 need to be initialized.
     string->internal.start = &string->internal.chars[0];
@@ -275,13 +275,13 @@ SZ_PUBLIC void sz_string_init(sz_string_t *string) {
 
 SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
-    _sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
+    sz_assert_(string && allocator && "String and allocator can't be SZ_NULL.");
     // Initialize the string to zeros for safety.
     string->words[1] = 0;
     string->words[2] = 0;
     string->words[3] = 0;
     // If we are lucky, no memory allocations will be needed.
-    if (space_needed <= _SZ_STRING_INTERNAL_SPACE) {
+    if (space_needed <= SZ_STRING_INTERNAL_SPACE) {
         string->internal.start = &string->internal.chars[0];
         string->internal.length = (sz_u8_t)length;
     }
@@ -292,24 +292,24 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
         string->external.length = length;
         string->external.space = space_needed;
     }
-    _sz_assert(&string->internal.start == &string->external.start && "Alignment confusion");
+    sz_assert_(&string->internal.start == &string->external.start && "Alignment confusion");
     string->external.start[length] = 0;
     return string->external.start;
 }
 
 SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator) {
 
-    _sz_assert(string && allocator && "Strings and allocators can't be SZ_NULL.");
+    sz_assert_(string && allocator && "Strings and allocators can't be SZ_NULL.");
 
     sz_size_t new_space = new_capacity + 1;
-    if (new_space <= _SZ_STRING_INTERNAL_SPACE) return string->external.start;
+    if (new_space <= SZ_STRING_INTERNAL_SPACE) return string->external.start;
 
     sz_ptr_t string_start;
     sz_size_t string_length;
     sz_size_t string_space;
     sz_bool_t string_is_external;
     sz_string_unpack(string, &string_start, &string_length, &string_space, &string_is_external);
-    _sz_assert(new_space > string_space && "New space must be larger than current.");
+    sz_assert_(new_space > string_space && "New space must be larger than current.");
 
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
     if (!new_start) return SZ_NULL_CHAR;
@@ -327,7 +327,7 @@ SZ_PUBLIC sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity
 
 SZ_PUBLIC sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator) {
 
-    _sz_assert(string && allocator && "Strings and allocators can't be SZ_NULL.");
+    sz_assert_(string && allocator && "Strings and allocators can't be SZ_NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -356,7 +356,7 @@ SZ_PUBLIC sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_alloca
 SZ_PUBLIC sz_ptr_t sz_string_expand( //
     sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_memory_allocator_t *allocator) {
 
-    _sz_assert(string && allocator && "String and allocator can't be SZ_NULL.");
+    sz_assert_(string && allocator && "String and allocator can't be SZ_NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -393,7 +393,7 @@ SZ_PUBLIC sz_ptr_t sz_string_expand( //
 
 SZ_PUBLIC sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length) {
 
-    _sz_assert(string && "String can't be SZ_NULL.");
+    sz_assert_(string && "String can't be SZ_NULL.");
 
     sz_ptr_t string_start;
     sz_size_t string_length;

@@ -30,15 +30,18 @@
 
 #include "test_stringzillas.cuh"
 
+#include "test_fingerprint.cuh"
+#include "test_similarity.cuh"
+
 namespace szs = ashvardanian::stringzillas;
 
 int main(int argc, char const **argv) {
-    sz_unused(argc && argv);
+    sz_unused_(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
     if (auto code = szs::scripts::log_environment(); code != 0) return code;
 
     try {
-        szs::scripts::test_fingerprint_equivalence();
+        szs::scripts::test_rolling_hasher();
         szs::scripts::test_similarity_scores_equivalence();
         szs::scripts::test_similarity_scores_memory_usage();
     }

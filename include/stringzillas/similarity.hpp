@@ -121,8 +121,8 @@ struct affine_gap_costs_t {
 
 template <typename gap_costs_type_>
 constexpr sz_similarity_gaps_t gap_type() {
-    constexpr bool is_linear_k = std::is_same_v<gap_costs_type_, linear_gap_costs_t>;
-    constexpr bool is_affine_k = std::is_same_v<gap_costs_type_, affine_gap_costs_t>;
+    constexpr bool is_linear_k = is_same_type<gap_costs_type_, linear_gap_costs_t>::value;
+    constexpr bool is_affine_k = is_same_type<gap_costs_type_, affine_gap_costs_t>::value;
     static_assert(is_linear_k || is_affine_k, "Invalid gap costs type");
     if constexpr (is_linear_k) { return sz_gaps_linear_k; }
     else { return sz_gaps_affine_k; }
@@ -266,7 +266,7 @@ struct similarity_memory_requirements {
 
 #pragma region - Core Templates
 
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
 
 template <typename iterator_type_>
 concept pointer_like = requires(iterator_type_ iterator, std::size_t idx) {
@@ -316,7 +316,7 @@ template <                                                       //
     sz_capability_t capability_ = sz_cap_serial_k,               //
     typename enable_ = void                                      //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
@@ -354,7 +354,7 @@ template <                                                       //
     sz_capability_t capability_ = sz_cap_serial_k,               //
     typename enable_ = void                                      //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires score_like<score_type_> && substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct diagonal_walker;
@@ -393,7 +393,7 @@ template <                                                       //
     sz_capability_t capability_ = sz_cap_serial_k,               //
     typename enable_ = void                                      //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires score_like<score_type_> && substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct horizontal_walker;
@@ -410,7 +410,7 @@ template <                                         //
     sz_capability_t capability_ = sz_cap_serial_k, //
     typename enable_ = void                        //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances;
@@ -422,7 +422,7 @@ template <                                         //
     sz_capability_t capability_ = sz_cap_serial_k, //
     typename enable_ = void                        //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances_utf8;
@@ -435,7 +435,7 @@ template <                                              //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct needleman_wunsch_scores;
@@ -448,7 +448,7 @@ template <                                              //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct smith_waterman_scores;
@@ -510,7 +510,7 @@ using affine_levenshtein_utf8_ice_t = levenshtein_distances_utf8<char, affine_ga
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -565,7 +565,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param n The length of the diagonal to evaluate and the number of characters to compare from each string.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                     //
@@ -602,7 +602,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -621,7 +621,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
-    static_assert(std::is_same<first_char_t, second_char_t>(), "String characters must be of the same type.");
+    static_assert(is_same_type<first_char_t, second_char_t>(), "String characters must be of the same type.");
     using char_t = first_char_t;
 
     using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
@@ -649,7 +649,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     score_t score() const noexcept { return best_score_; }
 
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                           //
@@ -693,7 +693,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -757,7 +757,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param n The length of the diagonal to evaluate and the number of characters to compare from each string.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                     //
@@ -809,7 +809,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -828,7 +828,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
-    static_assert(std::is_same<first_char_t, second_char_t>(), "String characters must be of the same type.");
+    static_assert(is_same_type<first_char_t, second_char_t>(), "String characters must be of the same type.");
     using char_t = first_char_t;
 
     using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
@@ -863,7 +863,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     score_t score() const noexcept { return best_score_; }
 
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                           //
@@ -930,7 +930,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename enable_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires score_like<score_type_> && substituter_like<substituter_type_>
 #endif
 struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_costs_t, allocator_type_, objective_,
@@ -971,7 +971,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
      *  @param[out] result_ref Location to dump the calculated score.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
@@ -1123,7 +1123,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
 template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename enable_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires score_like<score_type_> && substituter_like<substituter_type_>
 #endif
 struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_costs_t, allocator_type_, objective_,
@@ -1165,7 +1165,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
      *  @param[out] result_ref Location to dump the calculated score.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
@@ -1347,7 +1347,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
  */
 template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires score_like<score_type_> && substituter_like<substituter_type_>
 #endif
 struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_costs_t, allocator_type_, objective_,
@@ -1391,7 +1391,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
      *  @param[out] result_ref Location to dump the calculated score.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
@@ -1472,7 +1472,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
  */
 template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires score_like<score_type_> && substituter_like<substituter_type_>
 #endif
 struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_costs_t, allocator_type_, objective_,
@@ -1516,7 +1516,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
      *  @param[out] result_ref Location to dump the calculated score.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
@@ -1624,7 +1624,7 @@ template <                                         //
     sz_capability_t capability_ = sz_cap_serial_k, //
     typename enable_ = void                        //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distance {
@@ -1669,7 +1669,7 @@ struct levenshtein_distance {
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
@@ -1677,7 +1677,7 @@ struct levenshtein_distance {
 
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
-        if constexpr (std::is_same<gap_costs_t, affine_gap_costs_t>())
+        if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>())
             if (gap_costs_.open == gap_costs_.extend) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
                 linearized_fallback_t linear_backend(substituter_, linear_gap, alloc_);
@@ -1741,7 +1741,7 @@ template <                                         //
     sz_capability_t capability_ = sz_cap_serial_k, //
     typename enable_ = void                        //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distance_utf8 {
@@ -1787,7 +1787,7 @@ struct levenshtein_distance_utf8 {
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
@@ -1795,7 +1795,7 @@ struct levenshtein_distance_utf8 {
 
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
-        if constexpr (std::is_same<gap_costs_t, affine_gap_costs_t>())
+        if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>())
             if (gap_costs_.open == gap_costs_.extend) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
                 linearized_fallback_t linear_backend(substituter_, linear_gap, alloc_);
@@ -1887,7 +1887,7 @@ template <                                              //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct needleman_wunsch_score {
@@ -1927,7 +1927,7 @@ struct needleman_wunsch_score {
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
@@ -1982,7 +1982,7 @@ template <                                              //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct smith_waterman_score {
@@ -2022,7 +2022,7 @@ struct smith_waterman_score {
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
@@ -2093,7 +2093,7 @@ template <                                     //
     typename results_type_,                    //
     typename executor_type_ = dummy_executor_t //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires score_like<score_type_> && executor_like<executor_type_>
 #endif
 status_t _score_in_parallel(                                                                                       //
@@ -2109,7 +2109,7 @@ status_t _score_in_parallel(                                                    
 
     auto first_size = first_strings.size();
     auto second_size = second_strings.size();
-    _sz_assert(first_size == second_size && "Expect equal number of strings");
+    sz_assert_(first_size == second_size && "Expect equal number of strings");
 
     // Use an atomic to store any error encountered.
     std::atomic<status_t> error {status_t::success_k};
@@ -2159,7 +2159,7 @@ template <                         //
     typename second_strings_type_, //
     typename results_type_         //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires score_like<score_type_>
 #endif
 status_t _score_sequentially(                                                                                      //
@@ -2170,7 +2170,7 @@ status_t _score_sequentially(                                                   
 
     auto first_size = first_strings.size();
     auto second_size = second_strings.size();
-    _sz_assert(first_size == second_size && "Expect equal number of strings");
+    sz_assert_(first_size == second_size && "Expect equal number of strings");
 
     for (size_t i = 0; i < first_size; ++i) {
         score_t result = 0;
@@ -2190,7 +2190,7 @@ template <                       //
     sz_capability_t capability_, //
     typename enable_             //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances {
@@ -2221,7 +2221,7 @@ struct levenshtein_distances {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
@@ -2241,7 +2241,7 @@ template <                       //
     sz_capability_t capability_, //
     typename enable_             //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances_utf8 {
@@ -2272,7 +2272,7 @@ struct levenshtein_distances_utf8 {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
@@ -2293,7 +2293,7 @@ template <                       //
     sz_capability_t capability_, //
     typename enable_             //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct needleman_wunsch_scores {
@@ -2324,7 +2324,7 @@ struct needleman_wunsch_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
@@ -2345,7 +2345,7 @@ template <                       //
     sz_capability_t capability_, //
     typename enable_             //
     >
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct smith_waterman_scores {
@@ -2376,7 +2376,7 @@ struct smith_waterman_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
@@ -2590,7 +2590,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
      *  @brief  Computes one diagonal of the `u8` DM matrix for exactly 64 characters,
      *          using unaligned loads, but forcing @b aligned stores.
      */
-    SZ_FORCE_INLINE void slice_aligned64chars(                                       //
+    SZ_INLINE void slice_aligned64chars(                                             //
         char const *first_reversed_slice, char const *second_slice,                  //
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                     //
@@ -2624,7 +2624,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
      *  @brief  Computes one diagonal of the `u8` DM matrix for up to 64 characters,
      *          using unaligned loads and stores.
      */
-    SZ_FORCE_INLINE void slice_upto64chars(                                          //
+    SZ_INLINE void slice_upto64chars(                                                //
         char const *first_reversed_slice, char const *second_slice, size_t n,        //
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                     //
@@ -2639,7 +2639,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u64_mask_until(n);
+        load_mask = sz_u64_mask_until_(n);
         first_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, first_reversed_slice);
         second_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, second_slice);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_substitution);
@@ -2661,7 +2661,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                         //
         dummy_executor_t executor = {}) noexcept {
 
-        sz_unused(executor); // On such small inputs, we don't need to worry about parallelism.
+        sz_unused_(executor); // On such small inputs, we don't need to worry about parallelism.
 
         // Initialize constats:
         sz_u512_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec;
@@ -2737,7 +2737,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
      *  @brief  Computes one diagonal of the `u8` DM matrix for exactly 16 characters,
      *          using unaligned loads, but forcing @b aligned stores.
      */
-    SZ_FORCE_INLINE void slice_aligned16chars(                                       //
+    SZ_INLINE void slice_aligned16chars(                                             //
         sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice,        //
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion, //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                     //
@@ -2770,7 +2770,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
      *  @brief  Computes one diagonal of the `u8` DM matrix for up to 16 characters,
      *          using unaligned loads and stores.
      */
-    SZ_FORCE_INLINE void slice_upto16chars(                                             //
+    SZ_INLINE void slice_upto16chars(                                                   //
         sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, size_t n, //
         sz_u8_t const *scores_pre_substitution, sz_u8_t const *scores_pre_insertion,    //
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                        //
@@ -2785,7 +2785,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u16_mask_until(n);
+        load_mask = sz_u16_mask_until_(n);
         first_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, first_reversed_slice);
         second_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, second_slice);
         pre_substitution_vec.xmm = _mm_maskz_loadu_epi8(load_mask, scores_pre_substitution);
@@ -2806,7 +2806,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
         sz_u8_t const *scores_pre_deletion, sz_u8_t *scores_new,                                   //
         dummy_executor_t executor = {}) noexcept {
 
-        sz_unused(executor); // On such small inputs, we don't need to worry about parallelism.
+        sz_unused_(executor); // On such small inputs, we don't need to worry about parallelism.
 
         // Initialize constats:
         sz_u128_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec;
@@ -2882,7 +2882,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
      *  @brief  Computes one diagonal of the `u16` DM matrix for exactly 16 characters,
      *          using unaligned loads, but forcing @b aligned stores.
      */
-    SZ_FORCE_INLINE void slice_aligned32chars(                                         //
+    SZ_INLINE void slice_aligned32chars(                                               //
         char const *first_reversed_slice, char const *second_slice,                    //
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new,                     //
@@ -2911,7 +2911,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
         _mm512_store_si512(scores_new, cell_score_vec.zmm);
     }
 
-    SZ_FORCE_INLINE void slice_upto32chars(                                            //
+    SZ_INLINE void slice_upto32chars(                                                  //
         char const *first_reversed_slice, char const *second_slice, size_t n,          //
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new,                     //
@@ -2925,7 +2925,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u32_mask_until(n);
+        load_mask = sz_u32_mask_until_(n);
         first_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, first_reversed_slice);
         second_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, second_slice);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_substitution);
@@ -2942,7 +2942,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                              //
@@ -3024,7 +3024,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
      *  @brief  Computes one diagonal of the `u16` DM matrix for exactly 16 characters,
      *          using unaligned loads, but forcing @b aligned stores.
      */
-    SZ_FORCE_INLINE void slice_aligned16chars(                                         //
+    SZ_INLINE void slice_aligned16chars(                                               //
         sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice,          //
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion, //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new,                     //
@@ -3057,7 +3057,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
      *  @brief  Computes one diagonal of the `u16` DM matrix for up to 16 characters,
      *          using unaligned loads and stores.
      */
-    SZ_FORCE_INLINE void slice_upto16chars(                                             //
+    SZ_INLINE void slice_upto16chars(                                                   //
         sz_rune_t const *first_reversed_slice, sz_rune_t const *second_slice, size_t n, //
         sz_u16_t const *scores_pre_substitution, sz_u16_t const *scores_pre_insertion,  //
         sz_u16_t const *scores_pre_deletion, sz_u16_t *scores_new,                      //
@@ -3071,7 +3071,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u16_mask_until(n);
+        load_mask = sz_u16_mask_until_(n);
         first_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, first_reversed_slice);
         second_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, second_slice);
         pre_substitution_vec.ymm = _mm256_maskz_loadu_epi16(load_mask, scores_pre_substitution);
@@ -3088,7 +3088,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                                        //
@@ -3170,7 +3170,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
      *  @brief  Computes one diagonal of the `u32` DM matrix for exactly 16 characters,
      *          using unaligned loads, but forcing @b aligned stores.
      */
-    SZ_FORCE_INLINE void slice_aligned16chars(                                         //
+    SZ_INLINE void slice_aligned16chars(                                               //
         char const *first_reversed_slice, char const *second_slice,                    //
         sz_u32_t const *scores_pre_substitution, sz_u32_t const *scores_pre_insertion, //
         sz_u32_t const *scores_pre_deletion, sz_u32_t *scores_new,                     //
@@ -3203,7 +3203,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
      *  @brief  Computes one diagonal of the `u32` DM matrix for up to 16 characters,
      *          using unaligned loads and stores.
      */
-    SZ_FORCE_INLINE void slice_upto16chars(                                            //
+    SZ_INLINE void slice_upto16chars(                                                  //
         char const *first_reversed_slice, char const *second_slice, size_t n,          //
         sz_u32_t const *scores_pre_substitution, sz_u32_t const *scores_pre_insertion, //
         sz_u32_t const *scores_pre_deletion, sz_u32_t *scores_new,                     //
@@ -3217,7 +3217,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u16_mask_until(n);
+        load_mask = sz_u16_mask_until_(n);
         first_vec.xmm = _mm_maskz_loadu_epi8(load_mask, first_reversed_slice);
         second_vec.xmm = _mm_maskz_loadu_epi8(load_mask, second_slice);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, scores_pre_substitution);
@@ -3234,7 +3234,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                              //
@@ -3315,7 +3315,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
      *  @brief  Computes one diagonal of the `u8` DM matrix for up to 64 characters,
      *          using unaligned loads and stores.
      */
-    SZ_FORCE_INLINE void slice_upto64chars(                                   //
+    SZ_INLINE void slice_upto64chars(                                         //
         char const *first_reversed_slice, char const *second_slice, size_t n, //
         sz_u8_t const *scores_pre_substitution,                               //
         sz_u8_t const *scores_pre_insertion,                                  //
@@ -3337,7 +3337,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u64_mask_until(n);
+        load_mask = sz_u64_mask_until_(n);
         first_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, first_reversed_slice);
         second_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, second_slice);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi8(load_mask, scores_pre_substitution);
@@ -3374,7 +3374,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
         sz_u8_t *scores_new_deletions,                                                   //
         dummy_executor_t executor = {}) noexcept {
 
-        sz_unused(executor); // On such small inputs, we don't need to worry about parallelism.
+        sz_unused_(executor); // On such small inputs, we don't need to worry about parallelism.
 
         // Initialize constats:
         sz_u512_vec_t match_cost_vec, mismatch_cost_vec, gap_open_vec, gap_expand_vec;
@@ -3427,7 +3427,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
     static constexpr size_t step_k = 32;
 
-    SZ_FORCE_INLINE void slice_upto32chars(                                   //
+    SZ_INLINE void slice_upto32chars(                                         //
         char const *first_reversed_slice, char const *second_slice, size_t n, //
         sz_u16_t const *scores_pre_substitution,                              //
         sz_u16_t const *scores_pre_insertion,                                 //
@@ -3449,7 +3449,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u32_mask_until(n);
+        load_mask = sz_u32_mask_until_(n);
         first_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, first_reversed_slice);
         second_vec.ymm = _mm256_maskz_loadu_epi8(load_mask, second_slice);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_substitution);
@@ -3475,7 +3475,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                              //
@@ -3548,7 +3548,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
      *  @brief  Computes one diagonal of the `u32` DM matrix for up to 16 characters,
      *          using unaligned loads and stores.
      */
-    SZ_FORCE_INLINE void slice_upto16chars(                                   //
+    SZ_INLINE void slice_upto16chars(                                         //
         char const *first_reversed_slice, char const *second_slice, size_t n, //
         sz_u32_t const *scores_pre_substitution,                              //
         sz_u32_t const *scores_pre_insertion,                                 //
@@ -3570,7 +3570,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
 
         // ? Note that here we are still traversing both buffers in the same order,
         // ? because one of the strings has been reversed beforehand.
-        load_mask = _sz_u16_mask_until(n);
+        load_mask = sz_u16_mask_until_(n);
         first_vec.xmm = _mm_maskz_loadu_epi8(load_mask, first_reversed_slice);
         second_vec.xmm = _mm_maskz_loadu_epi8(load_mask, second_slice);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, scores_pre_substitution);
@@ -3596,7 +3596,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                              //
@@ -3692,7 +3692,7 @@ struct levenshtein_distance<char, gap_costs_type_, allocator_type_, capability_,
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
@@ -3781,7 +3781,7 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
@@ -3935,7 +3935,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
     _lookup_in256bytes_ice_t lookup_;
 
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                   //
@@ -3965,8 +3965,8 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
         // To perform the same operation in vectorized form, we need to perform a tree-like reduction,
         // that will involve multiple steps. It's quite expensive and should be first tested in the
         // "experimental" section.
-        _sz_assert(scores_pre_substitution + 1 == scores_pre_insertion && "Expects horizontal traversal of DP matrix");
-        _sz_assert(scores_pre_deletion + 1 == scores_new && "Expects horizontal traversal of DP matrix");
+        sz_assert_(scores_pre_substitution + 1 == scores_pre_insertion && "Expects horizontal traversal of DP matrix");
+        sz_assert_(scores_pre_deletion + 1 == scores_new && "Expects horizontal traversal of DP matrix");
         sz_i16_t last_in_row = scores_pre_deletion[0];
         for (size_t i = 0; i < n; ++i) scores_new[i] = last_in_row = sz_max_of_two(scores_new[i], last_in_row + gap);
         this->last_score_ = last_in_row;
@@ -4035,7 +4035,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
         gap_cost_vec.zmm = _mm512_set1_epi16(gap);
 
         // Load the data with a mask:
-        load_mask = _sz_u32_mask_until(n - i);
+        load_mask = sz_u32_mask_until_(n - i);
         second_vec.ymms[0] = _mm256_maskz_loadu_epi8(load_mask, second_slice + i);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_substitution + i);
         pre_gap_vec.zmm = _mm512_maskz_loadu_epi16(load_mask, scores_pre_insertion + i);
@@ -4075,7 +4075,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i32_t, error_costs_
     _lookup_in256bytes_ice_t lookup_;
 
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                   //
@@ -4105,8 +4105,8 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i32_t, error_costs_
         // To perform the same operation in vectorized form, we need to perform a tree-like reduction,
         // that will involve multiple steps. It's quite expensive and should be first tested in the
         // "experimental" section.
-        _sz_assert(scores_pre_substitution + 1 == scores_pre_insertion && "Expects horizontal traversal of DP matrix");
-        _sz_assert(scores_pre_deletion + 1 == scores_new && "Expects horizontal traversal of DP matrix");
+        sz_assert_(scores_pre_substitution + 1 == scores_pre_insertion && "Expects horizontal traversal of DP matrix");
+        sz_assert_(scores_pre_deletion + 1 == scores_new && "Expects horizontal traversal of DP matrix");
         sz_i32_t last_in_row = scores_pre_deletion[0];
         for (size_t i = 0; i < n; ++i) scores_new[i] = last_in_row = sz_max_of_two(scores_new[i], last_in_row + gap);
         this->last_score_ = last_in_row;
@@ -4195,7 +4195,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i32_t, error_costs_
         gap_cost_vec.zmm = _mm512_set1_epi32(gap);
 
         // Load the data with a mask:
-        load_mask = _sz_u16_clamp_mask_until(n - i);
+        load_mask = sz_u16_clamp_mask_until_(n - i);
         second_vec.xmms[0] = _mm_maskz_loadu_epi8(load_mask, second_slice + i);
         pre_substitution_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, scores_pre_substitution + i);
         pre_gap_vec.zmm = _mm512_maskz_loadu_epi32(load_mask, scores_pre_insertion + i);
@@ -4280,7 +4280,7 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, a
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
@@ -4354,7 +4354,7 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,

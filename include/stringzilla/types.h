@@ -24,13 +24,13 @@
  *  - `sz_sequence_t` - a wrapper to access strings forming a sequential container.
  *  - `sz_byteset_t` - a bitset for 256 possible byte values.
  */
-#ifndef STRINGZILLA_TYPES_H_
+#if !defined(STRINGZILLA_TYPES_H_)
 #define STRINGZILLA_TYPES_H_
 
 /*
  *  Debugging and testing.
  */
-#ifndef SZ_DEBUG
+#if !defined(SZ_DEBUG)
 #if defined(DEBUG) || defined(_DEBUG) // This means "Not using DEBUG information".
 #define SZ_DEBUG (1)
 #else
@@ -46,7 +46,7 @@
  *  You may also avoid them, if you are very sensitive to compilation time and avoid pre-compiled headers.
  *  https://artificial-mind.net/projects/compile-health/
  */
-#ifndef SZ_AVOID_LIBC
+#if !defined(SZ_AVOID_LIBC)
 #define SZ_AVOID_LIBC (0) // true or false
 #endif
 
@@ -56,7 +56,7 @@
  *          that runs the program, rather than the most advanced backend supported by the CPU
  *          used to compile the library or the downstream application.
  */
-#ifndef SZ_DYNAMIC_DISPATCH
+#if !defined(SZ_DYNAMIC_DISPATCH)
 #define SZ_DYNAMIC_DISPATCH (0) // true or false
 #endif
 
@@ -67,7 +67,7 @@
  *  Most platforms support it, but there is no industry standard way to check for those.
  *  This value will mostly affect the performance of the serial (SWAR) backend.
  */
-#ifndef SZ_USE_MISALIGNED_LOADS
+#if !defined(SZ_USE_MISALIGNED_LOADS)
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #define SZ_USE_MISALIGNED_LOADS (1) // true or false
 #else
@@ -81,9 +81,9 @@
  *          32-bit on platforms where pointers are 32-bit.
  */
 #if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
-#define _SZ_IS_64_BIT (1)
+#define SZ_IS_64BIT_ (1)
 #else
-#define _SZ_IS_64_BIT (0)
+#define SZ_IS_64BIT_ (0)
 #endif
 
 /**
@@ -96,31 +96,31 @@
  *  In Python one can check `sys.byteorder == 'big'` in the `setup.py` script and pass the appropriate macro.
  *  https://stackoverflow.com/a/27054190
  */
-#ifndef _SZ_IS_BIG_ENDIAN
+#if !defined(SZ_IS_BIG_ENDIAN_)
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || defined(__BIG_ENDIAN__) || defined(__ARMEB__) || \
     defined(__THUMBEB__) || defined(__AARCH64EB__) || defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__)
-#define _SZ_IS_BIG_ENDIAN (1) //< It's a big-endian target architecture
+#define SZ_IS_BIG_ENDIAN_ (1) //< It's a big-endian target architecture
 #else
-#define _SZ_IS_BIG_ENDIAN (0) //< It's a little-endian target architecture
+#define SZ_IS_BIG_ENDIAN_ (0) //< It's a little-endian target architecture
 #endif
 #endif
 
 /**
- *  @brief  Infer the target architecture.
+ *  @brief  Infer the target architecture, unless it's overriden by the build system.
  *          At this point we only provide optimized backends for x86_64 and ARM64.
  */
-#ifndef _SZ_IS_X86_64
+#if !defined(SZ_IS_64BIT_X86_)
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-#define _SZ_IS_X86_64 (1)
+#define SZ_IS_64BIT_X86_ (1)
 #else
-#define _SZ_IS_X86_64 (0)
+#define SZ_IS_64BIT_X86_ (0)
 #endif
 #endif
-#ifndef _SZ_IS_ARM64
+#if !defined(SZ_IS_64BIT_ARM_)
 #if defined(__aarch64__) || defined(__arm64__) || defined(__arm64) || defined(_M_ARM64)
-#define _SZ_IS_ARM64 (1)
+#define SZ_IS_64BIT_ARM_ (1)
 #else
-#define _SZ_IS_ARM64 (0)
+#define SZ_IS_64BIT_ARM_ (0)
 #endif
 #endif
 
@@ -129,7 +129,7 @@
  *          On very short strings, under 16 bytes long, at most a single word will be processed with SWAR.
  *          Assuming potentially misaligned loads, SWAR makes sense only after ~24 bytes.
  */
-#ifndef SZ_SWAR_THRESHOLD
+#if !defined(SZ_SWAR_THRESHOLD)
 #if SZ_DEBUG
 #define SZ_SWAR_THRESHOLD (8u) // 8 bytes in debug builds
 #else
@@ -142,8 +142,8 @@
  *  - `SZ_PUBLIC` is used for functions that are part of the public API.
  *  - `SZ_INTERNAL` is used for internal helper functions with unstable APIs.
  *  - `SZ_DYNAMIC` is used for functions that are part of the public API, but are dispatched at runtime.
+ *  - `SZ_EXTERNAL` is used for third-party libraries that are linked dynamically.
  */
-#ifndef SZ_DYNAMIC
 #if SZ_DYNAMIC_DISPATCH
 #if defined(_WIN32) || defined(__CYGWIN__)
 #define SZ_DYNAMIC __declspec(dllexport)
@@ -162,17 +162,16 @@
 #define SZ_PUBLIC inline static
 #define SZ_INTERNAL inline static
 #endif // SZ_DYNAMIC_DISPATCH
-#endif // SZ_DYNAMIC
 
 /**
  *  @brief  Alignment macro for 64-byte alignment.
  */
 #if defined(_MSC_VER)
-#define _SZ_ALIGN64 __declspec(align(64))
+#define SZ_ALIGN64 __declspec(align(64))
 #elif defined(__GNUC__) || defined(__clang__)
-#define _SZ_ALIGN64 __attribute__((aligned(64)))
+#define SZ_ALIGN64 __attribute__((aligned(64)))
 #else
-#define _SZ_ALIGN64
+#define SZ_ALIGN64
 #endif
 
 /**
@@ -200,7 +199,7 @@
 #include <stdint.h> // `uint8_t`
 #endif
 
-/*  The headers needed for the `_sz_assert_failure` function. */
+/*  The headers needed for the `sz_assert_failure_` function. */
 #if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC)
 #include <stdio.h>  // `fprintf`, `stderr`
 #include <stdlib.h> // `EXIT_FAILURE`
@@ -209,7 +208,7 @@
 /*  Compile-time hardware features detection.
  *  All of those can be controlled by the user.
  */
-#ifndef SZ_USE_HASWELL
+#if !defined(SZ_USE_HASWELL)
 #ifdef __AVX2__
 #define SZ_USE_HASWELL (1)
 #else
@@ -217,7 +216,7 @@
 #endif
 #endif
 
-#ifndef SZ_USE_SKYLAKE
+#if !defined(SZ_USE_SKYLAKE)
 #ifdef __AVX512F__
 #define SZ_USE_SKYLAKE (1)
 #else
@@ -225,7 +224,7 @@
 #endif
 #endif
 
-#ifndef SZ_USE_ICE
+#if !defined(SZ_USE_ICE)
 #ifdef __AVX512BW__
 #define SZ_USE_ICE (1)
 #else
@@ -233,7 +232,7 @@
 #endif
 #endif
 
-#ifndef SZ_USE_NEON
+#if !defined(SZ_USE_NEON)
 #ifdef __ARM_NEON
 #define SZ_USE_NEON (1)
 #else
@@ -241,7 +240,7 @@
 #endif
 #endif
 
-#ifndef SZ_USE_SVE
+#if !defined(SZ_USE_SVE)
 #ifdef __ARM_FEATURE_SVE
 #define SZ_USE_SVE (1)
 #else
@@ -249,7 +248,7 @@
 #endif
 #endif
 
-#ifndef SZ_USE_SVE2
+#if !defined(SZ_USE_SVE2)
 #ifdef __ARM_FEATURE_SVE2
 #define SZ_USE_SVE2 (1)
 #else
@@ -257,7 +256,7 @@
 #endif
 #endif
 
-#ifndef SZ_USE_OPENMP
+#if !defined(SZ_USE_OPENMP)
 #ifdef _OPENMP
 #define SZ_USE_OPENMP (1)
 #else
@@ -265,7 +264,7 @@
 #endif
 #endif
 
-#ifndef SZ_USE_CUDA
+#if !defined(SZ_USE_CUDA)
 #ifdef __NVCC__
 #define SZ_USE_CUDA (1)
 #else
@@ -378,13 +377,13 @@ typedef unsigned long long sz_u64_t;
  *
  *  Source: https://learn.microsoft.com/en-us/windows/win32/winprog64/abstract-data-models
  */
-#if _SZ_IS_64_BIT
+#if SZ_IS_64BIT_
 typedef sz_u64_t sz_size_t;  // ? Preferred over the `__SIZE_TYPE__` and `__UINTMAX_TYPE__` macros
 typedef sz_i64_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__INTMAX_TYPE__` macros
 #else
 typedef sz_u32_t sz_size_t;  // ? Preferred over the `__SIZE_TYPE__` and `__UINTMAX_TYPE__` macros
 typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__INTMAX_TYPE__` macros
-#endif // _SZ_IS_64_BIT
+#endif // SZ_IS_64BIT_
 #endif // SZ_AVOID_LIBC
 
 /**
@@ -930,13 +929,13 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
  */
 
 /** @brief Helper-macro to mark potentially unused variables. */
-#define sz_unused(x) ((void)(x))
+#define sz_unused_(x) ((void)(x))
 
 /** @brief Helper-macro casting a variable to another type of the same size. */
 #if defined(__has_builtin) && __has_builtin(__builtin_bit_cast)
-#define sz_bitcast(type, value) __builtin_bit_cast(type, (value))
+#define sz_bitcast_(type, value) __builtin_bit_cast(type, (value))
 #else
-#define sz_bitcast(type, value) (*((type *)&(value)))
+#define sz_bitcast_(type, value) (*((type *)&(value)))
 #endif
 
 /**
@@ -962,35 +961,35 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #define SZ_SSIZE_MAX ((sz_ssize_t)(SZ_SIZE_MAX >> 1))
 #define SZ_SSIZE_MIN ((sz_ssize_t)(-SZ_SSIZE_MAX - 1))
 
-SZ_INTERNAL sz_size_t _sz_size_max(void) { return SZ_SIZE_MAX; }
-SZ_INTERNAL sz_ssize_t _sz_ssize_max(void) { return SZ_SSIZE_MAX; }
+SZ_INTERNAL sz_size_t sz_size_max_(void) { return SZ_SIZE_MAX; }
+SZ_INTERNAL sz_ssize_t sz_ssize_max_(void) { return SZ_SSIZE_MAX; }
 
 /**
- *  @brief  Similar to `assert`, the `_sz_assert` is used in the `SZ_DEBUG` mode
+ *  @brief  Similar to `assert`, the `sz_assert_` is used in the `SZ_DEBUG` mode
  *          to check the invariants of the library. It's a no-op in the "Release" mode.
  *  @note   If you want to catch it, put a breakpoint at @b `__GI_exit`
  */
 #if SZ_DEBUG && defined(SZ_AVOID_LIBC) && !SZ_AVOID_LIBC && !defined(SZ_PIC) && \
     !defined(__CUDA_ARCH__) // ? CPU code w/out LibC access
-SZ_PUBLIC void _sz_assert_failure(char const *condition, char const *file, int line) {
+SZ_PUBLIC void sz_assert_failure_(char const *condition, char const *file, int line) {
     fprintf(stderr, "Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     exit(EXIT_FAILURE);
 }
-#define _sz_assert(condition)                                                     \
+#define sz_assert_(condition)                                                     \
     do {                                                                          \
-        if (!(condition)) { _sz_assert_failure(#condition, __FILE__, __LINE__); } \
+        if (!(condition)) { sz_assert_failure_(#condition, __FILE__, __LINE__); } \
     } while (0)
 #elif SZ_DEBUG && defined(__CUDA_ARCH__) // ? CUDA code for GPUs
-__device__ __noinline__ void _sz_assert_cuda_failure(char const *condition, char const *file, int line) {
+__device__ __noinline__ void sz_assert_cuda_failure_(char const *condition, char const *file, int line) {
     printf("Assertion failed: %s, in file %s, line %d\n", condition, file, line);
     __trap();
 }
-#define _sz_assert(condition)                                                          \
+#define sz_assert_(condition)                                                          \
     do {                                                                               \
-        if (!(condition)) { _sz_assert_cuda_failure(#condition, __FILE__, __LINE__); } \
+        if (!(condition)) { sz_assert_cuda_failure_(#condition, __FILE__, __LINE__); } \
     } while (0)
 #else
-#define _sz_assert(condition) ((void)(condition))
+#define sz_assert_(condition) ((void)(condition))
 #endif
 
 /*  Intrinsics aliases for MSVC, GCC, Clang, and Clang-Cl.
@@ -1010,13 +1009,13 @@ __device__ __noinline__ void _sz_assert_cuda_failure(char const *condition, char
  */
 #if (defined(_WIN32) && !defined(_WIN64)) || defined(_M_ARM) || defined(_M_ARM64)
 SZ_INTERNAL int sz_u64_ctz(sz_u64_t x) {
-    _sz_assert(x != 0);
+    sz_assert_(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
 SZ_INTERNAL int sz_u64_clz(sz_u64_t x) {
-    _sz_assert(x != 0);
+    sz_assert_(x != 0);
     int n = 0;
     while ((x & 0x8000000000000000ull) == 0) { n++, x <<= 1; }
     return n;
@@ -1027,13 +1026,13 @@ SZ_INTERNAL int sz_u64_popcount(sz_u64_t x) {
     return (((x + (x >> 4)) & 0x0F0F0F0F0F0F0F0Full) * 0x0101010101010101ull) >> 56;
 }
 SZ_INTERNAL int sz_u32_ctz(sz_u32_t x) {
-    _sz_assert(x != 0);
+    sz_assert_(x != 0);
     int n = 0;
     while ((x & 1) == 0) { n++, x >>= 1; }
     return n;
 }
 SZ_INTERNAL int sz_u32_clz(sz_u32_t x) {
-    _sz_assert(x != 0);
+    sz_assert_(x != 0);
     int n = 0;
     while ((x & 0x80000000u) == 0) { n++, x <<= 1; }
     return n;
@@ -1116,12 +1115,12 @@ SZ_INTERNAL sz_u64_t sz_u64_blend(sz_u64_t a, sz_u64_t b, sz_u64_t mask) { retur
  *  A cleaner option is to perform two comparisons and a subtraction.
  *  One instruction more, but no data-dependency.
  */
-#define _sz_order_scalars(a, b) ((sz_ordering_t)((a > b) - (a < b)))
+#define sz_order_scalars_(a, b) ((sz_ordering_t)((a > b) - (a < b)))
 
 /**
  *  Convenience macro to swap two values of the same type.
  */
-#define _sz_swap(type, a, b) \
+#define sz_swap_(type, a, b) \
     do {                     \
         type _tmp = (a);     \
         (a) = (b);           \
@@ -1143,14 +1142,14 @@ SZ_INTERNAL sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x 
 #pragma GCC push_options
 #pragma GCC target("bmi", "bmi2")
 #pragma clang attribute push(__attribute__((target("bmi,bmi2"))), apply_to = function)
-SZ_INTERNAL __mmask8 _sz_u8_mask_until(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, n); }
-SZ_INTERNAL __mmask16 _sz_u16_mask_until(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, n); }
-SZ_INTERNAL __mmask32 _sz_u32_mask_until(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, n); }
-SZ_INTERNAL __mmask64 _sz_u64_mask_until(sz_size_t n) { return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, n); }
-SZ_INTERNAL __mmask16 _sz_u16_clamp_mask_until(sz_size_t n) { return n < 16 ? _sz_u16_mask_until(n) : 0xFFFFu; }
-SZ_INTERNAL __mmask32 _sz_u32_clamp_mask_until(sz_size_t n) { return n < 32 ? _sz_u32_mask_until(n) : 0xFFFFFFFFu; }
-SZ_INTERNAL __mmask64 _sz_u64_clamp_mask_until(sz_size_t n) {
-    return n < 64 ? _sz_u64_mask_until(n) : 0xFFFFFFFFFFFFFFFFull;
+SZ_INTERNAL __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, n); }
+SZ_INTERNAL __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, n); }
+SZ_INTERNAL __mmask32 sz_u32_mask_until_(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, n); }
+SZ_INTERNAL __mmask64 sz_u64_mask_until_(sz_size_t n) { return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, n); }
+SZ_INTERNAL __mmask16 sz_u16_clamp_mask_until_(sz_size_t n) { return n < 16 ? sz_u16_mask_until_(n) : 0xFFFFu; }
+SZ_INTERNAL __mmask32 sz_u32_clamp_mask_until_(sz_size_t n) { return n < 32 ? sz_u32_mask_until_(n) : 0xFFFFFFFFu; }
+SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
+    return n < 64 ? sz_u64_mask_until_(n) : 0xFFFFFFFFFFFFFFFFull;
 }
 #pragma GCC pop_options
 #pragma clang attribute pop
@@ -1160,7 +1159,7 @@ SZ_INTERNAL __mmask64 _sz_u64_clamp_mask_until(sz_size_t n) {
  *  @brief  Byte-level equality comparison between two 64-bit integers.
  *  @return 64-bit integer, where every top bit in each byte signifies a match.
  */
-SZ_INTERNAL sz_u64_vec_t _sz_u64_each_byte_equal(sz_u64_vec_t a, sz_u64_vec_t b) {
+SZ_INTERNAL sz_u64_vec_t sz_u64_each_byte_equal_(sz_u64_vec_t a, sz_u64_vec_t b) {
     sz_u64_vec_t vec;
     vec.u64 = ~(a.u64 ^ b.u64);
     // The match is valid, if every bit within each byte is set.
@@ -1198,7 +1197,7 @@ SZ_INTERNAL void sz_ssize_clamp_interval( //
  *  @pre Input must be a positive number, as the logarithm of zero is undefined.
  */
 SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
-    _sz_assert(x > 0 && "Non-positive numbers have no defined logarithm");
+    sz_assert_(x > 0 && "Non-positive numbers have no defined logarithm");
     sz_size_t leading_zeros = sz_u64_clz(x);
     return 63 - leading_zeros;
 }
@@ -1215,7 +1214,7 @@ SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
     x |= x >> 4;
     x |= x >> 8;
     x |= x >> 16;
-#if _SZ_IS_64_BIT
+#if SZ_IS_64BIT_
     x |= x >> 32;
 #endif
     x++;
@@ -1307,7 +1306,7 @@ SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 }
 
 /** @brief Helper function, using the supplied fixed-capacity buffer to allocate memory. */
-SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
+SZ_INTERNAL sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
 
     sz_size_t const capacity = *(sz_size_t *)handle;
     sz_size_t const consumed_capacity = *((sz_size_t *)handle + 1);
@@ -1318,8 +1317,8 @@ SZ_INTERNAL sz_ptr_t _sz_memory_allocate_fixed(sz_size_t length, void *handle) {
 }
 
 /** @brief Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
-SZ_INTERNAL void _sz_memory_free_fixed(sz_ptr_t start, sz_size_t length, void *handle) {
-    sz_unused(start && length && handle);
+SZ_INTERNAL void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle) {
+    sz_unused_(start && length && handle);
 }
 
 #pragma GCC visibility pop
@@ -1331,13 +1330,13 @@ SZ_INTERNAL void _sz_memory_free_fixed(sz_ptr_t start, sz_size_t length, void *h
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
 
-SZ_PUBLIC void *_sz_memory_allocate_default(sz_size_t length, void *handle) {
-    sz_unused(handle);
+SZ_PUBLIC void *sz_memory_allocate_default_(sz_size_t length, void *handle) {
+    sz_unused_(handle);
     if (length == 0) return SZ_NULL;
     return malloc(length);
 }
-SZ_PUBLIC void _sz_memory_free_default(sz_ptr_t start, sz_size_t length, void *handle) {
-    sz_unused(handle && length);
+SZ_PUBLIC void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle) {
+    sz_unused_(handle && length);
     free(start);
 }
 
@@ -1345,8 +1344,8 @@ SZ_PUBLIC void _sz_memory_free_default(sz_ptr_t start, sz_size_t length, void *h
 
 SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc) {
 #if !SZ_AVOID_LIBC
-    alloc->allocate = (sz_memory_allocate_t)_sz_memory_allocate_default;
-    alloc->free = (sz_memory_free_t)_sz_memory_free_default;
+    alloc->allocate = (sz_memory_allocate_t)sz_memory_allocate_default_;
+    alloc->free = (sz_memory_free_t)sz_memory_free_default_;
 #else
     alloc->allocate = (sz_memory_allocate_t)SZ_NULL;
     alloc->free = (sz_memory_free_t)SZ_NULL;
@@ -1358,19 +1357,19 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
     // The logic here is simple - put the buffer capacity in the first slots of the buffer.
     // The second slot is used to store the current consumed capacity.
     // The rest of the buffer is used for the actual data.
-    alloc->allocate = (sz_memory_allocate_t)_sz_memory_allocate_fixed;
-    alloc->free = (sz_memory_free_t)_sz_memory_free_fixed;
+    alloc->allocate = (sz_memory_allocate_t)sz_memory_allocate_fixed_;
+    alloc->free = (sz_memory_free_t)sz_memory_free_fixed_;
     alloc->handle = buffer;
     *(sz_size_t *)buffer = length;
     *((sz_ptr_t)buffer + sizeof(sz_size_t)) = sizeof(sz_size_t) * 2; // The capacity and consumption so far
 }
 
-SZ_PUBLIC sz_cptr_t _sz_sequence_from_null_terminated_strings_get_start(void const *handle, sz_size_t i) {
+SZ_PUBLIC sz_cptr_t sz_sequence_from_null_terminated_strings_get_start_(void const *handle, sz_size_t i) {
     sz_cptr_t const *start = (sz_cptr_t const *)handle;
     return start[i];
 }
 
-SZ_PUBLIC sz_size_t _sz_sequence_from_null_terminated_strings_get_length(void const *handle, sz_size_t i) {
+SZ_PUBLIC sz_size_t sz_sequence_from_null_terminated_strings_get_length_(void const *handle, sz_size_t i) {
     sz_cptr_t const *start = (sz_cptr_t const *)handle;
     sz_size_t length = 0;
     for (sz_cptr_t ptr = start[i]; *ptr; ptr++) length++;
@@ -1380,8 +1379,8 @@ SZ_PUBLIC sz_size_t _sz_sequence_from_null_terminated_strings_get_length(void co
 SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count, sz_sequence_t *sequence) {
     sequence->handle = start;
     sequence->count = count;
-    sequence->get_start = _sz_sequence_from_null_terminated_strings_get_start;
-    sequence->get_length = _sz_sequence_from_null_terminated_strings_get_length;
+    sequence->get_start = sz_sequence_from_null_terminated_strings_get_start_;
+    sequence->get_length = sz_sequence_from_null_terminated_strings_get_length_;
 }
 
 #pragma endregion

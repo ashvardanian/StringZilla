@@ -35,32 +35,32 @@ extern void *malloc(size_t length);
 
 // Inferring target OS: Windows, MacOS, or Linux
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(__CYGWIN__)
-#define _SZ_IS_WINDOWS 1
+#define SZ_IS_WINDOWS_ 1
 #elif defined(__APPLE__) && defined(__MACH__)
-#define _SZ_IS_APPLE 1
+#define SZ_IS_APPLE_ 1
 #elif defined(__linux__)
-#define _SZ_IS_LINUX 1
+#define SZ_IS_LINUX_ 1
 #endif
 
 // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
-#if defined(_SZ_IS_APPLE)
+#if defined(SZ_IS_APPLE_)
 #include <sys/sysctl.h>
 #endif
 
-#if defined(_SZ_IS_WINDOWS)
+#if defined(SZ_IS_WINDOWS_)
 #include <windows.h> // `DllMain`
 #endif
 
-#if _SZ_IS_ARM64
+#if SZ_IS_64BIT_ARM_
 
 /**
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_INTERNAL sz_capability_t _sz_capabilities_arm(void) {
+SZ_INTERNAL sz_capability_t sz_capabilities_arm_(void) {
     // https://github.com/ashvardanian/SimSIMD/blob/28e536083602f85ad0c59456782c8864463ffb0e/include/simsimd/simsimd.h#L434
     // for documentation on how we detect capabilities across different ARM platforms.
-#if defined(_SZ_IS_APPLE)
+#if defined(SZ_IS_APPLE_)
 
     // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
     uint32_t supports_neon = 0;
@@ -71,7 +71,7 @@ SZ_INTERNAL sz_capability_t _sz_capabilities_arm(void) {
         (sz_cap_neon_k * (supports_neon)) | //
         (sz_cap_serial_k));
 
-#elif defined(_SZ_IS_LINUX)
+#elif defined(SZ_IS_LINUX_)
 
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
@@ -104,16 +104,16 @@ SZ_INTERNAL sz_capability_t _sz_capabilities_arm(void) {
         (sz_cap_sve2_k * (supports_sve2)) | //
         (sz_cap_serial_k));
 
-#else // if !defined(_SZ_IS_APPLE) && !defined(_SZ_IS_LINUX)
+#else // if !defined(SZ_IS_APPLE_) && !defined(SZ_IS_LINUX_)
     return sz_cap_serial_k;
 #endif
 }
 
-#endif // _SZ_IS_ARM64
+#endif // SZ_IS_64BIT_ARM_
 
-#if _SZ_IS_X86_64
+#if SZ_IS_64BIT_X86_
 
-SZ_INTERNAL sz_capability_t _sz_capabilities_x86(void) {
+SZ_INTERNAL sz_capability_t sz_capabilities_x86_(void) {
 
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 
@@ -158,17 +158,17 @@ SZ_INTERNAL sz_capability_t _sz_capabilities_x86(void) {
     return sz_cap_serial_k;
 #endif
 }
-#endif // _SZ_IS_X86_64
+#endif // SZ_IS_64BIT_X86_
 
 /**
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit x86 machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
 SZ_DYNAMIC sz_capability_t sz_capabilities(void) {
-#if _SZ_IS_X86_64
-    return _sz_capabilities_x86();
-#elif _SZ_IS_ARM64
-    return _sz_capabilities_arm();
+#if SZ_IS_64BIT_X86_
+    return sz_capabilities_x86_();
+#elif SZ_IS_64BIT_ARM_
+    return sz_capabilities_arm_();
 #else
     return sz_cap_serial_k;
 #endif
@@ -216,7 +216,7 @@ __attribute__((aligned(64))) static sz_implementations_t sz_dispatch_table;
 SZ_DYNAMIC void sz_dispatch_table_init(void) {
     sz_implementations_t *impl = &sz_dispatch_table;
     sz_capability_t caps = sz_capabilities();
-    sz_unused(caps); //< Unused when compiling on pre-SIMD machines.
+    sz_unused_(caps); //< Unused when compiling on pre-SIMD machines.
 
     impl->equal = sz_equal_serial;
     impl->order = sz_order_serial;
@@ -354,9 +354,9 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
  *  alphabetically (exclusive). The Microsoft C++ compiler puts C++ initialisation code in .CRT$XCU, so avoid that
  *  section: https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-initialization?view=msvc-170
  */
-#pragma comment(linker, "/INCLUDE:_sz_dispatch_table_init")
+#pragma comment(linker, "/INCLUDE:sz_dispatch_table_init_")
 #pragma section(".CRT$XCS", read)
-__declspec(allocate(".CRT$XCS")) void (*_sz_dispatch_table_init)() = sz_dispatch_table_init;
+__declspec(allocate(".CRT$XCS")) void (*sz_dispatch_table_init_)() = sz_dispatch_table_init;
 
 /*  Called either from CRT code or out own `_DLLMainCRTStartup`, when a DLL is loaded. */
 BOOL WINAPI DllMain(HINSTANCE hints, DWORD forward_reason, LPVOID lp) {
@@ -388,7 +388,7 @@ SZ_DYNAMIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
 SZ_DYNAMIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_DYNAMIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
 SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
-    return _sz_capabilities_to_string_implementation(caps);
+    return sz_capabilities_to_string_implementation_(caps);
 }
 
 SZ_DYNAMIC sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length) { return sz_dispatch_table.bytesum(text, length); }

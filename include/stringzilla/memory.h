@@ -409,13 +409,13 @@ SZ_PUBLIC void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value)
         if (head_length & 8) *(sz_u64_t *)target = value64, target += 8, head_length -= 8;
         if (head_length & 16)
             _mm_store_si128((__m128i *)target, _mm_set1_epi8(value_char)), target += 16, head_length -= 16;
-        _sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        sz_assert_((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
 
         // Fill the aligned body of the buffer.
         for (; body_length >= 32; target += 32, body_length -= 32) _mm256_store_si256((__m256i *)target, value_vec);
 
         // Fill the tail of the buffer. This part is much cleaner with AVX-512.
-        _sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        sz_assert_((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
         if (tail_length & 16)
             _mm_store_si128((__m128i *)target, _mm_set1_epi8(value_char)), target += 16, tail_length -= 16;
         if (tail_length & 8) *(sz_u64_t *)target = value64, target += 8, tail_length -= 8;
@@ -499,7 +499,7 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         if (head_length & 16)
             _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
                 head_length -= 16;
-        _sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        sz_assert_((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
 
         // Fill the aligned body of the buffer.
         if (!is_huge) {
@@ -517,7 +517,7 @@ SZ_PUBLIC void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         }
 
         // Fill the tail of the buffer. This part is much cleaner with AVX-512.
-        _sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
+        sz_assert_((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
         if (tail_length & 16)
             _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
                 tail_length -= 16;
@@ -747,11 +747,11 @@ SZ_PUBLIC void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value)
     // It assumes the CPU is great at handling unaligned "stores".
     //
     //    for (; length >= 64; target += 64, length -= 64) _mm512_storeu_si512(target, value_vec);
-    //    _mm512_mask_storeu_epi8(target, _sz_u64_mask_until(length), value_vec);
+    //    _mm512_mask_storeu_epi8(target, sz_u64_mask_until_(length), value_vec);
     //
     // When the buffer is small, there isn't much to innovate.
     if (length <= 64) {
-        __mmask64 mask = _sz_u64_mask_until(length);
+        __mmask64 mask = sz_u64_mask_until_(length);
         _mm512_mask_storeu_epi8(target, mask, value_vec);
     }
     // When the buffer is over 64 bytes, it's guaranteed to touch at least two cache lines - the head and tail,
@@ -762,8 +762,8 @@ SZ_PUBLIC void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value)
         sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
         sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
         sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
-        __mmask64 head_mask = _sz_u64_mask_until(head_length);
-        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+        __mmask64 head_mask = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
         _mm512_mask_storeu_epi8(target, head_mask, value_vec);
         for (target += head_length; body_length >= 64; target += 64, body_length -= 64)
             _mm512_store_si512(target, value_vec);
@@ -777,7 +777,7 @@ SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     //
     //    for (; length >= 64; target += 64, source += 64, length -= 64)
     //        _mm512_storeu_si512(target, _mm512_loadu_si512(source));
-    //    __mmask64 mask = _sz_u64_mask_until(length);
+    //    __mmask64 mask = sz_u64_mask_until_(length);
     //    _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     //
     // A typical AWS Sapphire Rapids instance can have 48 KB x 2 blocks of L1 data cache per core,
@@ -787,7 +787,7 @@ SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
 
     // When the buffer is small, there isn't much to innovate.
     if (length <= 64) {
-        __mmask64 mask = _sz_u64_mask_until(length);
+        __mmask64 mask = sz_u64_mask_until_(length);
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     }
     // When dealing with larger arrays, the optimization is not as simple as with the `sz_fill_skylake` function,
@@ -797,7 +797,7 @@ SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         for (; length >= 64; target += 64, source += 64, length -= 64)
             _mm512_store_si512(target, _mm512_load_si512(source));
         // At this point the length is guaranteed to be under 64.
-        __mmask64 mask = _sz_u64_mask_until(length);
+        __mmask64 mask = sz_u64_mask_until_(length);
         // Aligned load and stores would work too, but it's not defined.
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     }
@@ -808,8 +808,8 @@ SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
         sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
         sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
-        __mmask64 head_mask = _sz_u64_mask_until(head_length);
-        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+        __mmask64 head_mask = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
         _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
         for (target += head_length, source += head_length; body_length >= 64;
              target += 64, source += 64, body_length -= 64)
@@ -831,8 +831,8 @@ SZ_PUBLIC void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64;
         sz_size_t tail_length = (sz_size_t)(target + length) % 64;
         sz_size_t body_length = length - head_length - tail_length;
-        __mmask64 head_mask = _sz_u64_mask_until(head_length);
-        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+        __mmask64 head_mask = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
         _mm512_mask_storeu_epi8(target, head_mask, _mm512_maskz_loadu_epi8(head_mask, source));
         _mm512_mask_storeu_epi8(target + head_length + body_length, tail_mask,
                                 _mm512_maskz_loadu_epi8(tail_mask, source + head_length + body_length));
@@ -856,12 +856,12 @@ SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     // We can also avoid any data-dependencies between iterations, assuming we have 32 registers
     // to pre-load the data, before writing it back.
     if (length <= 64) {
-        __mmask64 mask = _sz_u64_mask_until(length);
+        __mmask64 mask = sz_u64_mask_until_(length);
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     }
     else if (length <= 128) {
         sz_size_t last_length = length - 64;
-        __mmask64 mask = _sz_u64_mask_until(last_length);
+        __mmask64 mask = sz_u64_mask_until_(last_length);
         __m512i source0 = _mm512_loadu_epi8(source);
         __m512i source1 = _mm512_maskz_loadu_epi8(mask, source + 64);
         _mm512_storeu_epi8(target, source0);
@@ -869,7 +869,7 @@ SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     }
     else if (length <= 192) {
         sz_size_t last_length = length - 128;
-        __mmask64 mask = _sz_u64_mask_until(last_length);
+        __mmask64 mask = sz_u64_mask_until_(last_length);
         __m512i source0 = _mm512_loadu_epi8(source);
         __m512i source1 = _mm512_loadu_epi8(source + 64);
         __m512i source2 = _mm512_maskz_loadu_epi8(mask, source + 128);
@@ -879,7 +879,7 @@ SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
     }
     else if (length <= 256) {
         sz_size_t last_length = length - 192;
-        __mmask64 mask = _sz_u64_mask_until(last_length);
+        __mmask64 mask = sz_u64_mask_until_(last_length);
         __m512i source0 = _mm512_loadu_epi8(source);
         __m512i source1 = _mm512_loadu_epi8(source + 64);
         __m512i source2 = _mm512_loadu_epi8(source + 128);
@@ -901,8 +901,8 @@ SZ_PUBLIC void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t leng
         sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
         sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
         sz_size_t body_length = length - head_length - tail_length;   // Multiple of 64.
-        __mmask64 head_mask = _sz_u64_mask_until(head_length);
-        __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+        __mmask64 head_mask = sz_u64_mask_until_(head_length);
+        __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
 
         // The absolute most common case of using "moves" is shifting the data within a continuous buffer
         // when adding a removing some values in it. In such cases, a typical shift is by 1, 2, 4, 8, 16,
@@ -988,8 +988,8 @@ SZ_PUBLIC void sz_lookup_ice(sz_ptr_t target, sz_size_t length, sz_cptr_t source
     // for the body.
     sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
     sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
-    __mmask64 head_mask = _sz_u64_mask_until(head_length);
-    __mmask64 tail_mask = _sz_u64_mask_until(tail_length);
+    __mmask64 head_mask = sz_u64_mask_until_(head_length);
+    __mmask64 tail_mask = sz_u64_mask_until_(tail_length);
 
     // We need to pull the lookup table into 4x ZMM registers.
     // We can use `vpermi2b` instruction to perform the look in two ZMM registers with `_mm512_permutex2var_epi8`

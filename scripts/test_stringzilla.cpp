@@ -64,7 +64,7 @@
 #include <string>      // Baseline
 #include <string_view> // Baseline
 
-#if !_SZ_IS_CPP11
+#if !SZ_IS_CPP11_
 #error "This test requires C++11 or later."
 #endif
 
@@ -75,7 +75,7 @@ using namespace sz::scripts;
 using sz::literals::operator""_sv; // for `sz::string_view`
 using sz::literals::operator""_bs; // for `sz::byteset`
 
-#if _SZ_IS_CPP17
+#if SZ_IS_CPP17_
 using namespace std::literals; // for ""sv
 #endif
 
@@ -83,7 +83,7 @@ using namespace std::literals; // for ""sv
  *  Instantiate all the templates to make the symbols visible and also check
  *  for weird compilation errors on uncommon paths.
  */
-#if _SZ_IS_CPP17 && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && __cpp_lib_string_view
 template class std::basic_string_view<char>;
 #endif
 template class sz::basic_string_slice<char>;
@@ -152,7 +152,7 @@ static void test_arithmetical_utilities() {
     assert(sz_size_bit_ceil(1000000000ull) == (1ull << 30));
     assert(sz_size_bit_ceil(2000000000ull) == (1ull << 31));
 
-#if _SZ_IS_64_BIT
+#if SZ_IS_64BIT_
     assert(sz_size_bit_ceil(4000000000ull) == (1ull << 32));
     assert(sz_size_bit_ceil(8000000000ull) == (1ull << 33));
     assert(sz_size_bit_ceil(16000000000ull) == (1ull << 34));
@@ -276,7 +276,7 @@ static void test_hash_equivalence(                                      //
 
         // Let's also create an intentionally misaligned version of the state,
         // assuming some of the SIMD instructions may require alignment.
-        _SZ_ALIGN64 char state_misaligned_buffer[sizeof(sz_hash_state_t) + 1];
+        SZ_ALIGN64 char state_misaligned_buffer[sizeof(sz_hash_state_t) + 1];
         sz_hash_state_t &state_misaligned = *reinterpret_cast<sz_hash_state_t *>(state_misaligned_buffer + 1);
         init_simd(&state_misaligned, seed);
         assert(sz_hash_state_equal(&state_base, &state_misaligned) == sz_true_k); // Same across platforms
@@ -540,7 +540,7 @@ static void test_memory_utilities( //
         reverse_offset += fill_length;
     }
 
-    sz_unused(experiments);
+    sz_unused_(experiments);
 
 #if 0 // TODO:
 
@@ -575,7 +575,7 @@ static void test_memory_utilities( //
     do {                                          \
         bool threw = false;                       \
         try {                                     \
-            sz_unused(expression);                \
+            sz_unused_(expression);               \
         }                                         \
         catch (exception_type const &) {          \
             threw = true;                         \
@@ -746,7 +746,7 @@ static void test_stl_compatibility_for_reads() {
     assert(str("b") >= str("a"));
     assert(str("a") < str("aa"));
 
-#if _SZ_IS_CPP20 && __cpp_lib_three_way_comparison
+#if SZ_IS_CPP20_ && __cpp_lib_three_way_comparison
     // Spaceship operator instead of conventional comparions.
     assert((str("a") <=> str("b")) == std::strong_ordering::less);
     assert((str("b") <=> str("a")) == std::strong_ordering::greater);
@@ -789,7 +789,7 @@ static void test_stl_compatibility_for_reads() {
     assert(str("hello world").compare(6, 5, "worlds", 5) == 0);    // Substring "world" in both strings
     assert(str("hello world").compare(6, 5, "worlds", 6) < 0);     // Substring "world" is less than "worlds"
 
-#if _SZ_IS_CPP20 && __cpp_lib_starts_ends_with
+#if SZ_IS_CPP20_ && __cpp_lib_starts_ends_with
     // Prefix and suffix checks against strings.
     assert(str("https://cppreference.com").starts_with(str("http")) == true);
     assert(str("https://cppreference.com").starts_with(str("ftp")) == false);
@@ -809,7 +809,7 @@ static void test_stl_compatibility_for_reads() {
     assert(str("string_view").ends_with("View") == false);
 #endif
 
-#if _SZ_IS_CPP23 && __cpp_lib_string_contains
+#if SZ_IS_CPP23_ && __cpp_lib_string_contains
     // Checking basic substring presence.
     assert(str("hello").contains(str("ell")) == true);
     assert(str("hello").contains(str("oll")) == false);
@@ -840,7 +840,7 @@ static void test_stl_compatibility_for_reads() {
     assert(std::hash<str> {}("hello") != 0);
     assert_scoped(std::ostringstream os, os << str("hello"), os.str() == "hello");
 
-#if _SZ_IS_CPP14
+#if SZ_IS_CPP14_
     // Comparison function objects are a C++14 feature.
     assert(std::equal_to<str> {}("hello", "world") == false);
     assert(std::less<str> {}("hello", "world") == true);
@@ -900,7 +900,7 @@ static void test_stl_compatibility_for_updates() {
 
     // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
     // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
-    if (_SZ_IS_64_BIT) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
+    if (SZ_IS_64BIT_) assert_scoped(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string::min_capacity);
 
     // Concatenation.
     // Following are missing in strings, but are present in vectors.
@@ -991,10 +991,10 @@ static void test_stl_conversions() {
         std::string const stl {"hello"};
         sz::string sz = stl;
         sz::string_view szv = stl;
-        sz_unused(sz);
-        sz_unused(szv);
+        sz_unused_(sz);
+        sz_unused_(szv);
     }
-#if _SZ_IS_CPP17 && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && __cpp_lib_string_view
     // From STL `string_view` to StringZilla and vice-versa.
     {
         std::string_view stl {"hello"};
@@ -1469,7 +1469,7 @@ static void test_search() {
     assert(rsplits[4] == "");
 }
 
-#if _SZ_IS_CPP17 && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && __cpp_lib_string_view
 
 /**
  *  Evaluates the correctness of a "matcher", searching for all the occurrences of the `needle_stl`
@@ -1868,7 +1868,7 @@ static void test_stl_containers() {
 int main(int argc, char const **argv) {
 
     // Let's greet the user nicely
-    sz_unused(argc && argv);
+    sz_unused_(argc && argv);
     std::printf("Hi, dear tester! You look nice today!\n");
     std::printf("- Uses Haswell: %s \n", SZ_USE_HASWELL ? "yes" : "no");
     std::printf("- Uses Skylake: %s \n", SZ_USE_SKYLAKE ? "yes" : "no");
@@ -1925,7 +1925,7 @@ int main(int argc, char const **argv) {
     test_replacements();
 
 // Compatibility with STL
-#if _SZ_IS_CPP17 && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && __cpp_lib_string_view
     test_stl_compatibility_for_reads<std::string_view>();
 #endif
     test_stl_compatibility_for_reads<std::string>();
@@ -1950,7 +1950,7 @@ int main(int argc, char const **argv) {
     test_stl_conversions();
     test_comparisons();
     test_search();
-#if _SZ_IS_CPP17 && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && __cpp_lib_string_view
     test_search_with_misaligned_repetitions();
 #endif
 

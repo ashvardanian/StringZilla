@@ -258,7 +258,7 @@ public extension StringZillaViewable {
         // Swift has a ridiculous issue with casting unsigned 64-bit to unsigned 64-bit
         // values which results in "Fatal error: Not enough bits to represent the passed value".
         // Let's just copy the bytes: https://stackoverflow.com/a/68650250/2766161
-        let effectiveBound: sz_size_t = bound.map { sz_size_t($0) } ?? _sz_size_max()
+        let effectiveBound: sz_size_t = bound.map { sz_size_t($0) } ?? sz_size_max_()
         let status = try withStringZillaScope { hPointer, hLength in
             try other.withStringZillaScope { nPointer, nLength in
                 // Pass a mutable pointer for the result.

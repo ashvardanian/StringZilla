@@ -11,7 +11,7 @@
 #include "stringzillas/similarity.cuh"
 #endif
 
-#if !_SZ_IS_CPP17
+#if !SZ_IS_CPP17_
 #error "This test requires C++17 or later."
 #endif
 
@@ -292,7 +292,7 @@ struct levenshtein_baselines_t {
 
     template <typename results_type_>
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, results_type_ *results) const {
-        _sz_assert(first.size() == second.size());
+        sz_assert_(first.size() == second.size());
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
             results[i] =
@@ -321,7 +321,7 @@ struct needleman_wunsch_baselines_t {
         : substitution_costs(subs), gap_opening_cost(gap.open), gap_extension_cost(gap.extend) {}
 
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
-        _sz_assert(first.size() == second.size());
+        sz_assert_(first.size() == second.size());
 
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
@@ -350,7 +350,7 @@ struct smith_waterman_baselines_t {
         : substitution_costs(subs), gap_opening_cost(gap.open), gap_extension_cost(gap.extend) {}
 
     status_t operator()(arrow_strings_view_t first, arrow_strings_view_t second, sz_ssize_t *results) const {
-        _sz_assert(first.size() == second.size());
+        sz_assert_(first.size() == second.size());
 
 #pragma omp parallel for
         for (std::size_t i = 0; i != first.size(); ++i)
@@ -501,8 +501,8 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
         score_t *results_simd_ptr = results_simd.data();
         status_t status_base = base_operator(first_view, second_view, results_base_ptr);
         status_t status_simd = simd_operator(first_view, second_view, results_simd_ptr, extra_args...);
-        _sz_assert(status_base == status_t::success_k);
-        _sz_assert(status_simd == status_t::success_k);
+        sz_assert_(status_base == status_t::success_k);
+        sz_assert_(status_simd == status_t::success_k);
         if (results_base[0] != results_simd[0])
             edit_distance_log_mismatch(first, second, results_base[0], results_simd[0]);
     }
@@ -514,15 +514,15 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
         first_tape.reset();
         second_tape.reset();
         for (auto [first, second] : test_cases) {
-            _sz_assert(first_tape.try_append({first.data(), first.size()}) == status_t::success_k);
-            _sz_assert(second_tape.try_append({second.data(), second.size()}) == status_t::success_k);
+            sz_assert_(first_tape.try_append({first.data(), first.size()}) == status_t::success_k);
+            sz_assert_(second_tape.try_append({second.data(), second.size()}) == status_t::success_k);
         }
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
         status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), extra_args...);
-        _sz_assert(status_base == status_t::success_k);
-        _sz_assert(status_simd == status_t::success_k);
+        sz_assert_(status_base == status_t::success_k);
+        sz_assert_(status_simd == status_t::success_k);
 
         // Individually log the failed results
         for (std::size_t i = 0; i != test_cases.size(); ++i) {
@@ -554,8 +554,8 @@ void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
         status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), extra_args...);
-        _sz_assert(status_base == status_t::success_k);
-        _sz_assert(status_simd == status_t::success_k);
+        sz_assert_(status_base == status_t::success_k);
+        sz_assert_(status_simd == status_t::success_k);
 
         // Individually log the failed results
         for (std::size_t i = 0; i != config.batch_size; ++i) {
@@ -597,9 +597,9 @@ void test_similarity_scores_equivalence() {
         // Distance can be computed from the similarity, by inverting the sign around the length of the longest string:
         auto distance_nw = std::max(7, 7) - similarity_nw;
         auto distance_sw = std::max(7, 7) - similarity_sw;
-        _sz_assert(distance_l == 1);
-        _sz_assert(distance_nw == 1);
-        _sz_assert(distance_sw == 1);
+        sz_assert_(distance_l == 1);
+        sz_assert_(distance_nw == 1);
+        sz_assert_(distance_sw == 1);
     }
 
     // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:

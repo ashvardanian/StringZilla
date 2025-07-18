@@ -103,7 +103,7 @@ inline std::uint64_t cpu_cycle_counter() {
     unsigned int lo, hi;
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
     return (static_cast<std::uint64_t>(hi) << 32) | lo;
-#elif defined(__aarch64__) || defined(_SZ_IS_ARM64)
+#elif defined(__aarch64__) || defined(SZ_IS_64BIT_ARM_)
     // On ARM64, read the virtual count register `CNTVCT_EL0` which provides cycle count.
     std::uint64_t cnt;
     asm volatile("mrs %0, cntvct_el0" : "=r"(cnt));
@@ -333,7 +333,7 @@ inline environment_t build_environment(                                        /
     std::size_t default_seed = 0                                               //
     ) noexcept(false) {
 
-    sz_unused(argc && argv); // Unused in this context
+    sz_unused_(argc && argv); // Unused in this context
     environment_t env;
 
     // Use `STRINGWARS_DATASET` if set, otherwise `default_dataset`
@@ -613,7 +613,7 @@ struct bench_result_t {
 
         // Expand over all provided baselines.
         (void)std::initializer_list<int> {(log_relative(bases), 0)...};
-        sz_unused(log_relative); // In case no `bases` were provided
+        sz_unused_(log_relative); // In case no `bases` were provided
 
         return *this;
     }
@@ -650,10 +650,10 @@ bench_result_t bench_nullary(  //
     }
 
     // Pre-process before testing
-    if constexpr (!std::is_same<preprocessing_type_, callable_no_op_t>()) preprocessing();
+    if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>()) preprocessing();
 
     // Perform the testing against the baseline, if provided.
-    if constexpr (!std::is_same<baseline_type_, callable_no_op_t>())
+    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>())
         for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
             call_result_t const accelerated_result = callable();
             call_result_t const baseline_result = baseline();
@@ -723,10 +723,10 @@ bench_result_t bench_unary(    //
     }
 
     // Pre-process before testing
-    if constexpr (!std::is_same<preprocessing_type_, callable_no_op_t>()) preprocessing();
+    if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>()) preprocessing();
 
     std::size_t const lookup_mask = bit_floor(env.tokens.size()) - 1;
-    if constexpr (!std::is_same<baseline_type_, callable_no_op_t>())
+    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>())
         for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
             std::size_t const token_index = (result.stress_calls++) & lookup_mask;
             call_result_t const accelerated_result = callable(token_index);

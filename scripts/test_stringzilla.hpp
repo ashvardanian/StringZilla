@@ -142,7 +142,7 @@ void randomize_strings(fuzzy_config_t config, std::vector<std::string> &array, a
 
     // Convert to a GPU-friendly layout
     status_t status = tape.try_assign(array.data(), array.data() + array.size());
-    _sz_assert(status == status_t::success_k);
+    sz_assert_(status == status_t::success_k);
 }
 
 } // namespace scripts

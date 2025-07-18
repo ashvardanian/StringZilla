@@ -145,7 +145,7 @@ __forceinline__ __device__ scalar_type_ _load_last_use(scalar_type_ const *ptr) 
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -213,7 +213,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
         // Make sure we are called for an anti-diagonal traversal order
         score_t const gap_costs = gap_costs_.open_or_extend;
-        _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
+        sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
 
         // ? One weird observation, is that even though we can avoid fetching `pre_insertion`
         // ? from shared memory on each cycle, by slicing the work differently between the threads,
@@ -244,7 +244,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -309,7 +309,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
         // Make sure we are called for an anti-diagonal traversal order
         error_cost_t const gap_cost = gap_costs_.open_or_extend;
-        _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
+        sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
 
         // ? One weird observation, is that even though we can avoid fetching `pre_insertion`
         // ? from shared memory on each cycle, by slicing the work differently between the threads,
@@ -344,7 +344,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -426,7 +426,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         score_t *scores_new_deletions) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
-        _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
+        sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
 
         // ? One weird observation, is that even though we can avoid fetching `pre_insertion`
         // ? from shared memory on each cycle, by slicing the work differently between the threads,
@@ -467,7 +467,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -544,7 +544,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         score_t *scores_new_deletions) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
-        _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
+        sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
 
         // ? One weird observation, is that even though we can avoid fetching `pre_insertion`
         // ? from shared memory on each cycle, by slicing the work differently between the threads,
@@ -1240,9 +1240,9 @@ __global__ void _linear_score_across_cuda_device(              //
 
     namespace cg = cooperative_groups;
 
-    _sz_assert(shorter_length > 0);
-    _sz_assert(longer_length > 0);
-    _sz_assert(shorter_length <= longer_length);
+    sz_assert_(shorter_length > 0);
+    sz_assert_(longer_length > 0);
+    sz_assert_(shorter_length <= longer_length);
     using char_t = char_type_;
     using index_t = index_type_;
     using score_t = score_type_;
@@ -1417,9 +1417,9 @@ __global__ void _affine_score_across_cuda_device(              //
 
     namespace cg = cooperative_groups;
 
-    _sz_assert(shorter_length > 0);
-    _sz_assert(longer_length > 0);
-    _sz_assert(shorter_length <= longer_length);
+    sz_assert_(shorter_length > 0);
+    sz_assert_(longer_length > 0);
+    sz_assert_(shorter_length <= longer_length);
     using char_t = char_type_;
     using index_t = index_type_;
     using score_t = score_type_;
@@ -2075,7 +2075,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         results_type_ *results_ptr,                                                           //
         gpu_specs_t specs = {}, cuda_executor_t executor = {}) const noexcept {
 
-        constexpr bool is_affine_k = std::is_same<gap_costs_t, affine_gap_costs_t>::value;
+        constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
         constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
 
         // Preallocate the events for GPU timing.
@@ -2149,7 +2149,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
             // On very large inputs we can't fit the diagonals in shared memory, and use the global one.
             safe_vector<sz_u64_t, scores_allocator_t> diagonals_u64_buffer(alloc_);
             task_t const &largest_task = device_level_tasks[0];
-            _sz_assert(largest_task.max_diagonal_length() >= device_level_tasks.back().max_diagonal_length());
+            sz_assert_(largest_task.max_diagonal_length() >= device_level_tasks.back().max_diagonal_length());
             if (diagonals_u64_buffer.try_resize(largest_task.max_diagonal_length() * count_diagonals_k) ==
                 status_t::bad_alloc_k)
                 return {status_t::bad_alloc_k};
@@ -2221,7 +2221,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
 
                 // Make sure all tasks can be handled by the same kernel template.
                 task_t const &first_task = *tasks_begin;
-                _sz_assert(std::all_of(tasks_begin, tasks_end, [&](task_t const &task) {
+                sz_assert_(std::all_of(tasks_begin, tasks_end, [&](task_t const &task) {
                     return task.bytes_per_cell == first_task.bytes_per_cell && task.density == first_task.density;
                 }));
 
@@ -2243,8 +2243,8 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 // Update the selected kernels properties.
                 uint const shared_memory_per_block =
                     static_cast<uint>(indicative_task.memory_requirement * optimal_density);
-                _sz_assert(shared_memory_per_block > 0);
-                _sz_assert(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
+                sz_assert_(shared_memory_per_block > 0);
+                sz_assert_(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
                 cudaError_t attribute_error = cudaFuncSetAttribute(
                     warp_level_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory_per_block);
                 if (attribute_error != cudaSuccess) {
@@ -2317,7 +2317,7 @@ struct error_costs_256x256_in_cuda_constant_memory_t {
 #if defined(__CUDA_ARCH__)
         return _error_costs_in_cuda_constant_memory[static_cast<sz_u8_t>(a) * 256 + static_cast<sz_u8_t>(b)];
 #else
-        sz_unused(a && b);
+        sz_unused_(a && b);
         return 0;
 #endif
     }
@@ -2388,7 +2388,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
             if constexpr (locality_k == sz_similarity_global_k) {
                 cell_score_vec.u32 = __viaddmax_s16x2(pre_substitution_vec.u32, cost_of_substitution_vec.u32,
                                                       if_deletion_or_insertion_vec.u32);
-                sz_unused(final_score_vec);
+                sz_unused_(final_score_vec);
             }
             else {
                 cell_score_vec.u32 = __viaddmax_s16x2_relu(pre_substitution_vec.u32, cost_of_substitution_vec.u32,
@@ -2440,7 +2440,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         sz_i32_t *scores_new) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
-        _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
+        sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
         error_costs_256x256_in_cuda_constant_memory_t substituter;
         sz_i32_t const gap_costs = this->gap_costs_.open_or_extend;
         sz_i32_t final_score = 0;
@@ -2459,7 +2459,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
             // For local scoring we should use the ReLU variants of 3-way `max`.
             if constexpr (locality_k == sz_similarity_global_k) {
                 cell_score = __viaddmax_s32(pre_substitution, cost_of_substitution, if_deletion_or_insertion);
-                sz_unused(final_score);
+                sz_unused_(final_score);
             }
             else {
                 cell_score = __viaddmax_s32_relu(pre_substitution, cost_of_substitution, if_deletion_or_insertion);
@@ -2561,7 +2561,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
             // For local scoring we should use the ReLU variants of 3-way `max`.
             if constexpr (locality_k == sz_similarity_global_k) {
                 cell_score_vec.u32 = __vimax3_s16x2(if_substitution_vec.u32, if_insertion_vec.u32, if_deletion_vec.u32);
-                sz_unused(final_score_vec);
+                sz_unused_(final_score_vec);
             }
             else {
                 cell_score_vec.u32 =
@@ -2621,7 +2621,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         sz_i32_t *scores_new_deletions) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
-        _sz_assert(scores_pre_insertion + 1 == scores_pre_deletion);
+        sz_assert_(scores_pre_insertion + 1 == scores_pre_deletion);
         sz_i32_t const gap_open_cost = this->gap_costs_.open;
         sz_i32_t const gap_extend_cost = this->gap_costs_.extend;
         error_costs_256x256_in_cuda_constant_memory_t substituter;
@@ -2647,7 +2647,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
             // For local scoring we should use the ReLU variants of 3-way `max`.
             if constexpr (locality_k == sz_similarity_global_k) {
                 cell_score = __vimax3_s32(if_substitution, if_insertion, if_deletion);
-                sz_unused(final_score);
+                sz_unused_(final_score);
             }
             else {
                 cell_score = __vimax3_s32_relu(if_substitution, if_insertion, if_deletion);
@@ -2735,7 +2735,7 @@ struct _cuda_nw_or_sw_byte_level_scores {
         gpu_specs_t specs = {}, cuda_executor_t executor = {}) const noexcept {
 
         constexpr bool is_local_k = locality_k == sz_similarity_local_k;
-        constexpr bool is_affine_k = std::is_same<gap_costs_t, affine_gap_costs_t>::value;
+        constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
         constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
 
         // Preallocate the events for GPU timing.
@@ -2808,7 +2808,7 @@ struct _cuda_nw_or_sw_byte_level_scores {
             // On very large inputs we can't fit the diagonals in shared memory, and use the global one.
             safe_vector<sz_u64_t, scores_allocator_t> diagonals_u64_buffer(alloc_);
             task_t const &largest_task = device_level_tasks[0];
-            _sz_assert(largest_task.max_diagonal_length() >= device_level_tasks.back().max_diagonal_length());
+            sz_assert_(largest_task.max_diagonal_length() >= device_level_tasks.back().max_diagonal_length());
             if (diagonals_u64_buffer.try_resize(largest_task.max_diagonal_length() * count_diagonals_k) ==
                 status_t::bad_alloc_k)
                 return {status_t::bad_alloc_k};
@@ -2876,7 +2876,7 @@ struct _cuda_nw_or_sw_byte_level_scores {
 
                 // Make sure all tasks can be handled by the same kernel template.
                 task_t const &first_task = *tasks_begin;
-                _sz_assert(std::all_of(tasks_begin, tasks_end, [&](task_t const &task) {
+                sz_assert_(std::all_of(tasks_begin, tasks_end, [&](task_t const &task) {
                     return task.bytes_per_cell == first_task.bytes_per_cell && task.density == first_task.density;
                 }));
 
@@ -2898,8 +2898,8 @@ struct _cuda_nw_or_sw_byte_level_scores {
                 // Update the selected kernels properties.
                 uint const shared_memory_per_block =
                     static_cast<uint>(indicative_task.memory_requirement * optimal_density);
-                _sz_assert(shared_memory_per_block > 0);
-                _sz_assert(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
+                sz_assert_(shared_memory_per_block > 0);
+                sz_assert_(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
                 cudaError_t attribute_error = cudaFuncSetAttribute(
                     warp_level_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory_per_block);
                 if (attribute_error != cudaSuccess) {

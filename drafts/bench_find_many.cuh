@@ -60,7 +60,7 @@ struct find_many_callable {
                                                 results_matches_per_haystack.size()};
 
         // Unpack the extra arguments from `std::tuple` into the engine call using `std::apply`
-        constexpr bool only_counts_k = std::is_same_v<results_t, counts_t>;
+        constexpr bool only_counts_k = is_same_type<results_t, counts_t>::value;
         if constexpr (only_counts_k)
             status = std::apply(
                 [&](auto &&...rest) mutable {

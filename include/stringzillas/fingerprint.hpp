@@ -121,8 +121,8 @@ struct multiplying_rolling_hasher {
     explicit multiplying_rolling_hasher(std::size_t window_width, hash_t multiplier = static_cast<hash_t>(257)) noexcept
         : window_width_ {window_width}, multiplier_ {multiplier}, highest_power_ {1} {
 
-        _sz_assert(window_width_ > 1 && "Window width must be > 1");
-        _sz_assert(multiplier_ > 0 && "Multiplier must be positive");
+        sz_assert_(window_width_ > 1 && "Window width must be > 1");
+        sz_assert_(multiplier_ > 0 && "Multiplier must be positive");
 
         for (std::size_t i = 0; i + 1 < window_width_; ++i) highest_power_ = highest_power_ * multiplier_;
     }
@@ -157,15 +157,15 @@ struct rabin_karp_rolling_hasher {
     using hash_t = hash_type_;
     using accumulator_t = accumulator_type_;
 
-    static_assert(std::is_same<hash_t, std::uint16_t>::value || std::is_same<hash_t, std::uint32_t>::value ||
-                      std::is_same<hash_t, std::uint64_t>::value,
+    static_assert(is_same_type<hash_t, std::uint16_t>::value || is_same_type<hash_t, std::uint32_t>::value ||
+                      is_same_type<hash_t, std::uint64_t>::value,
                   "Unsupported hash type");
 
     static constexpr hash_t default_alphabet_size_k = 256u;
     static constexpr hash_t default_modulo_base_k = //
-        std::is_same_v<hash_t, std::uint16_t>   ? SZ_U16_MAX_PRIME
-        : std::is_same_v<hash_t, std::uint32_t> ? SZ_U32_MAX_PRIME
-                                                : SZ_U64_MAX_PRIME;
+        is_same_type<hash_t, std::uint16_t>::value   ? SZ_U16_MAX_PRIME
+        : is_same_type<hash_t, std::uint32_t>::value ? SZ_U32_MAX_PRIME
+                                                     : SZ_U64_MAX_PRIME;
 
     explicit rabin_karp_rolling_hasher(              //
         std::size_t window_width,                    //
@@ -173,9 +173,9 @@ struct rabin_karp_rolling_hasher {
         hash_t modulo = default_modulo_base_k) noexcept
         : window_width_ {window_width}, modulo_ {modulo}, multiplier_ {multiplier}, discarding_multiplier_ {1} {
 
-        _sz_assert(window_width_ > 1 && "Window width must be > 1");
-        _sz_assert(multiplier_ > 0 && "Multiplier must be positive");
-        _sz_assert(modulo_ > 1 && "Modulo base must be > 1");
+        sz_assert_(window_width_ > 1 && "Window width must be > 1");
+        sz_assert_(multiplier_ > 0 && "Multiplier must be positive");
+        sz_assert_(modulo_ > 1 && "Modulo base must be > 1");
 
         for (std::size_t i = 0; i + 1 < window_width_; ++i)
             discarding_multiplier_ = mul_mod(discarding_multiplier_, multiplier_);
@@ -227,7 +227,7 @@ struct buz_rolling_hasher {
     explicit buz_rolling_hasher(std::size_t window_width, std::uint64_t seed = 0x9E3779B97F4A7C15ull) noexcept
         : window_width_ {window_width} {
 
-        _sz_assert(window_width_ > 1 && "Window width must be > 1");
+        sz_assert_(window_width_ > 1 && "Window width must be > 1");
         for (std::size_t i = 0; i < 256; ++i) table_[i] = split_mix64(seed);
     }
 
@@ -323,16 +323,16 @@ struct floating_rolling_hasher<float> {
           modulo_ {static_cast<float_t>(modulo)}, inverse_modulo_ {1.0f / modulo_},
           negative_discarding_multiplier_ {1.0f} {
 
-        _sz_assert(window_width_ > 1 && "Window width must be > 1");
-        _sz_assert(multiplier_ > 0 && "Multiplier must be positive");
-        _sz_assert(modulo_ > 1 && "Modulo must be > 1");
+        sz_assert_(window_width_ > 1 && "Window width must be > 1");
+        sz_assert_(multiplier_ > 0 && "Multiplier must be positive");
+        sz_assert_(modulo_ > 1 && "Modulo must be > 1");
 
         // If we want to avoid hitting +inf or NaN, we need to make sure that the product of our post-modulo
         // normalized number with the multiplier and added subsequent term stays within the exactly representable range.
         float_t const largest_input_term = std::numeric_limits<byte_t>::max() + 1.0f;
         float_t const largest_normalized_state = modulo_ - 1;
         float_t const largest_intermediary = largest_normalized_state * multiplier_ + largest_input_term;
-        _sz_assert(largest_intermediary < limit_k && "Intermediate state overflows the limit");
+        sz_assert_(largest_intermediary < limit_k && "Intermediate state overflows the limit");
 
         // ! The GCC header misses the `std::fmodf` overload, so we use the underlying C version
         for (std::size_t i = 0; i + 1 < window_width_; ++i)
@@ -344,18 +344,18 @@ struct floating_rolling_hasher<float> {
 
     inline hash_t update(hash_t const old_hash, byte_t const new_char) const noexcept {
 
-        float_t state = sz_bitcast(float_t, old_hash);
+        float_t state = sz_bitcast_(float_t, old_hash);
         float_t new_term = float_t(new_char) + 1.0f;
 
         state = std::fmaf(state, multiplier_, new_term);
         state = reduce(state);
 
-        return sz_bitcast(hash_t, state);
+        return sz_bitcast_(hash_t, state);
     }
 
     inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
 
-        float_t state = sz_bitcast(float_t, old_hash);
+        float_t state = sz_bitcast_(float_t, old_hash);
         float_t old_term = float_t(old_char) + 1.0f;
         float_t new_term = float_t(new_char) + 1.0f;
 
@@ -363,7 +363,7 @@ struct floating_rolling_hasher<float> {
         state = std::fmaf(state, multiplier_, new_term);                     // Add head
         state = reduce(state);
 
-        return sz_bitcast(hash_t, state);
+        return sz_bitcast_(hash_t, state);
     }
 
   private:
@@ -423,16 +423,16 @@ struct floating_rolling_hasher<double> {
           modulo_ {static_cast<float_t>(modulo)}, inverse_modulo_ {1.0 / modulo_},
           negative_discarding_multiplier_ {1.0} {
 
-        _sz_assert(window_width_ > 1 && "Window width must be > 1");
-        _sz_assert(multiplier_ > 0 && "Multiplier must be positive");
-        _sz_assert(modulo_ > 1 && "Modulo must be > 1");
+        sz_assert_(window_width_ > 1 && "Window width must be > 1");
+        sz_assert_(multiplier_ > 0 && "Multiplier must be positive");
+        sz_assert_(modulo_ > 1 && "Modulo must be > 1");
 
         // If we want to avoid hitting +inf or NaN, we need to make sure that the product of our post-modulo
         // normalized number with the multiplier and added subsequent term stays within the exactly representable range.
         float_t const largest_input_term = std::numeric_limits<byte_t>::max() + 1.0;
         float_t const largest_normalized_state = modulo_ - 1;
         float_t const largest_intermediary = largest_normalized_state * multiplier_ + largest_input_term;
-        _sz_assert(largest_intermediary < limit_k && "Intermediate state overflows the limit");
+        sz_assert_(largest_intermediary < limit_k && "Intermediate state overflows the limit");
 
         for (std::size_t i = 0; i + 1 < window_width_; ++i)
             negative_discarding_multiplier_ = std::fmod(negative_discarding_multiplier_ * multiplier_, modulo_);
@@ -443,18 +443,18 @@ struct floating_rolling_hasher<double> {
 
     inline hash_t update(hash_t const old_hash, byte_t const new_char) const noexcept {
 
-        float_t state = sz_bitcast(float_t, old_hash);
+        float_t state = sz_bitcast_(float_t, old_hash);
         float_t new_term = float_t(new_char) + 1.0;
 
         state = std::fma(state, multiplier_, new_term);
         state = reduce(state);
 
-        return sz_bitcast(hash_t, state);
+        return sz_bitcast_(hash_t, state);
     }
 
     inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
 
-        float_t state = sz_bitcast(float_t, old_hash);
+        float_t state = sz_bitcast_(float_t, old_hash);
         float_t old_term = float_t(old_char) + 1.0;
         float_t new_term = float_t(new_char) + 1.0;
 
@@ -462,7 +462,7 @@ struct floating_rolling_hasher<double> {
         state = std::fma(state, multiplier_, new_term);                     // Add head
         state = reduce(state);
 
-        return sz_bitcast(hash_t, state);
+        return sz_bitcast_(hash_t, state);
     }
 
     inline float_t multiplier() const noexcept { return multiplier_; }
@@ -562,7 +562,7 @@ struct basic_rolling_hashers {
         if (hashers_.try_reserve(dims) != status_t::success_k) return status_t::bad_alloc_k;
         for (std::size_t dim = 0; dim < dims; ++dim) {
             status_t status = try_append(hasher_t(window_width, alphabet_size + dim));
-            _sz_assert(status == status_t::success_k && "Couldn't fail after the reserve");
+            sz_assert_(status == status_t::success_k && "Couldn't fail after the reserve");
         }
         return status_t::success_k;
     }
@@ -589,7 +589,7 @@ struct basic_rolling_hashers {
      */
     template <size_t dimensions_ = SZ_SIZE_MAX>
     status_t try_fingerprint(span<byte_t const> text, span<result_scalar_t, dimensions_> result) const noexcept {
-        _sz_assert(result.size() == dimensions() && "Dimensions number & hashers number mismatch");
+        sz_assert_(result.size() == dimensions() && "Dimensions number & hashers number mismatch");
 
         // Allocate temporary states
         states_t states(allocator_traits_t::select_on_container_copy_construction(allocator_));
@@ -609,8 +609,8 @@ struct basic_rolling_hashers {
     void fingerprint(span<byte_t const> text, span<state_t, dimensions_> states,
                      span<result_scalar_t, dimensions_> result) const noexcept {
 
-        _sz_assert(result.size() == dimensions() && "Dimensions number & hashers number mismatch");
-        _sz_assert(states.size() == dimensions() && "Dimensions number & states number mismatch");
+        sz_assert_(result.size() == dimensions() && "Dimensions number & hashers number mismatch");
+        sz_assert_(states.size() == dimensions() && "Dimensions number & states number mismatch");
 
         fill_states_(text, states);
 
@@ -632,7 +632,7 @@ struct basic_rolling_hashers {
      *  @retval status_t::bad_alloc_k if the memory allocation fails.
      */
     template <typename texts_type_, typename fingerprints_type_, typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(                                        //
@@ -707,7 +707,7 @@ struct basic_rolling_hashers {
     template <size_t dimensions_ = SZ_SIZE_MAX>
     void fill_states_(span<byte_t const> text, span<state_t, dimensions_> states) const noexcept {
 
-        _sz_assert(states.size() >= hashers_.size() && "Dimensions number & states number mismatch");
+        sz_assert_(states.size() >= hashers_.size() && "Dimensions number & states number mismatch");
 
         // Clear the states
         for (auto &state : states) state = state_t {};
@@ -840,7 +840,7 @@ struct floating_rolling_hashers {
      *  @retval status_t::bad_alloc_k if the memory allocation fails.
      */
     template <typename texts_type_, typename fingerprints_type_, typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(                                        //
@@ -917,7 +917,7 @@ struct floating_rolling_hashers {
         // Branchless clamp to [0, modulo).
         // `h` is in (-modulo, modulo).
         // If h is negative, add modulo.
-        h += modulo * static_cast<float_t>(sz_bitcast(std::uint64_t, h) >> 63);
+        h += modulo * static_cast<float_t>(sz_bitcast_(std::uint64_t, h) >> 63);
         // Now `h` is in [0, 2*modulo).
         // If h is >= modulo, subtract modulo.
         long long is_ge = static_cast<long long>(h * inverse_modulo);
@@ -939,12 +939,12 @@ struct floating_rolling_hashers {
             float_t const new_term = static_cast<float_t>(new_char) + 1.0;
             for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
                 rolling_hash_t &hash = last_hashes[dim];
-                float_t state = sz_bitcast(float_t, hash);
+                float_t state = sz_bitcast_(float_t, hash);
                 state += multipliers_[dim] * new_term;
                 state = reduce(state, dim);
 
                 // Save back
-                hash = sz_bitcast(rolling_hash_t, state);
+                hash = sz_bitcast_(rolling_hash_t, state);
                 minimum_hashes[dim] = std::min(minimum_hashes[dim], hash);
             }
         }
@@ -957,13 +957,13 @@ struct floating_rolling_hashers {
             float_t const old_term = static_cast<float_t>(old_char) + 1.0;
             for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
                 rolling_hash_t &hash = last_hashes[dim];
-                float_t state = sz_bitcast(float_t, hash);
+                float_t state = sz_bitcast_(float_t, hash);
                 state += negative_discarding_multipliers_[dim] * old_term; // Remove tail
                 state += multipliers_[dim] * new_term;                     // Add head
                 state = reduce(state, dim);
 
                 // Save back
-                hash = sz_bitcast(rolling_hash_t, state);
+                hash = sz_bitcast_(rolling_hash_t, state);
                 minimum_hashes[dim] = std::min(minimum_hashes[dim], hash);
             }
         }
@@ -1055,7 +1055,7 @@ SZ_DYNAMIC void sz_hashes(                                                      
 SZ_PUBLIC void sz_hashes_fingerprint(                          //
     sz_cptr_t text, sz_size_t length, sz_size_t window_width, //
     sz_ptr_t fingerprint, sz_size_t fingerprint_bytes) {
-    sz_unused(text && length && window_width && fingerprint && fingerprint_bytes);
+    sz_unused_(text && length && window_width && fingerprint && fingerprint_bytes);
 }
 
 /**
@@ -1095,10 +1095,10 @@ SZ_PUBLIC void sz_hashes_serial(                                                
  *  Let's stick to the Fibonacci hash trick using the golden ratio.
  *  https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/
  */
-#define _sz_hash_mix(first, second) ((first * 11400714819323198485ull) ^ (second * 11400714819323198485ull))
-#define _sz_shift_low(x) (x)
-#define _sz_shift_high(x) ((x + 77ull) & 0xFFull)
-#define _sz_prime_mod(x) (x % SZ_U64_MAX_PRIME)
+#define sz_hash_mix_(first, second) ((first * 11400714819323198485ull) ^ (second * 11400714819323198485ull))
+#define sz_shift_low_(x) (x)
+#define sz_shift_high_(x) ((x + 77ull) & 0xFFull)
+#define sz_prime_mod_(x) (x % SZ_U64_MAX_PRIME)
 
 SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t window_width, sz_size_t step, //
                                 sz_hash_callback_t callback, void *callback_handle) {
@@ -1116,11 +1116,11 @@ SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t win
     // Compute the initial hash value for the first window.
     sz_u64_t hash_low = 0, hash_high = 0, hash_mix;
     for (sz_u8_t const *first_end = text + window_width; text < first_end; ++text)
-        hash_low = (hash_low * 31ull + _sz_shift_low(*text)) % SZ_U64_MAX_PRIME,
-        hash_high = (hash_high * 257ull + _sz_shift_high(*text)) % SZ_U64_MAX_PRIME;
+        hash_low = (hash_low * 31ull + sz_shift_low_(*text)) % SZ_U64_MAX_PRIME,
+        hash_high = (hash_high * 257ull + sz_shift_high_(*text)) % SZ_U64_MAX_PRIME;
 
     // In most cases the fingerprint length will be a power of two.
-    hash_mix = _sz_hash_mix(hash_low, hash_high);
+    hash_mix = sz_hash_mix_(hash_low, hash_high);
     callback((sz_cptr_t)text, window_width, hash_mix, callback_handle);
 
     // Compute the hash value for every window, exporting into the fingerprint,
@@ -1129,53 +1129,53 @@ SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t win
     sz_size_t const step_mask = step - 1;
     for (; text < text_end; ++text, ++cycles) {
         // Discard one character:
-        hash_low -= _sz_shift_low(*(text - window_width)) * prime_power_low;
-        hash_high -= _sz_shift_high(*(text - window_width)) * prime_power_high;
+        hash_low -= sz_shift_low_(*(text - window_width)) * prime_power_low;
+        hash_high -= sz_shift_high_(*(text - window_width)) * prime_power_high;
         // And add a new one:
-        hash_low = 31ull * hash_low + _sz_shift_low(*text);
-        hash_high = 257ull * hash_high + _sz_shift_high(*text);
+        hash_low = 31ull * hash_low + sz_shift_low_(*text);
+        hash_high = 257ull * hash_high + sz_shift_high_(*text);
         // Wrap the hashes around:
-        hash_low = _sz_prime_mod(hash_low);
-        hash_high = _sz_prime_mod(hash_high);
+        hash_low = sz_prime_mod_(hash_low);
+        hash_high = sz_prime_mod_(hash_high);
         // Mix only if we've skipped enough hashes.
         if ((cycles & step_mask) == 0) {
-            hash_mix = _sz_hash_mix(hash_low, hash_high);
+            hash_mix = sz_hash_mix_(hash_low, hash_high);
             callback((sz_cptr_t)text, window_width, hash_mix, callback_handle);
         }
     }
 }
 
 /** @brief  An internal callback used to set a bit in a power-of-two length binary fingerprint of a string. */
-SZ_INTERNAL void _sz_hashes_fingerprint_pow2_callback(sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *handle) {
+SZ_INTERNAL void sz_hashes_fingerprint_pow2_callback_(sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *handle) {
     sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
     sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
     sz_size_t fingerprint_bytes = fingerprint_buffer->length;
     fingerprint_u8s[(hash / 8) & (fingerprint_bytes - 1)] |= (1 << (hash & 7));
-    sz_unused(start && length);
+    sz_unused_(start && length);
 }
 
 /** @brief  An internal callback used to set a bit in a @b non power-of-two length binary fingerprint of a string. */
-SZ_INTERNAL void _sz_hashes_fingerprint_non_pow2_callback( //
+SZ_INTERNAL void sz_hashes_fingerprint_non_pow2_callback_( //
     sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *handle) {
     sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
     sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
     sz_size_t fingerprint_bytes = fingerprint_buffer->length;
     fingerprint_u8s[(hash / 8) % fingerprint_bytes] |= (1 << (hash & 7));
-    sz_unused(start && length);
+    sz_unused_(start && length);
 }
 
 /** @brief  An internal callback, used to mix all the running hashes into one pointer-size value. */
-SZ_INTERNAL void _sz_hashes_fingerprint_scalar_callback( //
+SZ_INTERNAL void sz_hashes_fingerprint_scalar_callback_( //
     sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *scalar_handle) {
-    sz_unused(start && length && hash && scalar_handle);
+    sz_unused_(start && length && hash && scalar_handle);
     sz_size_t *scalar_ptr = (sz_size_t *)scalar_handle;
     *scalar_ptr ^= hash;
 }
 
-#undef _sz_shift_low
-#undef _sz_shift_high
-#undef _sz_hash_mix
-#undef _sz_prime_mod
+#undef sz_shift_low_
+#undef sz_shift_high_
+#undef sz_hash_mix_
+#undef sz_prime_mod_
 
 #pragma endregion // Serial Implementation
 

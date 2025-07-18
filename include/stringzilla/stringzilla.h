@@ -91,7 +91,7 @@ SZ_DYNAMIC sz_capability_t sz_capabilities(void);
  *  @brief Internal helper function to convert SIMD capabilities to a string.
  *  @sa    sz_capabilities_to_string, sz_capabilities
  */
-SZ_INTERNAL sz_cptr_t _sz_capabilities_to_string_implementation(sz_capability_t caps) {
+SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t caps) {
 
     static char buf[256];
     char *p = buf;
@@ -151,7 +151,7 @@ SZ_PUBLIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
 SZ_PUBLIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_PUBLIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
 SZ_PUBLIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
-    return _sz_capabilities_to_string_implementation(caps);
+    return sz_capabilities_to_string_implementation_(caps);
 }
 
 #endif

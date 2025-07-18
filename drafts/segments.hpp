@@ -85,7 +85,7 @@ SZ_PUBLIC sz_bool_t sz_detect_encoding(sz_cptr_t text, sz_size_t length) {
     // codepoints. In the case of emojis, we deal with 4-byte codepoints.
     // We can also use the idea, that misaligned reads are quite cheap on modern CPUs.
     int can_be_ascii = 1, can_be_utf8 = 1, can_be_utf16 = 1, can_be_utf32 = 1;
-    sz_unused(can_be_ascii + can_be_utf8 + can_be_utf16 + can_be_utf32);
-    sz_unused(text && length);
+    sz_unused_(can_be_ascii + can_be_utf8 + can_be_utf16 + can_be_utf32);
+    sz_unused_(text && length);
     return sz_false_k;
 }

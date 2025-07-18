@@ -26,7 +26,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_u32tape( //
     sz_size_t bound,                                     //
     sz_memory_allocator_t *alloc, sz_size_t *results) {
 
-    _sz_unused(bound && alloc);
+    sz_unused_(bound && alloc);
 
     using tape_t = sz::arrow_strings_tape<char, sz_u32_t, sz::dummy_alloc_t>;
     sz_size_t const a_total_length = a_lengths[count];
@@ -45,7 +45,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_u32tape( //
     sz_error_cost_t const *subs, sz_error_cost_t gap,      //
     sz_memory_allocator_t *alloc, sz_ssize_t *results) {
 
-    _sz_unused(alloc);
+    sz_unused_(alloc);
 
     using tape_t = sz::arrow_strings_tape<char, sz_u32_t, sz::dummy_alloc_t>;
     sz_size_t const a_total_length = a_lengths[count];

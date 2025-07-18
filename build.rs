@@ -27,11 +27,11 @@ fn main() {
     }
 
     if target_arch == "x86_64" {
-        build.define("_SZ_IS_X86_64", "1");
-        build.define("_SZ_IS_ARM64", "0");
+        build.define("SZ_IS_64BIT_X86_", "1");
+        build.define("SZ_IS_64BIT_ARM_", "0");
     } else if target_arch == "aarch64" {
-        build.define("_SZ_IS_X86_64", "0");
-        build.define("_SZ_IS_ARM64", "1");
+        build.define("SZ_IS_64BIT_X86_", "0");
+        build.define("SZ_IS_64BIT_ARM_", "1");
     }
 
     // At start we will try compiling with all SIMD backends enabled

@@ -247,12 +247,12 @@ struct aho_corasick_dictionary {
         if ((s = outputs_offsets.try_reserve(other.outputs_offsets().size())) != status_t::success_k) return s;
         if ((s = needles_lengths.try_reserve(other.needles_lengths().size())) != status_t::success_k) return s;
 
-        _sz_assert(transitions.try_assign(other.transitions()) == status_t::success_k);
-        _sz_assert(outputs.try_assign(other.outputs()) == status_t::success_k);
-        _sz_assert(failures.try_assign(other.failures()) == status_t::success_k);
-        _sz_assert(outputs_counts.try_assign(other.outputs_counts()) == status_t::success_k);
-        _sz_assert(outputs_offsets.try_assign(other.outputs_offsets()) == status_t::success_k);
-        _sz_assert(needles_lengths.try_assign(other.needles_lengths()) == status_t::success_k);
+        sz_assert_(transitions.try_assign(other.transitions()) == status_t::success_k);
+        sz_assert_(outputs.try_assign(other.outputs()) == status_t::success_k);
+        sz_assert_(failures.try_assign(other.failures()) == status_t::success_k);
+        sz_assert_(outputs_counts.try_assign(other.outputs_counts()) == status_t::success_k);
+        sz_assert_(outputs_offsets.try_assign(other.outputs_offsets()) == status_t::success_k);
+        sz_assert_(needles_lengths.try_assign(other.needles_lengths()) == status_t::success_k);
 
         alloc_ = std::move(alloc);
         transitions_ = std::move(transitions);
@@ -621,7 +621,7 @@ struct find_many {
      */
     template <typename haystacks_type_>
     status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts) const noexcept {
-        _sz_assert(counts.size() == haystacks.size());
+        sz_assert_(counts.size() == haystacks.size());
         for (size_t i = 0; i < counts.size(); ++i) counts[i] = dict_.count(haystacks[i]);
         return status_t::success_k;
     }
@@ -636,7 +636,7 @@ struct find_many {
     status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts,
                       output_matches_type_ &&matches) const noexcept {
 
-        sz_unused(counts); // ? We only keep it for API compatibility with parallel algos
+        sz_unused_(counts); // ? We only keep it for API compatibility with parallel algos
         size_t count_found = 0;
         size_t const count_allowed = matches.size();
         for (auto it = haystacks.begin(); it != haystacks.end() && count_found != count_allowed; ++it)
@@ -722,13 +722,13 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @return The total number of occurrences found.
      */
     template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts, executor_type_ &&executor = {},
                        cpu_specs_t const &specs = {}) const noexcept {
 
-        _sz_assert(counts.size() == haystacks.size());
+        sz_assert_(counts.size() == haystacks.size());
 
         using haystacks_t = typename std::remove_reference_t<haystacks_type_>;
         using haystack_t = typename haystacks_t::value_type;
@@ -785,7 +785,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @note The @p matches reference objects should be assignable from @b `match_t`.
      */
     template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches, //
@@ -806,13 +806,13 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @note The @p matches reference objects should be assignable from @b `match_t`.
      */
     template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
-#if _SZ_IS_CPP20
+#if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
     status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts, output_matches_type_ &&matches,
                       executor_type_ &&executor = {}, cpu_specs_t const &specs = {}) const noexcept {
 
-        _sz_assert(counts.size() == haystacks.size());
+        sz_assert_(counts.size() == haystacks.size());
         size_t const cores_total = executor.threads_count();
 
         using haystacks_t = typename std::remove_reference_t<haystacks_type_>;
@@ -839,7 +839,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                 ++matches_found;
                 return true;
             });
-            _sz_assert(counts[haystack_index] == matches_found);
+            sz_assert_(counts[haystack_index] == matches_found);
         });
 
         // On longer strings, throw all cores on each haystack, but between the threads we need additional
@@ -896,7 +896,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
                     count_matches_found_on_this_core++;
                     return true;
                 });
-                _sz_assert(count_matches_found_on_this_core == count_matches_expected_on_this_core);
+                sz_assert_(count_matches_found_on_this_core == count_matches_expected_on_this_core);
             });
         }
 

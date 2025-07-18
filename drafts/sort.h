@@ -83,19 +83,19 @@ SZ_INTERNAL void cswap_argsort_avx512(__m512i *pgrams, __m512i *offsets, __m512i
         _mm512_storeu_si512(pgrams_array, *pgrams);
         _mm512_storeu_si512(offsets_array, *offsets);
         for (sz_size_t i = 1; i < 8; ++i)
-            _sz_assert(pgrams_array[i - 1] <= pgrams_array[i] &&
+            sz_assert_(pgrams_array[i - 1] <= pgrams_array[i] &&
                        "The sorting network must sort the pgrams in ascending order.");
     }
 }
 
-SZ_PUBLIC void _sz_sequence_argsort_ice_recursively(                    //
+SZ_PUBLIC void sz_sequence_argsort_ice_recursively_(                    //
     sz_sequence_t const *const collection,                              //
     sz_pgram_t *const global_pgrams, sz_size_t *const global_order,     //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, //
     sz_size_t const start_character) {
 
     // Prepare the new range of windows
-    _sz_sequence_argsort_serial_export_next_pgrams(collection, global_pgrams, global_order, start_in_sequence,
+    sz_sequence_argsort_serial_export_next_pgrams_(collection, global_pgrams, global_order, start_in_sequence,
                                                    end_in_sequence, start_character);
 
     // We can implement a form of a Radix sort here, that will count the number of elements with

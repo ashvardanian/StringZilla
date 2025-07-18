@@ -140,11 +140,11 @@ void bench_fingerprint(environment_t const &env) {
     auto call_serial = fingerprint_callable<rolling_serial_t>(env, fingerprints_baseline, *rolling_serial);
     bench_result_t serial = bench_nullary(env, "rolling_serial", call_serial).log(baseline);
 
-    bench_nullary(                                                                                //
-        env, "rolling_skylake", call_serial,                                                      //
-        fingerprint_callable<rolling_skylake_t>(env, fingerprints_accelerated, *rolling_skylake), //
-        callable_no_op_t {},                                                                      // preprocessing
-        fingerprints_equality_t {})                                                               // equality check
+    bench_nullary(                                                                              //
+        env, "rolling_serial", call_serial,                                                     //
+        fingerprint_callable<rolling_serial_t>(env, fingerprints_accelerated, *rolling_serial), //
+        callable_no_op_t {},                                                                    // preprocessing
+        fingerprints_equality_t {})                                                             // equality check
         .log(baseline, serial);
     scramble_accelerated_results();
 }

@@ -37,6 +37,8 @@
 namespace ashvardanian {
 namespace stringzillas {
 
+using namespace stringzilla;
+
 /**
  *  @brief  A custom allocator that uses CUDA Unified Memory for allocation.
  */

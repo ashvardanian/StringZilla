@@ -79,50 +79,50 @@ before-build = ["rd /s /q {project}\\build || echo Done"]
 [[tool.cibuildwheel.overrides]]
 select = "*-win_amd64"
 inherit.environment = "append"
-environment._SZ_IS_X86_64 = "1"
+environment.SZ_IS_64BIT_X86_ = "1"
 
 [[tool.cibuildwheel.overrides]]
 select = "*-manylinux*_x86_64"
 inherit.environment = "append"
-environment._SZ_IS_X86_64 = "1"
+environment.SZ_IS_64BIT_X86_ = "1"
 
 [[tool.cibuildwheel.overrides]]
 select = "*-musllinux*_x86_64"
 inherit.environment = "append"
-environment._SZ_IS_X86_64 = "1"
+environment.SZ_IS_64BIT_X86_ = "1"
 
 [[tool.cibuildwheel.overrides]]
 select = "*-macos*_x86_64"
 inherit.environment = "append"
-environment._SZ_IS_X86_64 = "1"
+environment.SZ_IS_64BIT_X86_ = "1"
 
 # Detect ARM 64-bit builds
 [[tool.cibuildwheel.overrides]]
 select = "*-win_arm64"
 inherit.environment = "append"
-environment._SZ_IS_ARM64 = "1"
+environment.SZ_IS_64BIT_ARM_ = "1"
 
 [[tool.cibuildwheel.overrides]]
 select = "*-manylinux*_aarch64"
 inherit.environment = "append"
-environment._SZ_IS_ARM64 = "1"
+environment.SZ_IS_64BIT_ARM_ = "1"
 
 [[tool.cibuildwheel.overrides]]
 select = "*-musllinux*_aarch64"
 inherit.environment = "append"
-environment._SZ_IS_ARM64 = "1"
+environment.SZ_IS_64BIT_ARM_ = "1"
 
 [[tool.cibuildwheel.overrides]]
 select = "*-macos*_arm64"
 inherit.environment = "append"
-environment._SZ_IS_ARM64 = "1"
+environment.SZ_IS_64BIT_ARM_ = "1"
 
 # Detect MacOS Universal2 builds
 [[tool.cibuildwheel.overrides]]
 select = "*-macos*_universal2"
 inherit.environment = "append"
-environment._SZ_IS_X86_64 = "1"
-environment._SZ_IS_ARM64 = "1"
+environment.SZ_IS_64BIT_X86_ = "1"
+environment.SZ_IS_64BIT_ARM_ = "1"
 
 [tool.cibuildwheel.macos.environment]
 MACOSX_DEPLOYMENT_TARGET = "10.11"

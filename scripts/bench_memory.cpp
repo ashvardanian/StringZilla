@@ -262,7 +262,7 @@ void memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value) { std::mem
 void generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
     uniform_u8_distribution_t distribution;
     std::generate(output, output + length, [&]() -> char { return distribution(global_random_generator()); });
-    sz_unused(nonce);
+    sz_unused_(nonce);
 }
 
 /**
