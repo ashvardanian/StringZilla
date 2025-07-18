@@ -106,6 +106,7 @@ struct dummy_executor_t {
     }
 };
 
+#if _SZ_IS_CPP20
 template <typename executor_type_>
 concept executor_like = requires(executor_type_ executor) {
 #if !defined(__NVCC__) && 0
@@ -126,6 +127,7 @@ concept executor_like = requires(executor_type_ executor) {
     sizeof(executor) > 0;
 #endif
 };
+#endif
 
 struct openmp_executor_t {
 
@@ -198,6 +200,7 @@ struct openmp_executor_t {
     }
 };
 
+#if _SZ_IS_CPP20
 #if !defined(__NVCC__)
 static_assert(executor_like<dummy_executor_t>);
 static_assert(executor_like<openmp_executor_t>);
@@ -212,6 +215,7 @@ concept continuous_like = requires(continuous_type_ container) {
 
 static_assert(continuous_like<span<char>>);
 static_assert(!continuous_like<int>);
+#endif
 
 /**
  *  @brief  A function that takes a range of elements and a @p callback function and groups the elements
