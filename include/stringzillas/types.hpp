@@ -53,6 +53,13 @@ struct dummy_prong_t {
     operator std::size_t() const noexcept { return task; }
 };
 
+/**
+ *  @brief  C++17-compatible equivalent of std::remove_cvref (which was added in C++20).
+ *          Removes const, volatile, and reference qualifiers from a type.
+ */
+template <typename type_>
+using remove_cvref = typename std::remove_cv<typename std::remove_reference<type_>::type>::type;
+
 struct dummy_executor_t {
 
     constexpr size_t threads_count() const noexcept { return 1; }

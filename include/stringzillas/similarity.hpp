@@ -530,7 +530,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
-    using char_t = typename std::remove_cvref<first_char_t>::type;
+    using char_t = remove_cvref<first_char_t>;
 
     using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
                                       objective_k, locality_k, capability_k>;
@@ -713,7 +713,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
-    using char_t = typename std::remove_cvref<first_char_t>::type;
+    using char_t = remove_cvref<first_char_t>;
 
     using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
                                       objective_k, locality_k, capability_k>;
