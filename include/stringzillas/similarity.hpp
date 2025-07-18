@@ -2220,7 +2220,10 @@ struct levenshtein_distances {
     }
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
-              executor_like executor_type_>
+              typename executor_type_>
+#if _SZ_IS_CPP20
+        requires executor_like<executor_type_>
+#endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
                         cpu_specs_t const &specs = {}) const noexcept {
@@ -2268,7 +2271,10 @@ struct levenshtein_distances_utf8 {
     }
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
-              executor_like executor_type_>
+              typename executor_type_>
+#if _SZ_IS_CPP20
+        requires executor_like<executor_type_>
+#endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
                         cpu_specs_t const &specs = {}) const noexcept {
@@ -2317,7 +2323,10 @@ struct needleman_wunsch_scores {
     }
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
-              executor_like executor_type_>
+              typename executor_type_>
+#if _SZ_IS_CPP20
+        requires executor_like<executor_type_>
+#endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
                         cpu_specs_t const &specs = {}) const noexcept {
@@ -2366,7 +2375,10 @@ struct smith_waterman_scores {
     }
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
-              executor_like executor_type_>
+              typename executor_type_>
+#if _SZ_IS_CPP20
+        requires executor_like<executor_type_>
+#endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
                         cpu_specs_t const &specs = {}) const noexcept {

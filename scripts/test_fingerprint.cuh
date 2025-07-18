@@ -107,19 +107,6 @@ std::vector<std::string> rolling_hasher_dna_like_inputs() {
     return strings;
 }
 
-std::vector<std::string> rolling_hasher_dna_like_inputs() {
-    std::vector<std::string> strings;
-
-    fuzzy_config_t config;
-    config.alphabet = "ACGT";
-    config.batch_size = 100;
-    config.min_string_length = 100;
-    config.max_string_length = 100 * 1024;
-
-    randomize_strings(config, strings);
-    return strings;
-}
-
 std::vector<std::string> rolling_hasher_inconvenient_inputs() {
     std::vector<std::string> strings;
 

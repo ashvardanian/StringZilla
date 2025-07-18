@@ -157,8 +157,9 @@ struct rabin_karp_rolling_hasher {
     using hash_t = hash_type_;
     using accumulator_t = accumulator_type_;
 
-    static_assert(std::is_same_v<hash_t, std::uint16_t> || std::is_same_v<hash_t, std::uint32_t> ||
-                  std::is_same_v<hash_t, std::uint64_t>);
+    static_assert(std::is_same<hash_t, std::uint16_t>::value || std::is_same<hash_t, std::uint32_t>::value ||
+                      std::is_same<hash_t, std::uint64_t>::value,
+                  "Unsupported hash type");
 
     static constexpr hash_t default_alphabet_size_k = 256u;
     static constexpr hash_t default_modulo_base_k = //

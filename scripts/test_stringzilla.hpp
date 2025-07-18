@@ -113,7 +113,7 @@ inline void iterate_in_random_slices(std::string const &text, slice_callback_typ
 }
 
 struct fuzzy_config_t {
-    std::string_view alphabet = "ABC";
+    std::string alphabet = "ABC";
     std::size_t batch_size = 16;
     std::size_t min_string_length = 1;
     std::size_t max_string_length = 200;

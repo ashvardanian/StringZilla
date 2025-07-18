@@ -833,28 +833,28 @@ void test_similarity_scores_equivalence() {
  */
 void test_similarity_scores_memory_usage() {
 
-    std::vector<fuzzy_config_t> experiments = {
+    std::vector<fuzzy_config_t> experiments {
         // Single string pair of same length:
-        {.batch_size = 1, .min_string_length = 128, .max_string_length = 128},
-        {.batch_size = 1, .min_string_length = 512, .max_string_length = 512},
-        {.batch_size = 1, .min_string_length = 2048, .max_string_length = 2048},
-        {.batch_size = 1, .min_string_length = 8192, .max_string_length = 8192},
-        {.batch_size = 1, .min_string_length = 32768, .max_string_length = 32768},
-        {.batch_size = 1, .min_string_length = 131072, .max_string_length = 131072},
+        {"ABC", /* batch_size */ 1, /* min_string_length */ 128, /* max_string_length */ 128},
+        {"ABC", /* batch_size */ 1, /* min_string_length */ 512, /* max_string_length */ 512},
+        {"ABC", /* batch_size */ 1, /* min_string_length */ 2048, /* max_string_length */ 2048},
+        {"ABC", /* batch_size */ 1, /* min_string_length */ 8192, /* max_string_length */ 8192},
+        {"ABC", /* batch_size */ 1, /* min_string_length */ 32768, /* max_string_length */ 32768},
+        {"ABC", /* batch_size */ 1, /* min_string_length */ 131072, /* max_string_length */ 131072},
         // Two strings of a same length:
-        {.batch_size = 2, .min_string_length = 128, .max_string_length = 128},
-        {.batch_size = 2, .min_string_length = 512, .max_string_length = 512},
-        {.batch_size = 2, .min_string_length = 2048, .max_string_length = 2048},
-        {.batch_size = 2, .min_string_length = 8192, .max_string_length = 8192},
-        {.batch_size = 2, .min_string_length = 32768, .max_string_length = 32768},
-        {.batch_size = 2, .min_string_length = 131072, .max_string_length = 131072},
+        {"ABC", /* batch_size */ 2, /* min_string_length */ 128, /* max_string_length */ 128},
+        {"ABC", /* batch_size */ 2, /* min_string_length */ 512, /* max_string_length */ 512},
+        {"ABC", /* batch_size */ 2, /* min_string_length */ 2048, /* max_string_length */ 2048},
+        {"ABC", /* batch_size */ 2, /* min_string_length */ 8192, /* max_string_length */ 8192},
+        {"ABC", /* batch_size */ 2, /* min_string_length */ 32768, /* max_string_length */ 32768},
+        {"ABC", /* batch_size */ 2, /* min_string_length */ 131072, /* max_string_length */ 131072},
         // Ten strings of random lengths:
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 128},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 512},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 2048},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 8192},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 32768},
-        {.batch_size = 10, .min_string_length = 1, .max_string_length = 131072},
+        {"ABC", /* batch_size */ 10, /* min_string_length */ 1, /* max_string_length */ 128},
+        {"ABC", /* batch_size */ 10, /* min_string_length */ 1, /* max_string_length */ 512},
+        {"ABC", /* batch_size */ 10, /* min_string_length */ 1, /* max_string_length */ 2048},
+        {"ABC", /* batch_size */ 10, /* min_string_length */ 1, /* max_string_length */ 8192},
+        {"ABC", /* batch_size */ 10, /* min_string_length */ 1, /* max_string_length */ 32768},
+        {"ABC", /* batch_size */ 10, /* min_string_length */ 1, /* max_string_length */ 131072},
     };
 
 #if SZ_USE_CUDA
