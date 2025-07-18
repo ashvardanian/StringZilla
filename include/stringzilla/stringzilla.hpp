@@ -396,7 +396,7 @@ struct matcher_find {
     size_type operator()(string_type_ haystack) const noexcept { return haystack.find(needle_); }
     size_type skip_length() const noexcept {
         // TODO: Apply Galil rule to match repetitive patterns in strictly linear time.
-        return is_same_type<overlaps_type, include_overlaps_type>() ? 1 : needle_.length();
+        return is_same_type<overlaps_type, include_overlaps_type>::value ? 1 : needle_.length();
     }
 };
 
@@ -414,7 +414,7 @@ struct matcher_rfind {
     size_type operator()(string_type_ haystack) const noexcept { return haystack.rfind(needle_); }
     size_type skip_length() const noexcept {
         // TODO: Apply Galil rule to match repetitive patterns in strictly linear time.
-        return is_same_type<overlaps_type, include_overlaps_type>() ? 1 : needle_.length();
+        return is_same_type<overlaps_type, include_overlaps_type>::value ? 1 : needle_.length();
     }
 };
 
@@ -2066,7 +2066,7 @@ class basic_string {
      *  @brief  The number of characters that can be stored in the internal buffer.
      *          Depends on the size of the internal buffer for the "Small String Optimization".
      */
-    static constexpr size_type min_capacity = _SZ_STRING_INTERNAL_SPACE - 1;
+    static constexpr size_type min_capacity = SZ_STRING_INTERNAL_SPACE - 1;
 
 #pragma region Constructors and STL Utilities
 

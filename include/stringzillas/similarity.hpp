@@ -621,7 +621,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
-    static_assert(is_same_type<first_char_t, second_char_t>(), "String characters must be of the same type.");
+    static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = first_char_t;
 
     using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
@@ -828,7 +828,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
     using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
     using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
-    static_assert(is_same_type<first_char_t, second_char_t>(), "String characters must be of the same type.");
+    static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = first_char_t;
 
     using tile_scorer_t = tile_scorer<first_iterator_t, second_iterator_t, score_t, substituter_t, gap_costs_t,
@@ -1677,7 +1677,7 @@ struct levenshtein_distance {
 
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
-        if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>())
+        if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>::value)
             if (gap_costs_.open == gap_costs_.extend) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
                 linearized_fallback_t linear_backend(substituter_, linear_gap, alloc_);
@@ -1795,7 +1795,7 @@ struct levenshtein_distance_utf8 {
 
         // If the cost of gap opening and extension is the same and we've mistakenly instantiated
         // the more memory-intensive `affine_gap_costs_t`, we can fall-back to the linearized version.
-        if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>())
+        if constexpr (is_same_type<gap_costs_t, affine_gap_costs_t>::value)
             if (gap_costs_.open == gap_costs_.extend) {
                 linear_gap_costs_t linear_gap {gap_costs_.open};
                 linearized_fallback_t linear_backend(substituter_, linear_gap, alloc_);

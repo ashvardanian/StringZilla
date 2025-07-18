@@ -650,10 +650,10 @@ bench_result_t bench_nullary(  //
     }
 
     // Pre-process before testing
-    if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>()) preprocessing();
+    if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>::value) preprocessing();
 
     // Perform the testing against the baseline, if provided.
-    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>())
+    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
         for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
             call_result_t const accelerated_result = callable();
             call_result_t const baseline_result = baseline();
@@ -723,10 +723,10 @@ bench_result_t bench_unary(    //
     }
 
     // Pre-process before testing
-    if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>()) preprocessing();
+    if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>::value) preprocessing();
 
     std::size_t const lookup_mask = bit_floor(env.tokens.size()) - 1;
-    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>())
+    if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
         for (auto running_seconds : repeat_up_to(env.stress ? env.stress_seconds : 0)) {
             std::size_t const token_index = (result.stress_calls++) & lookup_mask;
             call_result_t const accelerated_result = callable(token_index);
