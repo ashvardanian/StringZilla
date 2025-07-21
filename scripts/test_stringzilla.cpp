@@ -345,6 +345,10 @@ static void test_random_generator_equivalence(sz_fill_random_t generate_base, sz
 
 static void test_equivalence() {
 
+    // Ensure the seed affects hash results
+    assert(sz_hash_serial("abc", 3, 100) != sz_hash_serial("abc", 3, 200));
+    assert(sz_hash_serial("abcdefgh", 8, 0) != sz_hash_serial("abcdefgh", 8, 7));
+
 #if SZ_USE_HASWELL
     test_hash_equivalence(                                      //
         sz_hash_serial, sz_hash_state_init_serial,              //
