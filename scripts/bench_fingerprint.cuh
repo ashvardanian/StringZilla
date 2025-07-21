@@ -22,7 +22,7 @@ namespace scripts {
 
 using namespace ashvardanian::stringzilla::scripts;
 
-static constexpr std::size_t default_embedding_dims_k = 768;
+static constexpr std::size_t default_embedding_dims_k = 128;
 static constexpr std::size_t default_window_width_k = 7;
 
 using fingerprint_t = std::array<std::uint32_t, default_embedding_dims_k>;
@@ -30,18 +30,17 @@ using fingerprints_t = unified_vector<fingerprint_t>;
 
 #pragma region Multi-Pattern Search
 
-/** @brief Wraps a hardware-specific fingerprinting backend into something @b `bench_nullary`-compatible . */
+/** @brief Wraps a hardware-specific fingerprinting backend into something @b `bench_nullary`-compatible. */
 template <typename engine_type_, typename... extra_args_>
 struct fingerprint_callable {
     using engine_t = engine_type_;
 
     environment_t const &env;
     fingerprints_t &fingerprints;
-    engine_t const &engine;
+    engine_t &engine;
     std::tuple<extra_args_...> extra_args = {};
 
-    fingerprint_callable(environment_t const &env, fingerprints_t &fingerprints, engine_t const &eng,
-                         extra_args_... args)
+    fingerprint_callable(environment_t const &env, fingerprints_t &fingerprints, engine_t &eng, extra_args_... args)
         : env(env), fingerprints(fingerprints), engine(eng), extra_args(args...) {}
 
     call_result_t operator()() noexcept(false) {
@@ -50,6 +49,7 @@ struct fingerprint_callable {
         status_t status = std::apply(
             [&](auto &&...rest) mutable {
                 auto result = engine(env.tokens, fingerprints, rest...);
+                do_not_optimize(result);
                 for (auto &fingerprint : fingerprints) do_not_optimize(fingerprint);
                 return result;
             },
@@ -61,12 +61,12 @@ struct fingerprint_callable {
         std::size_t bytes_passed = 0;
         for (std::size_t i = 0; i < env.tokens.size(); ++i) bytes_passed += env.tokens[i].size();
 
-        volatile call_result_t call_result;
+        call_result_t call_result;
         call_result.bytes_passed = bytes_passed;
         call_result.operations = bytes_passed * default_embedding_dims_k;
         call_result.inputs_processed = env.tokens.size();
         call_result.check_value = reinterpret_cast<check_value_t>(&fingerprints);
-        return (call_result_t const &)call_result;
+        return call_result;
     }
 };
 
@@ -97,8 +97,7 @@ void bench_fingerprint(environment_t const &env) {
     if (multiply_u32->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Multiplying Hasher.");
 
-    using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<double>,
-                                                std::allocator<floating_rolling_hasher<double>>, std::uint32_t>;
+    using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<double>, std::uint32_t>;
     auto rolling_f64 = std::make_unique<rolling_f64_t>();
     if (rolling_f64->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Floating f64 Rolling Hasher.");
@@ -112,7 +111,7 @@ void bench_fingerprint(environment_t const &env) {
         floating_rolling_hashers<sz_cap_serial_k, default_window_width_k, default_embedding_dims_k>;
     auto rolling_serial = std::make_unique<rolling_serial_t>();
     if (rolling_serial->try_seed() != status_t::success_k)
-        throw std::runtime_error("Can't build Serial Floating Hasher.");
+        throw std::runtime_error("Can't build Unrolled Floating Hasher.");
 
     using rolling_skylake_t =
         floating_rolling_hashers<sz_cap_skylake_k, default_window_width_k, default_embedding_dims_k>;
@@ -121,31 +120,36 @@ void bench_fingerprint(environment_t const &env) {
         throw std::runtime_error("Can't build Skylake Floating Hasher.");
 
     // Perform the benchmarks, passing the dictionary to the engines
-    bench_result_t baseline =
-        bench_nullary(env, "rabin_u64", fingerprint_callable<rabin_u64_t>(env, fingerprints_accelerated, *rabin_u64))
-            .log();
+    auto call_baseline = fingerprint_callable<rolling_f64_t>(env, fingerprints_baseline, *rolling_f64);
+    bench_result_t baseline = bench_nullary(env, "rolling_f64", call_baseline);
 
     // Semi-serial variants
+    bench_nullary(env, "rolling_f32", fingerprint_callable<rolling_f32_t>(env, fingerprints_accelerated, *rolling_f32))
+        .log(baseline);
+    bench_nullary(env, "rabin_u64", fingerprint_callable<rabin_u64_t>(env, fingerprints_accelerated, *rabin_u64))
+        .log(baseline);
     bench_nullary(env, "buz_u32", fingerprint_callable<buz_u32_t>(env, fingerprints_accelerated, *buz_u32)) //
         .log(baseline);
     bench_nullary(env, "multiply_u32",
                   fingerprint_callable<multiply_u32_t>(env, fingerprints_accelerated, *multiply_u32))
         .log(baseline);
-    bench_nullary(env, "rolling_f64", fingerprint_callable<rolling_f64_t>(env, fingerprints_accelerated, *rolling_f64))
-        .log(baseline);
-    bench_nullary(env, "rolling_f32", fingerprint_callable<rolling_f32_t>(env, fingerprints_accelerated, *rolling_f32))
-        .log(baseline);
 
     // Actually unrolled hard-coded variants, including SIMD ports
-    auto call_serial = fingerprint_callable<rolling_serial_t>(env, fingerprints_baseline, *rolling_serial);
-    bench_result_t serial = bench_nullary(env, "rolling_serial", call_serial).log(baseline);
+    bench_result_t unrolled =
+        bench_nullary(                                                                              //
+            env, "rolling_serial", call_baseline,                                                   //
+            fingerprint_callable<rolling_serial_t>(env, fingerprints_accelerated, *rolling_serial), //
+            callable_no_op_t {},                                                                    // preprocessing
+            fingerprints_equality_t {})                                                             // equality check
+            .log(baseline);
+    scramble_accelerated_results();
 
-    bench_nullary(                                                                              //
-        env, "rolling_serial", call_serial,                                                     //
-        fingerprint_callable<rolling_serial_t>(env, fingerprints_accelerated, *rolling_serial), //
-        callable_no_op_t {},                                                                    // preprocessing
-        fingerprints_equality_t {})                                                             // equality check
-        .log(baseline, serial);
+    bench_nullary(                                                                                //
+        env, "rolling_skylake", call_baseline,                                                    //
+        fingerprint_callable<rolling_skylake_t>(env, fingerprints_accelerated, *rolling_skylake), //
+        callable_no_op_t {},                                                                      // preprocessing
+        fingerprints_equality_t {})                                                               // equality check
+        .log(baseline, unrolled);
     scramble_accelerated_results();
 }
 

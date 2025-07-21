@@ -167,7 +167,7 @@ I'd recommend putting the following breakpoints:
 - `__asan::ReportGenericError` - to detect illegal memory accesses.
 - `__GI_exit` - to stop at exit points - the end of running any executable.
 - `__builtin_unreachable` - to catch unexpected code paths.
-- `_sz_assert_failure` - to catch StringZilla logic assertions.
+- `sz_assert_failure_` - to catch StringZilla logic assertions.
 
 ### Benchmarking
 
@@ -197,7 +197,7 @@ Let's say you want to benchmark large-batch DNA similarity scoring kernels:
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release --target stringzillas_bench_similarity_cpp20    # CPU
+cmake --build build_release --config Release --target stringzillas_bench_fingerprint_cpp20   # CPU
 cmake --build build_release --config Release --target stringzillas_bench_similarity_cu20     # GPU
 STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarity_cpp20
 STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarity_cu20

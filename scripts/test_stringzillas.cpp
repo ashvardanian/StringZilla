@@ -41,8 +41,8 @@ int main(int argc, char const **argv) {
     if (auto code = szs::scripts::log_environment(); code != 0) return code;
 
     try {
-        szs::scripts::test_rolling_hashers_equivalence();
         szs::scripts::test_rolling_hasher();
+        szs::scripts::test_rolling_hashers_equivalence();
         szs::scripts::test_similarity_scores_equivalence();
         szs::scripts::test_similarity_scores_memory_usage();
     }

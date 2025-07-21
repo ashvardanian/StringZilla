@@ -756,7 +756,7 @@ typedef union sz_string_t {
     struct internal {
         sz_ptr_t start;
         sz_u8_t length;
-        char chars[_SZ_STRING_INTERNAL_SPACE]; /// Ends with a null-terminator.
+        char chars[SZ_STRING_INTERNAL_SPACE]; /// Ends with a null-terminator.
     } internal;
 
     struct external {

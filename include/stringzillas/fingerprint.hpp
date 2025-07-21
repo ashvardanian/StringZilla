@@ -37,6 +37,7 @@
  *  3. add broadcasted byte to the hashes,
  *  4. compute the modulo of the hashes with a large prime number.
  *
+ *  That logic is packed into 3 functions: @b `push`, @b `roll`, and @b `digest`.
  *  The typical instructions for high-resolution integer multiplication are like are:
  *
  *  - `VPMULLQ (ZMM, ZMM, ZMM)` for `_mm512_mullo_epi64`:
@@ -116,6 +117,7 @@ namespace stringzillas {
  */
 template <typename hash_type_ = std::uint64_t>
 struct multiplying_rolling_hasher {
+    using state_t = hash_type_;
     using hash_t = hash_type_;
 
     explicit multiplying_rolling_hasher(std::size_t window_width, hash_t multiplier = static_cast<hash_t>(257)) noexcept
@@ -129,17 +131,19 @@ struct multiplying_rolling_hasher {
 
     inline std::size_t window_width() const noexcept { return window_width_; }
 
-    inline hash_t update(hash_t old_hash, byte_t new_char) const noexcept { return old_hash * multiplier_ + new_char; }
+    inline state_t push(state_t state, byte_t new_char) const noexcept { return state * multiplier_ + new_char; }
 
-    inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
-        hash_t const without_head = old_hash - old_char * highest_power_;
+    inline state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
+        state_t const without_head = state - old_char * highest_power_;
         return without_head * multiplier_ + new_char;
     }
 
+    inline hash_t digest(state_t const state) const noexcept { return state; }
+
   private:
     std::size_t window_width_;
-    hash_t multiplier_;
-    hash_t highest_power_;
+    state_t multiplier_;
+    state_t highest_power_;
 };
 
 /**
@@ -155,7 +159,7 @@ struct multiplying_rolling_hasher {
 template <typename hash_type_ = std::uint32_t, typename accumulator_type_ = std::uint64_t>
 struct rabin_karp_rolling_hasher {
     using hash_t = hash_type_;
-    using accumulator_t = accumulator_type_;
+    using state_t = accumulator_type_;
 
     static_assert(is_same_type<hash_t, std::uint16_t>::value || is_same_type<hash_t, std::uint32_t>::value ||
                       is_same_type<hash_t, std::uint64_t>::value,
@@ -183,36 +187,31 @@ struct rabin_karp_rolling_hasher {
 
     inline std::size_t window_width() const noexcept { return window_width_; }
 
-    inline hash_t update(hash_t old_hash, byte_t new_char) const noexcept {
-        return add_mod(mul_mod(old_hash, multiplier_), new_char);
+    inline state_t push(state_t state, byte_t new_char) const noexcept {
+        state_t new_term = static_cast<state_t>(new_char + 1u);
+        return add_mod(mul_mod(state, multiplier_), new_term);
     }
 
-    inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
-        hash_t const term_to_subtract = mul_mod(old_char, discarding_multiplier_);
-        hash_t const without_head = sub_mod(old_hash, term_to_subtract);
-        return add_mod(mul_mod(without_head, multiplier_), new_char);
+    inline state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
+        state_t old_term = static_cast<state_t>(old_char + 1u);
+        state_t new_term = static_cast<state_t>(new_char + 1u);
+
+        state_t without_old = sub_mod(state, mul_mod(old_term, discarding_multiplier_));
+        state_t with_new = add_mod(mul_mod(without_old, multiplier_), new_term);
+        return with_new;
     }
+
+    inline hash_t digest(state_t state) noexcept { return static_cast<hash_t>(state); }
 
   private:
-    inline hash_t mul_mod(hash_t const a, hash_t const b) const noexcept {
-        accumulator_t const prod = accumulator_t {a} * accumulator_t {b};
-        return static_cast<hash_t>(prod % modulo_);
-    }
-
-    inline hash_t add_mod(hash_t const a, hash_t const b) const noexcept {
-        accumulator_t const sum = accumulator_t {a} + accumulator_t {b};
-        return static_cast<hash_t>(sum % modulo_);
-    }
-
-    inline hash_t sub_mod(hash_t const a, hash_t const b) const noexcept {
-        accumulator_t diff = accumulator_t {a} + modulo_ - accumulator_t {b};
-        return static_cast<hash_t>(diff % modulo_);
-    }
+    inline state_t mul_mod(state_t a, state_t b) const noexcept { return (a * b) % modulo_; }
+    inline state_t add_mod(state_t a, state_t b) const noexcept { return (a + b) % modulo_; }
+    inline state_t sub_mod(state_t a, state_t b) const noexcept { return (a + modulo_ - b) % modulo_; }
 
     std::size_t window_width_;
-    hash_t modulo_;
-    hash_t multiplier_;
-    hash_t discarding_multiplier_;
+    state_t modulo_;
+    state_t multiplier_;
+    state_t discarding_multiplier_;
 };
 
 /**
@@ -222,6 +221,7 @@ struct rabin_karp_rolling_hasher {
  */
 template <typename hash_type_ = std::uint64_t>
 struct buz_rolling_hasher {
+    using state_t = hash_type_;
     using hash_t = hash_type_;
 
     explicit buz_rolling_hasher(std::size_t window_width, std::uint64_t seed = 0x9E3779B97F4A7C15ull) noexcept
@@ -233,21 +233,22 @@ struct buz_rolling_hasher {
 
     inline std::size_t window_width() const noexcept { return window_width_; }
 
-    inline hash_t update(hash_t old_hash, byte_t new_char) const noexcept {
-        return rotl(old_hash, 1) ^ table_[new_char & 0xFFu];
+    inline state_t push(state_t state, byte_t new_char) const noexcept {
+        return rotl(state, 1) ^ table_[new_char & 0xFFu];
     }
 
-    inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
-        constexpr unsigned bits_k = sizeof(hash_t) * 8u;
-
-        hash_t const rolled = rotl(old_hash, 1);
-        hash_t const remove_term = rotl(table_[old_char & 0xFFu], window_width_ & (bits_k - 1u));
+    inline state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
+        constexpr unsigned bits_k = sizeof(state_t) * 8u;
+        state_t const rolled = rotl(state, 1);
+        state_t const remove_term = rotl(table_[old_char & 0xFFu], window_width_ & (bits_k - 1u));
         return rolled ^ remove_term ^ table_[new_char & 0xFFu];
     }
 
+    inline hash_t digest(state_t state) const noexcept { return state; }
+
   private:
-    static inline hash_t rotl(hash_t const v, unsigned const r) noexcept {
-        constexpr unsigned bits_k = sizeof(hash_t) * 8u;
+    static inline state_t rotl(state_t v, unsigned r) noexcept {
+        constexpr unsigned bits_k = sizeof(state_t) * 8u;
         return (v << r) | (v >> (bits_k - r));
     }
 
@@ -260,7 +261,7 @@ struct buz_rolling_hasher {
     }
 
     std::size_t window_width_;
-    hash_t table_[256];
+    state_t table_[256];
 };
 
 /**
@@ -282,12 +283,12 @@ inline std::uint64_t choose_coprime_modulo(std::uint64_t multiplier, std::uint64
     return 0;
 }
 
-template <typename float_type_ = float>
+template <typename state_type_ = float>
 struct floating_rolling_hasher;
 
 /**
  *  @brief Rabin-Karp-style Rolling hash function for single-precision floating-point numbers.
- *  @tparam float_type_ Type of the floating-point number, e.g., `float`.
+ *  @tparam state_type_ Type of the floating-point number, e.g., `float`.
  *
  *  The IEEE 754 single-precision `float` has a 24-bit significand (23 explicit bits + 1 implicit bit).
  *  For simplicity, we just focus on the 23-bit part, which is capable of exactly representing integers
@@ -308,20 +309,24 @@ struct floating_rolling_hasher;
  */
 template <>
 struct floating_rolling_hasher<float> {
+    using state_t = float;
     using hash_t = std::uint32_t;
-    using float_t = float;
 
-    static constexpr float_t limit_k = 8'388'607.0f;
+    /** @brief The largest integer exactly representable as a float. */
+    static constexpr state_t limit_k = 8'388'607.0f;
+
+    /** @brief The typical size of the alphabet - the 256 possible values of a single byte. */
     static constexpr hash_t default_alphabet_size_k = 256u;
+
+    /** @brief The largest prime, that multiplied by `default_alphabet_size_k` and added a term - stays `limit_k`. */
     static constexpr hash_t default_modulo_base_k = 8123u;
 
     explicit floating_rolling_hasher(                      //
         std::size_t const window_width,                    //
         hash_t const multiplier = default_alphabet_size_k, //
         hash_t const modulo = default_modulo_base_k) noexcept
-        : window_width_ {window_width}, multiplier_ {static_cast<float_t>(multiplier)},
-          modulo_ {static_cast<float_t>(modulo)}, inverse_modulo_ {1.0f / modulo_},
-          negative_discarding_multiplier_ {1.0f} {
+        : window_width_ {window_width}, multiplier_ {static_cast<state_t>(multiplier)},
+          modulo_ {static_cast<state_t>(modulo)}, inverse_modulo_ {1.0f / modulo_}, discarding_multiplier_ {1.0f} {
 
         sz_assert_(window_width_ > 1 && "Window width must be > 1");
         sz_assert_(multiplier_ > 0 && "Multiplier must be positive");
@@ -329,66 +334,70 @@ struct floating_rolling_hasher<float> {
 
         // If we want to avoid hitting +inf or NaN, we need to make sure that the product of our post-modulo
         // normalized number with the multiplier and added subsequent term stays within the exactly representable range.
-        float_t const largest_input_term = std::numeric_limits<byte_t>::max() + 1.0f;
-        float_t const largest_normalized_state = modulo_ - 1;
-        float_t const largest_intermediary = largest_normalized_state * multiplier_ + largest_input_term;
+        state_t const largest_input_term = std::numeric_limits<byte_t>::max() + 1.0f;
+        state_t const largest_normalized_state = modulo_ - 1;
+        state_t const largest_intermediary = largest_normalized_state * multiplier_ + largest_input_term;
         sz_assert_(largest_intermediary < limit_k && "Intermediate state overflows the limit");
 
         // ! The GCC header misses the `std::fmodf` overload, so we use the underlying C version
         for (std::size_t i = 0; i + 1 < window_width_; ++i)
-            negative_discarding_multiplier_ = ::fmodf(negative_discarding_multiplier_ * multiplier_, modulo_);
-        negative_discarding_multiplier_ = -negative_discarding_multiplier_;
+            discarding_multiplier_ = ::fmodf(discarding_multiplier_ * multiplier_, modulo_);
     }
 
     inline std::size_t window_width() const noexcept { return window_width_; }
 
-    inline hash_t update(hash_t const old_hash, byte_t const new_char) const noexcept {
-
-        float_t state = sz_bitcast_(float_t, old_hash);
-        float_t new_term = float_t(new_char) + 1.0f;
-
-        state = std::fmaf(state, multiplier_, new_term);
-        state = reduce(state);
-
-        return sz_bitcast_(hash_t, state);
+    inline state_t push(state_t state, byte_t new_char) const noexcept {
+        state_t new_term = state_t(new_char) + 1.0f;
+        return fma_mod(state, multiplier_, new_term);
     }
 
-    inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
+    inline state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
 
-        float_t state = sz_bitcast_(float_t, old_hash);
-        float_t old_term = float_t(old_char) + 1.0f;
-        float_t new_term = float_t(new_char) + 1.0f;
+        state_t old_term = state_t(old_char) + 1.0f;
+        state_t new_term = state_t(new_char) + 1.0f;
 
-        state = std::fmaf(state, negative_discarding_multiplier_, old_term); // Remove tail
-        state = std::fmaf(state, multiplier_, new_term);                     // Add head
-        state = reduce(state);
-
-        return sz_bitcast_(hash_t, state);
+        state_t term_to_subtract = mul_mod(old_term, discarding_multiplier_);
+        state_t without_head = sub_mod(state, term_to_subtract);
+        return fma_mod(without_head, multiplier_, new_term);
     }
+
+    inline hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
 
   private:
+    inline state_t mul_mod(state_t a, state_t b) const noexcept { return reduce(a * b); }
+    inline state_t fma_mod(state_t a, state_t b, state_t c) const noexcept { return reduce(a * b + c); }
+    inline state_t sub_mod(state_t a, state_t b) const noexcept { return reduce(a + modulo_ - b); }
+
     /**
      *  @brief Barrett-style `std::fmodf` alternative to avoid overflow.
      *  @see https://en.cppreference.com/w/cpp/numeric/math/fmod
      */
-    inline float_t reduce(float_t h) const noexcept {
+    inline state_t reduce(state_t state) const noexcept {
+        sz_assert_(state >= 0 && "We can't handle negative states");
+
+        state_t h = state;
         h -= modulo_ * std::floor(h * inverse_modulo_);
         // Clamp into the [0, modulo_) range.
         h += modulo_ * (h < 0.0f);
         h -= modulo_ * (h >= modulo_);
+        sz_assert_(h >= 0 && "Intermediate state underflows the zero");
+        sz_assert_(h < limit_k && "Intermediate state overflows the limit");
+        sz_assert_(static_cast<std::uint64_t>(state) % static_cast<std::uint64_t>(modulo_) ==
+                       static_cast<std::uint64_t>(h) &&
+                   "Floating point approximation was incorrect");
         return h;
     }
 
     std::size_t window_width_;
-    float_t multiplier_;
-    float_t modulo_;
-    float_t inverse_modulo_;
-    float_t negative_discarding_multiplier_;
+    state_t multiplier_;
+    state_t modulo_;
+    state_t inverse_modulo_;
+    state_t discarding_multiplier_;
 };
 
 /**
  *  @brief Rabin-Karp-style Rolling hash function for double-precision floating-point numbers.
- *  @tparam float_type_ Type of the floating-point number, e.g., `float`.
+ *  @tparam state_type_ Type of the floating-point number, e.g., `float`.
  *
  *  The IEEE 754 double-precision `float` has a 53-bit significand (52 explicit bits + 1 implicit bit).
  *  For simplicity, we just focus on the 52-bit part, which is capable of exactly representing integers
@@ -400,28 +409,27 @@ struct floating_rolling_hasher<float> {
  *
  *  Assuming the multipliers are typically within @b [256;~1000) and the additive factor is always within @b [1;257],
  *  a safer choice of modulo is the largest prime under `limit_k/1000-257`:
- *
  *      4'503'599'626'781, 4'503'599'626'783, 4'503'599'626'807,
  *      4'503'599'626'907, 4'503'599'626'957, 4'503'599'626'977.
  *
- *  @sa `floating_rolling_hasher<double>` for 52 bit variant.
+ *  @sa `rabin_karp_rolling_hasher<std::uint32_t, std::uint64_t>` integer implementation for small modulo variants.
+ *  @sa `floating_rolling_hasher<float>` for a lower-resolution hash.
  */
 template <>
 struct floating_rolling_hasher<double> {
+    using state_t = double;
     using hash_t = std::uint64_t;
-    using float_t = double;
 
-    static constexpr float_t limit_k = 4503599627370495.0;
+    static constexpr state_t limit_k = 4503599627370495.0;
     static constexpr hash_t default_alphabet_size_k = 256u;
     static constexpr hash_t default_modulo_base_k = 4503599626977u;
 
-    explicit floating_rolling_hasher(                      //
-        std::size_t const window_width,                    //
-        hash_t const multiplier = default_alphabet_size_k, //
-        hash_t const modulo = default_modulo_base_k) noexcept
-        : window_width_ {window_width}, multiplier_ {static_cast<float_t>(multiplier)},
-          modulo_ {static_cast<float_t>(modulo)}, inverse_modulo_ {1.0 / modulo_},
-          negative_discarding_multiplier_ {1.0} {
+    explicit floating_rolling_hasher(                       //
+        std::size_t const window_width,                     //
+        state_t const multiplier = default_alphabet_size_k, //
+        state_t const modulo = default_modulo_base_k) noexcept
+        : window_width_ {window_width}, multiplier_ {static_cast<state_t>(multiplier)},
+          modulo_ {static_cast<state_t>(modulo)}, inverse_modulo_ {1.0 / modulo_}, discarding_multiplier_ {1.0} {
 
         sz_assert_(window_width_ > 1 && "Window width must be > 1");
         sz_assert_(multiplier_ > 0 && "Multiplier must be positive");
@@ -429,65 +437,77 @@ struct floating_rolling_hasher<double> {
 
         // If we want to avoid hitting +inf or NaN, we need to make sure that the product of our post-modulo
         // normalized number with the multiplier and added subsequent term stays within the exactly representable range.
-        float_t const largest_input_term = std::numeric_limits<byte_t>::max() + 1.0;
-        float_t const largest_normalized_state = modulo_ - 1;
-        float_t const largest_intermediary = largest_normalized_state * multiplier_ + largest_input_term;
+        state_t const largest_input_term = std::numeric_limits<byte_t>::max() + 1.0;
+        state_t const largest_normalized_state = modulo_ - 1;
+        state_t const largest_intermediary = largest_normalized_state * multiplier_ + largest_input_term;
         sz_assert_(largest_intermediary < limit_k && "Intermediate state overflows the limit");
 
         for (std::size_t i = 0; i + 1 < window_width_; ++i)
-            negative_discarding_multiplier_ = std::fmod(negative_discarding_multiplier_ * multiplier_, modulo_);
-        negative_discarding_multiplier_ = -negative_discarding_multiplier_;
+            discarding_multiplier_ = std::fmod(discarding_multiplier_ * multiplier_, modulo_);
+        discarding_multiplier_ = -discarding_multiplier_;
     }
 
     inline std::size_t window_width() const noexcept { return window_width_; }
 
-    inline hash_t update(hash_t const old_hash, byte_t const new_char) const noexcept {
-
-        float_t state = sz_bitcast_(float_t, old_hash);
-        float_t new_term = float_t(new_char) + 1.0;
-
+    inline state_t push(state_t state, byte_t new_char) const noexcept {
+        state_t new_term = state_t(new_char) + 1.0;
         state = std::fma(state, multiplier_, new_term);
         state = reduce(state);
-
-        return sz_bitcast_(hash_t, state);
+        return state;
     }
 
-    inline hash_t update(hash_t const old_hash, byte_t const old_char, byte_t const new_char) const noexcept {
+    inline state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
 
-        float_t state = sz_bitcast_(float_t, old_hash);
-        float_t old_term = float_t(old_char) + 1.0;
-        float_t new_term = float_t(new_char) + 1.0;
+        state_t old_term = state_t(old_char) + 1.0;
+        state_t new_term = state_t(new_char) + 1.0;
 
-        state = std::fma(state, negative_discarding_multiplier_, old_term); // Remove tail
-        state = std::fma(state, multiplier_, new_term);                     // Add head
+        // Add head
+        state = std::fma(state, multiplier_, new_term);
+        sz_assert_(state < limit_k && "Intermediate state exceeds the limit");
+
+        // Remove tail
+        sz_assert_(std::abs(discarding_multiplier_) * old_term <= state && "Will underflow");
+        state = std::fma(discarding_multiplier_, old_term, state);
         state = reduce(state);
 
-        return sz_bitcast_(hash_t, state);
+        return state;
     }
 
-    inline float_t multiplier() const noexcept { return multiplier_; }
-    inline float_t modulo() const noexcept { return modulo_; }
-    inline float_t inverse_modulo() const noexcept { return inverse_modulo_; }
-    inline float_t negative_discarding_multiplier() const noexcept { return negative_discarding_multiplier_; }
+    inline hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
+
+    inline state_t multiplier() const noexcept { return multiplier_; }
+    inline state_t modulo() const noexcept { return modulo_; }
+    inline state_t inverse_modulo() const noexcept { return inverse_modulo_; }
+    inline state_t negative_discarding_multiplier() const noexcept { return discarding_multiplier_; }
 
   private:
     /**
      *  @brief Barrett-style `std::fmod` alternative to avoid overflow.
      *  @see https://en.cppreference.com/w/cpp/numeric/math/fmod
      */
-    inline float_t reduce(float_t h) const noexcept {
+    inline state_t reduce(state_t state) const noexcept {
+        sz_assert_(state >= 0 && "We can't handle negative states");
+
+        state_t h = state;
         h -= modulo_ * std::floor(h * inverse_modulo_);
         // Clamp into the [0, modulo_) range.
         h += modulo_ * (h < 0.0);
         h -= modulo_ * (h >= modulo_);
+
+        sz_assert_(h >= 0 && "Intermediate state underflows the zero");
+        sz_assert_(h < limit_k && "Intermediate state overflows the limit");
+        sz_assert_(static_cast<std::uint64_t>(state) % static_cast<std::uint64_t>(modulo_) ==
+                       static_cast<std::uint64_t>(h) &&
+                   "Floating point modulo was incorrect");
+
         return h;
     }
 
     std::size_t window_width_;
-    float_t multiplier_;
-    float_t modulo_;
-    float_t inverse_modulo_;
-    float_t negative_discarding_multiplier_;
+    state_t multiplier_;
+    state_t modulo_;
+    state_t inverse_modulo_;
+    state_t discarding_multiplier_;
 };
 
 #pragma endregion - Baseline Rolling Hashers
@@ -500,31 +520,34 @@ struct floating_rolling_hasher<double> {
  */
 template <                                                                           //
     typename hasher_type_ = rabin_karp_rolling_hasher<std::uint32_t, std::uint64_t>, //
-    typename allocator_type_ = std::allocator<hasher_type_>,                         //
-    typename scalar_type_ = typename hasher_type_::hash_t                            //
+    typename scalar_type_ = typename hasher_type_::hash_t,                           //
+    typename allocator_type_ = std::allocator<hasher_type_>                          //
     >
 struct basic_rolling_hashers {
 
     using hasher_t = hasher_type_;
+    using rolling_state_t = typename hasher_t::state_t;
     using rolling_hash_t = typename hasher_t::hash_t;
+
     using result_scalar_t = scalar_type_;
     using allocator_t = allocator_type_;
 
-    static constexpr rolling_hash_t skipped_rolling_hash_k = std::numeric_limits<rolling_hash_t>::max();
+    static constexpr rolling_state_t skipped_rolling_state_k = std::numeric_limits<rolling_state_t>::max();
+    static constexpr rolling_hash_t max_rolling_hash_k = std::numeric_limits<rolling_hash_t>::max();
     static constexpr result_scalar_t max_result_scalar_k = std::numeric_limits<result_scalar_t>::max();
 
-    struct state_t {
-        rolling_hash_t last = 0;
-        rolling_hash_t minimum = skipped_rolling_hash_k;
+    struct dimension_state_t {
+        rolling_state_t last = 0;
+        rolling_hash_t minimum = max_rolling_hash_k;
     };
 
   private:
     using allocator_traits_t = std::allocator_traits<allocator_type_>;
     using hasher_allocator_t = typename allocator_traits_t::template rebind_alloc<hasher_t>;
-    using state_allocator_t = typename allocator_traits_t::template rebind_alloc<state_t>;
+    using dimension_state_allocator_t = typename allocator_traits_t::template rebind_alloc<dimension_state_t>;
 
     using hashers_t = safe_vector<hasher_t, hasher_allocator_t>;
-    using states_t = safe_vector<state_t, state_allocator_t>;
+    using dimension_states_t = safe_vector<dimension_state_t, dimension_state_allocator_t>;
 
     allocator_t allocator_;
     hashers_t hashers_;
@@ -592,10 +615,10 @@ struct basic_rolling_hashers {
         sz_assert_(result.size() == dimensions() && "Dimensions number & hashers number mismatch");
 
         // Allocate temporary states
-        states_t states(allocator_traits_t::select_on_container_copy_construction(allocator_));
-        if (states.try_resize(dimensions()) != status_t::success_k) return status_t::bad_alloc_k;
+        dimension_states_t dimension_states(allocator_traits_t::select_on_container_copy_construction(allocator_));
+        if (dimension_states.try_resize(dimensions()) != status_t::success_k) return status_t::bad_alloc_k;
 
-        fingerprint<dimensions_>(text, {states.data(), states.size()}, result);
+        fingerprint<dimensions_>(text, {dimension_states.data(), dimension_states.size()}, result);
         return status_t::success_k;
     }
 
@@ -606,19 +629,22 @@ struct basic_rolling_hashers {
      *  @param[out] result The output fingerprint, a vector of minimum hashes.
      */
     template <size_t dimensions_ = SZ_SIZE_MAX>
-    void fingerprint(span<byte_t const> text, span<state_t, dimensions_> states,
+    void fingerprint(span<byte_t const> text, span<dimension_state_t, dimensions_> dimension_states,
                      span<result_scalar_t, dimensions_> result) const noexcept {
 
         sz_assert_(result.size() == dimensions() && "Dimensions number & hashers number mismatch");
-        sz_assert_(states.size() == dimensions() && "Dimensions number & states number mismatch");
+        sz_assert_(dimension_states.size() == dimensions() && "Dimensions number & states number mismatch");
 
-        fill_states_(text, states);
+        fill_states_(text, dimension_states);
 
         // Export the minimum hashes to the fingerprint
         for (std::size_t dim = 0; dim < result.size(); ++dim) {
             hasher_t const &hasher = hashers_[dim];
-            rolling_hash_t minimum = hasher.window_width() < text.size() ? skipped_rolling_hash_k : states[dim].minimum;
-            result[dim] = static_cast<result_scalar_t>(minimum & max_result_scalar_k);
+            if (hasher.window_width() > text.size()) {
+                rolling_hash_t min_hash = dimension_states[dim].minimum;
+                result[dim] = static_cast<result_scalar_t>(min_hash & max_result_scalar_k);
+            }
+            else { result[dim] = max_result_scalar_k; }
         }
     }
 
@@ -646,8 +672,9 @@ struct basic_rolling_hashers {
         std::size_t const dims = dimensions();
 
         // Allocate enough temporary states for all cores to have individual states
-        states_t states(allocator_traits_t::select_on_container_copy_construction(allocator_));
-        if (states.try_resize(executor.threads_count() * dims) != status_t::success_k) return status_t::bad_alloc_k;
+        dimension_states_t dimension_states(allocator_traits_t::select_on_container_copy_construction(allocator_));
+        if (dimension_states.try_resize(executor.threads_count() * dims) != status_t::success_k)
+            return status_t::bad_alloc_k;
 
         // Process small texts by individual threads
         executor.for_n_dynamic(texts.size(), [&](auto prong) noexcept {
@@ -658,7 +685,7 @@ struct basic_rolling_hashers {
             if (text.size() >= text_size_threshold) return;
 
             auto text_view = to_bytes_view(text);
-            auto thread_local_states = to_span(states).subspan(thread_index * dims, dims);
+            auto thread_local_states = to_span(dimension_states).subspan(thread_index * dims, dims);
             auto result = to_span(results[text_index]);
             fingerprint<SZ_SIZE_MAX>(text_view, thread_local_states, result);
         });
@@ -683,20 +710,19 @@ struct basic_rolling_hashers {
                 // ? same slices isn't a big deal.
                 auto overlapping_text_end = std::min(text_start + chunk_size + max_window_width_ - 1, text_view.end());
                 auto thread_local_text = span<byte_t const>(text_start, overlapping_text_end);
-                auto thread_local_states = to_span(states).subspan(thread_index * dims, dims);
+                auto thread_local_states = to_span(dimension_states).subspan(thread_index * dims, dims);
                 fill_states_<SZ_SIZE_MAX>(thread_local_text, thread_local_states);
             });
 
             // Compute the minimums of each thread's local states
             auto &result = results[text_index];
             for (std::size_t dim = 0; dim < result.size(); ++dim) {
-                rolling_hash_t minimum_across_thread_local_chunks = skipped_rolling_hash_k;
+                rolling_hash_t min_hash = max_rolling_hash_k;
                 for (std::size_t thread_index = 0; thread_index < executor.threads_count(); ++thread_index) {
-                    auto const &state = states[thread_index * dims + dim];
-                    minimum_across_thread_local_chunks = (std::min)(minimum_across_thread_local_chunks, state.minimum);
+                    rolling_hash_t const &dimension_state = dimension_states[thread_index * dims + dim];
+                    min_hash = (std::min)(min_hash, dimension_state.minimum);
                 }
-                minimum_across_thread_local_chunks &= max_result_scalar_k; // Clamp to the result scalar range
-                result[dim] = static_cast<result_scalar_t>(minimum_across_thread_local_chunks);
+                result[dim] = static_cast<result_scalar_t>(min_hash & max_result_scalar_k);
             }
         }
 
@@ -705,12 +731,12 @@ struct basic_rolling_hashers {
 
   private:
     template <size_t dimensions_ = SZ_SIZE_MAX>
-    void fill_states_(span<byte_t const> text, span<state_t, dimensions_> states) const noexcept {
+    void fill_states_(span<byte_t const> text, span<dimension_state_t, dimensions_> states) const noexcept {
 
         sz_assert_(states.size() >= hashers_.size() && "Dimensions number & states number mismatch");
 
         // Clear the states
-        for (auto &state : states) state = state_t {};
+        for (auto &state : states) state = dimension_state_t {};
 
         // Until we reach the maximum window length, use a branching code version
         std::size_t const prefix_length = (std::min)(text.size(), max_window_width_);
@@ -719,11 +745,15 @@ struct basic_rolling_hashers {
             for (std::size_t dim = 0; dim < states.size(); ++dim) {
                 auto &hasher = hashers_[dim];
                 auto &state = states[dim];
-                if (hasher.window_width() > new_char_offset) { state.last = hasher.update(state.last, new_char); }
+                if (hasher.window_width() > new_char_offset) {
+                    state.last = hasher.push(state.last, new_char);
+                    if (hasher.window_width() == (new_char_offset + 1))
+                        state.minimum = (std::min)(state.minimum, hasher.digest(state.last));
+                }
                 else {
                     auto const old_char = text[new_char_offset - hasher.window_width()];
-                    state.last = hasher.update(state.last, old_char, new_char);
-                    state.minimum = (std::min)(state.minimum, state.last);
+                    state.last = hasher.roll(state.last, old_char, new_char);
+                    state.minimum = (std::min)(state.minimum, hasher.digest(state.last));
                 }
             }
         }
@@ -735,8 +765,8 @@ struct basic_rolling_hashers {
                 auto &hasher = hashers_[dim];
                 auto &state = states[dim];
                 auto const old_char = text[new_char_offset - hasher.window_width()];
-                state.last = hasher.update(state.last, old_char, new_char);
-                state.minimum = (std::min)(state.minimum, state.last);
+                state.last = hasher.roll(state.last, old_char, new_char);
+                state.minimum = (std::min)(state.minimum, hasher.digest(state.last));
             }
         }
     }
@@ -766,22 +796,23 @@ template <                                         //
 struct floating_rolling_hashers {
 
     using hasher_t = floating_rolling_hasher<double>;
-    using rolling_hash_t = typename hasher_t::hash_t;
+    using rolling_state_t = typename hasher_t::hash_t;
     using result_scalar_t = std::uint32_t;
 
     static constexpr std::size_t window_width_k = window_width_;
     static constexpr std::size_t dimensions_k = dimensions_;
-    static constexpr result_scalar_t skipped_rolling_hash_k = std::numeric_limits<result_scalar_t>::max();
+    static constexpr rolling_state_t skipped_rolling_hash_k = std::numeric_limits<rolling_state_t>::max();
+    static constexpr result_scalar_t max_result_scalar_k = std::numeric_limits<result_scalar_t>::max();
 
     using fingerprint_span_t = span<result_scalar_t, dimensions_k>;
 
   private:
-    using float_t = typename hasher_t::float_t;
+    using state_t = typename hasher_t::state_t;
 
-    float_t multipliers_[dimensions_k];
-    float_t modulos_[dimensions_k];
-    float_t inverse_modulos_[dimensions_k];
-    float_t negative_discarding_multipliers_[dimensions_k];
+    state_t multipliers_[dimensions_k];
+    state_t modulos_[dimensions_k];
+    state_t inverse_modulos_[dimensions_k];
+    state_t negative_discarding_multipliers_[dimensions_k];
 
   public:
     constexpr std::size_t window_width() const noexcept { return window_width_k; }
@@ -808,16 +839,15 @@ struct floating_rolling_hashers {
      *  @param[out] result The output fingerprint, a vector of minimum hashes.
      */
     void fingerprint(span<byte_t const> text, fingerprint_span_t result) const noexcept {
-        if (text.size() < window_width_k) return;
 
         // Fill the states
-        rolling_hash_t last_hashes[dimensions_k];
-        rolling_hash_t minimum_hashes[dimensions_k];
-        fill_states_(text, last_hashes, minimum_hashes);
+        rolling_state_t last_floats[dimensions_k];
+        rolling_state_t minimum_floats[dimensions_k];
+        fill_states_(text, last_floats, minimum_floats);
 
-        // Export the minimum hashes to the fingerprint
+        // Export the minimum floats to the fingerprint
         for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-            result[dim] = static_cast<result_scalar_t>(minimum_hashes[dim]);
+            result[dim] = static_cast<result_scalar_t>(minimum_floats[dim]); // & max_result_scalar_k);
     }
 
     /**
@@ -877,7 +907,7 @@ struct floating_rolling_hashers {
                 specs.cache_line_width);
 
             auto gather_mutex = executor.make_mutex();
-            rolling_hash_t minimum_hashes[dimensions_k];
+            rolling_state_t minimum_floats[dimensions_k];
 
             // Distribute overlapping chunks across threads
             executor.for_threads([&](std::size_t thread_index) noexcept {
@@ -888,83 +918,81 @@ struct floating_rolling_hashers {
                 auto overlapping_text_end = std::min(text_start + chunk_size + window_width_k - 1, text_view.end());
                 auto thread_local_text = span<byte_t const>(text_start, overlapping_text_end);
 
-                rolling_hash_t thread_local_last_hashes[dimensions_k];
-                rolling_hash_t thread_local_minimum_hashes[dimensions_k];
-                fill_states_(thread_local_text, thread_local_last_hashes, thread_local_minimum_hashes);
+                rolling_state_t thread_local_last_floats[dimensions_k];
+                rolling_state_t thread_local_minimum_floats[dimensions_k];
+                fill_states_(thread_local_text, thread_local_last_floats, thread_local_minimum_floats);
 
                 lock_guard lock(gather_mutex);
                 for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-                    minimum_hashes[dim] = (std::min)(minimum_hashes[dim], thread_local_minimum_hashes[dim]);
+                    minimum_floats[dim] = (std::min)(minimum_floats[dim], thread_local_minimum_floats[dim]);
             });
 
             // Compute the minimums of each thread's local states
             auto &result = results[text_index];
             for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-                result[dim] = static_cast<result_scalar_t>(minimum_hashes[dim]);
+                result[dim] = static_cast<result_scalar_t>(minimum_floats[dim] & max_result_scalar_k);
         }
 
         return status_t::success_k;
     }
 
   private:
-    inline float_t reduce(float_t h, std::size_t dim) const noexcept {
-        float_t const modulo = modulos_[dim];
-        float_t const inverse_modulo = inverse_modulos_[dim];
-        // Using `trunc` instead of `floor` for modulo.
-        // This is branchless and avoids STL.
-        h -= modulo * static_cast<float_t>(static_cast<long long>(h * inverse_modulo));
-
-        // Branchless clamp to [0, modulo).
-        // `h` is in (-modulo, modulo).
-        // If h is negative, add modulo.
-        h += modulo * static_cast<float_t>(sz_bitcast_(std::uint64_t, h) >> 63);
-        // Now `h` is in [0, 2*modulo).
-        // If h is >= modulo, subtract modulo.
-        long long is_ge = static_cast<long long>(h * inverse_modulo);
-        h -= modulo * static_cast<float_t>(is_ge);
+    inline state_t reduce(state_t h, std::size_t dim) const noexcept {
+        state_t const modulo = modulos_[dim];
+        state_t const inverse_modulo = inverse_modulos_[dim];
+        // Use STL-based modulo reduction like floating_rolling_hasher
+        h -= modulo * std::floor(h * inverse_modulo);
+        // Clamp into the [0, modulo) range.
+        h += modulo * (h < 0.0);
+        h -= modulo * (h >= modulo);
         return h;
     }
 
-    void fill_states_(span<byte_t const> text, span<rolling_hash_t, dimensions_k> last_hashes,
-                      span<rolling_hash_t, dimensions_k> minimum_hashes) const noexcept {
+    void fill_states_(span<byte_t const> text, span<rolling_state_t, dimensions_k> last_floats,
+                      span<rolling_state_t, dimensions_k> minimum_floats) const noexcept {
 
         for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
-            last_hashes[dim] = 0;
-            minimum_hashes[dim] = skipped_rolling_hash_k;
+            last_floats[dim] = 0;
+            minimum_floats[dim] = skipped_rolling_hash_k;
         }
+
+        if (text.size() > window_width_k) return;
 
         // Until we reach the maximum window length, use a branching code version
         for (std::size_t new_char_offset = 0; new_char_offset < window_width_k; ++new_char_offset) {
             byte_t const new_char = text[new_char_offset];
-            float_t const new_term = static_cast<float_t>(new_char) + 1.0;
+            state_t const new_term = static_cast<state_t>(new_char) + 1.0;
             for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
-                rolling_hash_t &hash = last_hashes[dim];
-                float_t state = sz_bitcast_(float_t, hash);
+                rolling_state_t &hash = last_floats[dim];
+                state_t state = sz_bitcast_(state_t, hash);
                 state += multipliers_[dim] * new_term;
                 state = reduce(state, dim);
 
                 // Save back
-                hash = sz_bitcast_(rolling_hash_t, state);
-                minimum_hashes[dim] = std::min(minimum_hashes[dim], hash);
+                hash = sz_bitcast_(rolling_state_t, state);
             }
         }
+
+        // We now have our first minimum hashes
+        for (std::size_t dim = 0; dim < dimensions_k; ++dim)
+            minimum_floats[dim] = std::min(minimum_floats[dim], last_floats[dim]);
 
         // Now we can avoid a branch in the nested loop, as we are passed the longest window width
         for (std::size_t new_char_offset = window_width_k; new_char_offset < text.size(); ++new_char_offset) {
             byte_t const new_char = text[new_char_offset];
             byte_t const old_char = text[new_char_offset - window_width_k];
-            float_t const new_term = static_cast<float_t>(new_char) + 1.0;
-            float_t const old_term = static_cast<float_t>(old_char) + 1.0;
+            state_t const new_term = static_cast<state_t>(new_char) + 1.0;
+            state_t const old_term = static_cast<state_t>(old_char) + 1.0;
             for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
-                rolling_hash_t &hash = last_hashes[dim];
-                float_t state = sz_bitcast_(float_t, hash);
+                rolling_state_t &hash = last_floats[dim];
+                state_t state = sz_bitcast_(state_t, hash);
                 state += negative_discarding_multipliers_[dim] * old_term; // Remove tail
                 state += multipliers_[dim] * new_term;                     // Add head
                 state = reduce(state, dim);
 
                 // Save back
-                hash = sz_bitcast_(rolling_hash_t, state);
-                minimum_hashes[dim] = std::min(minimum_hashes[dim], hash);
+                hash = sz_bitcast_(rolling_state_t, state);
+                minimum_floats[dim] = std::min(minimum_floats[dim], hash);
             }
         }
     }
@@ -981,7 +1009,7 @@ template <std::size_t dimensions_>
 struct floating_rolling_hashers<sz_cap_ice_k, dimensions_> {
 
     using hasher_t = floating_rolling_hasher<double>;
-    using rolling_hash_t = typename hasher_t::hash_t;
+    using rolling_state_t = typename hasher_t::hash_t;
     using result_scalar_t = std::uint32_t;
     static constexpr std::size_t dimensions_k = dimensions_;
 
@@ -989,7 +1017,7 @@ struct floating_rolling_hashers<sz_cap_ice_k, dimensions_> {
                     span<result_scalar_t, dimensions_k> fingerprint) const noexcept {
 
         // constexpr std::size_t unroll_factor_k = 2;
-        // constexpr std::size_t unrolled_hashes_k = unroll_factor_k * sizeof(sz_u512_vec_t) / sizeof(rolling_hash_t);
+        // constexpr std::size_t unrolled_hashes_k = unroll_factor_k * sizeof(sz_u512_vec_t) / sizeof(rolling_state_t);
 
         // sz_u512_vec_t window_widths[unroll_factor_k], multipliers[unroll_factor_k],
         //     negative_discarding_multipliers[unroll_factor_k], modulos[unroll_factor_k],

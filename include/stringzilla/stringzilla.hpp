@@ -19,21 +19,19 @@
 #include "types.hpp"
 
 #if !SZ_AVOID_STL
-#include <array>
-#include <bitset>
-#include <string>
-#include <vector>
-#if _SZ_IS_CPP17 && __cpp_lib_string_view
-#include <string_view>
-#endif
-#endif
-
 #include <cassert>   // `assert`
 #include <cstddef>   // `std::size_t`
 #include <cstdint>   // `std::int8_t`
 #include <iosfwd>    // `std::basic_ostream`
 #include <stdexcept> // `std::out_of_range`
-#include <utility>   // `std::swap`
+#include <array>     // `std::array`
+#include <bitset>    // `std::bitset`
+#include <string>    // `std::string`
+#include <vector>    // `std::vector`
+#if SZ_IS_CPP17_ && __cpp_lib_string_view
+#include <string_view> // `std::string_view`
+#endif
+#endif
 
 #include <stringzilla/stringzilla.h>
 
