@@ -421,6 +421,22 @@ def test_unit_globals():
         "world", 0, 11
     )
 
+    assert sz.find_first_of("abcdef", "cde") == 2
+    assert sz.find_first_of("abcdef", "xyz") == -1
+    assert sz.find_first_of("hello world", "aeiou") == 1
+
+    assert sz.find_last_of("abcdef", "abc") == 2
+    assert sz.find_last_of("abcdef", "xyz") == -1
+    assert sz.find_last_of("hello world", "aeiou") == 7
+
+    assert sz.find_first_not_of("aaabbbccc", "ab") == 6
+    assert sz.find_first_not_of("abcdef", "abcdef") == -1
+    assert sz.find_first_not_of("   hello", " ") == 3
+
+    assert sz.find_last_not_of("aaabbbccc", "bc") == 2
+    assert sz.find_last_not_of("abcdef", "abcdef") == -1
+    assert sz.find_last_not_of("hello   ", " ") == 4
+
     # Compare partitioning functions
     assert sz.partition("abcdef", "c") == ("ab", "c", "def")
     assert sz.rpartition("abcdef", "c") == ("ab", "c", "def")
@@ -435,10 +451,16 @@ def test_unit_globals():
     assert sz.count("aaaaa", "aa") == 2
     assert sz.count("aaaaa", "aa", allowoverlap=True) == 4
 
+    assert sz.bytesum("hello") > 0
+    assert sz.bytesum("hello") > sz.bytesum("hell")
+
     assert sz.translate("ABC", {"A": "X", "B": "Y", "C": "Z"}) == "XYZ"
     assert sz.translate("ABC", {"A": "X", "B": "Y"}) == "XYC"
     assert sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1) == "YC"
     assert sz.translate("ABC", bytes(range(256))) == "ABC"
+
+    assert sz.split("hello world test", " ") == ["hello", "world", "test"]
+    assert sz.rsplit("hello world test", " ", 1) == ["hello world", "test"]
 
 
 def test_string_lengths():

@@ -689,71 +689,88 @@ static char const doc_like_hash[] = //
     "\n"
     "This function can be called as a method on a Str object or as a standalone function.\n"
     "Args:\n"
-    "  text (Str or str or bytes): The string to hash.\n"
-    "  seed (int, optional): The seed value for hashing. Defaults to 0.\n"
+    "  text (Str or str or bytes): The string to hash (positional-only when standalone).\n"
+    "  seed (int, optional): The seed value for hashing. Defaults to 0. Can be positional or keyword.\n"
     "Returns:\n"
-    "  int: The hash value of the string.\n"
+    "  int: The hash value as an unsigned 64-bit integer. This differs from Python's\n"
+    "       built-in `hash()` which returns a `Py_hash_t` and may be platform-dependent.\n"
     "Raises:\n"
-    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
+    "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.\n"
+    "Signature:\n"
+    "  >>> def hash(text, seed=0, /) -> int: ...";
 
-static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs) {
-    // Check arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
+static PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
+    // Fast path variables
+    PyObject *text_obj = NULL;
+    PyObject *seed_obj = NULL;
+    sz_string_view_t text;
+    sz_u64_t seed = 0;
 
-    // Allow optional seed parameter
-    Py_ssize_t min_args = !is_member;
-    Py_ssize_t max_args = min_args + 1;
+    // Check if this is a method call on a Str instance
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
 
-    if (nargs < min_args || nargs > max_args) {
+    // Fast argument validation
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+    Py_ssize_t const expected_min = is_member ? 0 : 1;
+    Py_ssize_t const expected_max = expected_min + 1;
+
+    if (total_args < expected_min || total_args > expected_max) {
         PyErr_SetString(PyExc_TypeError, is_member ? "hash() takes 0 or 1 positional arguments"
                                                    : "hash() takes 1 or 2 positional arguments");
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    sz_string_view_t text;
+    if (positional_args_count > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Too many positional arguments");
+        return NULL;
+    }
 
-    // Validate and convert `text`
+    // Fast positional argument extraction
+    if (is_member) {
+        text_obj = self;
+        if (positional_args_count >= 1) seed_obj = args[0];
+    }
+    else {
+        if (positional_args_count >= 1) text_obj = args[0];
+        if (positional_args_count >= 2) seed_obj = args[1];
+    }
+
+    // Fast keyword argument parsing
+    if (args_names_count > 0) {
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *const key = PyTuple_GetItem(args_names_tuple, i);
+            PyObject *const value = args[positional_args_count + i];
+
+            if (PyUnicode_CompareWithASCIIString(key, "seed") == 0) {
+                if (seed_obj) {
+                    PyErr_SetString(PyExc_TypeError, "seed specified twice");
+                    return NULL;
+                }
+                seed_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return NULL;
+            }
+        }
+    }
+
+    // Validate and convert text
     if (!export_string_like(text_obj, &text.start, &text.length)) {
         wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
 
-    // Parse optional seed
-    sz_u64_t seed = 0;
-    if (is_member && nargs > 0) {
-        // Member method with seed argument
-        PyObject *seed_obj = PyTuple_GET_ITEM(args, 0);
+    // Parse seed
+    if (seed_obj) {
         if (!PyLong_Check(seed_obj)) {
             PyErr_SetString(PyExc_TypeError, "seed must be an integer");
             return NULL;
         }
         seed = PyLong_AsUnsignedLongLong(seed_obj);
         if (PyErr_Occurred()) return NULL;
-    }
-    else if (!is_member && nargs > 1) {
-        // Standalone function with seed argument
-        PyObject *seed_obj = PyTuple_GET_ITEM(args, 1);
-        if (!PyLong_Check(seed_obj)) {
-            PyErr_SetString(PyExc_TypeError, "seed must be an integer");
-            return NULL;
-        }
-        seed = PyLong_AsUnsignedLongLong(seed_obj);
-        if (PyErr_Occurred()) return NULL;
-    }
-
-    // Handle keyword arguments if present
-    if (kwargs && PyDict_Size(kwargs) > 0) {
-        PyObject *seed_obj = PyDict_GetItemString(kwargs, "seed");
-        if (seed_obj) {
-            if (!PyLong_Check(seed_obj)) {
-                PyErr_SetString(PyExc_TypeError, "seed must be an integer");
-                return NULL;
-            }
-            seed = PyLong_AsUnsignedLongLong(seed_obj);
-            if (PyErr_Occurred()) return NULL;
-        }
     }
 
     sz_u64_t result = sz_hash(text.start, text.length, seed);
@@ -771,16 +788,16 @@ static char const doc_like_bytesum[] = //
     "Raises:\n"
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
 
-static PyObject *Str_like_bytesum(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_like_bytesum(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                  PyObject *args_names_tuple) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member || nargs > !is_member + 1 || kwargs) {
+    if (positional_args_count < !is_member || positional_args_count > !is_member + 1 || args_names_tuple) {
         PyErr_SetString(PyExc_TypeError, "bytesum() expects exactly one positional argument");
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
+    PyObject *text_obj = is_member ? self : args[0];
     sz_string_view_t text;
 
     // Validate and convert `text`
@@ -805,17 +822,17 @@ static char const doc_like_equal[] = //
     "Raises:\n"
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
 
-static PyObject *Str_like_equal(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member || nargs > !is_member + 1 || kwargs) {
+    if (positional_args_count < !is_member || positional_args_count > !is_member + 1 || args_names_tuple) {
         PyErr_SetString(PyExc_TypeError, "equals() expects exactly two positional arguments");
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *other_obj = PyTuple_GET_ITEM(args, is_member);
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *other_obj = args[is_member];
     sz_string_view_t text, other;
 
     // Validate and convert tje texts
@@ -1352,26 +1369,28 @@ static char const doc_decode[] = //
     "Raises:\n"
     "  UnicodeDecodeError: If decoding fails.";
 
-static PyObject *Str_decode(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member || nargs > !is_member + 2) {
+    if (positional_args_count < !is_member || positional_args_count > !is_member + 2) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *encoding_obj = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
-    PyObject *errors_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *encoding_obj = positional_args_count > !is_member + 0 ? args[!is_member + 0] : NULL;
+    PyObject *errors_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
 
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value))
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "encoding") == 0 && !encoding_obj) { encoding_obj = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "errors") == 0 && !errors_obj) { errors_obj = value; }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
                 return NULL;
+        }
     }
 
     // Convert `encoding` and `errors` to `NULL` if they are `None`
@@ -1403,20 +1422,20 @@ static char const doc_write_to[] = //
     "Returns:\n"
     "  None.";
 
-static PyObject *Str_write_to(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                              PyObject *args_names_tuple) {
 
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs != !is_member + 1) {
+    if (positional_args_count != !is_member + 1) {
         PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *path_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *path_obj = args[!is_member + 0];
 
     // Parse keyword arguments
-    if (kwargs) {
+    if (args_names_tuple) {
         PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument");
         return NULL;
     }
@@ -1482,20 +1501,20 @@ static char const doc_offset_within[] = //
     "Returns:\n"
     "  int: The byte offset where 'self' is found within 'larger', or -1 if not found.";
 
-static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_offset_within(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple) {
 
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs != !is_member + 1) {
+    if (positional_args_count != !is_member + 1) {
         PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    PyObject *slice_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *text_obj = PyTuple_GET_ITEM(args, !is_member + 0);
+    PyObject *slice_obj = is_member ? self : args[0];
+    PyObject *text_obj = args[!is_member + 0];
 
     // Parse keyword arguments
-    if (kwargs) {
+    if (args_names_tuple) {
         PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument");
         return NULL;
     }
@@ -1522,31 +1541,74 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *args, PyObject *kwa
  *  @brief  Implementation function for all search-like operations, parameterized by a function callback.
  *  @return 1 on success, 0 on failure.
  */
-static int _Str_find_implementation_( //
-    PyObject *self, PyObject *args, PyObject *kwargs, sz_find_t finder, sz_bool_t is_reverse, Py_ssize_t *offset_out,
-    sz_string_view_t *haystack_out, sz_string_view_t *needle_out) {
+static int Str_find_implementation_( //
+    PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count, PyObject *args_names_tuple,
+    sz_find_t finder, sz_bool_t is_reverse, Py_ssize_t *offset_out, sz_string_view_t *haystack_out,
+    sz_string_view_t *needle_out) {
 
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
+    // Fast path variables
+    PyObject *haystack_obj = NULL;
+    PyObject *needle_obj = NULL;
+    PyObject *start_obj = NULL;
+    PyObject *end_obj = NULL;
+
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+
+    // Fast argument validation
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+    Py_ssize_t const expected_min = is_member ? 1 : 2; // needle is required
+    Py_ssize_t const expected_max = expected_min + 2;  // + start + end
+
+    if (total_args < expected_min || total_args > expected_max) {
         PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return 0;
     }
 
-    PyObject *haystack_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *needle_obj = PyTuple_GET_ITEM(args, !is_member + 0);
-    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+    if (positional_args_count > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Too many positional arguments");
+        return 0;
+    }
 
-    // Parse keyword arguments
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value))
-            if (PyUnicode_CompareWithASCIIString(key, "start") == 0 && !start_obj) { start_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0 && !end_obj) { end_obj = value; }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+    // Fast positional argument extraction
+    if (is_member) {
+        haystack_obj = self;
+        if (positional_args_count >= 1) needle_obj = args[0];
+        if (positional_args_count >= 2) start_obj = args[1];
+        if (positional_args_count >= 3) end_obj = args[2];
+    }
+    else {
+        if (positional_args_count >= 1) haystack_obj = args[0];
+        if (positional_args_count >= 2) needle_obj = args[1];
+        if (positional_args_count >= 3) start_obj = args[2];
+        if (positional_args_count >= 4) end_obj = args[3];
+    }
+
+    // Fast keyword argument parsing
+    if (args_names_count > 0) {
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *const key = PyTuple_GetItem(args_names_tuple, i);
+            PyObject *const value = args[positional_args_count + i];
+
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0) {
+                if (start_obj) {
+                    PyErr_SetString(PyExc_TypeError, "start specified twice");
+                    return 0;
+                }
+                start_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) {
+                if (end_obj) {
+                    PyErr_SetString(PyExc_TypeError, "end specified twice");
+                    return 0;
+                }
+                end_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
                 return 0;
+            }
+        }
     }
 
     sz_string_view_t haystack;
@@ -1615,11 +1677,13 @@ static char const doc_contains[] = //
     "Returns:\n"
     "  bool: True if the substring is found, False otherwise.";
 
-static PyObject *Str_contains(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_contains(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                              PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, sz_false_k, &signed_offset, &text, &separator))
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k,
+                                  &signed_offset, &text, &separator))
         return NULL;
     if (signed_offset == -1) { Py_RETURN_FALSE; }
     else { Py_RETURN_TRUE; }
@@ -1636,11 +1700,13 @@ static char const doc_find[] = //
     "Returns:\n"
     "  int: The index of the first occurrence, or -1 if not found.";
 
-static PyObject *Str_find(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                          PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, sz_false_k, &signed_offset, &text, &separator))
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k,
+                                  &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -1658,11 +1724,13 @@ static char const doc_index[] = //
     "Raises:\n"
     "  ValueError: If the substring is not found.";
 
-static PyObject *Str_index(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_index(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                           PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find, sz_false_k, &signed_offset, &text, &separator))
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k,
+                                  &signed_offset, &text, &separator))
         return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
@@ -1682,11 +1750,13 @@ static char const doc_rfind[] = //
     "Returns:\n"
     "  int: The index of the last occurrence, or -1 if not found.";
 
-static PyObject *Str_rfind(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_rfind(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                           PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, sz_true_k, &signed_offset, &text, &separator))
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind, sz_true_k,
+                                  &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -1704,11 +1774,13 @@ static char const doc_rindex[] = //
     "Raises:\n"
     "  ValueError: If the substring is not found.";
 
-static PyObject *Str_rindex(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_rindex(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind, sz_true_k, &signed_offset, &text, &separator))
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind, sz_true_k,
+                                  &signed_offset, &text, &separator))
         return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
@@ -1717,15 +1789,16 @@ static PyObject *Str_rindex(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static PyObject *_Str_partition_implementation(PyObject *self, PyObject *args, PyObject *kwargs, sz_find_t finder,
-                                               sz_bool_t is_reverse) {
+static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                               PyObject *args_names_tuple, sz_find_t finder, sz_bool_t is_reverse) {
     Py_ssize_t separator_index;
     sz_string_view_t text;
     sz_string_view_t separator;
     PyObject *result_tuple;
 
-    // Use _Str_find_implementation_ to get the index of the separator
-    if (!_Str_find_implementation_(self, args, kwargs, finder, is_reverse, &separator_index, &text, &separator))
+    // Use `Str_find_implementation_` to get the index of the separator
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, finder, is_reverse,
+                                  &separator_index, &text, &separator))
         return NULL;
 
     // If the separator length is zero, we must raise a `ValueError`
@@ -1781,8 +1854,9 @@ static char const doc_partition[] = //
     "Returns:\n"
     "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns (self, '', '').";
 
-static PyObject *Str_partition(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_partition_implementation(self, args, kwargs, &sz_find, sz_false_k);
+static PyObject *Str_partition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
+    return Str_partition_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find, sz_false_k);
 }
 
 static char const doc_rpartition[] = //
@@ -1794,8 +1868,9 @@ static char const doc_rpartition[] = //
     "Returns:\n"
     "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns ('', '', self).";
 
-static PyObject *Str_rpartition(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_partition_implementation(self, args, kwargs, &sz_rfind, sz_true_k);
+static PyObject *Str_rpartition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
+    return Str_partition_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind, sz_true_k);
 }
 
 static char const doc_count[] = //
@@ -1810,29 +1885,81 @@ static char const doc_count[] = //
     "Returns:\n"
     "  int: The number of occurrences of the substring.";
 
-static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 4) {
-        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
+static PyObject *Str_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                           PyObject *args_names_tuple) {
+    // Fast path variables
+    PyObject *haystack_obj = NULL;
+    PyObject *needle_obj = NULL;
+    PyObject *start_obj = NULL;
+    PyObject *end_obj = NULL;
+    PyObject *allowoverlap_obj = NULL;
+
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+
+    // Fast argument validation
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+    Py_ssize_t const expected_min = is_member ? 1 : 2; // needle is required
+    Py_ssize_t const expected_max = expected_min + 3;  // + start + end + allowoverlap
+
+    if (total_args < expected_min || total_args > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    PyObject *haystack_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *needle_obj = PyTuple_GET_ITEM(args, !is_member + 0);
-    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
-    PyObject *allowoverlap_obj = nargs > !is_member + 3 ? PyTuple_GET_ITEM(args, !is_member + 3) : NULL;
+    if (positional_args_count > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Too many positional arguments");
+        return NULL;
+    }
 
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value))
-            if (PyUnicode_CompareWithASCIIString(key, "start") == 0) { start_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) { end_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "allowoverlap") == 0) { allowoverlap_obj = value; }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
+    // Fast positional argument extraction
+    if (is_member) {
+        haystack_obj = self;
+        if (positional_args_count >= 1) needle_obj = args[0];
+        if (positional_args_count >= 2) start_obj = args[1];
+        if (positional_args_count >= 3) end_obj = args[2];
+        if (positional_args_count >= 4) allowoverlap_obj = args[3];
+    }
+    else {
+        if (positional_args_count >= 1) haystack_obj = args[0];
+        if (positional_args_count >= 2) needle_obj = args[1];
+        if (positional_args_count >= 3) start_obj = args[2];
+        if (positional_args_count >= 4) end_obj = args[3];
+        if (positional_args_count >= 5) allowoverlap_obj = args[4];
+    }
+
+    // Fast keyword argument parsing
+    if (args_names_count > 0) {
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *const key = PyTuple_GetItem(args_names_tuple, i);
+            PyObject *const value = args[positional_args_count + i];
+
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0) {
+                if (start_obj) {
+                    PyErr_SetString(PyExc_TypeError, "start specified twice");
+                    return NULL;
+                }
+                start_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) {
+                if (end_obj) {
+                    PyErr_SetString(PyExc_TypeError, "end specified twice");
+                    return NULL;
+                }
+                end_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "allowoverlap") == 0) {
+                if (allowoverlap_obj) {
+                    PyErr_SetString(PyExc_TypeError, "allowoverlap specified twice");
+                    return NULL;
+                }
+                allowoverlap_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
                 return NULL;
+            }
+        }
     }
 
     sz_string_view_t haystack;
@@ -1891,18 +2018,72 @@ static char const doc_startswith[] = //
     "Returns:\n"
     "  bool: True if the string starts with the prefix, False otherwise.";
 
-static PyObject *Str_startswith(PyObject *self, PyObject *args, PyObject *kwargs) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
-        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
+static PyObject *Str_startswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
+    // Fast path variables
+    PyObject *str_obj = NULL;
+    PyObject *prefix_obj = NULL;
+    PyObject *start_obj = NULL;
+    PyObject *end_obj = NULL;
+
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+
+    // Fast argument validation
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+    Py_ssize_t const expected_min = is_member ? 1 : 2; // prefix is required
+    Py_ssize_t const expected_max = expected_min + 2;  // + start + end
+
+    if (total_args < expected_min || total_args > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    PyObject *str_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *prefix_obj = PyTuple_GET_ITEM(args, !is_member);
-    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+    if (positional_args_count > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Too many positional arguments");
+        return NULL;
+    }
+
+    // Fast positional argument extraction
+    if (is_member) {
+        str_obj = self;
+        if (positional_args_count >= 1) prefix_obj = args[0];
+        if (positional_args_count >= 2) start_obj = args[1];
+        if (positional_args_count >= 3) end_obj = args[2];
+    }
+    else {
+        if (positional_args_count >= 1) str_obj = args[0];
+        if (positional_args_count >= 2) prefix_obj = args[1];
+        if (positional_args_count >= 3) start_obj = args[2];
+        if (positional_args_count >= 4) end_obj = args[3];
+    }
+
+    // Fast keyword argument parsing
+    if (args_names_count > 0) {
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *const key = PyTuple_GetItem(args_names_tuple, i);
+            PyObject *const value = args[positional_args_count + i];
+
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0) {
+                if (start_obj) {
+                    PyErr_SetString(PyExc_TypeError, "start specified twice");
+                    return NULL;
+                }
+                start_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) {
+                if (end_obj) {
+                    PyErr_SetString(PyExc_TypeError, "end specified twice");
+                    return NULL;
+                }
+                end_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return NULL;
+            }
+        }
+    }
 
     // Optional start and end arguments
     Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
@@ -1945,18 +2126,72 @@ static char const doc_endswith[] = //
     "Returns:\n"
     "  bool: True if the string ends with the suffix, False otherwise.";
 
-static PyObject *Str_endswith(PyObject *self, PyObject *args, PyObject *kwargs) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 3) {
-        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
+static PyObject *Str_endswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                              PyObject *args_names_tuple) {
+    // Fast path variables
+    PyObject *str_obj = NULL;
+    PyObject *suffix_obj = NULL;
+    PyObject *start_obj = NULL;
+    PyObject *end_obj = NULL;
+
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+
+    // Fast argument validation
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
+    Py_ssize_t const total_args = positional_args_count + args_names_count;
+    Py_ssize_t const expected_min = is_member ? 1 : 2; // suffix is required
+    Py_ssize_t const expected_max = expected_min + 2;  // + start + end
+
+    if (total_args < expected_min || total_args > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    PyObject *str_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *suffix_obj = PyTuple_GET_ITEM(args, !is_member);
-    PyObject *start_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *end_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+    if (positional_args_count > expected_max) {
+        PyErr_SetString(PyExc_TypeError, "Too many positional arguments");
+        return NULL;
+    }
+
+    // Fast positional argument extraction
+    if (is_member) {
+        str_obj = self;
+        if (positional_args_count >= 1) suffix_obj = args[0];
+        if (positional_args_count >= 2) start_obj = args[1];
+        if (positional_args_count >= 3) end_obj = args[2];
+    }
+    else {
+        if (positional_args_count >= 1) str_obj = args[0];
+        if (positional_args_count >= 2) suffix_obj = args[1];
+        if (positional_args_count >= 3) start_obj = args[2];
+        if (positional_args_count >= 4) end_obj = args[3];
+    }
+
+    // Fast keyword argument parsing
+    if (args_names_count > 0) {
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *const key = PyTuple_GetItem(args_names_tuple, i);
+            PyObject *const value = args[positional_args_count + i];
+
+            if (PyUnicode_CompareWithASCIIString(key, "start") == 0) {
+                if (start_obj) {
+                    PyErr_SetString(PyExc_TypeError, "start specified twice");
+                    return NULL;
+                }
+                start_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0) {
+                if (end_obj) {
+                    PyErr_SetString(PyExc_TypeError, "end specified twice");
+                    return NULL;
+                }
+                end_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return NULL;
+            }
+        }
+    }
 
     // Optional start and end arguments
     Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
@@ -2004,30 +2239,32 @@ static char const doc_translate[] = //
     "  ValueError: If the table is not 256 bytes long.\n"
     "  TypeError: If the table is not a string or dictionary.";
 
-static PyObject *Str_translate(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 4) {
+    if (positional_args_count < !is_member + 1 || positional_args_count > !is_member + 4) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
     }
 
-    PyObject *str_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *look_up_table_obj = PyTuple_GET_ITEM(args, !is_member);
-    PyObject *inplace_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *start_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
-    PyObject *end_obj = nargs > !is_member + 3 ? PyTuple_GET_ITEM(args, !is_member + 3) : NULL;
+    PyObject *str_obj = is_member ? self : args[0];
+    PyObject *look_up_table_obj = args[!is_member];
+    PyObject *inplace_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
+    PyObject *start_obj = positional_args_count > !is_member + 2 ? args[!is_member + 2] : NULL;
+    PyObject *end_obj = positional_args_count > !is_member + 3 ? args[!is_member + 3] : NULL;
 
     // Optional keyword arguments
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value))
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "inplace") == 0 && !inplace_obj) { inplace_obj = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "start") == 0 && !start_obj) { start_obj = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "end") == 0 && !end_obj) { end_obj = value; }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
                 return NULL;
+        }
     }
 
     // Optional start and end arguments
@@ -2141,12 +2378,13 @@ static char const doc_find_first_of[] = //
     "Returns:\n"
     "  int: Index of the first matching character, or -1 if none found.";
 
-static PyObject *Str_find_first_of(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_find_first_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_byte_from, sz_false_k, &signed_offset, &text,
-                                   &separator))
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_byte_from, sz_false_k,
+                                  &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -2162,12 +2400,13 @@ static char const doc_find_first_not_of[] = //
     "Returns:\n"
     "  int: Index of the first non-matching character, or -1 if all match.";
 
-static PyObject *Str_find_first_not_of(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_find_first_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                       PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_find_byte_not_from, sz_false_k, &signed_offset, &text,
-                                   &separator))
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_byte_not_from,
+                                  sz_false_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -2183,12 +2422,13 @@ static char const doc_find_last_of[] = //
     "Returns:\n"
     "  int: Index of the last matching character, or -1 if none found.";
 
-static PyObject *Str_find_last_of(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_find_last_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                  PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_byte_from, sz_true_k, &signed_offset, &text,
-                                   &separator))
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_byte_from, sz_true_k,
+                                  &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -2204,12 +2444,13 @@ static char const doc_find_last_not_of[] = //
     "Returns:\n"
     "  int: Index of the last non-matching character, or -1 if all match.";
 
-static PyObject *Str_find_last_not_of(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_find_last_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!_Str_find_implementation_(self, args, kwargs, &sz_rfind_byte_not_from, sz_true_k, &signed_offset, &text,
-                                   &separator))
+    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_byte_not_from,
+                                  sz_true_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -2416,26 +2657,29 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
  *  @brief  Proxy routing requests like `Str.split`, `Str.rsplit`, `Str.split_byteset` and `Str.rsplit_byteset`
  *          to `Str_split_` and `Str_rsplit_` implementations, parsing function arguments.
  */
-static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *args, PyObject *kwargs, //
-                                               sz_find_t finder, sz_size_t match_length,         //
+static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                               PyObject *args_names_tuple,               //
+                                               sz_find_t finder, sz_size_t match_length, //
                                                sz_bool_t is_reverse, sz_bool_t is_lazy_iterator) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member || nargs > !is_member + 3) {
+    Py_ssize_t expected_min_args = !is_member;
+    Py_ssize_t expected_max_args = !is_member + 3;
+    if (positional_args_count < expected_min_args || positional_args_count > expected_max_args) {
         PyErr_SetString(PyExc_TypeError, "sz.split() received unsupported number of arguments");
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *separator_obj = nargs > !is_member + 0 ? PyTuple_GET_ITEM(args, !is_member + 0) : NULL;
-    PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *keepseparator_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *separator_obj = positional_args_count > !is_member + 0 ? args[!is_member + 0] : NULL;
+    PyObject *maxsplit_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
+    PyObject *keepseparator_obj = positional_args_count > !is_member + 2 ? args[!is_member + 2] : NULL;
 
-    if (kwargs) {
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "separator") == 0 && !separator_obj) { separator_obj = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "maxsplit") == 0 && !maxsplit_obj) { maxsplit_obj = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "keepseparator") == 0 && !keepseparator_obj) {
@@ -2517,8 +2761,10 @@ static char const doc_split[] = //
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
-static PyObject *Str_split(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_find, 0, sz_false_k, sz_false_k);
+static PyObject *Str_split(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                           PyObject *args_names_tuple) {
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find, 0, sz_false_k,
+                                         sz_false_k);
 }
 
 static char const doc_rsplit[] = //
@@ -2534,8 +2780,10 @@ static char const doc_rsplit[] = //
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
-static PyObject *Str_rsplit(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_false_k);
+static PyObject *Str_rsplit(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind, 0, sz_true_k,
+                                         sz_false_k);
 }
 
 static char const doc_split_byteset[] = //
@@ -2549,8 +2797,10 @@ static char const doc_split_byteset[] = //
     "Returns:\n"
     "  Strs: A list of strings split by the character set.";
 
-static PyObject *Str_split_byteset(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_find_byte_from, 1, sz_false_k, sz_false_k);
+static PyObject *Str_split_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple) {
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find_byte_from, 1,
+                                         sz_false_k, sz_false_k);
 }
 
 static char const doc_rsplit_byteset[] = //
@@ -2564,8 +2814,10 @@ static char const doc_rsplit_byteset[] = //
     "Returns:\n"
     "  Strs: A list of strings split by the character set.";
 
-static PyObject *Str_rsplit_byteset(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_byte_from, 1, sz_true_k, sz_false_k);
+static PyObject *Str_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple) {
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind_byte_from, 1,
+                                         sz_true_k, sz_false_k);
 }
 
 static char const doc_split_iter[] = //
@@ -2580,8 +2832,10 @@ static char const doc_split_iter[] = //
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
-static PyObject *Str_split_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_find, 0, sz_false_k, sz_true_k);
+static PyObject *Str_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find, 0, sz_false_k,
+                                         sz_true_k);
 }
 
 static char const doc_rsplit_iter[] = //
@@ -2596,8 +2850,10 @@ static char const doc_rsplit_iter[] = //
     "Raises:\n"
     "  ValueError: If the separator is an empty string.";
 
-static PyObject *Str_rsplit_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind, 0, sz_true_k, sz_true_k);
+static PyObject *Str_rsplit_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind, 0, sz_true_k,
+                                         sz_true_k);
 }
 
 static char const doc_split_byteset_iter[] = //
@@ -2610,8 +2866,10 @@ static char const doc_split_byteset_iter[] = //
     "Returns:\n"
     "  iterator: An iterator yielding split substrings.";
 
-static PyObject *Str_split_byteset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_find_byte_from, 1, sz_false_k, sz_true_k);
+static PyObject *Str_split_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple) {
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_find_byte_from, 1,
+                                         sz_false_k, sz_true_k);
 }
 
 static char const doc_rsplit_byteset_iter[] = //
@@ -2624,8 +2882,10 @@ static char const doc_rsplit_byteset_iter[] = //
     "Returns:\n"
     "  iterator: An iterator yielding split substrings in reverse.";
 
-static PyObject *Str_rsplit_byteset_iter(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return Str_split_with_known_callback(self, args, kwargs, &sz_rfind_byte_from, 1, sz_true_k, sz_true_k);
+static PyObject *Str_rsplit_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *args_names_tuple) {
+    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, &sz_rfind_byte_from, 1,
+                                         sz_true_k, sz_true_k);
 }
 
 static char const doc_splitlines[] = //
@@ -2638,23 +2898,24 @@ static char const doc_splitlines[] = //
     "Returns:\n"
     "  Strs: A list of strings split by line breaks.";
 
-static PyObject *Str_splitlines(PyObject *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Str_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
     // Check minimum arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member || nargs > !is_member + 2) {
+    if (positional_args_count < !is_member || positional_args_count > !is_member + 2) {
         PyErr_SetString(PyExc_TypeError, "splitlines() requires at least 1 argument");
         return NULL;
     }
 
-    PyObject *text_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *keeplinebreaks_obj = nargs > !is_member ? PyTuple_GET_ITEM(args, !is_member) : NULL;
-    PyObject *maxsplit_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
+    PyObject *text_obj = is_member ? self : args[0];
+    PyObject *keeplinebreaks_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+    PyObject *maxsplit_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
 
-    if (kwargs) {
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "keeplinebreaks") == 0 && !keeplinebreaks_obj) {
                 keeplinebreaks_obj = value;
             }
@@ -2777,7 +3038,7 @@ static PyGetSetDef Str_getsetters[] = {
     {NULL} // Sentinel
 };
 
-#define SZ_METHOD_FLAGS METH_VARARGS | METH_KEYWORDS
+#define SZ_METHOD_FLAGS METH_FASTCALL | METH_KEYWORDS
 
 static PyMethodDef Str_methods[] = {
     {"contains", (PyCFunction)Str_contains, SZ_METHOD_FLAGS, doc_contains},
@@ -2919,21 +3180,22 @@ static PyTypeObject SplitIteratorType = {
 
 #pragma region Strs
 
-static PyObject *Strs_shuffle(Strs *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Strs_shuffle(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                              PyObject *args_names_tuple) {
 
     // Check for positional arguments
-    Py_ssize_t nargs = PyTuple_Size(args);
-    PyObject *seed_obj = nargs == 1 ? PyTuple_GET_ITEM(args, 0) : NULL;
-    if (nargs > 1) {
+    PyObject *seed_obj = positional_args_count == 1 ? args[0] : NULL;
+    if (positional_args_count > 1) {
         PyErr_SetString(PyExc_TypeError, "shuffle() takes at most 1 positional argument");
         return NULL;
     }
 
     // Check for keyword arguments
-    if (kwargs) {
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "seed") == 0 && !seed_obj) { seed_obj = value; }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
@@ -3004,22 +3266,23 @@ static sz_bool_t Strs_argsort_(Strs *self, sz_string_view_t **parts_output, sz_s
     return 1;
 }
 
-static PyObject *Strs_sort(Strs *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Strs_sort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                           PyObject *args_names_tuple) {
     PyObject *reverse_obj = NULL; // Default is not reversed
 
     // Check for positional arguments
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs > 1) {
+    if (positional_args_count > 1) {
         PyErr_SetString(PyExc_TypeError, "sort() takes at most 1 positional argument");
         return NULL;
     }
-    else if (nargs == 1) { reverse_obj = PyTuple_GET_ITEM(args, 0); }
+    else if (positional_args_count == 1) { reverse_obj = args[0]; }
 
     // Check for keyword arguments
-    if (kwargs) {
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0 && !reverse_obj) { reverse_obj = value; }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
@@ -3048,22 +3311,23 @@ static PyObject *Strs_sort(Strs *self, PyObject *args, PyObject *kwargs) {
     Py_RETURN_NONE;
 }
 
-static PyObject *Strs_argsort(Strs *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                              PyObject *args_names_tuple) {
     PyObject *reverse_obj = NULL; // Default is not reversed
 
     // Check for positional arguments
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs > 1) {
+    if (positional_args_count > 1) {
         PyErr_SetString(PyExc_TypeError, "order() takes at most 1 positional argument");
         return NULL;
     }
-    else if (nargs == 1) { reverse_obj = PyTuple_GET_ITEM(args, 0); }
+    else if (positional_args_count == 1) { reverse_obj = args[0]; }
 
     // Check for keyword arguments
-    if (kwargs) {
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "reverse") == 0 && !reverse_obj) { reverse_obj = value; }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
@@ -3118,23 +3382,24 @@ static PyObject *Strs_argsort(Strs *self, PyObject *args, PyObject *kwargs) {
     return tuple;
 }
 
-static PyObject *Strs_sample(Strs *self, PyObject *args, PyObject *kwargs) {
+static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
     PyObject *sample_size_obj = NULL;
     PyObject *seed_obj = NULL;
 
     // Check for positional arguments
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs > 1) {
+    if (positional_args_count > 1) {
         PyErr_SetString(PyExc_TypeError, "sample() takes 1 positional argument and 1 keyword argument");
         return NULL;
     }
-    else if (nargs == 1) { sample_size_obj = PyTuple_GET_ITEM(args, 0); }
+    else if (positional_args_count == 1) { sample_size_obj = args[0]; }
 
     // Parse keyword arguments
-    if (kwargs) {
-        PyObject *key, *value;
-        Py_ssize_t pos = 0;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+    if (args_names_tuple) {
+        Py_ssize_t args_names_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < args_names_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "seed") == 0 && !seed_obj) { seed_obj = value; }
             else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key)) { return NULL; }
         }
@@ -3419,46 +3684,46 @@ static void stringzilla_cleanup(PyObject *m) {
 
 static PyMethodDef stringzilla_methods[] = {
     // Basic `str`, `bytes`, and `bytearray`-like functionality
-    {"contains", Str_contains, SZ_METHOD_FLAGS, doc_contains},
-    {"count", Str_count, SZ_METHOD_FLAGS, doc_count},
-    {"splitlines", Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
-    {"startswith", Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
-    {"endswith", Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
-    {"translate", Str_translate, SZ_METHOD_FLAGS, doc_translate},
-    {"decode", Str_decode, SZ_METHOD_FLAGS, doc_decode},
-    {"equal", Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
+    {"contains", (PyCFunction)Str_contains, SZ_METHOD_FLAGS, doc_contains},
+    {"count", (PyCFunction)Str_count, SZ_METHOD_FLAGS, doc_count},
+    {"splitlines", (PyCFunction)Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
+    {"startswith", (PyCFunction)Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
+    {"endswith", (PyCFunction)Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
+    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"decode", (PyCFunction)Str_decode, SZ_METHOD_FLAGS, doc_decode},
+    {"equal", (PyCFunction)Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
 
     // Bidirectional operations
-    {"find", Str_find, SZ_METHOD_FLAGS, doc_find},
-    {"index", Str_index, SZ_METHOD_FLAGS, doc_index},
-    {"partition", Str_partition, SZ_METHOD_FLAGS, doc_partition},
-    {"split", Str_split, SZ_METHOD_FLAGS, doc_split},
-    {"rfind", Str_rfind, SZ_METHOD_FLAGS, doc_rfind},
-    {"rindex", Str_rindex, SZ_METHOD_FLAGS, doc_rindex},
-    {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
-    {"rsplit", Str_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
+    {"find", (PyCFunction)Str_find, SZ_METHOD_FLAGS, doc_find},
+    {"index", (PyCFunction)Str_index, SZ_METHOD_FLAGS, doc_index},
+    {"partition", (PyCFunction)Str_partition, SZ_METHOD_FLAGS, doc_partition},
+    {"split", (PyCFunction)Str_split, SZ_METHOD_FLAGS, doc_split},
+    {"rfind", (PyCFunction)Str_rfind, SZ_METHOD_FLAGS, doc_rfind},
+    {"rindex", (PyCFunction)Str_rindex, SZ_METHOD_FLAGS, doc_rindex},
+    {"rpartition", (PyCFunction)Str_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
+    {"rsplit", (PyCFunction)Str_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
 
     // Character search extensions
-    {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
-    {"find_last_of", Str_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
-    {"find_first_not_of", Str_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
-    {"find_last_not_of", Str_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
-    {"split_byteset", Str_split_byteset, SZ_METHOD_FLAGS, doc_split_byteset},
-    {"rsplit_byteset", Str_rsplit_byteset, SZ_METHOD_FLAGS, doc_rsplit_byteset},
+    {"find_first_of", (PyCFunction)Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
+    {"find_last_of", (PyCFunction)Str_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
+    {"find_first_not_of", (PyCFunction)Str_find_first_not_of, SZ_METHOD_FLAGS, doc_find_first_not_of},
+    {"find_last_not_of", (PyCFunction)Str_find_last_not_of, SZ_METHOD_FLAGS, doc_find_last_not_of},
+    {"split_byteset", (PyCFunction)Str_split_byteset, SZ_METHOD_FLAGS, doc_split_byteset},
+    {"rsplit_byteset", (PyCFunction)Str_rsplit_byteset, SZ_METHOD_FLAGS, doc_rsplit_byteset},
 
     // Lazily evaluated iterators
-    {"split_iter", Str_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
-    {"rsplit_iter", Str_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
-    {"split_byteset_iter", Str_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
-    {"rsplit_byteset_iter", Str_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
+    {"split_iter", (PyCFunction)Str_split_iter, SZ_METHOD_FLAGS, doc_split_iter},
+    {"rsplit_iter", (PyCFunction)Str_rsplit_iter, SZ_METHOD_FLAGS, doc_rsplit_iter},
+    {"split_byteset_iter", (PyCFunction)Str_split_byteset_iter, SZ_METHOD_FLAGS, doc_split_byteset_iter},
+    {"rsplit_byteset_iter", (PyCFunction)Str_rsplit_byteset_iter, SZ_METHOD_FLAGS, doc_rsplit_byteset_iter},
 
     // Dealing with larger-than-memory datasets
-    {"offset_within", Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
-    {"write_to", Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
+    {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
+    {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
 
     // Global unary extensions
-    {"hash", Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
-    {"bytesum", Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
+    {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
+    {"bytesum", (PyCFunction)Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
 
     {NULL, NULL, 0, NULL}};
 
