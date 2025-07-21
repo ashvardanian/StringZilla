@@ -1,5 +1,5 @@
 /**
- *  @file       lib.c
+ *  @file       stringzilla.c
  *  @brief      Very light-weight CPython wrapper for StringZilla, with support for memory-mapping,
  *              native Python strings, Apache Arrow collections, and more.
  *  @author     Ash Vardanian
@@ -690,17 +690,24 @@ static char const doc_like_hash[] = //
     "This function can be called as a method on a Str object or as a standalone function.\n"
     "Args:\n"
     "  text (Str or str or bytes): The string to hash.\n"
+    "  seed (int, optional): The seed value for hashing. Defaults to 0.\n"
     "Returns:\n"
     "  int: The hash value of the string.\n"
     "Raises:\n"
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.";
 
 static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs) {
-    // Check minimum arguments
+    // Check arguments
     int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
     Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member || nargs > !is_member + 1 || kwargs) {
-        PyErr_SetString(PyExc_TypeError, "hash() expects exactly one positional argument");
+
+    // Allow optional seed parameter
+    Py_ssize_t min_args = !is_member;
+    Py_ssize_t max_args = min_args + 1;
+
+    if (nargs < min_args || nargs > max_args) {
+        PyErr_SetString(PyExc_TypeError, is_member ? "hash() takes 0 or 1 positional arguments"
+                                                   : "hash() takes 1 or 2 positional arguments");
         return NULL;
     }
 
@@ -713,7 +720,43 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *args, PyObject *kwargs)
         return NULL;
     }
 
-    sz_u64_t result = sz_hash(text.start, text.length, 0);
+    // Parse optional seed
+    sz_u64_t seed = 0;
+    if (is_member && nargs > 0) {
+        // Member method with seed argument
+        PyObject *seed_obj = PyTuple_GET_ITEM(args, 0);
+        if (!PyLong_Check(seed_obj)) {
+            PyErr_SetString(PyExc_TypeError, "seed must be an integer");
+            return NULL;
+        }
+        seed = PyLong_AsUnsignedLongLong(seed_obj);
+        if (PyErr_Occurred()) return NULL;
+    }
+    else if (!is_member && nargs > 1) {
+        // Standalone function with seed argument
+        PyObject *seed_obj = PyTuple_GET_ITEM(args, 1);
+        if (!PyLong_Check(seed_obj)) {
+            PyErr_SetString(PyExc_TypeError, "seed must be an integer");
+            return NULL;
+        }
+        seed = PyLong_AsUnsignedLongLong(seed_obj);
+        if (PyErr_Occurred()) return NULL;
+    }
+
+    // Handle keyword arguments if present
+    if (kwargs && PyDict_Size(kwargs) > 0) {
+        PyObject *seed_obj = PyDict_GetItemString(kwargs, "seed");
+        if (seed_obj) {
+            if (!PyLong_Check(seed_obj)) {
+                PyErr_SetString(PyExc_TypeError, "seed must be an integer");
+                return NULL;
+            }
+            seed = PyLong_AsUnsignedLongLong(seed_obj);
+            if (PyErr_Occurred()) return NULL;
+        }
+    }
+
+    sz_u64_t result = sz_hash(text.start, text.length, seed);
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
@@ -1837,263 +1880,6 @@ static PyObject *Str_count(PyObject *self, PyObject *args, PyObject *kwargs) {
     return PyLong_FromSize_t(count);
 }
 
-static PyObject *_Str_levenshtein_distance(PyObject *self, PyObject *args, PyObject *kwargs,
-                                           sz_levenshtein_distance_t function) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 2) {
-        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
-        return NULL;
-    }
-
-    PyObject *str1_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *str2_obj = PyTuple_GET_ITEM(args, !is_member + 0);
-    PyObject *bound_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value))
-            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0 && !bound_obj) { bound_obj = value; }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
-                return NULL;
-    }
-
-    sz_size_t bound = SZ_SIZE_MAX; // Default value for bound
-    if (bound_obj && ((bound = (sz_size_t)PyLong_AsSize_t(bound_obj)) == (sz_size_t)(-1))) {
-        PyErr_Format(PyExc_ValueError, "Bound must be a non-negative integer");
-        return NULL;
-    }
-
-    sz_string_view_t str1, str2;
-    if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
-        !export_string_like(str2_obj, &str2.start, &str2.length)) {
-        wrap_current_exception("Both arguments must be string-like");
-        return NULL;
-    }
-
-    // Allocate memory for the Levenshtein matrix
-    sz_memory_allocator_t reusing_allocator;
-    reusing_allocator.allocate = &temporary_memory_allocate;
-    reusing_allocator.free = &temporary_memory_free;
-    reusing_allocator.handle = &temporary_memory;
-
-    sz_size_t distance;
-    sz_status_t status =
-        function(str1.start, str1.length, str2.start, str2.length, bound, &reusing_allocator, &distance);
-
-    // Check for memory allocation issues
-    if (status != sz_success_k) {
-        PyErr_NoMemory();
-        return NULL;
-    }
-
-    return PyLong_FromSize_t(distance);
-}
-
-static char const doc_levenshtein_distance[] = //
-    "Compute the Levenshtein edit distance between two strings.\n"
-    "\n"
-    "Args:\n"
-    "  text (Str or str or bytes): The first string.\n"
-    "  other (str): The second string to compare.\n"
-    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n"
-    "Returns:\n"
-    "  int: The edit distance (number of insertions, deletions, substitutions).";
-
-static PyObject *Str_levenshtein_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_levenshtein_distance(self, args, kwargs, &sz_levenshtein_distance);
-}
-
-static char const doc_levenshtein_distance_unicode[] = //
-    "Compute the Levenshtein edit distance between two Unicode strings.\n"
-    "\n"
-    "Args:\n"
-    "  text (Str or str or bytes): The first string.\n"
-    "  other (str): The second string to compare.\n"
-    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n"
-    "Returns:\n"
-    "  int: The edit distance in Unicode characters.";
-
-static PyObject *Str_levenshtein_distance_unicode(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_levenshtein_distance(self, args, kwargs, &sz_levenshtein_distance_utf8);
-}
-
-static PyObject *_Str_hamming_distance(PyObject *self, PyObject *args, PyObject *kwargs,
-                                       sz_hamming_distance_t function) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 2) {
-        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
-        return NULL;
-    }
-
-    PyObject *str1_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *str2_obj = PyTuple_GET_ITEM(args, !is_member + 0);
-    PyObject *bound_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value))
-            if (PyUnicode_CompareWithASCIIString(key, "bound") == 0 && !bound_obj) { bound_obj = value; }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
-                return NULL;
-    }
-
-    Py_ssize_t bound = 0; // Default value for bound
-    if (bound_obj && ((bound = PyLong_AsSsize_t(bound_obj)) < 0)) {
-        PyErr_Format(PyExc_ValueError, "Bound must be a non-negative integer");
-        return NULL;
-    }
-
-    sz_string_view_t str1, str2;
-    if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
-        !export_string_like(str2_obj, &str2.start, &str2.length)) {
-        wrap_current_exception("Both arguments must be string-like");
-        return NULL;
-    }
-
-    sz_size_t distance;
-    sz_status_t status = function(str1.start, str1.length, str2.start, str2.length, (sz_size_t)bound, &distance);
-
-    // Check for memory allocation issues
-    if (status != sz_success_k) {
-        PyErr_NoMemory();
-        return NULL;
-    }
-
-    return PyLong_FromSize_t(distance);
-}
-
-static char const doc_hamming_distance[] = //
-    "Compute the Hamming distance between two strings.\n"
-    "\n"
-    "Args:\n"
-    "  text (Str or str or bytes): The first string.\n"
-    "  other (str): The second string to compare.\n"
-    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n"
-    "Returns:\n"
-    "  int: The Hamming distance, including differing bytes and length difference.";
-
-static PyObject *Str_hamming_distance(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_hamming_distance(self, args, kwargs, &sz_hamming_distance);
-}
-
-static char const doc_hamming_distance_unicode[] = //
-    "Compute the Hamming distance between two Unicode strings.\n"
-    "\n"
-    "Args:\n"
-    "  text (Str or str or bytes): The first string.\n"
-    "  other (str): The second string to compare.\n"
-    "  bound (int, optional): Optional maximum distance to compute (default is no bound).\n"
-    "Returns:\n"
-    "  int: The Hamming distance, including differing Unicode characters and length difference.";
-
-static PyObject *Str_hamming_distance_unicode(PyObject *self, PyObject *args, PyObject *kwargs) {
-    return _Str_hamming_distance(self, args, kwargs, &sz_hamming_distance_utf8);
-}
-
-static char const doc_needleman_wunsch_score[] = //
-    "Compute the Needleman-Wunsch alignment score between two strings.\n"
-    "\n"
-    "Args:\n"
-    "  text (Str or str or bytes): The first string.\n"
-    "  other (str): The second string to align.\n"
-    "  substitution_matrix (numpy.ndarray): A 256x256 substitution cost matrix.\n"
-    "  gap_score (int): The score for introducing a gap.\n"
-    "  bound (int, optional): Optional maximum score to compute (default is no bound).\n"
-    "Returns:\n"
-    "  int: The alignment score.";
-
-static PyObject *Str_needleman_wunsch_score(PyObject *self, PyObject *args, PyObject *kwargs) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
-    Py_ssize_t nargs = PyTuple_Size(args);
-    if (nargs < !is_member + 1 || nargs > !is_member + 2) {
-        PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
-        return NULL;
-    }
-
-    PyObject *str1_obj = is_member ? self : PyTuple_GET_ITEM(args, 0);
-    PyObject *str2_obj = PyTuple_GET_ITEM(args, !is_member + 0);
-    PyObject *substitution_matrix_obj = nargs > !is_member + 1 ? PyTuple_GET_ITEM(args, !is_member + 1) : NULL;
-    PyObject *gap_score_obj = nargs > !is_member + 2 ? PyTuple_GET_ITEM(args, !is_member + 2) : NULL;
-
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value))
-            if (PyUnicode_CompareWithASCIIString(key, "gap_score") == 0 && !gap_score_obj) { gap_score_obj = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "substitution_matrix") == 0 && !substitution_matrix_obj) {
-                substitution_matrix_obj = value;
-            }
-            else if (PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key))
-                return NULL;
-    }
-
-    Py_ssize_t gap = 1; // Default value for gap costs
-    if (gap_score_obj && (gap = PyLong_AsSsize_t(gap_score_obj)) && (gap >= 128 || gap <= -128)) {
-        PyErr_Format(PyExc_ValueError, "The `gap_score` must fit into an 8-bit signed integer");
-        return NULL;
-    }
-
-    // Now extract the substitution matrix from the `substitution_matrix_obj`.
-    // It must conform to the buffer protocol, and contain a continuous 256x256 matrix of 8-bit signed integers.
-    sz_error_cost_t const *substitutions;
-
-    // Ensure the substitution matrix object is provided
-    if (!substitution_matrix_obj) {
-        PyErr_Format(PyExc_TypeError, "No substitution matrix provided");
-        return NULL;
-    }
-
-    // Request a buffer view
-    Py_buffer substitutions_view;
-    if (PyObject_GetBuffer(substitution_matrix_obj, &substitutions_view, PyBUF_FULL)) {
-        PyErr_Format(PyExc_TypeError, "Failed to get buffer from substitution matrix");
-        return NULL;
-    }
-
-    // Validate the buffer
-    if (substitutions_view.ndim != 2 || substitutions_view.shape[0] != 256 || substitutions_view.shape[1] != 256 ||
-        substitutions_view.itemsize != sizeof(sz_error_cost_t)) {
-        PyErr_Format(PyExc_ValueError, "Substitution matrix must be a 256x256 matrix of 8-bit signed integers");
-        PyBuffer_Release(&substitutions_view);
-        return NULL;
-    }
-
-    sz_string_view_t str1, str2;
-    if (!export_string_like(str1_obj, &str1.start, &str1.length) ||
-        !export_string_like(str2_obj, &str2.start, &str2.length)) {
-        wrap_current_exception("Both arguments must be string-like");
-        return NULL;
-    }
-
-    // Assign the buffer's data to substitutions
-    substitutions = (sz_error_cost_t const *)substitutions_view.buf;
-
-    // Allocate memory for the Levenshtein matrix
-    sz_memory_allocator_t reusing_allocator;
-    reusing_allocator.allocate = &temporary_memory_allocate;
-    reusing_allocator.free = &temporary_memory_free;
-    reusing_allocator.handle = &temporary_memory;
-
-    sz_ssize_t score;
-    sz_status_t status = sz_needleman_wunsch_score(str1.start, str1.length, str2.start, str2.length, substitutions,
-                                                   (sz_error_cost_t)gap, &reusing_allocator, &score);
-
-    // Don't forget to release the buffer view
-    PyBuffer_Release(&substitutions_view);
-
-    // Check for memory allocation issues
-    if (status != sz_success_k) {
-        PyErr_NoMemory();
-        return NULL;
-    }
-
-    return PyLong_FromSsize_t(score);
-}
-
 static char const doc_startswith[] = //
     "Check if a string starts with a given prefix.\n"
     "\n"
@@ -3012,15 +2798,6 @@ static PyMethodDef Str_methods[] = {
     {"rpartition", (PyCFunction)Str_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
     {"rsplit", (PyCFunction)Str_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
 
-    // Edit distance extensions
-    {"hamming_distance", (PyCFunction)Str_hamming_distance, SZ_METHOD_FLAGS, doc_hamming_distance},
-    {"hamming_distance_unicode", (PyCFunction)Str_hamming_distance_unicode, SZ_METHOD_FLAGS,
-     doc_hamming_distance_unicode},
-    {"levenshtein_distance", (PyCFunction)Str_levenshtein_distance, SZ_METHOD_FLAGS, doc_levenshtein_distance},
-    {"levenshtein_distance_unicode", (PyCFunction)Str_levenshtein_distance_unicode, SZ_METHOD_FLAGS,
-     doc_levenshtein_distance_unicode},
-    {"needleman_wunsch_score", (PyCFunction)Str_needleman_wunsch_score, SZ_METHOD_FLAGS, doc_needleman_wunsch_score},
-
     // Character search extensions
     {"find_first_of", (PyCFunction)Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
     {"find_last_of", (PyCFunction)Str_find_last_of, SZ_METHOD_FLAGS, doc_find_last_of},
@@ -3660,14 +3437,6 @@ static PyMethodDef stringzilla_methods[] = {
     {"rindex", Str_rindex, SZ_METHOD_FLAGS, doc_rindex},
     {"rpartition", Str_rpartition, SZ_METHOD_FLAGS, doc_rpartition},
     {"rsplit", Str_rsplit, SZ_METHOD_FLAGS, doc_rsplit},
-
-    // Edit distance extensions
-    {"hamming_distance", Str_hamming_distance, SZ_METHOD_FLAGS, doc_hamming_distance},
-    {"hamming_distance_unicode", Str_hamming_distance_unicode, SZ_METHOD_FLAGS, doc_hamming_distance_unicode},
-    {"levenshtein_distance", Str_levenshtein_distance, SZ_METHOD_FLAGS, doc_levenshtein_distance},
-    {"levenshtein_distance_unicode", Str_levenshtein_distance_unicode, SZ_METHOD_FLAGS,
-     doc_levenshtein_distance_unicode},
-    {"needleman_wunsch_score", Str_needleman_wunsch_score, SZ_METHOD_FLAGS, doc_needleman_wunsch_score},
 
     // Character search extensions
     {"find_first_of", Str_find_first_of, SZ_METHOD_FLAGS, doc_find_first_of},
