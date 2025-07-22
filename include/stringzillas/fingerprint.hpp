@@ -326,7 +326,8 @@ struct floating_rolling_hasher<float> {
         hash_t const multiplier = default_alphabet_size_k, //
         hash_t const modulo = default_modulo_base_k) noexcept
         : window_width_ {window_width}, multiplier_ {static_cast<state_t>(multiplier)},
-          modulo_ {static_cast<state_t>(modulo)}, inverse_modulo_ {1.0f / modulo_}, discarding_multiplier_ {1.0f} {
+          modulo_ {static_cast<state_t>(modulo)}, inverse_modulo_ {1.0f / modulo_},
+          negative_discarding_multiplier_ {1.0f} {
 
         sz_assert_(window_width_ > 1 && "Window width must be > 1");
         sz_assert_(multiplier_ > 0 && "Multiplier must be positive");
@@ -341,7 +342,8 @@ struct floating_rolling_hasher<float> {
 
         // ! The GCC header misses the `std::fmodf` overload, so we use the underlying C version
         for (std::size_t i = 0; i + 1 < window_width_; ++i)
-            discarding_multiplier_ = ::fmodf(discarding_multiplier_ * multiplier_, modulo_);
+            negative_discarding_multiplier_ = ::fmodf(negative_discarding_multiplier_ * multiplier_, modulo_);
+        negative_discarding_multiplier_ = -negative_discarding_multiplier_;
     }
 
     inline std::size_t window_width() const noexcept { return window_width_; }
@@ -356,43 +358,42 @@ struct floating_rolling_hasher<float> {
         state_t old_term = state_t(old_char) + 1.0f;
         state_t new_term = state_t(new_char) + 1.0f;
 
-        state_t term_to_subtract = mul_mod(old_term, discarding_multiplier_);
-        state_t without_head = sub_mod(state, term_to_subtract);
-        return fma_mod(without_head, multiplier_, new_term);
+        state_t without_old = fma_mod(old_term, negative_discarding_multiplier_, state);
+        return fma_mod(without_old, multiplier_, new_term);
     }
 
     inline hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
 
   private:
-    inline state_t mul_mod(state_t a, state_t b) const noexcept { return reduce(a * b); }
-    inline state_t fma_mod(state_t a, state_t b, state_t c) const noexcept { return reduce(a * b + c); }
-    inline state_t sub_mod(state_t a, state_t b) const noexcept { return reduce(a + modulo_ - b); }
+    inline state_t fma_mod(state_t a, state_t b, state_t c) const noexcept { return barrett_mod(a * b + c); }
 
     /**
      *  @brief Barrett-style `std::fmodf` alternative to avoid overflow.
      *  @see https://en.cppreference.com/w/cpp/numeric/math/fmod
      */
-    inline state_t reduce(state_t state) const noexcept {
-        sz_assert_(state >= 0 && "We can't handle negative states");
+    inline state_t barrett_mod(state_t x) const noexcept {
 
-        state_t h = state;
-        h -= modulo_ * std::floor(h * inverse_modulo_);
+        state_t q = std::floor(x * inverse_modulo_);
+        state_t result = x - q * modulo_;
+
         // Clamp into the [0, modulo_) range.
-        h += modulo_ * (h < 0.0f);
-        h -= modulo_ * (h >= modulo_);
-        sz_assert_(h >= 0 && "Intermediate state underflows the zero");
-        sz_assert_(h < limit_k && "Intermediate state overflows the limit");
-        sz_assert_(static_cast<std::uint64_t>(state) % static_cast<std::uint64_t>(modulo_) ==
-                       static_cast<std::uint64_t>(h) &&
-                   "Floating point approximation was incorrect");
-        return h;
+        if (result >= modulo_) result -= modulo_;
+        if (result < 0.0f) result += modulo_;
+
+        sz_assert_(result >= 0 && "Intermediate x underflows the zero");
+        sz_assert_(result < limit_k && "Intermediate x overflows the limit");
+        sz_assert_(static_cast<std::uint64_t>(::fmodf(x, modulo_) + (::fmodf(x, modulo_) < 0.0f ? modulo_ : 0.0f)) ==
+                       static_cast<std::uint64_t>(result) &&
+                   "Floating point modulo was incorrect");
+
+        return result;
     }
 
     std::size_t window_width_;
     state_t multiplier_;
     state_t modulo_;
     state_t inverse_modulo_;
-    state_t discarding_multiplier_;
+    state_t negative_discarding_multiplier_;
 };
 
 /**
@@ -429,7 +430,8 @@ struct floating_rolling_hasher<double> {
         state_t const multiplier = default_alphabet_size_k, //
         state_t const modulo = default_modulo_base_k) noexcept
         : window_width_ {window_width}, multiplier_ {static_cast<state_t>(multiplier)},
-          modulo_ {static_cast<state_t>(modulo)}, inverse_modulo_ {1.0 / modulo_}, discarding_multiplier_ {1.0} {
+          modulo_ {static_cast<state_t>(modulo)}, inverse_modulo_ {1.0 / modulo_},
+          negative_discarding_multiplier_ {1.0} {
 
         sz_assert_(window_width_ > 1 && "Window width must be > 1");
         sz_assert_(multiplier_ > 0 && "Multiplier must be positive");
@@ -443,34 +445,22 @@ struct floating_rolling_hasher<double> {
         sz_assert_(largest_intermediary < limit_k && "Intermediate state overflows the limit");
 
         for (std::size_t i = 0; i + 1 < window_width_; ++i)
-            discarding_multiplier_ = std::fmod(discarding_multiplier_ * multiplier_, modulo_);
-        discarding_multiplier_ = -discarding_multiplier_;
+            negative_discarding_multiplier_ = std::fmod(negative_discarding_multiplier_ * multiplier_, modulo_);
+        negative_discarding_multiplier_ = -negative_discarding_multiplier_;
     }
 
     inline std::size_t window_width() const noexcept { return window_width_; }
 
     inline state_t push(state_t state, byte_t new_char) const noexcept {
         state_t new_term = state_t(new_char) + 1.0;
-        state = std::fma(state, multiplier_, new_term);
-        state = reduce(state);
-        return state;
+        return fma_mod(state, multiplier_, new_term);
     }
 
     inline state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
-
         state_t old_term = state_t(old_char) + 1.0;
         state_t new_term = state_t(new_char) + 1.0;
-
-        // Add head
-        state = std::fma(state, multiplier_, new_term);
-        sz_assert_(state < limit_k && "Intermediate state exceeds the limit");
-
-        // Remove tail
-        sz_assert_(std::abs(discarding_multiplier_) * old_term <= state && "Will underflow");
-        state = std::fma(discarding_multiplier_, old_term, state);
-        state = reduce(state);
-
-        return state;
+        state_t without_old = fma_mod(old_term, negative_discarding_multiplier_, state);
+        return fma_mod(without_old, multiplier_, new_term);
     }
 
     inline hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
@@ -478,36 +468,37 @@ struct floating_rolling_hasher<double> {
     inline state_t multiplier() const noexcept { return multiplier_; }
     inline state_t modulo() const noexcept { return modulo_; }
     inline state_t inverse_modulo() const noexcept { return inverse_modulo_; }
-    inline state_t negative_discarding_multiplier() const noexcept { return discarding_multiplier_; }
+    inline state_t negative_discarding_multiplier() const noexcept { return negative_discarding_multiplier_; }
 
   private:
+    inline state_t fma_mod(state_t a, state_t b, state_t c) const noexcept { return barrett_mod(a * b + c); }
+
     /**
      *  @brief Barrett-style `std::fmod` alternative to avoid overflow.
      *  @see https://en.cppreference.com/w/cpp/numeric/math/fmod
      */
-    inline state_t reduce(state_t state) const noexcept {
-        sz_assert_(state >= 0 && "We can't handle negative states");
+    inline state_t barrett_mod(state_t x) const noexcept {
 
-        state_t h = state;
-        h -= modulo_ * std::floor(h * inverse_modulo_);
+        state_t q = std::floor(x * inverse_modulo_);
+        state_t result = x - q * modulo_;
+
         // Clamp into the [0, modulo_) range.
-        h += modulo_ * (h < 0.0);
-        h -= modulo_ * (h >= modulo_);
+        if (result >= modulo_) result -= modulo_;
+        if (result < 0.0) result += modulo_;
 
-        sz_assert_(h >= 0 && "Intermediate state underflows the zero");
-        sz_assert_(h < limit_k && "Intermediate state overflows the limit");
-        sz_assert_(static_cast<std::uint64_t>(state) % static_cast<std::uint64_t>(modulo_) ==
-                       static_cast<std::uint64_t>(h) &&
+        sz_assert_(result >= 0 && "Intermediate x underflows the zero");
+        sz_assert_(result < limit_k && "Intermediate x overflows the limit");
+        sz_assert_(static_cast<std::uint64_t>(std::fmod(x, modulo_) + (std::fmod(x, modulo_) < 0.0 ? modulo_ : 0.0)) ==
+                       static_cast<std::uint64_t>(result) &&
                    "Floating point modulo was incorrect");
-
-        return h;
+        return result;
     }
 
     std::size_t window_width_;
     state_t multiplier_;
     state_t modulo_;
     state_t inverse_modulo_;
-    state_t discarding_multiplier_;
+    state_t negative_discarding_multiplier_;
 };
 
 #pragma endregion - Baseline Rolling Hashers
@@ -937,7 +928,7 @@ struct floating_rolling_hashers {
     }
 
   private:
-    inline state_t reduce(state_t h, std::size_t dim) const noexcept {
+    inline state_t barrett_mod(state_t h, std::size_t dim) const noexcept {
         state_t const modulo = modulos_[dim];
         state_t const inverse_modulo = inverse_modulos_[dim];
         // Use STL-based modulo reduction like floating_rolling_hasher
@@ -945,6 +936,9 @@ struct floating_rolling_hashers {
         // Clamp into the [0, modulo) range.
         h += modulo * (h < 0.0);
         h -= modulo * (h >= modulo);
+        // Handle potential precision issues with additional clamping
+        if (h < 0.0) h += modulo;
+        if (h >= modulo) h -= modulo;
         return h;
     }
 
@@ -956,7 +950,7 @@ struct floating_rolling_hashers {
             minimum_floats[dim] = skipped_rolling_hash_k;
         }
 
-        if (text.size() > window_width_k) return;
+        if (text.size() < window_width_k) return;
 
         // Until we reach the maximum window length, use a branching code version
         for (std::size_t new_char_offset = 0; new_char_offset < window_width_k; ++new_char_offset) {
@@ -966,7 +960,7 @@ struct floating_rolling_hashers {
                 rolling_state_t &hash = last_floats[dim];
                 state_t state = sz_bitcast_(state_t, hash);
                 state += multipliers_[dim] * new_term;
-                state = reduce(state, dim);
+                state = barrett_mod(state, dim);
 
                 // Save back
                 hash = sz_bitcast_(rolling_state_t, state);
@@ -988,7 +982,7 @@ struct floating_rolling_hashers {
                 state_t state = sz_bitcast_(state_t, hash);
                 state += negative_discarding_multipliers_[dim] * old_term; // Remove tail
                 state += multipliers_[dim] * new_term;                     // Add head
-                state = reduce(state, dim);
+                state = barrett_mod(state, dim);
 
                 // Save back
                 hash = sz_bitcast_(rolling_state_t, state);
