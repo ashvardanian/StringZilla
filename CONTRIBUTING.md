@@ -416,9 +416,9 @@ Python bindings are implemented using pure CPython, so you wouldn't need to inst
 Still, you need a virtual environment, and it's recommended to use `uv` to create one.
 
 ```bash
-uv venv --python 3.11           # Or your preferred Python version
-source .venv/bin/activate       # To activate the virtual environment
-pip install -e .                # To build locally from source
+uv venv --python 3.11                   # or your preferred Python version
+source .venv/bin/activate               # to activate the virtual environment
+uv pip install -e . --force-reinstall   # to build locally from source
 ```
 
 ### Testing
@@ -426,8 +426,10 @@ pip install -e .                # To build locally from source
 For testing we use PyTest, which may not be installed on your system.
 
 ```bash
-pip install pytest numpy        # NumPy is optional, but recommended
-pytest scripts/test.py -s -x    # Runs tests printing logs and stops on the first failure
+uv pip install pytest pytest-repeat numpy pyarrow                                       # for repeated fuzzy tests
+uv run --no-project python -m pytest scripts/test_stringzilla.py                        # to run with default settings
+uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -p no:warnings   # to pass custom settings
+uv run --no-project python -c 'from stringzilla import hash as sz_hash; print(sz_hash("abc", 100))'
 ```
 
 StringZilla for Python seems to cover more OS and hardware combinations, than NumPy.
