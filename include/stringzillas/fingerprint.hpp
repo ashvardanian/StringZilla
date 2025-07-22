@@ -278,7 +278,7 @@ inline std::uint64_t choose_coprime_modulo(std::uint64_t multiplier, std::uint64
     if (!(bound & 1u)) --bound; // Make odd
 
     for (std::uint64_t p = bound; p >= 3; p -= 2)
-        if (std::gcd(p, multiplier) != 1) continue;
+        if (std::gcd(p, multiplier) == 1) return p;
 
     return 0;
 }
