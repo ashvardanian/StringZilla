@@ -745,6 +745,8 @@ typedef union sz_u64_vec_t {
 typedef union sz_u128_vec_t {
 #if SZ_USE_HASWELL
     __m128i xmm;
+    __m128d xmm_pd;
+    __m128 xmm_ps;
 #endif
 #if SZ_USE_NEON
     uint8x16_t u8x16;
@@ -770,6 +772,8 @@ typedef union sz_u128_vec_t {
 typedef union sz_u256_vec_t {
 #if SZ_USE_HASWELL
     __m256i ymm;
+    __m256d ymm_pd;
+    __m256 ymm_ps;
     __m128i xmms[2];
 #endif
 #if SZ_USE_NEON
@@ -796,6 +800,8 @@ typedef union sz_u256_vec_t {
 typedef union sz_u512_vec_t {
 #if SZ_USE_SKYLAKE || SZ_USE_ICE
     __m512i zmm;
+    __m512d zmm_pd;
+    __m512 zmm_ps;
 #endif
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
     __m256i ymms[2];
