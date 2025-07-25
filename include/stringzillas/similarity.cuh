@@ -1232,7 +1232,7 @@ template <                                                       //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void _linear_score_across_cuda_device(              //
+__global__ void linear_score_across_cuda_device_(              //
     char_type_ const *shorter_ptr, index_type_ shorter_length, //
     char_type_ const *longer_ptr, index_type_ longer_length,   //
     final_score_type_ *result_ptr, score_type_ *diagonals_ptr, //
@@ -1409,7 +1409,7 @@ template <                                                       //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void _affine_score_across_cuda_device(              //
+__global__ void affine_score_across_cuda_device(               //
     char_type_ const *shorter_ptr, index_type_ shorter_length, //
     char_type_ const *longer_ptr, index_type_ longer_length,   //
     final_score_type_ *result_ptr, score_type_ *diagonals_ptr, //
@@ -1613,7 +1613,7 @@ template < //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void _linear_score_on_each_cuda_warp(                             //
+__global__ void linear_score_on_each_cuda_warp_(                             //
     task_type_ *tasks, size_t tasks_count,                                   //
     substituter_type_ const substituter, linear_gap_costs_t const gap_costs, //
     uint const shared_memory_size) {
@@ -1806,7 +1806,7 @@ template < //
     sz_similarity_locality_t locality_ = sz_similarity_global_k, //
     sz_capability_t capability_ = sz_cap_cuda_k                  //
     >
-__global__ void _affine_score_on_each_cuda_warp(                             //
+__global__ void affine_score_on_each_cuda_warp_(                             //
     task_type_ *tasks, size_t tasks_count,                                   //
     substituter_type_ const substituter, affine_gap_costs_t const gap_costs, //
     uint const shared_memory_size) {
@@ -2122,26 +2122,26 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         if (device_level_tasks.size()) {
             auto device_level_u16_kernel =
                 is_affine_k //
-                    ? (void *)&_affine_score_across_cuda_device<char_t, sz_u16_t, sz_u16_t, final_score_t,
-                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                                sz_similarity_global_k, capability_k>
-                    : (void *)&_linear_score_across_cuda_device<char_t, sz_u16_t, sz_u16_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u16_t, sz_u16_t, final_score_t,
+                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
+                                                               sz_similarity_global_k, capability_k>
+                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u16_t, sz_u16_t, final_score_t,
                                                                 uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                 sz_similarity_global_k, capability_k>;
             auto device_level_u32_kernel =
                 is_affine_k //
-                    ? (void *)&_affine_score_across_cuda_device<char_t, sz_u32_t, sz_u32_t, final_score_t,
-                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                                sz_similarity_global_k, capability_k>
-                    : (void *)&_linear_score_across_cuda_device<char_t, sz_u32_t, sz_u32_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u32_t, sz_u32_t, final_score_t,
+                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
+                                                               sz_similarity_global_k, capability_k>
+                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u32_t, sz_u32_t, final_score_t,
                                                                 uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                 sz_similarity_global_k, capability_k>;
             auto device_level_u64_kernel =
                 is_affine_k //
-                    ? (void *)&_affine_score_across_cuda_device<char_t, sz_u64_t, sz_u64_t, final_score_t,
-                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                                sz_similarity_global_k, capability_k>
-                    : (void *)&_linear_score_across_cuda_device<char_t, sz_u64_t, sz_u64_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u64_t, sz_u64_t, final_score_t,
+                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
+                                                               sz_similarity_global_k, capability_k>
+                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u64_t, sz_u64_t, final_score_t,
                                                                 uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                 sz_similarity_global_k, capability_k>;
             void *device_level_kernel_args[8];
@@ -2195,18 +2195,18 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         if (warp_level_tasks.size()) {
             auto warp_level_u8_kernel =
                 is_affine_k
-                    ? (void *)&_affine_score_on_each_cuda_warp<task_t, char_t, sz_u8_t, sz_u8_t,
+                    ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, sz_u8_t, sz_u8_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>
-                    : (void *)&_linear_score_on_each_cuda_warp<task_t, char_t, sz_u8_t, sz_u8_t,
+                    : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, sz_u8_t, sz_u8_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>;
             auto warp_level_u16_kernel =
                 is_affine_k
-                    ? (void *)&_affine_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_u16_t,
+                    ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, sz_u16_t, sz_u16_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>
-                    : (void *)&_linear_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_u16_t,
+                    : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, sz_u16_t, sz_u16_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>;
             void *warp_level_kernel_args[5];
@@ -2789,18 +2789,18 @@ struct _cuda_nw_or_sw_byte_level_scores {
         if (device_level_tasks.size()) {
             auto device_level_i32_kernel =
                 is_affine_k //
-                    ? (void *)&_affine_score_across_cuda_device<char_t, sz_u32_t, sz_i32_t, final_score_t,
-                                                                error_costs_256x256_in_cuda_constant_memory_t,
-                                                                sz_maximize_score_k, locality_k, capability_k>
-                    : (void *)&_linear_score_across_cuda_device<char_t, sz_u32_t, sz_i32_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u32_t, sz_i32_t, final_score_t,
+                                                               error_costs_256x256_in_cuda_constant_memory_t,
+                                                               sz_maximize_score_k, locality_k, capability_k>
+                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u32_t, sz_i32_t, final_score_t,
                                                                 error_costs_256x256_in_cuda_constant_memory_t,
                                                                 sz_maximize_score_k, locality_k, capability_k>;
             auto device_level_i64_kernel =
                 is_affine_k //
-                    ? (void *)&_affine_score_across_cuda_device<char_t, sz_u64_t, sz_i64_t, final_score_t,
-                                                                error_costs_256x256_in_cuda_constant_memory_t,
-                                                                sz_maximize_score_k, locality_k, capability_k>
-                    : (void *)&_linear_score_across_cuda_device<char_t, sz_u64_t, sz_i64_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u64_t, sz_i64_t, final_score_t,
+                                                               error_costs_256x256_in_cuda_constant_memory_t,
+                                                               sz_maximize_score_k, locality_k, capability_k>
+                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u64_t, sz_i64_t, final_score_t,
                                                                 error_costs_256x256_in_cuda_constant_memory_t,
                                                                 sz_maximize_score_k, locality_k, capability_k>;
             void *device_level_kernel_args[8];
@@ -2851,17 +2851,17 @@ struct _cuda_nw_or_sw_byte_level_scores {
         // From the highest possible number of warps per multiprocessor to the lowest.
         if (warp_level_tasks.size()) {
             auto warp_level_i16_kernel =
-                is_affine_k ? (void *)&_affine_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_i16_t,
+                is_affine_k ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, sz_u16_t, sz_i16_t,
                                                                        error_costs_256x256_in_cuda_constant_memory_t,
                                                                        sz_maximize_score_k, locality_k, capability_k>
-                            : (void *)&_linear_score_on_each_cuda_warp<task_t, char_t, sz_u16_t, sz_i16_t,
+                            : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, sz_u16_t, sz_i16_t,
                                                                        error_costs_256x256_in_cuda_constant_memory_t,
                                                                        sz_maximize_score_k, locality_k, capability_k>;
             auto warp_level_i32_kernel =
-                is_affine_k ? (void *)&_affine_score_on_each_cuda_warp<task_t, char_t, sz_u32_t, sz_i32_t,
+                is_affine_k ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, sz_u32_t, sz_i32_t,
                                                                        error_costs_256x256_in_cuda_constant_memory_t,
                                                                        sz_maximize_score_k, locality_k, capability_k>
-                            : (void *)&_linear_score_on_each_cuda_warp<task_t, char_t, sz_u32_t, sz_i32_t,
+                            : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, sz_u32_t, sz_i32_t,
                                                                        error_costs_256x256_in_cuda_constant_memory_t,
                                                                        sz_maximize_score_k, locality_k, capability_k>;
             void *warp_level_kernel_args[5];
