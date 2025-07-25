@@ -89,10 +89,26 @@
  *  With such minimalistic alphabets of just four characters (AGCT) longer windows might be needed.
  *  For protein sequences the alphabet is 20 characters long, so the window can be shorter, than for DNAs.
  *
- *  @section Fingerprinting/Sketching via @b Weighted-Min-Hashing
+ *  @section Fingerprinting, @b Min-Hashing, or @b Count-Min-Sketching?
  *
  *  Computing one such hash won't help us much in large-scale retrieval tasks, but there is a common technique
- *  called "Min-Hashing" that can. The idea is built around the T
+ *  called "Min-Hashing" that can. The idea is to apply many hash functions for different slices of the input,
+ *  and then output the minimum of each hash function as an individual dimension of a resulting vector.
+ *
+ *  Picking the right number of dimensions is task-dependant. The longer and more diverse are the input strings,
+ *  the more dimensions may be needed to capture their uniqueness. The shorter and more similar the strings,
+ *  the fewer dimensions are needed. A good starting point is to use roughly the same amount of memory as the size
+ *  of input documents. So if you are processing 4 KB memory pages, I'd recommend 1024 dimensions, each encoded
+ *  as a 32-bit integer, which is 4 KB in total.
+ *
+ *  From the hardware perspective, however, on both CPUs and GPUs we vectorize the code. Hash functions that have
+ *  the same window width can be processed simultaneously without complex memory access patterns. Assuming, the state
+ *  of each rolling hash is 8 bytes:
+ *
+ *  - on AVX-512 capable CPUs, take at least 8 hash-functions of each width,
+ *  - on AVX-512 capable CPUs with a physical 512-bit path, take 16 or more, to increase register utilization,
+ *  - on Nvidia GPUs, take at least 32 hash-functions of each width, to activate all 32 threads in a warp.
+ *  - on AMD GPUs, take at least 64 hash-functions of each width, to activate all 64 threads in a wave.
  */
 #ifndef STRINGZILLAS_FINGERPRINT_HPP_
 #define STRINGZILLAS_FINGERPRINT_HPP_
@@ -101,6 +117,7 @@
 #include "stringzilla/memory.h"   // `sz_move`
 #include "stringzillas/types.hpp" // `sz::executor_like`
 
+#include <cstddef>
 #include <limits>   // `std::numeric_limits` for numeric types
 #include <iterator> // `std::iterator_traits` for iterators
 #include <cmath>    // `std::fabsf` for `f32_rolling_hasher`
@@ -505,13 +522,41 @@ struct floating_rolling_hasher<double> {
 
 #pragma region - Optimized Rolling MinHashers
 
+template <size_t dimensions_ = SZ_SIZE_MAX, typename hash_type_ = std::uint32_t, typename count_type_ = std::uint32_t>
+void merge_count_min_sketches(                                                                           //
+    span<hash_type_ const, dimensions_> a_min_hashes, span<count_type_ const, dimensions_> a_min_counts, //
+    span<hash_type_ const, dimensions_> b_min_hashes, span<count_type_ const, dimensions_> b_min_counts, //
+    span<hash_type_, dimensions_> c_min_hashes, span<count_type_, dimensions_> c_min_counts) noexcept {
+
+    sz_assert_(a_min_hashes.size() == b_min_hashes.size() && "Input sketches must have the same size");
+    sz_assert_(a_min_counts.size() == b_min_counts.size() && "Input counts must have the same size");
+    sz_assert_(c_min_hashes.size() == a_min_hashes.size() && "Output hashes must have the same size");
+    sz_assert_(c_min_counts.size() == a_min_counts.size() && "Output counts must have the same size");
+
+    for (std::size_t dim = 0; dim < c_min_hashes.size(); ++dim) {
+        if (a_min_hashes[dim] < b_min_hashes[dim]) {
+            c_min_hashes[dim] = a_min_hashes[dim];
+            c_min_counts[dim] = a_min_counts[dim];
+        }
+        else if (b_min_hashes[dim] < a_min_hashes[dim]) {
+            c_min_hashes[dim] = b_min_hashes[dim];
+            c_min_counts[dim] = b_min_counts[dim];
+        }
+        else {
+            c_min_hashes[dim] = a_min_hashes[dim];
+            c_min_counts[dim] = a_min_counts[dim] + b_min_counts[dim];
+        }
+    }
+}
+
 /**
- *  @brief Boring Min-Hash implementation on top of the baseline Rabin Karp algorithm just for benchmarking.
+ *  @brief Boring Min-Hash / Count-Min-Sketch implementation over any rolling hashing algorithm just for benchmarking.
  *  @tparam hasher_type_ Can be the Rabin-Karp, BuzHash, or anything else compatible.
  */
 template <                                                                           //
     typename hasher_type_ = rabin_karp_rolling_hasher<std::uint32_t, std::uint64_t>, //
-    typename scalar_type_ = typename hasher_type_::hash_t,                           //
+    typename min_hash_type_ = std::uint32_t,                                         //
+    typename min_count_type_ = std::uint32_t,                                        //
     typename allocator_type_ = std::allocator<hasher_type_>                          //
     >
 struct basic_rolling_hashers {
@@ -520,28 +565,23 @@ struct basic_rolling_hashers {
     using rolling_state_t = typename hasher_t::state_t;
     using rolling_hash_t = typename hasher_t::hash_t;
 
-    using result_scalar_t = scalar_type_;
+    using min_hash_t = min_hash_type_;
+    using min_count_t = min_count_type_;
     using allocator_t = allocator_type_;
 
     static constexpr rolling_state_t skipped_rolling_state_k = std::numeric_limits<rolling_state_t>::max();
-    static constexpr rolling_hash_t max_rolling_hash_k = std::numeric_limits<rolling_hash_t>::max();
-    static constexpr result_scalar_t max_result_scalar_k = std::numeric_limits<result_scalar_t>::max();
-
-    struct dimension_state_t {
-        rolling_state_t last = 0;
-        rolling_hash_t minimum = max_rolling_hash_k;
-    };
+    static constexpr rolling_hash_t skipped_rolling_hash_k = std::numeric_limits<rolling_hash_t>::max();
+    static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
 
   private:
     using allocator_traits_t = std::allocator_traits<allocator_type_>;
     using hasher_allocator_t = typename allocator_traits_t::template rebind_alloc<hasher_t>;
-    using dimension_state_allocator_t = typename allocator_traits_t::template rebind_alloc<dimension_state_t>;
-
-    using hashers_t = safe_vector<hasher_t, hasher_allocator_t>;
-    using dimension_states_t = safe_vector<dimension_state_t, dimension_state_allocator_t>;
+    using rolling_states_allocator_t = typename allocator_traits_t::template rebind_alloc<rolling_state_t>;
+    using rolling_hashes_allocator_t = typename allocator_traits_t::template rebind_alloc<rolling_hash_t>;
+    using min_counts_allocator_t = typename allocator_traits_t::template rebind_alloc<min_count_t>;
 
     allocator_t allocator_;
-    hashers_t hashers_;
+    safe_vector<hasher_t, hasher_allocator_t> hashers_;
     std::size_t max_window_width_ = 0;
 
   public:
@@ -595,76 +635,163 @@ struct basic_rolling_hashers {
     }
 
     /**
-     *  @brief Computes the fingerprint of a single @p text on the current thread.
+     *  @brief Computes the fingerprint of a single @p `text` on the current thread.
      *  @param[in] text The input text to hash, typically a UTF-8 encoded string.
-     *  @param[out] result The output fingerprint, a vector of minimum hashes.
+     *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
+     *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      *  @retval status_t::success_k on success, or an error code otherwise.
      *  @retval status_t::bad_alloc_k if the memory allocation fails.
      */
     template <size_t dimensions_ = SZ_SIZE_MAX>
-    status_t try_fingerprint(span<byte_t const> text, span<result_scalar_t, dimensions_> result) const noexcept {
-        sz_assert_(result.size() == dimensions() && "Dimensions number & hashers number mismatch");
+    status_t try_fingerprint(                     //
+        span<byte_t const> text,                  //
+        span<min_hash_t, dimensions_> min_hashes, //
+        span<min_count_t, dimensions_> min_counts) const noexcept {
+
+        sz_assert_(dimensions() == min_hashes.size() && "Dimensions number & hashers number mismatch");
+        sz_assert_(dimensions() == min_counts.size() && "Dimensions number & hash-counts number mismatch");
 
         // Allocate temporary states
-        dimension_states_t dimension_states(allocator_traits_t::select_on_container_copy_construction(allocator_));
-        if (dimension_states.try_resize(dimensions()) != status_t::success_k) return status_t::bad_alloc_k;
+        safe_vector<rolling_state_t, rolling_states_allocator_t> rolling_states_buffer(
+            allocator_traits_t::select_on_container_copy_construction(allocator_));
+        safe_vector<rolling_hash_t, rolling_hashes_allocator_t> rolling_minimums_buffer(
+            allocator_traits_t::select_on_container_copy_construction(allocator_));
+        if (rolling_states_buffer.try_resize(dimensions()) != status_t::success_k &&
+            rolling_minimums_buffer.try_resize(dimensions()) != status_t::success_k)
+            return status_t::bad_alloc_k;
 
-        fingerprint<dimensions_>(text, {dimension_states.data(), dimension_states.size()}, result);
+        // Initialize the starting states
+        for (auto &state : rolling_states_buffer) state = rolling_state_t(0);
+        for (auto &minimum : rolling_minimums_buffer) minimum = skipped_rolling_hash_k;
+
+        // Roll through the entire `text`
+        auto rolling_states = span<rolling_state_t, dimensions_>(rolling_states_buffer);
+        auto rolling_minimums = span<rolling_hash_t, dimensions_>(rolling_minimums_buffer);
+        roll<dimensions_>(text, rolling_states, rolling_minimums, min_counts, 0);
+
+        // Now that the states are updated, export them into the output spans
+        digest<dimensions_>(rolling_minimums, min_hashes);
         return status_t::success_k;
     }
 
     /**
-     *  @brief Computes the fingerprint of a single @p text on the current thread.
-     *  @param[in] text The input text to hash, typically a UTF-8 encoded string.
-     *  @param[inout] states The states of the hashers, used to avoid re-allocating temporary buffers.
-     *  @param[out] result The output fingerprint, a vector of minimum hashes.
+     *  @brief Underlying machinery of `fingerprint` that fills the states of the hashers.
+     *  @param[in] text_chunk A chunk of text to update the @p `last_states` with.
+     *  @param[inout] last_states The last computed floats for each hasher; start with zeroes.
+     *  @param[inout] rolling_minimums The minimum floats for each hasher; start with `skipped_rolling_hash_k`.
+     *  @param[inout] rolling_counts The appearance frequency counts of each @p `rolling_minimums`; start with 1.
+     *  @param[in] passed_progress The offset of the received @p `text_chunk` in the whole text; defaults to 0.
      */
     template <size_t dimensions_ = SZ_SIZE_MAX>
-    void fingerprint(span<byte_t const> text, span<dimension_state_t, dimensions_> dimension_states,
-                     span<result_scalar_t, dimensions_> result) const noexcept {
+    void roll(                                              //
+        span<byte_t const> text_chunk,                      //
+        span<rolling_state_t, dimensions_> last_states,     //
+        span<rolling_hash_t, dimensions_> rolling_minimums, //
+        span<min_count_t, dimensions_> rolling_counts,      //
+        std::size_t const passed_progress = 0) const noexcept {
 
-        sz_assert_(result.size() == dimensions() && "Dimensions number & hashers number mismatch");
-        sz_assert_(dimension_states.size() == dimensions() && "Dimensions number & states number mismatch");
+        sz_assert_(dimensions() == last_states.size() && "Dimensions number & states number mismatch");
+        sz_assert_(dimensions() == rolling_minimums.size() && "Dimensions number & minimums number mismatch");
+        sz_assert_(dimensions() == rolling_counts.size() && "Dimensions number & hash-counts number mismatch");
 
-        fill_states_(text, dimension_states);
-
-        // Export the minimum hashes to the fingerprint
-        for (std::size_t dim = 0; dim < result.size(); ++dim) {
-            hasher_t const &hasher = hashers_[dim];
-            if (hasher.window_width() > text.size()) {
-                rolling_hash_t min_hash = dimension_states[dim].minimum;
-                result[dim] = static_cast<result_scalar_t>(min_hash & max_result_scalar_k);
+        // Until we reach the maximum window length, use a branching code version
+        std::size_t const prefix_length = (std::min)(text_chunk.size(), max_window_width_);
+        std::size_t new_char_offset = passed_progress;
+        for (; new_char_offset < prefix_length; ++new_char_offset) {
+            byte_t const new_char = text_chunk[new_char_offset];
+            for (std::size_t dim = 0; dim < last_states.size(); ++dim) {
+                auto &hasher = hashers_[dim];
+                auto &last_state = last_states[dim];
+                auto &rolling_minimum = rolling_minimums[dim];
+                auto &rolling_count = rolling_counts[dim];
+                if (hasher.window_width() > new_char_offset) {
+                    last_state = hasher.push(last_state, new_char);
+                    if (hasher.window_width() == (new_char_offset + 1)) {
+                        rolling_minimum = (std::min)(rolling_minimum, hasher.digest(last_state));
+                        rolling_count = 1; // First occurrence of this hash
+                    }
+                }
+                else {
+                    auto const old_char = text_chunk[new_char_offset - hasher.window_width()];
+                    last_state = hasher.roll(last_state, old_char, new_char);
+                    auto new_hash = hasher.digest(last_state);
+                    rolling_count += new_hash == rolling_minimum;
+                    rolling_minimum = (std::min)(rolling_minimum, new_hash);
+                }
             }
-            else { result[dim] = max_result_scalar_k; }
+        }
+
+        // Now we can avoid a branch in the nested loop, as we are passed the longest window width
+        for (; new_char_offset < text_chunk.size(); ++new_char_offset) {
+            byte_t const new_char = text_chunk[new_char_offset];
+            for (std::size_t dim = 0; dim < last_states.size(); ++dim) {
+                auto &hasher = hashers_[dim];
+                auto &last_state = last_states[dim];
+                auto &rolling_minimum = rolling_minimums[dim];
+                auto &rolling_count = rolling_counts[dim];
+                auto const old_char = text_chunk[new_char_offset - hasher.window_width()];
+                last_state = hasher.roll(last_state, old_char, new_char);
+                auto new_hash = hasher.digest(last_state);
+                rolling_count += new_hash == rolling_minimum;
+                rolling_minimum = (std::min)(rolling_minimum, new_hash);
+            }
+        }
+    }
+
+    /**
+     *  @brief Converts the rolling minimums into the final minimum hashes.
+     *  @param[in] rolling_minimums The minimum hashes computed by the rolling hashers.
+     *  @param[out] min_hashes The output minimum hashes, which are the final fingerprints.
+     */
+    template <size_t dimensions_ = SZ_SIZE_MAX>
+    void digest(                                                  //
+        span<rolling_hash_t const, dimensions_> rolling_minimums, //
+        span<min_hash_t, dimensions_> min_hashes) const noexcept {
+
+        for (std::size_t dim = 0; dim < min_hashes.size(); ++dim) {
+            rolling_hash_t const rolling_minimum = rolling_minimums[dim];
+            min_hashes[dim] = rolling_minimum == skipped_rolling_hash_k
+                                  ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
+                                  : static_cast<min_hash_t>(rolling_minimum & max_hash_k);
         }
     }
 
     /**
      *  @brief Computes many fingerprints in parallel for input @p texts via an @p executor.
-     *  @param[in] texts The input texts to hash, typically a UTF-8 encoded string.
-     *  @param[out] results The output fingerprints, a array of vectors of minimum hashes.
+     *  @param[in] texts The input texts to hash, typically a sequential container of UTF-8 encoded strings.
+     *  @param[out] min_hashes_per_text The output fingerprints, an array of vectors of minimum hashes.
+     *  @param[out] min_counts_per_text The output frequencies of @p `min_hashes_per_text` hashes.
      *  @param[in] executor The executor to use for parallel processing, defaults to a dummy executor.
      *  @param[in] specs The CPU specifications to use, defaults to an empty `cpu_specs_t`.
      *  @retval status_t::success_k on success, or an error code otherwise.
      *  @retval status_t::bad_alloc_k if the memory allocation fails.
      */
-    template <typename texts_type_, typename fingerprints_type_, typename executor_type_ = dummy_executor_t>
+    template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_,
+              typename executor_type_ = dummy_executor_t>
 #if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(                                        //
-        texts_type_ const &texts, fingerprints_type_ &&results, //
+    status_t operator()(                                                                                  //
+        texts_type_ const &texts,                                                                         //
+        min_hashes_per_text_type_ &&min_hashes_per_text, min_counts_per_text_type_ &&min_counts_per_text, //
         executor_type_ &&executor = {}, cpu_specs_t specs = {}) const noexcept {
 
         // Depending on document sizes, choose the appropriate parallelization strategy
         // - Either split each text into chunks across threads
         // - Or split the texts themselves across threads
-        std::size_t const text_size_threshold = specs.l2_bytes * executor.threads_count();
+        std::size_t const text_size_threshold = executor.threads_count() * specs.l2_bytes;
         std::size_t const dims = dimensions();
 
         // Allocate enough temporary states for all cores to have individual states
-        dimension_states_t dimension_states(allocator_traits_t::select_on_container_copy_construction(allocator_));
-        if (dimension_states.try_resize(executor.threads_count() * dims) != status_t::success_k)
+        safe_vector<rolling_state_t, rolling_states_allocator_t> rolling_states(
+            allocator_traits_t::select_on_container_copy_construction(allocator_));
+        safe_vector<rolling_hash_t, rolling_hashes_allocator_t> rolling_minimums(
+            allocator_traits_t::select_on_container_copy_construction(allocator_));
+        safe_vector<min_count_t, min_counts_allocator_t> rolling_counts(
+            allocator_traits_t::select_on_container_copy_construction(allocator_));
+        if (rolling_states.try_resize(executor.threads_count() * dims) != status_t::success_k ||
+            rolling_minimums.try_resize(executor.threads_count() * dims) != status_t::success_k ||
+            rolling_counts.try_resize(executor.threads_count() * dims) != status_t::success_k)
             return status_t::bad_alloc_k;
 
         // Process small texts by individual threads
@@ -675,10 +802,14 @@ struct basic_rolling_hashers {
             auto const &text = texts[text_index];
             if (text.size() >= text_size_threshold) return;
 
-            auto text_view = to_bytes_view(text);
-            auto thread_local_states = to_span(dimension_states).subspan(thread_index * dims, dims);
-            auto result = to_span(results[text_index]);
-            fingerprint<SZ_SIZE_MAX>(text_view, thread_local_states, result);
+            auto min_hashes = to_span(min_hashes_per_text[text_index]);
+            auto min_counts = to_span(min_counts_per_text[text_index]);
+
+            span<byte_t const> text_view = to_bytes_view(text);
+            span<rolling_state_t> thread_local_states {rolling_states.data() + thread_index * dims, dims};
+            span<rolling_hash_t> thread_local_minimums {rolling_minimums.data() + thread_index * dims, dims};
+            roll<SZ_SIZE_MAX>(text_view, thread_local_states, thread_local_minimums, min_counts);
+            digest<SZ_SIZE_MAX>(thread_local_minimums, min_hashes);
         });
 
         // Process large texts by splitting them into chunks
@@ -695,73 +826,145 @@ struct basic_rolling_hashers {
 
             // Distribute overlapping chunks across threads
             executor.for_threads([&](std::size_t thread_index) noexcept {
-                auto text_start = text_view.data() + std::min(text_view.size(), thread_index * chunk_size);
+                auto text_start = text_view.data() + (std::min)(text_view.size(), thread_index * chunk_size);
                 // ? This overlap will be different for different window widths, but assuming we are
                 // ? computing the non-weighted Min-Hash, recomputing & comparing a few hashes for the
                 // ? same slices isn't a big deal.
-                auto overlapping_text_end = std::min(text_start + chunk_size + max_window_width_ - 1, text_view.end());
+                auto overlapping_text_end =
+                    (std::min)(text_start + chunk_size + max_window_width_ - 1, text_view.end());
                 auto thread_local_text = span<byte_t const>(text_start, overlapping_text_end);
-                auto thread_local_states = to_span(dimension_states).subspan(thread_index * dims, dims);
-                fill_states_<SZ_SIZE_MAX>(thread_local_text, thread_local_states);
+                auto thread_local_states = span<rolling_state_t> {rolling_states.data() + thread_index * dims, dims};
+                auto thread_local_minimums = span<rolling_hash_t> {rolling_minimums.data() + thread_index * dims, dims};
+                auto thread_local_counts = span<min_count_t> {rolling_counts.data() + thread_index * dims, dims};
+                roll<SZ_SIZE_MAX>(thread_local_text, thread_local_states, thread_local_minimums, thread_local_counts);
             });
 
             // Compute the minimums of each thread's local states
-            auto &result = results[text_index];
-            for (std::size_t dim = 0; dim < result.size(); ++dim) {
-                rolling_hash_t min_hash = max_rolling_hash_k;
+            auto min_hashes = to_span(min_hashes_per_text[text_index]);
+            auto min_counts = to_span(min_counts_per_text[text_index]);
+            for (std::size_t dim = 0; dim < min_hashes.size(); ++dim) {
+                rolling_hash_t min_hash = skipped_rolling_hash_k;
+                min_count_t min_count = 0;
                 for (std::size_t thread_index = 0; thread_index < executor.threads_count(); ++thread_index) {
-                    rolling_hash_t const &dimension_state = dimension_states[thread_index * dims + dim];
-                    min_hash = (std::min)(min_hash, dimension_state.minimum);
+                    rolling_hash_t thread_local_min_hash = rolling_minimums[thread_index * dims + dim];
+                    min_count_t thread_local_min_count = rolling_counts[thread_index * dims + dim];
+                    if (thread_local_min_hash == min_hash) { min_count += thread_local_min_count; }
+                    else if (thread_local_min_hash > min_hash) { continue; }
+                    else { min_hash = thread_local_min_hash, min_count = thread_local_min_count; }
                 }
-                result[dim] = static_cast<result_scalar_t>(min_hash & max_result_scalar_k);
+                min_hashes[dim] = static_cast<min_hash_t>(min_hash & max_hash_k);
+                min_counts[dim] = min_count;
             }
         }
 
         return status_t::success_k;
     }
-
-  private:
-    template <size_t dimensions_ = SZ_SIZE_MAX>
-    void fill_states_(span<byte_t const> text, span<dimension_state_t, dimensions_> states) const noexcept {
-
-        sz_assert_(states.size() >= hashers_.size() && "Dimensions number & states number mismatch");
-
-        // Clear the states
-        for (auto &state : states) state = dimension_state_t {};
-
-        // Until we reach the maximum window length, use a branching code version
-        std::size_t const prefix_length = (std::min)(text.size(), max_window_width_);
-        for (std::size_t new_char_offset = 0; new_char_offset < prefix_length; ++new_char_offset) {
-            byte_t const new_char = text[new_char_offset];
-            for (std::size_t dim = 0; dim < states.size(); ++dim) {
-                auto &hasher = hashers_[dim];
-                auto &state = states[dim];
-                if (hasher.window_width() > new_char_offset) {
-                    state.last = hasher.push(state.last, new_char);
-                    if (hasher.window_width() == (new_char_offset + 1))
-                        state.minimum = (std::min)(state.minimum, hasher.digest(state.last));
-                }
-                else {
-                    auto const old_char = text[new_char_offset - hasher.window_width()];
-                    state.last = hasher.roll(state.last, old_char, new_char);
-                    state.minimum = (std::min)(state.minimum, hasher.digest(state.last));
-                }
-            }
-        }
-
-        // Now we can avoid a branch in the nested loop, as we are passed the longest window width
-        for (std::size_t new_char_offset = max_window_width_; new_char_offset < text.size(); ++new_char_offset) {
-            byte_t const new_char = text[new_char_offset];
-            for (std::size_t dim = 0; dim < states.size(); ++dim) {
-                auto &hasher = hashers_[dim];
-                auto &state = states[dim];
-                auto const old_char = text[new_char_offset - hasher.window_width()];
-                state.last = hasher.roll(state.last, old_char, new_char);
-                state.minimum = (std::min)(state.minimum, hasher.digest(state.last));
-            }
-        }
-    }
 };
+
+/**
+ *  @brief Computes many fingerprints in parallel for input @p texts, calling @p engine on each thread of @p executor.
+ *  @param[in] texts The input texts to hash, typically a UTF-8 encoded string.
+ *  @param[out] results The output fingerprints, a array of vectors of minimum hashes.
+ *  @param[in] executor The executor to use for parallel processing, defaults to a dummy executor.
+ *  @param[in] specs The CPU specifications to use, defaults to an empty `cpu_specs_t`.
+ *  @retval status_t::success_k on success, or an error code otherwise.
+ *  @retval status_t::bad_alloc_k if the memory allocation fails.
+ */
+template <typename engine_type_, typename texts_type_, typename min_hashes_per_text_type_,
+          typename min_counts_per_text_type_,
+          typename executor_type_ = dummy_executor_t>
+#if SZ_IS_CPP20_
+    requires executor_like<executor_type_>
+#endif
+status_t floating_rolling_hashers_in_parallel_(                                                       //
+    engine_type_ const &engine, texts_type_ const &texts,                                             //
+    min_hashes_per_text_type_ &&min_hashes_per_text, min_counts_per_text_type_ &&min_counts_per_text, //
+    executor_type_ &&executor = {}, cpu_specs_t specs = {}) noexcept {
+
+    using engine_t = engine_type_;
+    using rolling_state_t = typename engine_t::rolling_state_t;
+    using min_count_t = typename engine_t::min_count_t;
+    using min_hash_t = typename engine_t::min_hash_t;
+    static constexpr auto window_width_k = engine_t::window_width_k;
+    static constexpr auto dimensions_k = engine_t::dimensions_k;
+    static constexpr auto skipped_rolling_state_k = engine_t::skipped_rolling_state_k;
+    static constexpr auto skipped_rolling_hash_k = engine_t::skipped_rolling_hash_k;
+
+    // Depending on document sizes, choose the appropriate parallelization strategy
+    // - Either split each text into chunks across threads
+    // - Or split the texts themselves across threads
+    std::size_t const text_size_threshold = specs.l2_bytes * executor.threads_count();
+
+    // Process small texts by individual threads
+    executor.for_n_dynamic(texts.size(), [&](auto prong) noexcept {
+        auto const text_index = prong.task;
+
+        auto const &text = texts[text_index];
+        if (text.size() >= text_size_threshold) return;
+
+        auto text_view = to_bytes_view(text);
+        auto min_hashes = to_span<dimensions_k>(min_hashes_per_text[text_index]);
+        auto min_counts = to_span<dimensions_k>(min_counts_per_text[text_index]);
+        engine.fingerprint(text_view, min_hashes, min_counts);
+    });
+
+    // Process large texts by splitting them into chunks
+    for (std::size_t text_index = 0; text_index < texts.size(); ++text_index) {
+
+        auto const &text = texts[text_index];
+        if (text.size() < text_size_threshold) continue;
+
+        // Split the text into chunks of the maximum window width
+        auto text_view = to_bytes_view(text);
+        std::size_t const chunk_size = round_up_to_multiple(             //
+            divide_round_up(text_view.size(), executor.threads_count()), //
+            specs.cache_line_width);
+
+        rolling_state_t states[dimensions_k];
+        rolling_state_t minimums[dimensions_k];
+        for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
+            states[dim] = skipped_rolling_state_k;
+            minimums[dim] = skipped_rolling_hash_k;
+        }
+
+        // Distribute overlapping chunks across threads
+        auto min_hashes = to_span(min_hashes_per_text[text_index]);
+        auto min_counts = to_span(min_counts_per_text[text_index]);
+        auto gather_mutex = executor.make_mutex();
+        executor.for_threads([&](std::size_t thread_index) noexcept {
+            auto text_start = text_view.data() + (std::min)(text_view.size(), thread_index * chunk_size);
+            // ? This overlap will be different for different window widths, but assuming we are
+            // ? computing the non-weighted Min-Hash, recomputing & comparing a few hashes for the
+            // ? same slices isn't a big deal.
+            auto overlapping_text_end = (std::min)(text_start + chunk_size + window_width_k - 1, text_view.end());
+            auto thread_local_text = span<byte_t const>(text_start, overlapping_text_end);
+
+            rolling_state_t thread_local_states[dimensions_k];
+            rolling_state_t thread_local_minimums[dimensions_k];
+            min_count_t thread_local_counts[dimensions_k];
+            engine.roll(thread_local_text, thread_local_states, thread_local_minimums, thread_local_counts);
+
+            lock_guard lock(gather_mutex);
+            for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
+                rolling_state_t &min_hash = minimums[dim];
+                min_count_t &min_count = min_counts[dim];
+                rolling_state_t thread_local_min_hash = thread_local_minimums[dim];
+                min_count_t thread_local_min_count = thread_local_counts[dim];
+                if (thread_local_min_hash == min_hash) { min_count += thread_local_min_count; }
+                else if (thread_local_min_hash > min_hash) { continue; }
+                else { min_hash = thread_local_min_hash, min_count = thread_local_min_count; }
+            }
+        });
+
+        // Digest the smallest hash states, luckily for us, for this hash function,
+        // the smallest state corresponds to the smallest digested hash :)
+        // This is also never a bottleneck, so let's keep it sequential for simplicity.
+
+        engine.digest(span<rolling_state_t const, dimensions_k>(minimums), span<min_hash_t, dimensions_k>(min_hashes));
+    }
+
+    return status_t::success_k;
+}
 
 /**
  *  @brief Optimized rolling Min-Hashers via floats, @b constrained to a certain dimensionality & window width.
@@ -775,35 +978,36 @@ struct basic_rolling_hashers {
  *
  *  @tparam capability_ The CPU capability, e.g., `sz_cap_serial_k`, `sz_cap_ice_k`, etc.
  *  @tparam window_width_ The width of the rolling window, e.g., 3, 4, 5, 6, etc.
- *  @tparam dimensions_ The number of dimensions in the fingerprint, ideally a multiple of 16, like 64 or 80.
+ *  @tparam dimensions_ The number of dimensions in the fingerprint, recommended a multiple of 16, ideally @b 64.
  *  @tparam enable_ A type used to enable or disable this specialization, e.g., `void` for default.
  */
 template <                                         //
     sz_capability_t capability_ = sz_cap_serial_k, //
     std::size_t window_width_ = SZ_SIZE_MAX,       //
-    std::size_t dimensions_ = 16,                  //
+    std::size_t dimensions_ = 64,                  //
     typename enable_ = void                        //
     >
 struct floating_rolling_hashers {
 
     using hasher_t = floating_rolling_hasher<double>;
-    using rolling_state_t = typename hasher_t::hash_t;
-    using result_scalar_t = std::uint32_t;
+    using rolling_state_t = double;
+    using min_hash_t = std::uint32_t;
+    using min_count_t = std::uint32_t;
 
     static constexpr std::size_t window_width_k = window_width_;
     static constexpr std::size_t dimensions_k = dimensions_;
+    static constexpr rolling_state_t skipped_rolling_state_k = std::numeric_limits<rolling_state_t>::max();
     static constexpr rolling_state_t skipped_rolling_hash_k = std::numeric_limits<rolling_state_t>::max();
-    static constexpr result_scalar_t max_result_scalar_k = std::numeric_limits<result_scalar_t>::max();
+    static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
 
-    using fingerprint_span_t = span<result_scalar_t, dimensions_k>;
+    using min_hashes_span_t = span<min_hash_t, dimensions_k>;
+    using min_counts_span_t = span<min_count_t, dimensions_k>;
 
   private:
-    using state_t = typename hasher_t::state_t;
-
-    state_t multipliers_[dimensions_k];
-    state_t modulos_[dimensions_k];
-    state_t inverse_modulos_[dimensions_k];
-    state_t negative_discarding_multipliers_[dimensions_k];
+    rolling_state_t multipliers_[dimensions_k];
+    rolling_state_t modulos_[dimensions_k];
+    rolling_state_t inverse_modulos_[dimensions_k];
+    rolling_state_t negative_discarding_multipliers_[dimensions_k];
 
   public:
     constexpr std::size_t window_width() const noexcept { return window_width_k; }
@@ -827,168 +1031,152 @@ struct floating_rolling_hashers {
     /**
      *  @brief Computes the fingerprint of a single @p text on the current thread.
      *  @param[in] text The input text to hash, typically a UTF-8 encoded string.
-     *  @param[out] result The output fingerprint, a vector of minimum hashes.
+     *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
+     *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      */
-    void fingerprint(span<byte_t const> text, fingerprint_span_t result) const noexcept {
+    void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                     min_counts_span_t min_counts) const noexcept {
 
         // Fill the states
-        rolling_state_t last_floats[dimensions_k];
-        rolling_state_t minimum_floats[dimensions_k];
-        fill_states_(text, last_floats, minimum_floats);
+        rolling_state_t rolling_states[dimensions_k];
+        rolling_state_t rolling_minimums[dimensions_k];
+        min_count_t rolling_counts[dimensions_k];
+        for (std::size_t dim = 0; dim < dimensions_k; ++dim)
+            rolling_states[dim] = 0, rolling_minimums[dim] = skipped_rolling_hash_k, rolling_counts[dim] = 0;
+
+        // Roll through the whole input at once
+        if (text.size() >= window_width_k) roll(text, rolling_states, rolling_minimums, rolling_counts);
 
         // Export the minimum floats to the fingerprint
         for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-            result[dim] = static_cast<result_scalar_t>(minimum_floats[dim]); // & max_result_scalar_k);
+            min_hashes[dim] = static_cast<min_hash_t>(rolling_minimums[dim] & max_hash_k),
+            min_counts[dim] = rolling_counts[dim];
     }
 
     /**
      *  @brief Computes the fingerprint of a single @p text on the current thread.
      *  @param[in] text The input text to hash, typically a UTF-8 encoded string.
-     *  @param[out] result The output fingerprint, a vector of minimum hashes.
+     *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
+     *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      */
-    status_t try_fingerprint(span<byte_t const> text, fingerprint_span_t result) const noexcept {
-        fingerprint(text, result);
+    status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                             min_counts_span_t min_counts) const noexcept {
+        fingerprint(text, min_hashes, min_counts);
         return status_t::success_k;
     }
 
     /**
+     *  @brief Underlying machinery of `fingerprint` that fills the states of the hashers.
+     *  @param[in] text_chunk A chunk of text to update the @p `last_states` with.
+     *  @param[inout] last_states The last computed floats for each hasher; start with zeroes.
+     *  @param[inout] rolling_minimums The minimum floats for each hasher; start with `skipped_rolling_hash_k`.
+     *  @param[inout] rolling_counts The appearance frequency counts of each @p `rolling_minimums`; start with 1.
+     *  @param[in] passed_progress The offset of the received @p `text_chunk` in the whole text; defaults to 0.
+     */
+    void roll(                                                //
+        span<byte_t const> text_chunk,                        //
+        span<rolling_state_t, dimensions_k> last_states,      //
+        span<rolling_state_t, dimensions_k> rolling_minimums, //
+        span<min_count_t, dimensions_k> rolling_counts,       //
+        std::size_t const passed_progress = 0) const noexcept {
+
+        // Until we reach the maximum window length, use a branching code version
+        std::size_t const prefix_length = (std::min)(text_chunk.size(), window_width_k);
+        std::size_t new_char_offset = passed_progress;
+        for (; new_char_offset < prefix_length; ++new_char_offset) {
+            byte_t const new_char = text_chunk[new_char_offset];
+            rolling_state_t const new_term = static_cast<rolling_state_t>(new_char) + 1.0;
+            for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
+                rolling_state_t &last_state = last_states[dim];
+                last_state += multipliers_[dim] * new_term;
+                last_state = barrett_mod(last_state, dim);
+            }
+        }
+
+        // We now have our first minimum hashes
+        if (new_char_offset == prefix_length)
+            for (std::size_t dim = 0; dim < dimensions_k; ++dim)
+                rolling_minimums[dim] = (std::min)(rolling_minimums[dim], last_states[dim]),
+                rolling_counts[dim] = 1; // First occurrence of this hash
+
+        // Now we can avoid a branch in the nested loop, as we are passed the longest window width
+        for (; new_char_offset < text_chunk.size(); ++new_char_offset) {
+            byte_t const new_char = text_chunk[new_char_offset];
+            byte_t const old_char = text_chunk[new_char_offset - window_width_k];
+            rolling_state_t const new_term = static_cast<rolling_state_t>(new_char) + 1.0;
+            rolling_state_t const old_term = static_cast<rolling_state_t>(old_char) + 1.0;
+            for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
+                rolling_state_t &last_state = last_states[dim];
+                rolling_state_t &rolling_minimum = rolling_minimums[dim];
+                min_count_t &rolling_count = rolling_counts[dim];
+
+                last_state += negative_discarding_multipliers_[dim] * old_term; // Remove tail
+                last_state = barrett_mod(last_state, dim);
+                last_state += multipliers_[dim] * new_term; // Add head
+                last_state = barrett_mod(last_state, dim);
+
+                if (rolling_minimum == last_state) { rolling_count++; }
+                else if (last_state < rolling_minimum) { rolling_minimum = last_state, rolling_count = 1; }
+            }
+        }
+    }
+
+    /**
+     *  @brief Converts the rolling minimums into the final minimum hashes.
+     *  @param[in] rolling_minimums The minimum hashes computed by the rolling hashers.
+     *  @param[out] min_hashes The output minimum hashes, which are the final fingerprints.
+     */
+    template <std::size_t digest_dimensions_ = SZ_SIZE_MAX>
+    void digest(                                                          //
+        span<rolling_state_t const, digest_dimensions_> rolling_minimums, //
+        span<min_hash_t, digest_dimensions_> min_hashes) const noexcept {
+
+        for (std::size_t dim = 0; dim < min_hashes.size(); ++dim) {
+            rolling_state_t const rolling_minimum = rolling_minimums[dim];
+            min_hashes[dim] = rolling_minimum == skipped_rolling_hash_k
+                                  ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
+                                  : static_cast<min_hash_t>(static_cast<std::uint64_t>(rolling_minimum) & max_hash_k);
+        }
+    }
+
+    /**
      *  @brief Computes many fingerprints in parallel for input @p texts via an @p executor.
-     *  @param[in] texts The input texts to hash, typically a UTF-8 encoded string.
-     *  @param[out] results The output fingerprints, a array of vectors of minimum hashes.
+     *  @param[in] texts The input texts to hash, typically a sequential container of UTF-8 encoded strings.
+     *  @param[out] min_hashes_per_text The output fingerprints, an array of vectors of minimum hashes.
+     *  @param[out] min_counts_per_text The output frequencies of @p `min_hashes_per_text` hashes.
      *  @param[in] executor The executor to use for parallel processing, defaults to a dummy executor.
      *  @param[in] specs The CPU specifications to use, defaults to an empty `cpu_specs_t`.
      *  @retval status_t::success_k on success, or an error code otherwise.
      *  @retval status_t::bad_alloc_k if the memory allocation fails.
      */
-    template <typename texts_type_, typename fingerprints_type_, typename executor_type_ = dummy_executor_t>
+    template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_,
+              typename executor_type_ = dummy_executor_t>
 #if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(                                        //
-        texts_type_ const &texts, fingerprints_type_ &&results, //
-        executor_type_ &&executor = {}, cpu_specs_t specs = {}) const noexcept {
-
-        // Depending on document sizes, choose the appropriate parallelization strategy
-        // - Either split each text into chunks across threads
-        // - Or split the texts themselves across threads
-        std::size_t const text_size_threshold = specs.l2_bytes * executor.threads_count();
-
-        // Process small texts by individual threads
-        executor.for_n_dynamic(texts.size(), [&](auto prong) noexcept {
-            auto const text_index = prong.task;
-
-            auto const &text = texts[text_index];
-            if (text.size() >= text_size_threshold) return;
-
-            auto text_view = to_bytes_view(text);
-            auto result = to_span<dimensions_k>(results[text_index]);
-            fingerprint(text_view, result);
-        });
-
-        // Process large texts by splitting them into chunks
-        for (std::size_t text_index = 0; text_index < texts.size(); ++text_index) {
-
-            auto const &text = texts[text_index];
-            if (text.size() < text_size_threshold) continue;
-
-            // Split the text into chunks of the maximum window width
-            auto text_view = to_bytes_view(text);
-            std::size_t const chunk_size = round_up_to_multiple(             //
-                divide_round_up(text_view.size(), executor.threads_count()), //
-                specs.cache_line_width);
-
-            auto gather_mutex = executor.make_mutex();
-            rolling_state_t minimum_floats[dimensions_k];
-
-            // Distribute overlapping chunks across threads
-            executor.for_threads([&](std::size_t thread_index) noexcept {
-                auto text_start = text_view.data() + std::min(text_view.size(), thread_index * chunk_size);
-                // ? This overlap will be different for different window widths, but assuming we are
-                // ? computing the non-weighted Min-Hash, recomputing & comparing a few hashes for the
-                // ? same slices isn't a big deal.
-                auto overlapping_text_end = std::min(text_start + chunk_size + window_width_k - 1, text_view.end());
-                auto thread_local_text = span<byte_t const>(text_start, overlapping_text_end);
-
-                rolling_state_t thread_local_last_floats[dimensions_k];
-                rolling_state_t thread_local_minimum_floats[dimensions_k];
-                fill_states_(thread_local_text, thread_local_last_floats, thread_local_minimum_floats);
-
-                lock_guard lock(gather_mutex);
-                for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-                    minimum_floats[dim] = (std::min)(minimum_floats[dim], thread_local_minimum_floats[dim]);
-            });
-
-            // Compute the minimums of each thread's local states
-            auto &result = results[text_index];
-            for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-                result[dim] = static_cast<result_scalar_t>(minimum_floats[dim] & max_result_scalar_k);
-        }
-
-        return status_t::success_k;
+    status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes, //
+                        min_counts_per_text_type_ &&min_counts, executor_type_ &&executor = {},
+                        cpu_specs_t specs = {}) noexcept {
+        return floating_rolling_hashers_in_parallel_(            //
+            *this, texts,                                        //
+            std::forward<min_hashes_per_text_type_>(min_hashes), //
+            std::forward<min_counts_per_text_type_>(min_counts), //
+            std::forward<executor_type_>(executor), specs);
     }
 
   private:
-    inline state_t barrett_mod(state_t h, std::size_t dim) const noexcept {
-        state_t const modulo = modulos_[dim];
-        state_t const inverse_modulo = inverse_modulos_[dim];
-        // Use STL-based modulo reduction like floating_rolling_hasher
-        h -= modulo * std::floor(h * inverse_modulo);
+    inline rolling_state_t barrett_mod(rolling_state_t x, std::size_t dim) const noexcept {
+        rolling_state_t const modulo = modulos_[dim];
+        rolling_state_t const inverse_modulo = inverse_modulos_[dim];
+
+        // Use STL-based modulo reduction like `floating_rolling_hasher`
+        rolling_state_t q = std::floor(x * inverse_modulo);
+        rolling_state_t result = x - q * modulo;
+
         // Clamp into the [0, modulo) range.
-        h += modulo * (h < 0.0);
-        h -= modulo * (h >= modulo);
-        // Handle potential precision issues with additional clamping
-        if (h < 0.0) h += modulo;
-        if (h >= modulo) h -= modulo;
-        return h;
-    }
-
-    void fill_states_(span<byte_t const> text, span<rolling_state_t, dimensions_k> last_floats,
-                      span<rolling_state_t, dimensions_k> minimum_floats) const noexcept {
-
-        for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
-            last_floats[dim] = 0;
-            minimum_floats[dim] = skipped_rolling_hash_k;
-        }
-
-        if (text.size() < window_width_k) return;
-
-        // Until we reach the maximum window length, use a branching code version
-        for (std::size_t new_char_offset = 0; new_char_offset < window_width_k; ++new_char_offset) {
-            byte_t const new_char = text[new_char_offset];
-            state_t const new_term = static_cast<state_t>(new_char) + 1.0;
-            for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
-                rolling_state_t &hash = last_floats[dim];
-                state_t state = sz_bitcast_(state_t, hash);
-                state += multipliers_[dim] * new_term;
-                state = barrett_mod(state, dim);
-
-                // Save back
-                hash = sz_bitcast_(rolling_state_t, state);
-            }
-        }
-
-        // We now have our first minimum hashes
-        for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-            minimum_floats[dim] = std::min(minimum_floats[dim], last_floats[dim]);
-
-        // Now we can avoid a branch in the nested loop, as we are passed the longest window width
-        for (std::size_t new_char_offset = window_width_k; new_char_offset < text.size(); ++new_char_offset) {
-            byte_t const new_char = text[new_char_offset];
-            byte_t const old_char = text[new_char_offset - window_width_k];
-            state_t const new_term = static_cast<state_t>(new_char) + 1.0;
-            state_t const old_term = static_cast<state_t>(old_char) + 1.0;
-            for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
-                rolling_state_t &hash = last_floats[dim];
-                state_t state = sz_bitcast_(state_t, hash);
-                state += negative_discarding_multipliers_[dim] * old_term; // Remove tail
-                state += multipliers_[dim] * new_term;                     // Add head
-                state = barrett_mod(state, dim);
-
-                // Save back
-                hash = sz_bitcast_(rolling_state_t, state);
-                minimum_floats[dim] = std::min(minimum_floats[dim], hash);
-            }
-        }
+        result += modulo * (result < 0.0);
+        result -= modulo * (result >= modulo);
+        return result;
     }
 };
 
@@ -999,27 +1187,267 @@ struct floating_rolling_hashers {
  *  Assuming 32x ZMM registers, and roughly 10ish scalars for intermediaries per hash, we can unroll
  *  2-3x times, and process 16-24 hashes in parallel.
  */
-template <std::size_t dimensions_>
-struct floating_rolling_hashers<sz_cap_ice_k, dimensions_> {
+template <std::size_t window_width_, std::size_t dimensions_>
+struct floating_rolling_hashers<sz_cap_ice_k, window_width_, dimensions_> {
 
     using hasher_t = floating_rolling_hasher<double>;
-    using rolling_state_t = typename hasher_t::hash_t;
-    using result_scalar_t = std::uint32_t;
+    using rolling_state_t = double;
+    using min_hash_t = std::uint32_t;
+    using min_count_t = std::uint32_t;
+
+    static constexpr std::size_t window_width_k = window_width_;
     static constexpr std::size_t dimensions_k = dimensions_;
+    static constexpr rolling_state_t skipped_rolling_hash_k = std::numeric_limits<rolling_state_t>::max();
+    static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
 
-    void operator()(span<byte_t const> text, span<hasher_t const, dimensions_k> hashers,
-                    span<result_scalar_t, dimensions_k> fingerprint) const noexcept {
+    using min_hashes_span_t = span<min_hash_t, dimensions_k>;
+    using min_counts_span_t = span<min_count_t, dimensions_k>;
 
-        // constexpr std::size_t unroll_factor_k = 2;
-        // constexpr std::size_t unrolled_hashes_k = unroll_factor_k * sizeof(sz_u512_vec_t) / sizeof(rolling_state_t);
+    static constexpr unsigned unroll_factor_k = 2;
+    static constexpr unsigned hashes_per_zmm_k = sizeof(sz_u512_vec_t) / sizeof(rolling_state_t);
+    static constexpr unsigned hashes_per_unrolled_group_k = unroll_factor_k * hashes_per_zmm_k;
+    static_assert(dimensions_k % hashes_per_unrolled_group_k == 0,
+                  "Dimensions number must be divisible by the hash-count");
+    static_assert(dimensions_k <= 256, "Too many dimensions to keep on stack");
 
-        // sz_u512_vec_t window_widths[unroll_factor_k], multipliers[unroll_factor_k],
-        //     negative_discarding_multipliers[unroll_factor_k], modulos[unroll_factor_k],
-        //     inverse_modulos[unroll_factor_k], states_[unroll_factor_k], min_hashes[unroll_factor_k];
+  private:
+    SZ_ALIGN64 rolling_state_t multipliers_[dimensions_k];
+    SZ_ALIGN64 rolling_state_t modulos_[dimensions_k];
+    SZ_ALIGN64 rolling_state_t inverse_modulos_[dimensions_k];
+    SZ_ALIGN64 rolling_state_t negative_discarding_multipliers_[dimensions_k];
 
-        sz_unused_(text);
-        sz_unused_(hashers);
-        sz_unused_(fingerprint);
+  public:
+    constexpr std::size_t window_width() const noexcept { return window_width_k; }
+    constexpr std::size_t dimensions() const noexcept { return dimensions_k; }
+
+    /**
+     *  @brief Initializes several rolling hashers with different multipliers and modulos.
+     *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
+     */
+    status_t try_seed(std::size_t alphabet_size = 256) noexcept {
+        for (unsigned j = 0; j < dimensions_k; ++j) {
+            hasher_t hasher(window_width_k, alphabet_size + j, hasher_t::default_modulo_base_k);
+            multipliers_[j] = hasher.multiplier();
+            modulos_[j] = hasher.modulo();
+            inverse_modulos_[j] = -hasher.inverse_modulo();
+            negative_discarding_multipliers_[j] = hasher.negative_discarding_multiplier();
+        }
+        return status_t::success_k;
+    }
+
+    /**
+     *  @brief Computes the fingerprint of a single @p text on the current thread.
+     *  @param[in] text The input text to hash, typically a UTF-8 encoded string.
+     *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
+     *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
+     */
+    void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                     min_counts_span_t min_counts) const noexcept {
+
+        // Fill the states
+        rolling_state_t rolling_states[dimensions_k];
+        rolling_state_t rolling_minimums[dimensions_k];
+        min_count_t rolling_counts[dimensions_k];
+        for (std::size_t dim = 0; dim < dimensions_k; ++dim)
+            rolling_states[dim] = 0, rolling_minimums[dim] = skipped_rolling_hash_k, rolling_counts[dim] = 0;
+
+        // Roll through the whole input at once
+        if (text.size() >= window_width_k) roll(text, rolling_states, rolling_minimums, rolling_counts);
+
+        // Export the minimum floats to the fingerprint
+        for (std::size_t dim = 0; dim < dimensions_k; ++dim)
+            min_hashes[dim] = static_cast<min_hash_t>(rolling_minimums[dim] & max_hash_k),
+            min_counts[dim] = rolling_counts[dim];
+    }
+
+    /**
+     *  @brief Underlying machinery of `fingerprint` that fills the states of the hashers.
+     *  @param[in] text_chunk A chunk of text to update the @p `last_floats` with.
+     *  @param[inout] last_floats The last computed floats for each hasher; start with zeroes.
+     *  @param[inout] rolling_minimums The minimum floats for each hasher; start with `skipped_rolling_hash_k`.
+     *  @param[inout] rolling_counts The appearance frequency counts of each @p `rolling_minimums`; start with 1.
+     *  @param[in] passed_progress The offset of the received @p `text_chunk` in the whole text; defaults to 0.
+     */
+    void roll(                                                //
+        span<byte_t const> text_chunk,                        //
+        span<rolling_state_t, dimensions_k> last_floats,      //
+        span<rolling_state_t, dimensions_k> rolling_minimums, //
+        span<min_count_t, dimensions_k> rolling_counts,       //
+        std::size_t passed_progress = 0) const noexcept {
+
+        constexpr unsigned groups_count_k = dimensions_k / hashes_per_unrolled_group_k;
+        for (unsigned group_index = 0; group_index < groups_count_k; ++group_index)
+            roll_group(text_chunk, group_index, last_floats, rolling_minimums, rolling_counts, passed_progress);
+    }
+
+    /**
+     *  @brief Converts the rolling minimums into the final minimum hashes.
+     *  @param[in] rolling_minimums The minimum hashes computed by the rolling hashers.
+     *  @param[out] min_hashes The output minimum hashes, which are the final fingerprints.
+     */
+    void digest(                                                    //
+        span<rolling_state_t const, dimensions_k> rolling_minimums, //
+        span<min_hash_t, dimensions_k> min_hashes) const noexcept {
+
+        for (std::size_t dim = 0; dim < min_hashes.size(); ++dim) {
+            rolling_state_t const rolling_minimum = rolling_minimums[dim];
+            min_hashes[dim] = rolling_minimum == skipped_rolling_hash_k
+                                  ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
+                                  : static_cast<min_hash_t>(static_cast<std::uint64_t>(rolling_minimum) & max_hash_k);
+        }
+    }
+
+    /**
+     *  @brief Computes many fingerprints in parallel for input @p texts via an @p executor.
+     *  @param[in] texts The input texts to hash, typically a sequential container of UTF-8 encoded strings.
+     *  @param[out] min_hashes_per_text The output fingerprints, an array of vectors of minimum hashes.
+     *  @param[out] min_counts_per_text The output frequencies of @p `min_hashes_per_text` hashes.
+     *  @param[in] executor The executor to use for parallel processing, defaults to a dummy executor.
+     *  @param[in] specs The CPU specifications to use, defaults to an empty `cpu_specs_t`.
+     *  @retval status_t::success_k on success, or an error code otherwise.
+     *  @retval status_t::bad_alloc_k if the memory allocation fails.
+     */
+    template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_,
+              typename executor_type_ = dummy_executor_t>
+#if SZ_IS_CPP20_
+        requires executor_like<executor_type_>
+#endif
+    status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes, //
+                        min_counts_per_text_type_ &&min_counts, executor_type_ &&executor = {},
+                        cpu_specs_t specs = {}) noexcept {
+        return floating_rolling_hashers_in_parallel_(            //
+            *this, texts,                                        //
+            std::forward<min_hashes_per_text_type_>(min_hashes), //
+            std::forward<min_counts_per_text_type_>(min_counts), //
+            std::forward<executor_type_>(executor), specs);
+    }
+
+  private:
+    struct unrolled_states_t {
+        sz_u512_vec_t last_f64s[unroll_factor_k];
+        sz_u512_vec_t minimum_f64s[unroll_factor_k];
+        sz_u512_vec_t count_u64s[unroll_factor_k];
+    };
+
+    // TODO: We can probably shave a few ore cycles here:
+    SZ_INLINE __m512d barrett_mod(__m512d xs, __m512d modulos, __m512d inverse_modulos) const noexcept {
+        // Use rounding SIMD arithmetic
+        __m512d qs = _mm512_mul_round_pd(xs, inverse_modulos, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+        __m512d results = _mm512_fnmadd_round_pd(qs, modulos, xs, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+
+        // Clamp into the [0, modulo) range.
+        __mmask8 ge_mask = _mm512_cmp_pd_mask(results, modulos, _CMP_GE_OQ);
+        __mmask8 lt_mask = _mm512_cmp_pd_mask(results, _mm512_setzero_pd(), _CMP_LT_OQ);
+        results = _mm512_mask_sub_pd(results, ge_mask, results, modulos);
+        results = _mm512_mask_add_pd(results, lt_mask, results, modulos);
+        return results;
+    }
+
+    void roll_group(                                          //
+        span<byte_t const> text_chunk, unsigned group_index,  //
+        span<rolling_state_t, dimensions_k> last_floats,      //
+        span<rolling_state_t, dimensions_k> rolling_minimums, //
+        span<min_count_t, dimensions_k> rolling_counts,       //
+        std::size_t passed_progress = 0) const noexcept {
+
+        // Resulting variables
+        sz_u512_vec_t last_floats_vec[unroll_factor_k];
+        sz_u512_vec_t rolling_minimums_vec[unroll_factor_k];
+        sz_u256_vec_t rolling_counts_vec[unroll_factor_k];
+
+        for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
+            unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
+            last_floats_vec[index_in_group].zmm_pd = _mm512_loadu_pd(&last_floats[dim]);
+            rolling_minimums_vec[index_in_group].zmm_pd = _mm512_loadu_pd(&rolling_minimums[dim]);
+            rolling_counts_vec[index_in_group].ymm =
+                _mm256_loadu_si256(reinterpret_cast<__m256i const *>(&rolling_counts[dim]));
+        }
+
+        // Temporary variables for the rolling state
+        sz_u512_vec_t multipliers_vec[unroll_factor_k], negative_discarding_multipliers_vec[unroll_factor_k],
+            modulos_vec[unroll_factor_k], inverse_modulos_vec[unroll_factor_k];
+
+        for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
+            unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
+            multipliers_vec[index_in_group].zmm_pd = _mm512_load_pd(&multipliers_[dim]);
+            negative_discarding_multipliers_vec[index_in_group].zmm_pd =
+                _mm512_load_pd(&negative_discarding_multipliers_[dim]);
+            modulos_vec[index_in_group].zmm_pd = _mm512_load_pd(&modulos_[dim]);
+            inverse_modulos_vec[index_in_group].zmm_pd = _mm512_load_pd(&inverse_modulos_[dim]);
+        }
+
+        // Until we reach the `window_width_k`, we don't need to discard any symbols and can keep the code simpler
+        std::size_t const prefix_length = (std::min)(text_chunk.size(), window_width_k);
+        std::size_t new_char_offset = passed_progress;
+        for (; new_char_offset < prefix_length; ++new_char_offset) {
+            byte_t const new_char = text_chunk[new_char_offset];
+            rolling_state_t const new_term = static_cast<rolling_state_t>(new_char) + 1.0;
+            __m512d new_term_zmm = _mm512_set1_pd(new_term);
+
+            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
+                last_floats_vec[index_in_group].zmm_pd = _mm512_fmadd_pd(
+                    multipliers_vec[index_in_group].zmm_pd, new_term_zmm, last_floats_vec[index_in_group].zmm_pd);
+                last_floats_vec[index_in_group].zmm_pd = barrett_mod( //
+                    last_floats_vec[index_in_group].zmm_pd,           //
+                    modulos_vec[index_in_group].zmm_pd,               //
+                    inverse_modulos_vec[index_in_group].zmm_pd);
+            }
+        }
+
+        // We now have our first minimum hashes
+        __m256i const ones_ymm = _mm256_set1_epi32(1);
+        if (new_char_offset == prefix_length)
+            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group)
+                rolling_minimums_vec[index_in_group].zmm_pd = last_floats_vec[index_in_group].zmm_pd,
+                rolling_counts_vec[index_in_group].ymm = ones_ymm;
+
+        // Now we can avoid a branch in the nested loop, as we are passed the longest window width
+        for (std::size_t new_char_offset = window_width_k; new_char_offset < text_chunk.size(); ++new_char_offset) {
+            byte_t const new_char = text_chunk[new_char_offset];
+            byte_t const old_char = text_chunk[new_char_offset - window_width_k];
+            rolling_state_t const new_term = static_cast<rolling_state_t>(new_char) + 1.0;
+            rolling_state_t const old_term = static_cast<rolling_state_t>(old_char) + 1.0;
+            __m512d new_term_zmm = _mm512_set1_pd(new_term);
+            __m512d old_term_zmm = _mm512_set1_pd(old_term);
+
+            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
+
+                // Discard the old term
+                last_floats_vec[index_in_group].zmm_pd =
+                    _mm512_fmadd_pd(negative_discarding_multipliers_vec[index_in_group].zmm_pd, old_term_zmm,
+                                    last_floats_vec[index_in_group].zmm_pd);
+                last_floats_vec[index_in_group].zmm_pd = barrett_mod( //
+                    last_floats_vec[index_in_group].zmm_pd,           //
+                    modulos_vec[index_in_group].zmm_pd,               //
+                    inverse_modulos_vec[index_in_group].zmm_pd);
+
+                // Add the new term
+                last_floats_vec[index_in_group].zmm_pd = _mm512_fmadd_pd(
+                    last_floats_vec[index_in_group].zmm_pd, multipliers_vec[index_in_group].zmm_pd, new_term_zmm);
+                last_floats_vec[index_in_group].zmm_pd = barrett_mod( //
+                    last_floats_vec[index_in_group].zmm_pd,           //
+                    modulos_vec[index_in_group].zmm_pd,               //
+                    inverse_modulos_vec[index_in_group].zmm_pd);
+
+                // To keep the right comparison mask, check out: https://stackoverflow.com/q/16988199
+                __mmask8 same_mask = _mm512_cmp_pd_mask(rolling_minimums_vec[index_in_group].zmm_pd,
+                                                        last_floats_vec[index_in_group].zmm_pd, _CMP_EQ_OQ);
+                rolling_minimums_vec[index_in_group].zmm_pd =
+                    _mm512_min_pd(rolling_minimums_vec[index_in_group].zmm_pd, last_floats_vec[index_in_group].zmm_pd);
+                rolling_counts_vec[index_in_group].ymm =
+                    _mm256_mask_add_epi32(rolling_counts_vec[index_in_group].ymm, same_mask,
+                                          rolling_counts_vec[index_in_group].ymm, ones_ymm);
+            }
+        }
+
+        // Dump back the results into our spans
+        for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
+            unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
+            _mm512_storeu_pd(&last_floats[dim], last_floats_vec[index_in_group].zmm_pd);
+            _mm512_storeu_pd(&rolling_minimums[dim], rolling_minimums_vec[index_in_group].zmm_pd);
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(&rolling_counts[dim]),
+                                rolling_counts_vec[index_in_group].ymm);
+        }
     }
 };
 
@@ -1028,547 +1456,4 @@ struct floating_rolling_hashers<sz_cap_ice_k, dimensions_> {
 } // namespace stringzillas
 } // namespace ashvardanian
 
-#if 0
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#pragma region Core API
-
-/**
- *  @brief  Computes the Karp-Rabin rolling hashes of a string supplying them to the provided `callback`.
- *          Can be used for similarity scores, search, ranking, etc.
- *
- *  Rabin-Karp-like rolling hashes can have very high-level of collisions and depend
- *  on the choice of bases and the prime number. That's why, often two hashes from the same
- *  family are used with different bases.
- *
- *       1. Kernighan and Ritchie's function uses 31, a prime close to the size of English alphabet.
- *       2. To be friendlier to byte-arrays and UTF8, we use 257 for the second function.
- *
- *
- *  @param text             String to hash.
- *  @param length           Number of bytes in the string.
- *  @param window_width    Length of the rolling window in bytes.
- *  @param window_step      Step of reported hashes. @b Must be power of two. Should be smaller than `window_width`.
- *  @param callback         Function receiving the start & length of a substring, the hash, and the `callback_handle`.
- *  @param callback_handle  Optional user-provided pointer to be passed to the `callback`.
- *  @see                    sz_hashes_fingerprint, sz_hashes_intersection
- */
-SZ_DYNAMIC void sz_hashes(                                                            //
-    sz_cptr_t text, sz_size_t length, sz_size_t window_width, sz_size_t window_step, //
-    sz_hash_callback_t callback, void *callback_handle);
-
-/**
- *  @brief  Computes the Karp-Rabin rolling hashes of a string outputting a binary fingerprint.
- *          Such fingerprints can be compared with Hamming or Jaccard (Tanimoto) distance for similarity.
- *
- *  The algorithm doesn't clear the fingerprint buffer on start, so it can be invoked multiple times
- *  to produce a fingerprint of a longer string, by passing the previous fingerprint as the ::fingerprint.
- *  It can also be reused to produce multi-resolution fingerprints by changing the ::window_width
- *  and calling the same function multiple times for the same input ::text.
- *
- *  Processes large strings in parts to maximize the cache utilization, using a small on-stack buffer,
- *  avoiding cache-coherency penalties of remote on-heap buffers.
- *
- *  @param text                 String to hash.
- *  @param length               Number of bytes in the string.
- *  @param fingerprint          Output fingerprint buffer.
- *  @param fingerprint_bytes    Number of bytes in the fingerprint buffer.
- *  @param window_width        Length of the rolling window in bytes.
- *  @see                        sz_hashes, sz_hashes_intersection
- */
-SZ_PUBLIC void sz_hashes_fingerprint(                          //
-    sz_cptr_t text, sz_size_t length, sz_size_t window_width, //
-    sz_ptr_t fingerprint, sz_size_t fingerprint_bytes) {
-    sz_unused_(text && length && window_width && fingerprint && fingerprint_bytes);
-}
-
-/**
- *  @brief  Given a hash-fingerprint of a textual document, computes the number of intersecting hashes
- *          of the incoming document. Can be used for document scoring and search.
- *
- *  Processes large strings in parts to maximize the cache utilization, using a small on-stack buffer,
- *  avoiding cache-coherency penalties of remote on-heap buffers.
- *
- *  @param text                 Input document.
- *  @param length               Number of bytes in the input document.
- *  @param fingerprint          Reference document fingerprint.
- *  @param fingerprint_bytes    Number of bytes in the reference documents fingerprint.
- *  @param window_width        Length of the rolling window in bytes.
- *  @see                        sz_hashes, sz_hashes_fingerprint
- */
-SZ_PUBLIC sz_size_t sz_hashes_intersection(                    //
-    sz_cptr_t text, sz_size_t length, sz_size_t window_width, //
-    sz_cptr_t fingerprint, sz_size_t fingerprint_bytes);
-
-/** @copydoc sz_hashes */
-SZ_PUBLIC void sz_hashes_serial(                                                      //
-    sz_cptr_t text, sz_size_t length, sz_size_t window_width, sz_size_t window_step, //
-    sz_hash_callback_t callback, void *callback_handle);
-}
-
-#pragma endregion // Core API
-
-#pragma region Serial Implementation
-
-/*
- *  One hardware-accelerated way of mixing hashes can be CRC, but it's only implemented for 32-bit values.
- *  Using a Boost-like mixer works very poorly in such case:
- *
- *       hash_first ^ (hash_second + 0x517cc1b727220a95 + (hash_first << 6) + (hash_first >> 2));
- *
- *  Let's stick to the Fibonacci hash trick using the golden ratio.
- *  https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/
- */
-#define sz_hash_mix_(first, second) ((first * 11400714819323198485ull) ^ (second * 11400714819323198485ull))
-#define sz_shift_low_(x) (x)
-#define sz_shift_high_(x) ((x + 77ull) & 0xFFull)
-#define sz_prime_mod_(x) (x % SZ_U64_MAX_PRIME)
-
-SZ_PUBLIC void sz_hashes_serial(sz_cptr_t start, sz_size_t length, sz_size_t window_width, sz_size_t step, //
-                                sz_hash_callback_t callback, void *callback_handle) {
-
-    if (length < window_width || !window_width) return;
-    sz_u8_t const *text = (sz_u8_t const *)start;
-    sz_u8_t const *text_end = text + length;
-
-    // Prepare the `prime ^ window_width` values, that we are going to use for modulo arithmetic.
-    sz_u64_t prime_power_low = 1, prime_power_high = 1;
-    for (sz_size_t i = 0; i + 1 < window_width; ++i)
-        prime_power_low = (prime_power_low * 31ull) % SZ_U64_MAX_PRIME,
-        prime_power_high = (prime_power_high * 257ull) % SZ_U64_MAX_PRIME;
-
-    // Compute the initial hash value for the first window.
-    sz_u64_t hash_low = 0, hash_high = 0, hash_mix;
-    for (sz_u8_t const *first_end = text + window_width; text < first_end; ++text)
-        hash_low = (hash_low * 31ull + sz_shift_low_(*text)) % SZ_U64_MAX_PRIME,
-        hash_high = (hash_high * 257ull + sz_shift_high_(*text)) % SZ_U64_MAX_PRIME;
-
-    // In most cases the fingerprint length will be a power of two.
-    hash_mix = sz_hash_mix_(hash_low, hash_high);
-    callback((sz_cptr_t)text, window_width, hash_mix, callback_handle);
-
-    // Compute the hash value for every window, exporting into the fingerprint,
-    // using the expensive modulo operation.
-    sz_size_t cycles = 1;
-    sz_size_t const step_mask = step - 1;
-    for (; text < text_end; ++text, ++cycles) {
-        // Discard one character:
-        hash_low -= sz_shift_low_(*(text - window_width)) * prime_power_low;
-        hash_high -= sz_shift_high_(*(text - window_width)) * prime_power_high;
-        // And add a new one:
-        hash_low = 31ull * hash_low + sz_shift_low_(*text);
-        hash_high = 257ull * hash_high + sz_shift_high_(*text);
-        // Wrap the hashes around:
-        hash_low = sz_prime_mod_(hash_low);
-        hash_high = sz_prime_mod_(hash_high);
-        // Mix only if we've skipped enough hashes.
-        if ((cycles & step_mask) == 0) {
-            hash_mix = sz_hash_mix_(hash_low, hash_high);
-            callback((sz_cptr_t)text, window_width, hash_mix, callback_handle);
-        }
-    }
-}
-
-/** @brief  An internal callback used to set a bit in a power-of-two length binary fingerprint of a string. */
-SZ_INTERNAL void sz_hashes_fingerprint_pow2_callback_(sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *handle) {
-    sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
-    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
-    sz_size_t fingerprint_bytes = fingerprint_buffer->length;
-    fingerprint_u8s[(hash / 8) & (fingerprint_bytes - 1)] |= (1 << (hash & 7));
-    sz_unused_(start && length);
-}
-
-/** @brief  An internal callback used to set a bit in a @b non power-of-two length binary fingerprint of a string. */
-SZ_INTERNAL void sz_hashes_fingerprint_non_pow2_callback_( //
-    sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *handle) {
-    sz_string_view_t *fingerprint_buffer = (sz_string_view_t *)handle;
-    sz_u8_t *fingerprint_u8s = (sz_u8_t *)fingerprint_buffer->start;
-    sz_size_t fingerprint_bytes = fingerprint_buffer->length;
-    fingerprint_u8s[(hash / 8) % fingerprint_bytes] |= (1 << (hash & 7));
-    sz_unused_(start && length);
-}
-
-/** @brief  An internal callback, used to mix all the running hashes into one pointer-size value. */
-SZ_INTERNAL void sz_hashes_fingerprint_scalar_callback_( //
-    sz_cptr_t start, sz_size_t length, sz_u64_t hash, void *scalar_handle) {
-    sz_unused_(start && length && hash && scalar_handle);
-    sz_size_t *scalar_ptr = (sz_size_t *)scalar_handle;
-    *scalar_ptr ^= hash;
-}
-
-#undef sz_shift_low_
-#undef sz_shift_high_
-#undef sz_hash_mix_
-#undef sz_prime_mod_
-
-#pragma endregion // Serial Implementation
-
-/*  AVX2 implementation of the string search algorithms for Haswell processors and newer.
- *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation.
- */
-#pragma region Haswell Implementation
-#if SZ_USE_HASWELL
-#pragma GCC push_options
-#pragma GCC target("avx2")
-#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
-
-/**
- *  @brief  There is no AVX2 instruction for fast multiplication of 64-bit integers.
- *          This implementation is coming from Agner Fog's Vector Class Library.
- */
-SZ_INTERNAL __m256i _mm256_mul_epu64(__m256i a, __m256i b) {
-    __m256i bswap = _mm256_shuffle_epi32(b, 0xB1);
-    __m256i prodlh = _mm256_mullo_epi32(a, bswap);
-    __m256i zero = _mm256_setzero_si256();
-    __m256i prodlh2 = _mm256_hadd_epi32(prodlh, zero);
-    __m256i prodlh3 = _mm256_shuffle_epi32(prodlh2, 0x73);
-    __m256i prodll = _mm256_mul_epu32(a, b);
-    __m256i prod = _mm256_add_epi64(prodll, prodlh3);
-    return prod;
-}
-
-SZ_PUBLIC void sz_hashes_haswell(sz_cptr_t start, sz_size_t length, sz_size_t window_width, sz_size_t step, //
-                                 sz_hash_callback_t callback, void *callback_handle) {
-
-    if (length < window_width || !window_width) return;
-    if (length < 4 * window_width) {
-        sz_hashes_serial(start, length, window_width, step, callback, callback_handle);
-        return;
-    }
-
-    // Using AVX2, we can perform 4 long integer multiplications and additions within one register.
-    // So let's slice the entire string into 4 overlapping windows, to slide over them in parallel.
-    sz_size_t const max_hashes = length - window_width + 1;
-    sz_size_t const min_hashes_per_thread = max_hashes / 4; // At most one sequence can overlap between 2 threads.
-    sz_u8_t const *text_first = (sz_u8_t const *)start;
-    sz_u8_t const *text_second = text_first + min_hashes_per_thread;
-    sz_u8_t const *text_third = text_first + min_hashes_per_thread * 2;
-    sz_u8_t const *text_fourth = text_first + min_hashes_per_thread * 3;
-    sz_u8_t const *text_end = text_first + length;
-
-    // Prepare the `prime ^ window_width` values, that we are going to use for modulo arithmetic.
-    sz_u64_t prime_power_low = 1, prime_power_high = 1;
-    for (sz_size_t i = 0; i + 1 < window_width; ++i)
-        prime_power_low = (prime_power_low * 31ull) % SZ_U64_MAX_PRIME,
-        prime_power_high = (prime_power_high * 257ull) % SZ_U64_MAX_PRIME;
-
-    // Broadcast the constants into the registers.
-    sz_u256_vec_t prime_vec, golden_ratio_vec;
-    sz_u256_vec_t base_low_vec, base_high_vec, prime_power_low_vec, prime_power_high_vec, shift_high_vec;
-    base_low_vec.ymm = _mm256_set1_epi64x(31ull);
-    base_high_vec.ymm = _mm256_set1_epi64x(257ull);
-    shift_high_vec.ymm = _mm256_set1_epi64x(77ull);
-    prime_vec.ymm = _mm256_set1_epi64x(SZ_U64_MAX_PRIME);
-    golden_ratio_vec.ymm = _mm256_set1_epi64x(11400714819323198485ull);
-    prime_power_low_vec.ymm = _mm256_set1_epi64x(prime_power_low);
-    prime_power_high_vec.ymm = _mm256_set1_epi64x(prime_power_high);
-
-    // Compute the initial hash values for every one of the four windows.
-    sz_u256_vec_t hash_low_vec, hash_high_vec, hash_mix_vec, chars_low_vec, chars_high_vec;
-    hash_low_vec.ymm = _mm256_setzero_si256();
-    hash_high_vec.ymm = _mm256_setzero_si256();
-    for (sz_u8_t const *prefix_end = text_first + window_width; text_first < prefix_end;
-         ++text_first, ++text_second, ++text_third, ++text_fourth) {
-
-        // 1. Multiply the hashes by the base.
-        hash_low_vec.ymm = _mm256_mul_epu64(hash_low_vec.ymm, base_low_vec.ymm);
-        hash_high_vec.ymm = _mm256_mul_epu64(hash_high_vec.ymm, base_high_vec.ymm);
-
-        // 2. Load the four characters from `text_first`, `text_first + max_hashes_per_thread`,
-        //   `text_first + max_hashes_per_thread * 2`, `text_first + max_hashes_per_thread * 3`.
-        chars_low_vec.ymm = _mm256_set_epi64x(text_fourth[0], text_third[0], text_second[0], text_first[0]);
-        chars_high_vec.ymm = _mm256_add_epi8(chars_low_vec.ymm, shift_high_vec.ymm);
-
-        // 3. Add the incoming characters.
-        hash_low_vec.ymm = _mm256_add_epi64(hash_low_vec.ymm, chars_low_vec.ymm);
-        hash_high_vec.ymm = _mm256_add_epi64(hash_high_vec.ymm, chars_high_vec.ymm);
-
-        // 4. Compute the modulo. Assuming there are only 59 values between our prime
-        //    and the 2^64 value, we can simply compute the modulo by conditionally subtracting the prime.
-        hash_low_vec.ymm = _mm256_blendv_epi8( //
-            hash_low_vec.ymm, _mm256_sub_epi64(hash_low_vec.ymm, prime_vec.ymm),
-            _mm256_cmpgt_epi64(hash_low_vec.ymm, prime_vec.ymm));
-        hash_high_vec.ymm = _mm256_blendv_epi8( //
-            hash_high_vec.ymm, _mm256_sub_epi64(hash_high_vec.ymm, prime_vec.ymm),
-            _mm256_cmpgt_epi64(hash_high_vec.ymm, prime_vec.ymm));
-    }
-
-    // 5. Compute the hash mix, that will be used to index into the fingerprint.
-    //    This includes a serial step at the end.
-    hash_low_vec.ymm = _mm256_mul_epu64(hash_low_vec.ymm, golden_ratio_vec.ymm);
-    hash_high_vec.ymm = _mm256_mul_epu64(hash_high_vec.ymm, golden_ratio_vec.ymm);
-    hash_mix_vec.ymm = _mm256_xor_si256(hash_low_vec.ymm, hash_high_vec.ymm);
-    callback((sz_cptr_t)text_first, window_width, hash_mix_vec.u64s[0], callback_handle);
-    callback((sz_cptr_t)text_second, window_width, hash_mix_vec.u64s[1], callback_handle);
-    callback((sz_cptr_t)text_third, window_width, hash_mix_vec.u64s[2], callback_handle);
-    callback((sz_cptr_t)text_fourth, window_width, hash_mix_vec.u64s[3], callback_handle);
-
-    // Now repeat that operation for the remaining characters, discarding older characters.
-    sz_size_t cycle = 1;
-    sz_size_t const step_mask = step - 1;
-    for (; text_fourth != text_end; ++text_first, ++text_second, ++text_third, ++text_fourth, ++cycle) {
-        // 0. Load again the four characters we are dropping, shift them, and subtract.
-        chars_low_vec.ymm = _mm256_set_epi64x( //
-            text_fourth[-window_width], text_third[-window_width], text_second[-window_width],
-            text_first[-window_width]);
-        chars_high_vec.ymm = _mm256_add_epi8(chars_low_vec.ymm, shift_high_vec.ymm);
-        hash_low_vec.ymm =
-            _mm256_sub_epi64(hash_low_vec.ymm, _mm256_mul_epu64(chars_low_vec.ymm, prime_power_low_vec.ymm));
-        hash_high_vec.ymm =
-            _mm256_sub_epi64(hash_high_vec.ymm, _mm256_mul_epu64(chars_high_vec.ymm, prime_power_high_vec.ymm));
-
-        // 1. Multiply the hashes by the base.
-        hash_low_vec.ymm = _mm256_mul_epu64(hash_low_vec.ymm, base_low_vec.ymm);
-        hash_high_vec.ymm = _mm256_mul_epu64(hash_high_vec.ymm, base_high_vec.ymm);
-
-        // 2. Load the four characters from `text_first`, `text_first + max_hashes_per_thread`,
-        //   `text_first + max_hashes_per_thread * 2`, `text_first + max_hashes_per_thread * 3`.
-        chars_low_vec.ymm = _mm256_set_epi64x(text_fourth[0], text_third[0], text_second[0], text_first[0]);
-        chars_high_vec.ymm = _mm256_add_epi8(chars_low_vec.ymm, shift_high_vec.ymm);
-
-        // 3. Add the incoming characters.
-        hash_low_vec.ymm = _mm256_add_epi64(hash_low_vec.ymm, chars_low_vec.ymm);
-        hash_high_vec.ymm = _mm256_add_epi64(hash_high_vec.ymm, chars_high_vec.ymm);
-
-        // 4. Compute the modulo. Assuming there are only 59 values between our prime
-        //    and the 2^64 value, we can simply compute the modulo by conditionally subtracting the prime.
-        hash_low_vec.ymm = _mm256_blendv_epi8( //
-            hash_low_vec.ymm, _mm256_sub_epi64(hash_low_vec.ymm, prime_vec.ymm),
-            _mm256_cmpgt_epi64(hash_low_vec.ymm, prime_vec.ymm));
-        hash_high_vec.ymm = _mm256_blendv_epi8( //
-            hash_high_vec.ymm, _mm256_sub_epi64(hash_high_vec.ymm, prime_vec.ymm),
-            _mm256_cmpgt_epi64(hash_high_vec.ymm, prime_vec.ymm));
-
-        // 5. Compute the hash mix, that will be used to index into the fingerprint.
-        //    This includes a serial step at the end.
-        hash_low_vec.ymm = _mm256_mul_epu64(hash_low_vec.ymm, golden_ratio_vec.ymm);
-        hash_high_vec.ymm = _mm256_mul_epu64(hash_high_vec.ymm, golden_ratio_vec.ymm);
-        hash_mix_vec.ymm = _mm256_xor_si256(hash_low_vec.ymm, hash_high_vec.ymm);
-        if ((cycle & step_mask) == 0) {
-            callback((sz_cptr_t)text_first, window_width, hash_mix_vec.u64s[0], callback_handle);
-            callback((sz_cptr_t)text_second, window_width, hash_mix_vec.u64s[1], callback_handle);
-            callback((sz_cptr_t)text_third, window_width, hash_mix_vec.u64s[2], callback_handle);
-            callback((sz_cptr_t)text_fourth, window_width, hash_mix_vec.u64s[3], callback_handle);
-        }
-    }
-}
-
-#pragma clang attribute pop
-#pragma GCC pop_options
-#endif            // SZ_USE_HASWELL
-#pragma endregion // Haswell Implementation
-
-/*  AVX512 implementation of the string hashing algorithms for Skylake and newer CPUs.
- *  Includes extensions: F, CD, ER, PF, VL, DQ, BW.
- *
- *  This is the "starting level" for the advanced algorithms using K-mask registers on x86.
- */
-#pragma region Skylake Implementation
-#if SZ_USE_SKYLAKE
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
-
-#pragma clang attribute pop
-#pragma GCC pop_options
-#endif            // SZ_USE_SKYLAKE
-#pragma endregion // Skylake Implementation
-
-/*  AVX512 implementation of the string search algorithms for Ice Lake and newer CPUs.
- *  Includes extensions:
- *      - 2017 Skylake: F, CD, ER, PF, VL, DQ, BW,
- *      - 2018 CannonLake: IFMA, VBMI,
- *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
- */
-#pragma region Ice Lake Implementation
-#if SZ_USE_ICE
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2"))), \
-                             apply_to = function)
-
-SZ_PUBLIC void sz_hashes_ice(sz_cptr_t start, sz_size_t length, sz_size_t window_width, sz_size_t step, //
-                             sz_hash_callback_t callback, void *callback_handle) {
-
-    if (length < window_width || !window_width) return;
-    if (length < 4 * window_width) {
-        sz_hashes_serial(start, length, window_width, step, callback, callback_handle);
-        return;
-    }
-
-    // Using AVX2, we can perform 4 long integer multiplications and additions within one register.
-    // So let's slice the entire string into 4 overlapping windows, to slide over them in parallel.
-    sz_size_t const max_hashes = length - window_width + 1;
-    sz_size_t const min_hashes_per_thread = max_hashes / 4; // At most one sequence can overlap between 2 threads.
-    sz_u8_t const *text_first = (sz_u8_t const *)start;
-    sz_u8_t const *text_second = text_first + min_hashes_per_thread;
-    sz_u8_t const *text_third = text_first + min_hashes_per_thread * 2;
-    sz_u8_t const *text_fourth = text_first + min_hashes_per_thread * 3;
-    sz_u8_t const *text_end = text_first + length;
-
-    // Broadcast the global constants into the registers.
-    // Both high and low hashes will work with the same prime and golden ratio.
-    sz_u512_vec_t prime_vec, golden_ratio_vec;
-    prime_vec.zmm = _mm512_set1_epi64(SZ_U64_MAX_PRIME);
-    golden_ratio_vec.zmm = _mm512_set1_epi64(11400714819323198485ull);
-
-    // Prepare the `prime ^ window_width` values, that we are going to use for modulo arithmetic.
-    sz_u64_t prime_power_low = 1, prime_power_high = 1;
-    for (sz_size_t i = 0; i + 1 < window_width; ++i)
-        prime_power_low = (prime_power_low * 31ull) % SZ_U64_MAX_PRIME,
-        prime_power_high = (prime_power_high * 257ull) % SZ_U64_MAX_PRIME;
-
-    // We will be evaluating 4 offsets at a time with 2 different hash functions.
-    // We can fit all those 8 state variables in each of the following ZMM registers.
-    sz_u512_vec_t base_vec, prime_power_vec, shift_vec;
-    base_vec.zmm = _mm512_set_epi64(31ull, 31ull, 31ull, 31ull, 257ull, 257ull, 257ull, 257ull);
-    shift_vec.zmm = _mm512_set_epi64(0ull, 0ull, 0ull, 0ull, 77ull, 77ull, 77ull, 77ull);
-    prime_power_vec.zmm = _mm512_set_epi64(prime_power_low, prime_power_low, prime_power_low, prime_power_low,
-                                           prime_power_high, prime_power_high, prime_power_high, prime_power_high);
-
-    // Compute the initial hash values for every one of the four windows.
-    sz_u512_vec_t hash_vec, chars_vec;
-    hash_vec.zmm = _mm512_setzero_si512();
-    for (sz_u8_t const *prefix_end = text_first + window_width; text_first < prefix_end;
-         ++text_first, ++text_second, ++text_third, ++text_fourth) {
-
-        // 1. Multiply the hashes by the base.
-        hash_vec.zmm = _mm512_mullo_epi64(hash_vec.zmm, base_vec.zmm);
-
-        // 2. Load the four characters from `text_first`, `text_first + max_hashes_per_thread`,
-        //   `text_first + max_hashes_per_thread * 2`, `text_first + max_hashes_per_thread * 3`...
-        chars_vec.zmm = _mm512_set_epi64(text_fourth[0], text_third[0], text_second[0], text_first[0], //
-                                         text_fourth[0], text_third[0], text_second[0], text_first[0]);
-        chars_vec.zmm = _mm512_add_epi8(chars_vec.zmm, shift_vec.zmm);
-
-        // 3. Add the incoming characters.
-        hash_vec.zmm = _mm512_add_epi64(hash_vec.zmm, chars_vec.zmm);
-
-        // 4. Compute the modulo. Assuming there are only 59 values between our prime
-        //    and the 2^64 value, we can simply compute the modulo by conditionally subtracting the prime.
-        hash_vec.zmm = _mm512_mask_blend_epi8(_mm512_cmpgt_epi64_mask(hash_vec.zmm, prime_vec.zmm), hash_vec.zmm,
-                                              _mm512_sub_epi64(hash_vec.zmm, prime_vec.zmm));
-    }
-
-    // 5. Compute the hash mix, that will be used to index into the fingerprint.
-    //    This includes a serial step at the end.
-    sz_u512_vec_t hash_mix_vec;
-    hash_mix_vec.zmm = _mm512_mullo_epi64(hash_vec.zmm, golden_ratio_vec.zmm);
-    hash_mix_vec.ymms[0] = _mm256_xor_si256(_mm512_extracti64x4_epi64(hash_mix_vec.zmm, 1), //
-                                            _mm512_extracti64x4_epi64(hash_mix_vec.zmm, 0));
-
-    callback((sz_cptr_t)text_first, window_width, hash_mix_vec.u64s[0], callback_handle);
-    callback((sz_cptr_t)text_second, window_width, hash_mix_vec.u64s[1], callback_handle);
-    callback((sz_cptr_t)text_third, window_width, hash_mix_vec.u64s[2], callback_handle);
-    callback((sz_cptr_t)text_fourth, window_width, hash_mix_vec.u64s[3], callback_handle);
-
-    // Now repeat that operation for the remaining characters, discarding older characters.
-    sz_size_t cycle = 1;
-    sz_size_t step_mask = step - 1;
-    for (; text_fourth != text_end; ++text_first, ++text_second, ++text_third, ++text_fourth, ++cycle) {
-        // 0. Load again the four characters we are dropping, shift them, and subtract.
-        chars_vec.zmm = _mm512_set_epi64(text_fourth[-window_width], text_third[-window_width],
-                                         text_second[-window_width], text_first[-window_width], //
-                                         text_fourth[-window_width], text_third[-window_width],
-                                         text_second[-window_width], text_first[-window_width]);
-        chars_vec.zmm = _mm512_add_epi8(chars_vec.zmm, shift_vec.zmm);
-        hash_vec.zmm = _mm512_sub_epi64(hash_vec.zmm, _mm512_mullo_epi64(chars_vec.zmm, prime_power_vec.zmm));
-
-        // 1. Multiply the hashes by the base.
-        hash_vec.zmm = _mm512_mullo_epi64(hash_vec.zmm, base_vec.zmm);
-
-        // 2. Load the four characters from `text_first`, `text_first + max_hashes_per_thread`,
-        //   `text_first + max_hashes_per_thread * 2`, `text_first + max_hashes_per_thread * 3`.
-        chars_vec.zmm = _mm512_set_epi64(text_fourth[0], text_third[0], text_second[0], text_first[0], //
-                                         text_fourth[0], text_third[0], text_second[0], text_first[0]);
-        chars_vec.zmm = _mm512_add_epi8(chars_vec.zmm, shift_vec.zmm);
-
-        // ... and prefetch the next four characters into Level 2 or higher.
-        _mm_prefetch((sz_cptr_t)text_fourth + 1, _MM_HINT_T1);
-        _mm_prefetch((sz_cptr_t)text_third + 1, _MM_HINT_T1);
-        _mm_prefetch((sz_cptr_t)text_second + 1, _MM_HINT_T1);
-        _mm_prefetch((sz_cptr_t)text_first + 1, _MM_HINT_T1);
-
-        // 3. Add the incoming characters.
-        hash_vec.zmm = _mm512_add_epi64(hash_vec.zmm, chars_vec.zmm);
-
-        // 4. Compute the modulo. Assuming there are only 59 values between our prime
-        //    and the 2^64 value, we can simply compute the modulo by conditionally subtracting the prime.
-        hash_vec.zmm = _mm512_mask_blend_epi8(_mm512_cmpgt_epi64_mask(hash_vec.zmm, prime_vec.zmm), hash_vec.zmm,
-                                              _mm512_sub_epi64(hash_vec.zmm, prime_vec.zmm));
-
-        // 5. Compute the hash mix, that will be used to index into the fingerprint.
-        //    This includes a serial step at the end.
-        hash_mix_vec.zmm = _mm512_mullo_epi64(hash_vec.zmm, golden_ratio_vec.zmm);
-        hash_mix_vec.ymms[0] = _mm256_xor_si256(_mm512_extracti64x4_epi64(hash_mix_vec.zmm, 1), //
-                                                _mm512_castsi512_si256(hash_mix_vec.zmm));
-
-        if ((cycle & step_mask) == 0) {
-            callback((sz_cptr_t)text_first, window_width, hash_mix_vec.u64s[0], callback_handle);
-            callback((sz_cptr_t)text_second, window_width, hash_mix_vec.u64s[1], callback_handle);
-            callback((sz_cptr_t)text_third, window_width, hash_mix_vec.u64s[2], callback_handle);
-            callback((sz_cptr_t)text_fourth, window_width, hash_mix_vec.u64s[3], callback_handle);
-        }
-    }
-}
-
-#pragma clang attribute pop
-#pragma GCC pop_options
-#endif            // SZ_USE_ICE
-#pragma endregion // Ice Lake Implementation
-
-/*  Implementation of the string hashing algorithms using the Arm NEON instruction set, available on 64-bit
- *  Arm processors. Covers billions of mobile CPUs worldwide, including Apple's A-series, and Qualcomm's Snapdragon.
- */
-#pragma region NEON Implementation
-#if SZ_USE_NEON
-#pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+simd")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
-
-#pragma clang attribute pop
-#pragma GCC pop_options
-#endif            // SZ_USE_NEON
-#pragma endregion // NEON Implementation
-
-/*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
- *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs.
- */
-#pragma region SVE Implementation
-#if SZ_USE_SVE
-#pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
-
-#pragma clang attribute pop
-#pragma GCC pop_options
-#endif            // SZ_USE_SVE
-#pragma endregion // SVE Implementation
-
-/*  Pick the right implementation for the string search algorithms.
- *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
- */
-#pragma region Compile Time Dispatching
-#if !SZ_DYNAMIC_DISPATCH
-
-SZ_DYNAMIC void sz_hashes(sz_cptr_t text, sz_size_t length, sz_size_t window_width, sz_size_t window_step, //
-                          sz_hash_callback_t callback, void *callback_handle) {
-#if SZ_USE_ICE
-    sz_hashes_ice(text, length, window_width, window_step, callback, callback_handle);
-#elif SZ_USE_HASWELL
-    sz_hashes_haswell(text, length, window_width, window_step, callback, callback_handle);
-#else
-    sz_hashes_serial(text, length, window_width, window_step, callback, callback_handle);
-#endif
-}
-
-#endif            // !SZ_DYNAMIC_DISPATCH
-#pragma endregion // Compile Time Dispatching
-
-#ifdef __cplusplus
-}
-#endif // __cplusplus
 #endif // STRINGZILLAS_FINGERPRINT_HPP_
-#endif

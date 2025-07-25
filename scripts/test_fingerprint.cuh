@@ -338,24 +338,24 @@ void test_rolling_hashers_equivalence_for_width() {
 
     constexpr std::size_t embedding_dims_k = embedding_dims_;
     constexpr std::size_t window_width_k = window_width_;
-    using fingerprint_t = safe_array<std::uint32_t, embedding_dims_k>;
+    using fingerprint_hashes_t = safe_array<std::uint32_t, embedding_dims_k>;
+    using fingerprint_counts_t = safe_array<std::uint32_t, embedding_dims_k>;
 
     auto test_against_baseline = [&](auto const &strings, auto const &baseline_hasher, auto const &accelerated_hasher) {
-        fingerprint_t fingerprint_accelerated;
-        fingerprint_t fingerprint_serial;
+        fingerprint_hashes_t serial_hashes, accelerated_hashes;
+        fingerprint_counts_t serial_counts, accelerated_counts;
 
         // Compute the fingerprints
         for (auto const &str : strings) {
             auto bytes = to_bytes_view(str);
-            baseline_hasher.template try_fingerprint<embedding_dims_k>(bytes, fingerprint_serial);
-            accelerated_hasher.try_fingerprint(bytes, fingerprint_accelerated);
+            baseline_hasher.template try_fingerprint<embedding_dims_k>(bytes, serial_hashes, serial_counts);
+            accelerated_hasher.try_fingerprint(bytes, accelerated_hashes, accelerated_counts);
 
             // Compare the results
             std::size_t const first_mismatch_index =
-                std::mismatch(fingerprint_serial.begin(), fingerprint_serial.end(), fingerprint_accelerated.begin())
-                    .first -
-                fingerprint_serial.begin();
-            sz_assert_(first_mismatch_index == fingerprint_serial.size() && "Fingerprints do not match");
+                std::mismatch(serial_hashes.begin(), serial_hashes.end(), accelerated_hashes.begin()).first -
+                serial_hashes.begin();
+            sz_assert_(first_mismatch_index == serial_hashes.size() && "Fingerprints do not match");
         }
     };
 

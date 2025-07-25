@@ -25,8 +25,10 @@ using namespace ashvardanian::stringzilla::scripts;
 static constexpr std::size_t default_embedding_dims_k = 128;
 static constexpr std::size_t default_window_width_k = 7;
 
-using fingerprint_t = std::array<std::uint32_t, default_embedding_dims_k>;
-using fingerprints_t = unified_vector<fingerprint_t>;
+using fingerprint_min_hashes_t = std::array<std::uint32_t, default_embedding_dims_k>;
+using fingerprint_min_counts_t = std::array<std::uint32_t, default_embedding_dims_k>;
+using fingerprints_min_hashes_t = unified_vector<fingerprint_min_hashes_t>;
+using fingerprints_min_counts_t = unified_vector<fingerprint_min_counts_t>;
 
 #pragma region Multi-Pattern Search
 
@@ -36,21 +38,25 @@ struct fingerprint_callable {
     using engine_t = engine_type_;
 
     environment_t const &env;
-    fingerprints_t &fingerprints;
+    fingerprints_min_hashes_t &fingerprints_hashes;
+    fingerprints_min_counts_t &fingerprints_counts;
     engine_t &engine;
     std::tuple<extra_args_...> extra_args = {};
 
-    fingerprint_callable(environment_t const &env, fingerprints_t &fingerprints, engine_t &eng, extra_args_... args)
-        : env(env), fingerprints(fingerprints), engine(eng), extra_args(args...) {}
+    fingerprint_callable(environment_t const &env, fingerprints_min_hashes_t &fingerprints_hashes,
+                         fingerprints_min_counts_t &fingerprints_counts, engine_t &eng, extra_args_... args)
+        : env(env), fingerprints_hashes(fingerprints_hashes), fingerprints_counts(fingerprints_counts), engine(eng),
+          extra_args(args...) {}
 
     call_result_t operator()() noexcept(false) {
 
         // Unpack the extra arguments from `std::tuple` into the engine call using `std::apply`
         status_t status = std::apply(
             [&](auto &&...rest) mutable {
-                auto result = engine(env.tokens, fingerprints, rest...);
+                auto result = engine(env.tokens, fingerprints_hashes, fingerprints_counts, rest...);
                 do_not_optimize(result);
-                for (auto &fingerprint : fingerprints) do_not_optimize(fingerprint);
+                for (auto &scalar : fingerprints_hashes) do_not_optimize(scalar);
+                for (auto &scalar : fingerprints_counts) do_not_optimize(scalar);
                 return result;
             },
             extra_args);
@@ -65,7 +71,7 @@ struct fingerprint_callable {
         call_result.bytes_passed = bytes_passed;
         call_result.operations = bytes_passed * default_embedding_dims_k;
         call_result.inputs_processed = env.tokens.size();
-        call_result.check_value = reinterpret_cast<check_value_t>(&fingerprints);
+        call_result.check_value = reinterpret_cast<check_value_t>(&fingerprints_hashes);
         return call_result;
     }
 };
@@ -74,11 +80,13 @@ void bench_fingerprint(environment_t const &env) {
 
     // Preallocate buffers for resulting fingerprints,
     // so that we can compare baseline and accelerated results for exact matches
-    using fingerprints_equality_t = arrays_equality<fingerprints_t>;
-    fingerprints_t fingerprints_baseline, fingerprints_accelerated;
-    fingerprints_baseline.resize(env.tokens.size()), fingerprints_accelerated.resize(env.tokens.size());
+    using fingerprints_equality_t = arrays_equality<fingerprints_min_hashes_t>;
+    fingerprints_min_hashes_t min_hashes_baseline, min_hashes_accelerated;
+    fingerprints_min_counts_t min_counts_baseline, min_counts_accelerated;
+    min_hashes_baseline.resize(env.tokens.size()), min_hashes_accelerated.resize(env.tokens.size());
+    min_counts_baseline.resize(env.tokens.size()), min_counts_accelerated.resize(env.tokens.size());
     auto scramble_accelerated_results = [&]() {
-        std::shuffle(fingerprints_accelerated.begin(), fingerprints_accelerated.end(), global_random_generator());
+        std::shuffle(min_hashes_accelerated.begin(), min_hashes_accelerated.end(), global_random_generator());
     };
 
     // Allocate all hashers on heap
@@ -120,35 +128,42 @@ void bench_fingerprint(environment_t const &env) {
         throw std::runtime_error("Can't build Skylake Floating Hasher.");
 
     // Perform the benchmarks, passing the dictionary to the engines
-    auto call_baseline = fingerprint_callable<rolling_f64_t>(env, fingerprints_baseline, *rolling_f64);
+    auto call_baseline =
+        fingerprint_callable<rolling_f64_t>(env, min_hashes_baseline, min_counts_baseline, *rolling_f64);
     bench_result_t baseline = bench_nullary(env, "rolling_f64", call_baseline);
 
     // Semi-serial variants
-    bench_nullary(env, "rolling_f32", fingerprint_callable<rolling_f32_t>(env, fingerprints_accelerated, *rolling_f32))
+    bench_nullary(
+        env, "rolling_f32",
+        fingerprint_callable<rolling_f32_t>(env, min_hashes_accelerated, min_counts_accelerated, *rolling_f32))
         .log(baseline);
-    bench_nullary(env, "rabin_u64", fingerprint_callable<rabin_u64_t>(env, fingerprints_accelerated, *rabin_u64))
+    bench_nullary(env, "rabin_u64",
+                  fingerprint_callable<rabin_u64_t>(env, min_hashes_accelerated, min_counts_accelerated, *rabin_u64))
         .log(baseline);
-    bench_nullary(env, "buz_u32", fingerprint_callable<buz_u32_t>(env, fingerprints_accelerated, *buz_u32)) //
+    bench_nullary(env, "buz_u32",
+                  fingerprint_callable<buz_u32_t>(env, min_hashes_accelerated, min_counts_accelerated, *buz_u32)) //
         .log(baseline);
-    bench_nullary(env, "multiply_u32",
-                  fingerprint_callable<multiply_u32_t>(env, fingerprints_accelerated, *multiply_u32))
+    bench_nullary(
+        env, "multiply_u32",
+        fingerprint_callable<multiply_u32_t>(env, min_hashes_accelerated, min_counts_accelerated, *multiply_u32))
         .log(baseline);
 
     // Actually unrolled hard-coded variants, including SIMD ports
-    bench_result_t unrolled =
-        bench_nullary(                                                                              //
-            env, "rolling_serial", call_baseline,                                                   //
-            fingerprint_callable<rolling_serial_t>(env, fingerprints_accelerated, *rolling_serial), //
-            callable_no_op_t {},                                                                    // preprocessing
-            fingerprints_equality_t {})                                                             // equality check
-            .log(baseline);
+    bench_result_t unrolled = bench_nullary(                            //
+                                  env, "rolling_serial", call_baseline, //
+                                  fingerprint_callable<rolling_serial_t>(env, min_hashes_accelerated,
+                                                                         min_counts_accelerated, *rolling_serial), //
+                                  callable_no_op_t {},        // preprocessing
+                                  fingerprints_equality_t {}) // equality check
+                                  .log(baseline);
     scramble_accelerated_results();
 
-    bench_nullary(                                                                                //
-        env, "rolling_skylake", call_baseline,                                                    //
-        fingerprint_callable<rolling_skylake_t>(env, fingerprints_accelerated, *rolling_skylake), //
-        callable_no_op_t {},                                                                      // preprocessing
-        fingerprints_equality_t {})                                                               // equality check
+    bench_nullary(                             //
+        env, "rolling_skylake", call_baseline, //
+        fingerprint_callable<rolling_skylake_t>(env, min_hashes_accelerated, min_counts_accelerated,
+                                                *rolling_skylake), //
+        callable_no_op_t {},                                       // preprocessing
+        fingerprints_equality_t {})                                // equality check
         .log(baseline, unrolled);
     scramble_accelerated_results();
 }
