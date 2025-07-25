@@ -159,6 +159,8 @@ struct span {
         sz_unused_(size);
     }
 
+    sz_constexpr_if_cpp14 explicit operator bool() const noexcept { return data_ != nullptr; }
+
     constexpr value_type *begin() const noexcept { return data_; }
     constexpr value_type *end() const noexcept { return data_ + extent; }
     constexpr value_type *data() const noexcept { return data_; }
@@ -201,6 +203,8 @@ struct span<value_type_, SZ_SIZE_MAX> {
     constexpr span() noexcept = default;
     constexpr span(value_type *data, size_type size) noexcept : data_(data), size_(size) {}
     constexpr span(value_type *data, value_type *end) noexcept : data_(data), size_(end - data) {}
+
+    sz_constexpr_if_cpp14 explicit operator bool() const noexcept { return data_ != nullptr; }
 
     constexpr value_type *begin() const noexcept { return data_; }
     constexpr value_type *end() const noexcept { return data_ + size_; }

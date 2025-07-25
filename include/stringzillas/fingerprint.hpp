@@ -218,7 +218,7 @@ struct rabin_karp_rolling_hasher {
         return with_new;
     }
 
-    inline hash_t digest(state_t state) noexcept { return static_cast<hash_t>(state); }
+    inline hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
 
   private:
     inline state_t mul_mod(state_t a, state_t b) const noexcept { return (a * b) % modulo_; }
@@ -375,7 +375,7 @@ struct floating_rolling_hasher<float> {
         state_t old_term = state_t(old_char) + 1.0f;
         state_t new_term = state_t(new_char) + 1.0f;
 
-        state_t without_old = fma_mod(old_term, negative_discarding_multiplier_, state);
+        state_t without_old = fma_mod(negative_discarding_multiplier_, old_term, state);
         return fma_mod(without_old, multiplier_, new_term);
     }
 
@@ -476,7 +476,7 @@ struct floating_rolling_hasher<double> {
     inline state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
         state_t old_term = state_t(old_char) + 1.0;
         state_t new_term = state_t(new_char) + 1.0;
-        state_t without_old = fma_mod(old_term, negative_discarding_multiplier_, state);
+        state_t without_old = fma_mod(negative_discarding_multiplier_, old_term, state);
         return fma_mod(without_old, multiplier_, new_term);
     }
 
@@ -656,7 +656,7 @@ struct basic_rolling_hashers {
             allocator_traits_t::select_on_container_copy_construction(allocator_));
         safe_vector<rolling_hash_t, rolling_hashes_allocator_t> rolling_minimums_buffer(
             allocator_traits_t::select_on_container_copy_construction(allocator_));
-        if (rolling_states_buffer.try_resize(dimensions()) != status_t::success_k &&
+        if (rolling_states_buffer.try_resize(dimensions()) != status_t::success_k ||
             rolling_minimums_buffer.try_resize(dimensions()) != status_t::success_k)
             return status_t::bad_alloc_k;
 
@@ -665,34 +665,41 @@ struct basic_rolling_hashers {
         for (auto &minimum : rolling_minimums_buffer) minimum = skipped_rolling_hash_k;
 
         // Roll through the entire `text`
-        auto rolling_states = span<rolling_state_t, dimensions_>(rolling_states_buffer);
-        auto rolling_minimums = span<rolling_hash_t, dimensions_>(rolling_minimums_buffer);
-        roll<dimensions_>(text, rolling_states, rolling_minimums, min_counts, 0);
-
-        // Now that the states are updated, export them into the output spans
-        digest<dimensions_>(rolling_minimums, min_hashes);
+        auto rolling_states =
+            span<rolling_state_t, dimensions_>(rolling_states_buffer.data(), rolling_states_buffer.size());
+        auto rolling_minimums =
+            span<rolling_hash_t, dimensions_>(rolling_minimums_buffer.data(), rolling_minimums_buffer.size());
+        fingerprint_chunk<dimensions_>(text, rolling_states, rolling_minimums, min_hashes, min_counts);
         return status_t::success_k;
     }
 
     /**
      *  @brief Underlying machinery of `fingerprint` that fills the states of the hashers.
      *  @param[in] text_chunk A chunk of text to update the @p `last_states` with.
-     *  @param[inout] last_states The last computed floats for each hasher; start with zeroes.
-     *  @param[inout] rolling_minimums The minimum floats for each hasher; start with `skipped_rolling_hash_k`.
-     *  @param[inout] rolling_counts The appearance frequency counts of each @p `rolling_minimums`; start with 1.
+     *  @param[inout] last_states The last computed floats for each hasher; start with @b zeroes.
+     *  @param[inout] rolling_minimums The minimum floats for each hasher; start with @b `skipped_rolling_hash_k`.
+     *  @param[out] min_hashes The @b optional output for minimum hashes, which are the final fingerprints.
+     *  @param[out] min_counts The frequencies of @p `rolling_minimums` and optional @p `min_hashes` hashes.
      *  @param[in] passed_progress The offset of the received @p `text_chunk` in the whole text; defaults to 0.
+     *
+     *  Unlike the `fingerprint` method, this function can be used in a @b rolling fashion, i.e., it can be called
+     *  multiple times with different chunks of text, and it will update the states accordingly. In the end, it
+     *  will anyways export the composing Count-Min-Sketch fingerprint into the @p `min_hashes` and @p `min_counts`,
+     *  as its a relatively cheap operation.
      */
     template <size_t dimensions_ = SZ_SIZE_MAX>
-    void roll(                                              //
+    void fingerprint_chunk(                                 //
         span<byte_t const> text_chunk,                      //
         span<rolling_state_t, dimensions_> last_states,     //
         span<rolling_hash_t, dimensions_> rolling_minimums, //
-        span<min_count_t, dimensions_> rolling_counts,      //
+        span<min_hash_t, dimensions_> min_hashes,           //
+        span<min_count_t, dimensions_> min_counts,          //
         std::size_t const passed_progress = 0) const noexcept {
 
         sz_assert_(dimensions() == last_states.size() && "Dimensions number & states number mismatch");
         sz_assert_(dimensions() == rolling_minimums.size() && "Dimensions number & minimums number mismatch");
-        sz_assert_(dimensions() == rolling_counts.size() && "Dimensions number & hash-counts number mismatch");
+        sz_assert_(dimensions() == min_hashes.size() && "Dimensions number & min-hashes number mismatch");
+        sz_assert_(dimensions() == min_counts.size() && "Dimensions number & hash-counts number mismatch");
 
         // Until we reach the maximum window length, use a branching code version
         std::size_t const prefix_length = (std::min)(text_chunk.size(), max_window_width_);
@@ -701,21 +708,22 @@ struct basic_rolling_hashers {
             byte_t const new_char = text_chunk[new_char_offset];
             for (std::size_t dim = 0; dim < last_states.size(); ++dim) {
                 auto &hasher = hashers_[dim];
-                auto &last_state = last_states[dim];
-                auto &rolling_minimum = rolling_minimums[dim];
-                auto &rolling_count = rolling_counts[dim];
+                rolling_state_t &last_state = last_states[dim];
+                rolling_hash_t &rolling_minimum = rolling_minimums[dim];
+                min_count_t &min_count = min_counts[dim];
                 if (hasher.window_width() > new_char_offset) {
                     last_state = hasher.push(last_state, new_char);
                     if (hasher.window_width() == (new_char_offset + 1)) {
                         rolling_minimum = (std::min)(rolling_minimum, hasher.digest(last_state));
-                        rolling_count = 1; // First occurrence of this hash
+                        min_count = 1; // First occurrence of this hash
                     }
                 }
                 else {
                     auto const old_char = text_chunk[new_char_offset - hasher.window_width()];
                     last_state = hasher.roll(last_state, old_char, new_char);
-                    auto new_hash = hasher.digest(last_state);
-                    rolling_count += new_hash == rolling_minimum;
+                    rolling_hash_t new_hash = hasher.digest(last_state);
+                    min_count *= new_hash >= rolling_minimum; // Discard `min_count` to 0, if a new minimum is found
+                    min_count += new_hash == rolling_minimum; // Increments `min_count` by 1 for new & existing minimums
                     rolling_minimum = (std::min)(rolling_minimum, new_hash);
                 }
             }
@@ -726,34 +734,27 @@ struct basic_rolling_hashers {
             byte_t const new_char = text_chunk[new_char_offset];
             for (std::size_t dim = 0; dim < last_states.size(); ++dim) {
                 auto &hasher = hashers_[dim];
-                auto &last_state = last_states[dim];
-                auto &rolling_minimum = rolling_minimums[dim];
-                auto &rolling_count = rolling_counts[dim];
+                rolling_state_t &last_state = last_states[dim];
+                rolling_hash_t &rolling_minimum = rolling_minimums[dim];
+                min_count_t &min_count = min_counts[dim];
                 auto const old_char = text_chunk[new_char_offset - hasher.window_width()];
                 last_state = hasher.roll(last_state, old_char, new_char);
-                auto new_hash = hasher.digest(last_state);
-                rolling_count += new_hash == rolling_minimum;
+                rolling_hash_t new_hash = hasher.digest(last_state);
+                min_count *= new_hash >= rolling_minimum; // Discard `min_count` to 0, if a new minimum is found
+                min_count += new_hash == rolling_minimum; // Increments `min_count` by 1 for new & existing minimums
                 rolling_minimum = (std::min)(rolling_minimum, new_hash);
             }
         }
-    }
 
-    /**
-     *  @brief Converts the rolling minimums into the final minimum hashes.
-     *  @param[in] rolling_minimums The minimum hashes computed by the rolling hashers.
-     *  @param[out] min_hashes The output minimum hashes, which are the final fingerprints.
-     */
-    template <size_t dimensions_ = SZ_SIZE_MAX>
-    void digest(                                                  //
-        span<rolling_hash_t const, dimensions_> rolling_minimums, //
-        span<min_hash_t, dimensions_> min_hashes) const noexcept {
-
-        for (std::size_t dim = 0; dim < min_hashes.size(); ++dim) {
-            rolling_hash_t const rolling_minimum = rolling_minimums[dim];
-            min_hashes[dim] = rolling_minimum == skipped_rolling_hash_k
-                                  ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
-                                  : static_cast<min_hash_t>(rolling_minimum & max_hash_k);
-        }
+        // Finally, export the minimum hashes into the smaller representations
+        if (min_hashes)
+            for (std::size_t dim = 0; dim < min_hashes.size(); ++dim) {
+                rolling_hash_t const &rolling_minimum = rolling_minimums[dim];
+                min_hash_t &min_hash = min_hashes[dim];
+                min_hash = rolling_minimum == skipped_rolling_hash_k
+                               ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
+                               : static_cast<min_hash_t>(rolling_minimum & max_hash_k);
+            }
     }
 
     /**
@@ -808,8 +809,12 @@ struct basic_rolling_hashers {
             span<byte_t const> text_view = to_bytes_view(text);
             span<rolling_state_t> thread_local_states {rolling_states.data() + thread_index * dims, dims};
             span<rolling_hash_t> thread_local_minimums {rolling_minimums.data() + thread_index * dims, dims};
-            roll<SZ_SIZE_MAX>(text_view, thread_local_states, thread_local_minimums, min_counts);
-            digest<SZ_SIZE_MAX>(thread_local_minimums, min_hashes);
+
+            // Clear the thread-local buffers & run the rolling fingerprinting API
+            for (auto &state : thread_local_states) state = rolling_state_t(0);
+            for (auto &minimum : thread_local_minimums) minimum = skipped_rolling_hash_k;
+            fingerprint_chunk<SZ_SIZE_MAX>(text_view, thread_local_states, thread_local_minimums, min_hashes,
+                                           min_counts);
         });
 
         // Process large texts by splitting them into chunks
@@ -836,7 +841,12 @@ struct basic_rolling_hashers {
                 auto thread_local_states = span<rolling_state_t> {rolling_states.data() + thread_index * dims, dims};
                 auto thread_local_minimums = span<rolling_hash_t> {rolling_minimums.data() + thread_index * dims, dims};
                 auto thread_local_counts = span<min_count_t> {rolling_counts.data() + thread_index * dims, dims};
-                roll<SZ_SIZE_MAX>(thread_local_text, thread_local_states, thread_local_minimums, thread_local_counts);
+
+                // Clear the thread-local buffers & run the rolling fingerprinting API
+                for (auto &state : thread_local_states) state = rolling_state_t(0);
+                for (auto &minimum : thread_local_minimums) minimum = skipped_rolling_hash_k;
+                fingerprint_chunk<SZ_SIZE_MAX>(thread_local_text, thread_local_states, thread_local_minimums, {},
+                                               thread_local_counts);
             });
 
             // Compute the minimums of each thread's local states
@@ -887,8 +897,8 @@ status_t floating_rolling_hashers_in_parallel_(                                 
     using min_hash_t = typename engine_t::min_hash_t;
     static constexpr auto window_width_k = engine_t::window_width_k;
     static constexpr auto dimensions_k = engine_t::dimensions_k;
-    static constexpr auto skipped_rolling_state_k = engine_t::skipped_rolling_state_k;
     static constexpr auto skipped_rolling_hash_k = engine_t::skipped_rolling_hash_k;
+    static constexpr auto max_hash_k = engine_t::max_hash_k;
 
     // Depending on document sizes, choose the appropriate parallelization strategy
     // - Either split each text into chunks across threads
@@ -920,12 +930,8 @@ status_t floating_rolling_hashers_in_parallel_(                                 
             divide_round_up(text_view.size(), executor.threads_count()), //
             specs.cache_line_width);
 
-        rolling_state_t states[dimensions_k];
-        rolling_state_t minimums[dimensions_k];
-        for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
-            states[dim] = skipped_rolling_state_k;
-            minimums[dim] = skipped_rolling_hash_k;
-        }
+        rolling_state_t rolling_minimums[dimensions_k];
+        for (std::size_t dim = 0; dim < dimensions_k; ++dim) rolling_minimums[dim] = skipped_rolling_hash_k;
 
         // Distribute overlapping chunks across threads
         auto min_hashes = to_span(min_hashes_per_text[text_index]);
@@ -942,11 +948,14 @@ status_t floating_rolling_hashers_in_parallel_(                                 
             rolling_state_t thread_local_states[dimensions_k];
             rolling_state_t thread_local_minimums[dimensions_k];
             min_count_t thread_local_counts[dimensions_k];
-            engine.roll(thread_local_text, thread_local_states, thread_local_minimums, thread_local_counts);
+            for (std::size_t dim = 0; dim < dimensions_k; ++dim)
+                thread_local_states[dim] = 0, thread_local_minimums[dim] = skipped_rolling_hash_k;
+            engine.fingerprint_chunk(thread_local_text, thread_local_states, thread_local_minimums, {},
+                                     thread_local_counts);
 
             lock_guard lock(gather_mutex);
             for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
-                rolling_state_t &min_hash = minimums[dim];
+                rolling_state_t &min_hash = rolling_minimums[dim];
                 min_count_t &min_count = min_counts[dim];
                 rolling_state_t thread_local_min_hash = thread_local_minimums[dim];
                 min_count_t thread_local_min_count = thread_local_counts[dim];
@@ -959,8 +968,14 @@ status_t floating_rolling_hashers_in_parallel_(                                 
         // Digest the smallest hash states, luckily for us, for this hash function,
         // the smallest state corresponds to the smallest digested hash :)
         // This is also never a bottleneck, so let's keep it sequential for simplicity.
-
-        engine.digest(span<rolling_state_t const, dimensions_k>(minimums), span<min_hash_t, dimensions_k>(min_hashes));
+        for (std::size_t dim = 0; dim < min_hashes.size(); ++dim) {
+            rolling_state_t const &rolling_minimum = rolling_minimums[dim];
+            min_hash_t &min_hash = min_hashes[dim];
+            auto const rolling_minimum_as_uint = static_cast<std::uint64_t>(rolling_minimum);
+            min_hash = rolling_minimum == skipped_rolling_hash_k
+                           ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
+                           : static_cast<min_hash_t>(rolling_minimum_as_uint & max_hash_k);
+        }
     }
 
     return status_t::success_k;
@@ -1037,20 +1052,17 @@ struct floating_rolling_hashers {
     void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
                      min_counts_span_t min_counts) const noexcept {
 
-        // Fill the states
+        if (text.size() < window_width_k) {
+            for (auto &min_hash : min_hashes) min_hash = max_hash_k;
+            for (auto &min_count : min_counts) min_count = 0;
+            return;
+        }
+
         rolling_state_t rolling_states[dimensions_k];
         rolling_state_t rolling_minimums[dimensions_k];
-        min_count_t rolling_counts[dimensions_k];
         for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-            rolling_states[dim] = 0, rolling_minimums[dim] = skipped_rolling_hash_k, rolling_counts[dim] = 0;
-
-        // Roll through the whole input at once
-        if (text.size() >= window_width_k) roll(text, rolling_states, rolling_minimums, rolling_counts);
-
-        // Export the minimum floats to the fingerprint
-        for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-            min_hashes[dim] = static_cast<min_hash_t>(rolling_minimums[dim] & max_hash_k),
-            min_counts[dim] = rolling_counts[dim];
+            rolling_states[dim] = 0, rolling_minimums[dim] = skipped_rolling_hash_k;
+        fingerprint_chunk(text, rolling_states, rolling_minimums, min_hashes, min_counts);
     }
 
     /**
@@ -1068,16 +1080,23 @@ struct floating_rolling_hashers {
     /**
      *  @brief Underlying machinery of `fingerprint` that fills the states of the hashers.
      *  @param[in] text_chunk A chunk of text to update the @p `last_states` with.
-     *  @param[inout] last_states The last computed floats for each hasher; start with zeroes.
-     *  @param[inout] rolling_minimums The minimum floats for each hasher; start with `skipped_rolling_hash_k`.
-     *  @param[inout] rolling_counts The appearance frequency counts of each @p `rolling_minimums`; start with 1.
+     *  @param[inout] last_states The last computed floats for each hasher; start with @b zeroes.
+     *  @param[inout] rolling_minimums The minimum floats for each hasher; start with @b `skipped_rolling_hash_k`.
+     *  @param[out] min_hashes The @b optional output for minimum hashes, which are the final fingerprints.
+     *  @param[out] min_counts The frequencies of @p `rolling_minimums` and optional @p `min_hashes` hashes.
      *  @param[in] passed_progress The offset of the received @p `text_chunk` in the whole text; defaults to 0.
+     *
+     *  Unlike the `fingerprint` method, this function can be used in a @b rolling fashion, i.e., it can be called
+     *  multiple times with different chunks of text, and it will update the states accordingly. In the end, it
+     *  will anyways export the composing Count-Min-Sketch fingerprint into the @p `min_hashes` and @p `min_counts`,
+     *  as its a relatively cheap operation.
      */
-    void roll(                                                //
+    void fingerprint_chunk(                                   //
         span<byte_t const> text_chunk,                        //
         span<rolling_state_t, dimensions_k> last_states,      //
         span<rolling_state_t, dimensions_k> rolling_minimums, //
-        span<min_count_t, dimensions_k> rolling_counts,       //
+        span<min_hash_t, dimensions_k> min_hashes,            //
+        span<min_count_t, dimensions_k> min_counts,           //
         std::size_t const passed_progress = 0) const noexcept {
 
         // Until we reach the maximum window length, use a branching code version
@@ -1088,7 +1107,7 @@ struct floating_rolling_hashers {
             rolling_state_t const new_term = static_cast<rolling_state_t>(new_char) + 1.0;
             for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
                 rolling_state_t &last_state = last_states[dim];
-                last_state += multipliers_[dim] * new_term;
+                last_state = std::fma(last_state, multipliers_[dim], new_term); // Add head
                 last_state = barrett_mod(last_state, dim);
             }
         }
@@ -1097,7 +1116,7 @@ struct floating_rolling_hashers {
         if (new_char_offset == prefix_length)
             for (std::size_t dim = 0; dim < dimensions_k; ++dim)
                 rolling_minimums[dim] = (std::min)(rolling_minimums[dim], last_states[dim]),
-                rolling_counts[dim] = 1; // First occurrence of this hash
+                min_counts[dim] = 1; // First occurrence of this hash
 
         // Now we can avoid a branch in the nested loop, as we are passed the longest window width
         for (; new_char_offset < text_chunk.size(); ++new_char_offset) {
@@ -1108,35 +1127,28 @@ struct floating_rolling_hashers {
             for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
                 rolling_state_t &last_state = last_states[dim];
                 rolling_state_t &rolling_minimum = rolling_minimums[dim];
-                min_count_t &rolling_count = rolling_counts[dim];
+                min_count_t &min_count = min_counts[dim];
 
-                last_state += negative_discarding_multipliers_[dim] * old_term; // Remove tail
+                last_state = std::fma(negative_discarding_multipliers_[dim], old_term, last_state); // Remove tail
                 last_state = barrett_mod(last_state, dim);
-                last_state += multipliers_[dim] * new_term; // Add head
+                last_state = std::fma(last_state, multipliers_[dim], new_term); // Add head
                 last_state = barrett_mod(last_state, dim);
 
-                if (rolling_minimum == last_state) { rolling_count++; }
-                else if (last_state < rolling_minimum) { rolling_minimum = last_state, rolling_count = 1; }
+                if (rolling_minimum == last_state) { min_count++; }
+                else if (last_state < rolling_minimum) { rolling_minimum = last_state, min_count = 1; }
             }
         }
-    }
 
-    /**
-     *  @brief Converts the rolling minimums into the final minimum hashes.
-     *  @param[in] rolling_minimums The minimum hashes computed by the rolling hashers.
-     *  @param[out] min_hashes The output minimum hashes, which are the final fingerprints.
-     */
-    template <std::size_t digest_dimensions_ = SZ_SIZE_MAX>
-    void digest(                                                          //
-        span<rolling_state_t const, digest_dimensions_> rolling_minimums, //
-        span<min_hash_t, digest_dimensions_> min_hashes) const noexcept {
-
-        for (std::size_t dim = 0; dim < min_hashes.size(); ++dim) {
-            rolling_state_t const rolling_minimum = rolling_minimums[dim];
-            min_hashes[dim] = rolling_minimum == skipped_rolling_hash_k
-                                  ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
-                                  : static_cast<min_hash_t>(static_cast<std::uint64_t>(rolling_minimum) & max_hash_k);
-        }
+        // Finally, export the minimum hashes into the smaller representations
+        if (min_hashes)
+            for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
+                rolling_state_t const &rolling_minimum = rolling_minimums[dim];
+                min_hash_t &min_hash = min_hashes[dim];
+                auto const rolling_minimum_as_uint = static_cast<std::uint64_t>(rolling_minimum);
+                min_hash = rolling_minimum == skipped_rolling_hash_k
+                               ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
+                               : static_cast<min_hash_t>(rolling_minimum_as_uint & max_hash_k);
+            }
     }
 
     /**
@@ -1244,57 +1256,55 @@ struct floating_rolling_hashers<sz_cap_ice_k, window_width_, dimensions_> {
     void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
                      min_counts_span_t min_counts) const noexcept {
 
-        // Fill the states
+        if (text.size() < window_width_k) {
+            for (auto &min_hash : min_hashes) min_hash = max_hash_k;
+            for (auto &min_count : min_counts) min_count = 0;
+            return;
+        }
+
         rolling_state_t rolling_states[dimensions_k];
         rolling_state_t rolling_minimums[dimensions_k];
-        min_count_t rolling_counts[dimensions_k];
         for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-            rolling_states[dim] = 0, rolling_minimums[dim] = skipped_rolling_hash_k, rolling_counts[dim] = 0;
-
-        // Roll through the whole input at once
-        if (text.size() >= window_width_k) roll(text, rolling_states, rolling_minimums, rolling_counts);
-
-        // Export the minimum floats to the fingerprint
-        for (std::size_t dim = 0; dim < dimensions_k; ++dim)
-            min_hashes[dim] = static_cast<min_hash_t>(rolling_minimums[dim] & max_hash_k),
-            min_counts[dim] = rolling_counts[dim];
+            rolling_states[dim] = 0, rolling_minimums[dim] = skipped_rolling_hash_k;
+        fingerprint_chunk(text, rolling_states, rolling_minimums, min_hashes, min_counts);
     }
 
     /**
      *  @brief Underlying machinery of `fingerprint` that fills the states of the hashers.
-     *  @param[in] text_chunk A chunk of text to update the @p `last_floats` with.
-     *  @param[inout] last_floats The last computed floats for each hasher; start with zeroes.
-     *  @param[inout] rolling_minimums The minimum floats for each hasher; start with `skipped_rolling_hash_k`.
-     *  @param[inout] rolling_counts The appearance frequency counts of each @p `rolling_minimums`; start with 1.
+     *  @param[in] text_chunk A chunk of text to update the @p `last_states` with.
+     *  @param[inout] last_states The last computed floats for each hasher; start with @b zeroes.
+     *  @param[inout] rolling_minimums The minimum floats for each hasher; start with @b `skipped_rolling_hash_k`.
+     *  @param[out] min_hashes The @b optional output for minimum hashes, which are the final fingerprints.
+     *  @param[out] min_counts The frequencies of @p `rolling_minimums` and optional @p `min_hashes` hashes.
      *  @param[in] passed_progress The offset of the received @p `text_chunk` in the whole text; defaults to 0.
+     *
+     *  Unlike the `fingerprint` method, this function can be used in a @b rolling fashion, i.e., it can be called
+     *  multiple times with different chunks of text, and it will update the states accordingly. In the end, it
+     *  will anyways export the composing Count-Min-Sketch fingerprint into the @p `min_hashes` and @p `min_counts`,
+     *  as its a relatively cheap operation.
      */
-    void roll(                                                //
+    void fingerprint_chunk(                                   //
         span<byte_t const> text_chunk,                        //
-        span<rolling_state_t, dimensions_k> last_floats,      //
+        span<rolling_state_t, dimensions_k> last_states,      //
         span<rolling_state_t, dimensions_k> rolling_minimums, //
-        span<min_count_t, dimensions_k> rolling_counts,       //
-        std::size_t passed_progress = 0) const noexcept {
+        span<min_hash_t, dimensions_k> min_hashes,            //
+        span<min_count_t, dimensions_k> min_counts,           //
+        std::size_t const passed_progress = 0) const noexcept {
 
         constexpr unsigned groups_count_k = dimensions_k / hashes_per_unrolled_group_k;
         for (unsigned group_index = 0; group_index < groups_count_k; ++group_index)
-            roll_group(text_chunk, group_index, last_floats, rolling_minimums, rolling_counts, passed_progress);
-    }
+            roll_group(text_chunk, group_index, last_states, rolling_minimums, min_counts, passed_progress);
 
-    /**
-     *  @brief Converts the rolling minimums into the final minimum hashes.
-     *  @param[in] rolling_minimums The minimum hashes computed by the rolling hashers.
-     *  @param[out] min_hashes The output minimum hashes, which are the final fingerprints.
-     */
-    void digest(                                                    //
-        span<rolling_state_t const, dimensions_k> rolling_minimums, //
-        span<min_hash_t, dimensions_k> min_hashes) const noexcept {
-
-        for (std::size_t dim = 0; dim < min_hashes.size(); ++dim) {
-            rolling_state_t const rolling_minimum = rolling_minimums[dim];
-            min_hashes[dim] = rolling_minimum == skipped_rolling_hash_k
-                                  ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
-                                  : static_cast<min_hash_t>(static_cast<std::uint64_t>(rolling_minimum) & max_hash_k);
-        }
+        // Finally, export the minimum hashes into the smaller representations
+        if (min_hashes)
+            for (std::size_t dim = 0; dim < dimensions_k; ++dim) {
+                rolling_state_t const &rolling_minimum = rolling_minimums[dim];
+                min_hash_t &min_hash = min_hashes[dim];
+                auto const rolling_minimum_as_uint = static_cast<std::uint64_t>(rolling_minimum);
+                min_hashes[dim] = rolling_minimum == skipped_rolling_hash_k
+                                      ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
+                                      : static_cast<min_hash_t>(rolling_minimum_as_uint & max_hash_k);
+            }
     }
 
     /**
@@ -1312,23 +1322,17 @@ struct floating_rolling_hashers<sz_cap_ice_k, window_width_, dimensions_> {
 #if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes, //
-                        min_counts_per_text_type_ &&min_counts, executor_type_ &&executor = {},
+    status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text, //
+                        min_counts_per_text_type_ &&min_counts_per_text, executor_type_ &&executor = {},
                         cpu_specs_t specs = {}) noexcept {
-        return floating_rolling_hashers_in_parallel_(            //
-            *this, texts,                                        //
-            std::forward<min_hashes_per_text_type_>(min_hashes), //
-            std::forward<min_counts_per_text_type_>(min_counts), //
+        return floating_rolling_hashers_in_parallel_(                     //
+            *this, texts,                                                 //
+            std::forward<min_hashes_per_text_type_>(min_hashes_per_text), //
+            std::forward<min_counts_per_text_type_>(min_counts_per_text), //
             std::forward<executor_type_>(executor), specs);
     }
 
   private:
-    struct unrolled_states_t {
-        sz_u512_vec_t last_f64s[unroll_factor_k];
-        sz_u512_vec_t minimum_f64s[unroll_factor_k];
-        sz_u512_vec_t count_u64s[unroll_factor_k];
-    };
-
     // TODO: We can probably shave a few ore cycles here:
     SZ_INLINE __m512d barrett_mod(__m512d xs, __m512d modulos, __m512d inverse_modulos) const noexcept {
         // Use rounding SIMD arithmetic
