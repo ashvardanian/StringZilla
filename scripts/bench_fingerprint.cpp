@@ -50,7 +50,7 @@ int main(int argc, char const **argv) {
         std::printf("Building up the environment...\n");
         environment_t env = build_environment( //
             argc, argv,                        //
-            "xlsum.csv",                       // Preferred for UTF-8 content
+            "leipzig1M.txt",                   //
             environment_t::tokenization_t::lines_k);
 
         std::printf("Starting string fingerprinting benchmarks...\n");

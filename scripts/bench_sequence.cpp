@@ -204,7 +204,7 @@ struct argsort_strings_via_sz {
  *  @brief Find the array permutation that sorts the input strings.
  *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
  */
-void bench_sequenceing_strings(environment_t const &env) {
+void bench_sequencing_strings(environment_t const &env) {
     permute_t permute_buffer(env.tokens.size());
 
     // First, benchmark the STL function
@@ -282,7 +282,7 @@ struct sort_pgrams_via_sz {
  *  @brief Find the array permutation that sorts the input strings.
  *  @warning Some algorithms use more memory than others and memory usage is not accounted for in this benchmark.
  */
-void bench_sequenceing_pgrams(environment_t const &env) {
+void bench_sequencing_pgrams(environment_t const &env) {
     permute_t permute_buffer(env.tokens.size());
 
     // Before sorting the strings themselves, which is a heavy operation,
@@ -439,8 +439,8 @@ int main(int argc, char const **argv) {
         environment_t::tokenization_t::words_k);
 
     std::printf("Starting search benchmarks...\n");
-    bench_sequenceing_pgrams(env);
-    bench_sequenceing_strings(env);
+    bench_sequencing_pgrams(env);
+    bench_sequencing_strings(env);
     bench_intersections(env);
 
     std::printf("All benchmarks passed.\n");

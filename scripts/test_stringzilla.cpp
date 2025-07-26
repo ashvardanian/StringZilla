@@ -5,7 +5,7 @@
  *
  *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file    test.cpp
+ *  @file    test_stringzilla.cpp
  *  @author  Ash Vardanian
  */
 #undef NDEBUG // ! Enable all assertions for testing

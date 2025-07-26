@@ -9,9 +9,8 @@
  *  - Stream hashing of a token (file, lines, or words) - @b hash_init, @b hash_stream, @b hash_fold.
  *  - Equality check between two tokens and their relative order - @b equal and @b ordering.
  *
- *  For substring search, the number of operations per second are reported as the number of character-level comparisons
- *  happening in the worst case in the naive algorithm, meaning O(N*M) for N characters in the haystack and M in the
- *  needle.
+ *  For token operations, the number of operations per second are reported as the number of bytes processed
+ *  or comparisons performed, depending on the specific operation being benchmarked.
  *
  *  Instead of CLI arguments, for compatibility with @b StringWa.rs, the following environment variables are used:
  *  - `STRINGWARS_DATASET` : Path to the dataset file.
@@ -45,7 +44,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_sequence.cpp`, `bench_token.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `bench_find.cpp`, `bench_sequence.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
  */
 #include <numeric> // `std::accumulate`
 
