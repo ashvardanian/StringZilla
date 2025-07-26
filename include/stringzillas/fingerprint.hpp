@@ -1412,6 +1412,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
 
         // Use masked loads for the incomplete tail group
         if (has_incomplete_tail_group_k && group_index + 1 == groups_count_k)
+#pragma unroll(unroll_factor_k)
             for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
                 unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
                 __mmask8 const load_mask = dimensions_k > dim ? sz_u8_mask_until_(dimensions_k - dim) : (__mmask8)0;
@@ -1421,6 +1422,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
             }
         // Otherwise, everything is easy
         else
+#pragma unroll(unroll_factor_k)
             for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
                 unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
                 last_states_vec[index_in_group].zmm_pd = _mm512_loadu_pd(&last_states[dim]);
@@ -1433,6 +1435,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
         sz_u512_vec_t multipliers_vec[unroll_factor_k], negative_discarding_multipliers_vec[unroll_factor_k],
             modulos_vec[unroll_factor_k], inverse_modulos_vec[unroll_factor_k];
 
+#pragma unroll(unroll_factor_k)
         for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
             unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
             multipliers_vec[index_in_group].zmm_pd = _mm512_loadu_pd(&multipliers_[dim]);
@@ -1450,6 +1453,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
             rolling_state_t const new_term = static_cast<rolling_state_t>(new_char) + 1.0;
             __m512d new_term_zmm = _mm512_set1_pd(new_term);
 
+#pragma unroll(unroll_factor_k)
             for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
                 last_states_vec[index_in_group].zmm_pd = _mm512_fmadd_pd(
                     last_states_vec[index_in_group].zmm_pd, multipliers_vec[index_in_group].zmm_pd, new_term_zmm);
@@ -1463,6 +1467,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
         // We now have our first minimum hashes
         __m256i const ones_ymm = _mm256_set1_epi32(1);
         if (new_char_offset == window_width_k && passed_progress < prefix_length)
+#pragma unroll(unroll_factor_k)
             for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group)
                 rolling_minimums_vec[index_in_group].zmm_pd = last_states_vec[index_in_group].zmm_pd,
                 rolling_counts_vec[index_in_group].ymm = ones_ymm;
@@ -1476,6 +1481,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
             __m512d new_term_zmm = _mm512_set1_pd(new_term);
             __m512d old_term_zmm = _mm512_set1_pd(old_term);
 
+#pragma unroll(unroll_factor_k)
             for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
 
                 // Discard the old term
@@ -1508,6 +1514,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
 
         // Dump back the results from registers into our spans
         if (has_incomplete_tail_group_k && group_index + 1 == groups_count_k)
+#pragma unroll(unroll_factor_k)
             for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
                 unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
                 __mmask8 const store_mask = dimensions_k > dim ? sz_u8_mask_until_(dimensions_k - dim) : (__mmask8)0;

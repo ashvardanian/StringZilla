@@ -22,7 +22,7 @@ namespace scripts {
 
 using namespace ashvardanian::stringzilla::scripts;
 
-static constexpr std::size_t default_embedding_dims_k = 128;
+static constexpr std::size_t default_embedding_dims_k = 16;
 static constexpr std::size_t default_window_width_k = 7;
 
 using fingerprint_min_hashes_t = std::array<std::uint32_t, default_embedding_dims_k>;
@@ -78,6 +78,8 @@ struct fingerprint_callable {
 
 void bench_fingerprint(environment_t const &env) {
 
+    namespace fu = fork_union;
+
     // Preallocate buffers for resulting fingerprints,
     // so that we can compare baseline and accelerated results for exact matches
     using fingerprints_equality_t = arrays_equality<fingerprint_min_hashes_t>;
@@ -85,6 +87,12 @@ void bench_fingerprint(environment_t const &env) {
     fingerprints_min_counts_t min_counts_baseline, min_counts_accelerated;
     min_hashes_baseline.resize(env.tokens.size()), min_hashes_accelerated.resize(env.tokens.size());
     min_counts_baseline.resize(env.tokens.size()), min_counts_accelerated.resize(env.tokens.size());
+
+    // Let's reuse a thread-pool to amortize the cost of spawning threads.
+    alignas(fu::default_alignment_k) fu::basic_pool_t pool;
+    if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
+    static_assert(executor_like<fu::basic_pool_t>);
+
     auto scramble_accelerated_results = [&]() {
         std::shuffle(min_hashes_accelerated.begin(), min_hashes_accelerated.end(), global_random_generator());
     };
@@ -128,42 +136,45 @@ void bench_fingerprint(environment_t const &env) {
         throw std::runtime_error("Can't build Skylake Floating Hasher.");
 
     // Perform the benchmarks, passing the dictionary to the engines
-    auto call_baseline =
-        fingerprint_callable<rolling_f64_t>(env, min_hashes_baseline, min_counts_baseline, *rolling_f64);
+    auto call_baseline = fingerprint_callable<rolling_f64_t, fu::basic_pool_t &>(
+        env, min_hashes_baseline, min_counts_baseline, *rolling_f64, pool);
     bench_result_t baseline = bench_nullary(env, "rolling_f64", call_baseline);
 
     // Semi-serial variants
-    bench_nullary(
-        env, "rolling_f32",
-        fingerprint_callable<rolling_f32_t>(env, min_hashes_accelerated, min_counts_accelerated, *rolling_f32))
+    bench_nullary(env, "rolling_f32",
+                  fingerprint_callable<rolling_f32_t, fu::basic_pool_t &>(env, min_hashes_accelerated,
+                                                                          min_counts_accelerated, *rolling_f32, pool))
         .log(baseline);
     bench_nullary(env, "rabin_u64",
-                  fingerprint_callable<rabin_u64_t>(env, min_hashes_accelerated, min_counts_accelerated, *rabin_u64))
+                  fingerprint_callable<rabin_u64_t, fu::basic_pool_t &>(env, min_hashes_accelerated,
+                                                                        min_counts_accelerated, *rabin_u64, pool))
         .log(baseline);
     bench_nullary(env, "buz_u32",
-                  fingerprint_callable<buz_u32_t>(env, min_hashes_accelerated, min_counts_accelerated, *buz_u32)) //
+                  fingerprint_callable<buz_u32_t, fu::basic_pool_t &>(env, min_hashes_accelerated,
+                                                                      min_counts_accelerated, *buz_u32, pool)) //
         .log(baseline);
-    bench_nullary(
-        env, "multiply_u32",
-        fingerprint_callable<multiply_u32_t>(env, min_hashes_accelerated, min_counts_accelerated, *multiply_u32))
+    bench_nullary(env, "multiply_u32",
+                  fingerprint_callable<multiply_u32_t, fu::basic_pool_t &>(env, min_hashes_accelerated,
+                                                                           min_counts_accelerated, *multiply_u32, pool))
         .log(baseline);
 
     // Actually unrolled hard-coded variants, including SIMD ports
-    bench_result_t unrolled = bench_nullary(                            //
-                                  env, "rolling_serial", call_baseline, //
-                                  fingerprint_callable<rolling_serial_t>(env, min_hashes_accelerated,
-                                                                         min_counts_accelerated, *rolling_serial), //
-                                  callable_no_op_t {},        // preprocessing
-                                  fingerprints_equality_t {}) // equality check
-                                  .log(baseline);
+    bench_result_t unrolled =                     //
+        bench_nullary(                            //
+            env, "rolling_serial", call_baseline, //
+            fingerprint_callable<rolling_serial_t, fu::basic_pool_t &>(
+                env, min_hashes_accelerated, min_counts_accelerated, *rolling_serial, pool), //
+            callable_no_op_t {},                                                             // preprocessing
+            fingerprints_equality_t {})                                                      // equality check
+            .log(baseline);
     scramble_accelerated_results();
 
     bench_nullary(                             //
         env, "rolling_skylake", call_baseline, //
-        fingerprint_callable<rolling_skylake_t>(env, min_hashes_accelerated, min_counts_accelerated,
-                                                *rolling_skylake), //
-        callable_no_op_t {},                                       // preprocessing
-        fingerprints_equality_t {})                                // equality check
+        fingerprint_callable<rolling_skylake_t, fu::basic_pool_t &>(env, min_hashes_accelerated, min_counts_accelerated,
+                                                                    *rolling_skylake, pool), //
+        callable_no_op_t {},                                                                 // preprocessing
+        fingerprints_equality_t {})                                                          // equality check
         .log(baseline, unrolled);
     scramble_accelerated_results();
 }
