@@ -101,7 +101,7 @@ void bench_levenshtein(environment_t const &env) {
     similarities_t results_utf8_baseline, results_utf8_accelerated;
 
     // Let's reuse a thread-pool to amortize the cost of spawning threads.
-    fu::basic_pool_t pool;
+    alignas(fu::default_alignment_k) fu::basic_pool_t pool;
     if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
     static_assert(executor_like<fu::basic_pool_t>);
 
@@ -244,7 +244,7 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
     similarities_t results_affine_local_baseline, results_affine_local_accelerated;
 
     // Let's reuse a thread-pool to amortize the cost of spawning threads.
-    fu::basic_pool_t pool;
+    alignas(fu::default_alignment_k) fu::basic_pool_t pool;
     if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
     static_assert(executor_like<fu::basic_pool_t>);
 
