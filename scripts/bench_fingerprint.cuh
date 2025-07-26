@@ -80,7 +80,7 @@ void bench_fingerprint(environment_t const &env) {
 
     // Preallocate buffers for resulting fingerprints,
     // so that we can compare baseline and accelerated results for exact matches
-    using fingerprints_equality_t = arrays_equality<fingerprints_min_hashes_t>;
+    using fingerprints_equality_t = arrays_equality<fingerprint_min_hashes_t>;
     fingerprints_min_hashes_t min_hashes_baseline, min_hashes_accelerated;
     fingerprints_min_counts_t min_counts_baseline, min_counts_accelerated;
     min_hashes_baseline.resize(env.tokens.size()), min_hashes_accelerated.resize(env.tokens.size());

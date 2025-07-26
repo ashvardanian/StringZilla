@@ -53,7 +53,7 @@ int main(int argc, char const **argv) {
             "xlsum.csv",                       // Preferred for UTF-8 content
             environment_t::tokenization_t::lines_k);
 
-        std::printf("Starting string multi-pattern search benchmarks...\n");
+        std::printf("Starting string fingerprinting benchmarks...\n");
         bench_fingerprint(env);
     }
     catch (std::exception const &e) {

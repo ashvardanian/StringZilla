@@ -355,6 +355,18 @@ void test_rolling_hashers_equivalence_for_width() {
             std::size_t const first_mismatch_index =
                 std::mismatch(serial_hashes.begin(), serial_hashes.end(), accelerated_hashes.begin()).first -
                 serial_hashes.begin();
+
+            if (first_mismatch_index != serial_hashes.size()) {
+                std::printf("Fingerprint mismatch at index %zu:\n", first_mismatch_index);
+                std::printf("  String: \"%s\"\n", str.c_str());
+                std::printf("  Serial hash:      %u\n", serial_hashes[first_mismatch_index]);
+                std::printf("  Accelerated hash: %u\n", accelerated_hashes[first_mismatch_index]);
+                std::printf("  Serial count:     %u\n", serial_counts[first_mismatch_index]);
+                std::printf("  Accelerated count:%u\n", accelerated_counts[first_mismatch_index]);
+                for (std::size_t i = 0; i < serial_hashes.size(); ++i) {
+                    std::printf("  [%zu] serial=%u accelerated=%u\n", i, serial_hashes[i], accelerated_hashes[i]);
+                }
+            }
             sz_assert_(first_mismatch_index == serial_hashes.size() && "Fingerprints do not match");
         }
     };

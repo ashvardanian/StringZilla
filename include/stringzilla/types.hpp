@@ -111,6 +111,9 @@ using size_t = sz_size_t;
 using ssize_t = sz_ssize_t;
 using byte_t = sz_byte_t;
 
+using f32_t = float;
+using f64_t = double;
+
 using ptr_t = sz_ptr_t;
 using cptr_t = sz_cptr_t;
 using error_cost_t = sz_error_cost_t;
