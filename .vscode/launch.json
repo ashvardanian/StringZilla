@@ -99,7 +99,7 @@
       "name": "Current C++ Benchmark",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build_debug/stringzilla_${fileBasenameNoExtension}",
+      "program": "${workspaceFolder}/build_debug/stringzilla_${fileBasenameNoExtension}_cpp20",
       "cwd": "${workspaceFolder}",
       "environment": [
         {
@@ -133,10 +133,47 @@
       }
     },
     {
+      "name": "Current Parallel C++ Benchmark",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build_debug/stringzillas_${fileBasenameNoExtension}_cpp20",
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "ASAN_OPTIONS",
+          "value": "detect_leaks=0:atexit=1:strict_init_order=1:strict_string_checks=1"
+        },
+        {
+          "name": "STRINGWARS_DATASET",
+          "value": "utf8.txt"
+        }
+      ],
+      "stopAtEntry": false,
+      "preLaunchTask": "Build Benchmarks: Debug",
+      "linux": {
+        "MIMode": "gdb",
+        "setupCommands": [
+          {
+            "description": "Enable pretty-printing for GDB",
+            "text": "-enable-pretty-printing",
+            "ignoreFailures": true
+          }
+        ]
+      },
+      "osx": {
+        "MIMode": "lldb"
+      },
+      "windows": {
+        "program": "${workspaceFolder}\\build_debug\\stringzillas_${fileBasenameNoExtension}.exe",
+        "MIMode": "gdb",
+        "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
+      }
+    },
+    {
       "name": "Current CUDA Benchmark",
       "type": "cuda-gdb",
       "request": "launch",
-      "program": "${workspaceFolder}/build_debug/stringzillas_${fileBasenameNoExtension}",
+      "program": "${workspaceFolder}/build_debug/stringzillas_${fileBasenameNoExtension}_cu20",
       "cwd": "${workspaceFolder}",
       "environment": [
         {
