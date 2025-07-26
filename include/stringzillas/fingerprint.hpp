@@ -802,7 +802,9 @@ struct basic_rolling_hashers {
             return status_t::bad_alloc_k;
 
         // Process small texts by individual threads
-        executor.for_n_dynamic(texts.size(), [&](auto prong) noexcept {
+        using executor_t = typename std::decay<executor_type_>::type;
+        using prong_t = typename executor_t::prong_t;
+        executor.for_n_dynamic(texts.size(), [&](prong_t prong) noexcept {
             auto const text_index = prong.task;
             auto const thread_index = prong.thread;
 
@@ -879,8 +881,10 @@ struct basic_rolling_hashers {
 
 /**
  *  @brief Computes many fingerprints in parallel for input @p texts, calling @p engine on each thread of @p executor.
- *  @param[in] texts The input texts to hash, typically a UTF-8 encoded string.
- *  @param[out] results The output fingerprints, a array of vectors of minimum hashes.
+ *  @param[in] executor The executor to use for parallel processing, defaults to a dummy executor.
+ *  @param[in] texts The input texts to hash, typically a sequential container of UTF-8 encoded strings.
+ *  @param[out] min_hashes_per_text The output fingerprints, an array of vectors of minimum hashes.
+ *  @param[out] min_counts_per_text The output frequencies of @p `min_hashes_per_text` hashes.
  *  @param[in] executor The executor to use for parallel processing, defaults to a dummy executor.
  *  @param[in] specs The CPU specifications to use, defaults to an empty `cpu_specs_t`.
  *  @retval status_t::success_k on success, or an error code otherwise.
@@ -912,7 +916,9 @@ status_t floating_rolling_hashers_in_parallel_(                                 
     std::size_t const text_size_threshold = specs.l2_bytes * executor.threads_count();
 
     // Process small texts by individual threads
-    executor.for_n_dynamic(texts.size(), [&](auto prong) noexcept {
+    using executor_t = typename std::decay<executor_type_>::type;
+    using prong_t = typename executor_t::prong_t;
+    executor.for_n_dynamic(texts.size(), [&](prong_t prong) noexcept {
         auto const text_index = prong.task;
 
         auto const &text = texts[text_index];
