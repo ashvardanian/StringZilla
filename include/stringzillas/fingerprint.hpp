@@ -595,8 +595,9 @@ struct basic_rolling_hashers {
         : allocator_(std::move(allocator)),
           hashers_(allocator_traits_t::select_on_container_copy_construction(allocator)) {}
 
-    std::size_t max_window_width() const noexcept { return max_window_width_; }
     std::size_t dimensions() const noexcept { return hashers_.size(); }
+    std::size_t max_window_width() const noexcept { return max_window_width_; }
+    std::size_t window_width(std::size_t dim) const noexcept { return hashers_[dim].window_width(); }
 
     /**
      *  @brief Appends multiple new rolling hashers for a given @p window_width.
@@ -717,21 +718,20 @@ struct basic_rolling_hashers {
                 rolling_state_t &last_state = last_states[dim];
                 rolling_hash_t &rolling_minimum = rolling_minimums[dim];
                 min_count_t &min_count = min_counts[dim];
-                if (hasher.window_width() > new_char_offset) {
+                if (new_char_offset < hasher.window_width()) {
                     last_state = hasher.push(last_state, new_char);
                     if (hasher.window_width() == (new_char_offset + 1)) {
                         rolling_minimum = (std::min)(rolling_minimum, hasher.digest(last_state));
                         min_count = 1; // First occurrence of this hash
                     }
+                    continue;
                 }
-                else {
-                    auto const old_char = text_chunk[new_char_offset - hasher.window_width()];
-                    last_state = hasher.roll(last_state, old_char, new_char);
-                    rolling_hash_t new_hash = hasher.digest(last_state);
-                    min_count *= new_hash >= rolling_minimum; // Discard `min_count` to 0, if a new minimum is found
-                    min_count += new_hash == rolling_minimum; // Increments `min_count` by 1 for new & existing minimums
-                    rolling_minimum = (std::min)(rolling_minimum, new_hash);
-                }
+                auto const old_char = text_chunk[new_char_offset - hasher.window_width()];
+                last_state = hasher.roll(last_state, old_char, new_char);
+                rolling_hash_t new_hash = hasher.digest(last_state);
+                min_count *= new_hash >= rolling_minimum; // ? Discard `min_count` to 0, if a new minimum is found
+                min_count += new_hash <= rolling_minimum; // ? Increments `min_count` by 1 for new & existing minimums
+                rolling_minimum = (std::min)(rolling_minimum, new_hash);
             }
         }
 
@@ -746,8 +746,8 @@ struct basic_rolling_hashers {
                 auto const old_char = text_chunk[new_char_offset - hasher.window_width()];
                 last_state = hasher.roll(last_state, old_char, new_char);
                 rolling_hash_t new_hash = hasher.digest(last_state);
-                min_count *= new_hash >= rolling_minimum; // Discard `min_count` to 0, if a new minimum is found
-                min_count += new_hash == rolling_minimum; // Increments `min_count` by 1 for new & existing minimums
+                min_count *= new_hash >= rolling_minimum; // ? Discard `min_count` to 0, if a new minimum is found
+                min_count += new_hash <= rolling_minimum; // ? Increments `min_count` by 1 for new & existing minimums
                 rolling_minimum = (std::min)(rolling_minimum, new_hash);
             }
         }
@@ -760,6 +760,17 @@ struct basic_rolling_hashers {
                 min_hash = rolling_minimum == skipped_rolling_hash_k
                                ? max_hash_k // If the rolling minimum is not set, use the maximum hash value
                                : static_cast<min_hash_t>(rolling_minimum & max_hash_k);
+            }
+
+        // We may be in a position, when `text_chunk.size()` is smaller than the shortest window width,
+        // so we must output zeros for the `min_counts` for every case, where the rolling state is skipped.
+        if (min_counts)
+            for (std::size_t dim = 0; dim < min_counts.size(); ++dim) {
+                rolling_hash_t const &rolling_minimum = rolling_minimums[dim];
+                min_count_t &min_count = min_counts[dim];
+                min_count = rolling_minimum == skipped_rolling_hash_k
+                                ? 0 // If the rolling minimum is not set, reset to zeros
+                                : min_count;
             }
     }
 
@@ -1037,8 +1048,9 @@ struct floating_rolling_hashers {
     rolling_state_t negative_discarding_multipliers_[dimensions_k];
 
   public:
-    constexpr std::size_t window_width() const noexcept { return window_width_k; }
     constexpr std::size_t dimensions() const noexcept { return dimensions_k; }
+    constexpr std::size_t window_width() const noexcept { return window_width_k; }
+    constexpr std::size_t window_width(std::size_t) const noexcept { return window_width_k; }
 
     /**
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
@@ -1146,8 +1158,16 @@ struct floating_rolling_hashers {
                 last_state = std::fma(last_state, multipliers_[dim], new_term); // Add head
                 last_state = barrett_mod(last_state, dim);
 
-                if (rolling_minimum == last_state) { min_count++; }
-                else if (last_state < rolling_minimum) { rolling_minimum = last_state, min_count = 1; }
+                // In essence, we need to increment the `min_count` if the new hash is equal to the minimum,
+                // or reset it to 1 if the new hash is smaller than the minimum.
+                //
+                //      if (rolling_minimum == last_state) { min_count++; }
+                //      else if (last_state < rolling_minimum) { rolling_minimum = last_state, min_count = 1; }
+                //
+                // There's a branchless approach to achieve the same outcome:
+                min_count *= last_state >= rolling_minimum; // ? Discard `min_count` to 0, if a new minimum is found
+                min_count += last_state <= rolling_minimum; // ? Increments `min_count` by 1 for new & existing minimums
+                rolling_minimum = (std::min)(rolling_minimum, last_state);
             }
         }
 
@@ -1520,11 +1540,23 @@ struct floating_rolling_hashers<sz_cap_haswell_k, window_width_, dimensions_> {
                              apply_to = function)
 
 /**
+ *  @brief Alternative to `_mm512_roundscale_pd` and `std::floor`.
+ *  Using `_mm512_roundscale_pd` drops throughput to 1/10th of `std::floor`,
+ *  while this approach is about 2x faster than `std::floor`.
+ */
+SZ_INLINE __m512d _mm512_floor_magic_pd(__m512d x) noexcept {
+    // Add magic number to force rounding, then subtract it back
+    __m512d magic = _mm512_set1_pd(6755399441055744.0); // 2^52 + 2^51
+    __m512d rounded = _mm512_sub_pd(_mm512_add_pd(x, magic), magic);
+
+    // Handle negative numbers: if result > x, subtract 1
+    __mmask8 neg_mask = _mm512_cmp_pd_mask(rounded, x, _CMP_GT_OQ);
+    return _mm512_mask_sub_pd(rounded, neg_mask, rounded, _mm512_set1_pd(1.0));
+}
+
+/**
  *  @brief Optimized rolling Min-Hashers built around floating-point numbers.
- *
  *  In a single ZMM register we can store 8 `double` values, so we can process 8 hashes per register.
- *  Assuming 32x ZMM registers, and roughly 10ish scalars for intermediaries per hash, we can unroll
- *  2-3x times, and process 16-24 hashes in parallel.
  */
 template <std::size_t window_width_, std::size_t dimensions_>
 struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
@@ -1542,14 +1574,11 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
     using min_hashes_span_t = span<min_hash_t, dimensions_k>;
     using min_counts_span_t = span<min_count_t, dimensions_k>;
 
-    static constexpr unsigned unroll_factor_k = 2;
     static constexpr unsigned hashes_per_zmm_k = sizeof(sz_u512_vec_t) / sizeof(rolling_state_t);
-    static constexpr unsigned hashes_per_unrolled_group_k = unroll_factor_k * hashes_per_zmm_k;
-    static constexpr bool has_incomplete_tail_group_k = dimensions_k % hashes_per_unrolled_group_k;
+    static constexpr bool has_incomplete_tail_group_k = dimensions_k % hashes_per_zmm_k;
     static constexpr std::size_t aligned_dimensions_k =
-        has_incomplete_tail_group_k ? (dimensions_k / hashes_per_unrolled_group_k + 1) * hashes_per_unrolled_group_k
-                                    : (dimensions_k);
-    static constexpr unsigned groups_count_k = aligned_dimensions_k / hashes_per_unrolled_group_k;
+        has_incomplete_tail_group_k ? (dimensions_k / hashes_per_zmm_k + 1) * hashes_per_zmm_k : (dimensions_k);
+    static constexpr unsigned groups_count_k = aligned_dimensions_k / hashes_per_zmm_k;
 
     static_assert(dimensions_k <= 256, "Too many dimensions to keep on stack");
 
@@ -1560,8 +1589,9 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
     rolling_state_t negative_discarding_multipliers_[aligned_dimensions_k];
 
   public:
-    constexpr std::size_t window_width() const noexcept { return window_width_k; }
     constexpr std::size_t dimensions() const noexcept { return dimensions_k; }
+    constexpr std::size_t window_width() const noexcept { return window_width_k; }
+    constexpr std::size_t window_width(std::size_t) const noexcept { return window_width_k; }
 
     /**
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
@@ -1630,8 +1660,8 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
         span<byte_t const> text_chunk,                        //
         span<rolling_state_t, dimensions_k> last_states,      //
         span<rolling_state_t, dimensions_k> rolling_minimums, //
-        span<min_hash_t, dimensions_k> min_hashes,            //
-        span<min_count_t, dimensions_k> min_counts,           //
+        min_hashes_span_t min_hashes,                         //
+        min_counts_span_t min_counts,                         //
         std::size_t const passed_progress = 0) const noexcept {
 
         for (unsigned group_index = 0; group_index < groups_count_k; ++group_index)
@@ -1675,12 +1705,10 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
     }
 
   private:
-    // TODO: We can probably shave a few ore cycles here:
     SZ_INLINE __m512d barrett_mod(__m512d xs, __m512d modulos, __m512d inverse_modulos) const noexcept {
+
         // Use rounding SIMD arithmetic
-        __m512d qs = _mm512_roundscale_pd(      // ! The rounding operation is extremely expensive,
-            _mm512_mul_pd(xs, inverse_modulos), // ! so alternatives should be considered.
-            _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+        __m512d qs = _mm512_floor_magic_pd(_mm512_mul_pd(xs, inverse_modulos));
         __m512d results = _mm512_fnmadd_pd(qs, modulos, xs);
 
         // Clamp into the [0, modulo) range.
@@ -1708,45 +1736,34 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
         span<min_count_t, dimensions_k> rolling_counts,            //
         std::size_t const passed_progress = 0) const noexcept {
 
+        unsigned const first_dim = group_index * hashes_per_zmm_k;
+
         // Register space for in-out variables
-        sz_u512_vec_t last_states_vec[unroll_factor_k];
-        sz_u512_vec_t rolling_minimums_vec[unroll_factor_k];
-        sz_u256_vec_t rolling_counts_vec[unroll_factor_k];
+        sz_u512_vec_t last_states_vec;
+        sz_u512_vec_t rolling_minimums_vec;
+        sz_u256_vec_t rolling_counts_vec;
 
         // Use masked loads for the incomplete tail group
-        if (has_incomplete_tail_group_k && group_index + 1 == groups_count_k)
-#pragma unroll(unroll_factor_k)
-            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
-                unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
-                __mmask8 const load_mask = dimensions_k > dim ? sz_u8_mask_until_(dimensions_k - dim) : (__mmask8)0;
-                last_states_vec[index_in_group].zmm_pd = _mm512_maskz_loadu_pd(load_mask, &last_states[dim]);
-                rolling_minimums_vec[index_in_group].zmm_pd = _mm512_maskz_loadu_pd(load_mask, &rolling_minimums[dim]);
-                rolling_counts_vec[index_in_group].ymm = _mm256_maskz_loadu_epi32(load_mask, &rolling_counts[dim]);
-            }
+        if (has_incomplete_tail_group_k && group_index + 1 == groups_count_k) {
+            __mmask8 const load_mask =
+                dimensions_k > first_dim ? sz_u8_mask_until_(dimensions_k - first_dim) : (__mmask8)0;
+            last_states_vec.zmm_pd = _mm512_maskz_loadu_pd(load_mask, &last_states[first_dim]);
+            rolling_minimums_vec.zmm_pd = _mm512_maskz_loadu_pd(load_mask, &rolling_minimums[first_dim]);
+            rolling_counts_vec.ymm = _mm256_maskz_loadu_epi32(load_mask, &rolling_counts[first_dim]);
+        }
         // Otherwise, everything is easy
-        else
-#pragma unroll(unroll_factor_k)
-            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
-                unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
-                last_states_vec[index_in_group].zmm_pd = _mm512_loadu_pd(&last_states[dim]);
-                rolling_minimums_vec[index_in_group].zmm_pd = _mm512_loadu_pd(&rolling_minimums[dim]);
-                rolling_counts_vec[index_in_group].ymm =
-                    _mm256_loadu_si256(reinterpret_cast<__m256i const *>(&rolling_counts[dim]));
-            }
+        else {
+            last_states_vec.zmm_pd = _mm512_loadu_pd(&last_states[first_dim]);
+            rolling_minimums_vec.zmm_pd = _mm512_loadu_pd(&rolling_minimums[first_dim]);
+            rolling_counts_vec.ymm = _mm256_loadu_si256(reinterpret_cast<__m256i const *>(&rolling_counts[first_dim]));
+        }
 
         // Temporary variables for the rolling state
-        sz_u512_vec_t multipliers_vec[unroll_factor_k], negative_discarding_multipliers_vec[unroll_factor_k],
-            modulos_vec[unroll_factor_k], inverse_modulos_vec[unroll_factor_k];
-
-#pragma unroll(unroll_factor_k)
-        for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
-            unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
-            multipliers_vec[index_in_group].zmm_pd = _mm512_loadu_pd(&multipliers_[dim]);
-            negative_discarding_multipliers_vec[index_in_group].zmm_pd =
-                _mm512_loadu_pd(&negative_discarding_multipliers_[dim]);
-            modulos_vec[index_in_group].zmm_pd = _mm512_loadu_pd(&modulos_[dim]);
-            inverse_modulos_vec[index_in_group].zmm_pd = _mm512_loadu_pd(&inverse_modulos_[dim]);
-        }
+        sz_u512_vec_t multipliers_vec, negative_discarding_multipliers_vec, modulos_vec, inverse_modulos_vec;
+        multipliers_vec.zmm_pd = _mm512_loadu_pd(&multipliers_[first_dim]);
+        negative_discarding_multipliers_vec.zmm_pd = _mm512_loadu_pd(&negative_discarding_multipliers_[first_dim]);
+        modulos_vec.zmm_pd = _mm512_loadu_pd(&modulos_[first_dim]);
+        inverse_modulos_vec.zmm_pd = _mm512_loadu_pd(&inverse_modulos_[first_dim]);
 
         // Until we reach the `window_width_k`, we don't need to discard any symbols and can keep the code simpler
         std::size_t const prefix_length = (std::min)(text_chunk.size(), window_width_k);
@@ -1756,24 +1773,17 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
             rolling_state_t const new_term = static_cast<rolling_state_t>(new_char) + 1.0;
             __m512d new_term_zmm = _mm512_set1_pd(new_term);
 
-#pragma unroll(unroll_factor_k)
-            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
-                last_states_vec[index_in_group].zmm_pd = _mm512_fmadd_pd(
-                    last_states_vec[index_in_group].zmm_pd, multipliers_vec[index_in_group].zmm_pd, new_term_zmm);
-                last_states_vec[index_in_group].zmm_pd = barrett_mod( //
-                    last_states_vec[index_in_group].zmm_pd,           //
-                    modulos_vec[index_in_group].zmm_pd,               //
-                    inverse_modulos_vec[index_in_group].zmm_pd);
-            }
+            last_states_vec.zmm_pd = _mm512_fmadd_pd(last_states_vec.zmm_pd, multipliers_vec.zmm_pd, new_term_zmm);
+            last_states_vec.zmm_pd = barrett_mod( //
+                last_states_vec.zmm_pd,           //
+                modulos_vec.zmm_pd,               //
+                inverse_modulos_vec.zmm_pd);
         }
 
         // We now have our first minimum hashes
         __m256i const ones_ymm = _mm256_set1_epi32(1);
         if (new_char_offset == window_width_k && passed_progress < prefix_length)
-#pragma unroll(unroll_factor_k)
-            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group)
-                rolling_minimums_vec[index_in_group].zmm_pd = last_states_vec[index_in_group].zmm_pd,
-                rolling_counts_vec[index_in_group].ymm = ones_ymm;
+            rolling_minimums_vec.zmm_pd = last_states_vec.zmm_pd, rolling_counts_vec.ymm = ones_ymm;
 
         // Now we can avoid a branch in the nested loop, as we are passed the longest window width
         for (; new_char_offset < text_chunk.size(); ++new_char_offset) {
@@ -1784,61 +1794,56 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
             __m512d new_term_zmm = _mm512_set1_pd(new_term);
             __m512d old_term_zmm = _mm512_set1_pd(old_term);
 
-#pragma unroll(unroll_factor_k)
-            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
+            // Discard the old term
+            last_states_vec.zmm_pd =
+                _mm512_fmadd_pd(negative_discarding_multipliers_vec.zmm_pd, old_term_zmm, last_states_vec.zmm_pd);
+            last_states_vec.zmm_pd = barrett_mod( //
+                last_states_vec.zmm_pd,           //
+                modulos_vec.zmm_pd,               //
+                inverse_modulos_vec.zmm_pd);
 
-                // Discard the old term
-                last_states_vec[index_in_group].zmm_pd =
-                    _mm512_fmadd_pd(negative_discarding_multipliers_vec[index_in_group].zmm_pd, old_term_zmm,
-                                    last_states_vec[index_in_group].zmm_pd);
-                last_states_vec[index_in_group].zmm_pd = barrett_mod( //
-                    last_states_vec[index_in_group].zmm_pd,           //
-                    modulos_vec[index_in_group].zmm_pd,               //
-                    inverse_modulos_vec[index_in_group].zmm_pd);
+            // Add the new term
+            last_states_vec.zmm_pd = _mm512_fmadd_pd(last_states_vec.zmm_pd, multipliers_vec.zmm_pd, new_term_zmm);
+            last_states_vec.zmm_pd = barrett_mod( //
+                last_states_vec.zmm_pd,           //
+                modulos_vec.zmm_pd,               //
+                inverse_modulos_vec.zmm_pd);
 
-                // Add the new term
-                last_states_vec[index_in_group].zmm_pd = _mm512_fmadd_pd(
-                    last_states_vec[index_in_group].zmm_pd, multipliers_vec[index_in_group].zmm_pd, new_term_zmm);
-                last_states_vec[index_in_group].zmm_pd = barrett_mod( //
-                    last_states_vec[index_in_group].zmm_pd,           //
-                    modulos_vec[index_in_group].zmm_pd,               //
-                    inverse_modulos_vec[index_in_group].zmm_pd);
+            // To keep the right comparison mask, check out: https://stackoverflow.com/q/16988199
+            __mmask8 found_mask = _mm512_cmp_pd_mask(last_states_vec.zmm_pd, rolling_minimums_vec.zmm_pd, _CMP_LE_OQ);
+            __mmask8 discard_mask = _mm512_cmp_pd_mask(last_states_vec.zmm_pd, rolling_minimums_vec.zmm_pd, _CMP_GE_OQ);
+            rolling_minimums_vec.zmm_pd =
+                _mm512_mask_mov_pd(rolling_minimums_vec.zmm_pd, found_mask, last_states_vec.zmm_pd);
 
-                // To keep the right comparison mask, check out: https://stackoverflow.com/q/16988199
-                __mmask8 same_mask = _mm512_cmp_pd_mask(rolling_minimums_vec[index_in_group].zmm_pd,
-                                                        last_states_vec[index_in_group].zmm_pd, _CMP_EQ_OQ);
-                rolling_minimums_vec[index_in_group].zmm_pd =
-                    _mm512_min_pd(rolling_minimums_vec[index_in_group].zmm_pd, last_states_vec[index_in_group].zmm_pd);
-                rolling_counts_vec[index_in_group].ymm =
-                    _mm256_mask_add_epi32(rolling_counts_vec[index_in_group].ymm, same_mask,
-                                          rolling_counts_vec[index_in_group].ymm, ones_ymm);
-            }
+            // A branchless way to update the counts
+            // 1. Discard "min counts" to 0, if a new minimum is found
+            // 2. Increment the counts for new & existing minimums
+            rolling_counts_vec.ymm = _mm256_maskz_mov_epi32(discard_mask, rolling_counts_vec.ymm);
+            rolling_counts_vec.ymm =
+                _mm256_mask_add_epi32(rolling_counts_vec.ymm, found_mask, rolling_counts_vec.ymm, ones_ymm);
         }
 
         // Dump back the results from registers into our spans
-        if (has_incomplete_tail_group_k && group_index + 1 == groups_count_k)
-#pragma unroll(unroll_factor_k)
-            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
-                unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
-                __mmask8 const store_mask = dimensions_k > dim ? sz_u8_mask_until_(dimensions_k - dim) : (__mmask8)0;
-                _mm512_mask_storeu_pd(&last_states[dim], store_mask, last_states_vec[index_in_group].zmm_pd);
-                _mm512_mask_storeu_pd(&rolling_minimums[dim], store_mask, rolling_minimums_vec[index_in_group].zmm_pd);
-                _mm256_mask_storeu_epi32(&rolling_counts[dim], store_mask, rolling_counts_vec[index_in_group].ymm);
-            }
-        else
-            for (unsigned index_in_group = 0; index_in_group < unroll_factor_k; ++index_in_group) {
-                unsigned const dim = group_index * hashes_per_unrolled_group_k + index_in_group * hashes_per_zmm_k;
-                _mm512_storeu_pd(&last_states[dim], last_states_vec[index_in_group].zmm_pd);
-                _mm512_storeu_pd(&rolling_minimums[dim], rolling_minimums_vec[index_in_group].zmm_pd);
-                _mm256_storeu_si256(reinterpret_cast<__m256i *>(&rolling_counts[dim]),
-                                    rolling_counts_vec[index_in_group].ymm);
-            }
+        if (has_incomplete_tail_group_k && group_index + 1 == groups_count_k) {
+            __mmask8 const store_mask =
+                dimensions_k > first_dim ? sz_u8_mask_until_(dimensions_k - first_dim) : (__mmask8)0;
+            _mm512_mask_storeu_pd(&last_states[first_dim], store_mask, last_states_vec.zmm_pd);
+            _mm512_mask_storeu_pd(&rolling_minimums[first_dim], store_mask, rolling_minimums_vec.zmm_pd);
+            _mm256_mask_storeu_epi32(&rolling_counts[first_dim], store_mask, rolling_counts_vec.ymm);
+        }
+        else {
+            _mm512_storeu_pd(&last_states[first_dim], last_states_vec.zmm_pd);
+            _mm512_storeu_pd(&rolling_minimums[first_dim], rolling_minimums_vec.zmm_pd);
+            _mm256_storeu_si256(reinterpret_cast<__m256i *>(&rolling_counts[first_dim]), rolling_counts_vec.ymm);
+        }
     }
 };
 
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif // SZ_USE_SKYLAKE
+
+#pragma endregion Skylake Implementation
 
 #pragma endregion - Optimized Rolling MinHashers
 

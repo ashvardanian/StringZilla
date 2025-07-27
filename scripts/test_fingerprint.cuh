@@ -144,6 +144,14 @@ std::vector<std::string> rolling_hasher_basic_inputs() {
     strings.emplace_back("si siht si a tset gnirts; reh ton si ehs, tub sih ti si.");
     strings.emplace_back("his\0is\r\nshe\0her");
 
+    // Repetitive patterns to check min-counts
+    strings.emplace_back("ab ab ab ab ab");
+    strings.emplace_back("ababababab");
+    strings.emplace_back("abcabcabcabc");
+    strings.emplace_back("a a a a a");
+    strings.emplace_back("ab ab ab ab ab ab ab ab ab ab");
+    strings.emplace_back("abc abc abc abc abc abc abc abc");
+
     // Unicode variants:
     strings.emplace_back("école"), strings.emplace_back("école");                   // decomposed
     strings.emplace_back("Schön"), strings.emplace_back("Scho\u0308n");             // combining diaeresis
@@ -329,75 +337,112 @@ void test_rolling_hasher() {
             test_rolling_hasher(hasher, inconvenient_strings);
 }
 
+template <std::size_t dims_, typename strings_type_, typename baseline_hasher_type_, typename accelerated_hasher_type_>
+void test_rolling_hashers_equivalence_against_baseline(strings_type_ const &strings,
+                                                       baseline_hasher_type_ const &baseline_hasher,
+                                                       accelerated_hasher_type_ const &accelerated_hasher) {
+    constexpr std::size_t dims_k = dims_;
+    using fingerprint_hashes_t = safe_array<std::uint32_t, dims_k>;
+    using fingerprint_counts_t = safe_array<std::uint32_t, dims_k>;
+    fingerprint_hashes_t serial_hashes, accelerated_hashes;
+    fingerprint_counts_t serial_counts, accelerated_counts;
+
+    // Compute the fingerprints
+    for (auto const &str : strings) {
+        auto bytes = to_bytes_view(str);
+        baseline_hasher.template try_fingerprint<dims_k>(bytes, serial_hashes, serial_counts);
+        accelerated_hasher.try_fingerprint(bytes, accelerated_hashes, accelerated_counts);
+
+        // Compare the results
+        std::size_t const first_mismatch_index =
+            std::mismatch(serial_hashes.begin(), serial_hashes.end(), accelerated_hashes.begin()).first -
+            serial_hashes.begin();
+
+        if (first_mismatch_index != serial_hashes.size()) {
+            std::printf("Fingerprint mismatch at index %zu:\n", first_mismatch_index);
+            std::printf("  String: \"%s\"\n", str.c_str());
+            std::printf("  Serial hash:      %u\n", serial_hashes[first_mismatch_index]);
+            std::printf("  Accelerated hash: %u\n", accelerated_hashes[first_mismatch_index]);
+            std::printf("  Serial count:     %u\n", serial_counts[first_mismatch_index]);
+            std::printf("  Accelerated count:%u\n", accelerated_counts[first_mismatch_index]);
+            for (std::size_t i = 0; i < serial_hashes.size(); ++i) {
+                std::printf("  [%zu] serial=%u accelerated=%u\n", i, serial_hashes[i], accelerated_hashes[i]);
+            }
+        }
+        sz_assert_(first_mismatch_index == serial_hashes.size() && "Fingerprints do not match");
+
+        // Counters can't be zero, if the input string is at least the size of a window
+        for (std::size_t i = 0; i < serial_counts.size(); ++i) {
+            if (str.size() >= baseline_hasher.window_width(i)) {
+                sz_assert_(serial_counts[i] > 0 && "Serial fingerprint count is zero");
+                sz_assert_(accelerated_counts[i] > 0 && "Accelerated fingerprint count is zero");
+            }
+            else {
+                sz_assert_(serial_counts[i] == 0 && "Serial fingerprint should be zero");
+                sz_assert_(accelerated_counts[i] == 0 && "Accelerated fingerprint should be zero");
+            }
+        }
+
+        // Compare the counts
+        std::size_t const first_counts_mismatch_index =
+            std::mismatch(serial_counts.begin(), serial_counts.end(), accelerated_counts.begin()).first -
+            serial_counts.begin();
+        if (first_counts_mismatch_index != serial_counts.size()) {
+            std::printf("Fingerprint counts mismatch at index %zu:\n", first_counts_mismatch_index);
+            std::printf("  String: \"%s\"\n", str.c_str());
+            std::printf("  Serial count:      %u\n", serial_counts[first_counts_mismatch_index]);
+            std::printf("  Accelerated count: %u\n", accelerated_counts[first_counts_mismatch_index]);
+            for (std::size_t i = 0; i < serial_counts.size(); ++i) {
+                std::printf("  [%zu] serial=%u accelerated=%u\n", i, serial_counts[i], accelerated_counts[i]);
+            }
+        }
+        sz_assert_(first_counts_mismatch_index == serial_counts.size() && "Fingerprint counts do not match");
+    }
+}
+
 /**
  *  Compares the equivalence of SIMD backends to @b `floating_rolling_hashers<sz_cap_serial_k>`
  *  and the simpler `basic_rolling_hashers<floating_rolling_hasher<double>, ..., std::uint32_t>`.
  */
-template <std::size_t window_width_, std::size_t embedding_dims_>
+template <std::size_t window_width_, std::size_t dims_>
 void test_rolling_hashers_equivalence_for_width() {
 
-    constexpr std::size_t embedding_dims_k = embedding_dims_;
     constexpr std::size_t window_width_k = window_width_;
-    using fingerprint_hashes_t = safe_array<std::uint32_t, embedding_dims_k>;
-    using fingerprint_counts_t = safe_array<std::uint32_t, embedding_dims_k>;
-
-    auto test_against_baseline = [&](auto const &strings, auto const &baseline_hasher, auto const &accelerated_hasher) {
-        fingerprint_hashes_t serial_hashes, accelerated_hashes;
-        fingerprint_counts_t serial_counts, accelerated_counts;
-
-        // Compute the fingerprints
-        for (auto const &str : strings) {
-            auto bytes = to_bytes_view(str);
-            baseline_hasher.template try_fingerprint<embedding_dims_k>(bytes, serial_hashes, serial_counts);
-            accelerated_hasher.try_fingerprint(bytes, accelerated_hashes, accelerated_counts);
-
-            // Compare the results
-            std::size_t const first_mismatch_index =
-                std::mismatch(serial_hashes.begin(), serial_hashes.end(), accelerated_hashes.begin()).first -
-                serial_hashes.begin();
-
-            if (first_mismatch_index != serial_hashes.size()) {
-                std::printf("Fingerprint mismatch at index %zu:\n", first_mismatch_index);
-                std::printf("  String: \"%s\"\n", str.c_str());
-                std::printf("  Serial hash:      %u\n", serial_hashes[first_mismatch_index]);
-                std::printf("  Accelerated hash: %u\n", accelerated_hashes[first_mismatch_index]);
-                std::printf("  Serial count:     %u\n", serial_counts[first_mismatch_index]);
-                std::printf("  Accelerated count:%u\n", accelerated_counts[first_mismatch_index]);
-                for (std::size_t i = 0; i < serial_hashes.size(); ++i) {
-                    std::printf("  [%zu] serial=%u accelerated=%u\n", i, serial_hashes[i], accelerated_hashes[i]);
-                }
-            }
-            sz_assert_(first_mismatch_index == serial_hashes.size() && "Fingerprints do not match");
-        }
-    };
+    constexpr std::size_t dims_k = dims_;
 
     // Define hasher classes
     using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<double>, std::uint32_t>;
-    using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, window_width_k, embedding_dims_k>;
-    using rolling_skylake_t = floating_rolling_hashers<sz_cap_skylake_k, window_width_k, embedding_dims_k>;
+    using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, window_width_k, dims_k>;
+    using rolling_haswell_t = floating_rolling_hashers<sz_cap_haswell_k, window_width_k, dims_k>;
+    using rolling_skylake_t = floating_rolling_hashers<sz_cap_skylake_k, window_width_k, dims_k>;
 
     // Instantiate all rolling hashers
     rolling_f64_t rolling_f64;
     rolling_serial_t rolling_serial;
+    rolling_haswell_t rolling_haswell;
     rolling_skylake_t rolling_skylake;
-    sz_assert_(rolling_f64.try_extend(window_width_k, embedding_dims_k) == status_t::success_k);
+    sz_assert_(rolling_f64.try_extend(window_width_k, dims_k) == status_t::success_k);
     sz_assert_(rolling_serial.try_seed() == status_t::success_k);
+    sz_assert_(rolling_haswell.try_seed() == status_t::success_k);
     sz_assert_(rolling_skylake.try_seed() == status_t::success_k);
 
     // Test on each individual dataset
     auto unit_strings = rolling_hasher_basic_inputs();
-    test_against_baseline(unit_strings, rolling_f64, rolling_serial);
-    test_against_baseline(unit_strings, rolling_f64, rolling_skylake);
+    test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_serial);
+    test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_haswell);
+    test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_skylake);
 
     // Now for DNA-like data
     auto dna_like_strings = rolling_hasher_dna_like_inputs();
-    test_against_baseline(dna_like_strings, rolling_f64, rolling_serial);
-    test_against_baseline(dna_like_strings, rolling_f64, rolling_skylake);
+    test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_serial);
+    test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_haswell);
+    test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_skylake);
 
     // Finally, for inconvenient strings
     auto inconvenient_strings = rolling_hasher_inconvenient_inputs();
-    test_against_baseline(inconvenient_strings, rolling_f64, rolling_serial);
-    test_against_baseline(inconvenient_strings, rolling_f64, rolling_skylake);
+    test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_serial);
+    test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_haswell);
+    test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_skylake);
 }
 
 void test_rolling_hashers_equivalence() {

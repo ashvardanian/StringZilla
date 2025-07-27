@@ -129,6 +129,12 @@ void bench_fingerprint(environment_t const &env) {
     if (rolling_serial->try_seed() != status_t::success_k)
         throw std::runtime_error("Can't build Unrolled Floating Hasher.");
 
+    using rolling_haswell_t =
+        floating_rolling_hashers<sz_cap_haswell_k, default_window_width_k, default_embedding_dims_k>;
+    auto rolling_haswell = std::make_unique<rolling_haswell_t>();
+    if (rolling_haswell->try_seed() != status_t::success_k)
+        throw std::runtime_error("Can't build Haswell Floating Hasher.");
+
     using rolling_skylake_t =
         floating_rolling_hashers<sz_cap_skylake_k, default_window_width_k, default_embedding_dims_k>;
     auto rolling_skylake = std::make_unique<rolling_skylake_t>();
@@ -168,6 +174,14 @@ void bench_fingerprint(environment_t const &env) {
             fingerprints_equality_t {})                                                      // equality check
             .log(baseline);
     scramble_accelerated_results();
+
+    bench_nullary(                             //
+        env, "rolling_haswell", call_baseline, //
+        fingerprint_callable<rolling_haswell_t, fu::basic_pool_t &>(env, min_hashes_accelerated, min_counts_accelerated,
+                                                                    *rolling_haswell, pool), //
+        callable_no_op_t {},                                                                 // preprocessing
+        fingerprints_equality_t {})                                                          // equality check
+        .log(baseline, unrolled);
 
     bench_nullary(                             //
         env, "rolling_skylake", call_baseline, //
