@@ -293,6 +293,9 @@
 extern "C" {
 #endif
 
+typedef float sz_f32_t;  // 32-bit floating-point number
+typedef double sz_f64_t; // 64-bit floating-point number
+
 /*
  *  Let's infer the integer types or pull them from LibC,
  *  if that is allowed by the user.
@@ -754,6 +757,8 @@ typedef union sz_u128_vec_t {
     uint32x4_t u32x4;
     uint64x2_t u64x2;
 #endif
+    sz_f64_t f64s[2];
+    sz_f32_t f32s[4];
     sz_u64_t u64s[2];
     sz_i64_t i64s[2];
     sz_u32_t u32s[4];
@@ -782,6 +787,8 @@ typedef union sz_u256_vec_t {
     uint32x4_t u32x4s[2];
     uint64x2_t u64x2s[2];
 #endif
+    sz_f64_t f64s[4];
+    sz_f32_t f32s[8];
     sz_u64_t u64s[4];
     sz_i64_t i64s[4];
     sz_u32_t u32s[8];
@@ -813,6 +820,8 @@ typedef union sz_u512_vec_t {
     uint32x4_t u32x4s[4];
     uint64x2_t u64x2s[4];
 #endif
+    sz_f64_t f64s[8];
+    sz_f32_t f32s[16];
     sz_u64_t u64s[8];
     sz_i64_t i64s[8];
     sz_u32_t u32s[16];
@@ -1152,6 +1161,7 @@ SZ_INTERNAL __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32
 SZ_INTERNAL __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, n); }
 SZ_INTERNAL __mmask32 sz_u32_mask_until_(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, n); }
 SZ_INTERNAL __mmask64 sz_u64_mask_until_(sz_size_t n) { return (__mmask64)_bzhi_u64(0xFFFFFFFFFFFFFFFFull, n); }
+SZ_INTERNAL __mmask8 sz_u8_clamp_mask_until_(sz_size_t n) { return n < 8 ? sz_u8_mask_until_(n) : 0xFFu; }
 SZ_INTERNAL __mmask16 sz_u16_clamp_mask_until_(sz_size_t n) { return n < 16 ? sz_u16_mask_until_(n) : 0xFFFFu; }
 SZ_INTERNAL __mmask32 sz_u32_clamp_mask_until_(sz_size_t n) { return n < 32 ? sz_u32_mask_until_(n) : 0xFFFFFFFFu; }
 SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
