@@ -7,6 +7,8 @@
  *  CUDA backends of higher-level complex templated algorithms implemented outside of the C layer, like:
  *
  *  - `unified_alloc` - a custom allocator that uses CUDA Unified Memory for allocation.
+ *  - `gpu_specs_t` - a structure that contains the GPU specifications, like number of SMs, VRAM size, etc.
+ *  - `cuda_status_t` - a composite of the CUDA status, error code, and elapsed kernel execution time.
  */
 #ifndef STRINGZILLAS_TYPES_CUH_
 #define STRINGZILLAS_TYPES_CUH_
@@ -145,12 +147,18 @@ __forceinline__ __device__ sz_u32_vec_t sz_u32_load_unaligned(void const *ptr) n
     return result;
 }
 
+/** @brief Number of threads per warp on the GPU. */
+enum warp_size_t : unsigned {
+    warp_size_nvidia_k = 32, // ? NVIDIA GPUs use 32 threads per warp
+    warp_size_amd_k = 64,    // ? AMD GPUs use 64 threads per wave
+};
+
 /**
  *  @brief  Defines the upper bound on the number of warps per multi processor we may theoretically
  *          be able to run as part of one or many blocks. Generally this number depends on the amount
  *          of shared memory available on the device, and the amount of reserved memory per block.
  */
-enum warp_tasks_density_t : uint {
+enum warp_tasks_density_t : unsigned {
     warps_working_together_k = 0,
     one_warp_per_multiprocessor_k = 1,
     two_warps_per_multiprocessor_k = 2,

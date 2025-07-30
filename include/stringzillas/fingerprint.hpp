@@ -406,11 +406,11 @@ struct floating_rolling_hasher<f32_t> {
         return result;
     }
 
-    size_t window_width_;
-    state_t multiplier_;
-    state_t modulo_;
-    state_t inverse_modulo_;
-    state_t negative_discarding_multiplier_;
+    size_t window_width_ = 0;
+    state_t multiplier_ = 0.0f;
+    state_t modulo_ = 0.0f;
+    state_t inverse_modulo_ = 0.0f;
+    state_t negative_discarding_multiplier_ = 0.0f;
 };
 
 inline f64_t absolute_fmod(f64_t x, f64_t y) noexcept {
@@ -473,6 +473,12 @@ struct floating_rolling_hasher<f64_t> {
         negative_discarding_multiplier_ = -negative_discarding_multiplier_;
     }
 
+    constexpr floating_rolling_hasher() noexcept = default;
+    constexpr floating_rolling_hasher(floating_rolling_hasher &&) noexcept = default;
+    constexpr floating_rolling_hasher(floating_rolling_hasher const &) noexcept = default;
+    constexpr floating_rolling_hasher &operator=(floating_rolling_hasher &&) noexcept = default;
+    constexpr floating_rolling_hasher &operator=(floating_rolling_hasher const &) noexcept = default;
+
     SZ_INLINE size_t window_width() const noexcept { return window_width_; }
 
     SZ_INLINE state_t push(state_t state, byte_t new_char) const noexcept {
@@ -489,10 +495,10 @@ struct floating_rolling_hasher<f64_t> {
 
     SZ_INLINE hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
 
-    SZ_INLINE state_t multiplier() const noexcept { return multiplier_; }
-    SZ_INLINE state_t modulo() const noexcept { return modulo_; }
-    SZ_INLINE state_t inverse_modulo() const noexcept { return inverse_modulo_; }
-    SZ_INLINE state_t negative_discarding_multiplier() const noexcept { return negative_discarding_multiplier_; }
+    constexpr state_t multiplier() const noexcept { return multiplier_; }
+    constexpr state_t modulo() const noexcept { return modulo_; }
+    constexpr state_t inverse_modulo() const noexcept { return inverse_modulo_; }
+    constexpr state_t negative_discarding_multiplier() const noexcept { return negative_discarding_multiplier_; }
 
   private:
     SZ_INLINE state_t fma_mod(state_t a, state_t b, state_t c) const noexcept { return barrett_mod(a * b + c); }
@@ -517,11 +523,11 @@ struct floating_rolling_hasher<f64_t> {
         return result;
     }
 
-    size_t window_width_;
-    state_t multiplier_;
-    state_t modulo_;
-    state_t inverse_modulo_;
-    state_t negative_discarding_multiplier_;
+    size_t window_width_ = 0;
+    state_t multiplier_ = 0.0;
+    state_t modulo_ = 0.0;
+    state_t inverse_modulo_ = 0.0;
+    state_t negative_discarding_multiplier_ = 0.0;
 };
 
 #pragma endregion - Baseline Rolling Hashers
@@ -1025,7 +1031,10 @@ template <                                         //
     size_t dimensions_ = 64,                       //
     typename enable_ = void                        //
     >
-struct floating_rolling_hashers {
+struct floating_rolling_hashers;
+
+template <size_t window_width_, size_t dimensions_>
+struct floating_rolling_hashers<sz_cap_serial_k, window_width_, dimensions_> {
 
     using hasher_t = floating_rolling_hasher<f64_t>;
     using rolling_state_t = f64_t;
@@ -1051,6 +1060,15 @@ struct floating_rolling_hashers {
     constexpr size_t dimensions() const noexcept { return dimensions_k; }
     constexpr size_t window_width() const noexcept { return window_width_k; }
     constexpr size_t window_width(size_t) const noexcept { return window_width_k; }
+
+    floating_rolling_hashers() noexcept {
+        // Reset all variables to zeros
+        for (auto &multiplier : multipliers_) multiplier = 0.0;
+        for (auto &modulo : modulos_) modulo = 0.0;
+        for (auto &inverse_modulo : inverse_modulos_) inverse_modulo = 0.0;
+        for (auto &negative_discarding_multiplier : negative_discarding_multipliers_)
+            negative_discarding_multiplier = 0.0;
+    }
 
     /**
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
@@ -1281,6 +1299,15 @@ struct floating_rolling_hashers<sz_cap_haswell_k, window_width_, dimensions_> {
     constexpr size_t dimensions() const noexcept { return dimensions_k; }
     constexpr size_t window_width() const noexcept { return window_width_k; }
     constexpr size_t window_width(size_t) const noexcept { return window_width_k; }
+
+    floating_rolling_hashers() noexcept {
+        // Reset all variables to zeros
+        for (auto &multiplier : multipliers_) multiplier = 0.0;
+        for (auto &modulo : modulos_) modulo = 0.0;
+        for (auto &inverse_modulo : inverse_modulos_) inverse_modulo = 0.0;
+        for (auto &negative_discarding_multiplier : negative_discarding_multipliers_)
+            negative_discarding_multiplier = 0.0;
+    }
 
     /**
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
@@ -1592,6 +1619,15 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
     constexpr size_t dimensions() const noexcept { return dimensions_k; }
     constexpr size_t window_width() const noexcept { return window_width_k; }
     constexpr size_t window_width(size_t) const noexcept { return window_width_k; }
+
+    floating_rolling_hashers() noexcept {
+        // Reset all variables to zeros
+        for (auto &multiplier : multipliers_) multiplier = 0.0;
+        for (auto &modulo : modulos_) modulo = 0.0;
+        for (auto &inverse_modulo : inverse_modulos_) inverse_modulo = 0.0;
+        for (auto &negative_discarding_multiplier : negative_discarding_multipliers_)
+            negative_discarding_multiplier = 0.0;
+    }
 
     /**
      *  @brief Initializes several rolling hashers with different multipliers and modulos.

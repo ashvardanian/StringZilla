@@ -15,7 +15,7 @@ namespace stringzillas {
 
 using namespace ashvardanian::stringzilla;
 
-enum bytes_per_cell_t : uint {
+enum bytes_per_cell_t : unsigned {
     zero_bytes_per_cell_k = 0,
     one_byte_per_cell_k = 1,
     two_bytes_per_cell_k = 2,
