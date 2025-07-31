@@ -152,34 +152,41 @@ void bench_fingerprint(environment_t const &env) {
         throw std::runtime_error("Can't build Skylake Floating Hasher.");
 #endif // SZ_USE_SKYLAKE
 
-    // Perform the benchmarks, passing the dictionary to the engines
-    auto call_baseline = fingerprint_callable<rolling_f64_t, fu::basic_pool_t &>(
-        tape, min_hashes_baseline, min_counts_baseline, *rolling_f64, pool);
-    bench_result_t baseline = bench_nullary(env, "rolling_f64", call_baseline);
-
 #if SZ_USE_CUDA
     using rolling_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, default_window_width_k, default_embedding_dims_k>;
     auto rolling_cuda = std::make_unique<rolling_cuda_t>();
     if (rolling_cuda->try_seed() != status_t::success_k) throw std::runtime_error("Can't build CUDA Floating Hasher.");
 #endif // SZ_USE_CUDA
 
+    // Perform the benchmarks, passing the dictionary to the engines
+    auto call_baseline = fingerprint_callable<rolling_f64_t, fu::basic_pool_t &>(
+        tape, min_hashes_baseline, min_counts_baseline, *rolling_f64, pool);
+    bench_result_t baseline = bench_nullary(env, "rolling_f64", call_baseline).log();
+
     // Semi-serial variants
     bench_nullary(env, "rolling_f32",
                   fingerprint_callable<rolling_f32_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
                                                                           min_counts_accelerated, *rolling_f32, pool))
         .log(baseline);
+    scramble_accelerated_results();
+
     bench_nullary(env, "rabin_u64",
                   fingerprint_callable<rabin_u64_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
                                                                         min_counts_accelerated, *rabin_u64, pool))
         .log(baseline);
+    scramble_accelerated_results();
+
     bench_nullary(env, "buz_u32",
                   fingerprint_callable<buz_u32_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
                                                                       min_counts_accelerated, *buz_u32, pool)) //
         .log(baseline);
+    scramble_accelerated_results();
+
     bench_nullary(env, "multiply_u32",
                   fingerprint_callable<multiply_u32_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
                                                                            min_counts_accelerated, *multiply_u32, pool))
         .log(baseline);
+    scramble_accelerated_results();
 
     // Actually unrolled hard-coded variants, including SIMD ports
     bench_result_t unrolled =                     //
@@ -200,6 +207,7 @@ void bench_fingerprint(environment_t const &env) {
         callable_no_op_t {},        // preprocessing
         fingerprints_equality_t {}) // equality check
         .log(baseline, unrolled);
+    scramble_accelerated_results();
 #endif // SZ_USE_HASWELL
 
 #if SZ_USE_SKYLAKE
