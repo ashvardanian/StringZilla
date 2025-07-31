@@ -85,10 +85,20 @@
 #define sz_constexpr_if_cpp20
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(_MSC_VER)
+#define SZ_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
 #define SZ_INLINE inline __attribute__((always_inline))
 #else
 #define SZ_INLINE inline
+#endif
+
+#if defined(_MSC_VER)
+#define SZ_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define SZ_NOINLINE __attribute__((noinline))
+#else
+#define SZ_NOINLINE
 #endif
 
 #if !SZ_AVOID_STL
@@ -125,7 +135,7 @@ using rune_t = sz_rune_t;
 using sorted_idx_t = sz_sorted_idx_t;
 
 /** @sa sz_status_t */
-enum class status_t {
+enum class status_t : int {
     success_k = sz_success_k,
     bad_alloc_k = sz_bad_alloc_k,
     invalid_utf8_k = sz_invalid_utf8_k,
