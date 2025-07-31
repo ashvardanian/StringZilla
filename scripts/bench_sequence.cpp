@@ -45,7 +45,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_find.cpp`, `bench_token.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `bench_find.cpp`, `bench_token.cpp`, and `bench_memory.cpp`.
  */
 #include <memory>        // `std::memcpy`
 #include <numeric>       // `std::iota`

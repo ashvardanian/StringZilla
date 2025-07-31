@@ -1,5 +1,5 @@
 /**
- *  @file   bench_fingerprint.cu
+ *  @file   bench_fingerprints.cu
  *  @brief  Benchmarks for exact multi-pattern substring search algorithms on the GPU.
  *          The program accepts a file path to a dataset, tokenizes it, and benchmarks the search operations,
  *          validating the SIMD-accelerated backends against the serial baselines.
@@ -21,8 +21,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzillas_bench_fingerprint_cu20
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzillas_bench_fingerprint_cu20
+ *  cmake --build build_release --config Release --target stringzillas_bench_fingerprints_cu20
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words build_release/stringzillas_bench_fingerprints_cu20
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
@@ -32,13 +32,13 @@
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
  *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
- *  build_release/stringzillas_bench_fingerprint_cu20
+ *  build_release/stringzillas_bench_fingerprints_cu20
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_sequence.cpp`, `bench_token.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
+ *  This file is a sibling of `bench_similarities.cpp`.
  */
-#include "bench_fingerprint.cuh"
+#include "bench_fingerprints.cuh"
 
 namespace szs = ashvardanian::stringzillas;
 using namespace szs::scripts;

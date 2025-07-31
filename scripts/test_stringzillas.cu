@@ -30,8 +30,8 @@
 
 #include "test_stringzillas.cuh"
 
-#include "test_fingerprint.cuh"
-#include "test_similarity.cuh"
+#include "test_fingerprints.cuh"
+#include "test_similarities.cuh"
 
 namespace szs = ashvardanian::stringzillas;
 

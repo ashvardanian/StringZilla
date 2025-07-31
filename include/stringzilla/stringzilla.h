@@ -28,9 +28,9 @@
  *  It also provides many higher-level parallel algorithms, mostly implemented in C++ with OpenMP and CUDA, also exposed
  *  via the stable C 99 ABI, but requiring C++17 and CUDA 17 compilers to build the shared @b StringCuZilla libraries:
  *
- *  - `similarity.{hpp,cuh}` - similarity measures, like Levenshtein, Needleman-Wunsch, & Smith-Waterman scores.
+ *  - `similarities.{hpp,cuh}` - similarity measures, like Levenshtein, Needleman-Wunsch, & Smith-Waterman scores.
  *  - `features.{hpp,cuh}` - feature extraction for TF-IDF and other Machine Learning algorithms.
- *  - `fingerprint.{hpp,cuh}` - Aho-Corasick multi-pattern search.
+ *  - `fingerprints.{hpp,cuh}` - Aho-Corasick multi-pattern search.
  *
  *  The core implementations of those algorithms are mostly structured as callable structure templates, as opposed to
  *  template functions to simplify specialized overloads and reusing the state between invocations.

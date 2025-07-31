@@ -1,6 +1,6 @@
 /**
  *  @brief  CUDA-accelerated string similarity utilities.
- *  @file   similarity.cuh
+ *  @file   similarities.cuh
  *  @author Ash Vardanian
  *
  *  Unlike th OpenMP backed, which also has single-pair similarity scores, the CUDA backend focuses @b only on
@@ -10,7 +10,7 @@
  *  - `sz::needleman_wunsch_score` for weighted Needleman-Wunsch global alignment scores.
  *  - `sz::smith_waterman_score` for weighted Smith-Waterman local alignment scores.
  *
- *  Unlike the trivially parallelizable CPU kernels in `stringzilla/similarity.hpp`, the GPU kernels in this file are
+ *  Unlike the trivially parallelizable CPU kernels in `stringzilla/similarities.hpp`, the GPU kernels in this file are
  *  designed for batch-processing of large collections of strings, assigning a single warp to each string pair.
  *  Thus, they should be used when hundreds of pairwise comparisons are needed, and the strings are long enough to
  *  amortize the cost of copying them to the GPU.
@@ -34,8 +34,8 @@
  *  - `levenshtein_distances`: {CUDA and Kepler} for any chars and lengths, {Hopper} for 8-bit and 16-bit lengths.
  *  - `needleman_wunsch_score`.
  */
-#ifndef STRINGZILLAS_SIMILARITY_CUH_
-#define STRINGZILLAS_SIMILARITY_CUH_
+#ifndef STRINGZILLAS_SIMILARITIES_CUH_
+#define STRINGZILLAS_SIMILARITIES_CUH_
 
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -43,7 +43,7 @@
 #include <cooperative_groups.h> // `cooperative_groups::this_grid()`
 
 #include "stringzillas/types.cuh"
-#include "stringzillas/similarity.hpp"
+#include "stringzillas/similarities.hpp"
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -2995,4 +2995,4 @@ struct smith_waterman_scores<char, error_costs_256x256_t, gap_costs_type_, alloc
 } // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGZILLAS_SIMILARITY_CUH_
+#endif // STRINGZILLAS_SIMILARITIES_CUH_

@@ -2,7 +2,7 @@
  *  @brief   Extensive @b stress-testing suite for StringCuZilla parallel operations, written in CUDA C++.
  *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file    test_fingerprint.cuh
+ *  @file    test_fingerprints.cuh
  *  @author  Ash Vardanian
  */
 #include <cstring> // `std::memcmp`
@@ -11,10 +11,10 @@
 #define FU_ENABLE_NUMA 0
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
-#include "stringzillas/fingerprint.hpp"
+#include "stringzillas/fingerprints.hpp"
 
 #if SZ_USE_CUDA
-#include "stringzillas/fingerprint.cuh"
+#include "stringzillas/fingerprints.cuh"
 #endif
 
 #if !SZ_IS_CPP17_

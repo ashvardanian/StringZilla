@@ -2,13 +2,13 @@
  *  @brief   Extensive @b stress-testing suite for StringCuZilla parallel operations, written in CUDA C++.
  *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
- *  @file    test_similarity.cuh
+ *  @file    test_similarities.cuh
  *  @author  Ash Vardanian
  */
-#include "stringzillas/similarity.hpp"
+#include "stringzillas/similarities.hpp"
 
 #if SZ_USE_CUDA
-#include "stringzillas/similarity.cuh"
+#include "stringzillas/similarities.cuh"
 #endif
 
 #if !SZ_IS_CPP17_

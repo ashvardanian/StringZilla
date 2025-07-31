@@ -31,10 +31,10 @@
 #
 # Parallel Benchmarks:
 #
-# * stringzillas_bench_similarity_cpp20: A benchmark for similarity operations.
-# * stringzillas_bench_similarity_cu20: A benchmark for similarity operations on GPU.
-# * stringzillas_bench_fingerprint_cpp20: A benchmark for finding many substrings.
-# * stringzillas_bench_fingerprint_cu20: A benchmark for finding many substrings on GPU.
+# * stringzillas_bench_similarities_cpp20: A benchmark for similarity operations.
+# * stringzillas_bench_similarities_cu20: A benchmark for similarity operations on GPU.
+# * stringzillas_bench_fingerprints_cpp20: A benchmark for finding many substrings.
+# * stringzillas_bench_fingerprints_cu20: A benchmark for finding many substrings on GPU.
 #
 # For higher-level language bindings separate build scripts are provided, native to each toolchain.
 cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
@@ -246,7 +246,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             target_compile_options(${target} PRIVATE "-O0;-g")
         endif ()
         if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
-            target_compile_options(${target} PRIVATE "-O3")
+            target_compile_options(${target} PRIVATE "-O2")
         endif ()
     elseif (${compiler_id} STREQUAL "NVIDIA")
         if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
@@ -267,7 +267,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             )
         endif ()
         if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
-            target_compile_options(${target} PRIVATE "-O3")
+            target_compile_options(${target} PRIVATE "-O2")
         endif ()
     endif ()
 
@@ -330,8 +330,8 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                 # ! NVCC can't handle sanitizers?!
                 # https://stackoverflow.com/questions/75590579/cuda-fails-to-initialise-when-address-sanitizer-is-enabled
             else ()
-                # target_compile_options(${target} PRIVATE "-fsanitize=address;-fsanitize=leak")
-                # target_link_options(${target} PRIVATE "-fsanitize=address;-fsanitize=leak")
+                target_compile_options(${target} PRIVATE "-fsanitize=address" "-fsanitize=undefined")
+                target_link_options(${target} PRIVATE "-fsanitize=address" "-fsanitize=undefined")
             endif ()
         endif ()
     else ()
@@ -372,14 +372,18 @@ if (${STRINGZILLA_BUILD_BENCHMARK})
     define_launcher(stringzilla_bench_memory_cpp20 scripts/bench_memory.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
 
     # Parallel benchmarks
-    define_launcher(stringzillas_bench_similarity_cpp20 scripts/bench_similarity.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
-    define_launcher(stringzillas_bench_fingerprint_cpp20 scripts/bench_fingerprint.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
+    define_launcher(
+        stringzillas_bench_similarities_cpp20 scripts/bench_similarities.cpp 20 "${STRINGZILLA_TARGET_ARCH}"
+    )
+    define_launcher(
+        stringzillas_bench_fingerprints_cpp20 scripts/bench_fingerprints.cpp 20 "${STRINGZILLA_TARGET_ARCH}"
+    )
     if (ENABLE_CUDA)
         define_gpu_launcher(
-            stringzillas_bench_similarity_cu20 scripts/bench_similarity.cu 20 "${STRINGZILLA_TARGET_ARCH}"
+            stringzillas_bench_similarities_cu20 scripts/bench_similarities.cu 20 "${STRINGZILLA_TARGET_ARCH}"
         )
         define_gpu_launcher(
-            stringzillas_bench_fingerprint_cu20 scripts/bench_fingerprint.cu 20 "${STRINGZILLA_TARGET_ARCH}"
+            stringzillas_bench_fingerprints_cu20 scripts/bench_fingerprints.cu 20 "${STRINGZILLA_TARGET_ARCH}"
         )
     endif ()
 endif ()

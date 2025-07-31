@@ -1,5 +1,5 @@
 /**
- *  @file   bench_fingerprint.cuh
+ *  @file   bench_fingerprints.cuh
  *  @brief  Shared code for CPU and GPU batched parallel exact substring search.
  */
 #include <tuple> // `std::tuple`
@@ -8,10 +8,10 @@
 #define FU_ENABLE_NUMA 0
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
-#include <stringzillas/fingerprint.hpp> // C++ templates for string processing
+#include <stringzillas/fingerprints.hpp> // C++ templates for string processing
 
 #if SZ_USE_CUDA
-#include <stringzillas/fingerprint.cuh> // Parallel string processing in CUDA
+#include <stringzillas/fingerprints.cuh> // Parallel string processing in CUDA
 #endif
 
 #include "bench.hpp"

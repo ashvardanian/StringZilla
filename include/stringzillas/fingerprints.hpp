@@ -1,6 +1,6 @@
 /**
  *  @brief  Hardware-accelerated Min-Hash fingerprinting for string collections.
- *  @file   fingerprint.hpp
+ *  @file   fingerprints.hpp
  *  @author Ash Vardanian
  *
  *  The `sklearn.feature_extraction` module for @b TF-IDF, `CountVectorizer`, and @b `HashingVectorizer`
@@ -110,8 +110,8 @@
  *  - on Nvidia GPUs, take at least 32 hash-functions of each width, to activate all 32 threads in a warp.
  *  - on AMD GPUs, take at least 64 hash-functions of each width, to activate all 64 threads in a wave.
  */
-#ifndef STRINGZILLAS_FINGERPRINT_HPP_
-#define STRINGZILLAS_FINGERPRINT_HPP_
+#ifndef STRINGZILLAS_FINGERPRINTS_HPP_
+#define STRINGZILLAS_FINGERPRINTS_HPP_
 
 #include "stringzilla/types.hpp"  // `sz::error_cost_t`
 #include "stringzilla/memory.h"   // `sz_move`
@@ -1886,4 +1886,4 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
 } // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGZILLAS_FINGERPRINT_HPP_
+#endif // STRINGZILLAS_FINGERPRINTS_HPP_

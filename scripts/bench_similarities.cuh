@@ -1,5 +1,5 @@
 /**
- *  @file   bench_similarity.cuh
+ *  @file   bench_similarities.cuh
  *  @brief  Shared code for CPU and GPU batched string similarity kernels.
  */
 #include <tuple> // `std::tuple`
@@ -7,10 +7,10 @@
 #define FU_ENABLE_NUMA 0
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
-#include <stringzillas/similarity.hpp> // C++ templates for string similarity measures
+#include <stringzillas/similarities.hpp> // C++ templates for string similarity measures
 
 #if SZ_USE_CUDA
-#include <stringzillas/similarity.cuh> // Parallel string processing in CUDA
+#include <stringzillas/similarities.cuh> // Parallel string processing in CUDA
 #endif
 
 #include "bench.hpp"

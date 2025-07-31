@@ -17,13 +17,13 @@ This script benchmarks MinHash fingerprinting operations using specialized sketc
 Example usage via UV:
 
     # Benchmark with a file
-    uv run --no-project scripts/bench_fingerprint.py --dataset leipzig1M.txt
+    uv run --no-project scripts/bench_fingerprints.py --dataset leipzig1M.txt
 
     # Benchmark with limited docs
-    uv run --no-project scripts/bench_fingerprint.py --dataset leipzig1M.txt --max-docs 1000
+    uv run --no-project scripts/bench_fingerprints.py --dataset leipzig1M.txt --max-docs 1000
 
     # Benchmark with custom parameters
-    uv run --no-project scripts/bench_fingerprint.py --dataset leipzig1M.txt --dimensions 32
+    uv run --no-project scripts/bench_fingerprints.py --dataset leipzig1M.txt --dimensions 32
 """
 
 import argparse

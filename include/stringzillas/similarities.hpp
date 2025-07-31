@@ -1,6 +1,6 @@
 /**
  *  @brief  OpenMP-accelerated string similarity scores in C++.
- *  @file   similarity.hpp
+ *  @file   similarities.hpp
  *  @author Ash Vardanian
  *
  *  Includes core APIs, defined as the following template objects:
@@ -66,8 +66,8 @@
  *  @see https://github.com/quim0/WFA-GPU
  *  @see https://github.com/asbschmidt/CUDASW4
  */
-#ifndef STRINGZILLAS_SIMILARITY_HPP_
-#define STRINGZILLAS_SIMILARITY_HPP_
+#ifndef STRINGZILLAS_SIMILARITIES_HPP_
+#define STRINGZILLAS_SIMILARITIES_HPP_
 
 #include "stringzilla/types.hpp"  // `sz::error_cost_t`
 #include "stringzilla/memory.h"   // `sz_move`
@@ -4400,4 +4400,4 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
 } // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGZILLAS_SIMILARITY_HPP_
+#endif // STRINGZILLAS_SIMILARITIES_HPP_

@@ -1,5 +1,5 @@
 /**
- *  @file   bench_similarity.cpp
+ *  @file   bench_similarities.cpp
  *  @brief  Benchmarks string similarity computations.
  *          It accepts a file with a list of words, and benchmarks the levenshtein edit-distance computations,
  *          alignment scores, and fingerprinting techniques combined with the Hamming distance.
@@ -30,8 +30,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzillas_bench_similarity_cu20
- *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=words build_release/stringzillas_bench_similarity_cu20
+ *  cmake --build build_release --config Release --target stringzillas_bench_similarities_cpp20
+ *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=words build_release/stringzillas_bench_similarities_cpp20
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size inputs,
@@ -41,19 +41,19 @@
  *  @code{.sh}
  *  STRINGWARS_DATASET=proteins.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
  *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
- *  build_release/stringzillas_bench_similarity_cu20
+ *  build_release/stringzillas_bench_similarities_cpp20
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_find.cpp`, `bench_token.cpp`, `bench_sequence.cpp`, and `bench_memory.cpp`.
+ *  This file is a sibling of `bench_fingerprints.cpp`.
  */
-#include "bench_similarity.cuh"
+#include "bench_similarities.cuh"
 
 namespace szs = ashvardanian::stringzillas;
 using namespace szs::scripts;
 
 int main(int argc, char const **argv) {
-    std::printf("Welcome to StringZillas on GPU!\n");
+    std::printf("Welcome to StringZillas on CPU!\n");
 
     try {
         std::printf("Building up the environment...\n");

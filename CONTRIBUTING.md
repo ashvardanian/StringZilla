@@ -36,14 +36,14 @@ They have the broadest coverage of the library, and are the most important to ke
 - `scripts/bench_find.cpp` - bidirectional substring search, both exact and fuzzy.
 - `scripts/bench_sequence.cpp` - sorting, partitioning, merging.
 - `scripts/bench_container.cpp` - STL containers with different string keys.
-- `scripts/bench_similarity.cpp` - benchmark all edit distance backends.
-- `scripts/bench_fingerprint.cpp` - benchmark all Min-Hash fingerprinting backends.
+- `scripts/bench_similarities.cpp` - benchmark all edit distance backends.
+- `scripts/bench_fingerprints.cpp` - benchmark all Min-Hash fingerprinting backends.
 
 The role of Python benchmarks is less to provide absolute number, but to compare against popular tools in the Python ecosystem.
 
 - `scripts/bench_find.(py|ipynb)` - compares against native Python `str`.
 - `scripts/bench_sequence.(py|ipynb)` - compares against `pandas`.
-- `scripts/bench_similarity.(ipynb)` - compares against `jellyfish`, `editdistance`, etc.
+- `scripts/bench_similarities.(ipynb)` - compares against `jellyfish`, `editdistance`, etc.
 
 ## Benchmarking Datasets
 
@@ -186,10 +186,10 @@ build_release/stringzilla_bench_container_cpp20 # - for STL containers with stri
 There are also parallel algorithms that need a very different benchmarking setup:
 
 ```sh
-build_release/stringzillas_bench_fingerprint_cpp20  # - for parallel multi-pattern search on CPU
-build_release/stringzillas_bench_fingerprint_cu20   # - for parallel multi-pattern search on GPU
-build_release/stringzillas_bench_similarity_cpp20   # - for parallel edit distances and alignment scores on CPU
-build_release/stringzillas_bench_similarity_cu20    # - for parallel edit distances and alignment scores on GPU
+build_release/stringzillas_bench_fingerprints_cpp20     # - for parallel multi-pattern search on CPU
+build_release/stringzillas_bench_fingerprints_cu20      # - for parallel multi-pattern search on GPU
+build_release/stringzillas_bench_similarities_cpp20     # - for parallel edit distances and alignment scores on CPU
+build_release/stringzillas_bench_similarities_cu20      # - for parallel edit distances and alignment scores on GPU
 ```
 
 All of them support customization via environment variables.
@@ -197,13 +197,13 @@ Let's say you want to benchmark large-batch DNA similarity scoring kernels:
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCHMARK=1 -B build_release
-cmake --build build_release --config Release --target stringzillas_bench_fingerprint_cpp20   # CPU
-cmake --build build_release --config Release --target stringzillas_bench_similarity_cu20     # GPU
-STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarity_cpp20
-STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarity_cu20
+cmake --build build_release --config Release --target stringzillas_bench_fingerprints_cpp20 # CPU
+cmake --build build_release --config Release --target stringzillas_bench_similarities_cu20  # GPU
+STRINGWARS_FILTER=32768 STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarities_cpp20
+STRINGWARS_FILTER=1 STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarities_cu20
 
-STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarity_cu20
-STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarity_cu20
+STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch32768" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzillas_bench_similarities_cu20
+STRINGWARS_STRESS=0 STRINGWARS_FILTER="(cuda|kepler|hopper).*:batch1" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzillas_bench_similarities_cu20
 ```
 
 Each benchmark originates from an identically named single-source file in the `scripts/` directory.
@@ -475,9 +475,10 @@ For high-performance low-latency benchmarking, stick to C/C++ native benchmarks,
 For benchmarking, the following scripts are provided.
 
 ```sh
-python scripts/bench_find.py --haystack_path "your file" --needle "your pattern" # real data
-python scripts/bench_find.py --haystack_pattern "abcd" --haystack_length 1e9 --needle "abce" # synthetic data
-python scripts/similarity_bench.py --text_path "your file" # edit distance computations
+uv run --no-project scripts/bench_find.py --help
+uv run --no-project scripts/bench_sequence.py --help
+uv run --no-project scripts/bench_similarities.py --help
+uv run --no-project scripts/bench_fingerprints.py --help
 ```
 
 Alternatively, you can explore the Jupyter notebooks in `scripts/` directory.

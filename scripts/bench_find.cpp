@@ -50,7 +50,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWa.rs, it doesn't use any external frameworks like Criterion or Google Benchmark.
- *  This file is the sibling of `bench_sequence.cpp`, `bench_token.cpp`, `bench_similarity.cpp`, and `bench_memory.cpp`.
+ *  This file is the sibling of `bench_sequence.cpp`, `bench_token.cpp`, and `bench_memory.cpp`.
  */
 #include <cstring>    // `memmem`
 #include <functional> // `std::boyer_moore_searcher`

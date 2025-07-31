@@ -1,21 +1,21 @@
 /**
  *  @brief  CUDA-accelerated fingerprinting utilities for string collections.
- *  @file   fingerprint.cuh
+ *  @file   fingerprints.cuh
  *  @author Ash Vardanian
  *
  *  CUDA specialization of the `floating_rolling_hashers` template for GPU-accelerated count-min-sketching.
  *  Unlike the CPU variants, this implementation focuses on batch-processing of large collections of strings,
  *  assigning warps to process multiple strings in parallel.
  */
-#ifndef STRINGZILLAS_FINGERPRINT_CUH_
-#define STRINGZILLAS_FINGERPRINT_CUH_
+#ifndef STRINGZILLAS_FINGERPRINTS_CUH_
+#define STRINGZILLAS_FINGERPRINTS_CUH_
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cooperative_groups.h>
 
 #include "stringzillas/types.cuh"
-#include "stringzillas/fingerprint.hpp"
+#include "stringzillas/fingerprints.hpp"
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -470,4 +470,4 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
 } // namespace stringzillas
 } // namespace ashvardanian
 
-#endif // STRINGZILLAS_FINGERPRINT_CUH_
+#endif // STRINGZILLAS_FINGERPRINTS_CUH_
