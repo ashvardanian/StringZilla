@@ -17,6 +17,9 @@ addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = ["error"]
 
+[tool.black]
+line-length = 120
+
 [tool.cibuildwheel]
 test-requires = ["pytest", "pytest-repeat"]
 test-command = "pytest {project}/scripts/test.py -x"
