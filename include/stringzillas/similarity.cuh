@@ -94,20 +94,20 @@ using affine_smith_waterman_hopper_t =
  *  @brief  Dispatches min or max operation based on the compile-time objective.
  */
 template <sz_similarity_objective_t objective_, typename scalar_type_>
-__forceinline__ __device__ scalar_type_ _pick_best(scalar_type_ a, scalar_type_ b) noexcept {
+__forceinline__ __device__ scalar_type_ pick_best_(scalar_type_ a, scalar_type_ b) noexcept {
     if constexpr (objective_ == sz_minimize_distance_k) { return std::min(a, b); }
     else { return std::max(a, b); }
 }
 
 template <sz_similarity_objective_t objective_, typename scalar_type_>
-__forceinline__ __device__ scalar_type_ _pick_best_in_warp(scalar_type_ x) noexcept {
+__forceinline__ __device__ scalar_type_ pick_best_in_warp_(scalar_type_ x) noexcept {
     // The `__shfl_down_sync` replaces `__shfl_down`
     // https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/
-    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 16), x);
-    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 8), x);
-    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 4), x);
-    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 2), x);
-    x = _pick_best<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 1), x);
+    x = pick_best_<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 16), x);
+    x = pick_best_<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 8), x);
+    x = pick_best_<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 4), x);
+    x = pick_best_<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 2), x);
+    x = pick_best_<objective_, scalar_type_>(__shfl_down_sync(0xffffffff, x, 1), x);
     return x;
 }
 
@@ -117,7 +117,7 @@ __forceinline__ __device__ scalar_type_ _pick_best_in_warp(scalar_type_ x) noexc
  *  @see    https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#global-memory-5-x
  */
 template <typename scalar_type_>
-__forceinline__ __device__ scalar_type_ _load_immutable(scalar_type_ const *ptr) noexcept {
+__forceinline__ __device__ scalar_type_ load_immutable_(scalar_type_ const *ptr) noexcept {
     // The `__ldg` intrinsic translates into the `ld.global.nc` PTX instruction.
     // It reads a value from global memory and caches it in the non-coherent cache.
     // return __ldg(ptr);
@@ -130,7 +130,7 @@ __forceinline__ __device__ scalar_type_ _load_immutable(scalar_type_ const *ptr)
  *  @see    https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#cache-operators
  */
 template <typename scalar_type_>
-__forceinline__ __device__ scalar_type_ _load_last_use(scalar_type_ const *ptr) noexcept {
+__forceinline__ __device__ scalar_type_ load_last_use_(scalar_type_ const *ptr) noexcept {
     // return __ldlu(ptr);
     return *ptr;
 }
@@ -141,7 +141,7 @@ __forceinline__ __device__ scalar_type_ _load_last_use(scalar_type_ const *ptr) 
 
 /**
  *  @brief GPU adaptation of the `tile_scorer` on CUDA, avoiding warp-level shuffles and DPX.
- *  @note Uses 32-bit `uint` counter to iterate through the string slices, so it can't be over 4 billion characters.
+ *  @note Uses 32-bit `unsigned` counter to iterate through the string slices, so it can't be over 4 billion characters.
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
@@ -202,7 +202,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param tasks_step The step size for the next character to compare from each string.
      *  @param tasks_count The total number of characters to compare from input slices.
      *
-     *  @tparam index_type_ @b `uint` is recommended if the strings are under 4 billion characters.
+     *  @tparam index_type_ @b `unsigned` is recommended if the strings are under 4 billion characters.
      */
     template <typename index_type_>
     __forceinline__ __device__ void operator()(                                                      //
@@ -220,16 +220,16 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // ? and allowing them to reuse the previous `pre_deletion` as the new `pre_insertion`,
         // ? that code ends up being slower than the one below.
         for (index_type_ i = tasks_offset; i < tasks_count; i += tasks_step) {
-            score_t pre_substitution = _load_last_use(scores_pre_substitution + i);
+            score_t pre_substitution = load_last_use_(scores_pre_substitution + i);
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
-            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
-            char second_char = _load_immutable(second_slice + i);
+            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
-            score_t if_deletion_or_insertion = _pick_best<objective_k>(pre_deletion, pre_insertion) + gap_costs;
-            score_t cell_score = _pick_best<objective_k>(if_deletion_or_insertion, if_substitution);
+            score_t if_deletion_or_insertion = pick_best_<objective_k>(pre_deletion, pre_insertion) + gap_costs;
+            score_t cell_score = pick_best_<objective_k>(if_deletion_or_insertion, if_substitution);
             scores_new[i] = cell_score;
         }
 
@@ -240,7 +240,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
 /**
  *  @brief GPU adaptation of the `local_scorer` on CUDA, avoiding warp-level shuffles and DPX.
- *  @note Uses 32-bit `uint` counter to iterate through the string slices, so it can't be over 4 billion characters.
+ *  @note Uses 32-bit `unsigned` counter to iterate through the string slices, so it can't be over 4 billion characters.
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
@@ -298,7 +298,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param tasks_step The step size for the next character to compare from each string.
      *  @param tasks_count The total number of characters to compare from input slices.
      *
-     *  @tparam index_type_ @b `uint` is recommended if the strings are under 4 billion characters.
+     *  @tparam index_type_ @b `unsigned` is recommended if the strings are under 4 billion characters.
      */
     template <typename index_type_>
     __forceinline__ __device__ void operator()(                                                      //
@@ -316,31 +316,31 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // ? and allowing them to reuse the previous `pre_deletion` as the new `pre_insertion`,
         // ? that code ends up being slower than the one below.
         for (index_type_ i = tasks_offset; i < tasks_count; i += tasks_step) {
-            score_t pre_substitution = _load_last_use(scores_pre_substitution + i);
+            score_t pre_substitution = load_last_use_(scores_pre_substitution + i);
             score_t pre_insertion = scores_pre_insertion[i];
             score_t pre_deletion = scores_pre_deletion[i];
-            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
-            char second_char = _load_immutable(second_slice + i);
+            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
-            score_t if_deletion_or_insertion = _pick_best<objective_k>(pre_deletion, pre_insertion) + gap_cost;
-            score_t if_substitution_or_reset = _pick_best<objective_k, score_t>(if_substitution, 0);
-            score_t cell_score = _pick_best<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
+            score_t if_deletion_or_insertion = pick_best_<objective_k>(pre_deletion, pre_insertion) + gap_cost;
+            score_t if_substitution_or_reset = pick_best_<objective_k, score_t>(if_substitution, 0);
+            score_t cell_score = pick_best_<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
             scores_new[i] = cell_score;
 
             // Update the global maximum score if this cell beats it.
-            final_score_ = _pick_best<objective_k>(final_score_, cell_score);
+            final_score_ = pick_best_<objective_k>(final_score_, cell_score);
         }
 
         // ! Don't forget to pick the best among the best scores per thread.
-        final_score_ = _pick_best_in_warp<objective_k>(final_score_);
+        final_score_ = pick_best_in_warp_<objective_k>(final_score_);
     }
 };
 
 /**
  *  @brief GPU adaptation of the `tile_scorer` on CUDA, avoiding warp-level shuffles and DPX.
- *  @note Uses 32-bit `uint` counter to iterate through the string slices, so it can't be over 4 billion characters.
+ *  @note Uses 32-bit `unsigned` counter to iterate through the string slices, so it can't be over 4 billion characters.
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
@@ -410,7 +410,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param tasks_step The step size for the next character to compare from each string.
      *  @param tasks_count The total number of characters to compare from input slices.
      *
-     *  @tparam index_type_ @b `uint` is recommended if the strings are under 4 billion characters.
+     *  @tparam index_type_ @b `unsigned` is recommended if the strings are under 4 billion characters.
      */
     template <typename index_type_>
     __forceinline__ __device__ void operator()(                                                      //
@@ -433,13 +433,13 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // ? and allowing them to reuse the previous `pre_deletion` as the new `pre_insertion`,
         // ? that code ends up being slower than the one below.
         for (index_type_ i = tasks_offset; i < tasks_count; i += tasks_step) {
-            score_t pre_substitution = _load_last_use(scores_pre_substitution + i);
+            score_t pre_substitution = load_last_use_(scores_pre_substitution + i);
             score_t pre_insertion_opening = scores_pre_insertion[i];
             score_t pre_deletion_opening = scores_pre_deletion[i];
             score_t pre_insertion_expansion = scores_running_insertions[i];
             score_t pre_deletion_expansion = scores_running_deletions[i];
-            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
-            char second_char = _load_immutable(second_slice + i);
+            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
@@ -448,7 +448,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             score_t if_deletion = min_or_max<objective_k>(pre_deletion_opening + gap_costs_.open,
                                                           pre_deletion_expansion + gap_costs_.extend);
             score_t if_deletion_or_insertion = min_or_max<objective_k>(if_deletion, if_insertion);
-            score_t cell_score = _pick_best<objective_k>(if_deletion_or_insertion, if_substitution);
+            score_t cell_score = pick_best_<objective_k>(if_deletion_or_insertion, if_substitution);
 
             // Export results.
             scores_new[i] = cell_score;
@@ -463,7 +463,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 
 /**
  *  @brief GPU adaptation of the `local_scorer` on CUDA, avoiding warp-level shuffles and DPX.
- *  @note Uses 32-bit `uint` counter to iterate through the string slices, so it can't be over 4 billion characters.
+ *  @note Uses 32-bit `unsigned` counter to iterate through the string slices, so it can't be over 4 billion characters.
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
@@ -528,7 +528,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param tasks_step The step size for the next character to compare from each string.
      *  @param tasks_count The total number of characters to compare from input slices.
      *
-     *  @tparam index_type_ @b `uint` is recommended if the strings are under 4 billion characters.
+     *  @tparam index_type_ @b `unsigned` is recommended if the strings are under 4 billion characters.
      */
     template <typename index_type_>
     __forceinline__ __device__ void operator()(                                                      //
@@ -551,13 +551,13 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
         // ? and allowing them to reuse the previous `pre_deletion` as the new `pre_insertion`,
         // ? that code ends up being slower than the one below.
         for (index_type_ i = tasks_offset; i < tasks_count; i += tasks_step) {
-            score_t pre_substitution = _load_last_use(scores_pre_substitution + i);
+            score_t pre_substitution = load_last_use_(scores_pre_substitution + i);
             score_t pre_insertion_opening = scores_pre_insertion[i];
             score_t pre_deletion_opening = scores_pre_deletion[i];
             score_t pre_insertion_expansion = scores_running_insertions[i];
             score_t pre_deletion_expansion = scores_running_deletions[i];
-            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
-            char second_char = _load_immutable(second_slice + i);
+            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter_(first_char, second_char);
             score_t if_substitution = pre_substitution + cost_of_substitution;
@@ -566,8 +566,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             score_t if_insertion = min_or_max<objective_k>(pre_insertion_opening + gap_costs_.open,
                                                            pre_insertion_expansion + gap_costs_.extend);
             score_t if_deletion_or_insertion = min_or_max<objective_k>(if_deletion, if_insertion);
-            score_t if_substitution_or_reset = _pick_best<objective_k, score_t>(if_substitution, 0);
-            score_t cell_score = _pick_best<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
+            score_t if_substitution_or_reset = pick_best_<objective_k, score_t>(if_substitution, 0);
+            score_t cell_score = pick_best_<objective_k>(if_deletion_or_insertion, if_substitution_or_reset);
 
             // Export results.
             scores_new[i] = cell_score;
@@ -575,11 +575,11 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
             scores_new_deletions[i] = if_deletion;
 
             // Update the global maximum score if this cell beats it.
-            final_score_ = _pick_best<objective_k>(final_score_, cell_score);
+            final_score_ = pick_best_<objective_k>(final_score_, cell_score);
         }
 
         // ! Don't forget to pick the best among the best scores per thread.
-        final_score_ = _pick_best_in_warp<objective_k>(final_score_);
+        final_score_ = pick_best_in_warp_<objective_k>(final_score_);
     }
 };
 
@@ -599,27 +599,29 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  *  - @b `vmax4,vmin4,vadd4` video-processing instructions.
  */
 template <>
-struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
     using kepler_warp_scorer_t =
-        tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+        tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_u8_t const *scores_pre_substitution,                                 //
-        sz_u8_t const *scores_pre_insertion,                                    //
-        sz_u8_t const *scores_pre_deletion,                                     //
-        sz_u8_t *scores_new) noexcept {
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,          // ! Unlike CPU, uses `unsigned`
+        u8_t const *scores_pre_substitution, //
+        u8_t const *scores_pre_insertion,    //
+        u8_t const *scores_pre_deletion,     //
+        u8_t *scores_new) noexcept {
 
-        sz_u8_t const match_cost = this->substituter_.match;
-        sz_u8_t const mismatch_cost = this->substituter_.mismatch;
-        sz_u8_t const gap_cost = this->gap_costs_.open_or_extend;
+        u8_t const match_cost = this->substituter_.match;
+        u8_t const mismatch_cost = this->substituter_.mismatch;
+        u8_t const gap_cost = this->gap_costs_.open_or_extend;
+
         sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x01010101u;       // ! 4x `u8` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x01010101u; // ! 4x `u8` mismatch costs
@@ -636,7 +638,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
 
         // ! As we are processing 4 bytes per loop, and have at least 32 threads per block (32 * 4 = 128),
         // ! and deal with strings only under 256 bytes, this loop will fire at most twice per input.
-        for (uint i = tasks_offset * 4; i < tasks_count; i += tasks_step * 4) { // ! it's OK to spill beyond bounds
+        for (unsigned i = tasks_offset * 4; i < tasks_count; i += tasks_step * 4) { // ! it's OK to spill beyond bounds
             pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
             pre_insertion_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
             pre_deletion_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
@@ -675,27 +677,29 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
  *  - @b `vmax2,vmin2,vadd2` video-processing instructions.
  */
 template <>
-struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
     using kepler_warp_scorer_t =
-        tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+        tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_u16_t const *scores_pre_substitution,                                //
-        sz_u16_t const *scores_pre_insertion,                                   //
-        sz_u16_t const *scores_pre_deletion,                                    //
-        sz_u16_t *scores_new) noexcept {
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,           // ! Unlike CPU, uses `unsigned`
+        u16_t const *scores_pre_substitution, //
+        u16_t const *scores_pre_insertion,    //
+        u16_t const *scores_pre_deletion,     //
+        u16_t *scores_new) noexcept {
 
-        sz_u16_t const match_cost = this->substituter_.match;
-        sz_u16_t const mismatch_cost = this->substituter_.mismatch;
-        sz_u16_t const gap_cost = this->gap_costs_.open_or_extend;
+        u16_t const match_cost = this->substituter_.match;
+        u16_t const mismatch_cost = this->substituter_.mismatch;
+        u16_t const gap_cost = this->gap_costs_.open_or_extend;
+
         sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x00010001;       // ! 2x `u16` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x00010001; // ! 2x `u16` mismatch costs
@@ -712,17 +716,17 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
-        for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
+        for (unsigned i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
             pre_substitution_vec.u16s[0] = scores_pre_substitution[i + 0];
             pre_substitution_vec.u16s[1] = scores_pre_substitution[i + 1];
             pre_insertion_vec.u16s[0] = scores_pre_insertion[i + 0];
             pre_insertion_vec.u16s[1] = scores_pre_insertion[i + 1];
             pre_deletion_vec.u16s[0] = scores_pre_deletion[i + 0];
             pre_deletion_vec.u16s[1] = scores_pre_deletion[i + 1];
-            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
-            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
-            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
+            first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
+            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -745,26 +749,26 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
     using kepler_warp_scorer_t =
-        tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+        tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
+struct tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
     using kepler_warp_scorer_t =
-        tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
+        tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 };
 
@@ -777,32 +781,33 @@ struct tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_co
  *  - @b `vmax4,vmin4,vadd4` video-processing instructions.
  */
 template <>
-struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
     using kepler_warp_scorer_t =
-        tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+        tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_u8_t const *scores_pre_substitution,                                 //
-        sz_u8_t const *scores_pre_insertion,                                    //
-        sz_u8_t const *scores_pre_deletion,                                     //
-        sz_u8_t const *scores_running_insertions,                               //
-        sz_u8_t const *scores_running_deletions,                                //
-        sz_u8_t *scores_new,                                                    //
-        sz_u8_t *scores_new_insertions,                                         //
-        sz_u8_t *scores_new_deletions) noexcept {
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,            // ! Unlike CPU, uses `unsigned`
+        u8_t const *scores_pre_substitution,   //
+        u8_t const *scores_pre_insertion,      //
+        u8_t const *scores_pre_deletion,       //
+        u8_t const *scores_running_insertions, //
+        u8_t const *scores_running_deletions,  //
+        u8_t *scores_new,                      //
+        u8_t *scores_new_insertions,           //
+        u8_t *scores_new_deletions) noexcept {
 
-        sz_u8_t const match_cost = this->substituter_.match;
-        sz_u8_t const mismatch_cost = this->substituter_.mismatch;
-        sz_u8_t const gap_open_cost = this->gap_costs_.open;
-        sz_u8_t const gap_extend_cost = this->gap_costs_.extend;
+        u8_t const match_cost = this->substituter_.match;
+        u8_t const mismatch_cost = this->substituter_.mismatch;
+        u8_t const gap_open_cost = this->gap_costs_.open;
+        u8_t const gap_extend_cost = this->gap_costs_.extend;
         sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_open_cost_vec, gap_extend_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x01010101u;           // ! 4x `u8` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x01010101u;     // ! 4x `u8` mismatch costs
@@ -821,7 +826,7 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
 
         // ! As we are processing 4 bytes per loop, and have at least 32 threads per block (32 * 4 = 128),
         // ! and deal with strings only under 256 bytes, this loop will fire at most twice per input.
-        for (uint i = tasks_offset * 4; i < tasks_count; i += tasks_step * 4) { // ! it's OK to spill beyond bounds
+        for (unsigned i = tasks_offset * 4; i < tasks_count; i += tasks_step * 4) { // ! it's OK to spill beyond bounds
             pre_substitution_vec = sz_u32_load_unaligned(scores_pre_substitution + i);
             pre_insertion_opening_vec = sz_u32_load_unaligned(scores_pre_insertion + i);
             pre_deletion_opening_vec = sz_u32_load_unaligned(scores_pre_deletion + i);
@@ -872,32 +877,34 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
  *  - @b `vmax2,vmin2,vadd2` video-processing instructions.
  */
 template <>
-struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
     using kepler_warp_scorer_t =
-        tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+        tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
                     sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>;
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_u16_t const *scores_pre_substitution,                                //
-        sz_u16_t const *scores_pre_insertion,                                   //
-        sz_u16_t const *scores_pre_deletion,                                    //
-        sz_u16_t const *scores_running_insertions,                              //
-        sz_u16_t const *scores_running_deletions,                               //
-        sz_u16_t *scores_new,                                                   //
-        sz_u16_t *scores_new_insertions,                                        //
-        sz_u16_t *scores_new_deletions) noexcept {
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,             // ! Unlike CPU, uses `unsigned`
+        u16_t const *scores_pre_substitution,   //
+        u16_t const *scores_pre_insertion,      //
+        u16_t const *scores_pre_deletion,       //
+        u16_t const *scores_running_insertions, //
+        u16_t const *scores_running_deletions,  //
+        u16_t *scores_new,                      //
+        u16_t *scores_new_insertions,           //
+        u16_t *scores_new_deletions) noexcept {
 
-        sz_u16_t const match_cost = this->substituter_.match;
-        sz_u16_t const mismatch_cost = this->substituter_.mismatch;
-        sz_u16_t const gap_open_cost = this->gap_costs_.open;
-        sz_u16_t const gap_extend_cost = this->gap_costs_.extend;
+        u16_t const match_cost = this->substituter_.match;
+        u16_t const mismatch_cost = this->substituter_.mismatch;
+        u16_t const gap_open_cost = this->gap_costs_.open;
+        u16_t const gap_extend_cost = this->gap_costs_.extend;
+
         sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_open_cost_vec, gap_extend_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x00010001;           // ! 2x `u16` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x00010001;     // ! 2x `u16` mismatch costs
@@ -916,7 +923,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
-        for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
+        for (unsigned i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
             pre_substitution_vec.u16s[0] = scores_pre_substitution[i + 0];
             pre_substitution_vec.u16s[1] = scores_pre_substitution[i + 1];
             pre_insertion_opening_vec.u16s[0] = scores_pre_insertion[i + 0];
@@ -927,10 +934,10 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
             pre_insertion_expansion_vec.u16s[1] = scores_running_insertions[i + 1];
             pre_deletion_expansion_vec.u16s[0] = scores_running_deletions[i + 0];
             pre_deletion_expansion_vec.u16s[1] = scores_running_deletions[i + 1];
-            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
-            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
-            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
+            first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
+            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -959,17 +966,17 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_costs_t, affine_gap_costs_t,
+struct tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k>
-    : public tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_costs_t, affine_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
 };
@@ -985,9 +992,9 @@ struct tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_co
 #if SZ_USE_HOPPER
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k> {
     using kepler_warp_scorer_t::tile_scorer; // Make the constructors visible
 };
@@ -997,23 +1004,25 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
  *  @note Requires Hopper generation GPUs to handle 2x `u16` scores at a time.
  */
 template <>
-struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_u16_t const *scores_pre_substitution,                                //
-        sz_u16_t const *scores_pre_insertion,                                   //
-        sz_u16_t const *scores_pre_deletion,                                    //
-        sz_u16_t *scores_new) noexcept {
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,           // ! Unlike CPU, uses `unsigned`
+        u16_t const *scores_pre_substitution, //
+        u16_t const *scores_pre_insertion,    //
+        u16_t const *scores_pre_deletion,     //
+        u16_t *scores_new) noexcept {
 
-        sz_u16_t const match_cost = this->substituter_.match;
-        sz_u16_t const mismatch_cost = this->substituter_.mismatch;
-        sz_u16_t const gap_cost = this->gap_costs_.open_or_extend;
+        u16_t const match_cost = this->substituter_.match;
+        u16_t const mismatch_cost = this->substituter_.mismatch;
+        u16_t const gap_cost = this->gap_costs_.open_or_extend;
+
         sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x00010001;       // ! 2x `u16` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x00010001; // ! 2x `u16` mismatch costs
@@ -1030,17 +1039,17 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
-        for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
+        for (unsigned i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
             pre_substitution_vec.u16s[0] = scores_pre_substitution[i + 0];
             pre_substitution_vec.u16s[1] = scores_pre_substitution[i + 1];
             pre_insertion_vec.u16s[0] = scores_pre_insertion[i + 0];
             pre_insertion_vec.u16s[1] = scores_pre_insertion[i + 1];
             pre_deletion_vec.u16s[0] = scores_pre_deletion[i + 0];
             pre_deletion_vec.u16s[1] = scores_pre_deletion[i + 1];
-            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
-            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
-            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
+            first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
+            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -1063,27 +1072,27 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
+struct tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+struct tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ck_k> {
     using kepler_warp_scorer_t::tile_scorer; // Make the constructors visible
 };
@@ -1093,29 +1102,31 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
  *  @note Requires Hopper generation GPUs to handle 2x `u8` scores at a time.
  */
 template <>
-struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+struct tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_u16_t const *scores_pre_substitution,                                //
-        sz_u16_t const *scores_pre_insertion,                                   //
-        sz_u16_t const *scores_pre_deletion,                                    //
-        sz_u16_t const *scores_running_insertions,                              //
-        sz_u16_t const *scores_running_deletions,                               //
-        sz_u16_t *scores_new,                                                   //
-        sz_u16_t *scores_new_insertions,                                        //
-        sz_u16_t *scores_new_deletions) noexcept {
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,             // ! Unlike CPU, uses `unsigned`
+        u16_t const *scores_pre_substitution,   //
+        u16_t const *scores_pre_insertion,      //
+        u16_t const *scores_pre_deletion,       //
+        u16_t const *scores_running_insertions, //
+        u16_t const *scores_running_deletions,  //
+        u16_t *scores_new,                      //
+        u16_t *scores_new_insertions,           //
+        u16_t *scores_new_deletions) noexcept {
 
-        sz_u16_t const match_cost = this->substituter_.match;
-        sz_u16_t const mismatch_cost = this->substituter_.mismatch;
-        sz_u16_t const gap_open_cost = this->gap_costs_.open;
-        sz_u16_t const gap_extend_cost = this->gap_costs_.extend;
+        u16_t const match_cost = this->substituter_.match;
+        u16_t const mismatch_cost = this->substituter_.mismatch;
+        u16_t const gap_open_cost = this->gap_costs_.open;
+        u16_t const gap_extend_cost = this->gap_costs_.extend;
+
         sz_u32_vec_t match_cost_vec, mismatch_cost_vec, gap_open_cost_vec, gap_extend_cost_vec, equality_vec;
         match_cost_vec.u32 = match_cost * 0x00010001;           // ! 2x `u16` match costs
         mismatch_cost_vec.u32 = mismatch_cost * 0x00010001;     // ! 2x `u16` mismatch costs
@@ -1134,7 +1145,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
-        for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
+        for (unsigned i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
             pre_substitution_vec.u16s[0] = scores_pre_substitution[i + 0];
             pre_substitution_vec.u16s[1] = scores_pre_substitution[i + 1];
             pre_insertion_opening_vec.u16s[0] = scores_pre_insertion[i + 0];
@@ -1145,10 +1156,10 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
             pre_insertion_expansion_vec.u16s[1] = scores_running_insertions[i + 1];
             pre_deletion_expansion_vec.u16s[0] = scores_running_deletions[i + 0];
             pre_deletion_expansion_vec.u16s[1] = scores_running_deletions[i + 1];
-            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
-            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
-            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
+            first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
+            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
 
             // Equality comparison will output 0xFFFF for each matching byte-pair.
             equality_vec.u32 = __vcmpeq2(first_vec.u32, second_vec.u32);
@@ -1179,18 +1190,18 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+struct tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
 };
 
 template <>
-struct tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_costs_t, affine_gap_costs_t,
+struct tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs_t, affine_gap_costs_t,
                    sz_minimize_distance_k, sz_similarity_global_k, sz_caps_ckh_k>
-    : public tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_costs_t, affine_gap_costs_t,
+    : public tile_scorer<char const *, char const *, u64_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_cuda_k> {
 
     using cuda_warp_scorer_t::tile_scorer; // Make the constructors visible
@@ -1224,7 +1235,7 @@ struct tile_scorer<char const *, char const *, sz_u64_t, uniform_substitution_co
  */
 template <                                                       //
     typename char_type_ = char,                                  //
-    typename index_type_ = uint,                                 //
+    typename index_type_ = unsigned,                             //
     typename score_type_ = size_t,                               //
     typename final_score_type_ = size_t,                         //
     typename substituter_type_ = uniform_substitution_costs_t,   //
@@ -1401,7 +1412,7 @@ __global__ void linear_score_across_cuda_device_(              //
  */
 template <                                                       //
     typename char_type_ = char,                                  //
-    typename index_type_ = uint,                                 //
+    typename index_type_ = unsigned,                             //
     typename score_type_ = size_t,                               //
     typename final_score_type_ = size_t,                         //
     typename substituter_type_ = uniform_substitution_costs_t,   //
@@ -1606,7 +1617,7 @@ __global__ void affine_score_across_cuda_device(               //
 template < //
     typename task_type_,
     typename char_type_ = char,                                  //
-    typename index_type_ = uint,                                 //
+    typename index_type_ = unsigned,                             //
     typename score_type_ = size_t,                               //
     typename substituter_type_ = uniform_substitution_costs_t,   //
     sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
@@ -1616,7 +1627,7 @@ template < //
 __global__ void linear_score_on_each_cuda_warp_(                             //
     task_type_ *tasks, size_t tasks_count,                                   //
     substituter_type_ const substituter, linear_gap_costs_t const gap_costs, //
-    uint const shared_memory_size) {
+    unsigned const shared_memory_size) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using task_t = task_type_;
@@ -1638,12 +1649,12 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
                                            objective_k, locality_k, capability_k>;
 
     // We may have multiple warps operating in the same block.
-    uint const warp_size = warpSize;
-    size_t const global_thread_index = static_cast<uint>(blockIdx.x * blockDim.x + threadIdx.x);
-    size_t const global_warp_index = static_cast<uint>(global_thread_index / warp_size);
-    size_t const warps_per_block = static_cast<uint>(blockDim.x / warp_size);
-    size_t const warps_per_device = static_cast<uint>(gridDim.x * warps_per_block);
-    uint const warp_thread_index = static_cast<uint>(global_thread_index % warp_size);
+    unsigned const warp_size = warpSize;
+    size_t const global_thread_index = static_cast<unsigned>(blockIdx.x * blockDim.x + threadIdx.x);
+    size_t const global_warp_index = static_cast<unsigned>(global_thread_index / warp_size);
+    size_t const warps_per_block = static_cast<unsigned>(blockDim.x / warp_size);
+    size_t const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
+    unsigned const thread_in_warp_index = static_cast<unsigned>(global_thread_index % warp_size);
 
     // Allocating shared memory is handled on the host side.
     extern __shared__ char shared_memory_for_block[];
@@ -1651,7 +1662,7 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
         shared_memory_for_block + (global_warp_index % warps_per_block) * (shared_memory_size / warps_per_block);
 
     // Only one thread will be initializing the top row and left column and outputting the result.
-    bool const is_main_thread = warp_thread_index == 0;
+    bool const is_main_thread = thread_in_warp_index == 0;
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
@@ -1665,8 +1676,8 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
 
         // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
         // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
-        uint const shorter_dim = static_cast<uint>(shorter_length + 1);
-        uint const longer_dim = static_cast<uint>(longer_length + 1);
+        unsigned const shorter_dim = static_cast<unsigned>(shorter_length + 1);
+        unsigned const longer_dim = static_cast<unsigned>(longer_length + 1);
 
         // Let's say we are dealing with 3 and 5 letter words.
         // The matrix will have size 4 x 6, parameterized as (shorter_dim x longer_dim).
@@ -1674,9 +1685,9 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
         // - 4 diagonals of increasing length, at positions: 0, 1, 2, 3.
         // - 2 diagonals of fixed length, at positions: 4, 5.
         // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
-        uint const diagonals_count = shorter_dim + longer_dim - 1;
-        uint const max_diagonal_length = shorter_length + 1;
-        uint const bytes_per_diagonal = round_up_to_multiple<uint>(max_diagonal_length * sizeof(score_t), 4);
+        unsigned const diagonals_count = shorter_dim + longer_dim - 1;
+        unsigned const max_diagonal_length = shorter_length + 1;
+        unsigned const bytes_per_diagonal = round_up_to_multiple<unsigned>(max_diagonal_length * sizeof(score_t), 4);
 
         // The next few pointers will be swapped around.
         score_t *previous_scores = reinterpret_cast<score_t *>(shared_memory_for_warp);
@@ -1686,8 +1697,8 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
         char_t *const shorter = longer + longer_length;
 
         // Each thread in the warp will be loading it's own set of strided characters into shared memory.
-        for (uint i = warp_thread_index; i < longer_length; i += warp_size) longer[i] = longer_global[i];
-        for (uint i = warp_thread_index; i < shorter_length; i += warp_size) shorter[i] = shorter_global[i];
+        for (unsigned i = thread_in_warp_index; i < longer_length; i += warp_size) longer[i] = longer_global[i];
+        for (unsigned i = thread_in_warp_index; i < shorter_length; i += warp_size) shorter[i] = shorter_global[i];
 
         // Initialize the first two diagonals:
         cuda_warp_scorer_t diagonal_aligner {substituter, gap_costs};
@@ -1704,16 +1715,16 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
         // We will start with diagonal 2, which has length 3, with the first and last elements being preset,
         // so we are effectively computing just one value, as will be marked by a single set bit in
         // the `next_diagonal_mask` on the very first iteration.
-        uint next_diagonal_index = 2;
+        unsigned next_diagonal_index = 2;
 
         // Progress through the upper-left triangle of the Levenshtein matrix.
         for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
 
-            uint const next_diagonal_length = next_diagonal_index + 1;
+            unsigned const next_diagonal_length = next_diagonal_index + 1;
             diagonal_aligner(                       //
                 shorter,                            // first sequence of characters
                 longer,                             // second sequence of characters
-                warp_thread_index, warp_size,       //
+                thread_in_warp_index, warp_size,    //
                 next_diagonal_length - 2,           // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                    // costs pre substitution
                 current_scores, current_scores + 1, // costs pre insertion/deletion
@@ -1733,11 +1744,11 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
         // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
         for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
 
-            uint const next_diagonal_length = shorter_dim;
+            unsigned const next_diagonal_length = shorter_dim;
             diagonal_aligner(                               //
                 shorter,                                    // first sequence of characters
                 longer + next_diagonal_index - shorter_dim, // second sequence of characters
-                warp_thread_index, warp_size,               //
+                thread_in_warp_index, warp_size,            //
                 next_diagonal_length - 1,                   // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                            // costs pre substitution
                 current_scores, current_scores + 1,         // costs pre insertion/deletion
@@ -1750,10 +1761,10 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
             // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
             // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
             // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
-            for (size_t i = warp_thread_index; i + 1 < next_diagonal_length; i += warp_size)
+            for (size_t i = thread_in_warp_index; i + 1 < next_diagonal_length; i += warp_size)
                 previous_scores[i] = current_scores[i + 1];
             __syncwarp();
-            for (size_t i = warp_thread_index; i < next_diagonal_length; i += warp_size)
+            for (size_t i = thread_in_warp_index; i < next_diagonal_length; i += warp_size)
                 current_scores[i] = next_scores[i];
             __syncwarp();
         }
@@ -1761,11 +1772,11 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
         // Now let's handle the bottom-right triangle of the matrix.
         for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
 
-            uint const next_diagonal_length = diagonals_count - next_diagonal_index;
+            unsigned const next_diagonal_length = diagonals_count - next_diagonal_index;
             diagonal_aligner(                               //
                 shorter + next_diagonal_index - longer_dim, // first sequence of characters
                 longer + next_diagonal_index - shorter_dim, // second sequence of characters
-                warp_thread_index, warp_size,               //
+                thread_in_warp_index, warp_size,            //
                 next_diagonal_length,                       // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                            // costs pre substitution
                 current_scores, current_scores + 1,         // costs pre insertion/deletion
@@ -1799,7 +1810,7 @@ __global__ void linear_score_on_each_cuda_warp_(                             //
 template < //
     typename task_type_,
     typename char_type_ = char,                                  //
-    typename index_type_ = uint,                                 //
+    typename index_type_ = unsigned,                             //
     typename score_type_ = size_t,                               //
     typename substituter_type_ = uniform_substitution_costs_t,   //
     sz_similarity_objective_t objective_ = sz_maximize_score_k,  //
@@ -1809,7 +1820,7 @@ template < //
 __global__ void affine_score_on_each_cuda_warp_(                             //
     task_type_ *tasks, size_t tasks_count,                                   //
     substituter_type_ const substituter, affine_gap_costs_t const gap_costs, //
-    uint const shared_memory_size) {
+    unsigned const shared_memory_size) {
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     using task_t = task_type_;
@@ -1831,12 +1842,12 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
                                            objective_k, locality_k, capability_k>;
 
     // We may have multiple warps operating in the same block.
-    uint const warp_size = warpSize;
-    size_t const global_thread_index = static_cast<uint>(blockIdx.x * blockDim.x + threadIdx.x);
-    size_t const global_warp_index = static_cast<uint>(global_thread_index / warp_size);
-    size_t const warps_per_block = static_cast<uint>(blockDim.x / warp_size);
-    size_t const warps_per_device = static_cast<uint>(gridDim.x * warps_per_block);
-    uint const warp_thread_index = static_cast<uint>(global_thread_index % warp_size);
+    unsigned const warp_size = warpSize;
+    size_t const global_thread_index = static_cast<unsigned>(blockIdx.x * blockDim.x + threadIdx.x);
+    size_t const global_warp_index = static_cast<unsigned>(global_thread_index / warp_size);
+    size_t const warps_per_block = static_cast<unsigned>(blockDim.x / warp_size);
+    size_t const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
+    unsigned const thread_in_warp_index = static_cast<unsigned>(global_thread_index % warp_size);
 
     // Allocating shared memory is handled on the host side.
     extern __shared__ char shared_memory_for_block[];
@@ -1844,7 +1855,7 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
         shared_memory_for_block + (global_warp_index % warps_per_block) * (shared_memory_size / warps_per_block);
 
     // Only one thread will be initializing the top row and left column and outputting the result.
-    bool const is_main_thread = warp_thread_index == 0;
+    bool const is_main_thread = thread_in_warp_index == 0;
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
     // Each block/warp may end up receiving a different number of strings.
@@ -1858,8 +1869,8 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
 
         // We are going to store 3 diagonals of the matrix, assuming each would fit into a single ZMM register.
         // The length of the longest (main) diagonal would be `shorter_dim = (shorter_length + 1)`.
-        uint const shorter_dim = static_cast<uint>(shorter_length + 1);
-        uint const longer_dim = static_cast<uint>(longer_length + 1);
+        unsigned const shorter_dim = static_cast<unsigned>(shorter_length + 1);
+        unsigned const longer_dim = static_cast<unsigned>(longer_length + 1);
 
         // Let's say we are dealing with 3 and 5 letter words.
         // The matrix will have size 4 x 6, parameterized as (shorter_dim x longer_dim).
@@ -1867,9 +1878,9 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
         // - 4 diagonals of increasing length, at positions: 0, 1, 2, 3.
         // - 2 diagonals of fixed length, at positions: 4, 5.
         // - 3 diagonals of decreasing length, at positions: 6, 7, 8.
-        uint const diagonals_count = shorter_dim + longer_dim - 1;
-        uint const max_diagonal_length = shorter_length + 1;
-        uint const bytes_per_diagonal = round_up_to_multiple<uint>(max_diagonal_length * sizeof(score_t), 4);
+        unsigned const diagonals_count = shorter_dim + longer_dim - 1;
+        unsigned const max_diagonal_length = shorter_length + 1;
+        unsigned const bytes_per_diagonal = round_up_to_multiple<unsigned>(max_diagonal_length * sizeof(score_t), 4);
 
         // The next few pointers will be swapped around.
         score_t *previous_scores = reinterpret_cast<score_t *>(shared_memory_for_warp);
@@ -1883,8 +1894,8 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
         char_t *const shorter = longer + longer_length;
 
         // Each thread in the warp will be loading it's own set of strided characters into shared memory.
-        for (uint i = warp_thread_index; i < longer_length; i += warp_size) longer[i] = longer_global[i];
-        for (uint i = warp_thread_index; i < shorter_length; i += warp_size) shorter[i] = shorter_global[i];
+        for (unsigned i = thread_in_warp_index; i < longer_length; i += warp_size) longer[i] = longer_global[i];
+        for (unsigned i = thread_in_warp_index; i < shorter_length; i += warp_size) shorter[i] = shorter_global[i];
 
         // Initialize the first two diagonals:
         cuda_warp_scorer_t diagonal_aligner {substituter, gap_costs};
@@ -1903,16 +1914,16 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
         // We will start with diagonal 2, which has length 3, with the first and last elements being preset,
         // so we are effectively computing just one value, as will be marked by a single set bit in
         // the `next_diagonal_mask` on the very first iteration.
-        uint next_diagonal_index = 2;
+        unsigned next_diagonal_index = 2;
 
         // Progress through the upper-left triangle of the Levenshtein matrix.
         for (; next_diagonal_index < shorter_dim; ++next_diagonal_index) {
 
-            uint const next_diagonal_length = next_diagonal_index + 1;
+            unsigned const next_diagonal_length = next_diagonal_index + 1;
             diagonal_aligner(                         //
                 shorter,                              // first sequence of characters
                 longer,                               // second sequence of characters
-                warp_thread_index, warp_size,         //
+                thread_in_warp_index, warp_size,      //
                 next_diagonal_length - 2,             // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                      // costs pre substitution
                 current_scores, current_scores + 1,   // costs pre insertion/deletion opening
@@ -1939,11 +1950,11 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
         // Now let's handle the anti-diagonal band of the matrix, between the top and bottom-right triangles.
         for (; next_diagonal_index < longer_dim; ++next_diagonal_index) {
 
-            uint const next_diagonal_length = shorter_dim;
+            unsigned const next_diagonal_length = shorter_dim;
             diagonal_aligner(                               //
                 shorter,                                    // first sequence of characters
                 longer + next_diagonal_index - shorter_dim, // second sequence of characters
-                warp_thread_index, warp_size,               //
+                thread_in_warp_index, warp_size,            //
                 next_diagonal_length - 1,                   // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                            // costs pre substitution
                 current_scores, current_scores + 1,         // costs pre insertion/deletion opening
@@ -1965,10 +1976,10 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
             // ! In the central anti-diagonal band, we can't just set the `current_scores + 1` to `previous_scores`
             // ! for the circular shift, as we will end up spilling outside of the diagonal a few iterations later.
             // ! Assuming in-place `memmove` is tricky on the GPU, so we will copy the data.
-            for (size_t i = warp_thread_index; i + 1 < next_diagonal_length; i += warp_size)
+            for (size_t i = thread_in_warp_index; i + 1 < next_diagonal_length; i += warp_size)
                 previous_scores[i] = current_scores[i + 1];
             __syncwarp();
-            for (size_t i = warp_thread_index; i < next_diagonal_length; i += warp_size)
+            for (size_t i = thread_in_warp_index; i < next_diagonal_length; i += warp_size)
                 current_scores[i] = next_scores[i];
             __syncwarp();
         }
@@ -1976,11 +1987,11 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
         // Now let's handle the bottom-right triangle of the matrix.
         for (; next_diagonal_index < diagonals_count; ++next_diagonal_index) {
 
-            uint const next_diagonal_length = diagonals_count - next_diagonal_index;
+            unsigned const next_diagonal_length = diagonals_count - next_diagonal_index;
             diagonal_aligner(                               //
                 shorter + next_diagonal_index - longer_dim, // first sequence of characters
                 longer + next_diagonal_index - shorter_dim, // second sequence of characters
-                warp_thread_index, warp_size,               //
+                thread_in_warp_index, warp_size,            //
                 next_diagonal_length,                       // number of elements to compute with the `diagonal_aligner`
                 previous_scores,                            // costs pre substitution
                 current_scores, current_scores + 1,         // costs pre insertion/deletion opening
@@ -2015,7 +2026,7 @@ __global__ void affine_score_on_each_cuda_warp_(                             //
  *  @note Used to allow sorting/grouping inputs to differentiate device-wide and warp-wide tasks.
  */
 template <typename char_type_>
-struct cuda_similarity_task {
+struct cuda_similarity_task_ {
     using char_t = char_type_;
 
     char_t const *shorter_ptr = nullptr;
@@ -2028,8 +2039,8 @@ struct cuda_similarity_task {
     bytes_per_cell_t bytes_per_cell = eight_bytes_per_cell_k; // ? Worst case, need the most memory per scalar.
     warp_tasks_density_t density = warps_working_together_k;  // ? Worst case, we are not using shared memory.
 
-    constexpr cuda_similarity_task() = default;
-    constexpr cuda_similarity_task(                   //
+    constexpr cuda_similarity_task_() = default;
+    constexpr cuda_similarity_task_(                  //
         char_t const *first_ptr, size_t first_length, //
         char_t const *second_ptr, size_t second_length) noexcept {
         if (first_length < second_length)
@@ -2058,7 +2069,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
     using scores_allocator_t = typename allocator_t::template rebind<size_t>::other;
     static constexpr sz_capability_t capability_k = capability_;
 
-    using task_t = cuda_similarity_task<char_t>;
+    using task_t = cuda_similarity_task_<char_t>;
     using tasks_allocator_t = typename allocator_t::template rebind<task_t>::other;
 
     uniform_substitution_costs_t substituter_ {};
@@ -2066,7 +2077,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
     allocator_t alloc_ {};
 
     levenshtein_distances(uniform_substitution_costs_t subs = {}, gap_costs_t gaps = {},
-                          allocator_t const &alloc = allocator_t {}) noexcept
+                          allocator_t const &alloc = {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
@@ -2122,32 +2133,32 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         if (device_level_tasks.size()) {
             auto device_level_u16_kernel =
                 is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u16_t, sz_u16_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, u16_t, u16_t, final_score_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u16_t, sz_u16_t, final_score_t,
+                    : (void *)&linear_score_across_cuda_device_<char_t, u16_t, u16_t, final_score_t,
                                                                 uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                 sz_similarity_global_k, capability_k>;
             auto device_level_u32_kernel =
                 is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u32_t, sz_u32_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, u32_t, u32_t, final_score_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u32_t, sz_u32_t, final_score_t,
+                    : (void *)&linear_score_across_cuda_device_<char_t, u32_t, u32_t, final_score_t,
                                                                 uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                 sz_similarity_global_k, capability_k>;
             auto device_level_u64_kernel =
                 is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u64_t, sz_u64_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, u64_t, u64_t, final_score_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u64_t, sz_u64_t, final_score_t,
+                    : (void *)&linear_score_across_cuda_device_<char_t, u64_t, u64_t, final_score_t,
                                                                 uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                 sz_similarity_global_k, capability_k>;
             void *device_level_kernel_args[8];
 
             // On very large inputs we can't fit the diagonals in shared memory, and use the global one.
-            safe_vector<sz_u64_t, scores_allocator_t> diagonals_u64_buffer(alloc_);
+            safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer(alloc_);
             task_t const &largest_task = device_level_tasks[0];
             sz_assert_(largest_task.max_diagonal_length() >= device_level_tasks.back().max_diagonal_length());
             if (diagonals_u64_buffer.try_resize(largest_task.max_diagonal_length() * count_diagonals_k) ==
@@ -2169,14 +2180,14 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
 
                 // Pick the smallest fitting type for the diagonals.
                 void *device_level_kernel = reinterpret_cast<void *>(device_level_u16_kernel);
-                if (task.bytes_per_cell >= sizeof(sz_u32_t))
+                if (task.bytes_per_cell >= sizeof(u32_t))
                     device_level_kernel = reinterpret_cast<void *>(device_level_u32_kernel);
-                if (task.bytes_per_cell >= sizeof(sz_u64_t))
+                if (task.bytes_per_cell >= sizeof(u64_t))
                     device_level_kernel = reinterpret_cast<void *>(device_level_u64_kernel);
 
                 // TODO: We can be wiser about the dimensions of this grid.
-                uint const random_block_size = 128;
-                uint const random_blocks_per_multiprocessor = 32;
+                unsigned const random_block_size = 128;
+                unsigned const random_blocks_per_multiprocessor = 32;
                 cudaError_t launch_error = cudaLaunchCooperativeKernel(                       //
                     reinterpret_cast<void *>(device_level_kernel),                            // Kernel function pointer
                     dim3(random_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
@@ -2195,18 +2206,18 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         if (warp_level_tasks.size()) {
             auto warp_level_u8_kernel =
                 is_affine_k
-                    ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, sz_u8_t, sz_u8_t,
-                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                               sz_similarity_global_k, capability_k>
-                    : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, sz_u8_t, sz_u8_t,
-                                                               uniform_substitution_costs_t, sz_minimize_distance_k,
-                                                               sz_similarity_global_k, capability_k>;
+                    ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
+                                                               sz_minimize_distance_k, sz_similarity_global_k,
+                                                               capability_k>
+                    : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, u8_t, u8_t, uniform_substitution_costs_t,
+                                                               sz_minimize_distance_k, sz_similarity_global_k,
+                                                               capability_k>;
             auto warp_level_u16_kernel =
                 is_affine_k
-                    ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, sz_u16_t, sz_u16_t,
+                    ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, u16_t, u16_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>
-                    : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, sz_u16_t, sz_u16_t,
+                    : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, u16_t, u16_t,
                                                                uniform_substitution_costs_t, sz_minimize_distance_k,
                                                                sz_similarity_global_k, capability_k>;
             void *warp_level_kernel_args[5];
@@ -2233,7 +2244,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
 
                 // Pick the smallest fitting type for the diagonals.
                 void *warp_level_kernel = reinterpret_cast<void *>(warp_level_u8_kernel);
-                if (indicative_task.bytes_per_cell >= sizeof(sz_u16_t))
+                if (indicative_task.bytes_per_cell >= sizeof(u16_t))
                     warp_level_kernel = reinterpret_cast<void *>(warp_level_u16_kernel);
 
                 // Even if we can fit more warps per block we sometimes should not.
@@ -2241,8 +2252,8 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     speculation_friendly_density(indicative_task.density);
 
                 // Update the selected kernels properties.
-                uint const shared_memory_per_block =
-                    static_cast<uint>(indicative_task.memory_requirement * optimal_density);
+                unsigned const shared_memory_per_block =
+                    static_cast<unsigned>(indicative_task.memory_requirement * optimal_density);
                 sz_assert_(shared_memory_per_block > 0);
                 sz_assert_(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
                 cudaError_t attribute_error = cudaFuncSetAttribute(
@@ -2260,7 +2271,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 warp_level_kernel_args[4] = (void *)(&shared_memory_per_block);
 
                 // Warp-level algorithm clearly aligns with the warp size.
-                uint const threads_per_block = static_cast<uint>(specs.warp_size * optimal_density);
+                unsigned const threads_per_block = static_cast<unsigned>(specs.warp_size * optimal_density);
                 cudaError_t launch_error = cudaLaunchKernel(                    //
                     reinterpret_cast<void *>(warp_level_kernel),                // Kernel function pointer
                     dim3(specs.streaming_multiprocessors * speculative_factor), // Grid dimensions
@@ -2309,13 +2320,13 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
  *          used to cheaper store and access the substitution costs for the characters.
  *  @see    CUDA constant memory docs: https://docs.nvidia.com/cuda/cuda-c-programming-guide/#constant
  */
-__constant__ char _error_costs_in_cuda_constant_memory[256 * 256];
+__constant__ char error_costs_in_cuda_constant_memory_[256 * 256];
 
 struct error_costs_256x256_in_cuda_constant_memory_t {
     __host__ error_cost_t magnitude() const noexcept { return 0; }
     __forceinline__ __host__ __device__ error_cost_t operator()(char a, char b) const noexcept {
 #if defined(__CUDA_ARCH__)
-        return _error_costs_in_cuda_constant_memory[static_cast<sz_u8_t>(a) * 256 + static_cast<sz_u8_t>(b)];
+        return error_costs_in_cuda_constant_memory_[static_cast<u8_t>(a) * 256 + static_cast<u8_t>(b)];
 #else
         sz_unused_(a && b);
         return 0;
@@ -2342,12 +2353,13 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_i16_t const *scores_pre_substitution,                                //
-        sz_i16_t const *scores_pre_insertion,                                   //
-        sz_i16_t const *scores_pre_deletion,                                    //
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,              // ! Unlike CPU, uses `unsigned`
+        sz_i16_t const *scores_pre_substitution, //
+        sz_i16_t const *scores_pre_insertion,    //
+        sz_i16_t const *scores_pre_deletion,     //
         sz_i16_t *scores_new) noexcept {
 
         error_costs_256x256_in_cuda_constant_memory_t substituter;
@@ -2367,17 +2379,17 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
-        for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
-            pre_substitution_vec.i16s[0] = _load_last_use(scores_pre_substitution + i + 0);
-            pre_substitution_vec.i16s[1] = _load_last_use(scores_pre_substitution + i + 1);
+        for (unsigned i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
+            pre_substitution_vec.i16s[0] = load_last_use_(scores_pre_substitution + i + 0);
+            pre_substitution_vec.i16s[1] = load_last_use_(scores_pre_substitution + i + 1);
             pre_insertion_vec.i16s[0] = scores_pre_insertion[i + 0];
             pre_insertion_vec.i16s[1] = scores_pre_insertion[i + 1];
             pre_deletion_vec.i16s[0] = scores_pre_deletion[i + 0];
             pre_deletion_vec.i16s[1] = scores_pre_deletion[i + 1];
-            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
-            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
-            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
+            first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
+            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
 
             cost_of_substitution_vec.i16s[0] = substituter(first_vec.u16s[0], second_vec.u16s[0]);
             cost_of_substitution_vec.i16s[1] = substituter(first_vec.u16s[1], second_vec.u16s[1]);
@@ -2412,7 +2424,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         else { // Or the best score for local alignment.
             this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
             // On Hopper we can use specialized warp reductions for up-to 32-bit values:
-            // this->final_score_ = _pick_best_in_warp<sz_maximize_score_k>(this->final_score_);
+            // this->final_score_ = pick_best_in_warp_<sz_maximize_score_k>(this->final_score_);
             this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
         }
     }
@@ -2431,12 +2443,13 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
                       linear_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_i32_t const *scores_pre_substitution,                                //
-        sz_i32_t const *scores_pre_insertion,                                   //
-        sz_i32_t const *scores_pre_deletion,                                    //
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,              // ! Unlike CPU, uses `unsigned`
+        sz_i32_t const *scores_pre_substitution, //
+        sz_i32_t const *scores_pre_insertion,    //
+        sz_i32_t const *scores_pre_deletion,     //
         sz_i32_t *scores_new) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
@@ -2445,12 +2458,12 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         sz_i32_t const gap_costs = this->gap_costs_.open_or_extend;
         sz_i32_t final_score = 0;
 
-        for (uint i = tasks_offset; i < tasks_count; i += tasks_step) {
-            sz_i32_t pre_substitution = _load_last_use(scores_pre_substitution + i);
+        for (unsigned i = tasks_offset; i < tasks_count; i += tasks_step) {
+            sz_i32_t pre_substitution = load_last_use_(scores_pre_substitution + i);
             sz_i32_t pre_insertion = scores_pre_insertion[i];
             sz_i32_t pre_deletion = scores_pre_deletion[i];
-            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
-            char second_char = _load_immutable(second_slice + i);
+            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter(first_char, second_char);
             sz_i32_t if_deletion_or_insertion = (std::max)(pre_deletion, pre_insertion) + gap_costs;
@@ -2477,7 +2490,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         else { // Or the best score for local alignment.
             this->final_score_ = (std::max)(this->final_score_, final_score);
             // On Hopper we can use specialized warp reductions for up-to 32-bit values:
-            // this->final_score_ = _pick_best_in_warp<sz_maximize_score_k>(this->final_score_);
+            // this->final_score_ = pick_best_in_warp_<sz_maximize_score_k>(this->final_score_);
             this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
         }
     }
@@ -2500,16 +2513,17 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_i16_t const *scores_pre_substitution,                                //
-        sz_i16_t const *scores_pre_insertion,                                   //
-        sz_i16_t const *scores_pre_deletion,                                    //
-        sz_i16_t const *scores_running_insertions,                              //
-        sz_i16_t const *scores_running_deletions,                               //
-        sz_i16_t *scores_new,                                                   //
-        sz_i16_t *scores_new_insertions,                                        //
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,                // ! Unlike CPU, uses `unsigned`
+        sz_i16_t const *scores_pre_substitution,   //
+        sz_i16_t const *scores_pre_insertion,      //
+        sz_i16_t const *scores_pre_deletion,       //
+        sz_i16_t const *scores_running_insertions, //
+        sz_i16_t const *scores_running_deletions,  //
+        sz_i16_t *scores_new,                      //
+        sz_i16_t *scores_new_insertions,           //
         sz_i16_t *scores_new_deletions) noexcept {
 
         error_costs_256x256_in_cuda_constant_memory_t substituter;
@@ -2532,9 +2546,9 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
 
         // ! As we are processing 2 bytes per loop, and have at least 32 threads per block (32 * 2 = 64),
         // ! and deal with strings only under 64k bytes, this loop will fire at most 1K times per input
-        for (uint i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
-            pre_substitution_vec.i16s[0] = _load_last_use(scores_pre_substitution + i + 0);
-            pre_substitution_vec.i16s[1] = _load_last_use(scores_pre_substitution + i + 1);
+        for (unsigned i = tasks_offset * 2; i < tasks_count; i += tasks_step * 2) { // ! it's OK to spill beyond bounds
+            pre_substitution_vec.i16s[0] = load_last_use_(scores_pre_substitution + i + 0);
+            pre_substitution_vec.i16s[1] = load_last_use_(scores_pre_substitution + i + 1);
             pre_insertion_opening_vec.i16s[0] = scores_pre_insertion[i + 0];
             pre_insertion_opening_vec.i16s[1] = scores_pre_insertion[i + 1];
             pre_deletion_opening_vec.i16s[0] = scores_pre_deletion[i + 0];
@@ -2543,10 +2557,10 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
             pre_insertion_expansion_vec.i16s[1] = scores_running_insertions[i + 1];
             pre_deletion_expansion_vec.i16s[0] = scores_running_deletions[i + 0];
             pre_deletion_expansion_vec.i16s[1] = scores_running_deletions[i + 1];
-            first_vec.u16s[0] = _load_immutable(first_slice + tasks_count - i - 1);
-            first_vec.u16s[1] = _load_immutable(first_slice + tasks_count - i - 2); // ! this may be OOB
-            second_vec.u16s[0] = _load_immutable(second_slice + i + 0);
-            second_vec.u16s[1] = _load_immutable(second_slice + i + 1); // ! this may be OOB, but padded
+            first_vec.u16s[0] = load_immutable_(first_slice + tasks_count - i - 1);
+            first_vec.u16s[1] = load_immutable_(first_slice + tasks_count - i - 2); // ! this may be OOB
+            second_vec.u16s[0] = load_immutable_(second_slice + i + 0);
+            second_vec.u16s[1] = load_immutable_(second_slice + i + 1); // ! this may be OOB, but padded
 
             cost_of_substitution_vec.i16s[0] = substituter(first_vec.u16s[0], second_vec.u16s[0]);
             cost_of_substitution_vec.i16s[1] = substituter(first_vec.u16s[1], second_vec.u16s[1]);
@@ -2589,7 +2603,7 @@ struct tile_scorer<char const *, char const *, sz_i16_t, error_costs_256x256_in_
         else { // Or the best score for local alignment.
             this->final_score_ = __vimax3_s32(this->final_score_, final_score_vec.i16s[0], final_score_vec.i16s[1]);
             // On Hopper we can use specialized warp reductions for up-to 32-bit values:
-            // this->final_score_ = _pick_best_in_warp<sz_maximize_score_k>(this->final_score_);
+            // this->final_score_ = pick_best_in_warp_<sz_maximize_score_k>(this->final_score_);
             this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
         }
     }
@@ -2608,16 +2622,17 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
                       affine_gap_costs_t, sz_maximize_score_k, locality_,
                       sz_cap_cuda_k>::tile_scorer; // Make the constructors visible
 
-    __forceinline__ __device__ void operator()(                                 //
-        char const *first_slice, char const *second_slice,                      //
-        uint const tasks_offset, uint const tasks_step, uint const tasks_count, // ! Unlike CPU, uses `uint`
-        sz_i32_t const *scores_pre_substitution,                                //
-        sz_i32_t const *scores_pre_insertion,                                   //
-        sz_i32_t const *scores_pre_deletion,                                    //
-        sz_i32_t const *scores_running_insertions,                              //
-        sz_i32_t const *scores_running_deletions,                               //
-        sz_i32_t *scores_new,                                                   //
-        sz_i32_t *scores_new_insertions,                                        //
+    __forceinline__ __device__ void operator()(            //
+        char const *first_slice, char const *second_slice, //
+        unsigned const tasks_offset, unsigned const tasks_step,
+        unsigned const tasks_count,                // ! Unlike CPU, uses `unsigned`
+        sz_i32_t const *scores_pre_substitution,   //
+        sz_i32_t const *scores_pre_insertion,      //
+        sz_i32_t const *scores_pre_deletion,       //
+        sz_i32_t const *scores_running_insertions, //
+        sz_i32_t const *scores_running_deletions,  //
+        sz_i32_t *scores_new,                      //
+        sz_i32_t *scores_new_insertions,           //
         sz_i32_t *scores_new_deletions) noexcept {
 
         // Make sure we are called for an anti-diagonal traversal order
@@ -2627,14 +2642,14 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         error_costs_256x256_in_cuda_constant_memory_t substituter;
         sz_i32_t final_score = 0;
 
-        for (uint i = tasks_offset; i < tasks_count; i += tasks_step) {
-            sz_i32_t pre_substitution = _load_last_use(scores_pre_substitution + i);
+        for (unsigned i = tasks_offset; i < tasks_count; i += tasks_step) {
+            sz_i32_t pre_substitution = load_last_use_(scores_pre_substitution + i);
             sz_i32_t pre_insertion_opening = scores_pre_insertion[i];
             sz_i32_t pre_deletion_opening = scores_pre_deletion[i];
             sz_i32_t pre_insertion_expansion = scores_running_insertions[i];
             sz_i32_t pre_deletion_expansion = scores_running_deletions[i];
-            char first_char = _load_immutable(first_slice + tasks_count - i - 1);
-            char second_char = _load_immutable(second_slice + i);
+            char first_char = load_immutable_(first_slice + tasks_count - i - 1);
+            char second_char = load_immutable_(second_slice + i);
 
             error_cost_t cost_of_substitution = substituter(first_char, second_char);
             sz_i32_t if_substitution = pre_substitution + cost_of_substitution;
@@ -2667,7 +2682,7 @@ struct tile_scorer<char const *, char const *, sz_i32_t, error_costs_256x256_in_
         else { // Or the best score for local alignment.
             this->final_score_ = (std::max)(this->final_score_, final_score);
             // On Hopper we can use specialized warp reductions for up-to 32-bit values:
-            // this->final_score_ = _pick_best_in_warp<sz_maximize_score_k>(this->final_score_);
+            // this->final_score_ = pick_best_in_warp_<sz_maximize_score_k>(this->final_score_);
             this->final_score_ = __reduce_max_sync(0xFFFFFFFF, this->final_score_);
         }
     }
@@ -2707,7 +2722,7 @@ struct tile_scorer<char const *, char const *, sz_i64_t, error_costs_256x256_in_
  */
 template <typename gap_costs_type_, typename allocator_type_, sz_similarity_locality_t locality_,
           sz_capability_t capability_>
-struct _cuda_nw_or_sw_byte_level_scores {
+struct cuda_nw_or_sw_byte_level_scores_ {
 
     using char_t = char;
     using substituter_t = error_costs_256x256_t;
@@ -2717,14 +2732,14 @@ struct _cuda_nw_or_sw_byte_level_scores {
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_capability_t capability_k = capability_;
 
-    using task_t = cuda_similarity_task<char_t>;
+    using task_t = cuda_similarity_task_<char_t>;
     using tasks_allocator_t = typename allocator_t::template rebind<task_t>::other;
 
     error_costs_256x256_t substituter_ {};
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    _cuda_nw_or_sw_byte_level_scores(error_costs_256x256_t subs = {}, gap_costs_t gaps = {},
+    cuda_nw_or_sw_byte_level_scores_(error_costs_256x256_t subs = {}, gap_costs_t gaps = {},
                                      allocator_t const &alloc = allocator_t {}) noexcept
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
@@ -2753,7 +2768,7 @@ struct _cuda_nw_or_sw_byte_level_scores {
 
         // Enqueue the transfer of the substituter to the constant memory:
         cudaError_t copy_error =
-            cudaMemcpyToSymbolAsync(_error_costs_in_cuda_constant_memory, (void const *)&substituter_,
+            cudaMemcpyToSymbolAsync(error_costs_in_cuda_constant_memory_, (void const *)&substituter_,
                                     sizeof(substituter_t), 0, cudaMemcpyHostToDevice, executor.stream);
         if (copy_error != cudaSuccess) return {status_t::unknown_k, copy_error};
 
@@ -2789,24 +2804,24 @@ struct _cuda_nw_or_sw_byte_level_scores {
         if (device_level_tasks.size()) {
             auto device_level_i32_kernel =
                 is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u32_t, sz_i32_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, u32_t, sz_i32_t, final_score_t,
                                                                error_costs_256x256_in_cuda_constant_memory_t,
                                                                sz_maximize_score_k, locality_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u32_t, sz_i32_t, final_score_t,
+                    : (void *)&linear_score_across_cuda_device_<char_t, u32_t, sz_i32_t, final_score_t,
                                                                 error_costs_256x256_in_cuda_constant_memory_t,
                                                                 sz_maximize_score_k, locality_k, capability_k>;
             auto device_level_i64_kernel =
                 is_affine_k //
-                    ? (void *)&affine_score_across_cuda_device<char_t, sz_u64_t, sz_i64_t, final_score_t,
+                    ? (void *)&affine_score_across_cuda_device<char_t, u64_t, sz_i64_t, final_score_t,
                                                                error_costs_256x256_in_cuda_constant_memory_t,
                                                                sz_maximize_score_k, locality_k, capability_k>
-                    : (void *)&linear_score_across_cuda_device_<char_t, sz_u64_t, sz_i64_t, final_score_t,
+                    : (void *)&linear_score_across_cuda_device_<char_t, u64_t, sz_i64_t, final_score_t,
                                                                 error_costs_256x256_in_cuda_constant_memory_t,
                                                                 sz_maximize_score_k, locality_k, capability_k>;
             void *device_level_kernel_args[8];
 
             // On very large inputs we can't fit the diagonals in shared memory, and use the global one.
-            safe_vector<sz_u64_t, scores_allocator_t> diagonals_u64_buffer(alloc_);
+            safe_vector<u64_t, scores_allocator_t> diagonals_u64_buffer(alloc_);
             task_t const &largest_task = device_level_tasks[0];
             sz_assert_(largest_task.max_diagonal_length() >= device_level_tasks.back().max_diagonal_length());
             if (diagonals_u64_buffer.try_resize(largest_task.max_diagonal_length() * count_diagonals_k) ==
@@ -2832,8 +2847,8 @@ struct _cuda_nw_or_sw_byte_level_scores {
                     device_level_kernel = reinterpret_cast<void *>(device_level_i64_kernel);
 
                 // TODO: We can be wiser about the dimensions of this grid.
-                uint const random_block_size = 128;
-                uint const random_blocks_per_multiprocessor = 32;
+                unsigned const random_block_size = 128;
+                unsigned const random_blocks_per_multiprocessor = 32;
                 cudaError_t launch_error = cudaLaunchCooperativeKernel(                       //
                     reinterpret_cast<void *>(device_level_kernel),                            // Kernel function pointer
                     dim3(random_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
@@ -2851,17 +2866,17 @@ struct _cuda_nw_or_sw_byte_level_scores {
         // From the highest possible number of warps per multiprocessor to the lowest.
         if (warp_level_tasks.size()) {
             auto warp_level_i16_kernel =
-                is_affine_k ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, sz_u16_t, sz_i16_t,
+                is_affine_k ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, u16_t, sz_i16_t,
                                                                        error_costs_256x256_in_cuda_constant_memory_t,
                                                                        sz_maximize_score_k, locality_k, capability_k>
-                            : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, sz_u16_t, sz_i16_t,
+                            : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, u16_t, sz_i16_t,
                                                                        error_costs_256x256_in_cuda_constant_memory_t,
                                                                        sz_maximize_score_k, locality_k, capability_k>;
             auto warp_level_i32_kernel =
-                is_affine_k ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, sz_u32_t, sz_i32_t,
+                is_affine_k ? (void *)&affine_score_on_each_cuda_warp_<task_t, char_t, u32_t, sz_i32_t,
                                                                        error_costs_256x256_in_cuda_constant_memory_t,
                                                                        sz_maximize_score_k, locality_k, capability_k>
-                            : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, sz_u32_t, sz_i32_t,
+                            : (void *)&linear_score_on_each_cuda_warp_<task_t, char_t, u32_t, sz_i32_t,
                                                                        error_costs_256x256_in_cuda_constant_memory_t,
                                                                        sz_maximize_score_k, locality_k, capability_k>;
             void *warp_level_kernel_args[5];
@@ -2896,8 +2911,8 @@ struct _cuda_nw_or_sw_byte_level_scores {
                     speculation_friendly_density(indicative_task.density);
 
                 // Update the selected kernels properties.
-                uint const shared_memory_per_block =
-                    static_cast<uint>(indicative_task.memory_requirement * optimal_density);
+                unsigned const shared_memory_per_block =
+                    static_cast<unsigned>(indicative_task.memory_requirement * optimal_density);
                 sz_assert_(shared_memory_per_block > 0);
                 sz_assert_(shared_memory_per_block < specs.shared_memory_per_multiprocessor());
                 cudaError_t attribute_error = cudaFuncSetAttribute(
@@ -2915,7 +2930,7 @@ struct _cuda_nw_or_sw_byte_level_scores {
                 warp_level_kernel_args[4] = (void *)(&shared_memory_per_block);
 
                 // Warp-level algorithm clearly aligns with the warp size.
-                uint const threads_per_block = static_cast<uint>(specs.warp_size * optimal_density);
+                unsigned const threads_per_block = static_cast<unsigned>(specs.warp_size * optimal_density);
                 cudaError_t launch_error = cudaLaunchKernel(                    //
                     reinterpret_cast<void *>(warp_level_kernel),                // Kernel function pointer
                     dim3(specs.streaming_multiprocessors * speculative_factor), // Grid dimensions
@@ -2947,8 +2962,8 @@ struct _cuda_nw_or_sw_byte_level_scores {
         cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
 
         // Now that everything went well, export the results back into the `results` array.
-        for (size_t i = 0; i < tasks.size(); ++i) {
-            task_t const &task = tasks[i];
+        for (size_t task_index = 0; task_index < tasks.size(); ++task_index) {
+            task_t const &task = tasks[task_index];
             results_ptr[task.original_index] = task.result;
         }
         return {status_t::success_k, cudaSuccess, execution_milliseconds};
@@ -2959,20 +2974,20 @@ struct _cuda_nw_or_sw_byte_level_scores {
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct needleman_wunsch_scores<char, error_costs_256x256_t, gap_costs_type_, allocator_type_, capability_,
                                std::enable_if_t<capability_ & sz_cap_cuda_k>>
-    : public _cuda_nw_or_sw_byte_level_scores<gap_costs_type_, allocator_type_, sz_similarity_global_k, capability_> {
+    : public cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_global_k, capability_> {
 
-    using _cuda_nw_or_sw_byte_level_scores<gap_costs_type_, allocator_type_, sz_similarity_global_k,
-                                           capability_>::_cuda_nw_or_sw_byte_level_scores;
+    using cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_global_k,
+                                           capability_>::cuda_nw_or_sw_byte_level_scores_;
 };
 
 /** @brief Dispatches baseline Smith Waterman algorithm to the GPU. */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
 struct smith_waterman_scores<char, error_costs_256x256_t, gap_costs_type_, allocator_type_, capability_,
                              std::enable_if_t<capability_ & sz_cap_cuda_k>>
-    : public _cuda_nw_or_sw_byte_level_scores<gap_costs_type_, allocator_type_, sz_similarity_local_k, capability_> {
+    : public cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_local_k, capability_> {
 
-    using _cuda_nw_or_sw_byte_level_scores<gap_costs_type_, allocator_type_, sz_similarity_local_k,
-                                           capability_>::_cuda_nw_or_sw_byte_level_scores;
+    using cuda_nw_or_sw_byte_level_scores_<gap_costs_type_, allocator_type_, sz_similarity_local_k,
+                                           capability_>::cuda_nw_or_sw_byte_level_scores_;
 };
 
 #pragma endregion

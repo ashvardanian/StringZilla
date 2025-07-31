@@ -184,7 +184,7 @@ struct error_costs_256x256_t {
  *          without fetching from RAM/VRAM all the time, including the space for 3 diagonals
  *          and the strings themselves.
  *
- *  @tparam size_type_ The type of the size, usually `size_t` for large inputs or `uint` on small inputs in CUDA.
+ *  @tparam size_type_ The type of the size, usually `size_t` for large inputs or `unsigned` on small inputs in CUDA.
  *  @tparam is_signed_ Whether the similarity scores can be negative or not.
  */
 template <typename size_type_, bool is_signed_>
@@ -2560,7 +2560,7 @@ struct error_costs_26x26ascii_t {
  *      - 2018 CannonLake: IFMA, VBMI,
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
  */
-#pragma region - Ice Lake Implementation
+#pragma region Ice Lake Implementation
 #if SZ_USE_ICE
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
@@ -3862,11 +3862,11 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
  *  - 8-bit, 16-bit, 32-bit, and even 64-bit costs.
  *  - Any memory allocator used.
  */
-struct _lookup_in256bytes_ice_t {
+struct lookup_in256bytes_ice_t_ {
     sz_u512_vec_t row_subs_vecs_[4];
     sz_u512_vec_t is_third_or_fourth_vec_, is_second_or_fourth_vec_;
 
-    inline _lookup_in256bytes_ice_t() noexcept {
+    inline lookup_in256bytes_ice_t_() noexcept {
         char is_third_or_fourth_check, is_second_or_fourth_check;
         *(sz_u8_t *)&is_third_or_fourth_check = 0x80, *(sz_u8_t *)&is_second_or_fourth_check = 0x40;
         is_third_or_fourth_vec_.zmm = _mm512_set1_epi8(is_third_or_fourth_check);
@@ -3932,7 +3932,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_capability_t capability_k = sz_cap_ice_k;
 
-    _lookup_in256bytes_ice_t lookup_;
+    lookup_in256bytes_ice_t_ lookup_;
 
     template <typename executor_type_ = dummy_executor_t>
 #if SZ_IS_CPP20_
@@ -4072,7 +4072,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i32_t, error_costs_
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_capability_t capability_k = sz_cap_ice_k;
 
-    _lookup_in256bytes_ice_t lookup_;
+    lookup_in256bytes_ice_t_ lookup_;
 
     template <typename executor_type_ = dummy_executor_t>
 #if SZ_IS_CPP20_

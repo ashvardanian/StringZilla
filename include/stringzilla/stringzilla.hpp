@@ -3801,22 +3801,22 @@ void lookup(basic_string_slice<char_type_> string, basic_look_up_table<char_type
  *  @sa try_argsort, argsort, try_join, join
  */
 template <typename container_type_, typename string_extractor_>
-struct _sequence_args {
+struct sequence_args_ {
     container_type_ const &container;
     string_extractor_ const &extractor;
 };
 
 template <typename container_type_, typename string_extractor_>
-sz_cptr_t _call_sequence_member_start(void const *sequence_args_ptr, sz_size_t i) {
-    using sequence_args_t = _sequence_args<container_type_, string_extractor_>;
+sz_cptr_t call_sequence_member_start_(void const *sequence_args_ptr, sz_size_t i) {
+    using sequence_args_t = sequence_args_<container_type_, string_extractor_>;
     sequence_args_t const *args = reinterpret_cast<sequence_args_t const *>(sequence_args_ptr);
     string_view member = args->extractor(args->container[i]);
     return member.data();
 }
 
 template <typename container_type_, typename string_extractor_>
-sz_size_t _call_sequence_member_length(void const *sequence_args_ptr, sz_size_t i) {
-    using sequence_args_t = _sequence_args<container_type_, string_extractor_>;
+sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t i) {
+    using sequence_args_t = sequence_args_<container_type_, string_extractor_>;
     sequence_args_t const *args = reinterpret_cast<sequence_args_t const *>(sequence_args_ptr);
     string_view member = args->extractor(args->container[i]);
     return static_cast<sz_size_t>(member.size());
@@ -3838,13 +3838,13 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
                      sorted_idx_t *order) noexcept {
 
     // Pack the arguments into a single structure to reference it from the callback.
-    using args_t = _sequence_args<container_type_, string_extractor_>;
+    using args_t = sequence_args_<container_type_, string_extractor_>;
     args_t args {container, extractor};
     sz_sequence_t sequence;
     sequence.handle = &args;
     sequence.count = container.size();
-    sequence.get_start = _call_sequence_member_start<container_type_, string_extractor_>;
-    sequence.get_length = _call_sequence_member_length<container_type_, string_extractor_>;
+    sequence.get_start = call_sequence_member_start_<container_type_, string_extractor_>;
+    sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
 
     using sz_alloc_type = sz_memory_allocator_t;
     return _with_alloc<std::allocator<sz_u8_t>>(
@@ -3872,18 +3872,18 @@ status_t try_intersect(                                                         
     sorted_idx_t *first_positions, sorted_idx_t *second_positions) noexcept {
 
     // Pack the arguments into a single structure to reference it from the callback.
-    using first_t = _sequence_args<first_container_, first_extractor_>;
-    using second_t = _sequence_args<second_container_, second_extractor_>;
+    using first_t = sequence_args_<first_container_, first_extractor_>;
+    using second_t = sequence_args_<second_container_, second_extractor_>;
     first_t first_args {first_container, first_extractor};
     second_t second_args {second_container, second_extractor};
 
     sz_sequence_t first_sequence, second_sequence;
     first_sequence.count = first_container.size(), second_sequence.count = second_container.size();
     first_sequence.handle = &first_args, second_sequence.handle = &second_args;
-    first_sequence.get_start = _call_sequence_member_start<first_container_, first_extractor_>;
-    first_sequence.get_length = _call_sequence_member_length<first_container_, first_extractor_>;
-    second_sequence.get_start = _call_sequence_member_start<second_container_, second_extractor_>;
-    second_sequence.get_length = _call_sequence_member_length<second_container_, second_extractor_>;
+    first_sequence.get_start = call_sequence_member_start_<first_container_, first_extractor_>;
+    first_sequence.get_length = call_sequence_member_length_<first_container_, first_extractor_>;
+    second_sequence.get_start = call_sequence_member_start_<second_container_, second_extractor_>;
+    second_sequence.get_length = call_sequence_member_length_<second_container_, second_extractor_>;
 
     using sz_alloc_type = sz_memory_allocator_t;
     return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
