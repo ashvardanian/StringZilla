@@ -141,7 +141,7 @@ else:
 ext_modules = [
     Extension(
         "stringzilla",
-        ["python/lib.c"] + glob.glob("c/*.c"),
+        ["python/stringzilla.c", "c/stringzilla.c"],
         # In the past I've used `np.get_include()` to include NumPy headers,
         # but it's not necessary for this library.
         include_dirs=["include"],
