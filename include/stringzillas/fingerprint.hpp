@@ -625,7 +625,7 @@ struct basic_rolling_hashers {
      *  hashers("some text", fingerprint);
      *  @endcode
      */
-    status_t try_extend(size_t window_width, size_t dims, size_t alphabet_size = 256) noexcept {
+    SZ_NOINLINE status_t try_extend(size_t window_width, size_t dims, size_t alphabet_size = 256) noexcept {
         if (hashers_.try_reserve(dims) != status_t::success_k) return status_t::bad_alloc_k;
         for (size_t dim = 0; dim < dims; ++dim) {
             status_t status = try_append(hasher_t(window_width, alphabet_size + dim));
@@ -639,7 +639,7 @@ struct basic_rolling_hashers {
      *  @retval status_t::success_k on success, or an error code otherwise.
      *  @retval status_t::bad_alloc_k if the memory allocation fails.
      */
-    status_t try_append(hasher_t hasher) noexcept {
+    SZ_NOINLINE status_t try_append(hasher_t hasher) noexcept {
         auto const new_window_width = hasher.window_width();
         if (hashers_.try_push_back(std::move(hasher)) != status_t::success_k) return status_t::bad_alloc_k;
 
@@ -656,7 +656,7 @@ struct basic_rolling_hashers {
      *  @retval status_t::bad_alloc_k if the memory allocation fails.
      */
     template <size_t dimensions_ = SZ_SIZE_MAX>
-    status_t try_fingerprint(                     //
+    SZ_NOINLINE status_t try_fingerprint(         //
         span<byte_t const> text,                  //
         span<min_hash_t, dimensions_> min_hashes, //
         span<min_count_t, dimensions_> min_counts) const noexcept {
@@ -701,7 +701,7 @@ struct basic_rolling_hashers {
      *  as its a relatively cheap operation.
      */
     template <size_t dimensions_ = SZ_SIZE_MAX>
-    void fingerprint_chunk(                                 //
+    SZ_NOINLINE void fingerprint_chunk(                     //
         span<byte_t const> text_chunk,                      //
         span<rolling_state_t, dimensions_> last_states,     //
         span<rolling_hash_t, dimensions_> rolling_minimums, //
@@ -795,7 +795,7 @@ struct basic_rolling_hashers {
 #if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(                                                                                  //
+    SZ_NOINLINE status_t operator()(                                                                      //
         texts_type_ const &texts,                                                                         //
         min_hashes_per_text_type_ &&min_hashes_per_text, min_counts_per_text_type_ &&min_counts_per_text, //
         executor_type_ &&executor = {}, cpu_specs_t specs = {}) const noexcept {
@@ -913,7 +913,7 @@ template <typename engine_type_, typename texts_type_, typename min_hashes_per_t
 #if SZ_IS_CPP20_
     requires executor_like<executor_type_>
 #endif
-status_t floating_rolling_hashers_in_parallel_(                                                       //
+SZ_NOINLINE status_t floating_rolling_hashers_in_parallel_(                                           //
     engine_type_ const &engine, texts_type_ const &texts,                                             //
     min_hashes_per_text_type_ &&min_hashes_per_text, min_counts_per_text_type_ &&min_counts_per_text, //
     executor_type_ &&executor = {}, cpu_specs_t specs = {}) noexcept {
@@ -1074,7 +1074,7 @@ struct floating_rolling_hashers<sz_cap_serial_k, window_width_, dimensions_> {
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
      *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
      */
-    status_t try_seed(size_t alphabet_size = 256) noexcept {
+    SZ_NOINLINE status_t try_seed(size_t alphabet_size = 256) noexcept {
         for (unsigned dim = 0; dim < dimensions_k; ++dim) {
             hasher_t hasher(window_width_k, alphabet_size + dim, hasher_t::default_modulo_base_k);
             multipliers_[dim] = hasher.multiplier();
@@ -1091,8 +1091,8 @@ struct floating_rolling_hashers<sz_cap_serial_k, window_width_, dimensions_> {
      *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
      *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      */
-    void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
-                     min_counts_span_t min_counts) const noexcept {
+    SZ_NOINLINE void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                                 min_counts_span_t min_counts) const noexcept {
 
         if (text.size() < window_width_k) {
             for (auto &min_hash : min_hashes) min_hash = max_hash_k;
@@ -1113,8 +1113,8 @@ struct floating_rolling_hashers<sz_cap_serial_k, window_width_, dimensions_> {
      *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
      *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      */
-    status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
-                             min_counts_span_t min_counts) const noexcept {
+    SZ_NOINLINE status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                                         min_counts_span_t min_counts) const noexcept {
         fingerprint(text, min_hashes, min_counts);
         return status_t::success_k;
     }
@@ -1133,7 +1133,7 @@ struct floating_rolling_hashers<sz_cap_serial_k, window_width_, dimensions_> {
      *  will anyways export the composing Count-Min-Sketch fingerprint into the @p `min_hashes` and @p `min_counts`,
      *  as its a relatively cheap operation.
      */
-    void fingerprint_chunk(                                   //
+    SZ_NOINLINE void fingerprint_chunk(                       //
         span<byte_t const> text_chunk,                        //
         span<rolling_state_t, dimensions_k> last_states,      //
         span<rolling_state_t, dimensions_k> rolling_minimums, //
@@ -1216,9 +1216,9 @@ struct floating_rolling_hashers<sz_cap_serial_k, window_width_, dimensions_> {
 #if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes, //
-                        min_counts_per_text_type_ &&min_counts, executor_type_ &&executor = {},
-                        cpu_specs_t specs = {}) noexcept {
+    SZ_NOINLINE status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes, //
+                                    min_counts_per_text_type_ &&min_counts, executor_type_ &&executor = {},
+                                    cpu_specs_t specs = {}) noexcept {
         return floating_rolling_hashers_in_parallel_(            //
             *this, texts,                                        //
             std::forward<min_hashes_per_text_type_>(min_hashes), //
@@ -1313,7 +1313,7 @@ struct floating_rolling_hashers<sz_cap_haswell_k, window_width_, dimensions_> {
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
      *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
      */
-    status_t try_seed(size_t alphabet_size = 256) noexcept {
+    SZ_NOINLINE status_t try_seed(size_t alphabet_size = 256) noexcept {
         for (unsigned dim = 0; dim < dimensions_k; ++dim) {
             hasher_t hasher(window_width_k, alphabet_size + dim, hasher_t::default_modulo_base_k);
             multipliers_[dim] = hasher.multiplier();
@@ -1330,8 +1330,8 @@ struct floating_rolling_hashers<sz_cap_haswell_k, window_width_, dimensions_> {
      *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
      *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      */
-    void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
-                     min_counts_span_t min_counts) const noexcept {
+    SZ_NOINLINE void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                                 min_counts_span_t min_counts) const noexcept {
 
         if (text.size() < window_width_k) {
             for (auto &min_hash : min_hashes) min_hash = max_hash_k;
@@ -1352,8 +1352,8 @@ struct floating_rolling_hashers<sz_cap_haswell_k, window_width_, dimensions_> {
      *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
      *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      */
-    status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
-                             min_counts_span_t min_counts) const noexcept {
+    SZ_NOINLINE status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                                         min_counts_span_t min_counts) const noexcept {
         fingerprint(text, min_hashes, min_counts);
         return status_t::success_k;
     }
@@ -1372,7 +1372,7 @@ struct floating_rolling_hashers<sz_cap_haswell_k, window_width_, dimensions_> {
      *  will anyways export the composing Count-Min-Sketch fingerprint into the @p `min_hashes` and @p `min_counts`,
      *  as its a relatively cheap operation.
      */
-    void fingerprint_chunk(                                   //
+    SZ_NOINLINE void fingerprint_chunk(                       //
         span<byte_t const> text_chunk,                        //
         span<rolling_state_t, dimensions_k> last_states,      //
         span<rolling_state_t, dimensions_k> rolling_minimums, //
@@ -1411,9 +1411,9 @@ struct floating_rolling_hashers<sz_cap_haswell_k, window_width_, dimensions_> {
 #if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text, //
-                        min_counts_per_text_type_ &&min_counts_per_text, executor_type_ &&executor = {},
-                        cpu_specs_t specs = {}) noexcept {
+    SZ_NOINLINE status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text, //
+                                    min_counts_per_text_type_ &&min_counts_per_text, executor_type_ &&executor = {},
+                                    cpu_specs_t specs = {}) noexcept {
         return floating_rolling_hashers_in_parallel_(                     //
             *this, texts,                                                 //
             std::forward<min_hashes_per_text_type_>(min_hashes_per_text), //
@@ -1633,7 +1633,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
      *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
      */
-    status_t try_seed(size_t alphabet_size = 256) noexcept {
+    SZ_NOINLINE status_t try_seed(size_t alphabet_size = 256) noexcept {
         for (unsigned dim = 0; dim < dimensions_k; ++dim) {
             hasher_t hasher(window_width_k, alphabet_size + dim, hasher_t::default_modulo_base_k);
             multipliers_[dim] = hasher.multiplier();
@@ -1650,8 +1650,8 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
      *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
      *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      */
-    void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
-                     min_counts_span_t min_counts) const noexcept {
+    SZ_NOINLINE void fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                                 min_counts_span_t min_counts) const noexcept {
 
         if (text.size() < window_width_k) {
             for (auto &min_hash : min_hashes) min_hash = max_hash_k;
@@ -1672,8 +1672,8 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
      *  @param[out] min_hashes The output fingerprint, a vector of minimum hashes.
      *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      */
-    status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
-                             min_counts_span_t min_counts) const noexcept {
+    SZ_NOINLINE status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                                         min_counts_span_t min_counts) const noexcept {
         fingerprint(text, min_hashes, min_counts);
         return status_t::success_k;
     }
@@ -1692,7 +1692,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
      *  will anyways export the composing Count-Min-Sketch fingerprint into the @p `min_hashes` and @p `min_counts`,
      *  as its a relatively cheap operation.
      */
-    void fingerprint_chunk(                                   //
+    SZ_NOINLINE void fingerprint_chunk(                       //
         span<byte_t const> text_chunk,                        //
         span<rolling_state_t, dimensions_k> last_states,      //
         span<rolling_state_t, dimensions_k> rolling_minimums, //
@@ -1730,9 +1730,9 @@ struct floating_rolling_hashers<sz_cap_skylake_k, window_width_, dimensions_> {
 #if SZ_IS_CPP20_
         requires executor_like<executor_type_>
 #endif
-    status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text, //
-                        min_counts_per_text_type_ &&min_counts_per_text, executor_type_ &&executor = {},
-                        cpu_specs_t specs = {}) noexcept {
+    SZ_NOINLINE status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text, //
+                                    min_counts_per_text_type_ &&min_counts_per_text, executor_type_ &&executor = {},
+                                    cpu_specs_t specs = {}) noexcept {
         return floating_rolling_hashers_in_parallel_(                     //
             *this, texts,                                                 //
             std::forward<min_hashes_per_text_type_>(min_hashes_per_text), //

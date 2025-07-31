@@ -93,23 +93,25 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
     unsigned const global_thread_index = static_cast<unsigned>(blockIdx.x * blockDim.x + threadIdx.x);
     unsigned const global_warp_index = static_cast<unsigned>(global_thread_index / warp_size_k);
     unsigned const warps_per_block = static_cast<unsigned>(blockDim.x / warp_size_k);
+    sz_assert_(warps_per_block == density_k && "Block size mismatch in kernel");
     unsigned const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
     unsigned const thread_in_warp_index = static_cast<unsigned>(global_thread_index % warp_size_k);
-    unsigned const warp_in_block_index = static_cast<unsigned>(global_warp_index % warps_per_block);
+    unsigned const warp_in_block_index = static_cast<unsigned>(global_warp_index % density_k);
 
     // Load the hashers states per thread.
     f64_t multipliers[dimensions_per_thread_k];
     f64_t negative_discarding_multipliers[dimensions_per_thread_k];
     f64_t modulos[dimensions_per_thread_k];
     f64_t inverse_modulos[dimensions_per_thread_k];
-    for (unsigned dim_withing_thread = 0; dim_withing_thread < dimensions_per_thread_k; ++dim_withing_thread) {
-        unsigned const dim = thread_in_warp_index * dimensions_per_thread_k + dim_withing_thread;
+#pragma unroll
+    for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
+        unsigned const dim = thread_in_warp_index * dimensions_per_thread_k + dim_within_thread;
         hasher_t const &hasher = hashers[dim];
         if (dim >= hashers_count) continue; // ? Avoid out-of-bounds access
-        multipliers[dim_withing_thread] = hasher.multiplier();
-        negative_discarding_multipliers[dim_withing_thread] = hasher.negative_discarding_multiplier();
-        modulos[dim_withing_thread] = hasher.modulo();
-        inverse_modulos[dim_withing_thread] = hasher.inverse_modulo();
+        multipliers[dim_within_thread] = hasher.multiplier();
+        negative_discarding_multipliers[dim_within_thread] = hasher.negative_discarding_multiplier();
+        modulos[dim_within_thread] = hasher.modulo();
+        inverse_modulos[dim_within_thread] = hasher.inverse_modulo();
     }
 
     // We are computing N edit distances for N pairs of strings. Not a cartesian product!
@@ -118,9 +120,12 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
         task_t const task = tasks[task_index];
 
         // For each state we need to reset the local state
-        f64_t rolling_states[dimensions_per_thread_k] = {0.0};
-        f64_t rolling_minimums[dimensions_per_thread_k] = {skipped_rolling_state_k};
-        u32_t rolling_counts[dimensions_per_thread_k] = {0};
+        f64_t rolling_states[dimensions_per_thread_k];
+        f64_t rolling_minimums[dimensions_per_thread_k];
+        u32_t rolling_counts[dimensions_per_thread_k];
+        for (auto &rolling_state : rolling_states) rolling_state = 0.0;
+        for (auto &rolling_minimum : rolling_minimums) rolling_minimum = skipped_rolling_state_k;
+        for (auto &rolling_count : rolling_counts) rolling_count = 0;
 
         // Until we reach the `window_width_k`, we don't need to discard any symbols and can keep the code simpler
         size_t const prefix_length = std::min<size_t>(task.text_length, window_width_k);
@@ -129,6 +134,7 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
             byte_t const new_char = task.text_ptr[new_char_offset]; // ? Hardware may auto-broadcast this
             f64_t const new_term = static_cast<f64_t>(new_char) + 1.0;
 
+#pragma unroll
             for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
                 f64_t &rolling_state = rolling_states[dim_within_thread];
                 f64_t const multiplier = multipliers[dim_within_thread];
@@ -141,19 +147,17 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
 
         // We now have our first minimum hashes
         if (new_char_offset == window_width_k) {
+#pragma unroll
             for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
                 rolling_minimums[dim_within_thread] = rolling_states[dim_within_thread];
                 rolling_counts[dim_within_thread] = 1;
-                // unsigned const dim = thread_in_warp_index * dimensions_per_thread_k + dim_within_thread;
-                // printf("DEBUG: rolling_minimums[%d] = %f, rolling_states[%d] = %f\n", dim,
-                //        rolling_minimums[dim_within_thread], dim, rolling_states[dim_within_thread]);
             }
         }
 
         // Now the main massive unrolled, coalescing reads & writes via `discarding_text_chunk` & `incoming_text_chunk`,
         // practically performing a (`warp_size_k` by `warp_size_k`) hash-calculating operation unrolling the loop
         // nested inside of this one.
-        for (; new_char_offset + warp_size_k < task.text_length; new_char_offset += warp_size_k) {
+        for (; new_char_offset + warp_size_k <= task.text_length; new_char_offset += warp_size_k) {
 
             // Load the next chunk of characters into shared memory
             byte_t const *incoming_bytes = task.text_ptr + new_char_offset;
@@ -164,12 +168,14 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
             // Make sure the shared memory is fully loaded.
             __syncwarp();
 
+#pragma unroll
             for (unsigned char_within_step = 0; char_within_step < warp_size_k; ++char_within_step) {
                 byte_t const new_char = incoming_text_chunk[warp_in_block_index][char_within_step];
                 byte_t const old_char = discarding_text_chunk[warp_in_block_index][char_within_step];
                 f64_t const new_term = static_cast<f64_t>(new_char) + 1.0;
                 f64_t const old_term = static_cast<f64_t>(old_char) + 1.0;
 
+#pragma unroll
                 for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
                     f64_t &rolling_state = rolling_states[dim_within_thread];
                     f64_t const multiplier = multipliers[dim_within_thread];
@@ -198,6 +204,7 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
             f64_t const new_term = static_cast<f64_t>(new_char) + 1.0;
             f64_t const old_term = static_cast<f64_t>(old_char) + 1.0;
 
+#pragma unroll
             for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
                 f64_t &rolling_state = rolling_states[dim_within_thread];
                 f64_t const multiplier = multipliers[dim_within_thread];
@@ -219,6 +226,7 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
         }
 
         // Finally export the results
+#pragma unroll
         for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
             unsigned const dim = thread_in_warp_index * dimensions_per_thread_k + dim_within_thread;
             if (dim >= hashers_count) continue; // ? Avoid out-of-bounds access
@@ -291,7 +299,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
      *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
      */
-    status_t try_seed(size_t alphabet_size = 256) noexcept {
+    SZ_NOINLINE status_t try_seed(size_t alphabet_size = 256) noexcept {
         if (hashers_.try_resize(aligned_dimensions_k) != status_t::success_k) return status_t::bad_alloc_k;
         for (unsigned dim = 0; dim < dimensions_k; ++dim)
             hashers_[dim] = hasher_t(window_width_k, alphabet_size + dim, hasher_t::default_modulo_base_k);
@@ -305,8 +313,9 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
      *  @param[out] min_counts The output frequencies of @p `min_hashes` hashes.
      *  @note Unlike the CPU kernels, @b not intended for product use, but rather for testing.
      */
-    cuda_status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes, min_counts_span_t min_counts,
-                                  gpu_specs_t specs = {}, cuda_executor_t executor = {}) const noexcept {
+    SZ_NOINLINE cuda_status_t try_fingerprint(span<byte_t const> text, min_hashes_span_t min_hashes,
+                                              min_counts_span_t min_counts, gpu_specs_t specs = {},
+                                              cuda_executor_t executor = {}) const noexcept {
 
         using task_t = cuda_floating_fingerprint_task_<byte_t>;
         using tasks_allocator_t = typename allocator_t::template rebind<task_t>::other;
@@ -376,9 +385,9 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
     }
 
     template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_>
-    cuda_status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text,
-                             min_counts_per_text_type_ &&min_counts_per_text, gpu_specs_t specs = {},
-                             cuda_executor_t executor = {}) const noexcept {
+    SZ_NOINLINE cuda_status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text,
+                                         min_counts_per_text_type_ &&min_counts_per_text, gpu_specs_t specs = {},
+                                         cuda_executor_t executor = {}) const noexcept {
 
         using texts_t = texts_type_;
         using text_t = typename texts_t::value_type;
@@ -407,8 +416,8 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
                 .density = four_warps_per_multiprocessor_k,
             };
         }
-        std::partition(tasks.begin(), tasks.end(),
-                       [](task_t const &task) { return task.density == warps_working_together_k; });
+        // std::partition(tasks.begin(), tasks.end(),
+        //                [](task_t const &task) { return task.density == warps_working_together_k; });
 
         // Record the start event
         cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream);
@@ -416,7 +425,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
 
         void *warp_level_kernel_args[4];
         auto const *tasks_ptr = tasks.data();
-        auto tasks_size = tasks.size();
+        auto const tasks_size = tasks.size();
         auto const *hashers_ptr = hashers_.data();
         auto const hashers_size = (std::min)(dimensions_k, hashers_.size());
         warp_level_kernel_args[0] = (void *)(&tasks_ptr);
@@ -430,9 +439,9 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
             warp_size_nvidia_k, four_warps_per_multiprocessor_k>;
 
         // TODO: We can be wiser about the dimensions of this grid.
-        unsigned const random_block_size =
-            static_cast<unsigned>(warp_size_nvidia_k) * static_cast<unsigned>(four_warps_per_multiprocessor_k);
-        unsigned const random_blocks_per_multiprocessor = 32;
+        unsigned const random_block_size = static_cast<unsigned>(warp_size_nvidia_k) * //
+                                           static_cast<unsigned>(four_warps_per_multiprocessor_k);
+        unsigned const random_blocks_per_multiprocessor = 2;
         cudaError_t launch_error = cudaLaunchCooperativeKernel(                       //
             reinterpret_cast<void *>(warp_level_kernel),                              // Kernel function pointer
             dim3(random_blocks_per_multiprocessor * specs.streaming_multiprocessors), // Grid dimensions
@@ -454,14 +463,6 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
         float execution_milliseconds = 0;
         cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
 
-        // Now that everything went well, export the results back into the `results` array.
-        for (size_t task_index = 0; task_index < tasks.size(); ++task_index) {
-            task_t const &task = tasks[task_index];
-            auto min_hashes = to_span(min_hashes_per_text[task.original_index]);
-            auto min_counts = to_span(min_counts_per_text[task.original_index]);
-            sz_copy((sz_ptr_t)min_hashes.data(), (sz_cptr_t)task.min_hashes, min_hashes.size_bytes());
-            sz_copy((sz_ptr_t)min_counts.data(), (sz_cptr_t)task.min_counts, min_counts.size_bytes());
-        }
         return {status_t::success_k, cudaSuccess, execution_milliseconds};
     }
 };
