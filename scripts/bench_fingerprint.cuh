@@ -37,41 +37,37 @@ template <typename engine_type_, typename... extra_args_>
 struct fingerprint_callable {
     using engine_t = engine_type_;
 
-    environment_t const &env;
+    arrow_strings_tape_t const &tape;
     fingerprints_min_hashes_t &fingerprints_hashes;
     fingerprints_min_counts_t &fingerprints_counts;
     engine_t &engine;
     std::tuple<extra_args_...> extra_args = {};
 
-    fingerprint_callable(environment_t const &env, fingerprints_min_hashes_t &fingerprints_hashes,
+    fingerprint_callable(arrow_strings_tape_t const &tape, fingerprints_min_hashes_t &fingerprints_hashes,
                          fingerprints_min_counts_t &fingerprints_counts, engine_t &eng, extra_args_... args)
-        : env(env), fingerprints_hashes(fingerprints_hashes), fingerprints_counts(fingerprints_counts), engine(eng),
+        : tape(tape), fingerprints_hashes(fingerprints_hashes), fingerprints_counts(fingerprints_counts), engine(eng),
           extra_args(args...) {}
 
     call_result_t operator()() noexcept(false) {
 
         // Unpack the extra arguments from `std::tuple` into the engine call using `std::apply`
-        status_t status = std::apply(
+        status_t result = status_t::success_k;
+        std::apply(
             [&](auto &&...rest) mutable {
-                [[maybe_unused]] auto result = engine( //
-                    env.tokens, *std::launder(&fingerprints_hashes), *std::launder(&fingerprints_counts), rest...);
-                do_not_optimize(result);
+                result = engine(tape, fingerprints_hashes, fingerprints_counts, rest...);
                 for (auto &scalar : fingerprints_hashes) do_not_optimize(scalar);
                 for (auto &scalar : fingerprints_counts) do_not_optimize(scalar);
-                return result;
             },
             extra_args);
-
-        do_not_optimize(status);
-        if (status != status_t::success_k) throw std::runtime_error("Failed fingerprinting.");
+        if (static_cast<status_t>(result) != status_t::success_k) throw std::runtime_error("Failed fingerprinting.");
 
         std::size_t bytes_passed = 0;
-        for (std::size_t i = 0; i < env.tokens.size(); ++i) bytes_passed += env.tokens[i].size();
+        for (std::size_t i = 0; i < tape.size(); ++i) bytes_passed += tape[i].size();
 
         call_result_t call_result;
         call_result.bytes_passed = bytes_passed;
         call_result.operations = bytes_passed * default_embedding_dims_k;
-        call_result.inputs_processed = env.tokens.size();
+        call_result.inputs_processed = tape.size();
         call_result.check_value = reinterpret_cast<check_value_t>(&fingerprints_hashes);
         return call_result;
     }
@@ -82,8 +78,14 @@ void bench_fingerprint(environment_t const &env) {
     namespace fu = fork_union;
 
 #if SZ_USE_CUDA
-    gpu_specs_t specs = *gpu_specs();
+    auto maybe_specs = gpu_specs();
+    if (!maybe_specs.has_value()) throw std::runtime_error("Failed to get GPU specs.");
+    gpu_specs_t specs = *maybe_specs;
 #endif
+
+    arrow_strings_tape_t tape;
+    if (tape.try_assign(env.tokens.begin(), env.tokens.end()) != status_t::success_k)
+        throw std::runtime_error("Failed to assign tokens to tape.");
 
     // Preallocate buffers for resulting fingerprints,
     // so that we can compare baseline and accelerated results for exact matches
@@ -150,32 +152,32 @@ void bench_fingerprint(environment_t const &env) {
         throw std::runtime_error("Can't build Skylake Floating Hasher.");
 #endif // SZ_USE_SKYLAKE
 
+    // Perform the benchmarks, passing the dictionary to the engines
+    auto call_baseline = fingerprint_callable<rolling_f64_t, fu::basic_pool_t &>(
+        tape, min_hashes_baseline, min_counts_baseline, *rolling_f64, pool);
+    bench_result_t baseline = bench_nullary(env, "rolling_f64", call_baseline);
+
 #if SZ_USE_CUDA
     using rolling_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, default_window_width_k, default_embedding_dims_k>;
     auto rolling_cuda = std::make_unique<rolling_cuda_t>();
     if (rolling_cuda->try_seed() != status_t::success_k) throw std::runtime_error("Can't build CUDA Floating Hasher.");
 #endif // SZ_USE_CUDA
 
-    // Perform the benchmarks, passing the dictionary to the engines
-    auto call_baseline = fingerprint_callable<rolling_f64_t, fu::basic_pool_t &>(
-        env, min_hashes_baseline, min_counts_baseline, *rolling_f64, pool);
-    bench_result_t baseline = bench_nullary(env, "rolling_f64", call_baseline);
-
     // Semi-serial variants
     bench_nullary(env, "rolling_f32",
-                  fingerprint_callable<rolling_f32_t, fu::basic_pool_t &>(env, min_hashes_accelerated,
+                  fingerprint_callable<rolling_f32_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
                                                                           min_counts_accelerated, *rolling_f32, pool))
         .log(baseline);
     bench_nullary(env, "rabin_u64",
-                  fingerprint_callable<rabin_u64_t, fu::basic_pool_t &>(env, min_hashes_accelerated,
+                  fingerprint_callable<rabin_u64_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
                                                                         min_counts_accelerated, *rabin_u64, pool))
         .log(baseline);
     bench_nullary(env, "buz_u32",
-                  fingerprint_callable<buz_u32_t, fu::basic_pool_t &>(env, min_hashes_accelerated,
+                  fingerprint_callable<buz_u32_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
                                                                       min_counts_accelerated, *buz_u32, pool)) //
         .log(baseline);
     bench_nullary(env, "multiply_u32",
-                  fingerprint_callable<multiply_u32_t, fu::basic_pool_t &>(env, min_hashes_accelerated,
+                  fingerprint_callable<multiply_u32_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
                                                                            min_counts_accelerated, *multiply_u32, pool))
         .log(baseline);
 
@@ -184,29 +186,29 @@ void bench_fingerprint(environment_t const &env) {
         bench_nullary(                            //
             env, "rolling_serial", call_baseline, //
             fingerprint_callable<rolling_serial_t, fu::basic_pool_t &>(
-                env, min_hashes_accelerated, min_counts_accelerated, *rolling_serial, pool), //
-            callable_no_op_t {},                                                             // preprocessing
-            fingerprints_equality_t {})                                                      // equality check
+                tape, min_hashes_accelerated, min_counts_accelerated, *rolling_serial, pool), //
+            callable_no_op_t {},                                                              // preprocessing
+            fingerprints_equality_t {})                                                       // equality check
             .log(baseline);
     scramble_accelerated_results();
 
 #if SZ_USE_HASWELL
     bench_nullary(                             //
         env, "rolling_haswell", call_baseline, //
-        fingerprint_callable<rolling_haswell_t, fu::basic_pool_t &>(env, min_hashes_accelerated, min_counts_accelerated,
-                                                                    *rolling_haswell, pool), //
-        callable_no_op_t {},                                                                 // preprocessing
-        fingerprints_equality_t {})                                                          // equality check
+        fingerprint_callable<rolling_haswell_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
+                                                                    min_counts_accelerated, *rolling_haswell, pool), //
+        callable_no_op_t {},        // preprocessing
+        fingerprints_equality_t {}) // equality check
         .log(baseline, unrolled);
 #endif // SZ_USE_HASWELL
 
 #if SZ_USE_SKYLAKE
     bench_nullary(                             //
         env, "rolling_skylake", call_baseline, //
-        fingerprint_callable<rolling_skylake_t, fu::basic_pool_t &>(env, min_hashes_accelerated, min_counts_accelerated,
-                                                                    *rolling_skylake, pool), //
-        callable_no_op_t {},                                                                 // preprocessing
-        fingerprints_equality_t {})                                                          // equality check
+        fingerprint_callable<rolling_skylake_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
+                                                                    min_counts_accelerated, *rolling_skylake, pool), //
+        callable_no_op_t {},        // preprocessing
+        fingerprints_equality_t {}) // equality check
         .log(baseline, unrolled);
     scramble_accelerated_results();
 #endif // SZ_USE_SKYLAKE
@@ -214,7 +216,7 @@ void bench_fingerprint(environment_t const &env) {
 #if SZ_USE_CUDA
     bench_nullary(                          //
         env, "rolling_cuda", call_baseline, //
-        fingerprint_callable<rolling_cuda_t, gpu_specs_t>(env, min_hashes_accelerated, min_counts_accelerated,
+        fingerprint_callable<rolling_cuda_t, gpu_specs_t>(tape, min_hashes_accelerated, min_counts_accelerated,
                                                           *rolling_cuda, specs), //
         callable_no_op_t {},                                                     // preprocessing
         fingerprints_equality_t {})                                              // equality check
