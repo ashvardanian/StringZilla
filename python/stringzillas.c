@@ -1925,7 +1925,7 @@ static PyMethodDef stringzilla_methods[] = {
 static PyModuleDef stringzilla_module = {
     PyModuleDef_HEAD_INIT,
     "stringzilla",
-    "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
+    "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
     -1,
     stringzilla_methods,
     NULL,

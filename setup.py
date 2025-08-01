@@ -163,7 +163,7 @@ with open(os.path.join(this_directory, "README.md"), "r", encoding="utf-8") as f
 setup(
     name=__lib_name__,
     version=__version__,
-    description="SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances",
+    description="Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU",
     author="Ash Vardanian",
     author_email="1983160+ashvardanian@users.noreply.github.com",
     url="https://github.com/ashvardanian/stringzilla",

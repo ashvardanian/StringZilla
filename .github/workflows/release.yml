@@ -260,7 +260,7 @@ jobs:
           mkdir "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
           cp include/stringzilla/stringzilla.h "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
           cp build_release/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
-          echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances" > "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
+          echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU" > "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
           dpkg-deb --build "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
 
       - name: Upload library

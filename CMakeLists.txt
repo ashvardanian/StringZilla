@@ -42,7 +42,7 @@ project(
     stringzilla
     VERSION 3.11.3
     LANGUAGES C CXX ASM
-    DESCRIPTION "SIMD-accelerated string search, sort, hashes, fingerprints, & edit distances"
+    DESCRIPTION "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
     HOMEPAGE_URL "https://github.com/ashvardanian/stringzilla"
 )
 
