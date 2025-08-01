@@ -71,8 +71,8 @@ fn main() {
         }
     }
 
-    println!("cargo:rerun-if-changed=c/lib.c");
-    println!("cargo:rerun-if-changed=rust/lib.rs");
+    println!("cargo:rerun-if-changed=c/stringzilla.c");
+    println!("cargo:rerun-if-changed=rust/stringzilla.rs");
     println!("cargo:rerun-if-changed=include/stringzilla/stringzilla.h");
 
     // Constituent parts:

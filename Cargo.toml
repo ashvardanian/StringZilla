@@ -2,7 +2,7 @@
 name = "stringzilla"
 version = "3.11.3"
 authors = ["Ash Vardanian <1983160+ashvardanian@users.noreply.github.com>"]
-description = "Faster SIMD-accelerated string search, sorting, fingerprints, and edit distances"
+description = "Search, hash, sort, fingerprint, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
 edition = "2021"
 license = "Apache-2.0"
 publish = true
@@ -21,7 +21,7 @@ include = ["/rust/**", "/c/**", "/include/**", "/build.rs"]
 
 [lib]
 name = "stringzilla"
-path = "rust/lib.rs"
+path = "rust/stringzilla.rs"
 
 [build-dependencies]
-cc = "1.0"
+cc = "1.2.31"
