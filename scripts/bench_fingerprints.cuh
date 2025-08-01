@@ -130,32 +130,30 @@ void bench_fingerprint(environment_t const &env) {
     if (rolling_f32->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Floating f32 Rolling Hasher.");
 
-    using rolling_serial_t =
-        floating_rolling_hashers<sz_cap_serial_k, default_window_width_k, default_embedding_dims_k>;
+    using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, default_embedding_dims_k>;
     auto rolling_serial = std::make_unique<rolling_serial_t>();
-    if (rolling_serial->try_seed() != status_t::success_k)
+    if (rolling_serial->try_seed(default_window_width_k) != status_t::success_k)
         throw std::runtime_error("Can't build Unrolled Floating Hasher.");
 
 #if SZ_USE_HASWELL
-    using rolling_haswell_t =
-        floating_rolling_hashers<sz_cap_haswell_k, default_window_width_k, default_embedding_dims_k>;
+    using rolling_haswell_t = floating_rolling_hashers<sz_cap_haswell_k, default_embedding_dims_k>;
     auto rolling_haswell = std::make_unique<rolling_haswell_t>();
-    if (rolling_haswell->try_seed() != status_t::success_k)
+    if (rolling_haswell->try_seed(default_window_width_k) != status_t::success_k)
         throw std::runtime_error("Can't build Haswell Floating Hasher.");
 #endif // SZ_USE_HASWELL
 
 #if SZ_USE_SKYLAKE
-    using rolling_skylake_t =
-        floating_rolling_hashers<sz_cap_skylake_k, default_window_width_k, default_embedding_dims_k>;
+    using rolling_skylake_t = floating_rolling_hashers<sz_cap_skylake_k, default_embedding_dims_k>;
     auto rolling_skylake = std::make_unique<rolling_skylake_t>();
-    if (rolling_skylake->try_seed() != status_t::success_k)
+    if (rolling_skylake->try_seed(default_window_width_k) != status_t::success_k)
         throw std::runtime_error("Can't build Skylake Floating Hasher.");
 #endif // SZ_USE_SKYLAKE
 
 #if SZ_USE_CUDA
-    using rolling_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, default_window_width_k, default_embedding_dims_k>;
+    using rolling_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, default_embedding_dims_k>;
     auto rolling_cuda = std::make_unique<rolling_cuda_t>();
-    if (rolling_cuda->try_seed() != status_t::success_k) throw std::runtime_error("Can't build CUDA Floating Hasher.");
+    if (rolling_cuda->try_seed(default_window_width_k) != status_t::success_k)
+        throw std::runtime_error("Can't build CUDA Floating Hasher.");
 #endif // SZ_USE_CUDA
 
     // Perform the benchmarks, passing the dictionary to the engines

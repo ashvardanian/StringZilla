@@ -439,35 +439,35 @@ void test_rolling_hashers_equivalence_for_width() {
     auto dna_like_strings = rolling_hasher_dna_like_inputs();
     auto inconvenient_strings = rolling_hasher_inconvenient_inputs();
 
-    using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, window_width_k, dims_k>;
+    using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, dims_k>;
     rolling_serial_t rolling_serial;
-    sz_assert_(rolling_serial.try_seed() == status_t::success_k);
+    sz_assert_(rolling_serial.try_seed(window_width_k) == status_t::success_k);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_serial);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_serial);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_serial);
 
 #if SZ_USE_HASWELL
-    using rolling_haswell_t = floating_rolling_hashers<sz_cap_haswell_k, window_width_k, dims_k>;
+    using rolling_haswell_t = floating_rolling_hashers<sz_cap_haswell_k, dims_k>;
     rolling_haswell_t rolling_haswell;
-    sz_assert_(rolling_haswell.try_seed() == status_t::success_k);
+    sz_assert_(rolling_haswell.try_seed(window_width_k) == status_t::success_k);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_haswell);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_haswell);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_haswell);
 #endif
 
 #if SZ_USE_SKYLAKE
-    using rolling_skylake_t = floating_rolling_hashers<sz_cap_skylake_k, window_width_k, dims_k>;
+    using rolling_skylake_t = floating_rolling_hashers<sz_cap_skylake_k, dims_k>;
     rolling_skylake_t rolling_skylake;
-    sz_assert_(rolling_skylake.try_seed() == status_t::success_k);
+    sz_assert_(rolling_skylake.try_seed(window_width_k) == status_t::success_k);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_skylake);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_skylake);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_skylake);
 #endif
 
 #if SZ_USE_CUDA
-    using rolling_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, window_width_k, dims_k>;
+    using rolling_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, dims_k>;
     rolling_cuda_t rolling_cuda;
-    sz_assert_(rolling_cuda.try_seed() == status_t::success_k);
+    sz_assert_(rolling_cuda.try_seed(window_width_k) == status_t::success_k);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(unit_strings, rolling_f64, rolling_cuda);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(dna_like_strings, rolling_f64, rolling_cuda);
     test_rolling_hashers_equivalence_against_baseline<dims_k>(inconvenient_strings, rolling_f64, rolling_cuda);

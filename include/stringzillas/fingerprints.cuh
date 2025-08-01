@@ -62,20 +62,19 @@ __device__ __forceinline__ f64_t barrett_mod_cuda_(f64_t x, f64_t modulo, f64_t 
  *  4x bytes and computing 4x (warp_size_) rolling hashes per thread in the inner loop.
  */
 template <                                                                     //
-    unsigned window_width_, unsigned dimensions_, sz_capability_t capability_, //
+    unsigned dimensions_, sz_capability_t capability_,                         //
     typename char_type_ = byte_t, warp_size_t warp_size_ = warp_size_nvidia_k, //
     warp_tasks_density_t density_ = four_warps_per_multiprocessor_k            //
     >
 __global__ void floating_rolling_hashers_on_each_cuda_warp_(                            //
     cuda_floating_fingerprint_task_<char_type_> const *tasks, size_t const tasks_count, //
-    floating_rolling_hasher<f64_t> const *hashers, size_t const hashers_count) {
+    floating_rolling_hasher<f64_t> const *hashers, size_t const hashers_count, size_t const window_width) {
 
     //
     using task_t = cuda_floating_fingerprint_task_<char_type_>;
     using hasher_t = floating_rolling_hasher<f64_t>;
     constexpr warp_size_t warp_size_k = warp_size_;
     constexpr warp_tasks_density_t density_k = density_;
-    constexpr unsigned window_width_k = window_width_;
     constexpr unsigned dimensions_k = dimensions_;
     constexpr unsigned dimensions_per_thread_k = dimensions_k / warp_size_k;
     constexpr f64_t skipped_rolling_state_k = basic_rolling_hashers<hasher_t>::skipped_rolling_state_k;
@@ -127,8 +126,8 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
         for (auto &rolling_minimum : rolling_minimums) rolling_minimum = skipped_rolling_state_k;
         for (auto &rolling_count : rolling_counts) rolling_count = 0;
 
-        // Until we reach the `window_width_k`, we don't need to discard any symbols and can keep the code simpler
-        size_t const prefix_length = std::min<size_t>(task.text_length, window_width_k);
+        // Until we reach the `window_width`, we don't need to discard any symbols and can keep the code simpler
+        size_t const prefix_length = std::min<size_t>(task.text_length, window_width);
         size_t new_char_offset = 0;
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             byte_t const new_char = task.text_ptr[new_char_offset]; // ? Hardware may auto-broadcast this
@@ -146,7 +145,7 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
         }
 
         // We now have our first minimum hashes
-        if (new_char_offset == window_width_k) {
+        if (new_char_offset == window_width) {
 #pragma unroll
             for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
                 rolling_minimums[dim_within_thread] = rolling_states[dim_within_thread];
@@ -161,7 +160,7 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
 
             // Load the next chunk of characters into shared memory
             byte_t const *incoming_bytes = task.text_ptr + new_char_offset;
-            byte_t const *discarding_bytes = task.text_ptr + new_char_offset - window_width_k;
+            byte_t const *discarding_bytes = task.text_ptr + new_char_offset - window_width;
             incoming_text_chunk[warp_in_block_index][thread_in_warp_index] = incoming_bytes[thread_in_warp_index];
             discarding_text_chunk[warp_in_block_index][thread_in_warp_index] = discarding_bytes[thread_in_warp_index];
 
@@ -200,7 +199,7 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
         // Roll until the end of the text
         for (; new_char_offset < task.text_length; ++new_char_offset) {
             byte_t const new_char = task.text_ptr[new_char_offset]; // ? Hardware may auto-broadcast this
-            byte_t const old_char = task.text_ptr[new_char_offset - window_width_k];
+            byte_t const old_char = task.text_ptr[new_char_offset - window_width];
             f64_t const new_term = static_cast<f64_t>(new_char) + 1.0;
             f64_t const old_term = static_cast<f64_t>(old_char) + 1.0;
 
@@ -244,9 +243,9 @@ __global__ void floating_rolling_hashers_on_each_cuda_warp_(                    
  *  where individual warps take care of separate unrelated inputs. The biggest difference is in how the minimum values
  *  are later reduced across the entire device, rather than per-warp.
  */
-template <                                                                 //
-    size_t window_width_, size_t dimensions_, sz_capability_t capability_, //
-    typename char_type_ = byte_t, size_t warp_size_ = 32                   //
+template <                                               //
+    size_t dimensions_, sz_capability_t capability_,     //
+    typename char_type_ = byte_t, size_t warp_size_ = 32 //
     >
 __global__ void floating_rolling_hashers_across_cuda_device_(span<cuda_floating_fingerprint_task_<char_type_>> tasks,
                                                              span<floating_rolling_hasher<f64_t> const> hashers) {
@@ -259,8 +258,8 @@ __global__ void floating_rolling_hashers_across_cuda_device_(span<cuda_floating_
 /**
  *  @brief CUDA specialization of floating_rolling_hashers for count-min-sketching.
  */
-template <size_t window_width_, size_t dimensions_>
-struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
+template <size_t dimensions_>
+struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
 
     using hasher_t = floating_rolling_hasher<f64_t>;
     using rolling_state_t = f64_t;
@@ -271,7 +270,6 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
     using hashers_allocator_t = typename allocator_t::template rebind<hasher_t>::other;
     using hashers_t = safe_vector<hasher_t, hashers_allocator_t>;
 
-    static constexpr size_t window_width_k = window_width_;
     static constexpr size_t dimensions_k = dimensions_;
     static constexpr rolling_state_t skipped_rolling_state_k = std::numeric_limits<rolling_state_t>::max();
     static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
@@ -288,21 +286,24 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
   private:
     allocator_t alloc_;
     hashers_t hashers_;
+    size_t window_width_;
 
   public:
-    floating_rolling_hashers(allocator_t const &alloc = {}) noexcept : alloc_(alloc), hashers_(alloc) {}
+    floating_rolling_hashers(allocator_t const &alloc = {}) noexcept
+        : alloc_(alloc), hashers_(alloc), window_width_(0) {}
     constexpr size_t dimensions() const noexcept { return dimensions_k; }
-    constexpr size_t window_width() const noexcept { return window_width_k; }
-    constexpr size_t window_width(size_t) const noexcept { return window_width_k; }
+    constexpr size_t window_width() const noexcept { return window_width_; }
+    constexpr size_t window_width(size_t) const noexcept { return window_width_; }
 
     /**
      *  @brief Initializes several rolling hashers with different multipliers and modulos.
      *  @param[in] alphabet_size Size of the alphabet, typically 256 for UTF-8, 4 for DNA, or 20 for proteins.
      */
-    SZ_NOINLINE status_t try_seed(size_t alphabet_size = 256) noexcept {
+    SZ_NOINLINE status_t try_seed(size_t window_width, size_t alphabet_size = 256) noexcept {
         if (hashers_.try_resize(aligned_dimensions_k) != status_t::success_k) return status_t::bad_alloc_k;
         for (unsigned dim = 0; dim < dimensions_k; ++dim)
-            hashers_[dim] = hasher_t(window_width_k, alphabet_size + dim, hasher_t::default_modulo_base_k);
+            hashers_[dim] = hasher_t(window_width, alphabet_size + dim, hasher_t::default_modulo_base_k);
+        window_width_ = window_width;
         return status_t::success_k;
     }
 
@@ -342,7 +343,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
         cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream);
         if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
 
-        void *warp_level_kernel_args[4];
+        void *warp_level_kernel_args[5];
         auto const *tasks_ptr = tasks.data();
         auto const tasks_size = tasks.size();
         auto const *hashers_ptr = hashers_.data();
@@ -351,10 +352,10 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
         warp_level_kernel_args[1] = (void *)(&tasks_size);
         warp_level_kernel_args[2] = (void *)(&hashers_ptr);
         warp_level_kernel_args[3] = (void *)(&hashers_size);
+        warp_level_kernel_args[4] = (void *)(&window_width_);
 
         auto warp_level_kernel = &floating_rolling_hashers_on_each_cuda_warp_< //
-            window_width_k, aligned_dimensions_k, sz_cap_cuda_k, byte_t,       //
-            warp_size_nvidia_k, one_warp_per_multiprocessor_k>;
+            aligned_dimensions_k, sz_cap_cuda_k, byte_t, warp_size_nvidia_k, one_warp_per_multiprocessor_k>;
 
         // TODO: We can be wiser about the dimensions of this grid.
         unsigned const random_block_size = static_cast<unsigned>(warp_size_nvidia_k) * //
@@ -423,7 +424,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
         cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream);
         if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
 
-        void *warp_level_kernel_args[4];
+        void *warp_level_kernel_args[5];
         auto const *tasks_ptr = tasks.data();
         auto const tasks_size = tasks.size();
         auto const *hashers_ptr = hashers_.data();
@@ -432,11 +433,11 @@ struct floating_rolling_hashers<sz_cap_cuda_k, window_width_, dimensions_> {
         warp_level_kernel_args[1] = (void *)(&tasks_size);
         warp_level_kernel_args[2] = (void *)(&hashers_ptr);
         warp_level_kernel_args[3] = (void *)(&hashers_size);
+        warp_level_kernel_args[4] = (void *)(&window_width_);
 
         static_assert(sizeof(char_t) == sizeof(byte_t), "Characters must be byte-sized");
         auto warp_level_kernel = &floating_rolling_hashers_on_each_cuda_warp_< //
-            window_width_k, aligned_dimensions_k, sz_cap_cuda_k, byte_t,       //
-            warp_size_nvidia_k, four_warps_per_multiprocessor_k>;
+            aligned_dimensions_k, sz_cap_cuda_k, byte_t, warp_size_nvidia_k, four_warps_per_multiprocessor_k>;
 
         // TODO: We can be wiser about the dimensions of this grid.
         unsigned const random_block_size = static_cast<unsigned>(warp_size_nvidia_k) * //
