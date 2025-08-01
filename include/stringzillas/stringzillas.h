@@ -30,22 +30,22 @@ extern "C" {
 #endif
 
 /**
- *  @brief Apache Arrow-compatible tape for strings with 32-bit offsets.
+ *  @brief Apache Arrow-compatible tape for non-NULL strings with 32-bit offsets.
  *  @sa `sz_arrow_u64tape_t` for larger collections.
  */
 struct sz_arrow_u32tape_t {
     sz_cptr_t data;
-    sz_u32_t const *lengths;
+    sz_u32_t const *offsets;
     sz_size_t count;
 };
 
 /**
- *  @brief Apache Arrow-compatible tape for strings with 64-bit offsets.
+ *  @brief Apache Arrow-compatible tape for non-NULL strings with 64-bit offsets.
  *  @sa `sz_arrow_u32tape_t` for smaller space-efficient collections.
  */
 struct sz_arrow_u64tape_t {
     sz_cptr_t data;
-    sz_u64_t const *lengths;
+    sz_u64_t const *offsets;
     sz_size_t count;
 };
 
@@ -69,6 +69,7 @@ SZ_DYNAMIC void sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc);
  */
 typedef void *sz_device_scope_t;
 
+SZ_DYNAMIC void sz_device_scope_init_default(sz_device_scope_t *scope);
 SZ_DYNAMIC void sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_device_scope_t *scope);
 SZ_DYNAMIC void sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_device_scope_t *scope);
 SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope);
@@ -202,17 +203,17 @@ typedef void *sz_fingerprints_utf8_t;
 /**
  *  @brief Initializes a fingerprinting engine.
  *  @param alphabet_size The size of the alphabet (256 for binary, 128 for ASCII, 4 for DNA, 22 for protein).
- *  @param dimensions The number of dimensions for the fingerprints (ideally 64-divisible, like 2048, 2112)
  *  @param window_widths An optional array of window widths for the fingerprints, like [3, 4, 5, 7, 9, 11, 15, 31].
  *  @param window_widths_count The number of window widths in the @p window_widths array.
+ *  @param dimensions_per_window_width The number of dimensions for each window width, ideally 64 or its multiple.
  *  @param alloc A memory allocator to use for allocating memory.
  *  @param device A device scope to use for parallel execution.
  *  @param engine Pointer to the initialized fingerprinting engine.
  */
-SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
-    sz_size_t alphabet_size, sz_size_t dimensions,                    //
-    sz_size_t const *window_widths, sz_size_t window_widths_count,    //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+SZ_DYNAMIC sz_status_t sz_fingerprints_init(                              //
+    sz_size_t alphabet_size, sz_size_t const *window_widths,              //
+    sz_size_t window_widths_count, sz_size_t dimensions_per_window_width, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,     //
     sz_fingerprints_t *engine);
 
 SZ_DYNAMIC sz_status_t sz_fingerprints_sequence(        //
@@ -235,10 +236,10 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_u32tape(         //
 
 SZ_DYNAMIC void sz_fingerprints_free(sz_fingerprints_t engine);
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_init(                     //
-    sz_size_t alphabet_size, sz_size_t dimensions,                    //
-    sz_size_t const *window_widths, sz_size_t window_widths_count,    //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_init(                         //
+    sz_size_t alphabet_size, sz_size_t const *window_widths,              //
+    sz_size_t window_widths_count, sz_size_t dimensions_per_window_width, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,     //
     sz_fingerprints_utf8_t *engine);
 
 SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_sequence(        //
