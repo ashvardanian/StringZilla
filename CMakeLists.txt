@@ -537,8 +537,8 @@ endif ()
 
 if (${STRINGZILLAS_BUILD_SHARED})
     # StringZillas shared library targets for parallel string operations
-    function (define_stringzillas_shared target backend_flags)
-        add_library(${target} SHARED c/stringzillas.cu)
+    function (define_stringzillas_shared target source_file backend_flags)
+        add_library(${target} SHARED ${source_file})
         add_library(${PROJECT_NAME}::${target} ALIAS ${target})
 
         set_target_properties(
@@ -586,11 +586,11 @@ if (${STRINGZILLAS_BUILD_SHARED})
     endfunction ()
 
     # Define StringZillas CPU shared library
-    define_stringzillas_shared(stringzillas_cpus_shared "SZ_USE_CUDA=0;SZ_USE_ROCM=0")
+    define_stringzillas_shared(stringzillas_cpus_shared c/stringzillas.cpp "SZ_USE_CUDA=0;SZ_USE_ROCM=0")
 
     # Define StringZillas CUDA shared library (only if CUDA is available)
     if (ENABLE_CUDA)
-        define_stringzillas_shared(stringzillas_cuda_shared "SZ_USE_CUDA=1;SZ_USE_ROCM=0")
+        define_stringzillas_shared(stringzillas_cuda_shared c/stringzillas.cu "SZ_USE_CUDA=1;SZ_USE_ROCM=0")
 
         # Link CUDA libraries
         target_link_libraries(stringzillas_cuda_shared PRIVATE CUDA::cudart)

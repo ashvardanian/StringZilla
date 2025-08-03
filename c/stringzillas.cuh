@@ -1,6 +1,6 @@
 /**
  *  @file       stringzillas.cu
- *  @brief      StringZillas library for parallel string operations using CUDA C++ and OpenMP backends.
+ *  @brief      StringZillas library shared code for parallel string operations using CPU & CUDA backends.
  *  @author     Ash Vardanian
  *  @date       March 23, 2025
  */
