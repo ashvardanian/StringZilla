@@ -1251,8 +1251,8 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_> {
 #pragma region Haswell Implementation
 #if SZ_USE_HASWELL
 #pragma GCC push_options
-#pragma GCC target("avx2")
-#pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
+#pragma GCC target("avx2", "fma")
+#pragma clang attribute push(__attribute__((target("avx2,fma"))), apply_to = function)
 
 SZ_INLINE __m256d _mm256_floor_magic_pd(__m256d x) noexcept {
     // Magic number rounding approach for fast floor
