@@ -924,7 +924,6 @@ SZ_NOINLINE status_t floating_rolling_hashers_in_parallel_(                     
     using rolling_state_t = typename engine_t::rolling_state_t;
     using min_count_t = typename engine_t::min_count_t;
     using min_hash_t = typename engine_t::min_hash_t;
-    static constexpr auto window_width_ = engine_t::window_width_;
     static constexpr auto dimensions_k = engine_t::dimensions_k;
     static constexpr auto skipped_rolling_hash_k = engine_t::skipped_rolling_hash_k;
     static constexpr auto max_hash_k = engine_t::max_hash_k;
@@ -933,6 +932,7 @@ SZ_NOINLINE status_t floating_rolling_hashers_in_parallel_(                     
     // - Either split each text into chunks across threads
     // - Or split the texts themselves across threads
     size_t const text_size_threshold = specs.l2_bytes * executor.threads_count();
+    size_t const window_width = engine.window_width();
 
     // Process small texts by individual threads
     using executor_t = typename std::decay<executor_type_>::type;
@@ -973,7 +973,7 @@ SZ_NOINLINE status_t floating_rolling_hashers_in_parallel_(                     
             // ? This overlap will be different for different window widths, but assuming we are
             // ? computing the non-weighted Min-Hash, recomputing & comparing a few hashes for the
             // ? same slices isn't a big deal.
-            auto overlapping_text_end = (std::min)(text_start + chunk_size + window_width_ - 1, text_view.end());
+            auto overlapping_text_end = (std::min)(text_start + chunk_size + window_width - 1, text_view.end());
             auto thread_local_text = span<byte_t const>(text_start, overlapping_text_end);
 
             rolling_state_t thread_local_states[dimensions_k];
@@ -1296,6 +1296,7 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_> {
     rolling_state_t modulos_[aligned_dimensions_k];
     rolling_state_t inverse_modulos_[aligned_dimensions_k];
     rolling_state_t negative_discarding_multipliers_[aligned_dimensions_k];
+    size_t window_width_;
 
   public:
     constexpr size_t dimensions() const noexcept { return dimensions_k; }

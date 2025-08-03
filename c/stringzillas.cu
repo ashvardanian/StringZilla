@@ -91,9 +91,9 @@ struct strided_rows {
 
     std::size_t size() const noexcept { return count_; }
 
-    span<value_type> operator[](std::size_t index) const noexcept {
+    sz::span<value_type> operator[](std::size_t index) const noexcept {
         sz_assert_(index < count_ && "Index out of bounds");
-        return {reinterpret_cast<value_type *>(data_ + index * stride_bytes_), row_length_};
+        return sz::span<value_type>(reinterpret_cast<value_type *>(data_ + index * stride_bytes_), row_length_);
     }
 };
 
@@ -113,23 +113,39 @@ void sz_memory_free_from_unified_(void *address, sz_size_t size_bytes, void *han
 
 #endif // SZ_USE_CUDA
 
-struct device_scope_default_t {
-    szs::dummy_executor_t executor;
-    sz::cpu_specs_t specs;
-};
+struct default_scope_t {};
+szs::dummy_executor_t get_executor(default_scope_t const &) noexcept { return {}; }
+sz::cpu_specs_t get_specs(default_scope_t const &) noexcept { return {}; }
 
-struct device_scope_cpu_cores_t {
-    fu::basic_pool_t executor;
+struct cpu_scope_t {
+    std::unique_ptr<fu::basic_pool_t> executor_ptr;
     sz::cpu_specs_t specs;
-};
 
-struct device_scope_gpu_device_t {
+    cpu_scope_t() = default;
+    cpu_scope_t(std::unique_ptr<fu::basic_pool_t> exec_ptr, sz::cpu_specs_t cpu_specs) noexcept
+        : executor_ptr(std::move(exec_ptr)), specs(cpu_specs) {}
+};
+fu::basic_pool_t &get_executor(cpu_scope_t &scope) noexcept { return *scope.executor_ptr; }
+sz::cpu_specs_t get_specs(cpu_scope_t const &scope) noexcept { return scope.specs; }
+
+#if SZ_USE_CUDA
+struct gpu_scope_t {
     szs::cuda_executor_t executor;
     sz::gpu_specs_t specs;
 };
+szs::cuda_executor_t &get_executor(gpu_scope_t &scope) noexcept { return scope.executor; }
+sz::gpu_specs_t get_specs(gpu_scope_t const &scope) noexcept { return scope.specs; }
+#endif
 
 struct device_scope_t {
-    std::variant<device_scope_default_t, device_scope_cpu_cores_t, device_scope_gpu_device_t> variants;
+#if SZ_USE_CUDA
+    std::variant<default_scope_t, cpu_scope_t, gpu_scope_t> variants;
+#else
+    std::variant<default_scope_t, cpu_scope_t> variants;
+#endif
+
+    template <typename... variants_arguments_>
+    device_scope_t(variants_arguments_ &&...args) noexcept : variants(std::forward<variants_arguments_>(args)...) {}
 };
 
 static constexpr size_t fingerprint_slice_k = 64;
@@ -155,12 +171,12 @@ struct fingerprints_t {
         vec<szs::floating_rolling_hashers<sz_cap_cuda_k, fingerprint_slice_k>>,
 #endif
         vec<szs::floating_rolling_hashers<sz_cap_serial_k, fingerprint_slice_k>>, fallback_variant_t>
-        slices;
+        variants;
 
     sz_size_t dimensions = 0; // Total number of dimensions across all hashers
 
     template <typename... variants_arguments_>
-    fingerprints_t(variants_arguments_ &&...args) noexcept : slices(std::forward<variants_arguments_>(args)...) {}
+    fingerprints_t(variants_arguments_ &&...args) noexcept : variants(std::forward<variants_arguments_>(args)...) {}
 };
 
 template <typename texts_type_>
@@ -171,7 +187,7 @@ sz_status_t sz_fingerprints_for_(                                     //
     sz_u32_t *min_counts, sz_size_t min_counts_stride) {
 
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
-    sz_assert_(texts != nullptr && "Input texts cannot be null");
+    sz_assert_(device_punned != nullptr && "Device must be initialized");
     sz_assert_(min_hashes != nullptr && "Output min_hashes cannot be null");
     sz_assert_(min_counts != nullptr && "Output min_counts cannot be null");
 
@@ -182,58 +198,106 @@ sz_status_t sz_fingerprints_for_(                                     //
     // Wrap our stable ABI sequences into C++ friendly containers
     auto const dims = engine->dimensions;
     auto const texts_count = texts_container.size();
-    auto min_hashes_rows = strided_rows<sz_u32_t> {min_hashes, dims, min_hashes_stride, texts_count};
-    auto min_counts_rows = strided_rows<sz_u32_t> {min_counts, dims, min_counts_stride, texts_count};
+    auto min_hashes_rows =
+        strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_hashes), dims, min_hashes_stride, texts_count};
+    auto min_counts_rows =
+        strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_counts), dims, min_counts_stride, texts_count};
 
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
     using fallback_variant_t = typename fingerprints_t::fallback_variant_t;
     auto fallback_logic = [&](fallback_variant_t &fallback_hashers) {
-        // Now we need one more level of branching/matching to pass down a typed device scope.
-        std::visit(
-            [&](auto &device_scope) {
-                sz::status_t status = fallback_hashers(                //
-                    texts_container, min_hashes_rows, min_counts_rows, //
-                    device_scope.executor, device_scope.specs);
-                result = static_cast<sz_status_t>(status);
-            },
-            device->variants);
+        // CPU fallback hashers can only work with CPU-compatible device scopes
+        if (std::holds_alternative<default_scope_t>(device->variants)) {
+            auto &device_scope = std::get<default_scope_t>(device->variants);
+            sz::status_t status = fallback_hashers(                //
+                texts_container, min_hashes_rows, min_counts_rows, //
+                get_executor(device_scope), get_specs(device_scope));
+            result = static_cast<sz_status_t>(status);
+        }
+        else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
+            auto &device_scope = std::get<cpu_scope_t>(device->variants);
+            sz::status_t status = fallback_hashers(                //
+                texts_container, min_hashes_rows, min_counts_rows, //
+                get_executor(device_scope), get_specs(device_scope));
+            result = static_cast<sz_status_t>(status);
+        }
+        else { result = sz_status_unknown_k; }
     };
 
     // The unrolled logic is a bit more complex than `fallback_logic`, but in practice involves
     // just one additional loop level.
     auto unrolled_logic = [&](auto &&unrolled_hashers) { std::printf("Unrolled hashers with %zu dimensions\n", dims); };
 
-    std::visit(overloaded {fallback_logic, unrolled_logic}, engine->slices);
+    std::visit(overloaded {fallback_logic, unrolled_logic}, engine->variants);
     return result;
 }
 
 extern "C" {
 
-SZ_DYNAMIC void sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc) {
+SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc) {
 #if SZ_USE_CUDA
     alloc->allocate = &sz_memory_allocate_from_unified_;
     alloc->free = &sz_memory_free_from_unified_;
     alloc->handle = nullptr;
+    return sz_success_k;
 #else
-    sz_memory_allocator_init_default(alloc);
+    return sz_missing_gpu_k;
 #endif
 }
 
-SZ_DYNAMIC void sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_device_scope_t *scope) {
-    sz_unused_(cpu_cores);
-    sz_unused_(scope);
+SZ_DYNAMIC sz_status_t sz_device_scope_init_default(sz_device_scope_t *scope_punned) {
+    sz_assert_(scope_punned != nullptr && "Scope must not be null");
+    auto *scope = new device_scope_t {default_scope_t {}};
+    if (!scope) return sz_bad_alloc_k;
+    *scope_punned = reinterpret_cast<sz_device_scope_t>(scope);
+    return sz_success_k;
 }
 
-SZ_DYNAMIC void sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_device_scope_t *scope) {
+SZ_DYNAMIC sz_status_t sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_device_scope_t *scope_punned) {
+    sz_assert_(scope_punned != nullptr && "Scope must not be null");
+    sz_assert_(cpu_cores > 0 && "CPU cores must be greater than zero");
+    sz_assert_(cpu_cores > 1 && "For a single-threaded execution, use the default scope");
+
+    sz::cpu_specs_t specs;
+    auto executor = std::make_unique<fu::basic_pool_t>();
+    if (!executor->try_spawn(cpu_cores)) return sz_bad_alloc_k;
+
+    auto *scope =
+        new (std::nothrow) device_scope_t(std::in_place_type_t<cpu_scope_t> {}, std::move(executor), std::move(specs));
+    if (!scope) return sz_bad_alloc_k;
+    *scope_punned = reinterpret_cast<sz_device_scope_t>(scope);
+    return sz_success_k;
+}
+
+SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_device_scope_t *scope_punned) {
+    sz_assert_(scope_punned != nullptr && "Scope must not be null");
+
+#if SZ_USE_CUDA
+    sz::gpu_specs_t specs;
+    auto specs_status = szs::gpu_specs_fetch(specs, static_cast<int>(gpu_device));
+    if (specs_status.status != sz::status_t::success_k) return static_cast<sz_status_t>(specs_status.status);
+    szs::cuda_executor_t executor;
+    auto executor_status = executor.try_scheduling(static_cast<int>(gpu_device));
+    if (executor_status.status != sz::status_t::success_k) return static_cast<sz_status_t>(executor_status.status);
+
+    auto *scope =
+        new (std::nothrow) device_scope_t {gpu_scope_t {.executor = std::move(executor), .specs = std::move(specs)}};
+    if (!scope) return sz_bad_alloc_k;
+    *scope_punned = reinterpret_cast<sz_device_scope_t>(scope);
+    return sz_success_k;
+#else
     sz_unused_(gpu_device);
-    sz_unused_(scope);
+    sz_unused_(scope_punned);
+    return sz_missing_gpu_k;
+#endif
 }
 
-SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope) { sz_unused_(scope); }
-
-static constexpr size_t window_widths_256d_k[] = {3, 5, 7, 9}; // 64 dims per width for 256+ dims
-static constexpr size_t window_widths_512d_k[] = {3, 4, 5, 7, 9, 11, 15, 31};
+SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope_punned) {
+    if (scope_punned == nullptr) return;
+    auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
+    delete scope;
+}
 
 SZ_DYNAMIC sz_status_t sz_fingerprints_init(                              //
     sz_size_t alphabet_size, sz_size_t const *window_widths,              //
@@ -263,6 +327,9 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                              //
         *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
         return sz_success_k;
     }
+
+    // TODO: Implement unrolled logic
+    return sz_status_unknown_k;
 }
 
 SZ_DYNAMIC sz_status_t sz_fingerprints_sequence(                      //

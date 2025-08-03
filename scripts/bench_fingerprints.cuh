@@ -221,10 +221,10 @@ void bench_fingerprints(environment_t const &env) {
 #if SZ_USE_CUDA
     bench_nullary(                          //
         env, "rolling_cuda", call_baseline, //
-        fingerprint_callable<rolling_cuda_t, gpu_specs_t>(tape, min_hashes_accelerated, min_counts_accelerated,
-                                                          *rolling_cuda, specs), //
-        callable_no_op_t {},                                                     // preprocessing
-        fingerprints_equality_t {})                                              // equality check
+        fingerprint_callable<rolling_cuda_t, cuda_executor_t, gpu_specs_t>(
+            tape, min_hashes_accelerated, min_counts_accelerated, *rolling_cuda, cuda_executor_t {}, specs), //
+        callable_no_op_t {},        // preprocessing
+        fingerprints_equality_t {}) // equality check
         .log(baseline, unrolled);
     scramble_accelerated_results();
 #endif // SZ_USE_CUDA

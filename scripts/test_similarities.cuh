@@ -383,9 +383,9 @@ void edit_distance_log_mismatch(std::string const &first, std::string const &sec
  *          as well as the similarity scoring functions for bioinformatics-like workloads
  *          on a @b fixed set of different representative ASCII and UTF-8 strings.
  */
-template <typename score_type_, typename base_operator_, typename simd_operator_, typename... extra_args_>
+template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
-                                  std::string_view allowed_chars = {}, extra_args_ &&...extra_args) {
+                                  std::string_view allowed_chars = {}, simd_extra_args_ &&...simd_extra_args) {
 
     std::vector<std::pair<std::string, std::string>> test_cases;
     auto append = [&test_cases](std::string const &first, std::string const &second) {
@@ -500,7 +500,7 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
         score_t *results_base_ptr = results_base.data();
         score_t *results_simd_ptr = results_simd.data();
         status_t status_base = base_operator(first_view, second_view, results_base_ptr);
-        status_t status_simd = simd_operator(first_view, second_view, results_simd_ptr, extra_args...);
+        status_t status_simd = simd_operator(first_view, second_view, results_simd_ptr, simd_extra_args...);
         sz_assert_(status_base == status_t::success_k);
         sz_assert_(status_simd == status_t::success_k);
         if (results_base[0] != results_simd[0])
@@ -520,7 +520,8 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
-        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), extra_args...);
+        status_t status_simd =
+            simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), simd_extra_args...);
         sz_assert_(status_base == status_t::success_k);
         sz_assert_(status_simd == status_t::success_k);
 
@@ -537,10 +538,10 @@ void test_similarity_scores_fixed(base_operator_ &&base_operator, simd_operator_
  *          as well as the similarity scoring functions for bioinformatics-like workloads
  *          on a synthetic @b randomly-generated set of strings from a given @p alphabet.
  */
-template <typename score_type_, typename base_operator_, typename simd_operator_, typename... extra_args_>
+template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
                                   fuzzy_config_t config = {}, std::size_t iterations = 10,
-                                  extra_args_ &&...extra_args) {
+                                  simd_extra_args_ &&...simd_extra_args) {
 
     unified_vector<score_type_> results_base(config.batch_size), results_simd(config.batch_size);
     std::vector<std::string> first_array, second_array;
@@ -553,7 +554,8 @@ void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_
 
         // Compute with both backends
         status_t status_base = base_operator(first_tape.view(), second_tape.view(), results_base.data());
-        status_t status_simd = simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), extra_args...);
+        status_t status_simd =
+            simd_operator(first_tape.view(), second_tape.view(), results_simd.data(), simd_extra_args...);
         sz_assert_(status_base == status_t::success_k);
         sz_assert_(status_simd == status_t::success_k);
 
@@ -565,12 +567,12 @@ void test_similarity_scores_fuzzy(base_operator_ &&base_operator, simd_operator_
     }
 }
 
-template <typename score_type_, typename base_operator_, typename simd_operator_, typename... extra_args_>
+template <typename score_type_, typename base_operator_, typename simd_operator_, typename... simd_extra_args_>
 void test_similarity_scores_fixed_and_fuzzy(base_operator_ &&base_operator, simd_operator_ &&simd_operator,
                                             std::string_view allowed_chars = {}, fuzzy_config_t config = {},
-                                            extra_args_ &&...extra_args) {
-    test_similarity_scores_fixed<score_type_>(base_operator, simd_operator, allowed_chars, extra_args...);
-    test_similarity_scores_fuzzy<score_type_>(base_operator, simd_operator, config, 1, extra_args...);
+                                            simd_extra_args_ &&...simd_extra_args) {
+    test_similarity_scores_fixed<score_type_>(base_operator, simd_operator, allowed_chars, simd_extra_args...);
+    test_similarity_scores_fuzzy<score_type_>(base_operator, simd_operator, config, 1, simd_extra_args...);
 }
 
 /**
@@ -733,7 +735,7 @@ void test_similarity_scores_equivalence() {
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    sz_assert_(get_first_gpu_specs(first_gpu_specs) == status_t::success_k);
+    sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);
 #endif
 
 #if SZ_USE_CUDA
@@ -741,13 +743,13 @@ void test_similarity_scores_equivalence() {
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
         levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
         levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_linear}, {}, {},
-        first_gpu_specs);
+        cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Levenshtein distance against Multi-threaded on CPU with weird affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
         levenshtein_distances<char, affine_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_affine}, //
         levenshtein_distances<char, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {weird_uniform, weird_affine}, {}, {},
-        first_gpu_specs);
+        cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
@@ -755,7 +757,7 @@ void test_similarity_scores_equivalence() {
     test_similarity_scores_fixed_and_fuzzy<sz_size_t>(                                                            //
         levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {weird_uniform, weird_linear}, //
         levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {weird_uniform, weird_linear}, {}, {},
-        first_gpu_specs);
+        cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_CUDA
@@ -765,7 +767,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
             blosum62_matrix, blosum62_linear_cost},
-        {}, {}, first_gpu_specs);
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Needleman-Wunsch score against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
@@ -773,7 +775,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_affine_cost}, //
         needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {
             blosum62_matrix, blosum62_affine_cost},
-        {}, {}, first_gpu_specs);
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
@@ -781,7 +783,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_linear_cost}, //
         smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
                                                                                                   blosum62_linear_cost},
-        {}, {}, first_gpu_specs);
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
@@ -789,7 +791,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_affine_cost}, //
         smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_cap_cuda_k> {blosum62_matrix,
                                                                                                   blosum62_affine_cost},
-        {}, {}, first_gpu_specs);
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_HOPPER
@@ -799,7 +801,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_linear_cost}, //
         needleman_wunsch_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
             blosum62_matrix, blosum62_linear_cost},
-        {}, {}, first_gpu_specs);
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Needleman-Wunsch score on Hopper against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
@@ -807,7 +809,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_affine_cost}, //
         needleman_wunsch_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {
             blosum62_matrix, blosum62_affine_cost},
-        {}, {}, first_gpu_specs);
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
@@ -815,7 +817,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_linear_cost}, //
         smith_waterman_scores<char, error_matrix_t, linear_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
                                                                                                   blosum62_linear_cost},
-        {}, {}, first_gpu_specs);
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 
     // CUDA Smith-Waterman score on Hopper against Multi-threaded on CPU with affine costs
     test_similarity_scores_fixed_and_fuzzy<sz_ssize_t>( //
@@ -823,7 +825,7 @@ void test_similarity_scores_equivalence() {
             blosum62_matrix, blosum62_affine_cost}, //
         smith_waterman_scores<char, error_matrix_t, affine_gap_costs_t, ualloc_t, sz_caps_ckh_k> {blosum62_matrix,
                                                                                                   blosum62_affine_cost},
-        {}, {}, first_gpu_specs);
+        {}, {}, cuda_executor_t {}, first_gpu_specs);
 
 #endif
 }
@@ -860,7 +862,7 @@ void test_similarity_scores_memory_usage() {
 
 #if SZ_USE_CUDA
     gpu_specs_t first_gpu_specs;
-    sz_assert_(get_first_gpu_specs(first_gpu_specs) == status_t::success_k);
+    sz_assert_(gpu_specs_fetch(first_gpu_specs) == status_t::success_k);
 #endif
 
     // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:
@@ -914,7 +916,7 @@ void test_similarity_scores_memory_usage() {
         test_similarity_scores_fuzzy<sz_size_t>(                                           //
             levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
             levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_cap_cuda_k> {}, experiment, 10,
-            first_gpu_specs);
+            cuda_executor_t {}, first_gpu_specs);
 #endif
 
 #if SZ_USE_KEPLER
@@ -922,7 +924,7 @@ void test_similarity_scores_memory_usage() {
         test_similarity_scores_fuzzy<sz_size_t>(                                           //
             levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k> {}, //
             levenshtein_distances<char, linear_gap_costs_t, ualloc_t, sz_caps_ck_k> {}, experiment, 10,
-            first_gpu_specs);
+            cuda_executor_t {}, first_gpu_specs);
 #endif
     }
 }

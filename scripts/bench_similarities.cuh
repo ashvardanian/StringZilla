@@ -165,57 +165,60 @@ void bench_levenshtein(environment_t const &env) {
 
 #if SZ_USE_CUDA
         bench_unary(env, "levenshtein_cuda:batch"s + std::to_string(batch_size), call_linear_baseline,
-                    similarities_callable<levenshtein_cuda_t, gpu_specs_t>(
-                        env, results_linear_accelerated, levenshtein_cuda_t {weird_uniform, weird_linear}, specs),
+                    similarities_callable<levenshtein_cuda_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_linear_accelerated, levenshtein_cuda_t {weird_uniform, weird_linear},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
 
-        bench_unary(
-            env, "affine_levenshtein_cuda:batch"s + std::to_string(batch_size), call_affine_baseline,
-            similarities_callable<affine_levenshtein_cuda_t, gpu_specs_t>(
-                env, results_affine_accelerated, affine_levenshtein_cuda_t {weird_uniform, weird_affine}, specs),
-            callable_no_op_t {},        // preprocessing
-            similarities_equality_t {}) // equality check
+        bench_unary(env, "affine_levenshtein_cuda:batch"s + std::to_string(batch_size), call_affine_baseline,
+                    similarities_callable<affine_levenshtein_cuda_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_affine_accelerated, affine_levenshtein_cuda_t {weird_uniform, weird_affine},
+                        cuda_executor_t {}, specs),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
             .log(linear_baseline, affine_baseline);
         scramble_accelerated_results(results_affine_accelerated);
 #endif
 
 #if SZ_USE_KEPLER
         bench_unary(env, "levenshtein_kepler:batch"s + std::to_string(batch_size), call_linear_baseline,
-                    similarities_callable<levenshtein_kepler_t, gpu_specs_t>(
-                        env, results_linear_accelerated, levenshtein_kepler_t {weird_uniform, weird_linear}, specs),
+                    similarities_callable<levenshtein_kepler_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_linear_accelerated, levenshtein_kepler_t {weird_uniform, weird_linear},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
 
-        bench_unary(
-            env, "affine_levenshtein_kepler:batch"s + std::to_string(batch_size), call_affine_baseline,
-            similarities_callable<affine_levenshtein_kepler_t, gpu_specs_t>(
-                env, results_affine_accelerated, affine_levenshtein_kepler_t {weird_uniform, weird_affine}, specs),
-            callable_no_op_t {},        // preprocessing
-            similarities_equality_t {}) // equality check
+        bench_unary(env, "affine_levenshtein_kepler:batch"s + std::to_string(batch_size), call_affine_baseline,
+                    similarities_callable<affine_levenshtein_kepler_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_affine_accelerated, affine_levenshtein_kepler_t {weird_uniform, weird_affine},
+                        cuda_executor_t {}, specs),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
             .log(linear_baseline, affine_baseline);
         scramble_accelerated_results(results_affine_accelerated);
 #endif
 
 #if SZ_USE_HOPPER
         bench_unary(env, "levenshtein_hopper:batch"s + std::to_string(batch_size), call_linear_baseline,
-                    similarities_callable<levenshtein_hopper_t, gpu_specs_t>(
-                        env, results_linear_accelerated, levenshtein_hopper_t {weird_uniform, weird_linear}, specs),
+                    similarities_callable<levenshtein_hopper_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_linear_accelerated, levenshtein_hopper_t {weird_uniform, weird_linear},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_baseline);
         scramble_accelerated_results(results_linear_accelerated);
 
-        bench_unary(
-            env, "affine_levenshtein_hopper:batch"s + std::to_string(batch_size), call_affine_baseline,
-            similarities_callable<affine_levenshtein_hopper_t, gpu_specs_t>(
-                env, results_affine_accelerated, affine_levenshtein_hopper_t {weird_uniform, weird_affine}, specs),
-            callable_no_op_t {},        // preprocessing
-            similarities_equality_t {}) // equality check
+        bench_unary(env, "affine_levenshtein_hopper:batch"s + std::to_string(batch_size), call_affine_baseline,
+                    similarities_callable<affine_levenshtein_hopper_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_affine_accelerated, affine_levenshtein_hopper_t {weird_uniform, weird_affine},
+                        cuda_executor_t {}, specs),
+                    callable_no_op_t {},        // preprocessing
+                    similarities_equality_t {}) // equality check
             .log(linear_baseline, affine_baseline);
         scramble_accelerated_results(results_affine_accelerated);
 #endif
@@ -323,16 +326,18 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
 #if SZ_USE_CUDA
         bench_unary(env, "needleman_wunsch_cuda:batch"s + std::to_string(batch_size), call_linear_global_baseline,
-                    similarities_callable<needleman_wunsch_cuda_t, gpu_specs_t>(
-                        env, results_linear_global_accelerated, {blosum62_matrix, blosum62_linear_cost}, specs),
+                    similarities_callable<needleman_wunsch_cuda_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_linear_global_accelerated, {blosum62_matrix, blosum62_linear_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_global_baseline);
         scramble_accelerated_results(results_linear_global_accelerated);
 
         bench_unary(env, "smith_waterman_cuda:batch"s + std::to_string(batch_size), call_linear_local_baseline,
-                    similarities_callable<smith_waterman_cuda_t, gpu_specs_t>(
-                        env, results_linear_local_accelerated, {blosum62_matrix, blosum62_linear_cost}, specs),
+                    similarities_callable<smith_waterman_cuda_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_linear_local_accelerated, {blosum62_matrix, blosum62_linear_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_local_baseline);
@@ -340,16 +345,18 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "affine_needleman_wunsch_cuda:batch"s + std::to_string(batch_size),
                     call_affine_global_baseline,
-                    similarities_callable<affine_needleman_wunsch_cuda_t, gpu_specs_t>(
-                        env, results_affine_global_accelerated, {blosum62_matrix, blosum62_affine_cost}, specs),
+                    similarities_callable<affine_needleman_wunsch_cuda_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_affine_global_accelerated, {blosum62_matrix, blosum62_affine_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_global_baseline);
         scramble_accelerated_results(results_affine_global_accelerated);
 
         bench_unary(env, "affine_smith_waterman_cuda:batch"s + std::to_string(batch_size), call_affine_local_baseline,
-                    similarities_callable<affine_smith_waterman_cuda_t, gpu_specs_t>(
-                        env, results_affine_local_accelerated, {blosum62_matrix, blosum62_affine_cost}, specs),
+                    similarities_callable<affine_smith_waterman_cuda_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_affine_local_accelerated, {blosum62_matrix, blosum62_affine_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_local_baseline);
@@ -358,16 +365,18 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
 #if SZ_USE_HOPPER
         bench_unary(env, "needleman_wunsch_hopper:batch"s + std::to_string(batch_size), call_linear_global_baseline,
-                    similarities_callable<needleman_wunsch_hopper_t, gpu_specs_t>(
-                        env, results_linear_global_accelerated, {blosum62_matrix, blosum62_linear_cost}, specs),
+                    similarities_callable<needleman_wunsch_hopper_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_linear_global_accelerated, {blosum62_matrix, blosum62_linear_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_global_baseline);
         scramble_accelerated_results(results_linear_global_accelerated);
 
         bench_unary(env, "smith_waterman_hopper:batch"s + std::to_string(batch_size), call_linear_local_baseline,
-                    similarities_callable<smith_waterman_hopper_t, gpu_specs_t>(
-                        env, results_linear_local_accelerated, {blosum62_matrix, blosum62_linear_cost}, specs),
+                    similarities_callable<smith_waterman_hopper_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_linear_local_accelerated, {blosum62_matrix, blosum62_linear_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(linear_local_baseline);
@@ -375,16 +384,18 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
 
         bench_unary(env, "affine_needleman_wunsch_hopper:batch"s + std::to_string(batch_size),
                     call_affine_global_baseline,
-                    similarities_callable<affine_needleman_wunsch_hopper_t, gpu_specs_t>(
-                        env, results_affine_global_accelerated, {blosum62_matrix, blosum62_affine_cost}, specs),
+                    similarities_callable<affine_needleman_wunsch_hopper_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_affine_global_accelerated, {blosum62_matrix, blosum62_affine_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_global_baseline);
         scramble_accelerated_results(results_affine_global_accelerated);
 
         bench_unary(env, "affine_smith_waterman_hopper:batch"s + std::to_string(batch_size), call_affine_local_baseline,
-                    similarities_callable<affine_smith_waterman_hopper_t, gpu_specs_t>(
-                        env, results_affine_local_accelerated, {blosum62_matrix, blosum62_affine_cost}, specs),
+                    similarities_callable<affine_smith_waterman_hopper_t, cuda_executor_t, gpu_specs_t>(
+                        env, results_affine_local_accelerated, {blosum62_matrix, blosum62_affine_cost},
+                        cuda_executor_t {}, specs),
                     callable_no_op_t {},        // preprocessing
                     similarities_equality_t {}) // equality check
             .log(affine_local_baseline);

@@ -61,6 +61,7 @@ template <typename type_>
 using remove_cvref = typename std::remove_cv<typename std::remove_reference<type_>::type>::type;
 
 struct dummy_executor_t {
+    using prong_t = dummy_prong_t;
 
     constexpr size_t threads_count() const noexcept { return 1; }
     constexpr dummy_mutex_t make_mutex() const noexcept { return {}; }

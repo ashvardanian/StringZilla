@@ -320,6 +320,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
 
         using task_t = cuda_floating_fingerprint_task_<byte_t>;
         using tasks_allocator_t = typename allocator_t::template rebind<task_t>::other;
+        sz_unused_(specs);
 
         // Preallocate the events for GPU timing.
         cudaEvent_t start_event, stop_event;
@@ -367,7 +368,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
             dim3(random_block_size),                            // Block dimensions
             warp_level_kernel_args,                             // Array of kernel argument pointers
             0,                                                  // Shared memory per block (in bytes)
-            executor.stream());                                   // CUDA stream
+            executor.stream());                                 // CUDA stream
         if (launch_error != cudaSuccess)
             if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
             else { return {status_t::unknown_k, launch_error}; }
@@ -449,7 +450,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
             dim3(random_block_size),                                                  // Block dimensions
             warp_level_kernel_args, // Array of kernel argument pointers
             0,                      // Shared memory per block (in bytes)
-            executor.stream());       // CUDA stream
+            executor.stream());     // CUDA stream
         if (launch_error != cudaSuccess)
             if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
             else { return {status_t::unknown_k, launch_error}; }

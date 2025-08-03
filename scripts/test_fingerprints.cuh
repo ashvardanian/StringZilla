@@ -15,6 +15,7 @@
 
 #if SZ_USE_CUDA
 #include "stringzillas/fingerprints.cuh"
+#include "stringzillas/types.cuh" // `unified_alloc`
 #endif
 
 #if !SZ_IS_CPP17_
@@ -352,14 +353,14 @@ void test_rolling_hashers_equivalence_against_baseline(texts_type_ const &texts,
     using min_counts_t = safe_array<u32_t, dims_k>;
 
     arrow_strings_tape_t texts_tape;
-    safe_vector<min_hashes_t, unified_alloc<min_hashes_t>> serial_hashes_per_text, accelerated_hashes_per_text;
-    safe_vector<min_counts_t, unified_alloc<min_counts_t>> serial_counts_per_text, accelerated_counts_per_text;
+    unified_vector<min_hashes_t> serial_hashes_per_text, accelerated_hashes_per_text;
+    unified_vector<min_counts_t> serial_counts_per_text, accelerated_counts_per_text;
 
     sz_assert_(texts_tape.try_assign(texts.begin(), texts.end()) == status_t::success_k);
-    sz_assert_(serial_hashes_per_text.try_resize(texts.size()) == status_t::success_k);
-    sz_assert_(accelerated_hashes_per_text.try_resize(texts.size()) == status_t::success_k);
-    sz_assert_(serial_counts_per_text.try_resize(texts.size()) == status_t::success_k);
-    sz_assert_(accelerated_counts_per_text.try_resize(texts.size()) == status_t::success_k);
+    serial_hashes_per_text.resize(texts.size());
+    accelerated_hashes_per_text.resize(texts.size());
+    serial_counts_per_text.resize(texts.size());
+    accelerated_counts_per_text.resize(texts.size());
 
     // Compute the fingerprints
     for (size_t text_index = 0; text_index < texts.size(); ++text_index) {

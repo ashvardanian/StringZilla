@@ -72,7 +72,7 @@ typedef void *sz_device_scope_t;
 SZ_DYNAMIC sz_status_t sz_device_scope_init_default(sz_device_scope_t *scope);
 SZ_DYNAMIC sz_status_t sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_device_scope_t *scope);
 SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_device_scope_t *scope);
-SZ_DYNAMIC sz_status_t sz_device_scope_free(sz_device_scope_t scope);
+SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope);
 
 /*  APIs for computing edit-distances between binary and UTF-8 strings.
  *  Supports `sz_sequence_t`, `sz_arrow_u32tape_t`, and `sz_arrow_u64tape_t` inputs.
