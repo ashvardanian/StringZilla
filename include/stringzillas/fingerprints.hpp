@@ -1547,8 +1547,11 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_> {
         else {
             _mm256_storeu_pd(&last_states[first_dim], last_states_vec.ymm_pd);
             _mm256_storeu_pd(&rolling_minimums[first_dim], rolling_minimums_vec.ymm_pd);
-            _mm_storeu_si128(reinterpret_cast<__m128i *>(&rolling_counts[first_dim]),
-                             _mm256_cvtepi64_epi32(rolling_counts_vec.ymm));
+            // AVX2-compatible replacement for `_mm256_cvtepi64_epi32`
+            __m256i shuffled = _mm256_shuffle_epi32(rolling_counts_vec.ymm, _MM_SHUFFLE(2, 0, 2, 0));
+            __m128i lo = _mm256_extracti128_si256(shuffled, 0);
+            __m128i hi = _mm256_extracti128_si256(shuffled, 1);
+            _mm_storeu_si128(reinterpret_cast<__m128i *>(&rolling_counts[first_dim]), _mm_unpacklo_epi64(lo, hi));
         }
     }
 };
