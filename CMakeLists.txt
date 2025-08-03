@@ -5,6 +5,9 @@
 # * stringzilla_header: A header-only library with the StringZilla C and C++ headers.
 # * stringzilla_shared: A shared library with the StringZilla C and C++ headers and dynamic SIMD dispatch.
 # * stringzilla_bare: A shared library with the StringZilla headers, but without linking the standard C library.
+# * stringzillas_cpus_shared: A shared library with the StringZillas parallel algorithms for multi-threaded CPUs.
+# * stringzillas_cuda_shared: A shared library with the StringZillas parallel algorithms for CUDA-capable GPUs.
+# * stringzillas_rocm_shared: A shared library with the StringZillas parallel algorithms for ROCm-capable GPUs.
 #
 # Tests for different C++ standards:
 #
@@ -122,6 +125,7 @@ option(STRINGZILLA_INSTALL "Install CMake targets" OFF)
 option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_BENCHMARK "Compile a native benchmark in C++" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${STRINGZILLA_IS_MAIN_PROJECT})
+option(STRINGZILLAS_BUILD_SHARED "Compile dynamic parallel libraries" ${STRINGZILLA_IS_MAIN_PROJECT})
 set(STRINGZILLA_TARGET_ARCH
     ""
     CACHE STRING "Architecture to tell the compiler to optimize for (-march)"
@@ -521,31 +525,140 @@ if (${STRINGZILLA_BUILD_SHARED})
     endif ()
 endif ()
 
+if (${STRINGZILLAS_BUILD_SHARED})
+    # StringZillas shared library targets for parallel string operations
+    function (define_stringzillas_shared target backend_flags)
+        add_library(${target} SHARED c/stringzillas.cu)
+        add_library(${PROJECT_NAME}::${target} ALIAS ${target})
+
+        set_target_properties(
+            ${target}
+            PROPERTIES VERSION ${PROJECT_VERSION}
+                       SOVERSION 1
+                       POSITION_INDEPENDENT_CODE ON
+        )
+
+        target_include_directories(${target} PUBLIC include)
+        target_include_directories(${target} PRIVATE fork_union/include)
+        target_compile_definitions(${target} PRIVATE "SZ_DYNAMIC_DISPATCH=1")
+        target_compile_definitions(${target} PRIVATE "SZ_AVOID_LIBC=0")
+        target_compile_definitions(${target} PRIVATE "SZ_DEBUG=0")
+
+        # Set backend-specific compilation flags
+        foreach (flag ${backend_flags})
+            target_compile_definitions(${target} PRIVATE ${flag})
+        endforeach ()
+
+        # Use C++17 for StringZillas
+        set_target_properties(${target} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+
+        # Architecture-specific optimizations
+        target_compile_options(
+            ${target} PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-O3;-fPIC>" "$<$<CXX_COMPILER_ID:MSVC>:/O2>"
+        )
+
+        # Dynamic dispatch for SIMD on different architectures
+        if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+            target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=1" "SZ_IS_64BIT_ARM_=0")
+        elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+            target_compile_definitions(${target} PRIVATE "SZ_IS_64BIT_X86_=0" "SZ_IS_64BIT_ARM_=1")
+        endif ()
+
+        # Link threading libraries for CPU backend
+        find_package(Threads REQUIRED)
+        target_link_libraries(${target} PRIVATE Threads::Threads)
+
+        # Platform-specific runtime libraries (similar to define_shared)
+        if (WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+            target_link_libraries(${target} PRIVATE msvcrt.lib vcruntime.lib ucrt.lib)
+        endif ()
+
+    endfunction ()
+
+    # Define StringZillas CPU shared library
+    define_stringzillas_shared(stringzillas_cpus_shared "SZ_USE_CUDA=0;SZ_USE_ROCM=0")
+
+    # Define StringZillas CUDA shared library (only if CUDA is available)
+    if (ENABLE_CUDA)
+        define_stringzillas_shared(stringzillas_cuda_shared "SZ_USE_CUDA=1;SZ_USE_ROCM=0")
+
+        # Link CUDA libraries
+        target_link_libraries(stringzillas_cuda_shared PRIVATE CUDA::cudart)
+
+        # Set CUDA-specific properties
+        set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+        set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_ARCHITECTURES "70;75;80;86;89;90")
+
+        # Enable CUDA separable compilation for device code
+        set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    endif ()
+
+    # TODO: Define StringZillas ROCm shared library when ROCm support is added if (ENABLE_ROCM)
+    # define_stringzillas_shared(stringzillas_rocm_shared "SZ_USE_CUDA=0;SZ_USE_ROCM=1") endif ()
+
+endif ()
+
 if (STRINGZILLA_INSTALL)
-    install(
-        TARGETS stringzilla_shared
-        ARCHIVE
-        BUNDLE
-        FRAMEWORK
-        LIBRARY
-        OBJECTS
-        PRIVATE_HEADER
-        PUBLIC_HEADER
-        RESOURCE
-        RUNTIME
-    )
-    install(
-        TARGETS stringzilla_bare
-        ARCHIVE
-        BUNDLE
-        FRAMEWORK
-        LIBRARY
-        OBJECTS
-        PRIVATE_HEADER
-        PUBLIC_HEADER
-        RESOURCE
-        RUNTIME
-    )
+    if (TARGET stringzilla_header)
+        install(
+            TARGETS stringzilla_shared
+            ARCHIVE
+            BUNDLE
+            FRAMEWORK
+            LIBRARY
+            OBJECTS
+            PRIVATE_HEADER
+            PUBLIC_HEADER
+            RESOURCE
+            RUNTIME
+        )
+    endif ()
+    if (TARGET stringzilla_bare)
+        install(
+            TARGETS stringzilla_bare
+            ARCHIVE
+            BUNDLE
+            FRAMEWORK
+            LIBRARY
+            OBJECTS
+            PRIVATE_HEADER
+            PUBLIC_HEADER
+            RESOURCE
+            RUNTIME
+        )
+    endif ()
+
+    # Install StringZillas shared libraries if they were built
+    if (TARGET stringzillas_cpus_shared)
+        install(
+            TARGETS stringzillas_cpus_shared
+            ARCHIVE
+            BUNDLE
+            FRAMEWORK
+            LIBRARY
+            OBJECTS
+            PRIVATE_HEADER
+            PUBLIC_HEADER
+            RESOURCE
+            RUNTIME
+        )
+    endif ()
+
+    if (TARGET stringzillas_cuda_shared)
+        install(
+            TARGETS stringzillas_cuda_shared
+            ARCHIVE
+            BUNDLE
+            FRAMEWORK
+            LIBRARY
+            OBJECTS
+            PRIVATE_HEADER
+            PUBLIC_HEADER
+            RESOURCE
+            RUNTIME
+        )
+    endif ()
+
     install(DIRECTORY ${STRINGZILLA_INCLUDE_BUILD_DIR} DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR})
     install(DIRECTORY ./c/ DESTINATION /usr/src/${PROJECT_NAME}/)
 endif ()
