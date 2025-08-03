@@ -91,11 +91,20 @@ struct unified_alloc {
     }
 };
 
-inline std::optional<gpu_specs_t> gpu_specs(int device = 0) noexcept {
-    gpu_specs_t specs;
+using unified_alloc_t = unified_alloc<char>;
+
+struct cuda_status_t {
+    status_t status = status_t::success_k;
+    cudaError_t cuda_error = cudaSuccess;
+    float elapsed_milliseconds = 0.0;
+
+    inline operator status_t() const noexcept { return status; }
+};
+
+inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noexcept {
     cudaDeviceProp prop;
-    cudaError_t cuda_error = cudaGetDeviceProperties(&prop, device);
-    if (cuda_error != cudaSuccess) return std::nullopt; // ! Failed to get device properties
+    cudaError_t cuda_error = cudaGetDeviceProperties(&prop, device_id);
+    if (cuda_error != cudaSuccess) return {status_t::unknown_k, cuda_error};
 
     // Set the GPU specs
     specs.streaming_multiprocessors = prop.multiProcessorCount;
@@ -110,19 +119,30 @@ inline std::optional<gpu_specs_t> gpu_specs(int device = 0) noexcept {
     // Scheduling-related constants
     specs.max_blocks_per_multiprocessor = prop.maxBlocksPerMultiProcessor;
     specs.reserved_memory_per_block = prop.reservedSharedMemPerBlock;
-    return specs;
+    return {status_t::success_k, cudaSuccess};
 }
 
-struct cuda_status_t {
-    status_t status = status_t::success_k;
-    cudaError_t cuda_error = cudaSuccess;
-    float elapsed_milliseconds = 0.0;
+class cuda_executor_t {
+    cudaStream_t stream_ = 0;
+    int device_id_ = 0;
 
-    inline operator status_t() const noexcept { return status; }
-};
+  public:
+    constexpr cuda_executor_t() noexcept = default;
+    constexpr cuda_executor_t(cuda_executor_t const &) noexcept = default;
+    constexpr cuda_executor_t &operator=(cuda_executor_t const &) noexcept = default;
 
-struct cuda_executor_t {
-    cudaStream_t stream = 0;
+    cuda_status_t try_scheduling(int device_id) noexcept {
+        device_id_ = -1; // ? Invalid device ID
+        cudaError_t switching_error = cudaSetDevice(device_id);
+        if (switching_error != cudaSuccess) return {status_t::unknown_k, switching_error};
+        cudaError_t creation_error = cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking);
+        if (creation_error != cudaSuccess) return {status_t::unknown_k, creation_error};
+        device_id_ = device_id;
+        return {status_t::success_k, cudaSuccess};
+    }
+
+    explicit operator bool() const noexcept { return device_id_ >= 0; }
+    inline cudaStream_t stream() const noexcept { return stream_; }
 };
 
 /**

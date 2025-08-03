@@ -73,14 +73,13 @@ struct fingerprint_callable {
     }
 };
 
-void bench_fingerprint(environment_t const &env) {
+void bench_fingerprints(environment_t const &env) {
 
     namespace fu = fork_union;
 
 #if SZ_USE_CUDA
-    auto maybe_specs = gpu_specs();
-    if (!maybe_specs.has_value()) throw std::runtime_error("Failed to get GPU specs.");
-    gpu_specs_t specs = *maybe_specs;
+    gpu_specs_t specs;
+    if (gpu_specs_fetch(specs) != status_t::success_k) throw std::runtime_error("Failed to get GPU specs.");
 #endif
 
     arrow_strings_tape_t tape;

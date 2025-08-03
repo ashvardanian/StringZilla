@@ -442,7 +442,9 @@ void test_find_many_equivalence() {
         std::pow(needles_long_config.alphabet.size(), needles_long_config.max_string_length);
 
 #if SZ_USE_CUDA
-    gpu_specs_t first_gpu_specs = *gpu_specs();
+    gpu_specs_t first_gpu_specs;
+    if (gpu_specs_fetch(first_gpu_specs) != status_t::success_k)
+        throw std::runtime_error("Failed to fetch GPU specs for multi-pattern search equivalence test.");
 #endif
 
     // Single-threaded serial Aho-Corasick implementation

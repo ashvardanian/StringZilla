@@ -2084,7 +2084,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
     cuda_status_t operator()(                                                                 //
         first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
         results_type_ *results_ptr,                                                           //
-        gpu_specs_t specs = {}, cuda_executor_t executor = {}) const noexcept {
+        cuda_executor_t executor = {}, gpu_specs_t specs = {}) const noexcept {
 
         constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
         constexpr size_t count_diagonals_k = is_affine_k ? 7 : 3;
@@ -2099,7 +2099,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
         // Record the start event
-        cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream);
+        cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream());
         if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
 
         // Export all the tasks and sort them by decreasing memory requirement.
@@ -2194,7 +2194,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     dim3(random_block_size),                                                  // Block dimensions
                     device_level_kernel_args, // Array of kernel argument pointers
                     0,                        // Shared memory per block (in bytes)
-                    executor.stream);         // CUDA stream
+                    executor.stream());         // CUDA stream
                 if (launch_error != cudaSuccess)
                     if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
                     else { return {status_t::unknown_k, launch_error}; }
@@ -2278,7 +2278,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     dim3(threads_per_block),                                    // Block dimensions
                     warp_level_kernel_args,                                     // Array of kernel argument pointers
                     shared_memory_per_block,                                    // Shared memory per block (in bytes)
-                    executor.stream);                                           // CUDA stream
+                    executor.stream());                                           // CUDA stream
                 if (launch_error != cudaSuccess) {
                     result = {launch_error == cudaErrorMemoryAllocation ? status_t::bad_alloc_k : status_t::unknown_k,
                               launch_error};
@@ -2286,7 +2286,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                 }
 
                 // Wait until everything completes, as on the next iteration we will update the properties again.
-                cudaError_t execution_error = cudaStreamSynchronize(executor.stream);
+                cudaError_t execution_error = cudaStreamSynchronize(executor.stream());
                 if (execution_error != cudaSuccess) {
                     result = {status_t::unknown_k, execution_error};
                     return;
@@ -2297,7 +2297,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         }
 
         // Calculate the duration:
-        cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream);
+        cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream());
         if (stop_event_error != cudaSuccess) return {status_t::unknown_k, stop_event_error};
         float execution_milliseconds = 0;
         cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
@@ -2747,7 +2747,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
     cuda_status_t operator()(                                                                 //
         first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
         results_type_ *results_ptr,                                                           //
-        gpu_specs_t specs = {}, cuda_executor_t executor = {}) const noexcept {
+        cuda_executor_t executor = {}, gpu_specs_t specs = {}) const noexcept {
 
         constexpr bool is_local_k = locality_k == sz_similarity_local_k;
         constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
@@ -2763,13 +2763,13 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
         // Record the start event
-        cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream);
+        cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream());
         if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
 
         // Enqueue the transfer of the substituter to the constant memory:
         cudaError_t copy_error =
             cudaMemcpyToSymbolAsync(error_costs_in_cuda_constant_memory_, (void const *)&substituter_,
-                                    sizeof(substituter_t), 0, cudaMemcpyHostToDevice, executor.stream);
+                                    sizeof(substituter_t), 0, cudaMemcpyHostToDevice, executor.stream());
         if (copy_error != cudaSuccess) return {status_t::unknown_k, copy_error};
 
         // Export all the tasks and sort them by decreasing memory requirement.
@@ -2855,7 +2855,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
                     dim3(random_block_size),                                                  // Block dimensions
                     device_level_kernel_args, // Array of kernel argument pointers
                     0,                        // Shared memory per block (in bytes)
-                    executor.stream);         // CUDA stream
+                    executor.stream());         // CUDA stream
                 if (launch_error != cudaSuccess)
                     if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
                     else { return {status_t::unknown_k, launch_error}; }
@@ -2937,7 +2937,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
                     dim3(threads_per_block),                                    // Block dimensions
                     warp_level_kernel_args,                                     // Array of kernel argument pointers
                     shared_memory_per_block,                                    // Shared memory per block (in bytes)
-                    executor.stream);                                           // CUDA stream
+                    executor.stream());                                           // CUDA stream
                 if (launch_error != cudaSuccess) {
                     result = {launch_error == cudaErrorMemoryAllocation ? status_t::bad_alloc_k : status_t::unknown_k,
                               launch_error};
@@ -2945,7 +2945,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
                 }
 
                 // Wait until everything completes, as on the next iteration we will update the properties again.
-                cudaError_t execution_error = cudaStreamSynchronize(executor.stream);
+                cudaError_t execution_error = cudaStreamSynchronize(executor.stream());
                 if (execution_error != cudaSuccess) {
                     result = {status_t::unknown_k, execution_error};
                     return;
@@ -2956,7 +2956,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         }
 
         // Calculate the duration:
-        cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream);
+        cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream());
         if (stop_event_error != cudaSuccess) return {status_t::unknown_k, stop_event_error};
         float execution_milliseconds = 0;
         cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);

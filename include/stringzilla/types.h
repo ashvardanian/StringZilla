@@ -465,6 +465,8 @@ typedef enum sz_status_t {
     sz_overflow_risk_k = -14,
     /** For algorithms with multi-stage pipelines indicates input/output size mismatch. */
     sz_unexpected_dimensions_k = -15,
+    /** GPU support is missing in the library. */
+    sz_missing_gpu_k = -16,
     /** A sink-hole status for unknown errors. */
     sz_status_unknown_k = -1,
 } sz_status_t;

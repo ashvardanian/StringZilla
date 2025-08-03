@@ -90,7 +90,8 @@ void bench_levenshtein(environment_t const &env) {
     namespace fu = fork_union;
 
 #if SZ_USE_CUDA
-    gpu_specs_t specs = *gpu_specs();
+    gpu_specs_t specs;
+    if (gpu_specs_fetch(specs) != status_t::success_k) throw std::runtime_error("Failed to fetch GPU specs.");
 #endif
     std::vector<std::size_t> batch_sizes = {1, 64, 1024, 32 * 1024};
 #if SZ_DEBUG
@@ -232,7 +233,8 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
     auto blosum62_matrix = blosum62_mat.decompressed();
 
 #if SZ_USE_CUDA
-    gpu_specs_t specs = *gpu_specs();
+    gpu_specs_t specs;
+    if (gpu_specs_fetch(specs) != status_t::success_k) throw std::runtime_error("Failed to fetch GPU specs.");
 #endif
     std::vector<std::size_t> batch_sizes = {1, 64, 1024, 32 * 1024};
 #if SZ_DEBUG

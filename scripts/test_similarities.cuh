@@ -732,7 +732,8 @@ void test_similarity_scores_equivalence() {
 #endif
 
 #if SZ_USE_CUDA
-    gpu_specs_t first_gpu_specs = *gpu_specs();
+    gpu_specs_t first_gpu_specs;
+    sz_assert_(get_first_gpu_specs(first_gpu_specs) == status_t::success_k);
 #endif
 
 #if SZ_USE_CUDA
@@ -858,7 +859,8 @@ void test_similarity_scores_memory_usage() {
     };
 
 #if SZ_USE_CUDA
-    gpu_specs_t first_gpu_specs = *gpu_specs();
+    gpu_specs_t first_gpu_specs;
+    sz_assert_(get_first_gpu_specs(first_gpu_specs) == status_t::success_k);
 #endif
 
     // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:

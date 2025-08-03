@@ -102,7 +102,8 @@ void bench_find_many(environment_t const &env) {
     using namespace std::string_literals; // for "s" suffix
 
 #if SZ_USE_CUDA
-    gpu_specs_t specs = *gpu_specs();
+    gpu_specs_t specs;
+    if (gpu_specs_fetch(specs) != status_t::success_k) throw std::runtime_error("Failed to fetch GPU specs.");
 #endif
     std::vector<std::size_t> vocabulary_sizes = {
         1024,

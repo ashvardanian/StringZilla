@@ -23,7 +23,7 @@
 #ifndef STRINGZILLAS_H_
 #define STRINGZILLAS_H_
 
-#include "stringzilla.h" // `sz_sequence_t` and other types
+#include <stringzilla/stringzilla.h> // `sz_sequence_t` and other types
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,7 +53,7 @@ struct sz_arrow_u64tape_t {
  *  @brief Prepares the default allocator for unified memory management.
  *  @note When compiled on CUDA-capable systems, this function will use `cudaMallocManaged`.
  */
-SZ_DYNAMIC void sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc);
+SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc);
 
 /**
  *  Doesn't aim to provide the same level of granularity as the C++ API.
@@ -69,10 +69,10 @@ SZ_DYNAMIC void sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc);
  */
 typedef void *sz_device_scope_t;
 
-SZ_DYNAMIC void sz_device_scope_init_default(sz_device_scope_t *scope);
-SZ_DYNAMIC void sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_device_scope_t *scope);
-SZ_DYNAMIC void sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_device_scope_t *scope);
-SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope);
+SZ_DYNAMIC sz_status_t sz_device_scope_init_default(sz_device_scope_t *scope);
+SZ_DYNAMIC sz_status_t sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_device_scope_t *scope);
+SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_device_scope_t *scope);
+SZ_DYNAMIC sz_status_t sz_device_scope_free(sz_device_scope_t scope);
 
 /*  APIs for computing edit-distances between binary and UTF-8 strings.
  *  Supports `sz_sequence_t`, `sz_arrow_u32tape_t`, and `sz_arrow_u64tape_t` inputs.

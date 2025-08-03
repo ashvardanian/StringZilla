@@ -142,6 +142,7 @@ enum class status_t : int {
     contains_duplicates_k = sz_contains_duplicates_k,
     overflow_risk_k = sz_overflow_risk_k,
     unexpected_dimensions_k = sz_unexpected_dimensions_k,
+    missing_gpu_k = sz_missing_gpu_k,
     unknown_k = sz_status_unknown_k,
 };
 
@@ -247,6 +248,11 @@ struct span<value_type_, SZ_SIZE_MAX> {
         return span(data_ + offset, count);
     }
 };
+
+template <typename value_type_, std::size_t extent_>
+span<value_type_, extent_> to_span(span<value_type_, extent_> span) noexcept {
+    return span;
+}
 
 template <std::size_t extent_ = SZ_SIZE_MAX, typename container_type_ = void>
 span<typename container_type_::value_type, extent_> to_span(container_type_ &container) noexcept {

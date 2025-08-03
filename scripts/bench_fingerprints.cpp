@@ -54,7 +54,7 @@ int main(int argc, char const **argv) {
             environment_t::tokenization_t::lines_k);
 
         std::printf("Starting string fingerprinting benchmarks...\n");
-        bench_fingerprint(env);
+        bench_fingerprints(env);
     }
     catch (std::exception const &e) {
         std::fprintf(stderr, "Failed with: %s\n", e.what());

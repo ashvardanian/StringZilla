@@ -340,7 +340,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         };
 
         // Record the start event
-        cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream);
+        cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream());
         if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
 
         void *warp_level_kernel_args[5];
@@ -367,17 +367,17 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
             dim3(random_block_size),                            // Block dimensions
             warp_level_kernel_args,                             // Array of kernel argument pointers
             0,                                                  // Shared memory per block (in bytes)
-            executor.stream);                                   // CUDA stream
+            executor.stream());                                   // CUDA stream
         if (launch_error != cudaSuccess)
             if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
             else { return {status_t::unknown_k, launch_error}; }
 
         // Wait until everything completes, as on the next iteration we will update the properties again.
-        cudaError_t execution_error = cudaStreamSynchronize(executor.stream);
+        cudaError_t execution_error = cudaStreamSynchronize(executor.stream());
         if (execution_error != cudaSuccess) { return {status_t::unknown_k, execution_error}; }
 
         // Calculate the duration:
-        cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream);
+        cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream());
         if (stop_event_error != cudaSuccess) return {status_t::unknown_k, stop_event_error};
         float execution_milliseconds = 0;
         cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
@@ -387,8 +387,8 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
 
     template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_>
     SZ_NOINLINE cuda_status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text,
-                                         min_counts_per_text_type_ &&min_counts_per_text, gpu_specs_t specs = {},
-                                         cuda_executor_t executor = {}) const noexcept {
+                                         min_counts_per_text_type_ &&min_counts_per_text, cuda_executor_t executor = {},
+                                         gpu_specs_t specs = {}) const noexcept {
 
         using texts_t = texts_type_;
         using text_t = typename texts_t::value_type;
@@ -421,7 +421,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         //                [](task_t const &task) { return task.density == warps_working_together_k; });
 
         // Record the start event
-        cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream);
+        cudaError_t start_event_error = cudaEventRecord(start_event, executor.stream());
         if (start_event_error != cudaSuccess) return {status_t::unknown_k, start_event_error};
 
         void *warp_level_kernel_args[5];
@@ -449,17 +449,17 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
             dim3(random_block_size),                                                  // Block dimensions
             warp_level_kernel_args, // Array of kernel argument pointers
             0,                      // Shared memory per block (in bytes)
-            executor.stream);       // CUDA stream
+            executor.stream());       // CUDA stream
         if (launch_error != cudaSuccess)
             if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
             else { return {status_t::unknown_k, launch_error}; }
 
         // Wait until everything completes, as on the next iteration we will update the properties again.
-        cudaError_t execution_error = cudaStreamSynchronize(executor.stream);
+        cudaError_t execution_error = cudaStreamSynchronize(executor.stream());
         if (execution_error != cudaSuccess) { return {status_t::unknown_k, execution_error}; }
 
         // Calculate the duration:
-        cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream);
+        cudaError_t stop_event_error = cudaEventRecord(stop_event, executor.stream());
         if (stop_event_error != cudaSuccess) return {status_t::unknown_k, stop_event_error};
         float execution_milliseconds = 0;
         cudaEventElapsedTime(&execution_milliseconds, start_event, stop_event);
