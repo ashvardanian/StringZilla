@@ -53,6 +53,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
         # C/C++
         # If the compilation fails, we want to log the compilation commands in addition to
@@ -145,6 +147,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
         # C/C++
         # Clang 16 isn't available from default repos on Ubuntu 22.04, so we have to install it manually
@@ -230,6 +234,8 @@ jobs:
     container: swift:5.9
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Test Swift
         run: swift test
 
@@ -254,6 +260,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
         # C/C++
         # We need to install the cross-compilation toolchain for ARM64 and ARMHF
@@ -294,6 +302,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
         # C/C++
       - name: Install dependencies
@@ -359,6 +369,8 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build C/C++
@@ -414,7 +426,9 @@ jobs:
       image: alpine:latest
       options: --privileged # If needed for certain Docker operations
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
         # C/C++
       - name: Build C/C++
@@ -462,6 +476,8 @@ jobs:
         python-version: ["36", "37", "38", "39", "310", "311", "312", "313"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Set up Python
         uses: actions/setup-python@v5.2.0
         with:

@@ -57,6 +57,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Perform rebase
         run: |
@@ -84,6 +85,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: "main"
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5.2.0
@@ -114,6 +116,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: "main"
+          submodules: recursive
       - name: Set up Python
         uses: actions/setup-python@v5.2.0
         with:
@@ -168,7 +171,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: "main"
-      - run: git submodule update --init --recursive
+          submodules: recursive
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -222,6 +225,7 @@ jobs:
         with:
           persist-credentials: false
           ref: "main"
+          submodules: recursive
 
       - name: Get version
         id: set_version
@@ -292,7 +296,7 @@ jobs:
         with:
           persist-credentials: false
           ref: "main"
-      - run: git submodule update --init --recursive
+          submodules: recursive
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v1.13
@@ -337,7 +341,7 @@ jobs:
         with:
           persist-credentials: false
           ref: "main"
-      - run: git submodule update --init --recursive
+          submodules: recursive
 
       - name: Get version
         id: set_version
