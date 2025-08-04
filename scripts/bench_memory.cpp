@@ -119,29 +119,29 @@ void bench_copy(environment_t const &env) {
     sz_ptr_t o = output_buffer.get();
 
     // Provide a baseline
-    bench_result_t align = bench_unary(env, "sz_copy_serial(align)", copy_from_sz<sz_copy_serial>(env, o)).log();
-    bench_result_t shift = bench_unary(env, "sz_copy_serial(shift)", copy_from_sz<sz_copy_serial, 1>(env, o)) //
+    bench_result_t align = bench_unary(env, "sz_copy_serial(align)", copy_from_sz<sz_copy_serial> {env, o}).log();
+    bench_result_t shift = bench_unary(env, "sz_copy_serial(shift)", copy_from_sz<sz_copy_serial, 1> {env, o}) //
                                .log(align);
 
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_copy_haswell(align)", copy_from_sz<sz_copy_haswell>(env, o)).log(align);
-    bench_unary(env, "sz_copy_haswell(shift)", copy_from_sz<sz_copy_haswell, 1>(env, o)).log(align, shift);
+    bench_unary(env, "sz_copy_haswell(align)", copy_from_sz<sz_copy_haswell> {env, o}).log(align);
+    bench_unary(env, "sz_copy_haswell(shift)", copy_from_sz<sz_copy_haswell, 1> {env, o}).log(align, shift);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_copy_skylake(align)", copy_from_sz<sz_copy_skylake>(env, o)).log(align);
-    bench_unary(env, "sz_copy_skylake(shift)", copy_from_sz<sz_copy_skylake, 1>(env, o)).log(align, shift);
+    bench_unary(env, "sz_copy_skylake(align)", copy_from_sz<sz_copy_skylake> {env, o}).log(align);
+    bench_unary(env, "sz_copy_skylake(shift)", copy_from_sz<sz_copy_skylake, 1> {env, o}).log(align, shift);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_copy_neon(align)", copy_from_sz<sz_copy_neon>(env, o)).log(align);
-    bench_unary(env, "sz_copy_neon(shift)", copy_from_sz<sz_copy_neon, 1>(env, o)).log(align, shift);
+    bench_unary(env, "sz_copy_neon(align)", copy_from_sz<sz_copy_neon> {env, o}).log(align);
+    bench_unary(env, "sz_copy_neon(shift)", copy_from_sz<sz_copy_neon, 1> {env, o}).log(align, shift);
 #endif
 #if SZ_USE_SVE
-    bench_unary(env, "sz_copy_sve(align)", copy_from_sz<sz_copy_sve>(env, o)).log(align);
-    bench_unary(env, "sz_copy_sve(shift)", copy_from_sz<sz_copy_sve, 1>(env, o)).log(align, shift);
+    bench_unary(env, "sz_copy_sve(align)", copy_from_sz<sz_copy_sve> {env, o}).log(align);
+    bench_unary(env, "sz_copy_sve(shift)", copy_from_sz<sz_copy_sve, 1> {env, o}).log(align, shift);
 #endif
 
-    bench_unary(env, "std::memcpy(align)", copy_from_sz<memcpy_like_sz>(env, o)).log(align);
-    bench_unary(env, "std::memcpy(shift)", copy_from_sz<memcpy_like_sz, 1>(env, o)).log(align, shift);
+    bench_unary(env, "std::memcpy(align)", copy_from_sz<memcpy_like_sz> {env, o}).log(align);
+    bench_unary(env, "std::memcpy(shift)", copy_from_sz<memcpy_like_sz, 1> {env, o}).log(align, shift);
 }
 
 #pragma endregion // MemCpy
@@ -191,28 +191,28 @@ void bench_move(environment_t const &env) {
     std::memcpy(o, env.dataset.data(), env.dataset.size());
 
     // Provide a baseline for shifting forward by a single byte or a single cache line
-    bench_result_t byte = bench_unary(env, "sz_move_serial(by1)", move_from_sz<sz_move_serial, 1>(env, o)).log();
-    bench_result_t page = bench_unary(env, "sz_move_serial(by64)", move_from_sz<sz_move_serial, 64>(env, o)).log(byte);
+    bench_result_t byte = bench_unary(env, "sz_move_serial(by1)", move_from_sz<sz_move_serial, 1> {env, o}).log();
+    bench_result_t page = bench_unary(env, "sz_move_serial(by64)", move_from_sz<sz_move_serial, 64> {env, o}).log(byte);
 
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_move_haswell(by1)", move_from_sz<sz_move_haswell, 1>(env, o)).log(byte);
-    bench_unary(env, "sz_move_haswell(by64)", move_from_sz<sz_move_haswell, 64>(env, o)).log(byte, page);
+    bench_unary(env, "sz_move_haswell(by1)", move_from_sz<sz_move_haswell, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_haswell(by64)", move_from_sz<sz_move_haswell, 64> {env, o}).log(byte, page);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_move_skylake(by1)", move_from_sz<sz_move_skylake, 1>(env, o)).log(byte);
-    bench_unary(env, "sz_move_skylake(by64)", move_from_sz<sz_move_skylake, 64>(env, o)).log(byte, page);
+    bench_unary(env, "sz_move_skylake(by1)", move_from_sz<sz_move_skylake, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_skylake(by64)", move_from_sz<sz_move_skylake, 64> {env, o}).log(byte, page);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_move_neon(by1)", move_from_sz<sz_move_neon, 1>(env, o)).log(byte);
-    bench_unary(env, "sz_move_neon(by64)", move_from_sz<sz_move_neon, 64>(env, o)).log(byte, page);
+    bench_unary(env, "sz_move_neon(by1)", move_from_sz<sz_move_neon, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_neon(by64)", move_from_sz<sz_move_neon, 64> {env, o}).log(byte, page);
 #endif
 #if SZ_USE_SVE
-    bench_unary(env, "sz_move_sve(by1)", move_from_sz<sz_move_sve, 1>(env, o)).log(byte);
-    bench_unary(env, "sz_move_sve(by64)", move_from_sz<sz_move_sve, 64>(env, o)).log(byte, page);
+    bench_unary(env, "sz_move_sve(by1)", move_from_sz<sz_move_sve, 1> {env, o}).log(byte);
+    bench_unary(env, "sz_move_sve(by64)", move_from_sz<sz_move_sve, 64> {env, o}).log(byte, page);
 #endif
 
-    bench_unary(env, "std::memmove(by1)", move_from_sz<memmove_like_sz, 1>(env, o)).log(byte);
-    bench_unary(env, "std::memmove(by64)", move_from_sz<memmove_like_sz, 64>(env, o)).log(byte, page);
+    bench_unary(env, "std::memmove(by1)", move_from_sz<memmove_like_sz, 1> {env, o}).log(byte);
+    bench_unary(env, "std::memmove(by64)", move_from_sz<memmove_like_sz, 64> {env, o}).log(byte, page);
 }
 
 #pragma endregion // MemMove
@@ -285,34 +285,34 @@ void bench_fill(environment_t const &env) {
     std::memcpy(o, env.dataset.data(), env.dataset.size());
 
     // Provide a baseline for overwriting the `output_buffer` memory
-    bench_result_t zeros = bench_unary(env, "sz_fill_serial", fill_from_sz<sz_fill_serial>(env, o)).log();
-    auto random_call = fill_random_from_sz<sz_fill_random_serial>(env, o);
+    bench_result_t zeros = bench_unary(env, "sz_fill_serial", fill_from_sz<sz_fill_serial> {env, o}).log();
+    auto random_call = fill_random_from_sz<sz_fill_random_serial> {env, o};
     bench_result_t random = bench_unary(env, "sz_fill_random_serial", random_call).log(zeros);
 
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_fill_haswell", fill_from_sz<sz_fill_haswell>(env, o)).log(zeros);
-    bench_unary(env, "sz_fill_random_haswell", random_call, fill_random_from_sz<sz_fill_random_haswell>(env, o))
+    bench_unary(env, "sz_fill_haswell", fill_from_sz<sz_fill_haswell> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_haswell", random_call, fill_random_from_sz<sz_fill_random_haswell> {env, o})
         .log(zeros, random);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_fill_skylake", fill_from_sz<sz_fill_skylake>(env, o)).log(zeros);
-    bench_unary(env, "sz_fill_random_skylake", random_call, fill_random_from_sz<sz_fill_random_skylake>(env, o))
+    bench_unary(env, "sz_fill_skylake", fill_from_sz<sz_fill_skylake> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_skylake", random_call, fill_random_from_sz<sz_fill_random_skylake> {env, o})
         .log(zeros, random);
 #endif
 #if SZ_USE_ICE
-    bench_unary(env, "sz_fill_random_ice", random_call, fill_random_from_sz<sz_fill_random_ice>(env, o))
+    bench_unary(env, "sz_fill_random_ice", random_call, fill_random_from_sz<sz_fill_random_ice> {env, o})
         .log(zeros, random);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_fill_neon", fill_from_sz<sz_fill_neon>(env, o)).log(zeros);
-    bench_unary(env, "sz_fill_random_neon", random_call, fill_random_from_sz<sz_fill_random_neon>(env, o))
+    bench_unary(env, "sz_fill_neon", fill_from_sz<sz_fill_neon> {env, o}).log(zeros);
+    bench_unary(env, "sz_fill_random_neon", random_call, fill_random_from_sz<sz_fill_random_neon> {env, o})
         .log(zeros, random);
 #endif
 #if SZ_USE_SVE
-    bench_unary(env, "sz_fill_sve", fill_from_sz<sz_fill_sve>(env, o)).log(zeros);
+    bench_unary(env, "sz_fill_sve", fill_from_sz<sz_fill_sve> {env, o}).log(zeros);
 #endif
-    bench_unary(env, "fill<std::memset>", fill_from_sz<memset_like_sz>(env, o)).log(zeros);
-    bench_unary(env, "fill<std::random_device>", fill_random_from_sz<generate_like_sz>(env, o)).log(zeros, random);
+    bench_unary(env, "fill<std::memset>", fill_from_sz<memset_like_sz> {env, o}).log(zeros);
+    bench_unary(env, "fill<std::random_device>", fill_random_from_sz<generate_like_sz> {env, o}).log(zeros, random);
 }
 
 #pragma endregion // Broadcasting Constants with MemSet
@@ -367,18 +367,18 @@ void bench_lookup(environment_t const &env) {
 
     // Provide a baseline for overwriting the `output_buffer` memory
     sz_cptr_t lut = reinterpret_cast<sz_cptr_t>(lookup_table);
-    bench_result_t zeros = bench_unary(env, "sz_lookup_serial", lookup_from_sz<sz_lookup_serial>(env, o, lut)).log();
+    bench_result_t zeros = bench_unary(env, "sz_lookup_serial", lookup_from_sz<sz_lookup_serial> {env, o, lut}).log();
 
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_lookup_haswell", lookup_from_sz<sz_lookup_haswell>(env, o, lut)).log(zeros);
+    bench_unary(env, "sz_lookup_haswell", lookup_from_sz<sz_lookup_haswell> {env, o, lut}).log(zeros);
 #endif
 #if SZ_USE_ICE
-    bench_unary(env, "sz_lookup_ice", lookup_from_sz<sz_lookup_ice>(env, o, lut)).log(zeros);
+    bench_unary(env, "sz_lookup_ice", lookup_from_sz<sz_lookup_ice> {env, o, lut}).log(zeros);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_lookup_neon", lookup_from_sz<sz_lookup_neon>(env, o, lut)).log(zeros);
+    bench_unary(env, "sz_lookup_neon", lookup_from_sz<sz_lookup_neon> {env, o, lut}).log(zeros);
 #endif
-    bench_unary(env, "lookup<std::transform>", lookup_from_sz<transform_like_sz>(env, o, lut)).log(zeros);
+    bench_unary(env, "lookup<std::transform>", lookup_from_sz<transform_like_sz> {env, o, lut}).log(zeros);
 }
 
 #pragma endregion // Lookup Transformations

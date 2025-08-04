@@ -139,80 +139,80 @@ struct hash_stream_from_sz {
 
 void bench_checksums(environment_t const &env) {
 
-    auto validator = bytesum_from_std_t(env);
+    auto validator = bytesum_from_std_t {env};
     bench_result_t base_stl = bench_unary(env, "bytesum<std::accumulate>", validator).log();
     bench_result_t base =
-        bench_unary(env, "sz_bytesum_serial", validator, bytesum_from_sz<sz_bytesum_serial>(env)).log(base_stl);
+        bench_unary(env, "sz_bytesum_serial", validator, bytesum_from_sz<sz_bytesum_serial> {env}).log(base_stl);
 
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_bytesum_haswell", validator, bytesum_from_sz<sz_bytesum_haswell>(env)).log(base, base_stl);
+    bench_unary(env, "sz_bytesum_haswell", validator, bytesum_from_sz<sz_bytesum_haswell> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_bytesum_skylake", validator, bytesum_from_sz<sz_bytesum_skylake>(env)).log(base, base_stl);
+    bench_unary(env, "sz_bytesum_skylake", validator, bytesum_from_sz<sz_bytesum_skylake> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_ICE
-    bench_unary(env, "sz_bytesum_ice", validator, bytesum_from_sz<sz_bytesum_ice>(env)).log(base, base_stl);
+    bench_unary(env, "sz_bytesum_ice", validator, bytesum_from_sz<sz_bytesum_ice> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_bytesum_neon", validator, bytesum_from_sz<sz_bytesum_neon>(env)).log(base, base_stl);
+    bench_unary(env, "sz_bytesum_neon", validator, bytesum_from_sz<sz_bytesum_neon> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SVE
-    bench_unary(env, "sz_bytesum_sve", validator, bytesum_from_sz<sz_bytesum_sve>(env)).log(base, base_stl);
+    bench_unary(env, "sz_bytesum_sve", validator, bytesum_from_sz<sz_bytesum_sve> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SVE2
-    bench_unary(env, "sz_bytesum_sve2", validator, bytesum_from_sz<sz_bytesum_sve2>(env)).log(base, base_stl);
+    bench_unary(env, "sz_bytesum_sve2", validator, bytesum_from_sz<sz_bytesum_sve2> {env}).log(base, base_stl);
 #endif
 }
 
 void bench_hashing(environment_t const &env) {
 
-    auto validator = hash_from_sz<sz_hash_serial>(env);
+    auto validator = hash_from_sz<sz_hash_serial> {env};
     bench_result_t base = bench_unary(env, "sz_hash_serial", validator).log();
-    bench_result_t base_stl = bench_unary(env, "std::hash", hash_from_std_t(env)).log(base);
+    bench_result_t base_stl = bench_unary(env, "std::hash", hash_from_std_t {env}).log(base);
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_hash_haswell", validator, hash_from_sz<sz_hash_haswell>(env)).log(base, base_stl);
+    bench_unary(env, "sz_hash_haswell", validator, hash_from_sz<sz_hash_haswell> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_hash_skylake", validator, hash_from_sz<sz_hash_skylake>(env)).log(base, base_stl);
+    bench_unary(env, "sz_hash_skylake", validator, hash_from_sz<sz_hash_skylake> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_ICE
-    bench_unary(env, "sz_hash_ice", validator, hash_from_sz<sz_hash_ice>(env)).log(base, base_stl);
+    bench_unary(env, "sz_hash_ice", validator, hash_from_sz<sz_hash_ice> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SVE2
-    bench_unary(env, "sz_hash_sve2", validator, hash_from_sz<sz_hash_sve2>(env)).log(base, base_stl);
+    bench_unary(env, "sz_hash_sve2", validator, hash_from_sz<sz_hash_sve2> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_hash_neon", validator, hash_from_sz<sz_hash_neon>(env)).log(base, base_stl);
+    bench_unary(env, "sz_hash_neon", validator, hash_from_sz<sz_hash_neon> {env}).log(base, base_stl);
 #endif
 }
 
 void bench_stream_hashing(environment_t const &env) {
 
     auto validator =
-        hash_stream_from_sz<sz_hash_state_init_serial, sz_hash_state_stream_serial, sz_hash_state_fold_serial>(env);
+        hash_stream_from_sz<sz_hash_state_init_serial, sz_hash_state_stream_serial, sz_hash_state_fold_serial> {env};
     bench_result_t base = bench_unary(env, "sz_hash_stream_serial", validator).log();
-    bench_result_t base_stl = bench_unary(env, "std::hash", hash_from_std_t(env)).log(base);
+    bench_result_t base_stl = bench_unary(env, "std::hash", hash_from_std_t {env}).log(base);
 
 #if SZ_USE_HASWELL
     bench_unary(
         env, "sz_hash_stream_haswell", validator,
-        hash_stream_from_sz<sz_hash_state_init_haswell, sz_hash_state_stream_haswell, sz_hash_state_fold_haswell>(env))
+        hash_stream_from_sz<sz_hash_state_init_haswell, sz_hash_state_stream_haswell, sz_hash_state_fold_haswell> {env})
         .log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
     bench_unary(
         env, "sz_hash_stream_skylake", validator,
-        hash_stream_from_sz<sz_hash_state_init_skylake, sz_hash_state_stream_skylake, sz_hash_state_fold_skylake>(env))
+        hash_stream_from_sz<sz_hash_state_init_skylake, sz_hash_state_stream_skylake, sz_hash_state_fold_skylake> {env})
         .log(base, base_stl);
 #endif
 #if SZ_USE_ICE
     bench_unary(env, "sz_hash_stream_ice", validator,
-                hash_stream_from_sz<sz_hash_state_init_ice, sz_hash_state_stream_ice, sz_hash_state_fold_ice>(env))
+                hash_stream_from_sz<sz_hash_state_init_ice, sz_hash_state_stream_ice, sz_hash_state_fold_ice> {env})
         .log(base, base_stl);
 #endif
 #if SZ_USE_NEON
     bench_unary(env, "sz_hash_stream_neon", validator,
-                hash_stream_from_sz<sz_hash_state_init_neon, sz_hash_state_stream_neon, sz_hash_state_fold_neon>(env))
+                hash_stream_from_sz<sz_hash_state_init_neon, sz_hash_state_stream_neon, sz_hash_state_fold_neon> {env})
         .log(base, base_stl);
 #endif
 }
@@ -334,38 +334,38 @@ struct ordering_from_memcmp_t {
 
 void bench_comparing_equality(environment_t const &env) {
 
-    auto validator = equality_from_memcmp_t(env);
-    bench_result_t base = bench_unary(env, "sz_equal_serial", validator, equality_from_sz<sz_equal_serial>(env)).log();
+    auto validator = equality_from_memcmp_t {env};
+    bench_result_t base = bench_unary(env, "sz_equal_serial", validator, equality_from_sz<sz_equal_serial> {env}).log();
     bench_result_t base_stl = bench_unary(env, "equal<std::memcmp>", validator).log(base);
 
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_equal_haswell", validator, equality_from_sz<sz_equal_haswell>(env)).log(base, base_stl);
+    bench_unary(env, "sz_equal_haswell", validator, equality_from_sz<sz_equal_haswell> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_equal_skylake", validator, equality_from_sz<sz_equal_skylake>(env)).log(base, base_stl);
+    bench_unary(env, "sz_equal_skylake", validator, equality_from_sz<sz_equal_skylake> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_equal_neon", validator, equality_from_sz<sz_equal_neon>(env)).log(base, base_stl);
+    bench_unary(env, "sz_equal_neon", validator, equality_from_sz<sz_equal_neon> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SVE
-    bench_unary(env, "sz_equal_sve", validator, equality_from_sz<sz_equal_sve>(env)).log(base, base_stl);
+    bench_unary(env, "sz_equal_sve", validator, equality_from_sz<sz_equal_sve> {env}).log(base, base_stl);
 #endif
 }
 
 void bench_comparing_order(environment_t const &env) {
 
-    auto validator = ordering_from_memcmp_t(env);
-    bench_result_t base = bench_unary(env, "sz_order_serial", validator, ordering_from_sz<sz_order_serial>(env)).log();
+    auto validator = ordering_from_memcmp_t {env};
+    bench_result_t base = bench_unary(env, "sz_order_serial", validator, ordering_from_sz<sz_order_serial> {env}).log();
     bench_result_t base_stl = bench_unary(env, "order<std::memcmp>", validator).log(base);
 
 #if SZ_USE_HASWELL
-    bench_unary(env, "sz_order_haswell", validator, ordering_from_sz<sz_order_haswell>(env)).log(base, base_stl);
+    bench_unary(env, "sz_order_haswell", validator, ordering_from_sz<sz_order_haswell> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_SKYLAKE
-    bench_unary(env, "sz_order_skylake", validator, ordering_from_sz<sz_order_skylake>(env)).log(base, base_stl);
+    bench_unary(env, "sz_order_skylake", validator, ordering_from_sz<sz_order_skylake> {env}).log(base, base_stl);
 #endif
 #if SZ_USE_NEON
-    bench_unary(env, "sz_order_neon", validator, ordering_from_sz<sz_order_neon>(env)).log(base, base_stl);
+    bench_unary(env, "sz_order_neon", validator, ordering_from_sz<sz_order_neon> {env}).log(base, base_stl);
 #endif
 }
 

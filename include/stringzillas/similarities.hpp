@@ -147,7 +147,7 @@ struct uniform_substitution_costs_t {
  *          so smaller variants should be preferred where possible.
  */
 struct error_costs_256x256_t {
-    error_cost_t cells[256][256] = {0};
+    error_cost_t cells[256][256] = {{0}};
 
     constexpr error_cost_t operator()(char a, char b) const noexcept { return cells[(sz_u8_t)a][(sz_u8_t)b]; }
     constexpr error_cost_t operator()(sz_u8_t a, sz_u8_t b) const noexcept { return cells[a][b]; }
@@ -2457,7 +2457,7 @@ struct smith_waterman_scores {
  *  @endcode
  */
 struct error_costs_26x26ascii_t {
-    error_cost_t cells[26][26] = {0};
+    error_cost_t cells[26][26] = {{0}};
 
     constexpr error_cost_t operator()(char a, char b) const noexcept { return cells[(sz_u8_t)a - 65][(sz_u8_t)b - 65]; }
     constexpr error_cost_t operator()(sz_u8_t a, sz_u8_t b) const noexcept { return cells[a - 65][b - 65]; }

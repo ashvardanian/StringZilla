@@ -109,6 +109,7 @@ void bench_levenshtein(environment_t const &env) {
     auto scramble_accelerated_results = [&](similarities_t &results_accelerated) {
         std::shuffle(results_accelerated.begin(), results_accelerated.end(), global_random_generator());
     };
+    sz_unused_(scramble_accelerated_results);
 
     // Let's define some weird scoring schemes for Levenshtein-like distance, that are not unary:
     constexpr linear_gap_costs_t weird_linear {3};
@@ -256,6 +257,7 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
     auto scramble_accelerated_results = [&](similarities_t &results_accelerated) {
         std::shuffle(results_accelerated.begin(), results_accelerated.end(), global_random_generator());
     };
+    sz_unused_(scramble_accelerated_results);
 
     for (std::size_t batch_size : batch_sizes) {
         results_linear_global_baseline.resize(batch_size), results_linear_global_accelerated.resize(batch_size);
