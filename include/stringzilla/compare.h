@@ -336,26 +336,6 @@ SZ_PUBLIC sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length)
 #endif            // SZ_USE_SKYLAKE
 #pragma endregion // Skylake Implementation
 
-/*  AVX512 implementation of the string search algorithms for Ice Lake and newer CPUs.
- *  Includes extensions:
- *      - 2017 Skylake: F, CD, ER, PF, VL, DQ, BW,
- *      - 2018 CannonLake: IFMA, VBMI,
- *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
- */
-#pragma region Ice Lake Implementation
-#if SZ_USE_ICE
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2"))), \
-                             apply_to = function)
-
-/* Nothing here for now. */
-
-#pragma clang attribute pop
-#pragma GCC pop_options
-#endif            // SZ_USE_ICE
-#pragma endregion // Ice Lake Implementation
-
 /*  Implementation of the string search algorithms using the Arm NEON instruction set, available on 64-bit
  *  Arm processors. Covers billions of mobile CPUs worldwide, including Apple's A-series, and Qualcomm's Snapdragon.
  */

@@ -103,7 +103,7 @@ template class std::unordered_map<sz::string_view, int>;
  *  @brief  Several string processing operations rely on computing integer logarithms.
  *          Failures in such operations will result in wrong `resize` outcomes and heap corruption.
  */
-static void test_arithmetical_utilities() {
+void test_arithmetical_utilities() {
 
     assert(sz_u64_clz(0x0000000000000001ull) == 63);
     assert(sz_u64_clz(0x0000000000000002ull) == 62);
@@ -164,7 +164,7 @@ static void test_arithmetical_utilities() {
 }
 
 /** @brief Validates `sz_sequence_t` and related construction utilities. */
-static void test_sequence_struct() {
+void test_sequence_struct() {
     // Make sure the sequence helper functions work as expected
     // for both trivial c-style arrays and more complicated STL containers.
     {
@@ -202,7 +202,7 @@ static void test_sequence_struct() {
 }
 
 /** @brief Validates `sz_memory_allocator_t` and related construction utilities. */
-static void test_memory_allocator_struct() {
+void test_memory_allocator_struct() {
     // Our behavior for `malloc(0)` is to return a NULL pointer,
     // while the standard is implementation-defined.
     {
@@ -232,7 +232,7 @@ static void test_memory_allocator_struct() {
 }
 
 /** @brief Validates `sz_byteset_t` and related construction utilities. */
-static void test_byteset_struct() {
+void test_byteset_struct() {
     sz_byteset_t s;
     sz_byteset_init(&s);
     assert(sz_byteset_contains(&s, 'a') == false);
@@ -254,7 +254,7 @@ static void test_byteset_struct() {
  *  The test covers increasingly long and complex strings, starting with "abcabc..." repetitions and
  *  progressing towards corner cases like empty strings, all-zero inputs, zero seeds, and so on.
  */
-static void test_hash_equivalence(                                      //
+void test_hash_equivalence(                                             //
     sz_hash_t hash_base, sz_hash_state_init_t init_base,                //
     sz_hash_state_stream_t stream_base, sz_hash_state_fold_t fold_base, //
     sz_hash_t hash_simd, sz_hash_state_init_t init_simd,                //
@@ -321,7 +321,7 @@ static void test_hash_equivalence(                                      //
  *  @brief  Tests Pseudo-Random Number Generators (PRNGs) ensuring that the same nonce
  *          produces exactly the same output across different SIMD implementations.
  */
-static void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_random_t generate_simd) {
+void test_random_generator_equivalence(sz_fill_random_t generate_base, sz_fill_random_t generate_simd) {
 
     auto test_on_nonce = [&](std::size_t length, sz_u64_t nonce) {
         std::string text_base(length, '\0');
@@ -343,7 +343,7 @@ static void test_random_generator_equivalence(sz_fill_random_t generate_base, sz
             test_on_nonce(length, nonce);
 }
 
-static void test_equivalence() {
+void test_equivalence() {
 
     // Ensure the seed affects hash results
     assert(sz_hash_serial("abc", 3, 100) != sz_hash_serial("abc", 3, 200));
@@ -396,7 +396,7 @@ static void test_equivalence() {
  *          provided by `sz::string` and `sz::string_view`.
  */
 template <typename string_type>
-static void test_ascii_utilities() {
+void test_ascii_utilities() {
 
     using str = string_type;
 
@@ -462,7 +462,7 @@ inline void expect_equality(char const *a, char const *b, std::size_t size) {
  *  Uses a large heap-allocated buffer to ensure that operations optimized for @b larger-than-L2-cache memory
  *  regions are tested. Uses a combination of deterministic and random tests with uniform and exponential distributions.
  */
-static void test_memory_utilities( //
+void test_memory_utilities( //
     std::size_t experiments = 1024ull * 1024ull, std::size_t max_l2_size = 1024ull * 1024ull) {
 
     // We will be mirroring the operations on both standard and StringZilla strings.
@@ -592,7 +592,7 @@ static void test_memory_utilities( //
  *          This test guarantees API @b compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
-static void test_stl_compatibility_for_reads() {
+void test_stl_compatibility_for_reads() {
 
     using str = string_type;
 
@@ -856,7 +856,7 @@ static void test_stl_compatibility_for_reads() {
  *          compilation. This test guarantees API compatibility with STL `std::basic_string` template.
  */
 template <typename string_type>
-static void test_stl_compatibility_for_updates() {
+void test_stl_compatibility_for_updates() {
 
     using str = string_type;
 
@@ -979,7 +979,7 @@ static void test_stl_compatibility_for_updates() {
 /**
  *  @brief  Constructs StringZilla classes from STL and vice-versa to ensure that the conversions are working.
  */
-static void test_stl_conversions() {
+void test_stl_conversions() {
     // From a mutable STL string to StringZilla and vice-versa.
     {
         std::string stl {"hello"};
@@ -1030,7 +1030,7 @@ inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size
  *          extensions beyond the STL API.
  */
 template <typename string_type>
-static void test_non_stl_extensions_for_reads() {
+void test_non_stl_extensions_for_reads() {
     using str = string_type;
 
     // Signed offset lookups and slices.
@@ -1167,7 +1167,7 @@ void test_non_stl_extensions_for_updates() {
 /**
  *  @brief  Tests copy constructor and copy-assignment constructor of `sz::string`.
  */
-static void test_constructors() {
+void test_constructors() {
     std::string alphabet {sz::ascii_printables(), sizeof(sz::ascii_printables())};
     std::vector<sz::string> strings;
     for (std::size_t alphabet_slice = 0; alphabet_slice != alphabet.size(); ++alphabet_slice)
@@ -1202,8 +1202,8 @@ struct accounting_allocator : public std::allocator<char> {
         return global_value;
     }
 
-    template <typename... args_types>
-    static void print_if_verbose(char const *fmt, args_types... args) {
+    template <typename... args_types_>
+    static void print_if_verbose(char const *fmt, args_types_... args) {
         if (!verbose_ref()) return;
         std::printf(fmt, args...);
     }
@@ -1241,7 +1241,7 @@ void assert_balanced_memory(callback_type callback) {
 /**
  *  @brief  Checks for memory leaks in the string class using the `accounting_allocator`.
  */
-static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
+void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
     std::size_t iterations = 4;
 
     assert(accounting_allocator::counter_ref() == 0);
@@ -1313,7 +1313,7 @@ static void test_memory_stability_for_length(std::size_t len = 1ull << 10) {
 /**
  *  @brief  Tests the correctness of the string class update methods, such as `push_back` and `erase`.
  */
-static void test_updates(std::size_t repetitions = 1024) {
+void test_updates(std::size_t repetitions = 1024) {
     // Compare STL and StringZilla strings append functionality.
     char const alphabet_chars[] = "abcdefghijklmnopqrstuvwxyz";
     for (std::size_t repetition = 0; repetition != repetitions; ++repetition) {
@@ -1340,7 +1340,7 @@ static void test_updates(std::size_t repetitions = 1024) {
 /**
  *  @brief  Tests the correctness of the string class comparison methods, such as `compare` and `operator==`.
  */
-static void test_comparisons() {
+void test_comparisons() {
     // Comparing relative order of the strings
     assert("a"_sv.compare("a") == 0);
     assert("a"_sv.compare("ab") == -1);
@@ -1357,7 +1357,7 @@ static void test_comparisons() {
  *  @brief  Tests the correctness of the string class search methods, such as `find` and `find_first_of`.
  *          This covers haystacks and needles of different lengths, as well as character-sets.
  */
-static void test_search() {
+void test_search() {
 
     // Searching for a set of characters
     assert(sz::string_view("a").find_first_of("az") == 0);
@@ -1624,7 +1624,7 @@ void test_search_with_misaligned_repetitions(std::string_view haystack_pattern, 
  *  @brief  Extensively tests the correctness of the string class search methods, such as `find` and `find_first_of`.
  *          Covers different alignment cases within a cache line, repetitive patterns, and overlapping matches.
  */
-static void test_search_with_misaligned_repetitions() {
+void test_search_with_misaligned_repetitions() {
     // When haystack is only formed of needles:
     test_search_with_misaligned_repetitions("a", "a");
     test_search_with_misaligned_repetitions("ab", "ab");
@@ -1705,7 +1705,7 @@ void test_replacements(std::size_t lookup_tables_to_try = 32, std::size_t slices
  *  4. Test on random strings of varying lengths.
  *  5. Test on random strings of varying lengths with zero characters.
  */
-static void test_sorting_algorithms() {
+void test_sorting_algorithms() {
     using strs_t = std::vector<std::string>;
     using order_t = std::vector<sz::sorted_idx_t>;
 
@@ -1779,7 +1779,7 @@ static void test_sorting_algorithms() {
 /**
  *  @brief  Tests array intersection functionality.
  */
-static void test_intersecting_algorithms() {
+void test_intersecting_algorithms() {
     using strs_t = std::vector<std::string>;
     using result_t = sz::intersect_result_t;
 
@@ -1857,7 +1857,7 @@ static void test_intersecting_algorithms() {
 /**
  *  @brief  Tests constructing STL containers with StringZilla strings.
  */
-static void test_stl_containers() {
+void test_stl_containers() {
     std::map<sz::string, int> sorted_words_sz;
     std::unordered_map<sz::string, int> words_sz;
     assert(sorted_words_sz.empty());
