@@ -8,6 +8,12 @@
  *
  *  - Doesn't use PyBind11, NanoBind, Boost.Python, or any other high-level libs, only CPython API.
  *  - To minimize latency this implementation avoids `PyArg_ParseTupleAndKeywords` calls.
+ *  - Reimplements all of the `str` functionality in C as a `Str` type.
+ *  - Provides a highly generic `Strs` class for handling collections of strings, Arrow-style or not.
+ *
+ *  Pandas doesn't provide a C API, and even in the 2.0 the Apache Arrow representation is opt-in, not default.
+ *  PyCapsule protocol in conjunction with @b `__arrow_c_array__` dunder methods can be used to extract strings.
+ *  @see https://arrow.apache.org/docs/python/generated/pyarrow.array.html
  */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 #define NOMINMAX
@@ -41,6 +47,39 @@ typedef SSIZE_T ssize_t;
 #include <time.h>   // `time`
 
 #include <stringzilla/stringzilla.h>
+
+/**
+ *  @brief Arrow C Data Interface structure for an array schema.
+ *  @see https://arrow.apache.org/docs/format/CDataInterface.html#structure-definitions
+ */
+struct ArrowSchema {
+    const char *format;
+    const char *name;
+    const char *metadata;
+    int64_t flags;
+    int64_t n_children;
+    struct ArrowSchema **children;
+    struct ArrowSchema *dictionary;
+    void (*release)(struct ArrowSchema *);
+    void *private_data;
+};
+
+/**
+ *  @brief Arrow C Data Interface structure for an array content.
+ *  @see https://arrow.apache.org/docs/format/CDataInterface.html#structure-definitions
+ */
+struct ArrowArray {
+    int64_t length;
+    int64_t null_count;
+    int64_t offset;
+    int64_t n_buffers;
+    int64_t n_children;
+    const void **buffers;
+    struct ArrowArray **children;
+    struct ArrowArray *dictionary;
+    void (*release)(struct ArrowArray *);
+    void *private_data;
+};
 
 #pragma region Forward Declarations
 
@@ -565,10 +604,24 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
 static PyMethodDef File_methods[] = { //
     {NULL, NULL, 0, NULL}};
 
+static char const doc_File[] = //
+    "File(path, mode='r')\\n"
+    "\\n"
+    "Memory-mapped file class that exposes the memory range for low-level access.\\n"
+    "Provides efficient read-only access to file contents without loading into memory.\\n"
+    "\\n"
+    "Args:\\n"
+    "  path (str): Path to the file to memory-map.\\n"
+    "  mode (str): File access mode (default: 'r' for read-only).\\n"
+    "\\n"
+    "Example:\\n"
+    "  >>> f = sz.File('data.txt')\\n"
+    "  >>> content = str(f)  # Access file contents as string";
+
 static PyTypeObject FileType = {
     PyVarObject_HEAD_INIT(NULL, 0) //
         .tp_name = "stringzilla.File",
-    .tp_doc = "Memory mapped file class, that exposes the memory range for low-level access",
+    .tp_doc = doc_File,
     .tp_basicsize = sizeof(File),
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_methods = File_methods,
@@ -3080,10 +3133,31 @@ static PyMethodDef Str_methods[] = {
     {NULL, NULL, 0, NULL} // Sentinel
 };
 
+static char const doc_Str[] = //
+    "Str(source)\\n"
+    "\\n"
+    "Immutable byte-string/slice class with SIMD and SWAR-accelerated operations.\\n"
+    "Provides high-performance byte-string operations using modern CPU instructions.\\n"
+    "\\n"
+    "Args:\\n"
+    "  source (str, bytes, bytearray, or buffer): Source data to wrap.\\n"
+    "\\n"
+    "Methods:\\n"
+    "  - find(), rfind(): Fast substring search with SIMD acceleration\\n"
+    "  - count(): Count occurrences with optional overlap support\\n"
+    "  - split(), rsplit(): String splitting with various separators\\n"
+    "  - contains(): Fast membership testing\\n"
+    "  - translate(): Byte-level translations with lookup tables\\n"
+    "\\n"
+    "Example:\\n"
+    "  >>> s = sz.Str('hello world')\\n"
+    "  >>> s.find('world')  # Returns 6\\n"
+    "  >>> s.count('l')     # Returns 3";
+
 static PyTypeObject StrType = {
     PyVarObject_HEAD_INIT(NULL, 0) //
         .tp_name = "stringzilla.Str",
-    .tp_doc = "Immutable string/slice class with SIMD and SWAR-accelerated operations",
+    .tp_doc = doc_Str,
     .tp_basicsize = sizeof(Str),
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_new = Str_new,
@@ -3165,13 +3239,35 @@ static PyObject *SplitIteratorType_iter(PyObject *self) {
     return self;
 }
 
+static char const doc_SplitIterator[] = //
+    "SplitIterator(string, separator, ...)\\n"
+    "\\n"
+    "Text-splitting iterator for efficient string processing.\\n"
+    "Provides lazy evaluation of string splits without materializing all results.\\n"
+    "\\n"
+    "Created by:\\n"
+    "  - Str.split_iter()\\n"
+    "  - Str.rsplit_iter()\\n"
+    "  - Str.split_byteset_iter()\\n"
+    "  - Str.rsplit_byteset_iter()\\n"
+    "\\n"
+    "Features:\\n"
+    "  - Memory-efficient: yields results one at a time\\n"
+    "  - Forward and reverse iteration support\\n"
+    "  - Character set and string separator support\\n"
+    "\\n"
+    "Example:\\n"
+    "  >>> s = sz.Str('a,b,c,d')\\n"
+    "  >>> for part in s.split_iter(','):\\n"
+    "  ...     print(part)";
+
 static PyTypeObject SplitIteratorType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.SplitIterator",
     .tp_basicsize = sizeof(SplitIterator),
     .tp_itemsize = 0,
     .tp_dealloc = (destructor)SplitIteratorType_dealloc,
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_doc = "Text-splitting iterator",
+    .tp_doc = doc_SplitIterator,
     .tp_iter = SplitIteratorType_iter,
     .tp_iternext = (iternextfunc)SplitIteratorType_next,
 };
@@ -3649,7 +3745,136 @@ static PyGetSetDef Strs_getsetters[] = {
     {NULL} // Sentinel
 };
 
+static char const doc_Strs_from_arrow[] = //
+    "from_arrow(arrow_array)\n"
+    "\n"
+    "Create a Strs object from an Arrow string array with zero-copy semantics.\n"
+    "\n"
+    "Args:\n"
+    "  arrow_array: Arrow array object supporting `__arrow_c_array__` protocol.\n"
+    "\n"
+    "Returns:\n"
+    "  Strs: Zero-copy view of the Arrow string array.";
+
+static PyObject *Strs_from_arrow(PyObject *cls, PyObject *args, PyObject *kwargs) {
+    PyObject *arrow_array_obj = NULL;
+
+    // Manual argument parsing for performance
+    Py_ssize_t nargs = PyTuple_Size(args);
+    if (nargs != 1) {
+        PyErr_SetString(PyExc_TypeError, "from_arrow() takes exactly 1 argument");
+        return NULL;
+    }
+
+    arrow_array_obj = PyTuple_GET_ITEM(args, 0);
+
+    // Try to get the __arrow_c_array__ method
+    PyObject *arrow_c_array_method = PyObject_GetAttrString(arrow_array_obj, "__arrow_c_array__");
+    if (!arrow_c_array_method) {
+        PyErr_SetString(PyExc_TypeError,
+                        "Object does not support Arrow C interface (__arrow_c_array__ method missing)");
+        return NULL;
+    }
+
+    // Call __arrow_c_array__() to get the capsules
+    PyObject *capsules = PyObject_CallNoArgs(arrow_c_array_method);
+    Py_DECREF(arrow_c_array_method);
+
+    if (!capsules || !PyTuple_Check(capsules) || PyTuple_Size(capsules) != 2) {
+        Py_XDECREF(capsules);
+        PyErr_SetString(PyExc_ValueError, "__arrow_c_array__ must return a tuple of 2 capsules (schema, array)");
+        return NULL;
+    }
+
+    PyObject *schema_capsule = PyTuple_GET_ITEM(capsules, 0);
+    PyObject *array_capsule = PyTuple_GET_ITEM(capsules, 1);
+
+    if (!PyCapsule_CheckExact(schema_capsule) || !PyCapsule_CheckExact(array_capsule)) {
+        Py_DECREF(capsules);
+        PyErr_SetString(PyExc_ValueError, "Expected PyCapsule objects from __arrow_c_array__");
+        return NULL;
+    }
+
+    // Get the Arrow C schema and array structures
+    struct ArrowSchema *schema = (struct ArrowSchema *)PyCapsule_GetPointer(schema_capsule, "arrow_schema");
+    struct ArrowArray *array = (struct ArrowArray *)PyCapsule_GetPointer(array_capsule, "arrow_array");
+
+    if (!schema || !array) {
+        Py_DECREF(capsules);
+        PyErr_SetString(PyExc_ValueError, "Failed to extract Arrow C structures from capsules");
+        return NULL;
+    }
+
+    // Validate that this is a string array (utf8, large utf8, or binary)
+    if (!schema->format ||
+        (strcmp(schema->format, "u") != 0 && strcmp(schema->format, "U") != 0 && strcmp(schema->format, "z") != 0)) {
+        Py_DECREF(capsules);
+        PyErr_SetString(PyExc_ValueError, "Arrow array must be string type (utf8, large utf8, or binary)");
+        return NULL;
+    }
+
+    // Validate that we have the expected number of buffers (validity, offsets, data)
+    if (array->n_buffers != 3) {
+        Py_DECREF(capsules);
+        PyErr_SetString(PyExc_ValueError, "String Arrow array must have exactly 3 buffers");
+        return NULL;
+    }
+
+    // Extract the buffers: validity (optional), offsets, data
+    const void **buffers = (const void **)array->buffers;
+    const char *data_buffer = (const char *)buffers[2]; // String data
+    size_t length = array->length;
+
+    // Create a new Strs object
+    Strs *result = (Strs *)StrsType.tp_alloc(&StrsType, 0);
+    if (!result) {
+        Py_DECREF(capsules);
+        return NULL;
+    }
+
+    // Determine if we need 32-bit or 64-bit offsets based on Arrow format
+    const int32_t *offsets_32 = NULL;
+    const int64_t *offsets_64 = NULL;
+    int use_64bit = (strcmp(schema->format, "U") == 0); // Large strings use 64-bit offsets
+
+    if (use_64bit) { offsets_64 = (const int64_t *)buffers[1]; }
+    else {
+        offsets_32 = (const int32_t *)buffers[1];
+        // Check if the last offset exceeds 32-bit range
+        int32_t max_offset_32 = offsets_32[length];
+        if (max_offset_32 < 0) { // Overflow indicates we need 64-bit
+            use_64bit = 1;
+            offsets_64 = (const int64_t *)buffers[1];
+        }
+    }
+
+    if (use_64bit) {
+        result->type = STRS_CONSECUTIVE_64;
+        result->data.consecutive_64bit.count = length;
+        result->data.consecutive_64bit.separator_length = 0;     // No separator in Arrow arrays
+        result->data.consecutive_64bit.parent_string = capsules; // Keep capsules alive
+        result->data.consecutive_64bit.start = data_buffer;
+        // Arrow has N+1 offsets, we need the end offsets which start at offsets[1]
+        result->data.consecutive_64bit.end_offsets = (uint64_t *)(offsets_64 + 1);
+        Py_INCREF(capsules); // Keep the capsules alive
+    }
+    else {
+        result->type = STRS_CONSECUTIVE_32;
+        result->data.consecutive_32bit.count = length;
+        result->data.consecutive_32bit.separator_length = 0;     // No separator in Arrow arrays
+        result->data.consecutive_32bit.parent_string = capsules; // Keep capsules alive
+        result->data.consecutive_32bit.start = data_buffer;
+        // Arrow has N+1 offsets, we need the end offsets which start at offsets[1]
+        result->data.consecutive_32bit.end_offsets = (uint32_t *)(offsets_32 + 1);
+        Py_INCREF(capsules); // Keep the capsules alive
+    }
+
+    Py_DECREF(capsules);
+    return (PyObject *)result;
+}
+
 static PyMethodDef Strs_methods[] = {
+    {"from_arrow", (PyCFunction)Strs_from_arrow, METH_VARARGS | METH_KEYWORDS | METH_CLASS, doc_Strs_from_arrow},
     {"shuffle", Strs_shuffle, SZ_METHOD_FLAGS, "Shuffle (in-place) the elements of the Strs object."}, //
     {"sort", Strs_sort, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},          //
     {"argsort", Strs_argsort, SZ_METHOD_FLAGS, "Provides the permutation to achieve sorted order."},   //
@@ -3658,9 +3883,37 @@ static PyMethodDef Strs_methods[] = {
     {NULL, NULL, 0, NULL} // Sentinel
 };
 
+static char const doc_Strs[] = //
+    "Strs(source)\\n"
+    "\\n"
+    "Space-efficient container for large collections of strings and their slices.\\n"
+    "Optimized for memory efficiency and bulk operations on string collections.\\n"
+    "\\n"
+    "Args:\\n"
+    "  source (sequence): Iterable of strings to store.\\n"
+    "\\n"
+    "Features:\\n"
+    "  - Memory-efficient storage with shared backing buffers\\n"
+    "  - Zero-copy slicing and indexing operations\\n"
+    "  - Bulk operations: sort(), shuffle(), sample()\\n"
+    "  - Arrow integration: from_arrow() for zero-copy imports\\n"
+    "  - Fast comparison operations with native containers\\n"
+    "\\n"
+    "Methods:\\n"
+    "  - sort(): In-place sorting with custom comparison\\n"
+    "  - argsort(): Get indices for sorted order\\n"
+    "  - shuffle(): Randomize element order\\n"
+    "  - sample(): Get random subset of elements\\n"
+    "  - from_arrow(): Create from Apache Arrow arrays (zero-copy)\\n"
+    "\\n"
+    "Example:\\n"
+    "  >>> strs = sz.Strs(['apple', 'banana', 'cherry'])\\n"
+    "  >>> strs.sort()\\n"
+    "  >>> list(strs)  # ['apple', 'banana', 'cherry']";
+
 static PyTypeObject StrsType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Strs",
-    .tp_doc = "Space-efficient container for large collections of strings and their slices",
+    .tp_doc = doc_Strs,
     .tp_basicsize = sizeof(Strs),
     .tp_itemsize = 0,
     .tp_flags = Py_TPFLAGS_DEFAULT,

@@ -734,6 +734,115 @@ def test_pyarrow_str_conversion():
     assert arrow_buffer.to_pybytes() == native.encode("utf-8")
 
 
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_from_arrow_basic():
+    """Test basic conversion from Arrow string array to Strs."""
+    arrow_array = pa.array(["hello", "world", "test", "arrow"])
+    strs = Strs.from_arrow(arrow_array)
+    
+    assert len(strs) == 4
+    assert strs[0] == "hello"
+    assert strs[1] == "world" 
+    assert strs[2] == "test"
+    assert strs[3] == "arrow"
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_from_arrow_empty_strings():
+    """Test conversion with empty strings."""
+    arrow_array = pa.array(["hello", "", "world", ""])
+    strs = Strs.from_arrow(arrow_array)
+    
+    assert len(strs) == 4
+    assert strs[0] == "hello"
+    assert strs[1] == ""
+    assert strs[2] == "world"
+    assert strs[3] == ""
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_from_arrow_unicode():
+    """Test conversion with Unicode strings."""
+    arrow_array = pa.array(["hello", "мир", "🌍", "test"])
+    strs = Strs.from_arrow(arrow_array)
+    
+    assert len(strs) == 4
+    assert strs[0] == "hello"
+    assert strs[1] == "мир"
+    assert strs[2] == "🌍" 
+    assert strs[3] == "test"
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_from_arrow_binary_array():
+    """Test conversion from Arrow binary array."""
+    binary_data = [b"hello", b"world", b"binary", b"data"]
+    arrow_array = pa.array(binary_data, type=pa.binary())
+    
+    strs = Strs.from_arrow(arrow_array)
+    
+    assert len(strs) == 4
+    # Strs should handle binary data properly - compare as bytes
+    for i, expected in enumerate(binary_data):
+        str_bytes = strs[i].encode('latin-1') if isinstance(strs[i], str) else bytes(strs[i])
+        assert str_bytes == expected
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_from_arrow_large_strings():
+    """Test conversion from Arrow large string array."""
+    arrow_array = pa.array(["hello", "world", "large", "strings"], type=pa.large_string())
+    
+    strs = Strs.from_arrow(arrow_array)
+    
+    assert len(strs) == 4
+    assert strs[0] == "hello"
+    assert strs[1] == "world"
+    assert strs[2] == "large"
+    assert strs[3] == "strings"
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_from_arrow_error_cases():
+    """Test error handling for invalid inputs."""
+    # Test with non-Arrow object
+    with pytest.raises(TypeError):
+        Strs.from_arrow("not_an_arrow_array")
+    
+    with pytest.raises(TypeError):
+        Strs.from_arrow(["list", "of", "strings"])
+    
+    # Test with non-string Arrow array
+    int_array = pa.array([1, 2, 3, 4])
+    with pytest.raises((TypeError, ValueError)):
+        Strs.from_arrow(int_array)
+
+
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_from_arrow_c_interface():
+    """Test the low-level Arrow C Data Interface."""
+    arrow_array = pa.array(["test", "c", "interface"])
+    
+    # Check that Arrow array has the __arrow_c_array__ method
+    assert hasattr(arrow_array, '__arrow_c_array__')
+    
+    # Get the C interface capsules
+    schema_capsule, array_capsule = arrow_array.__arrow_c_array__()
+    
+    # Verify capsules are valid PyCapsule objects
+    import sys
+    if sys.version_info >= (3, 1):
+        assert str(type(schema_capsule)) == "<class 'PyCapsule'>"
+        assert str(type(array_capsule)) == "<class 'PyCapsule'>"
+    
+    # Test actual conversion
+    strs = Strs.from_arrow(arrow_array)
+    assert len(strs) == 3
+    assert strs[0] == "test"
+    assert strs[1] == "c"
+    assert strs[2] == "interface"
+
+
 if __name__ == "__main__":
     import sys
 
