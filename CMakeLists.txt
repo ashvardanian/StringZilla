@@ -559,8 +559,8 @@ if (${STRINGZILLAS_BUILD_SHARED})
             target_compile_definitions(${target} PRIVATE ${flag})
         endforeach ()
 
-        # Use C++17 for StringZillas
-        set_target_properties(${target} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+        # Use C++20 for StringZillas
+        set_target_properties(${target} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
 
         # Architecture-specific optimizations
         target_compile_options(
@@ -596,7 +596,7 @@ if (${STRINGZILLAS_BUILD_SHARED})
         target_link_libraries(stringzillas_cuda_shared PRIVATE CUDA::cudart)
 
         # Set CUDA-specific properties
-        set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+        set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_STANDARD 20 CUDA_STANDARD_REQUIRED ON)
         set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_ARCHITECTURES "70;75;80;86;89;90")
 
         # Enable CUDA separable compilation for device code
