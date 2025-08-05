@@ -12,7 +12,7 @@
  *
  *  Under the hood, a ton of C++ templates are instantiated to handle different types of inputs, like:
  *  - `sz_sequence_t` - for a C-style `std::vector<std::string_view>`-like structure.
- *  - `sz_arrow_u32tape_t`, `sz_arrow_u64tape_t` - for Apache Arrow-compatible tapes with 32-bit and 64-bit offsets.
+ *  - `sz_sequence_u32tape_t`, `sz_sequence_u64tape_t` - for Apache Arrow-like tapes with 32-bit and 64-bit offsets.
  *
  *  Those templates also reuse the same pre-configured operators for different thread-pool & executor types,
  *  hardware capability levels.
@@ -30,24 +30,26 @@ extern "C" {
 #endif
 
 /**
- *  @brief Apache Arrow-compatible tape for non-NULL strings with 32-bit offsets.
- *  @sa `sz_arrow_u64tape_t` for larger collections.
+ *  @brief Apache Arrow-like tape for non-NULL strings with 32-bit offsets.
+ *  @sa `sz_sequence_u64tape_t` for larger collections.
+ *  @note Unlike Apache Arrow, we only take (N) offsets for (N) strings, assuming the first one starts at zero offset.
  */
-struct sz_arrow_u32tape_t {
+typedef struct sz_sequence_u32tape_t {
     sz_cptr_t data;
     sz_u32_t const *offsets;
     sz_size_t count;
-};
+} sz_sequence_u32tape_t;
 
 /**
- *  @brief Apache Arrow-compatible tape for non-NULL strings with 64-bit offsets.
- *  @sa `sz_arrow_u32tape_t` for smaller space-efficient collections.
+ *  @brief Apache Arrow-like tape for non-NULL strings with 64-bit offsets.
+ *  @sa `sz_sequence_u32tape_t` for smaller space-efficient collections.
+ *  @note Unlike Apache Arrow, we only take (N) offsets for (N) strings, assuming the first one starts at zero offset.
  */
-struct sz_arrow_u64tape_t {
+typedef struct sz_sequence_u64tape_t {
     sz_cptr_t data;
     sz_u64_t const *offsets;
     sz_size_t count;
-};
+} sz_sequence_u64tape_t;
 
 /**
  *  @brief Prepares the default allocator for unified memory management.
@@ -75,7 +77,7 @@ SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_
 SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope);
 
 /*  APIs for computing edit-distances between binary and UTF-8 strings.
- *  Supports `sz_sequence_t`, `sz_arrow_u32tape_t`, and `sz_arrow_u64tape_t` inputs.
+ *  Supports `sz_sequence_t`, `sz_sequence_u32tape_t`, and `sz_sequence_u64tape_t` inputs.
  */
 typedef void *sz_levenshtein_distances_t;
 typedef void *sz_levenshtein_distances_utf8_t;
@@ -90,14 +92,14 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_sequence(        //
     sz_sequence_t const *a, sz_sequence_t const *b,              //
     sz_size_t *results, sz_size_t results_stride);
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_u32tape(         //
-    sz_levenshtein_distances_t engine, sz_device_scope_t device, //
-    sz_arrow_u32tape_t const *a, sz_arrow_u32tape_t const *b,    //
+SZ_DYNAMIC sz_status_t sz_levenshtein_distances_u32tape(            //
+    sz_levenshtein_distances_t engine, sz_device_scope_t device,    //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b, //
     sz_size_t *results, sz_size_t results_stride);
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_u64tape(         //
-    sz_levenshtein_distances_t engine, sz_device_scope_t device, //
-    sz_arrow_u64tape_t const *a, sz_arrow_u64tape_t const *b,    //
+SZ_DYNAMIC sz_status_t sz_levenshtein_distances_u64tape(            //
+    sz_levenshtein_distances_t engine, sz_device_scope_t device,    //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b, //
     sz_size_t *results, sz_size_t results_stride);
 
 SZ_DYNAMIC void sz_levenshtein_distances_free(sz_levenshtein_distances_t engine);
@@ -114,18 +116,18 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_sequence(        //
 
 SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_u32tape(         //
     sz_levenshtein_distances_utf8_t engine, sz_device_scope_t device, //
-    sz_arrow_u32tape_t const *a, sz_arrow_u32tape_t const *b,         //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,   //
     sz_size_t *results, sz_size_t results_stride);
 
 SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_u64tape(         //
     sz_levenshtein_distances_utf8_t engine, sz_device_scope_t device, //
-    sz_arrow_u64tape_t const *a, sz_arrow_u64tape_t const *b,         //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,   //
     sz_size_t *results, sz_size_t results_stride);
 
 SZ_DYNAMIC void sz_levenshtein_distances_utf8_free(sz_levenshtein_distances_utf8_t engine);
 
 /*  APIs for computing similarity scores between pairs of strings.
- *  Supports `sz_sequence_t`, `sz_arrow_u32tape_t`, and `sz_arrow_u64tape_t` inputs.
+ *  Supports `sz_sequence_t`, `sz_sequence_u32tape_t`, and `sz_sequence_u64tape_t` inputs.
  */
 
 typedef void *sz_needleman_wunsch_scores_t;
@@ -141,14 +143,14 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_sequence(        //
     sz_sequence_t const *a, sz_sequence_t const *b,                //
     sz_ssize_t *results, sz_size_t results_stride);
 
-SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_u32tape(         //
-    sz_needleman_wunsch_scores_t engine, sz_device_scope_t device, //
-    sz_arrow_u32tape_t const *a, sz_arrow_u32tape_t const *b,      //
+SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_u32tape(          //
+    sz_needleman_wunsch_scores_t engine, sz_device_scope_t device,  //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b, //
     sz_ssize_t *results, sz_size_t results_stride);
 
-SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_u64tape(         //
-    sz_needleman_wunsch_scores_t engine, sz_device_scope_t device, //
-    sz_arrow_u64tape_t const *a, sz_arrow_u64tape_t const *b,      //
+SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_u64tape(          //
+    sz_needleman_wunsch_scores_t engine, sz_device_scope_t device,  //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b, //
     sz_ssize_t *results, sz_size_t results_stride);
 
 SZ_DYNAMIC void sz_needleman_wunsch_scores_free(sz_needleman_wunsch_scores_t engine);
@@ -163,21 +165,21 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_sequence(        //
     sz_sequence_t const *a, sz_sequence_t const *b,              //
     sz_ssize_t *results, sz_size_t results_stride);
 
-SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_u32tape(         //
-    sz_smith_waterman_scores_t engine, sz_device_scope_t device, //
-    sz_arrow_u32tape_t const *a, sz_arrow_u32tape_t const *b,    //
+SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_u32tape(            //
+    sz_smith_waterman_scores_t engine, sz_device_scope_t device,    //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b, //
     sz_ssize_t *results, sz_size_t results_stride);
 
-SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_u64tape(         //
-    sz_smith_waterman_scores_t engine, sz_device_scope_t device, //
-    sz_arrow_u64tape_t const *a, sz_arrow_u64tape_t const *b,    //
+SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_u64tape(            //
+    sz_smith_waterman_scores_t engine, sz_device_scope_t device,    //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b, //
     sz_ssize_t *results, sz_size_t results_stride);
 
 SZ_DYNAMIC void sz_smith_waterman_scores_free(sz_smith_waterman_scores_t engine);
 
 /**
  *  APIs for computing fingerprints, Min-Hashes, and Count-Min-Sketches of binary and UTF-8 strings.
- *  Supports `sz_sequence_t`, `sz_arrow_u32tape_t`, and `sz_arrow_u64tape_t` inputs.
+ *  Supports `sz_sequence_t`, `sz_sequence_u32tape_t`, and `sz_sequence_u64tape_t` inputs.
  *
  *  @section Speed Considerations
  *
@@ -224,13 +226,13 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_sequence(        //
 
 SZ_DYNAMIC sz_status_t sz_fingerprints_u64tape(         //
     sz_fingerprints_t engine, sz_device_scope_t device, //
-    sz_arrow_u64tape_t const *texts,                    //
+    sz_sequence_u64tape_t const *texts,                 //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,  //
     sz_u32_t *min_counts, sz_size_t min_counts_stride);
 
 SZ_DYNAMIC sz_status_t sz_fingerprints_u32tape(         //
     sz_fingerprints_t engine, sz_device_scope_t device, //
-    sz_arrow_u32tape_t const *texts,                    //
+    sz_sequence_u32tape_t const *texts,                 //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,  //
     sz_u32_t *min_counts, sz_size_t min_counts_stride);
 
@@ -250,13 +252,13 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_sequence(        //
 
 SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_u64tape(         //
     sz_fingerprints_utf8_t engine, sz_device_scope_t device, //
-    sz_arrow_u64tape_t const *texts,                         //
+    sz_sequence_u64tape_t const *texts,                      //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,       //
     sz_u32_t *min_counts, sz_size_t min_counts_stride);
 
 SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_u32tape(         //
     sz_fingerprints_utf8_t engine, sz_device_scope_t device, //
-    sz_arrow_u32tape_t const *texts,                         //
+    sz_sequence_u32tape_t const *texts,                      //
     sz_u32_t *min_hashes, sz_size_t min_hashes_stride,       //
     sz_u32_t *min_counts, sz_size_t min_counts_stride);
 
