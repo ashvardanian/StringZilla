@@ -2066,11 +2066,11 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
     using char_t = char_type_;
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
-    using scores_allocator_t = typename allocator_t::template rebind<size_t>::other;
+    using scores_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
     static constexpr sz_capability_t capability_k = capability_;
 
     using task_t = cuda_similarity_task_<char_t>;
-    using tasks_allocator_t = typename allocator_t::template rebind<task_t>::other;
+    using tasks_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<task_t>;
 
     uniform_substitution_costs_t substituter_ {};
     gap_costs_t gap_costs_ {};
@@ -2731,12 +2731,12 @@ struct cuda_nw_or_sw_byte_level_scores_ {
     using substituter_t = error_costs_256x256_t;
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
-    using scores_allocator_t = typename allocator_t::template rebind<size_t>::other;
+    using scores_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<size_t>;
     static constexpr sz_similarity_locality_t locality_k = locality_;
     static constexpr sz_capability_t capability_k = capability_;
 
     using task_t = cuda_similarity_task_<char_t>;
-    using tasks_allocator_t = typename allocator_t::template rebind<task_t>::other;
+    using tasks_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<task_t>;
 
     error_costs_256x256_t substituter_ {};
     gap_costs_t gap_costs_ {};
