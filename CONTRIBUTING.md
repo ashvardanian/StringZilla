@@ -421,6 +421,14 @@ source .venv/bin/activate               # to activate the virtual environment
 uv pip install -e . --force-reinstall   # to build locally from source
 ```
 
+To build parallel StringZillas CPUs & CUDA backends, try:
+
+```bash
+uv pip install numpy
+SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
+SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
+```
+
 ### Testing
 
 For testing we use PyTest, which may not be installed on your system.

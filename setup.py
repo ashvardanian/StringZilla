@@ -2,9 +2,12 @@ import os
 import sys
 import platform
 from setuptools import setup, find_packages, Extension
-from typing import List, Tuple
+from typing import List, Tuple, Final
 import sysconfig
-import glob
+
+
+using_cibuildwheel: Final[str] = os.environ.get("CIBUILDWHEEL", "0") == "1"
+sz_target: Final[str] = os.environ.get("SZ_TARGET", "stringzilla")
 
 
 def get_compiler() -> str:
@@ -14,18 +17,15 @@ def get_compiler() -> str:
     return ""
 
 
-using_cibuildwheels = os.environ.get("CIBUILDWHEEL", "0") == "1"
-
-
 def is_64bit_x86() -> bool:
-    if using_cibuildwheels:
+    if using_cibuildwheel:
         return "SZ_X86_64" in os.environ
     arch = platform.machine()
     return arch in ["x86_64", "x64", "AMD64"]
 
 
 def is_64bit_arm() -> bool:
-    if using_cibuildwheels:
+    if using_cibuildwheel:
         return "SZ_ARM64" in os.environ
     arch = platform.machine()
     return arch in ["arm64", "aarch64", "ARM64"]
@@ -35,9 +35,9 @@ def is_big_endian() -> bool:
     return sys.byteorder == "big"
 
 
-def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
+def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
     compile_args = [
-        "-std=c99",  # use the C 99 language dialect
+        "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
         "-pedantic",  # stick close to the C language standard, avoid compiler extensions
         "-O3",  # maximum optimization level
         "-fdiagnostics-color=always",  # color console output
@@ -66,10 +66,10 @@ def linux_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     return compile_args, link_args, macros_args
 
 
-def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
+def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
 
     compile_args = [
-        "-std=c99",  # use the C 99 language dialect
+        "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
         "-pedantic",  # stick close to the C language standard, avoid compiler extensions
         "-O3",  # maximum optimization level
         "-fcolor-diagnostics",  # color console output
@@ -103,9 +103,9 @@ def darwin_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     return compile_args, link_args, macros_args
 
 
-def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
+def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
     compile_args = [
-        "/std:c99",  # use the C 99 language dialect
+        "/std:c++17" if use_cpp else "/std:c99",  # use C++17 for StringZillas, C99 for StringZilla
         "/Wall",  # stick close to the C language standard, avoid compiler extensions
         "/O2",  # maximum optimization level
     ]
@@ -125,35 +125,79 @@ def windows_settings() -> Tuple[List[str], List[str], List[Tuple[str]]]:
     return compile_args, link_args, macros_args
 
 
+use_cpp: Final[bool] = sz_target != "stringzilla"
+
 if sys.platform == "linux" or sys.platform.startswith("freebsd"):
-    compile_args, link_args, macros_args = linux_settings()
+    compile_args, link_args, macros_args = linux_settings(use_cpp=use_cpp)
 
 elif sys.platform == "darwin":
-    compile_args, link_args, macros_args = darwin_settings()
+    compile_args, link_args, macros_args = darwin_settings(use_cpp=use_cpp)
 
 elif sys.platform == "win32":
-    compile_args, link_args, macros_args = windows_settings()
+    compile_args, link_args, macros_args = windows_settings(use_cpp=use_cpp)
 
 # TODO: It would be great to infer available compilation flags on FreeBSD. They are likely similar to Linux
 else:
     compile_args, link_args, macros_args = [], [], []
 
-ext_modules = [
-    Extension(
-        "stringzilla",
-        ["python/stringzilla.c", "c/stringzilla.c"],
-        # In the past I've used `np.get_include()` to include NumPy headers,
-        # but it's not necessary for this library.
-        include_dirs=["include"],
-        extra_compile_args=compile_args,
-        extra_link_args=link_args,
-        define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
-    ),
-]
+ext_modules = []
+entry_points = {}
+
+if sz_target == "stringzilla":
+    __lib_name__ = "stringzilla"
+    ext_modules = [
+        Extension(
+            "stringzilla",
+            ["python/stringzilla.c", "c/stringzilla.c"],
+            include_dirs=["include"],
+            extra_compile_args=compile_args,
+            extra_link_args=link_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
+        ),
+    ]
+    entry_points = {
+        "console_scripts": [
+            "sz_split=cli.split:main",
+            "sz_wc=cli.wc:main",
+        ],
+    }
+elif sz_target == "stringzillas-cpus":
+    import numpy as np
+
+    from setuptools import Extension, setup
+    from setuptools.command.build_ext import build_ext
+    import numpy as np  # only used to obtain the include path
+
+    __lib_name__ = "stringzillas-cpus"
+    ext_modules = [
+        Extension(
+            "stringzillas",
+            ["python/stringzillas.c", "c/stringzillas.cpp"],
+            include_dirs=["include", "c", "fork_union/include", np.get_include()],
+            extra_compile_args=compile_args,
+            extra_link_args=link_args,
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "0")] + macros_args,
+        ),
+    ]
+elif sz_target == "stringzillas-cuda":
+    import numpy as np
+
+    __lib_name__ = "stringzillas-cuda"
+    ext_modules = [
+        Extension(
+            "stringzillas",
+            ["python/stringzillas.c", "c/stringzillas.cu"],
+            include_dirs=["include", "c", "fork_union/include", "/usr/local/cuda/include", np.get_include()],
+            extra_compile_args=compile_args + ["-x", "cuda"],
+            extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart"],
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
+        ),
+    ]
+else:
+    raise ValueError("Unknown target specified with SZ_TARGET environment variable.")
+
 
 __version__ = open("VERSION", "r").read().strip()
-__lib_name__ = "stringzilla"
-
 
 this_directory = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(this_directory, "README.md"), "r", encoding="utf-8") as f:
@@ -200,10 +244,5 @@ setup(
     setup_requires=[],
     ext_modules=ext_modules,
     packages=find_packages(),
-    entry_points={
-        "console_scripts": [
-            "sz_split=cli.split:main",
-            "sz_wc=cli.wc:main",
-        ],
-    },
+    entry_points=entry_points,
 )
