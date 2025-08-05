@@ -95,6 +95,11 @@ typedef union sz_string_t {
 
 } sz_string_t;
 
+#if !SZ_AVOID_LIBC // `offsetof` comes from `stddef.h`, which is part of the C standard library.
+sz_static_assert(offsetof(sz_string_t, internal.start) == offsetof(sz_string_t, external.start),
+                 Alignment_confusion_between_internal_and_external_storage);
+#endif
+
 #pragma endregion // Core Structure
 
 #pragma region Core API
@@ -292,7 +297,6 @@ SZ_PUBLIC sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, 
         string->external.length = length;
         string->external.space = space_needed;
     }
-    sz_assert_(&string->internal.start == &string->external.start && "Alignment confusion");
     string->external.start[length] = 0;
     return string->external.start;
 }
