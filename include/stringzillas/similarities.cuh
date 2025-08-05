@@ -2081,9 +2081,12 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
+#if SZ_IS_CPP20_
+        requires indexed_results_like<results_type_>
+#endif
     cuda_status_t operator()(                                                                 //
         first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
-        results_type_ *results_ptr,                                                           //
+        results_type_ &&results,                                                              //
         cuda_executor_t executor = {}, gpu_specs_t specs = {}) const noexcept {
 
         constexpr bool is_affine_k = is_same_type<gap_costs_t, affine_gap_costs_t>::value;
@@ -2094,7 +2097,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         cudaEventCreate(&start_event, cudaEventBlockingSync);
         cudaEventCreate(&stop_event, cudaEventBlockingSync);
 
-        using final_score_t = results_type_;
+        using final_score_t = typename indexed_results_type<results_type_>::type;
         safe_vector<task_t, tasks_allocator_t> tasks(alloc_);
         if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
@@ -2194,7 +2197,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     dim3(random_block_size),                                                  // Block dimensions
                     device_level_kernel_args, // Array of kernel argument pointers
                     0,                        // Shared memory per block (in bytes)
-                    executor.stream());         // CUDA stream
+                    executor.stream());       // CUDA stream
                 if (launch_error != cudaSuccess)
                     if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
                     else { return {status_t::unknown_k, launch_error}; }
@@ -2278,7 +2281,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
                     dim3(threads_per_block),                                    // Block dimensions
                     warp_level_kernel_args,                                     // Array of kernel argument pointers
                     shared_memory_per_block,                                    // Shared memory per block (in bytes)
-                    executor.stream());                                           // CUDA stream
+                    executor.stream());                                         // CUDA stream
                 if (launch_error != cudaSuccess) {
                     result = {launch_error == cudaErrorMemoryAllocation ? status_t::bad_alloc_k : status_t::unknown_k,
                               launch_error};
@@ -2305,7 +2308,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         // Now that everything went well, export the results back into the `results` array.
         for (size_t i = 0; i < tasks.size(); ++i) {
             task_t const &task = tasks[i];
-            results_ptr[task.original_index] = task.result;
+            results[task.original_index] = task.result;
         }
         return {status_t::success_k, cudaSuccess, execution_milliseconds};
     }
@@ -2744,9 +2747,12 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
+#if SZ_IS_CPP20_
+        requires indexed_results_like<results_type_>
+#endif
     cuda_status_t operator()(                                                                 //
         first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
-        results_type_ *results_ptr,                                                           //
+        results_type_ &&results,                                                              //
         cuda_executor_t executor = {}, gpu_specs_t specs = {}) const noexcept {
 
         constexpr bool is_local_k = locality_k == sz_similarity_local_k;
@@ -2758,7 +2764,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         cudaEventCreate(&start_event, cudaEventBlockingSync);
         cudaEventCreate(&stop_event, cudaEventBlockingSync);
 
-        using final_score_t = results_type_;
+        using final_score_t = typename indexed_results_type<results_type_>::type;
         safe_vector<task_t, tasks_allocator_t> tasks(alloc_);
         if (tasks.try_resize(first_strings.size()) == status_t::bad_alloc_k) return {status_t::bad_alloc_k};
 
@@ -2855,7 +2861,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
                     dim3(random_block_size),                                                  // Block dimensions
                     device_level_kernel_args, // Array of kernel argument pointers
                     0,                        // Shared memory per block (in bytes)
-                    executor.stream());         // CUDA stream
+                    executor.stream());       // CUDA stream
                 if (launch_error != cudaSuccess)
                     if (launch_error == cudaErrorMemoryAllocation) { return {status_t::bad_alloc_k, launch_error}; }
                     else { return {status_t::unknown_k, launch_error}; }
@@ -2937,7 +2943,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
                     dim3(threads_per_block),                                    // Block dimensions
                     warp_level_kernel_args,                                     // Array of kernel argument pointers
                     shared_memory_per_block,                                    // Shared memory per block (in bytes)
-                    executor.stream());                                           // CUDA stream
+                    executor.stream());                                         // CUDA stream
                 if (launch_error != cudaSuccess) {
                     result = {launch_error == cudaErrorMemoryAllocation ? status_t::bad_alloc_k : status_t::unknown_k,
                               launch_error};
@@ -2964,7 +2970,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         // Now that everything went well, export the results back into the `results` array.
         for (size_t task_index = 0; task_index < tasks.size(); ++task_index) {
             task_t const &task = tasks[task_index];
-            results_ptr[task.original_index] = task.result;
+            results[task.original_index] = task.result;
         }
         return {status_t::success_k, cudaSuccess, execution_milliseconds};
     }

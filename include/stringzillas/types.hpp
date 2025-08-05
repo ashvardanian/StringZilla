@@ -128,7 +128,30 @@ concept executor_like = requires(executor_type_ executor) {
     sizeof(executor) > 0;
 #endif
 };
+
+template <typename results_type_>
+concept indexed_results_like = requires(results_type_ results, size_t i) {
+    { results[i] };
+};
+
 #endif
+
+/** @brief Type trait to extract the value type from indexed results. */
+template <typename results_type_>
+struct indexed_results_type {
+    using clean_type = typename std::remove_reference<results_type_>::type;
+    using type = typename clean_type::value_type;
+};
+
+template <typename value_type_>
+struct indexed_results_type<value_type_ *> {
+    using type = value_type_;
+};
+
+template <typename value_type_>
+struct indexed_results_type<value_type_ *&> {
+    using type = value_type_;
+};
 
 struct openmp_executor_t {
 

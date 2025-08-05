@@ -2094,7 +2094,7 @@ template <                                     //
     typename executor_type_ = dummy_executor_t //
     >
 #if SZ_IS_CPP20_
-    requires score_like<score_type_> && executor_like<executor_type_>
+    requires score_like<score_type_> && executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
 status_t _score_in_parallel(                                                                                       //
     scoring_type_ &&scoring, first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
@@ -2160,7 +2160,7 @@ template <                         //
     typename results_type_         //
     >
 #if SZ_IS_CPP20_
-    requires score_like<score_type_>
+    requires score_like<score_type_> && indexed_results_like<results_type_>
 #endif
 status_t _score_sequentially(                                                                                      //
     scoring_type_ &&scoring, first_strings_type_ const &first_strings, second_strings_type_ const &second_strings, //
@@ -2222,7 +2222,7 @@ struct levenshtein_distances {
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
 #if SZ_IS_CPP20_
-        requires executor_like<executor_type_>
+        requires executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
@@ -2273,7 +2273,7 @@ struct levenshtein_distances_utf8 {
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
 #if SZ_IS_CPP20_
-        requires executor_like<executor_type_>
+        requires executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
@@ -2325,7 +2325,7 @@ struct needleman_wunsch_scores {
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
 #if SZ_IS_CPP20_
-        requires executor_like<executor_type_>
+        requires executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
@@ -2377,7 +2377,7 @@ struct smith_waterman_scores {
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
 #if SZ_IS_CPP20_
-        requires executor_like<executor_type_>
+        requires executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
                         results_type_ &&results, executor_type_ &&executor,
