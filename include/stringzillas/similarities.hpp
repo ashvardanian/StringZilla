@@ -70,7 +70,7 @@
 #define STRINGZILLAS_SIMILARITIES_HPP_
 
 #include "stringzilla/types.hpp"  // `sz::error_cost_t`
-#include "stringzilla/memory.h"   // `sz_move`
+#include "stringzilla/memory.h"   // `sz_move_serial`
 #include "stringzillas/types.hpp" // `sz::executor_like`
 
 #include <atomic>      // `std::atomic` to synchronize OpenMP threads
@@ -1078,8 +1078,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
             rotate_three(previous_scores, current_scores, next_scores);
 
             // ! Drop the first entry among the current scores.
-            sz_move((sz_ptr_t)(previous_scores), (sz_ptr_t)(previous_scores + 1),
-                    (max_diagonal_length - 1) * sizeof(score_t));
+            sz_move_serial((sz_ptr_t)(previous_scores), (sz_ptr_t)(previous_scores + 1),
+                           (max_diagonal_length - 1) * sizeof(score_t));
         }
 
         // Now let's handle the bottom-right triangle of the matrix.
@@ -1101,7 +1101,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
 
             // ! Drop the first entry among the current scores.
             // ! Assuming every next diagonal is shorter by one element,
-            // ! we don't need a full-blown `sz_move` to shift the array by one element.
+            // ! we don't need a full-blown `sz_move_serial` to shift the array by one element.
             previous_scores++;
         }
 
@@ -1295,8 +1295,8 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
             trivial_swap(current_deletes, next_deletes);
 
             // ! Drop the first entry among the current scores.
-            sz_move((sz_ptr_t)(previous_scores), (sz_ptr_t)(previous_scores + 1),
-                    (max_diagonal_length - 1) * sizeof(score_t));
+            sz_move_serial((sz_ptr_t)(previous_scores), (sz_ptr_t)(previous_scores + 1),
+                           (max_diagonal_length - 1) * sizeof(score_t));
         }
 
         // Now let's handle the bottom-right triangle of the matrix.
@@ -1323,7 +1323,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
 
             // ! Drop the first entry among the current scores.
             // ! Assuming every next diagonal is shorter by one element,
-            // ! we don't need a full-blown `sz_move` to shift the array by one element.
+            // ! we don't need a full-blown `sz_move_serial` to shift the array by one element.
             previous_scores++;
         }
 

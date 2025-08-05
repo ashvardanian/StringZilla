@@ -29,6 +29,11 @@
 extern "C" {
 #endif
 
+SZ_DYNAMIC int szs_version_major(void);
+SZ_DYNAMIC int szs_version_minor(void);
+SZ_DYNAMIC int szs_version_patch(void);
+SZ_DYNAMIC sz_capability_t szs_capabilities(void);
+
 /**
  *  @brief Apache Arrow-like tape for non-NULL strings with 32-bit offsets.
  *  @sa `sz_sequence_u64tape_t` for larger collections.

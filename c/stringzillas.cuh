@@ -397,6 +397,14 @@ sz_status_t sz_fingerprints_for_(                                     //
 
 extern "C" {
 
+SZ_DYNAMIC int szs_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
+SZ_DYNAMIC int szs_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
+SZ_DYNAMIC int szs_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+
+SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
+    return static_cast<sz_capability_t>(sz_caps_spi_k | sz_caps_ckh_k);
+}
+
 SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc) {
 #if SZ_USE_CUDA
     alloc->allocate = &sz_memory_allocate_from_unified_;

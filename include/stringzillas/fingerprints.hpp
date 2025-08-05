@@ -114,7 +114,6 @@
 #define STRINGZILLAS_FINGERPRINTS_HPP_
 
 #include "stringzilla/types.hpp"  // `sz::error_cost_t`
-#include "stringzilla/memory.h"   // `sz_move`
 #include "stringzillas/types.hpp" // `sz::executor_like`
 
 #include <cstddef>
