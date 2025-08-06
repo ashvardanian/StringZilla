@@ -77,15 +77,23 @@
 #include "sort.h"         // `sz_sequence_argsort`, `sz_pgrams_sort`
 #include "intersect.h"    // `sz_sequence_intersect`
 
+/* Inferring target OS: Windows, MacOS, or Linux */
+#if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__) || defined(__CYGWIN__)
+#define SZ_IS_WINDOWS_ 1
+#elif defined(__APPLE__) && defined(__MACH__)
+#define SZ_IS_APPLE_ 1
+#elif defined(__linux__)
+#define SZ_IS_LINUX_ 1
+#endif
+
+/* On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API */
+#if defined(SZ_IS_APPLE_)
+#include <sys/sysctl.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/**
- *  @brief  Function to determine the SIMD capabilities of the current machine @b only at @b runtime.
- *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
- */
-SZ_DYNAMIC sz_capability_t sz_capabilities(void);
 
 /**
  *  @brief Internal helper function to convert SIMD capabilities to a string.
@@ -136,12 +144,137 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
     return buf;
 }
 
+#if SZ_IS_64BIT_ARM_
+
+/**
+ *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
+ *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ */
+SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
+    // https://github.com/ashvardanian/SimSIMD/blob/28e536083602f85ad0c59456782c8864463ffb0e/include/simsimd/simsimd.h#L434
+    // for documentation on how we detect capabilities across different ARM platforms.
+#if defined(SZ_IS_APPLE_)
+
+    // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
+    uint32_t supports_neon = 0;
+    size_t size = sizeof(supports_neon);
+    if (sysctlbyname("hw.optional.neon", &supports_neon, &size, NULL, 0) != 0) supports_neon = 0;
+
+    return (sz_capability_t)(               //
+        (sz_cap_neon_k * (supports_neon)) | //
+        (sz_cap_serial_k));
+
+#elif defined(SZ_IS_LINUX_)
+
+    // Read CPUID registers directly
+    unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
+
+    // Now let's unpack the status flags from ID_AA64ISAR0_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
+    __asm__ __volatile__("mrs %0, ID_AA64ISAR0_EL1" : "=r"(id_aa64isar0_el1));
+    // Now let's unpack the status flags from ID_AA64ISAR1_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR1-EL1--AArch64-Instruction-Set-Attribute-Register-1?lang=en
+    __asm__ __volatile__("mrs %0, ID_AA64ISAR1_EL1" : "=r"(id_aa64isar1_el1));
+    // Now let's unpack the status flags from ID_AA64PFR0_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64PFR0-EL1--AArch64-Processor-Feature-Register-0?lang=en
+    __asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(id_aa64pfr0_el1));
+    // SVE, bits [35:32] of ID_AA64PFR0_EL1
+    unsigned supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
+    // Now let's unpack the status flags from ID_AA64ZFR0_EL1
+    // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ZFR0-EL1--SVE-Feature-ID-Register-0?lang=en
+    if (supports_sve) __asm__ __volatile__("mrs %0, ID_AA64ZFR0_EL1" : "=r"(id_aa64zfr0_el1));
+    // SVEver, bits [3:0] can be used to check for capability levels:
+    //  - 0b0000: SVE is implemented
+    //  - 0b0001: SVE2 is implemented
+    //  - 0b0010: SVE2.1 is implemented
+    // This value must match the existing indicator obtained from ID_AA64PFR0_EL1:
+    unsigned supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
+    unsigned supports_neon = 1; // NEON is always supported
+
+    return (sz_capability_t)(               //
+        (sz_cap_neon_k * (supports_neon)) | //
+        (sz_cap_sve_k * (supports_sve)) |   //
+        (sz_cap_sve2_k * (supports_sve2)) | //
+        (sz_cap_serial_k));
+
+#else // if !defined(SZ_IS_APPLE_) && !defined(SZ_IS_LINUX_)
+    return sz_cap_serial_k;
+#endif
+}
+
+#endif // SZ_IS_64BIT_ARM_
+
+#if SZ_IS_64BIT_X86_
+
+SZ_INTERNAL sz_capability_t sz_capabilities_implementation_x86_(void) {
+
+#if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
+
+    /// The states of 4 registers populated for a specific "cpuid" assembly call
+    union four_registers_t {
+        int array[4];
+        struct separate_t {
+            unsigned eax, ebx, ecx, edx;
+        } named;
+    } info1, info7;
+
+#if defined(_MSC_VER)
+    __cpuidex(info1.array, 1, 0);
+    __cpuidex(info7.array, 7, 0);
+#else
+    __asm__ __volatile__( //
+        "cpuid"
+        : "=a"(info1.named.eax), "=b"(info1.named.ebx), "=c"(info1.named.ecx), "=d"(info1.named.edx)
+        : "a"(1), "c"(0));
+    __asm__ __volatile__( //
+        "cpuid"
+        : "=a"(info7.named.eax), "=b"(info7.named.ebx), "=c"(info7.named.ecx), "=d"(info7.named.edx)
+        : "a"(7), "c"(0));
+#endif
+
+    // Check for AVX2 (Function ID 7, EBX register), you can take the relevant flags from the LLVM implementation:
+    // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L148
+    unsigned supports_avx2 = (info7.named.ebx & 0x00000020) != 0;
+    unsigned supports_avx512f = (info7.named.ebx & 0x00010000) != 0;
+    unsigned supports_avx512bw = (info7.named.ebx & 0x40000000) != 0;
+    unsigned supports_avx512vl = (info7.named.ebx & 0x80000000) != 0;
+    unsigned supports_avx512vbmi = (info7.named.ecx & 0x00000002) != 0;
+    unsigned supports_avx512vbmi2 = (info7.named.ecx & 0x00000040) != 0;
+    unsigned supports_vaes = (info7.named.ecx & 0x00000200) != 0;
+
+    return (sz_capability_t)(                                                                                //
+        (sz_cap_haswell_k * supports_avx2) |                                                                 //
+        (sz_cap_skylake_k * (supports_avx512f && supports_avx512vl && supports_avx512bw && supports_vaes)) | //
+        (sz_cap_ice_k * (supports_avx512vbmi && supports_avx512vbmi2)) |                                     //
+        (sz_cap_serial_k));
+#else
+    return sz_cap_serial_k;
+#endif
+}
+#endif // SZ_IS_64BIT_X86_
+
+/**
+ *  @brief Function to determine the SIMD capabilities of the current 64-bit x86 machine at @b runtime.
+ *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
+ *  @note Excludes parallel-processing & GPGPU capabilities, which are detected separately in StringZillas.
+ */
+SZ_INTERNAL sz_capability_t sz_capabilities_implementation_(void) {
+#if SZ_IS_64BIT_X86_
+    return sz_capabilities_implementation_x86_();
+#elif SZ_IS_64BIT_ARM_
+    return sz_capabilities_implementation_arm_();
+#else
+    return sz_cap_serial_k;
+#endif
+}
+
 #if defined(SZ_DYNAMIC_DISPATCH)
 
 SZ_DYNAMIC int sz_dynamic_dispatch(void);
 SZ_DYNAMIC int sz_version_major(void);
 SZ_DYNAMIC int sz_version_minor(void);
 SZ_DYNAMIC int sz_version_patch(void);
+SZ_DYNAMIC sz_capability_t sz_capabilities(void);
 SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
 
 #else
@@ -150,6 +283,7 @@ SZ_DYNAMIC int sz_dynamic_dispatch(void) { return 0; }
 SZ_PUBLIC int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
 SZ_PUBLIC int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_PUBLIC int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+SZ_PUBLIC sz_capability_t sz_capabilities(void) { return sz_capabilities_implementation_(); }
 SZ_PUBLIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return sz_capabilities_to_string_implementation_(caps);
 }
