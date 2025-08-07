@@ -259,6 +259,84 @@ static void test_memory_utilities( //
 #endif
 }
 
+/**
+ *  @brief  Tests memory utilities on large buffers (>1MB) that trigger special code paths
+ *          in AVX2/AVX512 implementations. This specifically tests the bidirectional
+ *          traversal optimization used for huge buffers.
+ */
+static void test_large_memory_utilities() {
+    // Test sizes that trigger the "huge buffer" path (> 1MB)
+    std::vector<std::size_t> test_sizes = {
+        1024ull * 1024ull + 1,       // Just over 1MB
+        1024ull * 10ull * 103ull,    // From GitHub issue #228: 1,055,360 bytes
+        2ull * 1024ull * 1024ull,    // 2MB
+        3ull * 1024ull * 1024ull + 7 // 3MB + 7 (unaligned size)
+    };
+
+    for (std::size_t size : test_sizes) {
+        // Test memcpy with aligned buffers
+        {
+            std::vector<char> src(size);
+            std::vector<char> dst_std(size);
+            std::vector<char> dst_sz(size);
+
+            // Fill source with pattern to detect copying errors
+            for (std::size_t i = 0; i < size; i++) { src[i] = static_cast<char>('A' + (i % 26)); }
+
+            std::memcpy(dst_std.data(), src.data(), size);
+            sz::memcpy(dst_sz.data(), src.data(), size);
+
+            expect_equality(dst_std.data(), dst_sz.data(), size);
+        }
+
+        // Test memcpy with unaligned buffers
+        {
+            std::vector<char> src_buf(size + 64);
+            std::vector<char> dst_std_buf(size + 64);
+            std::vector<char> dst_sz_buf(size + 64);
+
+            // Use unaligned pointers
+            char *src = src_buf.data() + 7;
+            char *dst_std = dst_std_buf.data() + 11;
+            char *dst_sz = dst_sz_buf.data() + 11;
+
+            for (std::size_t i = 0; i < size; i++) { src[i] = static_cast<char>('a' + (i % 26)); }
+
+            std::memcpy(dst_std, src, size);
+            sz::memcpy(dst_sz, src, size);
+
+            expect_equality(dst_std, dst_sz, size);
+        }
+
+        // Test memset
+        {
+            std::vector<char> buf_std(size);
+            std::vector<char> buf_sz(size);
+
+            std::memset(buf_std.data(), 'Z', size);
+            sz::memset(buf_sz.data(), 'Z', size);
+
+            expect_equality(buf_std.data(), buf_sz.data(), size);
+        }
+
+        // Test memmove with overlapping regions
+        {
+            std::vector<char> buf_std(size);
+            std::vector<char> buf_sz(size);
+
+            // Initialize both buffers identically
+            for (std::size_t i = 0; i < size; i++) { buf_std[i] = buf_sz[i] = static_cast<char>('0' + (i % 10)); }
+
+            // Move overlapping region forward
+            std::size_t overlap_size = size / 2;
+            std::memmove(buf_std.data() + 100, buf_std.data(), overlap_size);
+            sz::memmove(buf_sz.data() + 100, buf_sz.data(), overlap_size);
+
+            expect_equality(buf_std.data(), buf_sz.data(), size);
+        }
+    }
+}
+
 #define assert_scoped(init, operation, condition) \
     {                                             \
         init;                                     \
@@ -1570,6 +1648,7 @@ int main(int argc, char const **argv) {
     // Basic utilities
     test_arithmetical_utilities();
     test_memory_utilities();
+    test_large_memory_utilities();
     test_replacements();
 
 // Compatibility with STL

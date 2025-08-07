@@ -1773,8 +1773,8 @@ SZ_INTERNAL void _sz_locate_needle_anomalies(sz_cptr_t start, sz_size_t length, 
 
     // TODO: Investigate alternative strategies for long needles.
     // On very long needles we have the luxury to choose!
-    // Often dealing with UTF8, we will likely benfit from shifting the first and second characters
-    // further to the right, to achieve not only uniqness within the needle, but also avoid common
+    // Often dealing with UTF8, we will likely benefit from shifting the first and second characters
+    // further to the right, to achieve not only uniqueness within the needle, but also avoid common
     // rune prefixes of 2-, 3-, and 4-byte codes.
     if (length > 8) {
         // Pivot the first and second points right, until we find a character, that:
@@ -2215,8 +2215,7 @@ SZ_INTERNAL sz_cptr_t _sz_find_horspool_upto_256bytes_serial(sz_cptr_t h_chars, 
         sz_u64_vec_t n_length_vec;
         n_length_vec.u64 = ((sz_u8_t)(n_length - 1)) * 0x0101010101010101ull; // broadcast
         for (sz_size_t i = 0; i != 64; ++i) bad_shift_table.vecs[i].u64 = n_length_vec.u64;
-        for (sz_size_t i = 0; i + 1 < n_length; ++i) 
-            bad_shift_table.jumps[n[i]] = (sz_u8_t)(n_length - i - 1);
+        for (sz_size_t i = 0; i + 1 < n_length; ++i) bad_shift_table.jumps[n[i]] = (sz_u8_t)(n_length - i - 1);
     }
 
     // Another common heuristic is to match a few characters from different parts of a string.
@@ -3951,7 +3950,7 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
     // For now, let's avoid the cases beyond the L2 size.
     int is_huge = length > 1ull * 1024ull * 1024ull;
     if (length <= 32) { sz_copy_serial(target, source, length); }
-    // When dealing wirh larger arrays, the optimization is not as simple as with the `sz_fill_avx2` function,
+    // When dealing with larger arrays, the optimization is not as simple as with the `sz_fill_avx2` function,
     // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
     // we can use aligned loads and stores, and the performance will be great.
     else if ((sz_size_t)target % 32 == 0 && (sz_size_t)source % 32 == 0 && !is_huge) {
@@ -3975,6 +3974,7 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
         if (head_length & 16)
             _mm_store_si128((__m128i *)target, _mm_lddqu_si128((__m128i const *)source)), target += 16, source += 16,
                 head_length -= 16;
+        sz_assert(head_length == 0 && "The head length should be zero after the head copy.");
         sz_assert((sz_size_t)target % 32 == 0 && "Target is supposed to be aligned to the YMM register size.");
 
         // Fill the aligned body of the buffer.
@@ -3982,14 +3982,21 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
             for (; body_length >= 32; target += 32, source += 32, body_length -= 32)
                 _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
         }
-        // When the biffer is huge, we can traverse it in 2 directions.
+        // When the buffer is huge, we can traverse it in 2 directions.
         else {
-            for (; body_length >= 64; target += 32, source += 32, body_length -= 64) {
+            size_t tails_bytes_skipped = 0;
+            for (; body_length >= 64; target += 32, source += 32, body_length -= 64, tails_bytes_skipped += 32) {
                 _mm256_store_si256((__m256i *)(target), _mm256_lddqu_si256((__m256i const *)(source)));
                 _mm256_store_si256((__m256i *)(target + body_length - 32),
                                    _mm256_lddqu_si256((__m256i const *)(source + body_length - 32)));
             }
-            if (body_length) _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+            if (body_length) {
+                sz_assert(body_length == 32 && "The only remaining body length should be 32 bytes.");
+                _mm256_store_si256((__m256i *)target, _mm256_lddqu_si256((__m256i const *)source));
+                target += 32, source += 32, body_length -= 32;
+            }
+            target += tails_bytes_skipped;
+            source += tails_bytes_skipped;
         }
 
         // Fill the tail of the buffer. This part is much cleaner with AVX-512.
@@ -4001,6 +4008,7 @@ SZ_PUBLIC void sz_copy_avx2(sz_ptr_t target, sz_cptr_t source, sz_size_t length)
         if (tail_length & 4) *(sz_u32_t *)target = *(sz_u32_t *)source, target += 4, source += 4, tail_length -= 4;
         if (tail_length & 2) *(sz_u16_t *)target = *(sz_u16_t *)source, target += 2, source += 2, tail_length -= 2;
         if (tail_length & 1) *(sz_u8_t *)target = *(sz_u8_t *)source, target++, source++, tail_length--;
+        sz_assert(tail_length == 0 && "The tail length should be zero after the tail copy.");
     }
 }
 
@@ -4066,7 +4074,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_avx2(sz_cptr_t text, sz_size_t length) {
                 sums_vec.ymm = _mm256_add_epi64(sums_vec.ymm, _mm256_sad_epu8(text_vec.ymm, _mm256_setzero_si256()));
             }
         }
-        // When the biffer is huge, we can traverse it in 2 directions.
+        // When the buffer is huge, we can traverse it in 2 directions.
         else {
             sz_u256_vec_t text_reversed_vec, sums_reversed_vec;
             sums_reversed_vec.ymm = _mm256_setzero_si256();
@@ -4087,7 +4095,7 @@ SZ_PUBLIC sz_u64_t sz_checksum_avx2(sz_cptr_t text, sz_size_t length) {
         // Handle the tail
         while (tail_length--) result += *text++;
 
-        // Accumulating 256 bits is harders, as we need to extract the 128-bit sums first.
+        // Accumulating 256 bits is harder, as we need to extract the 128-bit sums first.
         __m128i low_xmm = _mm256_castsi256_si128(sums_vec.ymm);
         __m128i high_xmm = _mm256_extracti128_si256(sums_vec.ymm, 1);
         __m128i sums_xmm = _mm_add_epi64(low_xmm, high_xmm);
@@ -4779,7 +4787,7 @@ SZ_PUBLIC void sz_copy_avx512(sz_ptr_t target, sz_cptr_t source, sz_size_t lengt
         __mmask64 mask = _sz_u64_mask_until(length);
         _mm512_mask_storeu_epi8(target, mask, _mm512_maskz_loadu_epi8(mask, source));
     }
-    // When dealing wirh larger arrays, the optimization is not as simple as with the `sz_fill_avx512` function,
+    // When dealing with larger arrays, the optimization is not as simple as with the `sz_fill_avx512` function,
     // as both buffers may be unaligned. If we are lucky and the requested operation is some huge page transfer,
     // we can use aligned loads and stores, and the performance will be great.
     else if ((sz_size_t)target % 64 == 0 && (sz_size_t)source % 64 == 0 && !is_huge) {
