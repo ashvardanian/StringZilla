@@ -1,12 +1,23 @@
+#!/usr/bin/env python3
+"""
+Test suite for StringZillas parallel algorithms module.
+Tests with Python lists, NumPy arrays, Apache Arrow columns, and StringZilla Strs types.
+To run locally:
+
+    uv pip install numpy pyarrow pytest pytest-repeat
+    SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
+    SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
+    uv run --no-project python -m pytest scripts/test_stringzillas.py
+"""
+
 from random import choice, randint
 from string import ascii_lowercase
 from typing import Optional, Sequence, Dict
-import tempfile
-import os
 
 import pytest
 
 import stringzilla as sz
+import stringzillas as szs
 from stringzilla import Str, Strs
 
 # NumPy is available on most platforms and is required for most tests.
@@ -39,21 +50,33 @@ def test_library_properties():
     assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
     assert "serial" in sz.__capabilities__.split(","), "Serial backend must be present"
 
+    # Test StringZillas properties
+    assert len(szs.__version__.split(".")) == 3, "Semantic versioning must be preserved"
+    assert hasattr(szs, "__capabilities__"), "Capabilities must be exposed"
+    assert hasattr(szs, "__numpy_available__"), "NumPy availability must be exposed"
 
-def test_unit_globals():
-    """Validates that the previously unit-tested member methods are also visible as global functions."""
 
-    assert sz.hamming_distance("aaa", "aaa") == 0
-    assert sz.hamming_distance("aaa", "bbb") == 3
-    assert sz.hamming_distance("abababab", "aaaaaaaa") == 4
-    assert sz.hamming_distance("abababab", "aaaaaaaa", 2) == 2
-    assert sz.hamming_distance("abababab", "aaaaaaaa", bound=2) == 2
+def test_device_scope():
+    """Test DeviceScope for execution context control."""
 
-    assert sz.edit_distance("aaa", "aaa") == 0
-    assert sz.edit_distance("aaa", "bbb") == 3
-    assert sz.edit_distance("abababab", "aaaaaaaa") == 4
-    assert sz.edit_distance("abababab", "aaaaaaaa", 2) == 2
-    assert sz.edit_distance("abababab", "aaaaaaaa", bound=2) == 2
+    default_scope = szs.DeviceScope()
+    assert default_scope is not None
+
+    scope_multi = szs.DeviceScope.with_cpu_cores(4)
+    assert scope_multi is not None
+
+    scope_gpu = szs.DeviceScope.with_gpu_device(0)
+    assert scope_gpu is not None
+
+    # Invalid arguments
+    with pytest.raises(ValueError):
+        szs.DeviceScope.with_cpu_cores(1)
+
+    with pytest.raises(TypeError):
+        szs.DeviceScope.with_cpu_cores("invalid")
+
+    with pytest.raises(TypeError):
+        szs.DeviceScope.with_gpu_device("invalid")
 
 
 def get_random_string(
@@ -69,13 +92,11 @@ def get_random_string(
 
 def is_equal_strings(native_strings, big_strings):
     for native_slice, big_slice in zip(native_strings, big_strings):
-        assert (
-            native_slice == big_slice
-        ), f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
+        assert native_slice == big_slice, f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
 
 
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
-def baseline_edit_distance(s1, s2) -> int:
+def baseline_levenshtein_distance(s1, s2) -> int:
     """
     Compute the Levenshtein distance between two strings.
     """
@@ -108,10 +129,12 @@ def baseline_edit_distance(s1, s2) -> int:
 
 @pytest.mark.repeat(100)
 @pytest.mark.parametrize("max_edit_distance", [150])
-def test_edit_distance_insertions(max_edit_distance: int):
+def test_levenshtein_distance_insertions(max_edit_distance: int):
     # Create a new string by slicing and concatenating
     def insert_char_at(s, char_to_insert, index):
         return s[:index] + char_to_insert + s[index:]
+
+    binary_distance = sz.LevenshteinDistance()
 
     a = get_random_string(length=20)
     b = a
@@ -119,221 +142,146 @@ def test_edit_distance_insertions(max_edit_distance: int):
         source_offset = randint(0, len(ascii_lowercase) - 1)
         target_offset = randint(0, len(b) - 1)
         b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
-        assert sz.edit_distance(a, b, bound=200) == i + 1
+        assert binary_distance([a], [b]) == [i + 1], f"Edit distance mismatch after {i + 1} insertions: {a} -> {b}"
 
 
-def test_edit_distances():
+def test_levenshtein_distances_with_simple_cases():
 
-    assert sz.hamming_distance("hello", "hello") == 0
-    assert sz.hamming_distance("hello", "hell") == 1
-    assert sz.hamming_distance("abc", "adc") == 1, "one substitution"
-    assert sz.hamming_distance("αβγδ", "αxxγδ") == 2, "replace Beta UTF8 codepoint"
-    assert (
-        sz.hamming_distance_unicode("abcdefgh", "_bcdefg_") == 2
-    ), "replace ASCI prefix and suffix"
-    assert (
-        sz.hamming_distance_unicode("αβγδ", "αγγδ") == 1
-    ), "replace Beta UTF8 codepoint"
+    binary_distance = sz.LevenshteinDistance()
+    unicode_distance = sz.LevenshteinDistanceUTF8()
 
-    assert sz.edit_distance("hello", "hello") == 0
-    assert sz.edit_distance("hello", "hell") == 1
-    assert sz.edit_distance("", "") == 0
-    assert sz.edit_distance("", "abc") == 3
-    assert sz.edit_distance("abc", "") == 3
-    assert sz.edit_distance("abc", "ac") == 1, "one deletion"
-    assert sz.edit_distance("abc", "a_bc") == 1, "one insertion"
-    assert sz.edit_distance("abc", "adc") == 1, "one substitution"
-    assert (
-        sz.edit_distance("ggbuzgjux{}l", "gbuzgjux{}l") == 1
-    ), "one insertion (prepended)"
-    assert sz.edit_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == 14
+    assert binary_distance(["hello"], ["hello"]) == [0]
+    assert binary_distance(["hello"], ["hell"]) == [1]
+    assert binary_distance([""], [""]) == [0]
+    assert binary_distance([""], ["abc"]) == [3]
+    assert binary_distance(["abc"], [""]) == [3]
+    assert binary_distance(["abc"], ["ac"]) == [1], "one deletion"
+    assert binary_distance(["abc"], ["a_bc"]) == [1], "one insertion"
+    assert binary_distance(["abc"], ["adc"]) == [1], "one substitution"
+    assert binary_distance(["ggbuzgjux{}l"], ["gbuzgjux{}l"]) == [1], "one insertion (prepended)"
+    assert binary_distance(["abcdefgABCDEFG"], ["ABCDEFGabcdefg"]) == [14]
 
-    assert (
-        sz.edit_distance_unicode("hello", "hell") == 1
-    ), "no unicode symbols, just ASCII"
-    assert (
-        sz.edit_distance_unicode("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓") == 3
-    ), "add 3 whitespaces in Chinese"
-    assert sz.edit_distance_unicode("💖", "💗") == 1
+    assert unicode_distance(["hello"], ["hell"]) == [1], "no unicode symbols, just ASCII"
+    assert unicode_distance(["𠜎 𠜱 𠝹 𠱓"], ["𠜎𠜱𠝹𠱓"]) == [3], "add 3 whitespaces in Chinese"
+    assert unicode_distance(["💖"], ["💗"]) == [1]
 
-    assert sz.edit_distance_unicode("αβγδ", "αγδ") == 1, "insert Beta"
-    assert (
-        sz.edit_distance_unicode("école", "école") == 2
-    ), "etter 'é' as a single character vs 'e' + '´'"
-    assert (
-        sz.edit_distance_unicode("façade", "facade") == 1
-    ), "'ç' with cedilla vs. plain"
-    assert (
-        sz.edit_distance_unicode("Schön", "Scho\u0308n") == 2
-    ), "'ö' represented as 'o' + '¨'"
-    assert (
-        sz.edit_distance_unicode("München", "Muenchen") == 2
-    ), "German with umlaut vs. transcription"
-    assert sz.edit_distance_unicode("こんにちは世界", "こんばんは世界") == 2
+    assert unicode_distance(["αβγδ"], ["αγδ"]) == [1], "insert Beta"
+    assert unicode_distance(["école"], ["école"]) == [2], "etter 'é' as 1 character vs 'e' + '´'"
+    assert unicode_distance(["façade"], ["facade"]) == [1], "'ç' with cedilla vs. plain"
+    assert unicode_distance(["Schön"], ["Scho\u0308n"]) == [2], "'ö' represented as 'o' + '¨'"
+    assert unicode_distance(["München"], ["Muenchen"]) == [2], "German with umlaut vs. transcription"
+    assert unicode_distance(["こんにちは世界"], ["こんばんは世界"]) == [2], "Japanese greetings"
 
 
-@pytest.mark.repeat(30)
+def test_levenshtein_distances_with_custom_gaps():
+
+    mismatch: int = 4
+    opening: int = 3
+    extension: int = 2
+
+    binary_distance = sz.LevenshteinDistance()
+    unicode_distance = sz.LevenshteinDistanceUTF8()
+
+    assert binary_distance(["hello"], ["hello"]) == [0]
+    assert binary_distance(["hello"], ["hell"]) == [opening]
+    assert binary_distance([""], [""]) == [0]
+    assert binary_distance([""], ["abc"]) == [opening + 2 * extension]
+    assert binary_distance(["abc"], [""]) == [opening + 2 * extension]
+    assert binary_distance(["abc"], ["ac"]) == [opening], "one deletion"
+    assert binary_distance(["abc"], ["a_bc"]) == [opening], "one insertion"
+    assert binary_distance(["abc"], ["adc"]) == [mismatch], "one substitution"
+    assert binary_distance(["ggbuzgjux{}l"], ["gbuzgjux{}l"]) == [opening], "one insertion (prepended)"
+    assert binary_distance(["abcdefgABCDEFG"], ["ABCDEFGabcdefg"]) == [14 * mismatch]
+
+    assert unicode_distance(["hello"], ["hell"]) == [opening], "no unicode symbols, just ASCII"
+    assert unicode_distance(["𠜎 𠜱 𠝹 𠱓"], ["𠜎𠜱𠝹𠱓"]) == [3 * opening], "add 3 whitespaces in Chinese"
+    assert unicode_distance(["💖"], ["💗"]) == [1 * mismatch]
+
+    assert unicode_distance(["αβγδ"], ["αγδ"]) == [opening], "insert Beta"
+    assert unicode_distance(["école"], ["école"]) == [mismatch + opening], "etter 'é' as 1 character vs 'e' + '´'"
+    assert unicode_distance(["façade"], ["facade"]) == [mismatch], "'ç' with cedilla vs. plain"
+    assert unicode_distance(["Schön"], ["Scho\u0308n"]) == [mismatch + opening], "'ö' represented as 'o' + '¨'"
+    assert unicode_distance(["München"], ["Muenchen"]) == [mismatch + opening], "German with umlaut vs. transcription"
+    assert unicode_distance(["こんにちは世界"], ["こんばんは世界"]) == [mismatch + opening], "Japanese greetings"
+
+
+@pytest.mark.repeat(10)
 @pytest.mark.parametrize("first_length", [20, 100])
 @pytest.mark.parametrize("second_length", [20, 100])
+@pytest.mark.parametrize("batch_size", [1, 3, 133, 1000])
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
-def test_edit_distance_random(first_length: int, second_length: int):
-    a = get_random_string(length=first_length)
-    b = get_random_string(length=second_length)
-    assert sz.edit_distance(a, b) == baseline_edit_distance(a, b)
+def test_levenshtein_distance_random(first_length: int, second_length: int, batch_size: int):
+    batch_a = [get_random_string(length=first_length) for _ in range(batch_size)]
+    batch_b = [get_random_string(length=second_length) for _ in range(batch_size)]
+
+    baselines = np.array([baseline_levenshtein_distance(a, b) for a, b in zip(batch_a, batch_b)])
+    engine = sz.LevenshteinDistance()
+    results = engine(batch_a, batch_b)
+
+    np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
 
 
-@pytest.mark.repeat(30)
+@pytest.mark.repeat(10)
 @pytest.mark.parametrize("first_length", [20, 100])
 @pytest.mark.parametrize("second_length", [20, 100])
+@pytest.mark.parametrize("batch_size", [1, 3, 133, 1000])
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
-def test_alignment_score_random(first_length: int, second_length: int):
+def test_needleman_wunsch_vs_levenshtein_random(first_length: int, second_length: int, batch_size: int):
+    """Test Needleman-Wunsch global alignment scores against Levenshtein distances with random strings."""
 
-    a = get_random_string(length=first_length)
-    b = get_random_string(length=second_length)
+    batch_a = [get_random_string(length=first_length) for _ in range(batch_size)]
+    batch_b = [get_random_string(length=second_length) for _ in range(batch_size)]
+
     character_substitutions = np.zeros((256, 256), dtype=np.int8)
     character_substitutions.fill(-1)
     np.fill_diagonal(character_substitutions, 0)
 
-    assert sz.alignment_score(
-        a,
-        b,
-        substitution_matrix=character_substitutions,
-        gap_score=-1,
-    ) == -baseline_edit_distance(a, b)
+    baselines = [-baseline_levenshtein_distance(a, b) for a, b in zip(batch_a, batch_b)]
+    engine = sz.NeedlemanWunsch(substitution_matrix=character_substitutions, open=-1, extend=-1)
+    results = engine(batch_a, batch_b)
+
+    np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
 
 
-def baseline_translate(body: str, lut: Sequence) -> str:
-    return "".join([chr(lut[ord(c)]) for c in body])
+def test_fingerprints():
+    """Test Fingerprints and FingerprintsUTF8 basic functionality."""
+
+    engine = szs.Fingerprints()
+    utf8_engine = szs.FingerprintsUTF8()
+
+    # Basic functionality
+    assert engine([]) == []
+    assert utf8_engine([]) == []
+
+    test_strings = ["hello", "world", "hello"]
+    results = engine(test_strings)
+    assert len(results) == 3
+    assert results[0] == results[2], "Identical strings should produce identical fingerprints"
+    assert results[0] != results[1], "Different strings should produce different fingerprints"
+
+    # Unicode handling
+    unicode_strings = ["café", "世界", "🌟"]
+    utf8_results = utf8_engine(unicode_strings)
+    assert len(utf8_results) == 3
+    assert (
+        len(set(tuple(fp) if hasattr(fp, "__iter__") else fp for fp in utf8_results)) == 3
+    ), "Unicode strings should produce unique fingerprints"
 
 
-def translation_table_to_dict(lut: Sequence) -> Dict[str, str]:
-    return {chr(i): chr(lut[i]) for i in range(256)}
+@pytest.mark.repeat(5)
+@pytest.mark.parametrize("batch_size", [1, 10, 100])
+def test_fingerprints_random(batch_size: int):
+    """Test fingerprinting with random strings."""
 
+    engine = szs.Fingerprints()
+    batch = [get_random_string(length=randint(5, 50)) for _ in range(batch_size)]
 
-@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
-@pytest.mark.parametrize("length", range(1, 300))
-def test_translations(length: int):
+    results = engine(batch)
+    assert len(results) == batch_size
 
-    map_identity = np.arange(256, dtype=np.uint8)
-    map_invert = np.arange(255, -1, -1, dtype=np.uint8)
-    map_threshold = np.where(np.arange(256) > 127, 255, 0).astype(np.uint8)
-    dict_identity = translation_table_to_dict(map_identity)
-    dict_invert = translation_table_to_dict(map_invert)
-    dict_threshold = translation_table_to_dict(map_threshold)
-    view_identity = memoryview(map_identity)
-    view_invert = memoryview(map_invert)
-    view_threshold = memoryview(map_threshold)
-
-    body = get_random_string(length=length)
-    body_bytes = body.encode("utf-8")
-
-    # Check mapping strings and byte-strings into new strings
-    assert sz.translate(body, view_identity) == body
-    assert sz.translate(body_bytes, view_identity) == body_bytes
-    assert sz.translate(body_bytes, view_identity) == body_bytes.translate(
-        view_identity
-    )
-    assert sz.translate(body_bytes, view_invert) == body_bytes.translate(view_invert)
-    assert sz.translate(body_bytes, view_threshold) == body_bytes.translate(
-        view_threshold
-    )
-
-    # Check in-place translations - all of them return nothing
-    after_identity = memoryview(body_bytes)
-    assert sz.translate(after_identity, view_identity, inplace=True) == None
-    assert sz.equal(after_identity, body.translate(dict_identity))
-    after_invert = memoryview(body_bytes)
-    assert sz.translate(after_invert, view_invert, inplace=True) == None
-    assert sz.equal(after_invert, body.translate(dict_invert))
-    after_threshold = memoryview(body_bytes)
-    assert sz.translate(after_threshold, view_threshold, inplace=True) == None
-    assert sz.equal(after_threshold, body.translate(dict_threshold))
-
-
-@pytest.mark.repeat(3)
-@pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
-@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
-def test_translations_random(length: int):
-    body = get_random_string(length=length)
-    lut = np.random.randint(0, 256, size=256, dtype=np.uint8)
-    assert sz.translate(body, memoryview(lut)) == baseline_translate(body, lut)
-
-
-@pytest.mark.repeat(3)
-@pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
-def test_bytesums_random(length: int):
-    def sum_bytes(body: str) -> int:
-        return sum([ord(c) for c in body])
-
-    body = get_random_string(length=length)
-    assert sum_bytes(body) == sz.bytesum(body)
-
-
-@pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
-@pytest.mark.parametrize("part_length", [5, 10])
-@pytest.mark.parametrize("variability", [2, 3])
-def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
-    native_list = [
-        get_random_string(variability=variability, length=part_length)
-        for _ in range(list_length)
-    ]
-    native_joined = ".".join(native_list)
-    big_joined = Str(native_joined)
-    big_list = big_joined.split(".")
-
-    native_ordered = sorted(native_list)
-    native_order = big_list.argsort()
-    for i in range(list_length):
-        assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
-        assert native_ordered[i] == str(
-            big_list[int(native_order[i])]
-        ), "Split is wrong?!"
-
-    native_list.sort()
-    big_list.sort()
-
-    assert len(native_list) == len(big_list)
-    for native_str, big_str in zip(native_list, big_list):
-        assert native_str == str(big_str), "Order is wrong"
-
-
-@pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
-@pytest.mark.parametrize("part_length", [5, 10])
-@pytest.mark.parametrize("variability", [2, 3])
-def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
-    native_list = [
-        get_random_string(variability=variability, length=part_length)
-        for _ in range(list_length)
-    ]
-    native_joined = ".".join(native_list)
-    big_joined = Str(native_joined)
-    big_list = big_joined.split(".")
-
-    native_ordered = sorted(native_list)
-    native_order = big_list.argsort()
-    for i in range(list_length):
-        assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
-        assert native_ordered[i] == str(
-            big_list[int(native_order[i])]
-        ), "Split is wrong?!"
-
-    native_list.sort()
-    big_list.sort()
-
-    assert len(native_list) == len(big_list)
-    for native_str, big_str in zip(native_list, big_list):
-        assert native_str == str(big_str), "Order is wrong"
-
-
-@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_pyarrow_str_conversion():
-    native = "hello"
-    big = Str(native)
-    assert isinstance(big.address, int) and big.address != 0
-    assert isinstance(big.nbytes, int) and big.nbytes == len(native)
-
-    arrow_buffer = pa.foreign_buffer(big.address, big.nbytes, big)
-    assert arrow_buffer.to_pybytes() == native.encode("utf-8")
+    # Verify consistency
+    results_repeated = engine(batch)
+    assert results == results_repeated, "Same input should produce same fingerprints"
 
 
 if __name__ == "__main__":
