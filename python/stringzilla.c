@@ -14,6 +14,12 @@
  *  Pandas doesn't provide a C API, and even in the 2.0 the Apache Arrow representation is opt-in, not default.
  *  PyCapsule protocol in conjunction with @b `__arrow_c_array__` dunder methods can be used to extract strings.
  *  @see https://arrow.apache.org/docs/python/generated/pyarrow.array.html
+ *
+ *  This module exports C functions via `PyCapsule` for use by other extensions (like `stringzillas-cpus`):
+ *  - sz_py_export_string_like: exported as "sz_py_export_string_like".
+ *  - sz_py_export_strings_as_sequence: exported as "sz_py_export_strings_as_sequence".
+ *  - sz_py_export_strings_as_u32tape: exported as "sz_py_export_strings_as_u32tape".
+ *  - sz_py_export_strings_as_u64tape: exported as "sz_py_export_strings_as_u64tape".
  */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 #define NOMINMAX
@@ -80,6 +86,13 @@ struct ArrowArray {
     void (*release)(struct ArrowArray *);
     void *private_data;
 };
+
+typedef struct PyAPI {
+    sz_bool_t (*sz_py_export_string_like)(PyObject *, sz_cptr_t *, sz_size_t *);
+    sz_bool_t (*sz_py_export_strings_as_sequence)(PyObject *, sz_sequence_t *);
+    sz_bool_t (*sz_py_export_strings_as_u32tape)(PyObject *, sz_cptr_t *, sz_u32_t const **, sz_size_t *);
+    sz_bool_t (*sz_py_export_strings_as_u64tape)(PyObject *, sz_cptr_t *, sz_u64_t const **, sz_size_t *);
+} PyAPI;
 
 #pragma region Forward Declarations
 
@@ -294,7 +307,7 @@ void permute(sz_string_view_t *array, sz_sorted_idx_t *order, size_t length) {
  *  @brief  Helper function to export a Python string-like object into a `sz_string_view_t`.
  *          On failure, sets a Python exception and returns 0.
  */
-sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *length) {
+SZ_DYNAMIC sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
         // Handle Python `str` object
         Py_ssize_t signed_length;
@@ -361,6 +374,80 @@ sz_bool_t export_string_like(PyObject *object, sz_cptr_t **start, sz_size_t *len
         PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
         return 0;
     }
+}
+
+sz_cptr_t sz_py_strs_sequence_member_start_if_reordered(void const *sequence_punned, sz_size_t index) {
+    Strs *strs = (Strs *)sequence_punned;
+    sz_assert_(strs->type == STRS_REORDERED && "Expected a reordered Strs type");
+    if (index < 0 || index >= strs->data.reordered.count) {
+        PyErr_SetString(PyExc_IndexError, "Index out of bounds");
+        return NULL;
+    }
+    return strs->data.reordered.parts[index].start;
+}
+
+sz_size_t sz_py_strs_sequence_member_length_if_reordered(void const *sequence_punned, sz_size_t index) {
+    Strs *strs = (Strs *)sequence_punned;
+    sz_assert_(strs->type == STRS_REORDERED && "Expected a reordered Strs type");
+    if (index < 0 || index >= strs->data.reordered.count) {
+        PyErr_SetString(PyExc_IndexError, "Index out of bounds");
+        return 0;
+    }
+    return strs->data.reordered.parts[index].length;
+}
+
+/**
+ *  @brief  Helper function to export a `Strs` or similar sequence objects into a `sz_sequence_t`.
+ */
+SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequence) {
+    if (!sequence) return sz_false_k;
+
+    if (PyObject_TypeCheck(object, &StrsType)) {
+        Strs *strs = (Strs *)object;
+        sz_assert_(strs->type == STRS_REORDERED && "View as tapes!");
+
+        sequence->handle = strs;
+        sequence->count = strs->data.reordered.count;
+        sequence->get_start = sz_py_strs_sequence_member_start_if_reordered;
+        sequence->get_length = sz_py_strs_sequence_member_length_if_reordered;
+        return sz_true_k;
+    }
+
+    return sz_false_k;
+}
+
+/**
+ *  @brief  Helper function to export a `Strs` object into `sz_sequence_u32tape_t` components.
+ */
+SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_u32_t const **offsets,
+                                                     sz_size_t *count) {
+
+    if (!data || !offsets || !count) return sz_false_k;
+    if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
+    Strs *strs = (Strs *)object;
+    if (strs->type != STRS_CONSECUTIVE_32) return sz_false_k;
+
+    *data = strs->data.consecutive_32bit.start;
+    *offsets = strs->data.consecutive_32bit.end_offsets;
+    *count = strs->data.consecutive_32bit.count;
+    return sz_true_k;
+}
+
+/**
+ *  @brief  Helper function to export a `Strs` object into `sz_sequence_u64tape_t` components.
+ */
+SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
+                                                     sz_size_t *count) {
+
+    if (!data || !offsets || !count) return sz_false_k;
+    if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
+    Strs *strs = (Strs *)object;
+    if (strs->type != STRS_CONSECUTIVE_64) return sz_false_k;
+
+    *data = strs->data.consecutive_64bit.start;
+    *offsets = strs->data.consecutive_64bit.end_offsets;
+    *count = strs->data.consecutive_64bit.count;
+    return sz_true_k;
 }
 
 /**
@@ -681,7 +768,7 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
         self->memory.length = 0;
     }
     // Increment the reference count of the parent
-    else if (export_string_like(parent_obj, &self->memory.start, &self->memory.length)) {
+    else if (sz_py_export_string_like(parent_obj, &self->memory.start, &self->memory.length)) {
         self->parent = parent_obj;
         Py_INCREF(parent_obj);
     }
@@ -811,7 +898,7 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t
     }
 
     // Validate and convert text
-    if (!export_string_like(text_obj, &text.start, &text.length)) {
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
         wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
@@ -854,7 +941,7 @@ static PyObject *Str_like_bytesum(PyObject *self, PyObject *const *args, Py_ssiz
     sz_string_view_t text;
 
     // Validate and convert `text`
-    if (!export_string_like(text_obj, &text.start, &text.length)) {
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
         wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
@@ -889,8 +976,8 @@ static PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_
     sz_string_view_t text, other;
 
     // Validate and convert tje texts
-    if (!export_string_like(text_obj, &text.start, &text.length) || //
-        !export_string_like(other_obj, &other.start, &other.length)) {
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length) || //
+        !sz_py_export_string_like(other_obj, &other.start, &other.length)) {
         wrap_current_exception("The arguments must be string-like");
         return NULL;
     }
@@ -988,7 +1075,7 @@ static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
 static int Str_in(Str *self, PyObject *needle_obj) {
 
     sz_string_view_t needle;
-    if (!export_string_like(needle_obj, &needle.start, &needle.length)) {
+    if (!sz_py_export_string_like(needle_obj, &needle.start, &needle.length)) {
         wrap_current_exception("Unsupported needle type");
         return -1;
     }
@@ -1202,7 +1289,7 @@ static int Strs_in(Str *self, PyObject *needle_obj) {
 
     // Validate and convert `needle`
     sz_string_view_t needle;
-    if (!export_string_like(needle_obj, &needle.start, &needle.length)) {
+    if (!sz_py_export_string_like(needle_obj, &needle.start, &needle.length)) {
         wrap_current_exception("The needle argument must be string-like");
         return -1;
     }
@@ -1231,7 +1318,7 @@ static PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
 
     sz_cptr_t a_start = NULL, b_start = NULL;
     sz_size_t a_length = 0, b_length = 0;
-    if (!export_string_like(self, &a_start, &a_length) || !export_string_like(other, &b_start, &b_length))
+    if (!sz_py_export_string_like(self, &a_start, &a_length) || !sz_py_export_string_like(other, &b_start, &b_length))
         Py_RETURN_NOTIMPLEMENTED;
 
     int order = (int)sz_order(a_start, a_length, b_start, b_length);
@@ -1348,7 +1435,7 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
 
         // Try unpacking the element from the second sequence
         sz_string_view_t bi;
-        if (!export_string_like(other_item, &bi.start, &bi.length)) {
+        if (!sz_py_export_string_like(other_item, &bi.start, &bi.length)) {
             Py_DECREF(other_item);
             Py_DECREF(other_iter);
             wrap_current_exception("The second container must contain string-like objects");
@@ -1451,9 +1538,9 @@ static PyObject *Str_decode(PyObject *self, PyObject *const *args, Py_ssize_t po
     if (errors_obj == Py_None) errors_obj = NULL;
 
     sz_string_view_t text, encoding, errors;
-    if ((!export_string_like(text_obj, &text.start, &text.length)) ||
-        (encoding_obj && !export_string_like(encoding_obj, &encoding.start, &encoding.length)) ||
-        (errors_obj && !export_string_like(errors_obj, &errors.start, &errors.length))) {
+    if ((!sz_py_export_string_like(text_obj, &text.start, &text.length)) ||
+        (encoding_obj && !sz_py_export_string_like(encoding_obj, &encoding.start, &encoding.length)) ||
+        (errors_obj && !sz_py_export_string_like(errors_obj, &errors.start, &errors.length))) {
         wrap_current_exception("text, encoding, and errors must be string-like");
         return NULL;
     }
@@ -1497,8 +1584,8 @@ static PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t 
     sz_string_view_t path;
 
     // Validate and convert `text` and `path`
-    if (!export_string_like(text_obj, &text.start, &text.length) ||
-        !export_string_like(path_obj, &path.start, &path.length)) {
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length) ||
+        !sz_py_export_string_like(path_obj, &path.start, &path.length)) {
         wrap_current_exception("Text and path must be string-like");
         return NULL;
     }
@@ -1576,8 +1663,8 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *const *args, Py_ssi
     sz_string_view_t slice;
 
     // Validate and convert `text` and `slice`
-    if (!export_string_like(text_obj, &text.start, &text.length) ||
-        !export_string_like(slice_obj, &slice.start, &slice.length)) {
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length) ||
+        !sz_py_export_string_like(slice_obj, &slice.start, &slice.length)) {
         wrap_current_exception("Text and slice must be string-like");
         return NULL;
     }
@@ -1669,8 +1756,8 @@ static int Str_find_implementation_( //
     Py_ssize_t start, end;
 
     // Validate and convert `haystack` and `needle`
-    if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
-        !export_string_like(needle_obj, &needle.start, &needle.length)) {
+    if (!sz_py_export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
+        !sz_py_export_string_like(needle_obj, &needle.start, &needle.length)) {
         wrap_current_exception("Haystack and needle must be string-like");
         return 0;
     }
@@ -2021,8 +2108,8 @@ static PyObject *Str_count(PyObject *self, PyObject *const *args, Py_ssize_t pos
     Py_ssize_t end = end_obj ? PyLong_AsSsize_t(end_obj) : PY_SSIZE_T_MAX;
     int allowoverlap = allowoverlap_obj ? PyObject_IsTrue(allowoverlap_obj) : 0;
 
-    if (!export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
-        !export_string_like(needle_obj, &needle.start, &needle.length)) {
+    if (!sz_py_export_string_like(haystack_obj, &haystack.start, &haystack.length) ||
+        !sz_py_export_string_like(needle_obj, &needle.start, &needle.length)) {
         wrap_current_exception("Haystack and needle must be string-like");
         return NULL;
     }
@@ -2152,8 +2239,8 @@ static PyObject *Str_startswith(PyObject *self, PyObject *const *args, Py_ssize_
     }
 
     sz_string_view_t str, prefix;
-    if (!export_string_like(str_obj, &str.start, &str.length) ||
-        !export_string_like(prefix_obj, &prefix.start, &prefix.length)) {
+    if (!sz_py_export_string_like(str_obj, &str.start, &str.length) ||
+        !sz_py_export_string_like(prefix_obj, &prefix.start, &prefix.length)) {
         wrap_current_exception("Both arguments must be string-like");
         return NULL;
     }
@@ -2260,8 +2347,8 @@ static PyObject *Str_endswith(PyObject *self, PyObject *const *args, Py_ssize_t 
     }
 
     sz_string_view_t str, suffix;
-    if (!export_string_like(str_obj, &str.start, &str.length) ||
-        !export_string_like(suffix_obj, &suffix.start, &suffix.length)) {
+    if (!sz_py_export_string_like(str_obj, &str.start, &str.length) ||
+        !sz_py_export_string_like(suffix_obj, &suffix.start, &suffix.length)) {
         wrap_current_exception("Both arguments must be string-like");
         return NULL;
     }
@@ -2334,7 +2421,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *const *args, Py_ssize_t
     }
 
     sz_string_view_t str;
-    if (!export_string_like(str_obj, &str.start, &str.length)) {
+    if (!sz_py_export_string_like(str_obj, &str.start, &str.length)) {
         wrap_current_exception("First argument must be string-like");
         return NULL;
     }
@@ -2361,7 +2448,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *const *args, Py_ssize_t
             look_up_table[(unsigned char)key_char] = value_char;
         }
     }
-    else if (export_string_like(look_up_table_obj, &look_up_table_str.start, &look_up_table_str.length)) {
+    else if (sz_py_export_string_like(look_up_table_obj, &look_up_table_str.start, &look_up_table_str.length)) {
         if (look_up_table_str.length != 256) {
             PyErr_SetString(PyExc_ValueError, "The look-up table must be exactly 256 bytes long");
             return NULL;
@@ -2749,14 +2836,14 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
     Py_ssize_t maxsplit;
 
     // Validate and convert `text`
-    if (!export_string_like(text_obj, &text.start, &text.length)) {
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
         wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
 
     // Validate and convert `separator`
     if (separator_obj) {
-        if (!export_string_like(separator_obj, &separator.start, &separator.length)) {
+        if (!sz_py_export_string_like(separator_obj, &separator.start, &separator.length)) {
             wrap_current_exception("The separator argument must be string-like");
             return NULL;
         }
@@ -2982,7 +3069,7 @@ static PyObject *Str_splitlines(PyObject *self, PyObject *const *args, Py_ssize_
     Py_ssize_t maxsplit = PY_SSIZE_T_MAX; // Default value for maxsplit
 
     // Validate and convert `text`
-    if (!export_string_like(text_obj, &text.start, &text.length)) {
+    if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
         wrap_current_exception("The text argument must be string-like");
         return NULL;
     }
@@ -3036,8 +3123,8 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
     struct sz_string_view_t self_str, other_str;
 
     // Validate and convert `self` and `other`
-    if (!export_string_like(self, &self_str.start, &self_str.length) ||
-        !export_string_like(other, &other_str.start, &other_str.length)) {
+    if (!sz_py_export_string_like(self, &self_str.start, &self_str.length) ||
+        !sz_py_export_string_like(other, &other_str.start, &other_str.length)) {
         wrap_current_exception("Both operands must be string-like");
         return NULL;
     }
@@ -4043,6 +4130,22 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
 
     Py_INCREF(&SplitIteratorType);
     if (PyModule_AddObject(m, "SplitIterator", (PyObject *)&SplitIteratorType) < 0) {
+        Py_XDECREF(&SplitIteratorType);
+        Py_XDECREF(&StrsType);
+        Py_XDECREF(&FileType);
+        Py_XDECREF(&StrType);
+        Py_XDECREF(m);
+        return NULL;
+    }
+
+    // Export C API functions as a single capsule structure for StringZillas
+    static PyAPI sz_py_api = {
+        .sz_py_export_string_like = sz_py_export_string_like,
+        .sz_py_export_strings_as_sequence = sz_py_export_strings_as_sequence,
+        .sz_py_export_strings_as_u32tape = sz_py_export_strings_as_u32tape,
+        .sz_py_export_strings_as_u64tape = sz_py_export_strings_as_u64tape,
+    };
+    if (PyModule_AddObject(m, "_sz_py_api", PyCapsule_New(&sz_py_api, "_sz_py_api", NULL)) < 0) {
         Py_XDECREF(&SplitIteratorType);
         Py_XDECREF(&StrsType);
         Py_XDECREF(&FileType);
