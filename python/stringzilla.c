@@ -203,8 +203,9 @@ typedef struct {
             size_t count;
             size_t separator_length;
             PyObject *parent_string;
-            char const *start;
+            char const *start; // ? Ownership is controlled by presence of `parent_string`
             uint32_t *end_offsets;
+            int owns_offsets; // ? 1 if we allocated `end_offsets` and should `free`
         } consecutive_32bit;
 
         /**
@@ -223,8 +224,9 @@ typedef struct {
             size_t count;
             size_t separator_length;
             PyObject *parent_string;
-            char const *start;
+            char const *start; // ? Ownership is controlled by presence of `parent_string`
             uint64_t *end_offsets;
+            int owns_offsets; // ? 1 if we allocated `end_offsets` and should `free`
         } consecutive_64bit;
 
         /**
@@ -234,7 +236,7 @@ typedef struct {
         struct reordered_slices_t {
             size_t count;
             PyObject *parent_string;
-            sz_string_view_t *parts;
+            sz_string_view_t *parts; // ? Ownership is controlled by presence of `parent_string`
         } reordered;
 
     } data;
@@ -507,19 +509,19 @@ sz_bool_t prepare_strings_for_reordering(Strs *strs) {
 
     // Allocate memory for reordered slices
     size_t count = 0;
-    void *old_buffer = NULL;
+    void *buffer_to_release = NULL;
     get_string_at_offset_t getter = NULL;
     PyObject *parent_string = NULL;
     switch (strs->type) {
     case STRS_CONSECUTIVE_32:
         count = strs->data.consecutive_32bit.count;
-        old_buffer = strs->data.consecutive_32bit.end_offsets;
+        if (strs->data.consecutive_32bit.owns_offsets) buffer_to_release = strs->data.consecutive_32bit.end_offsets;
         parent_string = strs->data.consecutive_32bit.parent_string;
         getter = str_at_offset_consecutive_32bit;
         break;
     case STRS_CONSECUTIVE_64:
         count = strs->data.consecutive_64bit.count;
-        old_buffer = strs->data.consecutive_64bit.end_offsets;
+        if (strs->data.consecutive_64bit.owns_offsets) buffer_to_release = strs->data.consecutive_64bit.end_offsets;
         parent_string = strs->data.consecutive_64bit.parent_string;
         getter = str_at_offset_consecutive_64bit;
         break;
@@ -548,8 +550,8 @@ sz_bool_t prepare_strings_for_reordering(Strs *strs) {
         new_parts[i].length = length;
     }
 
-    // Release previous used memory.
-    if (old_buffer) free(old_buffer);
+    // Release previous used memory, if we own it
+    if (buffer_to_release) free(buffer_to_release);
 
     // Update the Strs object
     strs->type = STRS_REORDERED;
@@ -2647,6 +2649,8 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
         result->data.consecutive_64bit.start = text.start;
         result->data.consecutive_64bit.parent_string = parent_string;
         result->data.consecutive_64bit.separator_length = !keepseparator * match_length;
+        result->data.consecutive_64bit.end_offsets = NULL;
+        result->data.consecutive_64bit.owns_offsets = 0;
     }
     else {
         bytes_per_offset = 4;
@@ -2654,6 +2658,8 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
         result->data.consecutive_32bit.start = text.start;
         result->data.consecutive_32bit.parent_string = parent_string;
         result->data.consecutive_32bit.separator_length = !keepseparator * match_length;
+        result->data.consecutive_32bit.end_offsets = NULL;
+        result->data.consecutive_32bit.owns_offsets = 0;
     }
 
     sz_bool_t reached_tail = 0;
@@ -2704,10 +2710,12 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
     if (bytes_per_offset == 8) {
         result->data.consecutive_64bit.end_offsets = offsets_endings;
         result->data.consecutive_64bit.count = offsets_count;
+        result->data.consecutive_64bit.owns_offsets = 1;
     }
     else {
         result->data.consecutive_32bit.end_offsets = offsets_endings;
         result->data.consecutive_32bit.count = offsets_count;
+        result->data.consecutive_32bit.owns_offsets = 1;
     }
 
     Py_INCREF(parent_string);
@@ -3425,11 +3433,16 @@ static sz_bool_t Strs_argsort_(Strs *self, sz_string_view_t **parts_output, sz_s
     // Allocate temporary memory to store the ordering offsets
     size_t memory_needed = sizeof(sz_sorted_idx_t) * count;
     if (temporary_memory.length < memory_needed) {
-        temporary_memory.start = realloc(temporary_memory.start, memory_needed);
+        void *new_memory = realloc(temporary_memory.start, memory_needed);
+        if (!new_memory) {
+            PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
+            return 0;
+        }
+        temporary_memory.start = new_memory;
         temporary_memory.length = memory_needed;
     }
     if (!temporary_memory.start) {
-        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the Levenshtein matrix");
+        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
         return 0;
     }
 
