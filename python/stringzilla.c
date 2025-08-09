@@ -1150,7 +1150,6 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
     // Create a new `Strs` object
     Strs *result = (Strs *)StrsType.tp_alloc(&StrsType, 0);
-    // REVIEW(alexbowe): Does this raise the appropriate Error on the Python side?
     if (result == NULL && PyErr_NoMemory()) return NULL;
     if (result_count == 0) {
         result->type = STRS_REORDERED;
@@ -3404,7 +3403,15 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *const *args, Py_ssize_t posi
     size_t count = reordered->count;
 
     // Fisher-Yates Shuffle Algorithm
-    unsigned int seed = seed_obj ? PyLong_AsUnsignedLong(seed_obj) : time(NULL);
+    unsigned int seed = (unsigned int)time(NULL);
+    if (seed_obj) {
+        if (!PyLong_Check(seed_obj)) {
+            PyErr_SetString(PyExc_TypeError, "The seed must be an integer");
+            return NULL;
+        }
+        seed = PyLong_AsUnsignedLong(seed_obj);
+    }
+
     srand(seed);
     for (size_t i = count - 1; i > 0; --i) {
         size_t j = rand() % (i + 1);
@@ -3494,7 +3501,7 @@ static PyObject *Strs_sort(Strs *self, PyObject *const *args, Py_ssize_t positio
     }
 
     sz_string_view_t *parts = NULL;
-    sz_size_t *order = NULL;
+    sz_sorted_idx_t *order = NULL;
     sz_size_t count = 0;
     if (!Strs_argsort_(self, &parts, &order, &count)) return NULL;
 
@@ -3647,7 +3654,7 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
     // Randomly sample the strings
     srand(seed);
     PyObject *parent_string;
-    for (Py_ssize_t i = 0; i < sample_size; i++) {
+    for (Py_ssize_t i = 0; i < (Py_ssize_t)sample_size; i++) {
         size_t index = rand() % count;
         getter(self, index, count, &parent_string, &result_parts[i].start, &result_parts[i].length);
     }
