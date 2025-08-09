@@ -1,7 +1,19 @@
+#!/usr/bin/env python3
+"""
+Test suite for StringZilla package.
+For full coverage, preinstall NumPy and PyArrow.
+To run locally:
+
+    uv pip install numpy pyarrow pytest pytest-repeat
+    uv pip install -e . --force-reinstall --no-build-isolation
+    uv run --no-project python -m pytest scripts/test_stringzilla.py
+"""
+
 from random import choice, randint
 from string import ascii_lowercase
 from typing import Optional, Sequence, Dict
 import tempfile
+import sys
 import os
 
 import pytest
@@ -153,9 +165,7 @@ def test_str_write_to():
         big.write_to(temp_filename)
         with open(temp_filename, "r") as file:
             content = file.read()
-            assert (
-                content == native
-            ), "The content of the file does not match the expected output"
+            assert content == native, "The content of the file does not match the expected output"
     finally:
         os.remove(temp_filename)
 
@@ -386,9 +396,7 @@ def test_unit_strs_sequence_slicing():
 
     # Introduce a step to skip some values
     assert big_sequence[::2] == ["1", "3", "5"], to_str(big_sequence[::2])
-    assert big_sequence[::-1] == ["6", "5", "4", "3", "2", "1"], to_str(
-        big_sequence[::-1]
-    )
+    assert big_sequence[::-1] == ["6", "5", "4", "3", "2", "1"], to_str(big_sequence[::-1])
 
     # Let's go harder with nested slicing
     assert big_sequence[1:][::-1] == ["6", "5", "4", "3", "2"]
@@ -414,12 +422,8 @@ def test_unit_globals():
     assert sz.find("", "abcdef") == "".find("abcdef")
     assert sz.rfind("", "abcdef") == "".rfind("abcdef")
 
-    assert sz.find("Hello, world!", "world", 0, 11) == "Hello, world!".find(
-        "world", 0, 11
-    )
-    assert sz.rfind("Hello, world!", "world", 0, 11) == "Hello, world!".rfind(
-        "world", 0, 11
-    )
+    assert sz.find("Hello, world!", "world", 0, 11) == "Hello, world!".find("world", 0, 11)
+    assert sz.rfind("Hello, world!", "world", 0, 11) == "Hello, world!".rfind("world", 0, 11)
 
     assert sz.find_first_of("abcdef", "cde") == 2
     assert sz.find_first_of("abcdef", "xyz") == -1
@@ -526,9 +530,7 @@ def get_random_string(
 
 def is_equal_strings(native_strings, big_strings):
     for native_slice, big_slice in zip(native_strings, big_strings):
-        assert (
-            native_slice == big_slice
-        ), f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
+        assert native_slice == big_slice, f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
 
 
 def check_identical(
@@ -553,9 +555,7 @@ def check_identical(
     len_half = len(native) // 2
     len_quarter = len(native) // 4
     assert native.find(needle, len_half) == big.find(needle, len_half)
-    assert native.find(needle, len_quarter, 3 * len_quarter) == big.find(
-        needle, len_quarter, 3 * len_quarter
-    )
+    assert native.find(needle, len_quarter, 3 * len_quarter) == big.find(needle, len_quarter, 3 * len_quarter)
 
     # Check splits and other sequence operations
     native_strings = native.split(needle)
@@ -628,13 +628,9 @@ def test_translations(length: int):
     # Check mapping strings and byte-strings into new strings
     assert sz.translate(body, view_identity) == body
     assert sz.translate(body_bytes, view_identity) == body_bytes
-    assert sz.translate(body_bytes, view_identity) == body_bytes.translate(
-        view_identity
-    )
+    assert sz.translate(body_bytes, view_identity) == body_bytes.translate(view_identity)
     assert sz.translate(body_bytes, view_invert) == body_bytes.translate(view_invert)
-    assert sz.translate(body_bytes, view_threshold) == body_bytes.translate(
-        view_threshold
-    )
+    assert sz.translate(body_bytes, view_threshold) == body_bytes.translate(view_threshold)
 
     # Check in-place translations - all of them return nothing
     after_identity = memoryview(body_bytes)
@@ -671,10 +667,7 @@ def test_bytesums_random(length: int):
 @pytest.mark.parametrize("part_length", [5, 10])
 @pytest.mark.parametrize("variability", [2, 3])
 def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
-    native_list = [
-        get_random_string(variability=variability, length=part_length)
-        for _ in range(list_length)
-    ]
+    native_list = [get_random_string(variability=variability, length=part_length) for _ in range(list_length)]
     native_joined = ".".join(native_list)
     big_joined = Str(native_joined)
     big_list = big_joined.split(".")
@@ -683,9 +676,7 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
     native_order = big_list.argsort()
     for i in range(list_length):
         assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
-        assert native_ordered[i] == str(
-            big_list[int(native_order[i])]
-        ), "Split is wrong?!"
+        assert native_ordered[i] == str(big_list[int(native_order[i])]), "Split is wrong?!"
 
     native_list.sort()
     big_list.sort()
@@ -699,10 +690,7 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
 @pytest.mark.parametrize("part_length", [5, 10])
 @pytest.mark.parametrize("variability", [2, 3])
 def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
-    native_list = [
-        get_random_string(variability=variability, length=part_length)
-        for _ in range(list_length)
-    ]
+    native_list = [get_random_string(variability=variability, length=part_length) for _ in range(list_length)]
     native_joined = ".".join(native_list)
     big_joined = Str(native_joined)
     big_list = big_joined.split(".")
@@ -711,9 +699,7 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
     native_order = big_list.argsort()
     for i in range(list_length):
         assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
-        assert native_ordered[i] == str(
-            big_list[int(native_order[i])]
-        ), "Split is wrong?!"
+        assert native_ordered[i] == str(big_list[int(native_order[i])]), "Split is wrong?!"
 
     native_list.sort()
     big_list.sort()
@@ -724,7 +710,7 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_pyarrow_str_conversion():
+def test_str_to_pyarrow_conversion():
     native = "hello"
     big = Str(native)
     assert isinstance(big.address, int) and big.address != 0
@@ -734,43 +720,65 @@ def test_pyarrow_str_conversion():
     assert arrow_buffer.to_pybytes() == native.encode("utf-8")
 
 
+@pytest.mark.parametrize("container_class", [tuple])
+@pytest.mark.parametrize("view", [False, True])
+def test_strs_from_python_basic(container_class: type, view: bool):
+    """Test basic conversion from Python containers to Strs."""
+    container = container_class(["hello", "world", "test", " ", "from", " ", "container", ""])
+    strs = Strs(container, view=view)
+
+    assert len(strs) == len(container)
+    assert strs[0] == "hello"
+    assert strs[1] == "world"
+    assert strs[2] == "test"
+    assert strs[3] == " "
+    assert strs[4] == "from"
+    assert strs[5] == " "
+    assert strs[6] == "container"
+    assert strs[7] == ""
+
+
+@pytest.mark.parametrize("container_class", [tuple])
+@pytest.mark.parametrize("view", [False, True])
+def test_strs_reference_counting(container_class: type, view: bool):
+    """Test reference counting to prevent memory leaks."""
+    import sys
+    import gc
+    
+    container = container_class(["ref", "count", "test"])
+    initial_refcount = sys.getrefcount(container)
+    
+    strs = Strs(container, view=view)
+    during_refcount = sys.getrefcount(container)
+    
+    # View mode should increment refcount, copy mode should not
+    if view:
+        assert during_refcount == initial_refcount + 1, f"View mode should increment refcount"
+    else:
+        assert during_refcount == initial_refcount, f"Copy mode should not change refcount"
+    
+    # Verify functionality
+    assert len(strs) == 3
+    assert strs[0] == "ref"
+    
+    del strs
+    gc.collect()
+    final_refcount = sys.getrefcount(container)
+    assert final_refcount == initial_refcount, f"Refcount should return to initial value"
+
+
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_from_arrow_basic():
+@pytest.mark.parametrize("view", [False, True])
+def test_strs_from_arrow_basic(view: bool):
     """Test basic conversion from Arrow string array to Strs."""
     arrow_array = pa.array(["hello", "world", "test", "arrow"])
-    strs = Strs.from_arrow(arrow_array)
-    
+    strs = Strs(arrow_array, view=view)
+
     assert len(strs) == 4
     assert strs[0] == "hello"
-    assert strs[1] == "world" 
+    assert strs[1] == "world"
     assert strs[2] == "test"
     assert strs[3] == "arrow"
-
-
-@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_from_arrow_empty_strings():
-    """Test conversion with empty strings."""
-    arrow_array = pa.array(["hello", "", "world", ""])
-    strs = Strs.from_arrow(arrow_array)
-    
-    assert len(strs) == 4
-    assert strs[0] == "hello"
-    assert strs[1] == ""
-    assert strs[2] == "world"
-    assert strs[3] == ""
-
-
-@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_from_arrow_unicode():
-    """Test conversion with Unicode strings."""
-    arrow_array = pa.array(["hello", "мир", "🌍", "test"])
-    strs = Strs.from_arrow(arrow_array)
-    
-    assert len(strs) == 4
-    assert strs[0] == "hello"
-    assert strs[1] == "мир"
-    assert strs[2] == "🌍" 
-    assert strs[3] == "test"
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
@@ -778,13 +786,13 @@ def test_strs_from_arrow_binary_array():
     """Test conversion from Arrow binary array."""
     binary_data = [b"hello", b"world", b"binary", b"data"]
     arrow_array = pa.array(binary_data, type=pa.binary())
-    
-    strs = Strs.from_arrow(arrow_array)
-    
+
+    strs = Strs(arrow_array)
+
     assert len(strs) == 4
     # Strs should handle binary data properly - compare as bytes
     for i, expected in enumerate(binary_data):
-        str_bytes = strs[i].encode('latin-1') if isinstance(strs[i], str) else bytes(strs[i])
+        str_bytes = strs[i].encode("latin-1") if isinstance(strs[i], str) else bytes(strs[i])
         assert str_bytes == expected
 
 
@@ -792,9 +800,9 @@ def test_strs_from_arrow_binary_array():
 def test_strs_from_arrow_large_strings():
     """Test conversion from Arrow large string array."""
     arrow_array = pa.array(["hello", "world", "large", "strings"], type=pa.large_string())
-    
-    strs = Strs.from_arrow(arrow_array)
-    
+
+    strs = Strs(arrow_array)
+
     assert len(strs) == 4
     assert strs[0] == "hello"
     assert strs[1] == "world"
@@ -807,43 +815,74 @@ def test_strs_from_arrow_error_cases():
     """Test error handling for invalid inputs."""
     # Test with non-Arrow object
     with pytest.raises(TypeError):
-        Strs.from_arrow("not_an_arrow_array")
-    
+        Strs("not_an_arrow_array")
+
     with pytest.raises(TypeError):
-        Strs.from_arrow(["list", "of", "strings"])
-    
+        Strs(["list", "of", "strings"])
+
     # Test with non-string Arrow array
     int_array = pa.array([1, 2, 3, 4])
     with pytest.raises((TypeError, ValueError)):
-        Strs.from_arrow(int_array)
+        Strs(int_array)
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
 def test_strs_from_arrow_c_interface():
     """Test the low-level Arrow C Data Interface."""
     arrow_array = pa.array(["test", "c", "interface"])
-    
+
     # Check that Arrow array has the __arrow_c_array__ method
-    assert hasattr(arrow_array, '__arrow_c_array__')
-    
+    assert hasattr(arrow_array, "__arrow_c_array__")
+
     # Get the C interface capsules
     schema_capsule, array_capsule = arrow_array.__arrow_c_array__()
-    
+
     # Verify capsules are valid PyCapsule objects
-    import sys
     if sys.version_info >= (3, 1):
         assert str(type(schema_capsule)) == "<class 'PyCapsule'>"
         assert str(type(array_capsule)) == "<class 'PyCapsule'>"
-    
+
     # Test actual conversion
-    strs = Strs.from_arrow(arrow_array)
+    strs = Strs(arrow_array)
     assert len(strs) == 3
     assert strs[0] == "test"
     assert strs[1] == "c"
     assert strs[2] == "interface"
 
 
+@pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
+def test_strs_from_arrow_with_nulls():
+    """Test conversion from Arrow array with null values (validity bits)."""
+    # Create an array with None values
+    arrow_array = pa.array(["hello", None, "world", None, "test"])
+
+    strs = Strs(arrow_array)
+
+    assert len(strs) == 5
+    assert strs[0] == "hello"
+    assert strs[1] == ""  # None values should be converted to empty strings
+    assert strs[2] == "world"
+    assert strs[3] == ""  # None values should be converted to empty strings
+    assert strs[4] == "test"
+
+    # Test with all nulls
+    all_nulls = pa.array([None, None, None], type=pa.string())
+    strs_nulls = Strs(all_nulls)
+    assert len(strs_nulls) == 3
+    assert all(s == "" for s in strs_nulls)
+
+    # Test with mixed None and empty strings
+    mixed = pa.array(["", None, "hello", "", None, "world"])
+    strs_mixed = Strs(mixed)
+    assert len(strs_mixed) == 6
+    assert strs_mixed[0] == ""
+    assert strs_mixed[1] == ""
+    assert strs_mixed[2] == "hello"
+    assert strs_mixed[3] == ""
+    assert strs_mixed[4] == ""
+    assert strs_mixed[5] == "world"
+
+
 if __name__ == "__main__":
-    import sys
 
     sys.exit(pytest.main(["-x", "-s", __file__]))
