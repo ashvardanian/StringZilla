@@ -37,7 +37,7 @@ SZ_DYNAMIC sz_capability_t szs_capabilities(void);
 /**
  *  @brief Apache Arrow-like tape for non-NULL strings with 32-bit offsets.
  *  @sa `sz_sequence_u64tape_t` for larger collections.
- *  @note Unlike Apache Arrow, we only take (N) offsets for (N) strings, assuming the first one starts at zero offset.
+ *  @note Like Apache Arrow, we take (N+1) offsets for (N) strings, where `lengths[i] = offsets[i] - offsets[i-1]`.
  */
 typedef struct sz_sequence_u32tape_t {
     sz_cptr_t data;
@@ -48,7 +48,7 @@ typedef struct sz_sequence_u32tape_t {
 /**
  *  @brief Apache Arrow-like tape for non-NULL strings with 64-bit offsets.
  *  @sa `sz_sequence_u32tape_t` for smaller space-efficient collections.
- *  @note Unlike Apache Arrow, we only take (N) offsets for (N) strings, assuming the first one starts at zero offset.
+ *  @note Like Apache Arrow, we take (N+1) offsets for (N) strings, where `lengths[i] = offsets[i] - offsets[i-1]`.
  */
 typedef struct sz_sequence_u64tape_t {
     sz_cptr_t data;

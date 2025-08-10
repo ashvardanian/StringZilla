@@ -7,7 +7,7 @@ To run locally:
     uv pip install numpy pyarrow pytest pytest-repeat
     SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
     SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
-    uv run --no-project python -m pytest scripts/test_stringzillas.py
+    uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x
 """
 
 from random import choice, randint

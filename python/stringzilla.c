@@ -190,13 +190,12 @@ typedef struct {
         /**
          *  Simple structure resembling Apache Arrow arrays of variable length strings.
          *  When you split a `Str`, that is under 4 GB in size, this is used for space-efficiency.
-         *  The `end_offsets` contains `count`-many integers marking the end offset of part at a given
-         *  index. The length of consecutive elements can be determined as the difference in consecutive
-         *  offsets. The starting offset of the first element is zero bytes after the `start`.
-         *  Every chunk will include a separator of length `separator_length` at the end, except for the
-         *  last one.
          *
-         *  The layout isn't exactly identical to Arrow, as we have an optional separator and we have one less offset.
+         *  The `offsets` contains `count+1` integers similar to the Apache Arrow format.
+         *  The length of the i-th string is calculated as: `offsets[i+1] - offsets[i] - separator_length`.
+         *  The first offset is typically 0, unless we are looking at a slice of a larger array.
+         *
+         *  The layout is now identical to Apache Arrow format: N+1 offsets for N strings.
          *  https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
          */
         struct consecutive_slices_32bit_t {
@@ -204,20 +203,19 @@ typedef struct {
             size_t separator_length;
             PyObject *parent_string;
             char const *start; // ? Ownership is controlled by presence of `parent_string`
-            uint32_t *end_offsets;
-            int owns_offsets; // ? 1 if we allocated `end_offsets` and should `free`
+            uint32_t *offsets; // Apache Arrow format: N+1 offsets for N strings, starting with 0
+            int owns_offsets;  // ? 1 if we allocated `offsets` and should `free`
         } consecutive_32bit;
 
         /**
          *  Simple structure resembling Apache Arrow arrays of variable length strings.
          *  When you split a `Str`, over 4 GB long, this structure is used to indicate chunk offsets.
-         *  The `end_offsets` contains `count`-many integers marking the end offset of part at a given
-         *  index. The length of consecutive elements can be determined as the difference in consecutive
-         *  offsets. The starting offset of the first element is zero bytes after the `start`.
-         *  Every chunk will include a separator of length `separator_length` at the end, except for the
-         *  last one.
          *
-         *  The layout isn't exactly identical to Arrow, as we have an optional separator and we have one less offset.
+         *  The `offsets` contains `count+1` integers similar to the Apache Arrow format.
+         *  The length of the i-th string is calculated as: `offsets[i+1] - offsets[i] - separator_length`.
+         *  The first offset is typically 0, unless we are looking at a slice of a larger array.
+         *
+         *  The layout is now identical to Apache Arrow format: N+1 offsets for N strings.
          *  https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
          */
         struct consecutive_slices_64bit_t {
@@ -225,8 +223,8 @@ typedef struct {
             size_t separator_length;
             PyObject *parent_string;
             char const *start; // ? Ownership is controlled by presence of `parent_string`
-            uint64_t *end_offsets;
-            int owns_offsets; // ? 1 if we allocated `end_offsets` and should `free`
+            uint64_t *offsets; // Apache Arrow format: N+1 offsets for N strings, starting with 0
+            int owns_offsets;  // ? 1 if we allocated `offsets` and should `free`
         } consecutive_64bit;
 
         /**
@@ -428,9 +426,10 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
     Strs *strs = (Strs *)object;
     if (strs->type != STRS_CONSECUTIVE_32) return sz_false_k;
+    if (strs->data.consecutive_32bit.separator_length != 0) return sz_false_k;
 
     *data = strs->data.consecutive_32bit.start;
-    *offsets = strs->data.consecutive_32bit.end_offsets;
+    *offsets = strs->data.consecutive_32bit.offsets;
     *count = strs->data.consecutive_32bit.count;
     return sz_true_k;
 }
@@ -445,9 +444,10 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
     Strs *strs = (Strs *)object;
     if (strs->type != STRS_CONSECUTIVE_64) return sz_false_k;
+    if (strs->data.consecutive_64bit.separator_length != 0) return sz_false_k;
 
     *data = strs->data.consecutive_64bit.start;
-    *offsets = strs->data.consecutive_64bit.end_offsets;
+    *offsets = strs->data.consecutive_64bit.offsets;
     *count = strs->data.consecutive_64bit.count;
     return sz_true_k;
 }
@@ -468,8 +468,9 @@ typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject 
 
 void str_at_offset_consecutive_32bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
                                      PyObject **parent_string, char const **start, size_t *length) {
-    uint32_t start_offset = (i == 0) ? 0 : strs->data.consecutive_32bit.end_offsets[i - 1];
-    uint32_t end_offset = strs->data.consecutive_32bit.end_offsets[i] - //
+    // Apache Arrow format: offsets[i] to offsets[i+1] defines string i
+    uint32_t start_offset = strs->data.consecutive_32bit.offsets[i];
+    uint32_t end_offset = strs->data.consecutive_32bit.offsets[i + 1] - //
                           strs->data.consecutive_32bit.separator_length * (i + 1 != count);
     *start = strs->data.consecutive_32bit.start + start_offset;
     *length = end_offset - start_offset;
@@ -478,8 +479,9 @@ void str_at_offset_consecutive_32bit(Strs *strs, Py_ssize_t i, Py_ssize_t count,
 
 void str_at_offset_consecutive_64bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
                                      PyObject **parent_string, char const **start, size_t *length) {
-    uint64_t start_offset = (i == 0) ? 0 : strs->data.consecutive_64bit.end_offsets[i - 1];
-    uint64_t end_offset = strs->data.consecutive_64bit.end_offsets[i] - //
+    // Apache Arrow format: offsets[i] to offsets[i+1] defines string i
+    uint64_t start_offset = strs->data.consecutive_64bit.offsets[i];
+    uint64_t end_offset = strs->data.consecutive_64bit.offsets[i + 1] - //
                           strs->data.consecutive_64bit.separator_length * (i + 1 != count);
     *start = strs->data.consecutive_64bit.start + start_offset;
     *length = end_offset - start_offset;
@@ -515,13 +517,13 @@ sz_bool_t prepare_strings_for_reordering(Strs *strs) {
     switch (strs->type) {
     case STRS_CONSECUTIVE_32:
         count = strs->data.consecutive_32bit.count;
-        if (strs->data.consecutive_32bit.owns_offsets) buffer_to_release = strs->data.consecutive_32bit.end_offsets;
+        if (strs->data.consecutive_32bit.owns_offsets) buffer_to_release = strs->data.consecutive_32bit.offsets;
         parent_string = strs->data.consecutive_32bit.parent_string;
         getter = str_at_offset_consecutive_32bit;
         break;
     case STRS_CONSECUTIVE_64:
         count = strs->data.consecutive_64bit.count;
-        if (strs->data.consecutive_64bit.owns_offsets) buffer_to_release = strs->data.consecutive_64bit.end_offsets;
+        if (strs->data.consecutive_64bit.owns_offsets) buffer_to_release = strs->data.consecutive_64bit.offsets;
         parent_string = strs->data.consecutive_64bit.parent_string;
         getter = str_at_offset_consecutive_64bit;
         break;
@@ -1207,25 +1209,26 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         consecutive_slices_t *to = &result->data.consecutive_32bit;
         to->count = result_count;
 
-        // Allocate memory for the end offsets
+        // Allocate memory for the offsets (Apache Arrow format: N+1 offsets for N strings)
         to->separator_length = from->separator_length;
-        to->end_offsets = malloc(sizeof(uint32_t) * result_count);
-        if (to->end_offsets == NULL && PyErr_NoMemory()) {
+        to->offsets = malloc(sizeof(uint32_t) * (result_count + 1));
+        if (to->offsets == NULL && PyErr_NoMemory()) {
             Py_XDECREF(result);
             return NULL;
         }
         to->owns_offsets = 1;
 
-        // Now populate the offsets
+        // Now populate the offsets (Apache Arrow format: N+1 offsets for N strings)
+        to->offsets[0] = 0; // First offset is always 0
         size_t element_length;
         str_at_offset_consecutive_32bit(self, start, count, &to->parent_string, &to->start, &element_length);
-        to->end_offsets[0] = element_length;
+        to->offsets[1] = element_length;
         for (Py_ssize_t i = 1; i < result_count; ++i) {
-            to->end_offsets[i - 1] += from->separator_length;
+            to->offsets[i] += from->separator_length;
             PyObject *element_parent = NULL;
             char const *element_start = NULL;
-            str_at_offset_consecutive_32bit(self, start, count, &element_parent, &element_start, &element_length);
-            to->end_offsets[i] = element_length + to->end_offsets[i - 1];
+            str_at_offset_consecutive_32bit(self, start + i, count, &element_parent, &element_start, &element_length);
+            to->offsets[i + 1] = element_length + to->offsets[i];
         }
         Py_INCREF(to->parent_string);
         break;
@@ -1237,25 +1240,26 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         consecutive_slices_t *to = &result->data.consecutive_64bit;
         to->count = result_count;
 
-        // Allocate memory for the end offsets
+        // Allocate memory for the offsets (Apache Arrow format: N+1 offsets for N strings)
         to->separator_length = from->separator_length;
-        to->end_offsets = malloc(sizeof(uint64_t) * result_count);
-        if (to->end_offsets == NULL && PyErr_NoMemory()) {
+        to->offsets = malloc(sizeof(uint64_t) * (result_count + 1));
+        if (to->offsets == NULL && PyErr_NoMemory()) {
             Py_XDECREF(result);
             return NULL;
         }
         to->owns_offsets = 1;
 
-        // Now populate the offsets
+        // Now populate the offsets (Apache Arrow format: N+1 offsets for N strings)
+        to->offsets[0] = 0; // First offset is always 0
         size_t element_length;
         str_at_offset_consecutive_64bit(self, start, count, &to->parent_string, &to->start, &element_length);
-        to->end_offsets[0] = element_length;
+        to->offsets[1] = element_length;
         for (Py_ssize_t i = 1; i < result_count; ++i) {
-            to->end_offsets[i - 1] += from->separator_length;
+            to->offsets[i] += from->separator_length;
             PyObject *element_parent = NULL;
             char const *element_start = NULL;
-            str_at_offset_consecutive_64bit(self, start, count, &element_parent, &element_start, &element_length);
-            to->end_offsets[i] = element_length + to->end_offsets[i - 1];
+            str_at_offset_consecutive_64bit(self, start + i, count, &element_parent, &element_start, &element_length);
+            to->offsets[i + 1] = element_length + to->offsets[i];
         }
         Py_INCREF(to->parent_string);
         break;
@@ -2644,7 +2648,7 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
     // Initialize Strs object based on the splitting logic
     void *offsets_endings = NULL;
     size_t offsets_capacity = 0;
-    size_t offsets_count = 0;
+    size_t offsets_count = 1; // Start with 1 to account for the initial 0 offset
     size_t bytes_per_offset;
     if (text.length >= UINT32_MAX) {
         bytes_per_offset = 8;
@@ -2652,7 +2656,7 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
         result->data.consecutive_64bit.start = text.start;
         result->data.consecutive_64bit.parent_string = parent_string;
         result->data.consecutive_64bit.separator_length = !keepseparator * match_length;
-        result->data.consecutive_64bit.end_offsets = NULL;
+        result->data.consecutive_64bit.offsets = NULL;
         result->data.consecutive_64bit.owns_offsets = 0;
     }
     else {
@@ -2661,9 +2665,22 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
         result->data.consecutive_32bit.start = text.start;
         result->data.consecutive_32bit.parent_string = parent_string;
         result->data.consecutive_32bit.separator_length = !keepseparator * match_length;
-        result->data.consecutive_32bit.end_offsets = NULL;
+        result->data.consecutive_32bit.offsets = NULL;
         result->data.consecutive_32bit.owns_offsets = 0;
     }
+
+    // Initialize the first offset to 0 (Apache Arrow format)
+    if (offsets_capacity == 0) {
+        offsets_capacity = 4;
+        offsets_endings = malloc(offsets_capacity * bytes_per_offset);
+        if (!offsets_endings) {
+            Py_XDECREF(result);
+            PyErr_NoMemory();
+            return NULL;
+        }
+    }
+    if (bytes_per_offset == 8) { ((uint64_t *)offsets_endings)[0] = 0; }
+    else { ((uint32_t *)offsets_endings)[0] = 0; }
 
     sz_bool_t reached_tail = 0;
     sz_size_t total_skipped = 0;
@@ -2671,7 +2688,7 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
     while (!reached_tail) {
 
         sz_cptr_t match =
-            offsets_count + 1 < max_parts
+            offsets_count < max_parts
                 ? finder(text.start + total_skipped, text.length - total_skipped, separator.start, separator.length)
                 : NULL;
 
@@ -2711,13 +2728,13 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
 
     // Populate the Strs object with the offsets
     if (bytes_per_offset == 8) {
-        result->data.consecutive_64bit.end_offsets = offsets_endings;
-        result->data.consecutive_64bit.count = offsets_count;
+        result->data.consecutive_64bit.offsets = offsets_endings;
+        result->data.consecutive_64bit.count = offsets_count - 1; // count is number of strings, not offsets
         result->data.consecutive_64bit.owns_offsets = 1;
     }
     else {
-        result->data.consecutive_32bit.end_offsets = offsets_endings;
-        result->data.consecutive_32bit.count = offsets_count;
+        result->data.consecutive_32bit.offsets = offsets_endings;
+        result->data.consecutive_32bit.count = offsets_count - 1; // count is number of strings, not offsets
         result->data.consecutive_32bit.owns_offsets = 1;
     }
 
@@ -3918,7 +3935,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             self->data.consecutive_64bit.separator_length = 0;
             self->data.consecutive_64bit.parent_string = capsules;
             self->data.consecutive_64bit.start = data_buffer;
-            self->data.consecutive_64bit.end_offsets = (uint64_t *)(offsets_64 + 1);
+            self->data.consecutive_64bit.offsets = (uint64_t *)(offsets_64 + 1);
             self->data.consecutive_64bit.owns_offsets = 0; // Arrow owns buffer
             Py_INCREF(capsules);
         }
@@ -3929,7 +3946,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             self->data.consecutive_32bit.separator_length = 0;
             self->data.consecutive_32bit.parent_string = capsules;
             self->data.consecutive_32bit.start = data_buffer;
-            self->data.consecutive_32bit.end_offsets = (uint32_t *)(offsets_32 + 1);
+            self->data.consecutive_32bit.offsets = (uint32_t *)(offsets_32 + 1);
             self->data.consecutive_32bit.owns_offsets = 0; // Arrow owns buffer
             Py_INCREF(capsules);
         }
@@ -3975,7 +3992,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             self->data.consecutive_64bit.separator_length = 0;
             self->data.consecutive_64bit.parent_string = parent;
             self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_64bit.end_offsets = new_offsets;
+            self->data.consecutive_64bit.offsets = new_offsets;
             self->data.consecutive_64bit.owns_offsets = 1;
         }
         else {
@@ -4017,7 +4034,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             self->data.consecutive_32bit.separator_length = 0;
             self->data.consecutive_32bit.parent_string = parent;
             self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_32bit.end_offsets = new_offsets;
+            self->data.consecutive_32bit.offsets = new_offsets;
             self->data.consecutive_32bit.owns_offsets = 1;
         }
     }
@@ -4093,7 +4110,8 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
         }
 
         if (use_64bit) {
-            uint64_t *offsets = (uint64_t *)malloc(count * sizeof(uint64_t));
+            // Apache Arrow format: N+1 offsets for N strings
+            uint64_t *offsets = (uint64_t *)malloc((count + 1) * sizeof(uint64_t));
             if (!offsets) {
                 free(data_buffer);
                 PyErr_NoMemory();
@@ -4101,6 +4119,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
             }
 
             size_t offset = 0;
+            offsets[0] = 0; // First offset is always 0
             for (Py_ssize_t i = 0; i < count; i++) {
                 PyObject *item = PyTuple_GET_ITEM(sequence_obj, i);
                 sz_cptr_t item_start;
@@ -4109,7 +4128,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
 
                 sz_copy(data_buffer + offset, item_start, item_length);
                 offset += item_length;
-                offsets[i] = offset;
+                offsets[i + 1] = offset; // Apache Arrow format: offset after this string
             }
 
             PyObject *parent = PyBytes_FromStringAndSize(data_buffer, total_bytes);
@@ -4124,10 +4143,11 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
             self->data.consecutive_64bit.separator_length = 0;
             self->data.consecutive_64bit.parent_string = parent;
             self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_64bit.end_offsets = offsets;
+            self->data.consecutive_64bit.offsets = offsets;
         }
         else {
-            uint32_t *offsets = (uint32_t *)malloc(count * sizeof(uint32_t));
+            // Apache Arrow format: N+1 offsets for N strings
+            uint32_t *offsets = (uint32_t *)malloc((count + 1) * sizeof(uint32_t));
             if (!offsets) {
                 free(data_buffer);
                 PyErr_NoMemory();
@@ -4135,6 +4155,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
             }
 
             size_t offset = 0;
+            offsets[0] = 0; // First offset is always 0
             for (Py_ssize_t i = 0; i < count; i++) {
                 PyObject *item = PyTuple_GET_ITEM(sequence_obj, i);
                 sz_cptr_t item_start;
@@ -4143,7 +4164,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
 
                 sz_copy(data_buffer + offset, item_start, item_length);
                 offset += item_length;
-                offsets[i] = offset;
+                offsets[i + 1] = offset; // Apache Arrow format: offset after this string
             }
 
             PyObject *parent = PyBytes_FromStringAndSize(data_buffer, total_bytes);
@@ -4158,7 +4179,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
             self->data.consecutive_32bit.separator_length = 0;
             self->data.consecutive_32bit.parent_string = parent;
             self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_32bit.end_offsets = offsets;
+            self->data.consecutive_32bit.offsets = offsets;
         }
     }
 
@@ -4236,8 +4257,9 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
         char *data_buffer = (char *)malloc(total_bytes);
         void *offsets;
 
-        if (use_64bit) { offsets = malloc(count * sizeof(uint64_t)); }
-        else { offsets = malloc(count * sizeof(uint32_t)); }
+        // Apache Arrow format: N+1 offsets for N strings
+        if (use_64bit) { offsets = malloc((count + 1) * sizeof(uint64_t)); }
+        else { offsets = malloc((count + 1) * sizeof(uint32_t)); }
 
         if (!data_buffer || !offsets) {
             free(data_buffer);
@@ -4246,8 +4268,12 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
             return -1;
         }
 
-        // Second pass: copy data and build offsets
+        // Second pass: copy data and build offsets (Apache Arrow format)
         size_t current_offset = 0;
+        // Set first offset to 0
+        if (use_64bit) { ((uint64_t *)offsets)[0] = 0; }
+        else { ((uint32_t *)offsets)[0] = 0; }
+
         for (Py_ssize_t i = 0; i < count; i++) {
             PyObject *item = PyList_GET_ITEM(sequence_obj, i);
             sz_cptr_t item_start;
@@ -4260,9 +4286,9 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
             memcpy(data_buffer + current_offset, item_start, item_length);
             current_offset += item_length;
 
-            // Store offset
-            if (use_64bit) { ((uint64_t *)offsets)[i] = current_offset; }
-            else { ((uint32_t *)offsets)[i] = current_offset; }
+            // Store offset (Apache Arrow format: offset after this string)
+            if (use_64bit) { ((uint64_t *)offsets)[i + 1] = current_offset; }
+            else { ((uint32_t *)offsets)[i + 1] = current_offset; }
         }
 
         // Create parent bytes object from the buffer
@@ -4281,7 +4307,7 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
             self->data.consecutive_64bit.separator_length = 0;
             self->data.consecutive_64bit.parent_string = parent;
             self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_64bit.end_offsets = (uint64_t *)offsets;
+            self->data.consecutive_64bit.offsets = (uint64_t *)offsets;
             self->data.consecutive_64bit.owns_offsets = 1;
         }
         else {
@@ -4290,7 +4316,7 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
             self->data.consecutive_32bit.separator_length = 0;
             self->data.consecutive_32bit.parent_string = parent;
             self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_32bit.end_offsets = (uint32_t *)offsets;
+            self->data.consecutive_32bit.offsets = (uint32_t *)offsets;
             self->data.consecutive_32bit.owns_offsets = 1;
         }
 
@@ -4480,7 +4506,7 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
             self->data.consecutive_64bit.separator_length = 0;
             self->data.consecutive_64bit.parent_string = parent;
             self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_64bit.end_offsets = (uint64_t *)offsets;
+            self->data.consecutive_64bit.offsets = (uint64_t *)offsets;
             self->data.consecutive_64bit.owns_offsets = 1;
         }
         else {
@@ -4489,7 +4515,7 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
             self->data.consecutive_32bit.separator_length = 0;
             self->data.consecutive_32bit.parent_string = parent;
             self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_32bit.end_offsets = (uint32_t *)offsets;
+            self->data.consecutive_32bit.offsets = (uint32_t *)offsets;
             self->data.consecutive_32bit.owns_offsets = 1;
         }
 
@@ -4566,15 +4592,15 @@ static void Strs_dealloc(Strs *self) {
     switch (self->type) {
     case STRS_CONSECUTIVE_32:
         // Free offset array (only if owned) and decref parent string
-        if (self->data.consecutive_32bit.owns_offsets && self->data.consecutive_32bit.end_offsets)
-            free(self->data.consecutive_32bit.end_offsets);
+        if (self->data.consecutive_32bit.owns_offsets && self->data.consecutive_32bit.offsets)
+            free(self->data.consecutive_32bit.offsets);
         Py_XDECREF(self->data.consecutive_32bit.parent_string);
         break;
 
     case STRS_CONSECUTIVE_64:
         // Free offset array (only if owned) and decref parent string
-        if (self->data.consecutive_64bit.owns_offsets && self->data.consecutive_64bit.end_offsets)
-            free(self->data.consecutive_64bit.end_offsets);
+        if (self->data.consecutive_64bit.owns_offsets && self->data.consecutive_64bit.offsets)
+            free(self->data.consecutive_64bit.offsets);
         Py_XDECREF(self->data.consecutive_64bit.parent_string);
         break;
 
