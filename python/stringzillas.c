@@ -503,11 +503,10 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
-        PyErr_Format(PyExc_TypeError, 
+        PyErr_Format(PyExc_TypeError,
                      "Unsupported input types for Levenshtein distances. "
                      "u32tape: a=%d b=%d, u64tape: a=%d b=%d, seq: a=%d b=%d",
-                     a_is_u32tape, b_is_u32tape, a_is_u64tape, b_is_u64tape, 
-                     a_is_sequence, b_is_sequence);
+                     a_is_u32tape, b_is_u32tape, a_is_u64tape, b_is_u64tape, a_is_sequence, b_is_sequence);
         return NULL;
     }
 
@@ -596,7 +595,279 @@ static PyTypeObject LevenshteinDistancesType = {
 
 #pragma endregion
 
-static void stringzillas_cleanup(PyObject *m) { 
+#pragma region LevenshteinDistancesUTF8
+
+typedef struct {
+    PyObject ob_base;
+    sz_levenshtein_distances_utf8_t handle;
+} LevenshteinDistancesUTF8;
+
+static PyObject *LevenshteinDistancesUTF8_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    LevenshteinDistancesUTF8 *self = (LevenshteinDistancesUTF8 *)type->tp_alloc(type, 0);
+    if (self != NULL) { self->handle = NULL; }
+    return (PyObject *)self;
+}
+
+static void LevenshteinDistancesUTF8_dealloc(LevenshteinDistancesUTF8 *self) {
+    if (self->handle) { sz_levenshtein_distances_utf8_free(self->handle); }
+    Py_TYPE(self)->tp_free((PyObject *)self);
+}
+
+static int LevenshteinDistancesUTF8_init(LevenshteinDistancesUTF8 *self, PyObject *args, PyObject *kwds) {
+    static char *kwlist[] = {"match", "mismatch", "gap_open", "gap_extend", NULL};
+    sz_error_cost_t match = 0, mismatch = 1, open = 1, extend = 1;
+
+    if (args) {
+        Py_ssize_t n_args = PyTuple_Size(args);
+        for (Py_ssize_t i = 0; i < n_args; i++) {
+            PyObject *arg = PyTuple_GetItem(args, i);
+            int val = PyLong_AsLong(arg);
+            if (PyErr_Occurred()) return -1;
+            if (i == 0) { match = (sz_error_cost_t)val; }
+            else if (i == 1) { mismatch = (sz_error_cost_t)val; }
+            else if (i == 2) { open = (sz_error_cost_t)val; }
+            else if (i == 3) { extend = (sz_error_cost_t)val; }
+        }
+    }
+
+    if (kwds) {
+        PyObject *key, *value;
+        Py_ssize_t pos = 0;
+        while (PyDict_Next(kwds, &pos, &key, &value)) {
+            int val = PyLong_AsLong(value);
+            if (PyErr_Occurred()) return -1;
+
+            if (PyUnicode_CompareWithASCIIString(key, "match") == 0) { match = (sz_error_cost_t)val; }
+            else if (PyUnicode_CompareWithASCIIString(key, "mismatch") == 0) { mismatch = (sz_error_cost_t)val; }
+            else if (PyUnicode_CompareWithASCIIString(key, "gap_open") == 0) { open = (sz_error_cost_t)val; }
+            else if (PyUnicode_CompareWithASCIIString(key, "gap_extend") == 0) { extend = (sz_error_cost_t)val; }
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return -1;
+            }
+        }
+    }
+
+    sz_status_t status =
+        sz_levenshtein_distances_utf8_init(match, mismatch, open, extend, NULL, szs_capabilities(), &self->handle);
+
+    if (status != sz_success_k) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to initialize UTF-8 Levenshtein distances engine");
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t nargs = PyTuple_Size(args);
+    PyObject *a_obj = NULL, *b_obj = NULL, *device_obj = NULL, *out_obj = NULL;
+
+    // Manual argument parsing for hot path
+    if (nargs < 2) {
+        PyErr_SetString(PyExc_TypeError, "LevenshteinDistancesUTF8() requires at least 2 arguments");
+        return NULL;
+    }
+
+    if (nargs > 4) {
+        PyErr_SetString(PyExc_TypeError, "LevenshteinDistancesUTF8() takes at most 4 arguments");
+        return NULL;
+    }
+
+    a_obj = PyTuple_GET_ITEM(args, 0);
+    b_obj = PyTuple_GET_ITEM(args, 1);
+    if (nargs >= 3) device_obj = PyTuple_GET_ITEM(args, 2);
+    if (nargs >= 4) out_obj = PyTuple_GET_ITEM(args, 3);
+
+    // Parse keyword arguments
+    if (kwargs) {
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "device") == 0) {
+                if (device_obj) {
+                    PyErr_SetString(PyExc_TypeError, "device specified twice");
+                    return NULL;
+                }
+                device_obj = value;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "out") == 0) {
+                if (out_obj) {
+                    PyErr_SetString(PyExc_TypeError, "out specified twice");
+                    return NULL;
+                }
+                out_obj = value;
+            }
+            else {
+                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
+                return NULL;
+            }
+        }
+    }
+
+    DeviceScope *device_scope = NULL;
+    if (device_obj != NULL && device_obj != Py_None) {
+        if (!PyObject_TypeCheck(device_obj, &DeviceScopeType)) {
+            PyErr_SetString(PyExc_TypeError, "device must be a DeviceScope instance");
+            return NULL;
+        }
+        device_scope = (DeviceScope *)device_obj;
+    }
+
+    sz_device_scope_t device_handle = device_scope ? device_scope->handle : default_device_scope;
+    sz_size_t kernel_input_size = 0;
+    void *kernel_a_texts_punned = NULL;
+    void *kernel_b_texts_punned = NULL;
+    sz_size_t *kernel_results = NULL;
+    sz_size_t kernel_results_stride = sizeof(sz_size_t);
+    sz_status_t (*kernel_punned)(sz_levenshtein_distances_t, sz_device_scope_t, void *, void *, sz_size_t *,
+                                 sz_size_t) = NULL;
+
+    // Handle 32-bit tape inputs
+    sz_sequence_u32tape_t a_u32tape, b_u32tape;
+    sz_bool_t a_is_u32tape = sz_py_export_strings_as_u32tape( //
+        a_obj, &a_u32tape.data, &a_u32tape.offsets, &a_u32tape.count);
+    sz_bool_t b_is_u32tape = sz_py_export_strings_as_u32tape( //
+        b_obj, &b_u32tape.data, &b_u32tape.offsets, &b_u32tape.count);
+    if (a_is_u32tape && b_is_u32tape) {
+        if (a_u32tape.count != b_u32tape.count) {
+            PyErr_SetString(PyExc_ValueError, "Input sequences must have the same length");
+            return NULL;
+        }
+
+        kernel_input_size = a_u32tape.count;
+        kernel_punned = sz_levenshtein_distances_utf8_u32tape;
+        kernel_a_texts_punned = &a_u32tape;
+        kernel_b_texts_punned = &b_u32tape;
+    }
+
+    // Handle 64-bit tape inputs
+    sz_sequence_u64tape_t a_u64tape, b_u64tape;
+    sz_bool_t a_is_u64tape = !a_is_u32tape && sz_py_export_strings_as_u64tape( //
+                                                  a_obj, &a_u64tape.data, &a_u64tape.offsets, &a_u64tape.count);
+    sz_bool_t b_is_u64tape = !b_is_u32tape && sz_py_export_strings_as_u64tape( //
+                                                  b_obj, &b_u64tape.data, &b_u64tape.offsets, &b_u64tape.count);
+    if (a_is_u64tape && b_is_u64tape) {
+        if (a_u64tape.count != b_u64tape.count) {
+            PyErr_SetString(PyExc_ValueError, "Input sequences must have the same length");
+            return NULL;
+        }
+        kernel_input_size = a_u64tape.count;
+        kernel_punned = sz_levenshtein_distances_utf8_u64tape;
+        kernel_a_texts_punned = &a_u64tape;
+        kernel_b_texts_punned = &b_u64tape;
+    }
+
+    // Handle sequence inputs
+    sz_sequence_t a_seq, b_seq;
+    sz_bool_t a_is_sequence = !a_is_u32tape && !a_is_u64tape && sz_py_export_strings_as_sequence(a_obj, &a_seq);
+    sz_bool_t b_is_sequence = !b_is_u32tape && !b_is_u64tape && sz_py_export_strings_as_sequence(b_obj, &b_seq);
+    if (a_is_sequence && b_is_sequence) {
+        if (a_seq.count != b_seq.count) {
+            PyErr_SetString(PyExc_ValueError, "Input sequences must have the same length");
+            return NULL;
+        }
+        kernel_input_size = a_seq.count;
+        kernel_punned = sz_levenshtein_distances_utf8_sequence;
+        kernel_a_texts_punned = &a_seq;
+        kernel_b_texts_punned = &b_seq;
+    }
+
+    // If no valid input types were found, raise an error
+    if (!kernel_punned) {
+        PyErr_Format(PyExc_TypeError,
+                     "Unsupported input types for Levenshtein distances. "
+                     "u32tape: a=%d b=%d, u64tape: a=%d b=%d, seq: a=%d b=%d",
+                     a_is_u32tape, b_is_u32tape, a_is_u64tape, b_is_u64tape, a_is_sequence, b_is_sequence);
+        return NULL;
+    }
+
+    // Make sure the `out` argument is valid NumPy array and extract `kernel_results` and `kernel_results_stride`
+    // or create a new results array.
+    PyObject *results_array = NULL;
+    if (!out_obj || out_obj == Py_None) {
+        // Create a new NumPy array for results
+        npy_intp numpy_size = kernel_input_size;
+        results_array = PyArray_SimpleNew(1, &numpy_size, NPY_UINT64);
+        if (!results_array) {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to create NumPy array for results");
+            goto cleanup;
+        }
+        kernel_results = (sz_size_t *)PyArray_DATA((PyArrayObject *)results_array);
+        kernel_results_stride = sizeof(sz_size_t);
+    }
+    else {
+        // Validate existing NumPy array
+        if (!PyArray_Check(out_obj)) {
+            PyErr_SetString(PyExc_TypeError, "out argument must be a NumPy array");
+            goto cleanup;
+        }
+        PyArrayObject *array = (PyArrayObject *)out_obj;
+        if (PyArray_NDIM(array) != 1) {
+            PyErr_SetString(PyExc_ValueError, "out array must be 1-dimensional");
+            goto cleanup;
+        }
+        if (PyArray_SIZE(array) < (npy_intp)kernel_input_size) {
+            PyErr_SetString(PyExc_ValueError, "out array is too small for results");
+            goto cleanup;
+        }
+        if (PyArray_TYPE(array) != NPY_UINT64) {
+            PyErr_SetString(PyExc_TypeError, "out array must have uint64 dtype");
+            goto cleanup;
+        }
+        kernel_results = (sz_size_t *)PyArray_DATA(array);
+        kernel_results_stride = PyArray_STRIDE(array, 0);
+        results_array = out_obj;
+        Py_INCREF(results_array);
+    }
+
+    sz_status_t status = kernel_punned(               //
+        self->handle, device_handle,                  //
+        kernel_a_texts_punned, kernel_b_texts_punned, //
+        kernel_results, kernel_results_stride);
+
+    if (status != sz_success_k) {
+        PyErr_SetString(PyExc_RuntimeError, "Levenshtein distance computation failed");
+        goto cleanup;
+    }
+    return results_array;
+
+cleanup:
+    Py_XDECREF(results_array);
+    return NULL;
+}
+
+static char const doc_LevenshteinDistancesUTF8[] = //
+    "LevenshteinDistancesUTF8(match=0, mismatch=1, gap_open=1, gap_extend=1)\n"
+    "\n"
+    "Vectorized UTF-8 Levenshtein distance calculator.\n"
+    "Computes edit distances between pairs of UTF-8 encoded strings.\n"
+    "\n"
+    "Args:\n"
+    "  match (int): Cost of matching characters (default 0).\n"
+    "  mismatch (int): Cost of mismatched characters (default 1).\n"
+    "  gap_open (int): Cost of opening a gap (default 1).\n"
+    "  gap_extend (int): Cost of extending a gap (default 1).\n"
+    "\n"
+    "Call with:\n"
+    "  a (sequence): First sequence of UTF-8 strings.\n"
+    "  b (sequence): Second sequence of UTF-8 strings.\n"
+    "  device (DeviceScope, optional): Device execution context.\n"
+    "  out (array, optional): Output buffer for results.";
+
+static PyTypeObject LevenshteinDistancesUTF8Type = {
+    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.LevenshteinDistancesUTF8",
+    .tp_doc = doc_LevenshteinDistancesUTF8,
+    .tp_basicsize = sizeof(LevenshteinDistancesUTF8),
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = LevenshteinDistancesUTF8_new,
+    .tp_init = (initproc)LevenshteinDistancesUTF8_init,
+    .tp_dealloc = (destructor)LevenshteinDistancesUTF8_dealloc,
+    .tp_call = (ternaryfunc)LevenshteinDistancesUTF8_call,
+};
+
+#pragma endregion
+
+static void stringzillas_cleanup(PyObject *m) {
     sz_unused_(m);
     if (default_device_scope) {
         sz_device_scope_free(default_device_scope);
@@ -720,15 +991,14 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
         return NULL;
     }
 
-    // Add UTF8 version - commented out for now until properly implemented
-    // Py_INCREF(&LevenshteinDistancesUTF8Type);
-    // if (PyModule_AddObject(m, "LevenshteinDistancesUTF8", (PyObject *)&LevenshteinDistancesUTF8Type) < 0) {
-    //     Py_XDECREF(&LevenshteinDistancesUTF8Type);
-    //     Py_XDECREF(&LevenshteinDistancesType);
-    //     Py_XDECREF(&DeviceScopeType);
-    //     Py_XDECREF(m);
-    //     return NULL;
-    // }
+    Py_INCREF(&LevenshteinDistancesUTF8Type);
+    if (PyModule_AddObject(m, "LevenshteinDistancesUTF8", (PyObject *)&LevenshteinDistancesUTF8Type) < 0) {
+        Py_XDECREF(&LevenshteinDistancesUTF8Type);
+        Py_XDECREF(&LevenshteinDistancesType);
+        Py_XDECREF(&DeviceScopeType);
+        Py_XDECREF(m);
+        return NULL;
+    }
 
     return m;
 }
