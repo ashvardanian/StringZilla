@@ -720,14 +720,22 @@ def test_str_to_pyarrow_conversion():
     assert arrow_buffer.to_pybytes() == native.encode("utf-8")
 
 
-@pytest.mark.parametrize("container_class", [tuple])
+@pytest.mark.parametrize("container_class", [tuple, list, iter])
 @pytest.mark.parametrize("view", [False, True])
 def test_strs_from_python_basic(container_class: type, view: bool):
     """Test basic conversion from Python containers to Strs."""
-    container = container_class(["hello", "world", "test", " ", "from", " ", "container", ""])
+    base_items = ["hello", "world", "test", " ", "from", " ", "container", ""]
+    container = container_class(base_items)
+
+    # Skip iter+view combination as it's not supported
+    if container_class == iter and view:
+        with pytest.raises(ValueError, match="View mode.*not supported for iterators"):
+            Strs(container, view=view)
+        return
+
     strs = Strs(container, view=view)
 
-    assert len(strs) == len(container)
+    assert len(strs) == len(base_items)
     assert strs[0] == "hello"
     assert strs[1] == "world"
     assert strs[2] == "test"
@@ -738,33 +746,48 @@ def test_strs_from_python_basic(container_class: type, view: bool):
     assert strs[7] == ""
 
 
-@pytest.mark.parametrize("container_class", [tuple])
+@pytest.mark.parametrize("container_class", [tuple, list, iter])
 @pytest.mark.parametrize("view", [False, True])
 def test_strs_reference_counting(container_class: type, view: bool):
     """Test reference counting to prevent memory leaks."""
     import sys
     import gc
-    
-    container = container_class(["ref", "count", "test"])
+
+    base_items = ["ref", "count", "test"]
+    container = container_class(base_items)
+
+    # Skip iter+view combination as it's not supported
+    if container_class == iter and view:
+        with pytest.raises(ValueError, match="View mode.*not supported for iterators"):
+            Strs(container, view=view)
+        return
+
     initial_refcount = sys.getrefcount(container)
-    
+
     strs = Strs(container, view=view)
     during_refcount = sys.getrefcount(container)
-    
-    # View mode should increment refcount, copy mode should not
-    if view:
-        assert during_refcount == initial_refcount + 1, f"View mode should increment refcount"
-    else:
-        assert during_refcount == initial_refcount, f"Copy mode should not change refcount"
-    
+
+    # For iterators, we can't check refcount behavior the same way since iter() creates a new object
+    # and the iterator consumes the original container during iteration
+    if container_class != iter:
+        # View mode should increment refcount, copy mode should not
+        if view:
+            assert during_refcount == initial_refcount + 1, f"View mode should increment refcount"
+        else:
+            assert during_refcount == initial_refcount, f"Copy mode should not change refcount"
+
     # Verify functionality
     assert len(strs) == 3
     assert strs[0] == "ref"
-    
+    assert strs[1] == "count"
+    assert strs[2] == "test"
+
     del strs
     gc.collect()
-    final_refcount = sys.getrefcount(container)
-    assert final_refcount == initial_refcount, f"Refcount should return to initial value"
+
+    if container_class != iter:
+        final_refcount = sys.getrefcount(container)
+        assert final_refcount == initial_refcount, f"Refcount should return to initial value"
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
@@ -813,12 +836,12 @@ def test_strs_from_arrow_large_strings():
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
 def test_strs_from_arrow_error_cases():
     """Test error handling for invalid inputs."""
-    # Test with non-Arrow object
+    # Test with non-iterable object
     with pytest.raises(TypeError):
-        Strs("not_an_arrow_array")
+        Strs(123)  # Integer is not iterable
 
     with pytest.raises(TypeError):
-        Strs(["list", "of", "strings"])
+        Strs(None)  # None is not iterable
 
     # Test with non-string Arrow array
     int_array = pa.array([1, 2, 3, 4])

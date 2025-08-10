@@ -1159,7 +1159,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         return (PyObject *)result;
     }
 
-    // If a step is requested, we have to create a new `REORDERED` Strs object,
+    // If a step is requested, we have to create a new `REORDERED` instance of `Strs`,
     // even if the original one was `CONSECUTIVE`.
     if (step != 1) {
         sz_string_view_t *new_parts = (sz_string_view_t *)malloc(result_count * sizeof(sz_string_view_t));
@@ -1175,7 +1175,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         result->data.reordered.parts = new_parts;
         result->data.reordered.parent_string = NULL;
 
-        // Populate the new reordered array using get_string_at_offset
+        // Populate the new reordered array using `get_string_at_offset`
         size_t j = 0;
         if (step > 0)
             for (Py_ssize_t i = start; i < stop; i += step, ++j) {
@@ -1188,6 +1188,8 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
                        &new_parts[j].length);
             }
 
+        // Ensure the parent string isn't prematurely deallocated by this view.
+        Py_XINCREF(result->data.reordered.parent_string);
         return (PyObject *)result;
     }
 
@@ -1212,6 +1214,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
             Py_XDECREF(result);
             return NULL;
         }
+        to->owns_offsets = 1;
 
         // Now populate the offsets
         size_t element_length;
@@ -1241,6 +1244,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
             Py_XDECREF(result);
             return NULL;
         }
+        to->owns_offsets = 1;
 
         // Now populate the offsets
         size_t element_length;
@@ -3461,6 +3465,7 @@ static sz_bool_t Strs_argsort_(Strs *self, sz_string_view_t **parts_output, sz_s
     sequence.get_start = parts_get_start;
     sequence.get_length = parts_get_length;
     sz_status_t status = sz_sequence_argsort(&sequence, NULL, (sz_sorted_idx_t *)temporary_memory.start);
+    sz_unused_(status);
 
     // Export results
     *parts_output = parts;
@@ -3617,7 +3622,7 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
         }
         sample_size = PyLong_AsSize_t(sample_size_obj);
     }
-    unsigned int seed = time(NULL); // Default seed
+    unsigned int seed = (unsigned int)time(NULL); // Default seed
     if (seed_obj) {
         if (!PyLong_Check(seed_obj)) {
             PyErr_SetString(PyExc_TypeError, "The seed must be an integer");
@@ -3659,11 +3664,13 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
         getter(self, index, count, &parent_string, &result_parts[i].start, &result_parts[i].length);
     }
 
-    // Update the Strs object
+    // Update the `Strs` object
     result->type = STRS_REORDERED;
     result->data.reordered.count = sample_size;
     result->data.reordered.parts = result_parts;
     result->data.reordered.parent_string = parent_string;
+    // Hold a reference to the parent backing buffer while this view is alive
+    Py_XINCREF(result->data.reordered.parent_string);
     return result;
 }
 
@@ -4158,49 +4165,336 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
     return 0;
 }
 
-static void Strs_dealloc(Strs *self) {
-    switch (self->type) {
-    case STRS_CONSECUTIVE_32:
-        // Free offset array (only if owned) and decref parent string
-        if (self->data.consecutive_32bit.owns_offsets && self->data.consecutive_32bit.end_offsets)
-            free(self->data.consecutive_32bit.end_offsets);
-        Py_XDECREF(self->data.consecutive_32bit.parent_string);
-        break;
-
-    case STRS_CONSECUTIVE_64:
-        // Free offset array (only if owned) and decref parent string
-        if (self->data.consecutive_64bit.owns_offsets && self->data.consecutive_64bit.end_offsets)
-            free(self->data.consecutive_64bit.end_offsets);
-        Py_XDECREF(self->data.consecutive_64bit.parent_string);
-        break;
-
-    case STRS_REORDERED:
-        // Free parts array and decref parent string
-        free(self->data.reordered.parts);
-        Py_XDECREF(self->data.reordered.parent_string);
-        break;
-
-    case STRS_MULTI_SOURCE:
-        // Handle multi-source cleanup if needed
-        // (not currently used in our implementation)
-        break;
-    }
-
-    Py_TYPE(self)->tp_free((PyObject *)self);
-}
-
 // The inefficient `Strs_init` path initializing from a Pythonic list of strings.
 static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
-    // For now, just return an error indicating this is not yet implemented
-    PyErr_SetString(PyExc_NotImplementedError, "Strs initialization from list is not yet implemented");
-    return -1;
+    Py_ssize_t count = PyList_GET_SIZE(sequence_obj);
+
+    // Handle empty list
+    if (count == 0) {
+        self->type = STRS_REORDERED;
+        self->data.reordered.count = 0;
+        self->data.reordered.parts = NULL;
+        self->data.reordered.parent_string = NULL;
+        return 0;
+    }
+
+    // Zero-copy mode for Python sequences - use reordered layout for memory-scattered strings
+    if (view) {
+        sz_string_view_t *parts = (sz_string_view_t *)malloc(count * sizeof(sz_string_view_t));
+        if (!parts) {
+            PyErr_NoMemory();
+            return -1;
+        }
+
+        // Build views directly to the string data
+        for (Py_ssize_t i = 0; i < count; i++) {
+            PyObject *item = PyList_GET_ITEM(sequence_obj, i);
+
+            // Export string data directly (no copying, just span)
+            sz_cptr_t item_start;
+            sz_size_t item_length;
+            if (!sz_py_export_string_like(item, &item_start, &item_length)) {
+                free(parts);
+                PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", i);
+                return -1;
+            }
+
+            parts[i].start = item_start;
+            parts[i].length = item_length;
+        }
+
+        // Setup reordered layout with parent list to keep strings alive
+        self->type = STRS_REORDERED;
+        self->data.reordered.count = count;
+        self->data.reordered.parts = parts;
+        self->data.reordered.parent_string = sequence_obj; // Keep list alive
+        Py_INCREF(sequence_obj);
+        return 0;
+    }
+    // Allocate a new tape to fit all of the items
+    else {
+
+        // First pass: calculate total size needed
+        size_t total_bytes = 0;
+        int use_64bit = 0;
+
+        for (Py_ssize_t i = 0; i < count; i++) {
+            PyObject *item = PyList_GET_ITEM(sequence_obj, i);
+            sz_cptr_t item_start;
+            sz_size_t item_length;
+            if (!sz_py_export_string_like(item, &item_start, &item_length)) {
+                PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", i);
+                return -1;
+            }
+
+            // Check if we need 64-bit offsets
+            if (total_bytes + item_length > UINT32_MAX) { use_64bit = 1; }
+            total_bytes += item_length;
+        }
+
+        // Allocate buffers based on calculated sizes
+        char *data_buffer = (char *)malloc(total_bytes);
+        void *offsets;
+
+        if (use_64bit) { offsets = malloc(count * sizeof(uint64_t)); }
+        else { offsets = malloc(count * sizeof(uint32_t)); }
+
+        if (!data_buffer || !offsets) {
+            free(data_buffer);
+            free(offsets);
+            PyErr_NoMemory();
+            return -1;
+        }
+
+        // Second pass: copy data and build offsets
+        size_t current_offset = 0;
+        for (Py_ssize_t i = 0; i < count; i++) {
+            PyObject *item = PyList_GET_ITEM(sequence_obj, i);
+            sz_cptr_t item_start;
+            sz_size_t item_length;
+
+            // We already validated this in first pass, so this should not fail
+            sz_py_export_string_like(item, &item_start, &item_length);
+
+            // Copy the string data
+            memcpy(data_buffer + current_offset, item_start, item_length);
+            current_offset += item_length;
+
+            // Store offset
+            if (use_64bit) { ((uint64_t *)offsets)[i] = current_offset; }
+            else { ((uint32_t *)offsets)[i] = current_offset; }
+        }
+
+        // Create parent bytes object from the buffer
+        PyObject *parent = PyBytes_FromStringAndSize(data_buffer, total_bytes);
+        free(data_buffer);
+        if (!parent) {
+            free(offsets);
+            PyErr_NoMemory();
+            return -1;
+        }
+
+        // Setup the consecutive layout (32-bit or 64-bit)
+        if (use_64bit) {
+            self->type = STRS_CONSECUTIVE_64;
+            self->data.consecutive_64bit.count = count;
+            self->data.consecutive_64bit.separator_length = 0;
+            self->data.consecutive_64bit.parent_string = parent;
+            self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
+            self->data.consecutive_64bit.end_offsets = (uint64_t *)offsets;
+            self->data.consecutive_64bit.owns_offsets = 1;
+        }
+        else {
+            self->type = STRS_CONSECUTIVE_32;
+            self->data.consecutive_32bit.count = count;
+            self->data.consecutive_32bit.separator_length = 0;
+            self->data.consecutive_32bit.parent_string = parent;
+            self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
+            self->data.consecutive_32bit.end_offsets = (uint32_t *)offsets;
+            self->data.consecutive_32bit.owns_offsets = 1;
+        }
+
+        return 0;
+    }
 }
 
 // The inefficient `Strs_init` path initializing from a Pythonic iterable of strings.
 static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view) {
-    // For now, just return an error indicating this is not yet implemented
-    PyErr_SetString(PyExc_NotImplementedError, "Strs initialization from iterable is not yet implemented");
-    return -1;
+    // Get an iterator from the object
+    PyObject *iterator = PyObject_GetIter(sequence_obj);
+    if (!iterator) {
+        PyErr_SetString(PyExc_TypeError, "Object is not iterable");
+        return -1;
+    }
+
+    if (view) {
+        // View mode is not supported for iterators because we can't safely keep references
+        // to all the individual string objects without significant overhead
+        Py_DECREF(iterator);
+        PyErr_SetString(PyExc_ValueError, "View mode (view=True) is not supported for iterators. "
+                                          "Use view=False to create a copy, or convert to a list/tuple first.");
+        return -1;
+    }
+    // Allocate a new tape to fit all of the items
+    else {
+        size_t data_capacity = 4096;
+        size_t offsets_capacity = 16;
+        size_t count = 0;
+        size_t total_bytes = 0;
+        int use_64bit = 0; // Start with 32-bit
+
+        char *data_buffer = (char *)malloc(data_capacity);
+        void *offsets = malloc(offsets_capacity * sizeof(uint32_t)); // Start with 32-bit
+
+        if (!data_buffer || !offsets) {
+            free(data_buffer);
+            free(offsets);
+            Py_DECREF(iterator);
+            PyErr_NoMemory();
+            return -1;
+        }
+
+        // Iterate through all items
+        PyObject *item;
+        while ((item = PyIter_Next(iterator))) {
+            sz_cptr_t item_start;
+            sz_size_t item_length;
+            if (!sz_py_export_string_like(item, &item_start, &item_length)) {
+                Py_DECREF(item);
+                free(data_buffer);
+                free(offsets);
+                Py_DECREF(iterator);
+                PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", count);
+                return -1;
+            }
+
+            // Check if adding this string would exceed UINT32_MAX and switch to 64-bit
+            if (!use_64bit && total_bytes + item_length > UINT32_MAX) {
+                // Convert offsets from 32-bit to 64-bit
+                uint64_t *new_offsets = (uint64_t *)malloc(offsets_capacity * sizeof(uint64_t));
+                if (!new_offsets) {
+                    Py_DECREF(item);
+                    free(data_buffer);
+                    free(offsets);
+                    Py_DECREF(iterator);
+                    PyErr_NoMemory();
+                    return -1;
+                }
+
+                // Copy existing 32-bit offsets to 64-bit
+                uint32_t *old_offsets = (uint32_t *)offsets;
+                for (size_t i = 0; i < count; i++) { new_offsets[i] = old_offsets[i]; }
+
+                free(offsets);
+                offsets = new_offsets;
+                use_64bit = 1;
+            }
+
+            // Grow data buffer if needed (doubling strategy)
+            while (total_bytes + item_length > data_capacity) {
+                size_t new_capacity = data_capacity * 2;
+                if (new_capacity < data_capacity) { // Overflow check
+                    new_capacity = SIZE_MAX;
+                    if (total_bytes + item_length > new_capacity) {
+                        Py_DECREF(item);
+                        free(data_buffer);
+                        free(offsets);
+                        Py_DECREF(iterator);
+                        PyErr_SetString(PyExc_MemoryError, "String data too large");
+                        return -1;
+                    }
+                }
+
+                char *new_buffer = (char *)realloc(data_buffer, new_capacity);
+                if (!new_buffer) {
+                    Py_DECREF(item);
+                    free(data_buffer);
+                    free(offsets);
+                    Py_DECREF(iterator);
+                    PyErr_NoMemory();
+                    return -1;
+                }
+                data_buffer = new_buffer;
+                data_capacity = new_capacity;
+            }
+
+            // Grow offsets array if needed (doubling strategy)
+            if (count >= offsets_capacity) {
+                size_t new_capacity = offsets_capacity * 2;
+                size_t element_size = use_64bit ? sizeof(uint64_t) : sizeof(uint32_t);
+                if (new_capacity > SIZE_MAX / element_size) {
+                    Py_DECREF(item);
+                    free(data_buffer);
+                    free(offsets);
+                    Py_DECREF(iterator);
+                    PyErr_SetString(PyExc_MemoryError, "Too many strings");
+                    return -1;
+                }
+
+                void *new_offsets = realloc(offsets, new_capacity * element_size);
+                if (!new_offsets) {
+                    Py_DECREF(item);
+                    free(data_buffer);
+                    free(offsets);
+                    Py_DECREF(iterator);
+                    PyErr_NoMemory();
+                    return -1;
+                }
+                offsets = new_offsets;
+                offsets_capacity = new_capacity;
+            }
+
+            // Copy the string data
+            memcpy(data_buffer + total_bytes, item_start, item_length);
+            total_bytes += item_length;
+
+            // Store offset
+            if (use_64bit) { ((uint64_t *)offsets)[count] = total_bytes; }
+            else { ((uint32_t *)offsets)[count] = total_bytes; }
+            count++;
+
+            Py_DECREF(item);
+        }
+
+        Py_DECREF(iterator);
+
+        // Check for errors during iteration
+        if (PyErr_Occurred()) {
+            free(data_buffer);
+            free(offsets);
+            return -1;
+        }
+
+        // Handle empty iterator
+        if (count == 0) {
+            free(data_buffer);
+            free(offsets);
+            self->type = STRS_REORDERED;
+            self->data.reordered.count = 0;
+            self->data.reordered.parts = NULL;
+            self->data.reordered.parent_string = NULL;
+            return 0;
+        }
+
+        // Shrink buffers to actual size
+        char *final_buffer = (char *)realloc(data_buffer, total_bytes);
+        if (final_buffer) data_buffer = final_buffer;
+
+        size_t element_size = use_64bit ? sizeof(uint64_t) : sizeof(uint32_t);
+        void *final_offsets = realloc(offsets, count * element_size);
+        if (final_offsets) offsets = final_offsets;
+
+        // Create parent bytes object from the buffer
+        PyObject *parent = PyBytes_FromStringAndSize(data_buffer, total_bytes);
+        free(data_buffer);
+        if (!parent) {
+            free(offsets);
+            PyErr_NoMemory();
+            return -1;
+        }
+
+        // Setup the consecutive layout (32-bit or 64-bit)
+        if (use_64bit) {
+            self->type = STRS_CONSECUTIVE_64;
+            self->data.consecutive_64bit.count = count;
+            self->data.consecutive_64bit.separator_length = 0;
+            self->data.consecutive_64bit.parent_string = parent;
+            self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
+            self->data.consecutive_64bit.end_offsets = (uint64_t *)offsets;
+            self->data.consecutive_64bit.owns_offsets = 1;
+        }
+        else {
+            self->type = STRS_CONSECUTIVE_32;
+            self->data.consecutive_32bit.count = count;
+            self->data.consecutive_32bit.separator_length = 0;
+            self->data.consecutive_32bit.parent_string = parent;
+            self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
+            self->data.consecutive_32bit.end_offsets = (uint32_t *)offsets;
+            self->data.consecutive_32bit.owns_offsets = 1;
+        }
+
+        return 0;
+    }
 }
 
 static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
@@ -4266,6 +4560,37 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
     }
 
     return 0;
+}
+
+static void Strs_dealloc(Strs *self) {
+    switch (self->type) {
+    case STRS_CONSECUTIVE_32:
+        // Free offset array (only if owned) and decref parent string
+        if (self->data.consecutive_32bit.owns_offsets && self->data.consecutive_32bit.end_offsets)
+            free(self->data.consecutive_32bit.end_offsets);
+        Py_XDECREF(self->data.consecutive_32bit.parent_string);
+        break;
+
+    case STRS_CONSECUTIVE_64:
+        // Free offset array (only if owned) and decref parent string
+        if (self->data.consecutive_64bit.owns_offsets && self->data.consecutive_64bit.end_offsets)
+            free(self->data.consecutive_64bit.end_offsets);
+        Py_XDECREF(self->data.consecutive_64bit.parent_string);
+        break;
+
+    case STRS_REORDERED:
+        // Free parts array and decref parent string
+        free(self->data.reordered.parts);
+        Py_XDECREF(self->data.reordered.parent_string);
+        break;
+
+    case STRS_MULTI_SOURCE:
+        // Handle multi-source cleanup if needed
+        // (not currently used in our implementation)
+        break;
+    }
+
+    Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
 static PyMethodDef Strs_methods[] = {
