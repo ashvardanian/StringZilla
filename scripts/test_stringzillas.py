@@ -52,8 +52,7 @@ def test_library_properties():
 
     # Test StringZillas properties
     assert len(szs.__version__.split(".")) == 3, "Semantic versioning must be preserved"
-    assert hasattr(szs, "__capabilities__"), "Capabilities must be exposed"
-    assert hasattr(szs, "__numpy_available__"), "NumPy availability must be exposed"
+    assert "serial" in szs.__capabilities__.split(","), "Serial backend must be present"
 
 
 def test_device_scope():
@@ -62,21 +61,29 @@ def test_device_scope():
     default_scope = szs.DeviceScope()
     assert default_scope is not None
 
-    scope_multi = szs.DeviceScope.with_cpu_cores(4)
+    scope_multi = szs.DeviceScope(cpu_cores=4)
     assert scope_multi is not None
 
-    scope_gpu = szs.DeviceScope.with_gpu_device(0)
-    assert scope_gpu is not None
+    if "cuda" in szs.__capabilities__.split(","):
+        scope_gpu = szs.DeviceScope(gpu_device=0)
+        assert scope_gpu is not None
+    else:
+        with pytest.raises(RuntimeError):
+            szs.DeviceScope(gpu_device=0)
+
+    # Test single-threaded execution
+    scope_single = szs.DeviceScope(cpu_cores=1)
+    assert scope_single is not None
 
     # Invalid arguments
     with pytest.raises(ValueError):
-        szs.DeviceScope.with_cpu_cores(1)
+        szs.DeviceScope(cpu_cores=4, gpu_device=0)  # Can't specify both
 
     with pytest.raises(TypeError):
-        szs.DeviceScope.with_cpu_cores("invalid")
+        szs.DeviceScope(cpu_cores="invalid")
 
     with pytest.raises(TypeError):
-        szs.DeviceScope.with_gpu_device("invalid")
+        szs.DeviceScope(gpu_device="invalid")
 
 
 def get_random_string(
@@ -134,7 +141,7 @@ def test_levenshtein_distance_insertions(max_edit_distance: int):
     def insert_char_at(s, char_to_insert, index):
         return s[:index] + char_to_insert + s[index:]
 
-    binary_distance = sz.LevenshteinDistance()
+    binary_engine = szs.LevenshteinDistances()
 
     a = get_random_string(length=20)
     b = a
@@ -142,35 +149,54 @@ def test_levenshtein_distance_insertions(max_edit_distance: int):
         source_offset = randint(0, len(ascii_lowercase) - 1)
         target_offset = randint(0, len(b) - 1)
         b = insert_char_at(b, ascii_lowercase[source_offset], target_offset)
-        assert binary_distance([a], [b]) == [i + 1], f"Edit distance mismatch after {i + 1} insertions: {a} -> {b}"
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = binary_engine(a_strs, b_strs)
+        assert len(results) == 1, "Binary engine should return a single distance"
+        assert results[0] == [i + 1], f"Edit distance mismatch after {i + 1} insertions: {a} -> {b}"
 
 
 def test_levenshtein_distances_with_simple_cases():
 
-    binary_distance = sz.LevenshteinDistance()
-    unicode_distance = sz.LevenshteinDistanceUTF8()
+    binary_engine = szs.LevenshteinDistances()
 
-    assert binary_distance(["hello"], ["hello"]) == [0]
-    assert binary_distance(["hello"], ["hell"]) == [1]
-    assert binary_distance([""], [""]) == [0]
-    assert binary_distance([""], ["abc"]) == [3]
-    assert binary_distance(["abc"], [""]) == [3]
-    assert binary_distance(["abc"], ["ac"]) == [1], "one deletion"
-    assert binary_distance(["abc"], ["a_bc"]) == [1], "one insertion"
-    assert binary_distance(["abc"], ["adc"]) == [1], "one substitution"
-    assert binary_distance(["ggbuzgjux{}l"], ["gbuzgjux{}l"]) == [1], "one insertion (prepended)"
-    assert binary_distance(["abcdefgABCDEFG"], ["ABCDEFGabcdefg"]) == [14]
+    def binary_distance(a: str, b: str) -> int:
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = binary_engine(a_strs, b_strs)
+        assert len(results) == 1, "Binary engine should return a single distance"
+        return results[0]
 
-    assert unicode_distance(["hello"], ["hell"]) == [1], "no unicode symbols, just ASCII"
-    assert unicode_distance(["𠜎 𠜱 𠝹 𠱓"], ["𠜎𠜱𠝹𠱓"]) == [3], "add 3 whitespaces in Chinese"
-    assert unicode_distance(["💖"], ["💗"]) == [1]
+    assert binary_distance("hello", "hello") == 0
+    assert binary_distance("hello", "hell") == 1
+    assert binary_distance("", "") == 0
+    assert binary_distance("", "abc") == 3
+    assert binary_distance("abc", "") == 3
+    assert binary_distance("abc", "ac") == 1, "one deletion"
+    assert binary_distance("abc", "a_bc") == 1, "one insertion"
+    assert binary_distance("abc", "adc") == 1, "one substitution"
+    assert binary_distance("ggbuzgjux{}l", "gbuzgjux{}l") == 1, "one insertion (prepended)"
+    assert binary_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == 14
 
-    assert unicode_distance(["αβγδ"], ["αγδ"]) == [1], "insert Beta"
-    assert unicode_distance(["école"], ["école"]) == [2], "etter 'é' as 1 character vs 'e' + '´'"
-    assert unicode_distance(["façade"], ["facade"]) == [1], "'ç' with cedilla vs. plain"
-    assert unicode_distance(["Schön"], ["Scho\u0308n"]) == [2], "'ö' represented as 'o' + '¨'"
-    assert unicode_distance(["München"], ["Muenchen"]) == [2], "German with umlaut vs. transcription"
-    assert unicode_distance(["こんにちは世界"], ["こんばんは世界"]) == [2], "Japanese greetings"
+    unicode_engine = szs.LevenshteinDistancesUTF8()
+
+    def unicode_distance(a: str, b: str) -> int:
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = unicode_engine(a_strs, b_strs)
+        assert len(results) == 1, "Unicode engine should return a single distance"
+        return results[0]
+
+    assert unicode_distance("hello", "hell") == 1, "no unicode symbols, just ASCII"
+    assert unicode_distance("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓") == 3, "add 3 whitespaces in Chinese"
+    assert unicode_distance("💖", "💗") == 1
+
+    assert unicode_distance("αβγδ", "αγδ") == 1, "insert Beta"
+    assert unicode_distance("école", "école") == 2, "etter 'é' as 1 character vs 'e' + '´'"
+    assert unicode_distance("façade", "facade") == 1, "'ç' with cedilla vs. plain"
+    assert unicode_distance("Schön", "Scho\u0308n") == 2, "'ö' represented as 'o' + '¨'"
+    assert unicode_distance("München", "Muenchen") == 2, "German with umlaut vs. transcription"
+    assert unicode_distance("こんにちは世界", "こんばんは世界") == 2, "Japanese greetings"
 
 
 def test_levenshtein_distances_with_custom_gaps():
@@ -179,30 +205,45 @@ def test_levenshtein_distances_with_custom_gaps():
     opening: int = 3
     extension: int = 2
 
-    binary_distance = sz.LevenshteinDistance()
-    unicode_distance = sz.LevenshteinDistanceUTF8()
+    binary_engine = szs.LevenshteinDistances()
 
-    assert binary_distance(["hello"], ["hello"]) == [0]
-    assert binary_distance(["hello"], ["hell"]) == [opening]
-    assert binary_distance([""], [""]) == [0]
-    assert binary_distance([""], ["abc"]) == [opening + 2 * extension]
-    assert binary_distance(["abc"], [""]) == [opening + 2 * extension]
-    assert binary_distance(["abc"], ["ac"]) == [opening], "one deletion"
-    assert binary_distance(["abc"], ["a_bc"]) == [opening], "one insertion"
-    assert binary_distance(["abc"], ["adc"]) == [mismatch], "one substitution"
-    assert binary_distance(["ggbuzgjux{}l"], ["gbuzgjux{}l"]) == [opening], "one insertion (prepended)"
-    assert binary_distance(["abcdefgABCDEFG"], ["ABCDEFGabcdefg"]) == [14 * mismatch]
+    def binary_distance(a: str, b: str) -> int:
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = binary_engine(a_strs, b_strs)
+        assert len(results) == 1, "Binary engine should return a single distance"
+        return results[0]
 
-    assert unicode_distance(["hello"], ["hell"]) == [opening], "no unicode symbols, just ASCII"
-    assert unicode_distance(["𠜎 𠜱 𠝹 𠱓"], ["𠜎𠜱𠝹𠱓"]) == [3 * opening], "add 3 whitespaces in Chinese"
-    assert unicode_distance(["💖"], ["💗"]) == [1 * mismatch]
+    assert binary_distance("hello", "hello") == 0
+    assert binary_distance("hello", "hell") == opening
+    assert binary_distance("", "") == 0
+    assert binary_distance("", "abc") == opening + 2 * extension
+    assert binary_distance("abc", "") == opening + 2 * extension
+    assert binary_distance("abc", "ac") == opening, "one deletion"
+    assert binary_distance("abc", "a_bc") == opening, "one insertion"
+    assert binary_distance("abc", "adc") == mismatch, "one substitution"
+    assert binary_distance("ggbuzgjux{}l", "gbuzgjux{}l") == opening, "one insertion (prepended)"
+    assert binary_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == 14 * mismatch
 
-    assert unicode_distance(["αβγδ"], ["αγδ"]) == [opening], "insert Beta"
-    assert unicode_distance(["école"], ["école"]) == [mismatch + opening], "etter 'é' as 1 character vs 'e' + '´'"
-    assert unicode_distance(["façade"], ["facade"]) == [mismatch], "'ç' with cedilla vs. plain"
-    assert unicode_distance(["Schön"], ["Scho\u0308n"]) == [mismatch + opening], "'ö' represented as 'o' + '¨'"
-    assert unicode_distance(["München"], ["Muenchen"]) == [mismatch + opening], "German with umlaut vs. transcription"
-    assert unicode_distance(["こんにちは世界"], ["こんばんは世界"]) == [mismatch + opening], "Japanese greetings"
+    unicode_engine = szs.LevenshteinDistancesUTF8()
+
+    def unicode_distance(a: str, b: str) -> int:
+        a_strs = Strs([a])
+        b_strs = Strs([b])
+        results = unicode_engine(a_strs, b_strs)
+        assert len(results) == 1, "Unicode engine should return a single distance"
+        return results[0]
+
+    assert unicode_distance("hello", "hell") == opening, "no unicode symbols, just ASCII"
+    assert unicode_distance("𠜎 𠜱 𠝹 𠱓", "𠜎𠜱𠝹𠱓") == 3 * opening, "add 3 whitespaces in Chinese"
+    assert unicode_distance("💖", "💗") == 1 * mismatch
+
+    assert unicode_distance("αβγδ", "αγδ") == opening, "insert Beta"
+    assert unicode_distance("école", "école") == mismatch + opening, "etter 'é' as 1 character vs 'e' + '´'"
+    assert unicode_distance("façade", "facade") == mismatch, "'ç' with cedilla vs. plain"
+    assert unicode_distance("Schön", "Scho\u0308n") == mismatch + opening, "'ö' represented as 'o' + '¨'"
+    assert unicode_distance("München", "Muenchen") == mismatch + opening, "German with umlaut vs. transcription"
+    assert unicode_distance("こんにちは世界", "こんばんは世界") == mismatch + opening, "Japanese greetings"
 
 
 @pytest.mark.repeat(10)
@@ -215,7 +256,7 @@ def test_levenshtein_distance_random(first_length: int, second_length: int, batc
     batch_b = [get_random_string(length=second_length) for _ in range(batch_size)]
 
     baselines = np.array([baseline_levenshtein_distance(a, b) for a, b in zip(batch_a, batch_b)])
-    engine = sz.LevenshteinDistance()
+    engine = szs.LevenshteinDistances()
     results = engine(batch_a, batch_b)
 
     np.testing.assert_array_equal(results, baselines, "Edit distances do not match")

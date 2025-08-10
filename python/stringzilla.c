@@ -15,11 +15,11 @@
  *  PyCapsule protocol in conjunction with @b `__arrow_c_array__` dunder methods can be used to extract strings.
  *  @see https://arrow.apache.org/docs/python/generated/pyarrow.array.html
  *
- *  This module exports C functions via `PyCapsule` for use by other extensions (like `stringzillas-cpus`):
- *  - sz_py_export_string_like: exported as "sz_py_export_string_like".
- *  - sz_py_export_strings_as_sequence: exported as "sz_py_export_strings_as_sequence".
- *  - sz_py_export_strings_as_u32tape: exported as "sz_py_export_strings_as_u32tape".
- *  - sz_py_export_strings_as_u64tape: exported as "sz_py_export_strings_as_u64tape".
+ *  This module exports C functions via `PyCapsule` of `PyAPI` for use by other extensions (like `stringzillas-cpus`):
+ *  - `sz_py_export_string_like`.
+ *  - `sz_py_export_strings_as_sequence`.
+ *  - `sz_py_export_strings_as_u32tape`.
+ *  - `sz_py_export_strings_as_u64tape`.
  */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 #define NOMINMAX
