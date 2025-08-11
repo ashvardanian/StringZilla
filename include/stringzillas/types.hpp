@@ -153,6 +153,10 @@ struct indexed_results_type<value_type_ *&> {
     using type = value_type_;
 };
 
+/**
+ *  @brief An example of an executor that uses OpenMP for parallel execution.
+ *  @note Fork Union is preferred over this for library builds, but this is useful for users already leveraging OpenMP.
+ */
 struct openmp_executor_t {
 
     /**

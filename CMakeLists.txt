@@ -216,19 +216,6 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         )
     endif ()
 
-    # Enable OpenMP if available
-    if (NOT target_type STREQUAL "SHARED_LIBRARY")
-        if (${compiler_id} STREQUAL "GNU"
-            OR ${compiler_id} STREQUAL "Clang"
-            OR ${compiler_id} STREQUAL "NVIDIA"
-        )
-            target_compile_options(${target} PRIVATE "-fopenmp")
-            target_link_libraries(${target} PRIVATE "-fopenmp")
-        elseif (${compiler_id} STREQUAL "MSVC")
-            target_compile_options(${target} PRIVATE "/openmp")
-            target_link_libraries(${target} PRIVATE "/openmp")
-        endif ()
-    endif ()
 
     # Set optimization options for different compilers differently
     if (${compiler_id} STREQUAL "MSVC")
@@ -601,6 +588,12 @@ if (${STRINGZILLAS_BUILD_SHARED})
 
         # Enable CUDA separable compilation for device code
         set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+        
+        # Add CUDA-specific compiler flags
+        target_compile_options(stringzillas_cuda_shared PRIVATE "--expt-relaxed-constexpr")
+        
+        # Set the source file as CUDA
+        set_source_files_properties(c/stringzillas.cu TARGET_DIRECTORY stringzillas_cuda_shared PROPERTIES LANGUAGE CUDA)
     endif ()
 
     # TODO: Define StringZillas ROCm shared library when ROCm support is added if (ENABLE_ROCM)
