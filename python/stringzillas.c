@@ -68,6 +68,8 @@ static sz_bool_t (*sz_py_export_strings_as_u64tape)(PyObject *, sz_cptr_t *, sz_
 // Default device scope that can be safely reused across calls
 // The underlying implementation is stateless and thread-safe
 static sz_device_scope_t default_device_scope = NULL;
+// Static variable to store hardware capabilities
+static sz_capability_t default_hardware_capabilities = 0;
 
 typedef struct PyAPI {
     sz_bool_t (*sz_py_export_string_like)(PyObject *, sz_cptr_t *, sz_size_t *);
@@ -969,9 +971,12 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
         PyModule_AddStringConstant(m, "__version__", version_str);
     }
 
+    // Initialize hardware capabilities for capability intersection
+    default_hardware_capabilities = szs_capabilities();
+
     // Define SIMD capabilities as a tuple
     {
-        sz_capability_t caps = szs_capabilities();
+        sz_capability_t caps = default_hardware_capabilities;
 
         // Get capability strings using the new function
         char const *cap_strings[SZ_CAPABILITIES_COUNT];
