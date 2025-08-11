@@ -83,6 +83,65 @@ typedef struct PyAPI {
 
 #pragma endregion
 
+#pragma region Metadata
+
+/**
+ *  @brief Parse capabilities from a Python tuple of strings and intersect with hardware capabilities.
+ *  @param[in] caps_tuple Python tuple containing capability strings (e.g., ('serial', 'haswell')).
+ *  @param[out] result Output capability mask after intersection with hardware capabilities.
+ *  @return 0 on success, -1 on error (with Python exception set).
+ */
+static int parse_and_intersect_capabilities(PyObject *caps_tuple, sz_capability_t *result) {
+    if (!PyTuple_Check(caps_tuple)) {
+        PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
+        return -1;
+    }
+
+    sz_capability_t requested_caps = 0;
+    Py_ssize_t n = PyTuple_Size(caps_tuple);
+
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *item = PyTuple_GET_ITEM(caps_tuple, i);
+        if (!PyUnicode_Check(item)) {
+            PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
+            return -1;
+        }
+
+        const char *cap_str = PyUnicode_AsUTF8(item);
+        if (!cap_str) return -1;
+
+        // Map string to capability flag
+        if (strcmp(cap_str, "serial") == 0) { requested_caps |= sz_cap_serial_k; }
+        else if (strcmp(cap_str, "parallel") == 0) { requested_caps |= sz_cap_parallel_k; }
+        else if (strcmp(cap_str, "haswell") == 0) { requested_caps |= sz_cap_haswell_k; }
+        else if (strcmp(cap_str, "skylake") == 0) { requested_caps |= sz_cap_skylake_k; }
+        else if (strcmp(cap_str, "ice") == 0) { requested_caps |= sz_cap_ice_k; }
+        else if (strcmp(cap_str, "neon") == 0) { requested_caps |= sz_cap_neon_k; }
+        else if (strcmp(cap_str, "neon_aes") == 0) { requested_caps |= sz_cap_neon_aes_k; }
+        else if (strcmp(cap_str, "sve") == 0) { requested_caps |= sz_cap_sve_k; }
+        else if (strcmp(cap_str, "sve2") == 0) { requested_caps |= sz_cap_sve2_k; }
+        else if (strcmp(cap_str, "sve2_aes") == 0) { requested_caps |= sz_cap_sve2_aes_k; }
+        else if (strcmp(cap_str, "cuda") == 0) { requested_caps |= sz_cap_cuda_k; }
+        else if (strcmp(cap_str, "kepler") == 0) { requested_caps |= sz_cap_kepler_k; }
+        else if (strcmp(cap_str, "hopper") == 0) { requested_caps |= sz_cap_hopper_k; }
+        else if (strcmp(cap_str, "any") == 0) { requested_caps |= sz_cap_any_k; }
+        else {
+            PyErr_Format(PyExc_ValueError, "Unknown capability: %s", cap_str);
+            return -1;
+        }
+    }
+
+    // Intersect with hardware capabilities
+    *result = requested_caps & default_hardware_capabilities;
+
+    // If no capabilities match, fall back to serial
+    if (*result == 0) { *result = sz_cap_serial_k; }
+
+    return 0;
+}
+
+#pragma endregion
+
 #pragma region DeviceScope
 
 /**
@@ -231,6 +290,8 @@ static PyObject *LevenshteinDistances_new(PyTypeObject *type, PyObject *args, Py
 static int LevenshteinDistances_init(LevenshteinDistances *self, PyObject *args, PyObject *kwargs) {
     Py_ssize_t nargs = PyTuple_Size(args);
     sz_error_cost_t match = 0, mismatch = 1, open = 1, extend = 1;
+    PyObject *capabilities_tuple = NULL;
+    sz_capability_t capabilities = default_hardware_capabilities;
 
     // Manual argument parsing - fast path for positional args
     if (nargs >= 1) {
@@ -297,8 +358,17 @@ static int LevenshteinDistances_init(LevenshteinDistances *self, PyObject *args,
         }
     }
 
-    if (nargs > 4) {
-        PyErr_SetString(PyExc_TypeError, "LevenshteinDistances() takes at most 4 arguments");
+    if (nargs >= 5) {
+        PyObject *obj = PyTuple_GET_ITEM(args, 4);
+        if (PyTuple_Check(obj)) { capabilities_tuple = obj; }
+        else {
+            PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
+            return -1;
+        }
+    }
+
+    if (nargs > 5) {
+        PyErr_SetString(PyExc_TypeError, "LevenshteinDistances() takes at most 5 arguments");
         return -1;
     }
 
@@ -371,6 +441,17 @@ static int LevenshteinDistances_init(LevenshteinDistances *self, PyObject *args,
                 }
                 extend = (sz_error_cost_t)val;
             }
+            else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) {
+                if (nargs >= 5) {
+                    PyErr_SetString(PyExc_TypeError, "capabilities specified twice");
+                    return -1;
+                }
+                if (!PyTuple_Check(value)) {
+                    PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
+                    return -1;
+                }
+                capabilities_tuple = value;
+            }
             else {
                 PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
                 return -1;
@@ -378,8 +459,13 @@ static int LevenshteinDistances_init(LevenshteinDistances *self, PyObject *args,
         }
     }
 
+    // Parse capabilities if provided
+    if (capabilities_tuple) {
+        if (parse_and_intersect_capabilities(capabilities_tuple, &capabilities) != 0) { return -1; }
+    }
+
     sz_status_t status =
-        sz_levenshtein_distances_init(match, mismatch, open, extend, NULL, szs_capabilities(), &self->handle);
+        sz_levenshtein_distances_init(match, mismatch, open, extend, NULL, capabilities, &self->handle);
 
     if (status != sz_success_k) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize Levenshtein distances engine");
@@ -568,7 +654,7 @@ cleanup:
 }
 
 static char const doc_LevenshteinDistances[] = //
-    "LevenshteinDistances(match=0, mismatch=1, open=1, extend=1)\n"
+    "LevenshteinDistances(match=0, mismatch=1, open=1, extend=1, capabilities=None)\n"
     "\n"
     "Compute Levenshtein edit distances between pairs of binary strings.\n"
     "\n"
@@ -577,6 +663,9 @@ static char const doc_LevenshteinDistances[] = //
     "  mismatch (int): Cost for mismatched characters (default: 1).\n"
     "  open (int): Cost for opening a gap (default: 1).\n"
     "  extend (int): Cost for extending a gap (default: 1).\n"
+    "  capabilities (Tuple[str], optional): Hardware capabilities to use.\n"
+    "                                       Will be intersected with detected capabilities.\n"
+    "                                       Examples: ('serial',), ('haswell', 'parallel')\n"
     "\n"
     "Call with:\n"
     "  a (sequence): First sequence of strings.\n"
@@ -615,34 +704,135 @@ static void LevenshteinDistancesUTF8_dealloc(LevenshteinDistancesUTF8 *self) {
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static int LevenshteinDistancesUTF8_init(LevenshteinDistancesUTF8 *self, PyObject *args, PyObject *kwds) {
-    static char *kwlist[] = {"match", "mismatch", "gap_open", "gap_extend", NULL};
-    sz_error_cost_t match = 0, mismatch = 1, open = 1, extend = 1;
+static int LevenshteinDistancesUTF8_init(LevenshteinDistancesUTF8 *self, PyObject *args, PyObject *kwargs) {
+    Py_ssize_t nargs = PyTuple_Size(args);
+    sz_error_cost_t match = 0, mismatch = 1, gap = 1;
+    PyObject *capabilities_tuple = NULL;
+    sz_capability_t capabilities = default_hardware_capabilities;
 
-    if (args) {
-        Py_ssize_t n_args = PyTuple_Size(args);
-        for (Py_ssize_t i = 0; i < n_args; i++) {
-            PyObject *arg = PyTuple_GetItem(args, i);
-            int val = PyLong_AsLong(arg);
-            if (PyErr_Occurred()) return -1;
-            if (i == 0) { match = (sz_error_cost_t)val; }
-            else if (i == 1) { mismatch = (sz_error_cost_t)val; }
-            else if (i == 2) { open = (sz_error_cost_t)val; }
-            else if (i == 3) { extend = (sz_error_cost_t)val; }
+    // Manual argument parsing - fast path for positional args
+    if (nargs >= 1) {
+        PyObject *obj = PyTuple_GET_ITEM(args, 0);
+        if (PyLong_Check(obj)) {
+            long val = PyLong_AsLong(obj);
+            if (val < -128 || val > 127) {
+                PyErr_SetString(PyExc_ValueError, "match cost must fit in 8-bit signed integer");
+                return -1;
+            }
+            match = (sz_error_cost_t)val;
+        }
+        else {
+            PyErr_SetString(PyExc_TypeError, "match cost must be an integer");
+            return -1;
         }
     }
+    if (nargs >= 2) {
+        PyObject *obj = PyTuple_GET_ITEM(args, 1);
+        if (PyLong_Check(obj)) {
+            long val = PyLong_AsLong(obj);
+            if (val < -128 || val > 127) {
+                PyErr_SetString(PyExc_ValueError, "mismatch cost must fit in 8-bit signed integer");
+                return -1;
+            }
+            mismatch = (sz_error_cost_t)val;
+        }
+        else {
+            PyErr_SetString(PyExc_TypeError, "mismatch cost must be an integer");
+            return -1;
+        }
+    }
+    if (nargs >= 3) {
+        PyObject *obj = PyTuple_GET_ITEM(args, 2);
+        if (PyLong_Check(obj)) {
+            long val = PyLong_AsLong(obj);
+            if (val < -128 || val > 127) {
+                PyErr_SetString(PyExc_ValueError, "gap cost must fit in 8-bit signed integer");
+                return -1;
+            }
+            gap = (sz_error_cost_t)val;
+        }
+        else {
+            PyErr_SetString(PyExc_TypeError, "gap cost must be an integer");
+            return -1;
+        }
+    }
+    if (nargs >= 4) {
+        PyObject *obj = PyTuple_GET_ITEM(args, 3);
+        if (PyTuple_Check(obj)) { capabilities_tuple = obj; }
+        else {
+            PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
+            return -1;
+        }
+    }
+    if (nargs > 4) {
+        PyErr_SetString(PyExc_TypeError, "LevenshteinDistancesUTF8() takes at most 4 arguments");
+        return -1;
+    }
 
-    if (kwds) {
-        PyObject *key, *value;
+    // Parse keyword arguments
+    if (kwargs) {
         Py_ssize_t pos = 0;
-        while (PyDict_Next(kwds, &pos, &key, &value)) {
-            int val = PyLong_AsLong(value);
-            if (PyErr_Occurred()) return -1;
-
-            if (PyUnicode_CompareWithASCIIString(key, "match") == 0) { match = (sz_error_cost_t)val; }
-            else if (PyUnicode_CompareWithASCIIString(key, "mismatch") == 0) { mismatch = (sz_error_cost_t)val; }
-            else if (PyUnicode_CompareWithASCIIString(key, "gap_open") == 0) { open = (sz_error_cost_t)val; }
-            else if (PyUnicode_CompareWithASCIIString(key, "gap_extend") == 0) { extend = (sz_error_cost_t)val; }
+        PyObject *key, *value;
+        while (PyDict_Next(kwargs, &pos, &key, &value)) {
+            if (PyUnicode_CompareWithASCIIString(key, "match") == 0) {
+                if (nargs >= 1) {
+                    PyErr_SetString(PyExc_TypeError, "match specified twice");
+                    return -1;
+                }
+                if (!PyLong_Check(value)) {
+                    PyErr_SetString(PyExc_TypeError, "match must be an integer");
+                    return -1;
+                }
+                long val = PyLong_AsLong(value);
+                if (val < -128 || val > 127) {
+                    PyErr_SetString(PyExc_ValueError, "match cost must fit in 8-bit signed integer");
+                    return -1;
+                }
+                match = (sz_error_cost_t)val;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "mismatch") == 0) {
+                if (nargs >= 2) {
+                    PyErr_SetString(PyExc_TypeError, "mismatch specified twice");
+                    return -1;
+                }
+                if (!PyLong_Check(value)) {
+                    PyErr_SetString(PyExc_TypeError, "mismatch must be an integer");
+                    return -1;
+                }
+                long val = PyLong_AsLong(value);
+                if (val < -128 || val > 127) {
+                    PyErr_SetString(PyExc_ValueError, "mismatch cost must fit in 8-bit signed integer");
+                    return -1;
+                }
+                mismatch = (sz_error_cost_t)val;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "gap") == 0) {
+                if (nargs >= 3) {
+                    PyErr_SetString(PyExc_TypeError, "gap specified twice");
+                    return -1;
+                }
+                if (!PyLong_Check(value)) {
+                    PyErr_SetString(PyExc_TypeError, "gap must be an integer");
+                    return -1;
+                }
+                long val = PyLong_AsLong(value);
+                if (val < -128 || val > 127) {
+                    PyErr_SetString(PyExc_ValueError, "gap cost must fit in 8-bit signed integer");
+                    return -1;
+                }
+                gap = (sz_error_cost_t)val;
+            }
+            else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) {
+                if (nargs >= 4) {
+                    PyErr_SetString(PyExc_TypeError, "capabilities specified twice");
+                    return -1;
+                }
+                if (!PyTuple_Check(value)) {
+                    PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
+                    return -1;
+                }
+                capabilities_tuple = value;
+            }
             else {
                 PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
                 return -1;
@@ -650,8 +840,12 @@ static int LevenshteinDistancesUTF8_init(LevenshteinDistancesUTF8 *self, PyObjec
         }
     }
 
-    sz_status_t status =
-        sz_levenshtein_distances_utf8_init(match, mismatch, open, extend, NULL, szs_capabilities(), &self->handle);
+    // Parse capabilities if provided
+    if (capabilities_tuple) {
+        if (parse_and_intersect_capabilities(capabilities_tuple, &capabilities) != 0) { return -1; }
+    }
+
+    sz_status_t status = sz_levenshtein_distances_utf8_init(match, mismatch, gap, NULL, capabilities, &self->handle);
 
     if (status != sz_success_k) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize UTF-8 Levenshtein distances engine");
@@ -839,7 +1033,7 @@ cleanup:
 }
 
 static char const doc_LevenshteinDistancesUTF8[] = //
-    "LevenshteinDistancesUTF8(match=0, mismatch=1, gap_open=1, gap_extend=1)\n"
+    "LevenshteinDistancesUTF8(match=0, mismatch=1, gap=1, capabilities=None)\n"
     "\n"
     "Vectorized UTF-8 Levenshtein distance calculator.\n"
     "Computes edit distances between pairs of UTF-8 encoded strings.\n"
@@ -847,8 +1041,10 @@ static char const doc_LevenshteinDistancesUTF8[] = //
     "Args:\n"
     "  match (int): Cost of matching characters (default 0).\n"
     "  mismatch (int): Cost of mismatched characters (default 1).\n"
-    "  gap_open (int): Cost of opening a gap (default 1).\n"
-    "  gap_extend (int): Cost of extending a gap (default 1).\n"
+    "  gap (int): Cost of gap insertion (default 1).\n"
+    "  capabilities (Tuple[str], optional): Hardware capabilities to use.\n"
+    "                                       Will be intersected with detected capabilities.\n"
+    "                                       Examples: ('serial',), ('haswell', 'parallel')\n"
     "\n"
     "Call with:\n"
     "  a (sequence): First sequence of UTF-8 strings.\n"

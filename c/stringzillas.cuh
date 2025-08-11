@@ -309,6 +309,79 @@ sz_status_t sz_levenshtein_distances_for_(                                     /
     return result;
 }
 
+struct levenshtein_distances_utf8_backends_t {
+
+    using fallback_variant_t =
+        szs::levenshtein_distances_utf8<char, szs::linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
+
+    /**
+     *  On each hardware platform we use a different backend for Levenshtein UTF8 distances,
+     *  separately covering:
+     *  - Serial, Ice Lake, CUDA backends
+     */
+    std::variant<
+#if SZ_USE_ICE
+        szs::levenshtein_distances_utf8<char, szs::linear_gap_costs_t, malloc_t, sz_caps_si_k>,
+#endif
+        fallback_variant_t>
+        variants;
+
+    template <typename... variants_arguments_>
+    levenshtein_distances_utf8_backends_t(variants_arguments_ &&...args) noexcept
+        : variants(std::forward<variants_arguments_>(args)...) {}
+};
+
+template <typename texts_type_>
+sz_status_t sz_levenshtein_distances_utf8_for_(                                     //
+    sz_levenshtein_distances_utf8_t engine_punned, sz_device_scope_t device_punned, //
+    texts_type_ &&a_container, texts_type_ &&b_container,                           //
+    sz_size_t *results, sz_size_t results_stride) {
+
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    sz_assert_(device_punned != nullptr && "Device must be initialized");
+    sz_assert_(results != nullptr && "Results must not be null");
+
+    // Revert back from opaque pointer types
+    auto *engine = reinterpret_cast<levenshtein_distances_utf8_backends_t *>(engine_punned);
+    auto *device = reinterpret_cast<device_scope_t *>(device_punned);
+
+    // Wrap our stable ABI sequences into C++ friendly containers
+    auto results_strided = strided_ptr<sz_size_t> {reinterpret_cast<sz_ptr_t>(results), results_stride};
+
+    // The simplest case, is having non-optimized non-unrolled hashers.
+    sz_status_t result = sz_success_k;
+    auto variant_logic = [&](auto &engine_variant) {
+        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+
+        // GPU backends are only compatible with GPU scopes
+        if constexpr (is_gpu_capability(engine_capability_k)) {
+            // No GPU backends for UTF8 Levenshtein distances yet
+            result = sz_status_unknown_k;
+        }
+        // CPU backends are only compatible with CPU scopes
+        else {
+            if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &device_scope = std::get<default_scope_t>(device->variants);
+                sz::status_t status = engine_variant(          //
+                    a_container, b_container, results_strided, //
+                    get_executor(device_scope), get_specs(device_scope));
+                result = static_cast<sz_status_t>(status);
+            }
+            else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
+                auto &device_scope = std::get<cpu_scope_t>(device->variants);
+                sz::status_t status = engine_variant(          //
+                    a_container, b_container, results_strided, //
+                    get_executor(device_scope), get_specs(device_scope));
+                result = static_cast<sz_status_t>(status);
+            }
+            else { result = sz_status_unknown_k; }
+        }
+    };
+
+    std::visit(variant_logic, engine->variants);
+    return result;
+}
+
 template <typename element_type_>
 using vec = szs::safe_vector<element_type_, std::allocator<element_type_>>;
 
@@ -397,12 +470,15 @@ sz_status_t sz_fingerprints_for_(                                     //
 
 extern "C" {
 
+#pragma region Metadata
+
 SZ_DYNAMIC int szs_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
 SZ_DYNAMIC int szs_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_DYNAMIC int szs_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
 
 SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
-    return static_cast<sz_capability_t>(sz_caps_spi_k | sz_caps_ckh_k);
+    sz_capability_t cpu_capabilities = sz_capabilities_implementation_();
+    return static_cast<sz_capability_t>(cpu_capabilities | sz_caps_ckh_k);
 }
 
 SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc) {
@@ -415,6 +491,10 @@ SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *a
     return sz_missing_gpu_k;
 #endif
 }
+
+#pragma endregion Metadata
+
+#pragma region Device Scopes
 
 SZ_DYNAMIC sz_status_t sz_device_scope_init_default(sz_device_scope_t *scope_punned) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
@@ -468,6 +548,10 @@ SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope_punned) {
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
     delete scope;
 }
+
+#pragma endregion Device Scopes
+
+#pragma region Levenshtein Distances
 
 SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                                              //
     sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
@@ -601,6 +685,101 @@ SZ_DYNAMIC void sz_levenshtein_distances_free(sz_levenshtein_distances_t engine_
     delete engine;
 }
 
+#pragma endregion Levenshtein Distances
+
+#pragma region Levenshtein UTF8 Distances
+
+SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_init(                //
+    sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t gap, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,     //
+    sz_levenshtein_distances_utf8_t *engine_punned) {
+
+    sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
+
+    // If the gap opening and extension costs are identical we can use less memory
+    auto const substitution_costs = szs::uniform_substitution_costs_t {match, mismatch};
+    auto const linear_costs = szs::linear_gap_costs_t {gap};
+    using fallback_variant_t = typename levenshtein_distances_utf8_backends_t::fallback_variant_t;
+
+#if SZ_USE_ICE
+    bool const can_use_ice = (capabilities & sz_cap_ice_k) != 0;
+    if (can_use_ice) {
+        auto variant = szs::levenshtein_distances_utf8<char, szs::linear_gap_costs_t, malloc_t, sz_caps_si_k>(
+            substitution_costs, linear_costs);
+        auto engine = new (std::nothrow) levenshtein_distances_utf8_backends_t(
+            std::in_place_type_t<
+                szs::levenshtein_distances_utf8<char, szs::linear_gap_costs_t, malloc_t, sz_caps_si_k>>(),
+            std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        *engine_punned = reinterpret_cast<sz_levenshtein_distances_utf8_t>(engine);
+        return sz_success_k;
+    }
+#endif // SZ_USE_ICE
+
+    bool const can_use_serial = (capabilities & sz_cap_serial_k) != 0;
+    if (can_use_serial) {
+        auto variant = fallback_variant_t(substitution_costs, linear_costs);
+        auto engine = new (std::nothrow)
+            levenshtein_distances_utf8_backends_t(std::in_place_type_t<fallback_variant_t>(), std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        *engine_punned = reinterpret_cast<sz_levenshtein_distances_utf8_t>(engine);
+        return sz_success_k;
+    }
+
+    return sz_status_unknown_k; // No supported backends available
+}
+
+SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_sequence(                      //
+    sz_levenshtein_distances_utf8_t engine_punned, sz_device_scope_t device_punned, //
+    sz_sequence_t const *a, sz_sequence_t const *b,                                 //
+    sz_size_t *results, sz_size_t results_stride) {
+
+    sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
+    auto a_container = sz_sequence_as_cpp_container_t {a};
+    auto b_container = sz_sequence_as_cpp_container_t {b};
+    return sz_levenshtein_distances_utf8_for_(                  //
+        engine_punned, device_punned, a_container, b_container, //
+        results, results_stride);
+}
+
+SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_u32tape(                       //
+    sz_levenshtein_distances_utf8_t engine_punned, sz_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,                 //
+    sz_size_t *results, sz_size_t results_stride) {
+
+    sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
+    auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
+    auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
+    return sz_levenshtein_distances_utf8_for_(                  //
+        engine_punned, device_punned, a_container, b_container, //
+        results, results_stride);
+}
+
+SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_u64tape(                       //
+    sz_levenshtein_distances_utf8_t engine_punned, sz_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,                 //
+    sz_size_t *results, sz_size_t results_stride) {
+
+    sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
+    auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
+    auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
+    return sz_levenshtein_distances_utf8_for_(                  //
+        engine_punned, device_punned, a_container, b_container, //
+        results, results_stride);
+}
+
+SZ_DYNAMIC void sz_levenshtein_distances_utf8_free(sz_levenshtein_distances_utf8_t engine_punned) {
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    auto *engine = reinterpret_cast<levenshtein_distances_utf8_backends_t *>(engine_punned);
+    delete engine;
+}
+
+#pragma endregion Levenshtein UTF8 Distances
+
+#pragma region Fingerprints
+
 SZ_DYNAMIC sz_status_t sz_fingerprints_init(                              //
     sz_size_t alphabet_size, sz_size_t const *window_widths,              //
     sz_size_t window_widths_count, sz_size_t dimensions_per_window_width, //
@@ -679,5 +858,7 @@ SZ_DYNAMIC void sz_fingerprints_free(sz_fingerprints_t engine_punned) {
     auto *engine = reinterpret_cast<fingerprints_backends_t *>(engine_punned);
     delete engine;
 }
+
+#pragma endregion Fingerprints
 
 } // extern "C"

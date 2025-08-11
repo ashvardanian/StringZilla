@@ -2,17 +2,24 @@
 """
 Test suite for StringZillas parallel algorithms module.
 Tests with Python lists, NumPy arrays, Apache Arrow columns, and StringZilla Strs types.
-To run locally:
+To run for the CPU backend:
 
     uv pip install numpy pyarrow pytest pytest-repeat
     SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
+    uv run --no-project python -c "import stringzillas; print(stringzillas.__capabilities__)"
+    uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x
+
+To run for the CUDA backend:
+
+    uv pip install numpy pyarrow pytest pytest-repeat
     SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
+    uv run --no-project python -c "import stringzillas; print(stringzillas.__capabilities__)"
     uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x
 """
 
 from random import choice, randint
 from string import ascii_lowercase
-from typing import Optional, Sequence, Dict
+from typing import Optional, Literal
 
 import pytest
 
@@ -54,6 +61,21 @@ def test_library_properties():
     assert len(szs.__version__.split(".")) == 3, "Semantic versioning must be preserved"
     assert "serial" in szs.__capabilities__, "Serial backend must be present"
 
+
+DeviceName = Literal["default", "cpu_cores", "gpu_device"]
+DEVICE_NAMES = ["default", "cpu_cores", "gpu_device"] if "cuda" in szs.__capabilities__ else ["default", "cpu_cores"]
+
+
+def device_scope_and_capabilities(device: DeviceName):
+    """Create a DeviceScope based on the specified device type."""
+    if device == "default":
+        return szs.DeviceScope(), ("serial",)
+    elif device == "cpu_cores":
+        return szs.DeviceScope(cpu_cores=2), ("serial", "parallel")
+    elif device == "gpu_device":
+        return szs.DeviceScope(gpu_device=0), ("cuda",)
+    else:
+        raise ValueError(f"Unknown device type: {device}")
 
 
 def test_device_scope():
@@ -161,14 +183,16 @@ def test_levenshtein_distance_insertions(max_edit_distance: int):
         assert results[0] == [i + 1], f"Edit distance mismatch after {i + 1} insertions: {a} -> {b}"
 
 
-def test_levenshtein_distances_with_simple_cases():
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_levenshtein_distances_with_simple_cases(device_name: DeviceName):
 
-    binary_engine = szs.LevenshteinDistances()
+    device_scope, capabilities = device_scope_and_capabilities(device_name)
+    binary_engine = szs.LevenshteinDistances(capabilities=capabilities)
 
     def binary_distance(a: str, b: str) -> int:
         a_strs = Strs([a])
         b_strs = Strs([b])
-        results = binary_engine(a_strs, b_strs)
+        results = binary_engine(a_strs, b_strs, device=device_scope)
         assert len(results) == 1, "Binary engine should return a single distance"
         return results[0]
 
@@ -183,12 +207,20 @@ def test_levenshtein_distances_with_simple_cases():
     assert binary_distance("ggbuzgjux{}l", "gbuzgjux{}l") == 1, "one insertion (prepended)"
     assert binary_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == 14
 
-    unicode_engine = szs.LevenshteinDistancesUTF8()
+
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_levenshtein_distances_utf8_with_simple_cases(device_name: DeviceName):
+
+    if device_name == "cuda":
+        pytest.skip("CUDA backend does not support custom gaps in UTF-8 Levenshtein distances")
+
+    device_scope, capabilities = device_scope_and_capabilities(device_name)
+    unicode_engine = szs.LevenshteinDistancesUTF8(capabilities=capabilities)
 
     def unicode_distance(a: str, b: str) -> int:
         a_strs = Strs([a])
         b_strs = Strs([b])
-        results = unicode_engine(a_strs, b_strs)
+        results = unicode_engine(a_strs, b_strs, device=device_scope)
         assert len(results) == 1, "Unicode engine should return a single distance"
         return results[0]
 
@@ -204,18 +236,22 @@ def test_levenshtein_distances_with_simple_cases():
     assert unicode_distance("こんにちは世界", "こんばんは世界") == 2, "Japanese greetings"
 
 
-def test_levenshtein_distances_with_custom_gaps():
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_levenshtein_distances_with_custom_gaps(device_name: DeviceName):
 
     mismatch: int = 4
     opening: int = 3
     extension: int = 2
 
-    binary_engine = szs.LevenshteinDistances()
+    device_scope, capabilities = device_scope_and_capabilities(device_name)
+    binary_engine = szs.LevenshteinDistances(
+        open=opening, extend=extension, mismatch=mismatch, capabilities=capabilities
+    )
 
     def binary_distance(a: str, b: str) -> int:
         a_strs = Strs([a])
         b_strs = Strs([b])
-        results = binary_engine(a_strs, b_strs)
+        results = binary_engine(a_strs, b_strs, device=device_scope)
         assert len(results) == 1, "Binary engine should return a single distance"
         return results[0]
 
@@ -230,12 +266,23 @@ def test_levenshtein_distances_with_custom_gaps():
     assert binary_distance("ggbuzgjux{}l", "gbuzgjux{}l") == opening, "one insertion (prepended)"
     assert binary_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == 14 * mismatch
 
-    unicode_engine = szs.LevenshteinDistancesUTF8()
+
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_levenshtein_distances_utf8_with_custom_gaps(device_name: DeviceName):
+
+    if device_name == "cuda":
+        pytest.skip("CUDA backend does not support custom gaps in UTF-8 Levenshtein distances")
+
+    mismatch: int = 4
+    opening: int = 3
+
+    device_scope, capabilities = device_scope_and_capabilities(device_name)
+    unicode_engine = szs.LevenshteinDistancesUTF8(gap=opening, mismatch=mismatch, capabilities=capabilities)
 
     def unicode_distance(a: str, b: str) -> int:
         a_strs = Strs([a])
         b_strs = Strs([b])
-        results = unicode_engine(a_strs, b_strs)
+        results = unicode_engine(a_strs, b_strs, device=device_scope)
         assert len(results) == 1, "Unicode engine should return a single distance"
         return results[0]
 
