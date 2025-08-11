@@ -101,6 +101,17 @@
 #define SZ_NOINLINE
 #endif
 
+/**
+ *  MSVC and NVCC have a hard time with concepts.
+ */
+#if defined(__NVCC__)
+#define SZ_HAS_CONCEPTS_ 0
+#elif defined(__cpp_concepts)
+#define SZ_HAS_CONCEPTS_ 1
+#else
+#define SZ_HAS_CONCEPTS_ 0
+#endif
+
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
@@ -469,13 +480,8 @@ struct arrow_strings_tape {
     using iterator_t = indexed_container_iterator<self_t>;
     using iterator = iterator_t; // ? For STL compatibility
 
-#if SZ_IS_CPP17_
     using char_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<char_t>;
     using offset_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<offset_t>;
-#else
-    using char_alloc_t = typename allocator_t::template rebind<char_t>::other;
-    using offset_alloc_t = typename allocator_t::template rebind<offset_t>::other;
-#endif
 
   private:
     span<char_t> buffer_;

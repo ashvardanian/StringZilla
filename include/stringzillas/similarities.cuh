@@ -145,7 +145,7 @@ __forceinline__ __device__ scalar_type_ load_last_use_(scalar_type_ const *ptr) 
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -244,7 +244,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -344,7 +344,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -467,7 +467,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_, sz_capability_t capability_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -2081,7 +2081,7 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires indexed_results_like<results_type_>
 #endif
     cuda_status_t operator()(                                                                 //
@@ -2747,7 +2747,7 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         : substituter_(subs), gap_costs_(gaps), alloc_(alloc) {}
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires indexed_results_like<results_type_>
 #endif
     cuda_status_t operator()(                                                                 //

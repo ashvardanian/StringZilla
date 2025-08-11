@@ -306,7 +306,6 @@ struct matcher_strchr_t {
     constexpr size_type skip_length() const noexcept { return 1; }
 };
 
-#if defined(_GNU_SOURCE)
 /**
  *  @brief  Wraps the LibC functionality for finding the next occurrence of a byte-string in a buffer
  *          into something similar to @b `sz::matcher_find` and compatible with @b `sz::range_matches`.
@@ -325,7 +324,6 @@ struct matcher_memchr_t {
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
-#endif
 
 /**
  *  @brief  Wraps the C++11 @b `std::find` algorithms for finding the next occurrence of a string

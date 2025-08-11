@@ -722,7 +722,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @return The total number of occurrences found.
      */
     template <typename haystacks_type_, typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t try_count(haystacks_type_ &&haystacks, span<size_t> counts, executor_type_ &&executor = {},
@@ -785,7 +785,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @note The @p matches reference objects should be assignable from @b `match_t`.
      */
     template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t try_find(haystacks_type_ &&haystacks, output_matches_type_ &&matches, //
@@ -806,7 +806,7 @@ struct find_many<state_id_type_, allocator_type_, sz_caps_sp_k, enable_> {
      *  @note The @p matches reference objects should be assignable from @b `match_t`.
      */
     template <typename haystacks_type_, typename output_matches_type_, typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t try_find(haystacks_type_ &&haystacks, span<size_t const> counts, output_matches_type_ &&matches,

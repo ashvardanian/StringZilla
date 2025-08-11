@@ -454,14 +454,12 @@ void test_find_many_equivalence() {
     for (std::size_t threads : {2, 3, 4, 5}) {
         alignas(fu::default_alignment_k) fu::basic_pool_t pool;
         if (!pool.try_spawn(threads)) throw std::runtime_error("Failed to spawn thread pool.");
-        static_assert(executor_like<fu::basic_pool_t>);
         test_find_many_fixed(find_many_baselines_t {}, find_many_u32_parallel_t {}, pool);
     }
 
     // Let's reuse a thread-pool to amortize the cost of spawning threads.
     alignas(fu::default_alignment_k) fu::basic_pool_t pool;
     if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
-    static_assert(executor_like<fu::basic_pool_t>);
 
 #if SZ_USE_CUDA
     test_find_many_fixed(find_many_baselines_t {}, find_many_u32_cuda_t {}, cuda_executor_t {});

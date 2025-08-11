@@ -793,7 +793,7 @@ struct basic_rolling_hashers {
      */
     template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_,
               typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     SZ_NOINLINE status_t operator()(                                                                      //
@@ -911,7 +911,7 @@ struct basic_rolling_hashers {
 template <typename engine_type_, typename texts_type_, typename min_hashes_per_text_type_,
           typename min_counts_per_text_type_,
           typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires executor_like<executor_type_>
 #endif
 SZ_NOINLINE status_t floating_rolling_hashers_in_parallel_(                                           //
@@ -1215,7 +1215,7 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_> {
      */
     template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_,
               typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     SZ_NOINLINE status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes, //
@@ -1412,7 +1412,7 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_> {
      */
     template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_,
               typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     SZ_NOINLINE status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text, //
@@ -1736,7 +1736,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_> {
      */
     template <typename texts_type_, typename min_hashes_per_text_type_, typename min_counts_per_text_type_,
               typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     SZ_NOINLINE status_t operator()(texts_type_ const &texts, min_hashes_per_text_type_ &&min_hashes_per_text, //

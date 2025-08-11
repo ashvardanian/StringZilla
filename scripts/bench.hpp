@@ -37,6 +37,7 @@
 #include <exception>  // `std::invalid_argument`
 #include <functional> // `std::equal_to`
 #include <limits>     // `std::numeric_limits`
+#include <numeric>    // `std::accumulate`
 #include <random>     // `std::random_device`, `std::mt19937`
 #include <string>     // `std::hash`
 #include <vector>     // `std::vector`
@@ -46,6 +47,10 @@
 
 #include <string_view> // Requires C++17
 #include <span>        // Requires C++20, used to pass info to batch-capable parallel backends
+
+#if defined(_MSC_VER)
+#include <intrin.h> // `__rdtsc`
+#endif
 
 #include "stringzilla/stringzilla.h"
 #include "stringzilla/stringzilla.hpp"
@@ -98,7 +103,10 @@ using profiled_function_t = std::function<call_result_t(std::size_t)>;
  *          Used as a more efficient alternative to `std::chrono::high_resolution_clock`.
  */
 inline std::uint64_t cpu_cycle_counter() {
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64))
+    // Use MSVC intrinsics for `rdtsc`
+    return __rdtsc();
+#elif defined(__i386__) || defined(__x86_64__)
     // Use x86 inline assembly for `rdtsc` only if actually compiling for x86.
     unsigned int lo, hi;
     __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
@@ -439,7 +447,7 @@ inline environment_t build_environment(                                        /
     case environment_t::words_k: std::printf("word\n"); break;
     default: std::printf("%zu-grams\n", static_cast<std::size_t>(env.tokenization)); break;
     }
-    std::printf(" - Seed: %zu%s\n", env.seed, seed_message);
+    std::printf(" - Seed: %zu%s\n", static_cast<std::size_t>(env.seed), seed_message);
     std::printf(" - Stress-testing: %s\n", env.stress ? "yes" : "no");
     std::printf(" - Loaded dataset size: %zu bytes\n", env.dataset.size());
     std::printf(" - Number of tokens: %zu\n", env.tokens.size());

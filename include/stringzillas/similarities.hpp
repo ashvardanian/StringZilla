@@ -99,13 +99,18 @@ constexpr void rotate_three(value_type_ &a, value_type_ &b, value_type_ &c) noex
 }
 
 /**
+ *  @brief  A trivial `error_cost_abs` analog, that's `constexpr`-friendly.
+ */
+constexpr size_t error_cost_abs(error_cost_t x) noexcept { return static_cast<size_t>(x < 0 ? -(i32_t)x : (i32_t)x); }
+
+/**
  *  @brief  A trivial function object for linear and affine gap costs in Levenshtein-like similarity algorithms.
  *  @sa     affine_gap_costs_t
  */
 struct linear_gap_costs_t {
     error_cost_t open_or_extend = 1;
 
-    constexpr size_t magnitude() const noexcept { return std::abs(open_or_extend); }
+    constexpr size_t magnitude() const noexcept { return error_cost_abs(open_or_extend); }
 };
 
 /**
@@ -116,7 +121,7 @@ struct affine_gap_costs_t {
     error_cost_t open = 1;
     error_cost_t extend = 1;
 
-    constexpr size_t magnitude() const noexcept { return std::max(std::abs(open), std::abs(extend)); }
+    constexpr size_t magnitude() const noexcept { return std::max(error_cost_abs(open), error_cost_abs(extend)); }
 };
 
 template <typename gap_costs_type_>
@@ -138,7 +143,7 @@ struct uniform_substitution_costs_t {
 
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? match : mismatch; }
     constexpr error_cost_t operator()(sz_rune_t a, sz_rune_t b) const noexcept { return a == b ? match : mismatch; }
-    constexpr size_t magnitude() const noexcept { return std::max(std::abs(match), std::abs(mismatch)); }
+    constexpr size_t magnitude() const noexcept { return std::max(error_cost_abs(match), error_cost_abs(mismatch)); }
 };
 
 /**
@@ -172,7 +177,7 @@ struct error_costs_256x256_t {
         size_t max_magnitude = 0;
         for (int i = 0; i != 256; ++i)
             for (int j = 0; j != 256; ++j) //
-                max_magnitude = std::max(max_magnitude, (size_t)std::abs((int)cells[i][j]));
+                max_magnitude = std::max(max_magnitude, error_cost_abs(cells[i][j]));
         return max_magnitude;
     }
 };
@@ -266,7 +271,7 @@ struct similarity_memory_requirements {
 
 #pragma region - Core Templates
 
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
 
 template <typename iterator_type_>
 concept pointer_like = requires(iterator_type_ iterator, std::size_t idx) {
@@ -316,7 +321,7 @@ template <                                                       //
     sz_capability_t capability_ = sz_cap_serial_k,               //
     typename enable_ = void                                      //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
@@ -354,7 +359,7 @@ template <                                                       //
     sz_capability_t capability_ = sz_cap_serial_k,               //
     typename enable_ = void                                      //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct diagonal_walker;
@@ -393,7 +398,7 @@ template <                                                       //
     sz_capability_t capability_ = sz_cap_serial_k,               //
     typename enable_ = void                                      //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct horizontal_walker;
@@ -410,7 +415,7 @@ template <                                         //
     sz_capability_t capability_ = sz_cap_serial_k, //
     typename enable_ = void                        //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances;
@@ -422,7 +427,7 @@ template <                                         //
     sz_capability_t capability_ = sz_cap_serial_k, //
     typename enable_ = void                        //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances_utf8;
@@ -435,7 +440,7 @@ template <                                              //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct needleman_wunsch_scores;
@@ -448,7 +453,7 @@ template <                                              //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct smith_waterman_scores;
@@ -510,7 +515,7 @@ using affine_levenshtein_utf8_ice_t = levenshtein_distances_utf8<char, affine_ga
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -565,7 +570,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param n The length of the diagonal to evaluate and the number of characters to compare from each string.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                     //
@@ -602,7 +607,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -649,7 +654,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     score_t score() const noexcept { return best_score_; }
 
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                           //
@@ -693,7 +698,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -757,7 +762,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
      *  @param n The length of the diagonal to evaluate and the number of characters to compare from each string.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                     //
@@ -809,7 +814,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
  */
 template <typename first_iterator_type_, typename second_iterator_type_, typename score_type_,
           typename substituter_type_, sz_similarity_objective_t objective_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires pointer_like<first_iterator_type_> && pointer_like<second_iterator_type_> && score_like<score_type_> &&
              substituter_like<substituter_type_>
 #endif
@@ -863,7 +868,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     score_t score() const noexcept { return best_score_; }
 
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                           //
@@ -930,7 +935,7 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
 template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename enable_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && substituter_like<substituter_type_>
 #endif
 struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_costs_t, allocator_type_, objective_,
@@ -971,7 +976,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
      *  @param[out] result_ref Location to dump the calculated score.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
@@ -1123,7 +1128,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, linear_gap_co
 template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_, sz_capability_t capability_,
           typename enable_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && substituter_like<substituter_type_>
 #endif
 struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_costs_t, allocator_type_, objective_,
@@ -1165,7 +1170,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
      *  @param[out] result_ref Location to dump the calculated score.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
@@ -1347,7 +1352,7 @@ struct diagonal_walker<char_type_, score_type_, substituter_type_, affine_gap_co
  */
 template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && substituter_like<substituter_type_>
 #endif
 struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_costs_t, allocator_type_, objective_,
@@ -1391,7 +1396,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
      *  @param[out] result_ref Location to dump the calculated score.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
@@ -1472,7 +1477,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, linear_gap_
  */
 template <typename char_type_, typename score_type_, typename substituter_type_, typename allocator_type_,
           sz_similarity_objective_t objective_, sz_similarity_locality_t locality_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && substituter_like<substituter_type_>
 #endif
 struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_costs_t, allocator_type_, objective_,
@@ -1516,7 +1521,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
      *  @param[out] result_ref Location to dump the calculated score.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, score_t &result_ref,
@@ -1624,7 +1629,7 @@ template <                                         //
     sz_capability_t capability_ = sz_cap_serial_k, //
     typename enable_ = void                        //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distance {
@@ -1669,7 +1674,7 @@ struct levenshtein_distance {
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
@@ -1741,7 +1746,7 @@ template <                                         //
     sz_capability_t capability_ = sz_cap_serial_k, //
     typename enable_ = void                        //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distance_utf8 {
@@ -1787,7 +1792,7 @@ struct levenshtein_distance_utf8 {
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
@@ -1887,7 +1892,7 @@ template <                                              //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct needleman_wunsch_score {
@@ -1927,7 +1932,7 @@ struct needleman_wunsch_score {
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
@@ -1982,7 +1987,7 @@ template <                                              //
     sz_capability_t capability_ = sz_cap_serial_k,      //
     typename enable_ = void                             //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct smith_waterman_score {
@@ -2022,7 +2027,7 @@ struct smith_waterman_score {
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
@@ -2093,7 +2098,7 @@ template <                                     //
     typename results_type_,                    //
     typename executor_type_ = dummy_executor_t //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
 status_t _score_in_parallel(                                                                                       //
@@ -2159,7 +2164,7 @@ template <                         //
     typename second_strings_type_, //
     typename results_type_         //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires score_like<score_type_> && indexed_results_like<results_type_>
 #endif
 status_t _score_sequentially(                                                                                      //
@@ -2190,7 +2195,7 @@ template <                       //
     sz_capability_t capability_, //
     typename enable_             //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances {
@@ -2221,7 +2226,7 @@ struct levenshtein_distances {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
@@ -2241,7 +2246,7 @@ template <                       //
     sz_capability_t capability_, //
     typename enable_             //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires gap_costs_like<gap_costs_type_>
 #endif
 struct levenshtein_distances_utf8 {
@@ -2272,7 +2277,7 @@ struct levenshtein_distances_utf8 {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
@@ -2293,7 +2298,7 @@ template <                       //
     sz_capability_t capability_, //
     typename enable_             //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct needleman_wunsch_scores {
@@ -2324,7 +2329,7 @@ struct needleman_wunsch_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
@@ -2345,7 +2350,7 @@ template <                       //
     sz_capability_t capability_, //
     typename enable_             //
     >
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
     requires substituter_like<substituter_type_> && gap_costs_like<gap_costs_type_>
 #endif
 struct smith_waterman_scores {
@@ -2376,7 +2381,7 @@ struct smith_waterman_scores {
 
     template <typename first_strings_type_, typename second_strings_type_, typename results_type_,
               typename executor_type_>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_> && indexed_results_like<results_type_>
 #endif
     status_t operator()(first_strings_type_ const &first_strings, second_strings_type_ const &second_strings,
@@ -2477,7 +2482,7 @@ struct error_costs_26x26ascii_t {
         size_t max_magnitude = 0;
         for (int i = 0; i != 26; ++i)
             for (int j = 0; j != 26; ++j) //
-                max_magnitude = std::max(max_magnitude, (size_t)std::abs((int)cells[i][j]));
+                max_magnitude = std::max(max_magnitude, error_cost_abs(cells[i][j]));
         return max_magnitude;
     }
 
@@ -2942,7 +2947,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                              //
@@ -3088,7 +3093,7 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                                        //
@@ -3234,7 +3239,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                              //
@@ -3475,7 +3480,7 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                              //
@@ -3596,7 +3601,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
     }
 
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     inline void operator()(                                                              //
@@ -3692,7 +3697,7 @@ struct levenshtein_distance<char, gap_costs_type_, allocator_type_, capability_,
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
@@ -3781,7 +3786,7 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, size_t &result_ref,
@@ -3935,7 +3940,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i16_t, error_costs_
     lookup_in256bytes_ice_t_ lookup_;
 
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                   //
@@ -4075,7 +4080,7 @@ struct tile_scorer<constant_iterator<char>, char const *, sz_i32_t, error_costs_
     lookup_in256bytes_ice_t_ lookup_;
 
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     void operator()(                                                                   //
@@ -4280,7 +4285,7 @@ struct needleman_wunsch_score<char, error_costs_256x256_t, linear_gap_costs_t, a
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,
@@ -4354,7 +4359,7 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
      */
     template <typename executor_type_ = dummy_executor_t>
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
         requires executor_like<executor_type_>
 #endif
     status_t operator()(span<char_t const> first, span<char_t const> second, sz_ssize_t &result_ref,

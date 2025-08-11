@@ -51,10 +51,11 @@ struct similarities_callable {
 
     call_result_t operator()(std::span<token_view_t const> a, std::span<token_view_t const> b) noexcept(false) {
         // Unpack the extra arguments from `std::tuple` into the engine call using `std::apply`
-        status_t status = std::apply([&](auto &&...rest) { return engine(a, b, results.data(), rest...); }, extra_args);
+        auto status = std::apply([&](auto &&...rest) { return engine(a, b, results, rest...); }, extra_args);
         do_not_optimize(status);
 
-        if (status != status_t::success_k) throw std::runtime_error("Failed to compute Levenshtein distance.");
+        if (static_cast<status_t>(status) != status_t::success_k)
+            throw std::runtime_error("Failed to compute Levenshtein distance.");
         do_not_optimize(results);
         std::size_t bytes_passed = 0, cells_passed = 0;
         for (std::size_t i = 0; i < results.size(); ++i) {
@@ -104,7 +105,6 @@ void bench_levenshtein(environment_t const &env) {
     // Let's reuse a thread-pool to amortize the cost of spawning threads.
     alignas(fu::default_alignment_k) fu::basic_pool_t pool;
     if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
-    static_assert(executor_like<fu::basic_pool_t>);
 
     auto scramble_accelerated_results = [&](similarities_t &results_accelerated) {
         std::shuffle(results_accelerated.begin(), results_accelerated.end(), global_random_generator());
@@ -252,7 +252,6 @@ void bench_needleman_wunsch_smith_waterman(environment_t const &env) {
     // Let's reuse a thread-pool to amortize the cost of spawning threads.
     alignas(fu::default_alignment_k) fu::basic_pool_t pool;
     if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
-    static_assert(executor_like<fu::basic_pool_t>);
 
     auto scramble_accelerated_results = [&](similarities_t &results_accelerated) {
         std::shuffle(results_accelerated.begin(), results_accelerated.end(), global_random_generator());

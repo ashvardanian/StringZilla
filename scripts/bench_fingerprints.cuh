@@ -97,7 +97,6 @@ void bench_fingerprints(environment_t const &env) {
     // Let's reuse a thread-pool to amortize the cost of spawning threads.
     alignas(fu::default_alignment_k) fu::basic_pool_t pool;
     if (!pool.try_spawn(std::thread::hardware_concurrency())) throw std::runtime_error("Failed to spawn thread pool.");
-    static_assert(executor_like<fu::basic_pool_t>);
 
     auto scramble_accelerated_results = [&]() {
         std::shuffle(min_hashes_accelerated.begin(), min_hashes_accelerated.end(), global_random_generator());

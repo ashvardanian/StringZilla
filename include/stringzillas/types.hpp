@@ -107,10 +107,10 @@ struct dummy_executor_t {
     }
 };
 
-#if SZ_IS_CPP20_
+#if SZ_HAS_CONCEPTS_
+
 template <typename executor_type_>
 concept executor_like = requires(executor_type_ executor) {
-#if !defined(__NVCC__) && 0
     { executor.threads_count() } -> std::same_as<size_t>;
     {
         executor.for_n(0u, [](size_t) {})
@@ -124,9 +124,6 @@ concept executor_like = requires(executor_type_ executor) {
     {
         executor.for_threads([](size_t) {})
     };
-#else
-    sizeof(executor) > 0;
-#endif
 };
 
 template <typename results_type_>
@@ -228,12 +225,10 @@ struct openmp_executor_t {
     }
 };
 
-#if SZ_IS_CPP20_
-#if !defined(__NVCC__)
+#if SZ_HAS_CONCEPTS_
 static_assert(executor_like<dummy_executor_t>);
 static_assert(executor_like<openmp_executor_t>);
-// static_assert(!executor_like<int>);
-#endif
+static_assert(!executor_like<int>);
 
 template <typename continuous_type_>
 concept continuous_like = requires(continuous_type_ container) {
