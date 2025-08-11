@@ -110,9 +110,23 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
         sz_capability_t flag;
         char const *name;
     } capability_map[] = {
-        {sz_cap_serial_k, "serial"}, {sz_cap_haswell_k, "haswell"}, {sz_cap_skylake_k, "skylake"},
-        {sz_cap_ice_k, "ice"},       {sz_cap_neon_k, "neon"},       {sz_cap_neon_aes_k, "neon+aes"},
-        {sz_cap_sve_k, "sve"},       {sz_cap_sve2_k, "sve2"},       {sz_cap_sve2_aes_k, "sve2+aes"},
+        //
+        {sz_cap_serial_k, "serial"},
+        {sz_cap_parallel_k, "parallel"},
+        //
+        {sz_cap_haswell_k, "haswell"},
+        {sz_cap_skylake_k, "skylake"},
+        {sz_cap_ice_k, "ice"},
+        //
+        {sz_cap_neon_k, "neon"},
+        {sz_cap_neon_aes_k, "neon+aes"},
+        {sz_cap_sve_k, "sve"},
+        {sz_cap_sve2_k, "sve2"},
+        {sz_cap_sve2_aes_k, "sve2+aes"},
+        //
+        {sz_cap_cuda_k, "cuda"},
+        {sz_cap_kepler_k, "kepler"},
+        {sz_cap_hopper_k, "hopper"},
     };
     int const capabilities_count = sizeof(capability_map) / sizeof(capability_map[0]);
 
@@ -122,7 +136,7 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
             int const is_first = p == buf;
             // Add separator if this is not the first capability.
             if (!is_first) {
-                char const sep[3] = {',', ' ', '\0'};
+                char const sep[2] = {',', '\0'};
                 char const *s = sep;
                 while (*s && p < end - 1) *p++ = *s++;
             }
