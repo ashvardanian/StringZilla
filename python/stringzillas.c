@@ -959,7 +959,7 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
 
     if (PyType_Ready(&DeviceScopeType) < 0) return NULL;
     if (PyType_Ready(&LevenshteinDistancesType) < 0) return NULL;
-    // if (PyType_Ready(&LevenshteinDistancesUTF8Type) < 0) return NULL;
+    if (PyType_Ready(&LevenshteinDistancesUTF8Type) < 0) return NULL;
 
     m = PyModule_Create(&stringzillas_module);
     if (m == NULL) return NULL;
