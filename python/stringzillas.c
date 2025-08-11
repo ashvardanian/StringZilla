@@ -969,11 +969,40 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
         PyModule_AddStringConstant(m, "__version__", version_str);
     }
 
-    // Define SIMD capabilities
+    // Define SIMD capabilities as a tuple
     {
         sz_capability_t caps = szs_capabilities();
+
+        // Get capability strings using the new function
+        char const *cap_strings[SZ_CAPABILITIES_COUNT];
+        sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
+
+        // Create a Python tuple with the capabilities
+        PyObject *caps_tuple = PyTuple_New(cap_count);
+        if (!caps_tuple) {
+            Py_XDECREF(m);
+            return NULL;
+        }
+
+        for (sz_size_t i = 0; i < cap_count; i++) {
+            PyObject *cap_str = PyUnicode_FromString(cap_strings[i]);
+            if (!cap_str) {
+                Py_DECREF(caps_tuple);
+                Py_XDECREF(m);
+                return NULL;
+            }
+            PyTuple_SET_ITEM(caps_tuple, i, cap_str);
+        }
+
+        if (PyModule_AddObject(m, "__capabilities__", caps_tuple) < 0) {
+            Py_DECREF(caps_tuple);
+            Py_XDECREF(m);
+            return NULL;
+        }
+
+        // Also keep the old comma-separated string version for backward compatibility
         sz_cptr_t caps_str = sz_capabilities_to_string_implementation_(caps);
-        PyModule_AddStringConstant(m, "__capabilities__", caps_str);
+        PyModule_AddStringConstant(m, "__capabilities_str__", caps_str);
     }
 
     Py_INCREF(&DeviceScopeType);

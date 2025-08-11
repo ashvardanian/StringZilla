@@ -49,7 +49,7 @@ except:
 
 def test_library_properties():
     assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
-    assert "serial" in sz.__capabilities__.split(","), "Serial backend must be present"
+    assert "serial" in sz.__capabilities__, "Serial backend must be present"
 
 
 @pytest.mark.parametrize("native_type", [str, bytes, bytearray])

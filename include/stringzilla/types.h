@@ -504,6 +504,12 @@ typedef enum sz_capability_t {
 } sz_capability_t;
 
 /**
+ *  @brief Maximum number of individual capability flags that can be represented.
+ *  @sa sz_capabilities_to_strings_implementation_ - not intended for public use, but a valid example.
+ */
+#define SZ_CAPABILITIES_COUNT 14
+
+/**
  *  @brief Describes the length of a UTF-8 @b rune / character / codepoint in bytes, which can be 1 to 4.
  *  @see https://en.wikipedia.org/wiki/UTF-8
  */
