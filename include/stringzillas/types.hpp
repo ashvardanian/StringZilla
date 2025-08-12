@@ -111,19 +111,12 @@ struct dummy_executor_t {
 
 template <typename executor_type_>
 concept executor_like = requires(executor_type_ executor) {
-    { executor.threads_count() } -> std::same_as<size_t>;
-    {
-        executor.for_n(0u, [](size_t) {})
-    };
-    {
-        executor.for_slices(0u, [](size_t, size_t) {})
-    };
-    {
-        executor.for_n_dynamic(0u, [](size_t) {})
-    };
-    {
-        executor.for_threads([](size_t) {})
-    };
+    { executor.threads_count() } -> std::convertible_to<size_t>;
+    typename executor_type_::prong_t;
+    executor.for_n(0u, [](typename executor_type_::prong_t) {});
+    executor.for_slices(0u, [](typename executor_type_::prong_t, size_t) {});
+    executor.for_n_dynamic(0u, [](typename executor_type_::prong_t) {});
+    executor.for_threads([](size_t) {});
 };
 
 template <typename results_type_>
@@ -155,6 +148,7 @@ struct indexed_results_type<value_type_ *&> {
  *  @note Fork Union is preferred over this for library builds, but this is useful for users already leveraging OpenMP.
  */
 struct openmp_executor_t {
+    using prong_t = std::size_t;
 
     /**
      *  @brief  Calls the @p function for each index from 0 to @p (n) in such
