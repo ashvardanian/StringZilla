@@ -309,7 +309,7 @@ struct levenshtein_utf8_backends_t {
      */
     std::variant<
 #if SZ_USE_ICE
-        szs::levenshtein_utf8_ice_t, szs::affine_levenshtein_utf8_ice_t,
+        szs::levenshtein_utf8_ice_t, // ! `szs::affine_levenshtein_utf8_ice_t` won't compile yet
 #endif
         szs::levenshtein_utf8_serial_t, szs::affine_levenshtein_utf8_serial_t>
         variants;
@@ -908,15 +908,6 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_init(                      
         auto variant = szs::levenshtein_utf8_ice_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_utf8_backends_t(std::in_place_type_t<szs::levenshtein_utf8_ice_t>(), std::move(variant));
-        if (!engine) return sz_bad_alloc_k;
-
-        *engine_punned = reinterpret_cast<sz_levenshtein_distances_utf8_t>(engine);
-        return sz_success_k;
-    }
-    else {
-        auto variant = szs::affine_levenshtein_utf8_ice_t(substitution_costs, affine_costs);
-        auto engine = new (std::nothrow)
-            levenshtein_utf8_backends_t(std::in_place_type_t<szs::affine_levenshtein_utf8_ice_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
         *engine_punned = reinterpret_cast<sz_levenshtein_distances_utf8_t>(engine);
