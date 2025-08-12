@@ -2,8 +2,72 @@ import os
 import sys
 import platform
 from setuptools import setup, find_packages, Extension
+from setuptools.command.build_ext import build_ext
 from typing import List, Tuple, Final
 import sysconfig
+import subprocess
+
+
+class CudaBuildExtension(build_ext):
+    def build_extensions(self):
+        for ext in self.extensions:
+            if any(source.endswith(".cu") for source in ext.sources):
+                self._build_cuda_extension(ext)
+            else:
+                super().build_extension(ext)
+
+    def _build_cuda_extension(self, ext):
+        # Separate CUDA and C sources
+        cuda_sources = [s for s in ext.sources if s.endswith(".cu")]
+        c_sources = [s for s in ext.sources if not s.endswith(".cu")]
+
+        # Compile CUDA files with nvcc first
+        objects = []
+        for cuda_source in cuda_sources:
+            # Generate object file path
+            obj_name = os.path.splitext(os.path.basename(cuda_source))[0] + ".o"
+            obj_path = os.path.join(self.build_temp, obj_name)
+            os.makedirs(self.build_temp, exist_ok=True)
+
+            # NVCC command
+            nvcc_cmd = [
+                "nvcc",
+                "-c",
+                cuda_source,
+                "-o",
+                obj_path,
+                "--compiler-options",
+                "-fPIC",
+                "-std=c++17",
+                "-O3",
+                "--use_fast_math",
+                "--expt-relaxed-constexpr",  # Allow constexpr functions in device code
+                "-arch=sm_80",  # Set appropriate compute capability
+                "-DSZ_DYNAMIC_DISPATCH=1",
+                "-DSZ_USE_CUDA=1",
+            ]
+
+            # Add include directories
+            for inc_dir in ext.include_dirs:
+                nvcc_cmd.extend(["-I", inc_dir])
+
+            # Add defines
+            for define in ext.define_macros:
+                if len(define) == 2:
+                    nvcc_cmd.append(f"-D{define[0]}={define[1]}")
+                else:
+                    nvcc_cmd.append(f"-D{define[0]}")
+
+            print(f"Compiling {cuda_source} with nvcc...")
+            subprocess.check_call(nvcc_cmd)
+            objects.append(obj_path)
+
+        # Update extension: remove .cu sources, add compiled objects
+        ext.sources = c_sources
+        ext.extra_objects = getattr(ext, "extra_objects", []) + objects
+
+        # Build normally
+        super().build_extension(ext)
 
 
 using_cibuildwheel: Final[str] = os.environ.get("CIBUILDWHEEL", "0") == "1"
@@ -46,6 +110,7 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
         "-Wno-incompatible-pointer-types",  # like: passing argument 4 of ‘sz_export_prefix_u32’ from incompatible pointer type
         "-Wno-discarded-qualifiers",  # like: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target type
         "-fPIC",  # to enable dynamic dispatch
+        "-g",  # include debug symbols for better debugging experience
     ]
     link_args = [
         "-fPIC",  # to enable dynamic dispatch
@@ -142,6 +207,7 @@ else:
 
 ext_modules = []
 entry_points = {}
+cmdclass = {}
 
 if sz_target == "stringzilla":
     __lib_name__ = "stringzilla"
@@ -188,11 +254,13 @@ elif sz_target == "stringzillas-cuda":
             "stringzillas",
             ["python/stringzillas.c", "c/stringzillas.cu"],
             include_dirs=["include", "c", "fork_union/include", "/usr/local/cuda/include", np.get_include()],
-            extra_compile_args=compile_args + ["-x", "cuda"],
-            extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart"],
-            define_macros=[("SZ_DYNAMIC_DISPATCH", "1")] + macros_args,
+            extra_compile_args=compile_args,
+            extra_link_args=link_args + ["-L/usr/local/cuda/lib64", "-lcudart", "-lcuda", "-lstdc++"],
+            define_macros=[("SZ_DYNAMIC_DISPATCH", "1"), ("SZ_USE_CUDA", "1")] + macros_args,
+            language="c++",  # Force C++ linking
         ),
     ]
+    cmdclass = {"build_ext": CudaBuildExtension}
 else:
     raise ValueError("Unknown target specified with SZ_TARGET environment variable.")
 
@@ -245,4 +313,5 @@ setup(
     ext_modules=ext_modules,
     packages=find_packages(),
     entry_points=entry_points,
+    cmdclass=cmdclass,
 )
