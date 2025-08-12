@@ -370,7 +370,7 @@ sz_status_t sz_levenshtein_distances_utf8_for_(                                 
     return result;
 }
 
-struct needleman_wunsch_scores_backends_t {
+struct needleman_wunsch_backends_t {
 
     /**
      *  On each hardware platform we use a different backend for Levenshtein distances,
@@ -392,7 +392,7 @@ struct needleman_wunsch_scores_backends_t {
         variants;
 
     template <typename... variants_arguments_>
-    needleman_wunsch_scores_backends_t(variants_arguments_ &&...args) noexcept
+    needleman_wunsch_backends_t(variants_arguments_ &&...args) noexcept
         : variants(std::forward<variants_arguments_>(args)...) {}
 };
 
@@ -407,7 +407,94 @@ sz_status_t sz_needleman_wunsch_scores_for_(                                    
     sz_assert_(results != nullptr && "Results must not be null");
 
     // Revert back from opaque pointer types
-    auto *engine = reinterpret_cast<needleman_wunsch_scores_backends_t *>(engine_punned);
+    auto *engine = reinterpret_cast<needleman_wunsch_backends_t *>(engine_punned);
+    auto *device = reinterpret_cast<device_scope_t *>(device_punned);
+
+    // Wrap our stable ABI sequences into C++ friendly containers
+    auto results_strided = strided_ptr<sz_ssize_t> {reinterpret_cast<sz_ptr_t>(results), results_stride};
+
+    // The simplest case, is having non-optimized non-unrolled hashers.
+    sz_status_t result = sz_success_k;
+    auto variant_logic = [&](auto &engine_variant) {
+        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+
+        // GPU backends are only compatible with GPU scopes
+        if constexpr (is_gpu_capability(engine_capability_k)) {
+#if SZ_USE_CUDA
+            if (std::holds_alternative<gpu_scope_t>(device->variants)) {
+                auto &device_scope = std::get<gpu_scope_t>(device->variants);
+                sz::status_t status = engine_variant(          //
+                    a_container, b_container, results_strided, //
+                    get_executor(device_scope), get_specs(device_scope));
+                result = static_cast<sz_status_t>(status);
+            }
+            else { result = sz_status_unknown_k; }
+#else
+            result = sz_status_unknown_k; // GPU support is not enabled
+#endif // SZ_USE_CUDA
+        }
+        // CPU backends are only compatible with CPU scopes
+        else {
+            if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &device_scope = std::get<default_scope_t>(device->variants);
+                sz::status_t status = engine_variant(          //
+                    a_container, b_container, results_strided, //
+                    get_executor(device_scope), get_specs(device_scope));
+                result = static_cast<sz_status_t>(status);
+            }
+            else if (std::holds_alternative<cpu_scope_t>(device->variants)) {
+                auto &device_scope = std::get<cpu_scope_t>(device->variants);
+                sz::status_t status = engine_variant(          //
+                    a_container, b_container, results_strided, //
+                    get_executor(device_scope), get_specs(device_scope));
+                result = static_cast<sz_status_t>(status);
+            }
+            else { result = sz_status_unknown_k; }
+        }
+    };
+
+    std::visit(variant_logic, engine->variants);
+    return result;
+}
+
+struct smith_waterman_backends_t {
+
+    /**
+     *  On each hardware platform we use a different backend for Levenshtein distances,
+     *  separately covering:
+     *  - Linear or Affine gap costs
+     *  - Serial, Ice Lake, CUDA, CUDA Kepler, and CUDA Hopper backends
+     */
+    std::variant<
+#if SZ_USE_ICE
+        szs::smith_waterman_ice_t, // ! No affine variant here yet
+#endif
+#if SZ_USE_CUDA
+        szs::smith_waterman_cuda_t, szs::affine_smith_waterman_cuda_t,
+#endif
+#if SZ_USE_HOPPER
+        szs::smith_waterman_hopper_t, szs::affine_smith_waterman_hopper_t,
+#endif
+        szs::smith_waterman_serial_t, szs::affine_smith_waterman_serial_t>
+        variants;
+
+    template <typename... variants_arguments_>
+    smith_waterman_backends_t(variants_arguments_ &&...args) noexcept
+        : variants(std::forward<variants_arguments_>(args)...) {}
+};
+
+template <typename texts_type_>
+sz_status_t sz_smith_waterman_scores_for_(                                     //
+    sz_smith_waterman_scores_t engine_punned, sz_device_scope_t device_punned, //
+    texts_type_ &&a_container, texts_type_ &&b_container,                      //
+    sz_ssize_t *results, sz_size_t results_stride) {
+
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    sz_assert_(device_punned != nullptr && "Device must be initialized");
+    sz_assert_(results != nullptr && "Results must not be null");
+
+    // Revert back from opaque pointer types
+    auto *engine = reinterpret_cast<smith_waterman_backends_t *>(engine_punned);
     auto *device = reinterpret_cast<device_scope_t *>(device_punned);
 
     // Wrap our stable ABI sequences into C++ friendly containers
@@ -690,7 +777,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
 #endif // SZ_USE_CUDA
 
 #if SZ_USE_KEPLER
-    bool const can_use_kepler = (capabilities & sz_cap_ck_k) == sz_cap_ck_k;
+    bool const can_use_kepler = (capabilities & sz_caps_ck_k) == sz_caps_ck_k;
     if (can_use_kepler && can_use_linear_costs) {
         auto variant = szs::levenshtein_kepler_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
@@ -927,7 +1014,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
     if (can_use_ice && can_use_linear_costs) {
         auto variant = szs::needleman_wunsch_ice_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
-            needleman_wunsch_scores_backends_t(std::in_place_type_t<szs::needleman_wunsch_ice_t>(), std::move(variant));
+            needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_ice_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
         *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
@@ -939,17 +1026,17 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
     bool const can_use_cuda = (capabilities & sz_cap_cuda_k) != 0;
     if (can_use_cuda && can_use_linear_costs) {
         auto variant = szs::needleman_wunsch_cuda_t(substitution_costs, linear_costs);
-        auto engine = new (std::nothrow) needleman_wunsch_scores_backends_t(
-            std::in_place_type_t<szs::needleman_wunsch_cuda_t>(), std::move(variant));
+        auto engine = new (std::nothrow)
+            needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_cuda_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
         *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
         return sz_success_k;
     }
     else if (can_use_cuda) {
-        auto variant = affine_needleman_wunsch_cuda_t(substitution_costs, affine_costs);
-        auto engine = new (std::nothrow) needleman_wunsch_scores_backends_t(
-            std::in_place_type_t<affine_needleman_wunsch_cuda_t>(), std::move(variant));
+        auto variant = szs::affine_needleman_wunsch_cuda_t(substitution_costs, affine_costs);
+        auto engine = new (std::nothrow) needleman_wunsch_backends_t(
+            std::in_place_type_t<szs::affine_needleman_wunsch_cuda_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
         *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
@@ -961,8 +1048,8 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
     bool const can_use_hopper = (capabilities & sz_caps_ckh_k) == sz_caps_ckh_k;
     if (can_use_hopper && can_use_linear_costs) {
         auto variant = szs::needleman_wunsch_hopper_t(substitution_costs, linear_costs);
-        auto engine = new (std::nothrow) needleman_wunsch_scores_backends_t(
-            std::in_place_type_t<szs::needleman_wunsch_hopper_t>(), std::move(variant));
+        auto engine = new (std::nothrow)
+            needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_hopper_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
         *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
@@ -970,7 +1057,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
     }
     else if (can_use_hopper) {
         auto variant = szs::affine_needleman_wunsch_hopper_t(substitution_costs, affine_costs);
-        auto engine = new (std::nothrow) needleman_wunsch_scores_backends_t(
+        auto engine = new (std::nothrow) needleman_wunsch_backends_t(
             std::in_place_type_t<szs::affine_needleman_wunsch_hopper_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
@@ -981,8 +1068,8 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
 
     if (can_use_linear_costs) {
         auto variant = szs::needleman_wunsch_serial_t(substitution_costs, linear_costs);
-        auto engine = new (std::nothrow) needleman_wunsch_scores_backends_t(
-            std::in_place_type_t<szs::needleman_wunsch_serial_t>(), std::move(variant));
+        auto engine = new (std::nothrow)
+            needleman_wunsch_backends_t(std::in_place_type_t<szs::needleman_wunsch_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
         *engine_punned = reinterpret_cast<sz_needleman_wunsch_scores_t>(engine);
@@ -990,7 +1077,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
     }
     else {
         auto variant = szs::affine_needleman_wunsch_serial_t(substitution_costs, affine_costs);
-        auto engine = new (std::nothrow) needleman_wunsch_scores_backends_t(
+        auto engine = new (std::nothrow) needleman_wunsch_backends_t(
             std::in_place_type_t<szs::affine_needleman_wunsch_serial_t>(), std::move(variant));
         if (!engine) return sz_bad_alloc_k;
 
@@ -1040,11 +1127,150 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_u64tape(                      
 
 SZ_DYNAMIC void sz_needleman_wunsch_scores_free(sz_needleman_wunsch_scores_t engine_punned) {
     sz_assert_(engine_punned != nullptr && "Engine must be initialized");
-    auto *engine = reinterpret_cast<needleman_wunsch_scores_backends_t *>(engine_punned);
+    auto *engine = reinterpret_cast<needleman_wunsch_backends_t *>(engine_punned);
     delete engine;
 }
 
 #pragma endregion Needleman Wunsch
+
+#pragma region Smith Waterman
+
+SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          //
+    sz_error_cost_t const *subs, sz_error_cost_t open, sz_error_cost_t extend, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,          //
+    sz_smith_waterman_scores_t *engine_punned) {
+
+    sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
+
+    // If the gap opening and extension costs are identical we can use less memory
+    auto const can_use_linear_costs = open == extend;
+    auto const substitution_costs = *reinterpret_cast<szs::error_costs_256x256_t const *>(subs);
+    auto const linear_costs = szs::linear_gap_costs_t {open};
+    auto const affine_costs = szs::affine_gap_costs_t {open, extend};
+
+#if SZ_USE_ICE
+    bool const can_use_ice = (capabilities & sz_cap_serial_k) == sz_cap_serial_k;
+    if (can_use_ice && can_use_linear_costs) {
+        auto variant = szs::smith_waterman_ice_t(substitution_costs, linear_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_ice_t>(), std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        return sz_success_k;
+    }
+#endif // SZ_USE_ICE
+
+#if SZ_USE_CUDA
+    bool const can_use_cuda = (capabilities & sz_cap_cuda_k) != 0;
+    if (can_use_cuda && can_use_linear_costs) {
+        auto variant = szs::smith_waterman_cuda_t(substitution_costs, linear_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_cuda_t>(), std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        return sz_success_k;
+    }
+    else if (can_use_cuda) {
+        auto variant = szs::affine_smith_waterman_cuda_t(substitution_costs, affine_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_cuda_t>(), std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        return sz_success_k;
+    }
+#endif // SZ_USE_CUDA
+
+#if SZ_USE_HOPPER
+    bool const can_use_hopper = (capabilities & sz_caps_ckh_k) == sz_caps_ckh_k;
+    if (can_use_hopper && can_use_linear_costs) {
+        auto variant = szs::smith_waterman_hopper_t(substitution_costs, linear_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_hopper_t>(), std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        return sz_success_k;
+    }
+    else if (can_use_hopper) {
+        auto variant = szs::affine_smith_waterman_hopper_t(substitution_costs, affine_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_hopper_t>(), std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        return sz_success_k;
+    }
+#endif // SZ_USE_HOPPER
+
+    if (can_use_linear_costs) {
+        auto variant = szs::smith_waterman_serial_t(substitution_costs, linear_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::smith_waterman_serial_t>(), std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        return sz_success_k;
+    }
+    else {
+        auto variant = szs::affine_smith_waterman_serial_t(substitution_costs, affine_costs);
+        auto engine = new (std::nothrow)
+            smith_waterman_backends_t(std::in_place_type_t<szs::affine_smith_waterman_serial_t>(), std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        *engine_punned = reinterpret_cast<sz_smith_waterman_scores_t>(engine);
+        return sz_success_k;
+    }
+}
+
+SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_sequence(                      //
+    sz_smith_waterman_scores_t engine_punned, sz_device_scope_t device_punned, //
+    sz_sequence_t const *a, sz_sequence_t const *b,                            //
+    sz_ssize_t *results, sz_size_t results_stride) {
+
+    sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
+    auto a_container = sz_sequence_as_cpp_container_t {a};
+    auto b_container = sz_sequence_as_cpp_container_t {b};
+    return sz_smith_waterman_scores_for_(                       //
+        engine_punned, device_punned, a_container, b_container, //
+        results, results_stride);
+}
+
+SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_u32tape(                       //
+    sz_smith_waterman_scores_t engine_punned, sz_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *a, sz_sequence_u32tape_t const *b,            //
+    sz_ssize_t *results, sz_size_t results_stride) {
+
+    sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
+    auto a_container = sz_sequence_u32tape_as_cpp_container_t {a};
+    auto b_container = sz_sequence_u32tape_as_cpp_container_t {b};
+    return sz_smith_waterman_scores_for_(                       //
+        engine_punned, device_punned, a_container, b_container, //
+        results, results_stride);
+}
+
+SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_u64tape(                       //
+    sz_smith_waterman_scores_t engine_punned, sz_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *a, sz_sequence_u64tape_t const *b,            //
+    sz_ssize_t *results, sz_size_t results_stride) {
+
+    sz_assert_(a != nullptr && b != nullptr && "Input texts cannot be null");
+    auto a_container = sz_sequence_u64tape_as_cpp_container_t {a};
+    auto b_container = sz_sequence_u64tape_as_cpp_container_t {b};
+    return sz_smith_waterman_scores_for_(                       //
+        engine_punned, device_punned, a_container, b_container, //
+        results, results_stride);
+}
+
+SZ_DYNAMIC void sz_smith_waterman_scores_free(sz_smith_waterman_scores_t engine_punned) {
+    sz_assert_(engine_punned != nullptr && "Engine must be initialized");
+    auto *engine = reinterpret_cast<smith_waterman_backends_t *>(engine_punned);
+    delete engine;
+}
+
+#pragma endregion Smith Waterman
 
 #pragma region Fingerprints
 
