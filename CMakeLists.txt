@@ -65,27 +65,14 @@ message(STATUS "C++ Compiler Version: ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "C++ Compiler: ${CMAKE_CXX_COMPILER}")
 
 # Detect CUDA Support
-set(ENABLE_CUDA OFF)
+set(STRINGZILLA_CAN_BUILD_CUDA OFF)
 include(CheckLanguage)
 check_language(CUDA)
-
 if (CMAKE_CUDA_COMPILER)
-    enable_language(CUDA)
-    set(ENABLE_CUDA ON)
-    set(CMAKE_CUDA_STANDARD 20)
-    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-    set(CMAKE_CUDA_EXTENSIONS OFF)
-    set(CMAKE_CUDA_ARCHITECTURES 80 90)
-    set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
-    find_package(CUDAToolkit REQUIRED)
-    message(STATUS "CUDA detected!")
-    message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
-    message(STATUS "CUDA Compiler ID: ${CMAKE_CUDA_COMPILER_ID}")
-    message(STATUS "CUDA Toolkit Version: ${CUDAToolkit_VERSION}")
-    message(STATUS "CUDA Toolkit Include Path: ${CUDAToolkit_INCLUDE_DIRS}")
-    message(STATUS "CUDA Toolkit Libraries Path: ${CUDAToolkit_LIBRARY_DIR}")
+    set(STRINGZILLA_CAN_BUILD_CUDA ON)
+    message(STATUS "CUDA compiler available")
 else ()
-    message(STATUS "CUDA not detected. Skipping CUDA-specific builds.")
+    message(STATUS "CUDA compiler not available")
 endif ()
 
 if (CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -126,10 +113,30 @@ option(STRINGZILLA_BUILD_TEST "Compile a native unit test in C++" ${STRINGZILLA_
 option(STRINGZILLA_BUILD_BENCHMARK "Compile a native benchmark in C++" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLA_BUILD_SHARED "Compile a dynamic library" ${STRINGZILLA_IS_MAIN_PROJECT})
 option(STRINGZILLAS_BUILD_SHARED "Compile dynamic parallel libraries" ${STRINGZILLA_IS_MAIN_PROJECT})
+option(STRINGZILLA_BUILD_CUDA "Build CUDA-accelerated targets" ${STRINGZILLA_CAN_BUILD_CUDA})
 set(STRINGZILLA_TARGET_ARCH
     ""
     CACHE STRING "Architecture to tell the compiler to optimize for (-march)"
 )
+
+# Enable CUDA if requested
+if (STRINGZILLA_BUILD_CUDA)
+    if (NOT STRINGZILLA_CAN_BUILD_CUDA)
+        message(FATAL_ERROR "CUDA support requested but CUDA compiler not found")
+    endif ()
+    enable_language(CUDA)
+    set(CMAKE_CUDA_STANDARD 20)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    set(CMAKE_CUDA_EXTENSIONS OFF)
+    set(CMAKE_CUDA_ARCHITECTURES 90a) # Hopper is the newest architecture we specialize for
+    set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+    find_package(CUDAToolkit REQUIRED)
+    message(STATUS "CUDA support enabled")
+    message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
+    message(STATUS "CUDA Compiler ID: ${CMAKE_CUDA_COMPILER_ID}")
+    message(STATUS "CUDA Toolkit Version: ${CUDAToolkit_VERSION}")
+    message(STATUS "CUDA Architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+endif ()
 
 # Includes
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
@@ -215,7 +222,6 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                 "-Xcompiler=-Wfatal-errors;-Xcompiler=-Wall;-Xcompiler=-Wextra;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
         )
     endif ()
-
 
     # Set optimization options for different compilers differently
     if (${compiler_id} STREQUAL "MSVC")
@@ -379,7 +385,7 @@ if (${STRINGZILLA_BUILD_BENCHMARK})
     define_launcher(
         stringzillas_bench_fingerprints_cpp20 scripts/bench_fingerprints.cpp 20 "${STRINGZILLA_TARGET_ARCH}"
     )
-    if (ENABLE_CUDA)
+    if (STRINGZILLA_BUILD_CUDA)
         define_gpu_launcher(
             stringzillas_bench_similarities_cu20 scripts/bench_similarities.cu 20 "${STRINGZILLA_TARGET_ARCH}"
         )
@@ -405,7 +411,7 @@ if (${STRINGZILLA_BUILD_TEST})
     # To avoid bloating our codebase with `__device__` function annotations, we only target C++14 and newer to compile
     # `constexpr` functions on both host and device side. To avoid the complexity of defining too many template objects
     # and complex SFINAE, we only target C++17 anf newer to compile `if constexpr` compile-time SIMD dispatch.
-    if (ENABLE_CUDA)
+    if (STRINGZILLA_BUILD_CUDA)
         define_gpu_launcher(stringzillas_test_cu17 scripts/test_stringzillas.cu 17 "${STRINGZILLA_TARGET_ARCH}")
         define_gpu_launcher(stringzillas_test_cu20 scripts/test_stringzillas.cu 20 "${STRINGZILLA_TARGET_ARCH}")
     endif ()
@@ -418,7 +424,7 @@ if (${STRINGZILLA_BUILD_TEST})
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "AVX")
             define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "AVX2")
             define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "AVX512")
-            if (ENABLE_CUDA)
+            if (STRINGZILLA_BUILD_CUDA)
                 define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "AVX")
                 define_gpu_launcher(stringzillas_test_cu20_haswell scripts/test_stringzillas.cu 20 "AVX2")
                 define_gpu_launcher(stringzillas_test_cu20_ice scripts/test_stringzillas.cu 20 "AVX512")
@@ -427,7 +433,7 @@ if (${STRINGZILLA_BUILD_TEST})
             define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "ivybridge")
             define_launcher(stringzilla_test_cpp20_haswell scripts/test_stringzilla.cpp 20 "haswell")
             define_launcher(stringzilla_test_cpp20_ice scripts/test_stringzilla.cpp 20 "sapphirerapids")
-            if (ENABLE_CUDA)
+            if (STRINGZILLA_BUILD_CUDA)
                 define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "ivybridge")
                 define_gpu_launcher(stringzillas_test_cu20_haswell scripts/test_stringzillas.cu 20 "haswell")
                 define_gpu_launcher(stringzillas_test_cu20_ice scripts/test_stringzillas.cu 20 "sapphirerapids")
@@ -438,7 +444,7 @@ if (${STRINGZILLA_BUILD_TEST})
         define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8-a")
         define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8-a+simd")
         define_launcher(stringzilla_test_cpp20_sve scripts/test_stringzilla.cpp 20 "armv8.2-a+sve")
-        if (ENABLE_CUDA)
+        if (STRINGZILLA_BUILD_CUDA)
             define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "armv8-a")
             define_gpu_launcher(stringzillas_test_cu20_neon scripts/test_stringzillas.cu 20 "armv8-a+simd")
             define_gpu_launcher(stringzillas_test_cu20_sve scripts/test_stringzillas.cu 20 "armv8.2-a+sve")
@@ -576,7 +582,7 @@ if (${STRINGZILLAS_BUILD_SHARED})
     define_stringzillas_shared(stringzillas_cpus_shared c/stringzillas.cpp "SZ_USE_CUDA=0;SZ_USE_ROCM=0")
 
     # Define StringZillas CUDA shared library (only if CUDA is available)
-    if (ENABLE_CUDA)
+    if (STRINGZILLA_BUILD_CUDA)
         define_stringzillas_shared(stringzillas_cuda_shared c/stringzillas.cu "SZ_USE_CUDA=1;SZ_USE_ROCM=0")
 
         # Link CUDA libraries
@@ -584,16 +590,18 @@ if (${STRINGZILLAS_BUILD_SHARED})
 
         # Set CUDA-specific properties
         set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_STANDARD 20 CUDA_STANDARD_REQUIRED ON)
-        set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_ARCHITECTURES "70;75;80;86;89;90")
+        set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_ARCHITECTURES "90") # We dispatch manually
 
         # Enable CUDA separable compilation for device code
         set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-        
+
         # Add CUDA-specific compiler flags
         target_compile_options(stringzillas_cuda_shared PRIVATE "--expt-relaxed-constexpr")
-        
+
         # Set the source file as CUDA
-        set_source_files_properties(c/stringzillas.cu TARGET_DIRECTORY stringzillas_cuda_shared PROPERTIES LANGUAGE CUDA)
+        set_source_files_properties(
+            c/stringzillas.cu TARGET_DIRECTORY stringzillas_cuda_shared PROPERTIES LANGUAGE CUDA
+        )
     endif ()
 
     # TODO: Define StringZillas ROCm shared library when ROCm support is added if (ENABLE_ROCM)
