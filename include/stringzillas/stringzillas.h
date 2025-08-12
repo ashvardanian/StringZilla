@@ -109,9 +109,9 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_u64tape(            //
 
 SZ_DYNAMIC void sz_levenshtein_distances_free(sz_levenshtein_distances_t engine);
 
-SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_init(                //
-    sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t gap, //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,     //
+SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_init(                                         //
+    sz_error_cost_t match, sz_error_cost_t mismatch, sz_error_cost_t open, sz_error_cost_t extend, //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,                              //
     sz_levenshtein_distances_utf8_t *engine);
 
 SZ_DYNAMIC sz_status_t sz_levenshtein_distances_utf8_sequence(        //
