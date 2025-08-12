@@ -649,6 +649,14 @@ SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
  */
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
 
+/**
+ *  @brief Checks if two memory allocators are equivalent.
+ *  @param[in] a First memory allocator.
+ *  @param[in] b Second memory allocator.
+ *  @return True if the allocators are the same, false otherwise.
+ */
+SZ_PUBLIC sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b);
+
 #pragma endregion
 
 #pragma region API Signature Types
@@ -1386,6 +1394,13 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
     alloc->handle = buffer;
     *(sz_size_t *)buffer = length;
     *((sz_ptr_t)buffer + sizeof(sz_size_t)) = sizeof(sz_size_t) * 2; // The capacity and consumption so far
+}
+
+SZ_PUBLIC sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b) {
+    if (!a || !b) return sz_false_k;
+
+    // Two allocators are considered equal if they have the same function pointers and handle
+    return (a->allocate == b->allocate) && (a->free == b->free) && (a->handle == b->handle) ? sz_true_k : sz_false_k;
 }
 
 SZ_PUBLIC sz_cptr_t sz_sequence_from_null_terminated_strings_get_start_(void const *handle, sz_size_t i) {
