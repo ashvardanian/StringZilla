@@ -78,6 +78,40 @@ def device_scope_and_capabilities(device: DeviceName):
         raise ValueError(f"Unknown device type: {device}")
 
 
+InputSizeConfig = Literal["one-large", "few-big", "many-small"]
+INPUT_SIZE_CONFIGS = ["one-large", "few-big", "many-small"]
+
+
+def generate_string_batches(config: InputSizeConfig):
+    """Generate string batches based on the specified configuration.
+
+    Returns:
+        tuple: (batch_size, min_length, max_length) parameters for generating test strings
+    """
+    if config == "one-large":
+        return 1, 50, 1024  # Single pair of long strings
+    elif config == "few-big":
+        return 7, 30, 128  # Few pairs of medium strings
+    elif config == "many-small":
+        return 1000, 10, 30  # Many pairs of short strings
+    else:
+        raise ValueError(f"Unknown input size config: {config}")
+
+
+def get_random_string_batch(config: InputSizeConfig):
+    """Generate two batches of random strings based on the configuration."""
+    batch_size, min_len, max_len = generate_string_batches(config)
+
+    # Generate random lengths for each string in the batch
+    a_lengths = [randint(min_len, max_len) for _ in range(batch_size)]
+    b_lengths = [randint(min_len, max_len) for _ in range(batch_size)]
+
+    a_batch = [get_random_string(length=length) for length in a_lengths]
+    b_batch = [get_random_string(length=length) for length in b_lengths]
+
+    return a_batch, b_batch
+
+
 def test_device_scope():
     """Test DeviceScope for execution context control."""
 
@@ -264,7 +298,7 @@ def test_levenshtein_distances_with_custom_gaps(device_name: DeviceName):
     assert binary_distance("abc", "a_bc") == opening, "one insertion"
     assert binary_distance("abc", "adc") == mismatch, "one substitution"
     assert binary_distance("ggbuzgjux{}l", "gbuzgjux{}l") == opening, "one insertion (prepended)"
-    assert binary_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == 14 * mismatch
+    assert binary_distance("abcdefgABCDEFG", "ABCDEFGabcdefg") == min(14 * mismatch, 2 * opening + 12 * extension)
 
 
 @pytest.mark.parametrize("device_name", DEVICE_NAMES)
@@ -295,43 +329,45 @@ def test_levenshtein_distances_utf8_with_custom_gaps(device_name: DeviceName):
     assert unicode_distance("façade", "facade") == mismatch, "'ç' with cedilla vs. plain"
     assert unicode_distance("Schön", "Scho\u0308n") == mismatch + opening, "'ö' represented as 'o' + '¨'"
     assert unicode_distance("München", "Muenchen") == mismatch + opening, "German with umlaut vs. transcription"
-    assert unicode_distance("こんにちは世界", "こんばんは世界") == mismatch + opening, "Japanese greetings"
+    assert unicode_distance("こんにちは世界", "こんばんは世界") == min(2 * mismatch, 4 * opening), "Japanese greetings"
 
 
 @pytest.mark.repeat(10)
-@pytest.mark.parametrize("first_length", [20, 100])
-@pytest.mark.parametrize("second_length", [20, 100])
-@pytest.mark.parametrize("batch_size", [1, 3, 133, 1000])
+@pytest.mark.parametrize("config", INPUT_SIZE_CONFIGS)
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
-def test_levenshtein_distance_random(first_length: int, second_length: int, batch_size: int):
-    batch_a = [get_random_string(length=first_length) for _ in range(batch_size)]
-    batch_b = [get_random_string(length=second_length) for _ in range(batch_size)]
+def test_levenshtein_distance_random(config: InputSizeConfig):
+    a_batch, b_batch = get_random_string_batch(config)
 
-    baselines = np.array([baseline_levenshtein_distance(a, b) for a, b in zip(batch_a, batch_b)])
+    baselines = np.array([baseline_levenshtein_distance(a, b) for a, b in zip(a_batch, b_batch)])
     engine = szs.LevenshteinDistances()
-    results = engine(batch_a, batch_b)
+
+    # Convert to Strs objects
+    a_strs = Strs(a_batch)
+    b_strs = Strs(b_batch)
+    results = engine(a_strs, b_strs)
 
     np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
 
 
 @pytest.mark.repeat(10)
-@pytest.mark.parametrize("first_length", [20, 100])
-@pytest.mark.parametrize("second_length", [20, 100])
-@pytest.mark.parametrize("batch_size", [1, 3, 133, 1000])
+@pytest.mark.parametrize("config", INPUT_SIZE_CONFIGS)
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
-def test_needleman_wunsch_vs_levenshtein_random(first_length: int, second_length: int, batch_size: int):
+def test_needleman_wunsch_vs_levenshtein_random(config: InputSizeConfig):
     """Test Needleman-Wunsch global alignment scores against Levenshtein distances with random strings."""
 
-    batch_a = [get_random_string(length=first_length) for _ in range(batch_size)]
-    batch_b = [get_random_string(length=second_length) for _ in range(batch_size)]
+    a_batch, b_batch = get_random_string_batch(config)
 
     character_substitutions = np.zeros((256, 256), dtype=np.int8)
     character_substitutions.fill(-1)
     np.fill_diagonal(character_substitutions, 0)
 
-    baselines = [-baseline_levenshtein_distance(a, b) for a, b in zip(batch_a, batch_b)]
-    engine = sz.NeedlemanWunsch(substitution_matrix=character_substitutions, open=-1, extend=-1)
-    results = engine(batch_a, batch_b)
+    baselines = [-baseline_levenshtein_distance(a, b) for a, b in zip(a_batch, b_batch)]
+    engine = szs.NeedlemanWunsch(substitution_matrix=character_substitutions, open=-1, extend=-1)
+
+    # Convert to Strs objects
+    a_strs = Strs(a_batch)
+    b_strs = Strs(b_batch)
+    results = engine(a_strs, b_strs)
 
     np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
 
