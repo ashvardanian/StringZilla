@@ -20,6 +20,7 @@
  *  - `sz_py_export_strings_as_sequence`.
  *  - `sz_py_export_strings_as_u32tape`.
  *  - `sz_py_export_strings_as_u64tape`.
+ *  - `sz_py_replace_strings_allocator`.
  */
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
 #define NOMINMAX
@@ -59,9 +60,9 @@ typedef SSIZE_T ssize_t;
  *  @see https://arrow.apache.org/docs/format/CDataInterface.html#structure-definitions
  */
 struct ArrowSchema {
-    const char *format;
-    const char *name;
-    const char *metadata;
+    char const *format;
+    char const *name;
+    char const *metadata;
     int64_t flags;
     int64_t n_children;
     struct ArrowSchema **children;
@@ -80,7 +81,7 @@ struct ArrowArray {
     int64_t offset;
     int64_t n_buffers;
     int64_t n_children;
-    const void **buffers;
+    void const **buffers;
     struct ArrowArray **children;
     struct ArrowArray *dictionary;
     void (*release)(struct ArrowArray *);
@@ -92,6 +93,7 @@ typedef struct PyAPI {
     sz_bool_t (*sz_py_export_strings_as_sequence)(PyObject *, sz_sequence_t *);
     sz_bool_t (*sz_py_export_strings_as_u32tape)(PyObject *, sz_cptr_t *, sz_u32_t const **, sz_size_t *);
     sz_bool_t (*sz_py_export_strings_as_u64tape)(PyObject *, sz_cptr_t *, sz_u64_t const **, sz_size_t *);
+    sz_bool_t (*sz_py_replace_strings_allocator)(PyObject *, sz_memory_allocator_t *);
 } PyAPI;
 
 #pragma region Forward Declarations
@@ -180,62 +182,68 @@ typedef struct {
     PyObject ob_base;
 
     enum {
-        STRS_CONSECUTIVE_32,
-        STRS_CONSECUTIVE_64,
-        STRS_REORDERED,
-        STRS_MULTI_SOURCE,
+        STRS_U32_TAPE_VIEW,
+        STRS_U64_TAPE_VIEW,
+        STRS_U32_TAPE,
+        STRS_U64_TAPE,
+        STRS_FRAGMENTED,
     } type;
 
     union {
         /**
-         *  Simple structure resembling Apache Arrow arrays of variable length strings.
-         *  When you split a `Str`, that is under 4 GB in size, this is used for space-efficiency.
-         *
-         *  The `offsets` contains `count+1` integers similar to the Apache Arrow format.
-         *  The length of the i-th string is calculated as: `offsets[i+1] - offsets[i] - separator_length`.
-         *  The first offset is typically 0, unless we are looking at a slice of a larger array.
-         *
-         *  The layout is now identical to Apache Arrow format: N+1 offsets for N strings.
+         *  U32 tape view - references existing Arrow array data, owns nothing.
+         *  The layout is identical to Apache Arrow format: N+1 offsets for N strings.
          *  https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
          */
-        struct consecutive_slices_32bit_t {
-            size_t count;
-            size_t separator_length;
-            PyObject *parent_string;
-            char const *start; // ? Ownership is controlled by presence of `parent_string`
-            uint32_t *offsets; // Apache Arrow format: N+1 offsets for N strings, starting with 0
-            int owns_offsets;  // ? 1 if we allocated `offsets` and should `free`
-        } consecutive_32bit;
+        struct u32_tape_view_t {
+            sz_size_t count;
+            sz_cptr_t data;    // Points to existing data (not owned)
+            sz_u32_t *offsets; // Points to existing offsets (not owned)
+            PyObject *parent;  // Parent Arrow array or other object
+        } u32_tape_view;
 
         /**
-         *  Simple structure resembling Apache Arrow arrays of variable length strings.
-         *  When you split a `Str`, over 4 GB long, this structure is used to indicate chunk offsets.
-         *
-         *  The `offsets` contains `count+1` integers similar to the Apache Arrow format.
-         *  The length of the i-th string is calculated as: `offsets[i+1] - offsets[i] - separator_length`.
-         *  The first offset is typically 0, unless we are looking at a slice of a larger array.
-         *
-         *  The layout is now identical to Apache Arrow format: N+1 offsets for N strings.
+         *  U32 tape - owns both offsets and data with custom allocator.
+         */
+        struct u32_tape_t {
+            sz_size_t count;
+            sz_cptr_t data;    // Owned data
+            sz_u32_t *offsets; // Owned offsets (N+1 for N strings)
+            sz_memory_allocator_t allocator;
+        } u32_tape;
+
+        /**
+         *  U64 tape view - references existing Arrow array data, owns nothing.
+         *  The layout is identical to Apache Arrow format: N+1 offsets for N strings.
          *  https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
          */
-        struct consecutive_slices_64bit_t {
-            size_t count;
-            size_t separator_length;
-            PyObject *parent_string;
-            char const *start; // ? Ownership is controlled by presence of `parent_string`
-            uint64_t *offsets; // Apache Arrow format: N+1 offsets for N strings, starting with 0
-            int owns_offsets;  // ? 1 if we allocated `offsets` and should `free`
-        } consecutive_64bit;
+        struct u64_tape_view_t {
+            sz_size_t count;
+            sz_cptr_t data;    // Points to existing data (not owned)
+            sz_u64_t *offsets; // Points to existing offsets (not owned)
+            PyObject *parent;  // Parent Arrow array or other object
+        } u64_tape_view;
 
         /**
-         *  Once you sort, shuffle, or reorganize slices making up a larger string, this structure
-         *  can be used for space-efficient lookups.
+         *  U64 tape - owns both offsets and data with custom allocator.
          */
-        struct reordered_slices_t {
-            size_t count;
-            PyObject *parent_string;
-            sz_string_view_t *parts; // ? Ownership is controlled by presence of `parent_string`
-        } reordered;
+        struct u64_tape_t {
+            sz_size_t count;
+            sz_cptr_t data;    // Owned data
+            sz_u64_t *offsets; // Owned offsets (N+1 for N strings)
+            sz_memory_allocator_t allocator;
+        } u64_tape;
+
+        /**
+         *  Reordered subviews - owns only the array of individual spans.
+         *  Each span points to data in the parent object.
+         */
+        struct fragmented_t {
+            sz_size_t count;
+            sz_string_view_t *spans; // Owned array of spans
+            PyObject *parent;        // Parent object (Str, Strs, or other)
+            sz_memory_allocator_t allocator;
+        } fragmented;
 
     } data;
 
@@ -260,16 +268,32 @@ static sz_ptr_t temporary_memory_allocate(sz_size_t size, sz_string_view_t *exis
 
 static void temporary_memory_free(sz_ptr_t start, sz_size_t size, sz_string_view_t *existing) {}
 
-static sz_cptr_t parts_get_start(void const *handle, sz_size_t i) {
-    return ((sz_string_view_t const *)handle)[i].start;
+static sz_cptr_t Strs_get_start_(void const *handle, sz_size_t i) {
+    Strs *strs = (Strs *)handle;
+    switch (strs->type) {
+    case STRS_U32_TAPE: return strs->data.u32_tape.data + strs->data.u32_tape.offsets[i];
+    case STRS_U32_TAPE_VIEW: return strs->data.u32_tape_view.data + strs->data.u32_tape_view.offsets[i];
+    case STRS_U64_TAPE: return strs->data.u64_tape.data + strs->data.u64_tape.offsets[i];
+    case STRS_U64_TAPE_VIEW: return strs->data.u64_tape_view.data + strs->data.u64_tape_view.offsets[i];
+    case STRS_FRAGMENTED: return strs->data.fragmented.spans[i].start;
+    }
+    return NULL;
 }
 
-static sz_size_t parts_get_length(void const *handle, sz_size_t i) {
-    return ((sz_string_view_t const *)handle)[i].length;
+static sz_size_t Strs_get_length_(void const *handle, sz_size_t i) {
+    Strs *strs = (Strs *)handle;
+    switch (strs->type) {
+    case STRS_U32_TAPE: return strs->data.u32_tape.offsets[i + 1] - strs->data.u32_tape.offsets[i];
+    case STRS_U32_TAPE_VIEW: return strs->data.u32_tape_view.offsets[i + 1] - strs->data.u32_tape_view.offsets[i];
+    case STRS_U64_TAPE: return strs->data.u64_tape.offsets[i + 1] - strs->data.u64_tape.offsets[i];
+    case STRS_U64_TAPE_VIEW: return strs->data.u64_tape_view.offsets[i + 1] - strs->data.u64_tape_view.offsets[i];
+    case STRS_FRAGMENTED: return strs->data.fragmented.spans[i].length;
+    }
+    return 0;
 }
 
-void reverse_offsets(sz_sorted_idx_t *array, size_t length) {
-    size_t i, j;
+void reverse_offsets(sz_sorted_idx_t *array, sz_size_t length) {
+    sz_size_t i, j;
     // Swap array[i] and array[j]
     for (i = 0, j = length - 1; i < j; i++, j--) {
         sz_sorted_idx_t temp = array[i];
@@ -278,8 +302,8 @@ void reverse_offsets(sz_sorted_idx_t *array, size_t length) {
     }
 }
 
-void reverse_haystacks(sz_string_view_t *array, size_t length) {
-    size_t i, j;
+void reverse_haystacks(sz_string_view_t *array, sz_size_t length) {
+    sz_size_t i, j;
     // Swap array[i] and array[j]
     for (i = 0, j = length - 1; i < j; i++, j--) {
         sz_string_view_t temp = array[i];
@@ -288,12 +312,12 @@ void reverse_haystacks(sz_string_view_t *array, size_t length) {
     }
 }
 
-void permute(sz_string_view_t *array, sz_sorted_idx_t *order, size_t length) {
-    for (size_t i = 0; i < length; ++i) {
+void permute(sz_string_view_t *array, sz_sorted_idx_t *order, sz_size_t length) {
+    for (sz_size_t i = 0; i < length; ++i) {
         if (i == order[i]) continue;
         sz_string_view_t temp = array[i];
-        size_t k = i, j;
-        while (i != (j = (size_t)order[k])) {
+        sz_size_t k = i, j;
+        while (i != (j = (sz_size_t)order[k])) {
             array[k] = array[j];
             order[k] = k;
             k = j;
@@ -312,18 +336,18 @@ SZ_DYNAMIC sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start
         // Handle Python `str` object
         Py_ssize_t signed_length;
         *start = PyUnicode_AsUTF8AndSize(object, &signed_length);
-        *length = (size_t)signed_length;
+        *length = (sz_size_t)signed_length;
         return 1;
     }
     else if (PyBytes_Check(object)) {
         // Handle Python `bytes` object
         // https://docs.python.org/3/c-api/bytes.html
         Py_ssize_t signed_length;
-        if (PyBytes_AsStringAndSize(object, (char **)start, &signed_length) == -1) {
+        if (PyBytes_AsStringAndSize(object, (sz_ptr_t *)start, &signed_length) == -1) {
             PyErr_SetString(PyExc_ValueError, "Couldn't access `bytes` buffer internals");
             return 0;
         }
-        *length = (size_t)signed_length;
+        *length = (sz_size_t)signed_length;
         return 1;
     }
     else if (PyByteArray_Check(object)) {
@@ -378,22 +402,22 @@ SZ_DYNAMIC sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start
 
 sz_cptr_t sz_py_strs_sequence_member_start_if_reordered(void const *sequence_punned, sz_size_t index) {
     Strs *strs = (Strs *)sequence_punned;
-    sz_assert_(strs->type == STRS_REORDERED && "Expected a reordered Strs type");
-    if (index < 0 || index >= strs->data.reordered.count) {
+    sz_assert_(strs->type == STRS_FRAGMENTED && "Expected a reordered Strs type");
+    if (index < 0 || index >= strs->data.fragmented.count) {
         PyErr_SetString(PyExc_IndexError, "Index out of bounds");
         return NULL;
     }
-    return strs->data.reordered.parts[index].start;
+    return strs->data.fragmented.spans[index].start;
 }
 
 sz_size_t sz_py_strs_sequence_member_length_if_reordered(void const *sequence_punned, sz_size_t index) {
     Strs *strs = (Strs *)sequence_punned;
-    sz_assert_(strs->type == STRS_REORDERED && "Expected a reordered Strs type");
-    if (index < 0 || index >= strs->data.reordered.count) {
+    sz_assert_(strs->type == STRS_FRAGMENTED && "Expected a reordered Strs type");
+    if (index < 0 || index >= strs->data.fragmented.count) {
         PyErr_SetString(PyExc_IndexError, "Index out of bounds");
         return 0;
     }
-    return strs->data.reordered.parts[index].length;
+    return strs->data.fragmented.spans[index].length;
 }
 
 /**
@@ -404,10 +428,10 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_seque
 
     if (PyObject_TypeCheck(object, &StrsType)) {
         Strs *strs = (Strs *)object;
-        sz_assert_(strs->type == STRS_REORDERED && "View as tapes!");
+        sz_assert_(strs->type == STRS_FRAGMENTED && "View as tapes!");
 
         sequence->handle = strs;
-        sequence->count = strs->data.reordered.count;
+        sequence->count = strs->data.fragmented.count;
         sequence->get_start = sz_py_strs_sequence_member_start_if_reordered;
         sequence->get_length = sz_py_strs_sequence_member_length_if_reordered;
         return sz_true_k;
@@ -425,12 +449,17 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t
     if (!data || !offsets || !count) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
     Strs *strs = (Strs *)object;
-    if (strs->type != STRS_CONSECUTIVE_32) return sz_false_k;
-    if (strs->data.consecutive_32bit.separator_length != 0) return sz_false_k;
-
-    *data = strs->data.consecutive_32bit.start;
-    *offsets = strs->data.consecutive_32bit.offsets;
-    *count = strs->data.consecutive_32bit.count;
+    if (strs->type != STRS_U32_TAPE && strs->type != STRS_U32_TAPE_VIEW) return sz_false_k;
+    if (strs->type == STRS_U32_TAPE) {
+        *data = strs->data.u32_tape.data;
+        *offsets = strs->data.u32_tape.offsets;
+        *count = strs->data.u32_tape.count;
+    }
+    else {
+        *data = strs->data.u32_tape_view.data;
+        *offsets = strs->data.u32_tape_view.offsets;
+        *count = strs->data.u32_tape_view.count;
+    }
     return sz_true_k;
 }
 
@@ -443,12 +472,209 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t
     if (!data || !offsets || !count) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
     Strs *strs = (Strs *)object;
-    if (strs->type != STRS_CONSECUTIVE_64) return sz_false_k;
-    if (strs->data.consecutive_64bit.separator_length != 0) return sz_false_k;
+    if (strs->type != STRS_U64_TAPE && strs->type != STRS_U64_TAPE_VIEW) return sz_false_k;
+    if (strs->type == STRS_U64_TAPE) {
+        *data = strs->data.u64_tape.data;
+        *offsets = strs->data.u64_tape.offsets;
+        *count = strs->data.u64_tape.count;
+    }
+    else {
+        *data = strs->data.u64_tape_view.data;
+        *offsets = strs->data.u64_tape_view.offsets;
+        *count = strs->data.u64_tape_view.count;
+    }
+    return sz_true_k;
+}
 
-    *data = strs->data.consecutive_64bit.start;
-    *offsets = strs->data.consecutive_64bit.offsets;
-    *count = strs->data.consecutive_64bit.count;
+/**
+ *  @brief  Helper function to replace the memory allocator in a `Strs` object.
+ *          This reallocates existing string data using the new allocator.
+ *
+ *  This may change the type of the `Strs` layout:
+ *  - `STRS_U32_TAPE_VIEW` becomes `STRS_U32_TAPE`.
+ *  - `STRS_U64_TAPE_VIEW` becomes `STRS_U64_TAPE`.
+ *  - `STRS_U32_TAPE` remains, if the allocator is different.
+ *  - `STRS_U64_TAPE` remains, if the allocator is different.
+ *  - `STRS_FRAGMENTED` remains, but detaches from the parent object, if the allocator is different.
+ */
+SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator) {
+    if (!object || !allocator) return sz_false_k;
+    if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
+
+    Strs *strs = (Strs *)object;
+
+    printf("DEBUG: sz_py_replace_strings_allocator called for Strs at %p\n", strs);
+    printf("DEBUG: Strs type: %d\n", strs->type);
+
+    // Get the current allocator based on type
+    sz_memory_allocator_t old_allocator;
+    switch (strs->type) {
+    case STRS_U32_TAPE: old_allocator = strs->data.u32_tape.allocator; break;
+    case STRS_U64_TAPE: old_allocator = strs->data.u64_tape.allocator; break;
+    case STRS_FRAGMENTED: old_allocator = strs->data.fragmented.allocator; break;
+    case STRS_U32_TAPE_VIEW:
+    case STRS_U64_TAPE_VIEW:
+        // Views don't own memory, use default allocator for comparison
+        sz_memory_allocator_init_default(&old_allocator);
+        break;
+    }
+
+    // Check if the allocators are the same - no need to reallocate
+    if (sz_memory_allocator_equal(&old_allocator, allocator)) {
+        printf("DEBUG: Allocators are equal, no reallocation needed\n");
+        return sz_true_k;
+    }
+
+    // Handle different Strs layouts
+    switch (strs->type) {
+    case STRS_U32_TAPE: {
+        struct u32_tape_t *data = &strs->data.u32_tape;
+        sz_assert_(data->offsets && "Expected offsets to be allocated");
+
+        sz_size_t const string_data_size = (sz_size_t)data->offsets[data->count];
+        sz_size_t const offsets_size = (data->count + 1) * sizeof(sz_u32_t);
+
+        // Allocate new string data with new allocator
+        sz_ptr_t new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
+        if (!new_string_data) return sz_false_k;
+        memcpy(new_string_data, data->data, string_data_size);
+
+        // Allocate new offsets array
+        sz_u32_t *new_offsets = (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle);
+        if (!new_offsets) {
+            allocator->free(new_string_data, string_data_size, allocator->handle);
+            return sz_false_k;
+        }
+        memcpy(new_offsets, data->offsets, offsets_size);
+
+        // Free old memory with old allocator (tapes always own their data)
+        old_allocator.free(data->data, string_data_size, old_allocator.handle);
+        old_allocator.free(data->offsets, offsets_size, old_allocator.handle);
+
+        // Update pointers and allocator
+        data->data = new_string_data;
+        data->offsets = new_offsets;
+        data->allocator = *allocator;
+        break;
+    }
+
+    case STRS_U64_TAPE: {
+        struct u64_tape_t *data = &strs->data.u64_tape;
+        sz_assert_(data->offsets && "Expected offsets to be allocated");
+
+        sz_size_t string_data_size = (sz_size_t)data->offsets[data->count];
+        sz_size_t offsets_size = (data->count + 1) * sizeof(sz_u64_t);
+
+        // Allocate new string data with new allocator
+        sz_ptr_t new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
+        if (!new_string_data) return sz_false_k;
+        memcpy(new_string_data, data->data, string_data_size);
+
+        // Allocate new offsets array
+        sz_u64_t *new_offsets = (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle);
+        if (!new_offsets) {
+            allocator->free(new_string_data, string_data_size, allocator->handle);
+            return sz_false_k;
+        }
+        memcpy(new_offsets, data->offsets, offsets_size);
+
+        // Free old memory with old allocator (tapes always own their data)
+        old_allocator.free(data->data, string_data_size, old_allocator.handle);
+        old_allocator.free(data->offsets, offsets_size, old_allocator.handle);
+
+        // Update pointers and allocator
+        data->data = new_string_data;
+        data->offsets = new_offsets;
+        data->allocator = *allocator;
+        break;
+    }
+
+    case STRS_U32_TAPE_VIEW: {
+        // Convert view to tape by copying the data
+        struct u32_tape_view_t *view = &strs->data.u32_tape_view;
+        sz_size_t const string_data_size = (sz_size_t)view->offsets[view->count];
+        sz_size_t const offsets_size = (view->count + 1) * sizeof(sz_u32_t);
+
+        // Allocate new string data with new allocator
+        sz_ptr_t new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
+        if (!new_string_data) return sz_false_k;
+        memcpy(new_string_data, view->data, string_data_size);
+
+        // Allocate new offsets array
+        sz_u32_t *new_offsets = (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle);
+        if (!new_offsets) {
+            allocator->free(new_string_data, string_data_size, allocator->handle);
+            return sz_false_k;
+        }
+        memcpy(new_offsets, view->offsets, offsets_size);
+
+        // Release parent reference if any
+        Py_XDECREF(view->parent);
+
+        // Convert to tape layout
+        strs->type = STRS_U32_TAPE;
+        strs->data.u32_tape.count = view->count;
+        strs->data.u32_tape.data = new_string_data;
+        strs->data.u32_tape.offsets = new_offsets;
+        strs->data.u32_tape.allocator = *allocator;
+        break;
+    }
+
+    case STRS_U64_TAPE_VIEW: {
+        // Convert view to tape by copying the data
+        struct u64_tape_view_t *view = &strs->data.u64_tape_view;
+        sz_size_t const string_data_size = (sz_size_t)view->offsets[view->count];
+        sz_size_t const offsets_size = (view->count + 1) * sizeof(sz_u64_t);
+
+        // Allocate new string data with new allocator
+        sz_ptr_t new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
+        if (!new_string_data) return sz_false_k;
+        memcpy(new_string_data, view->data, string_data_size);
+
+        // Allocate new offsets array
+        sz_u64_t *new_offsets = (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle);
+        if (!new_offsets) {
+            allocator->free(new_string_data, string_data_size, allocator->handle);
+            return sz_false_k;
+        }
+        memcpy(new_offsets, view->offsets, offsets_size);
+
+        // Release parent reference if any
+        Py_XDECREF(view->parent);
+
+        // Convert to tape layout
+        strs->type = STRS_U64_TAPE;
+        strs->data.u64_tape.count = view->count;
+        strs->data.u64_tape.data = new_string_data;
+        strs->data.u64_tape.offsets = new_offsets;
+        strs->data.u64_tape.allocator = *allocator;
+        break;
+    }
+
+    case STRS_FRAGMENTED: {
+        struct fragmented_t *data = &strs->data.fragmented;
+        sz_assert_(data->spans && "Expected spans to be allocated");
+
+        // Reallocate the spans array with the new allocator
+        sz_size_t spans_size = data->count * sizeof(sz_string_view_t);
+        sz_string_view_t *new_spans = (sz_string_view_t *)allocator->allocate(spans_size, allocator->handle);
+        if (!new_spans) return sz_false_k;
+        memcpy(new_spans, data->spans, spans_size);
+
+        // Free old spans with old allocator
+        old_allocator.free(data->spans, spans_size, old_allocator.handle);
+
+        // Detach from parent object
+        Py_XDECREF(data->parent);
+        data->parent = NULL;
+
+        // Update pointer and allocator
+        data->spans = new_spans;
+        data->allocator = *allocator;
+        break;
+    }
+    }
+
     return sz_true_k;
 }
 
@@ -464,106 +690,68 @@ void wrap_current_exception(sz_cptr_t comment) {
     sz_unused_(comment);
 }
 
-typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject **, char const **, size_t *);
+typedef void (*get_string_at_offset_t)(Strs *, Py_ssize_t, Py_ssize_t, PyObject **, sz_cptr_t *, sz_size_t *);
 
-void str_at_offset_consecutive_32bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
-                                     PyObject **parent_string, char const **start, size_t *length) {
+void str_at_offset_u32_tape(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
+                            PyObject **memory_owner, sz_cptr_t *start, sz_size_t *length) {
     // Apache Arrow format: offsets[i] to offsets[i+1] defines string i
-    uint32_t start_offset = strs->data.consecutive_32bit.offsets[i];
-    uint32_t end_offset = strs->data.consecutive_32bit.offsets[i + 1] - //
-                          strs->data.consecutive_32bit.separator_length * (i + 1 != count);
-    *start = strs->data.consecutive_32bit.start + start_offset;
+    sz_u32_t start_offset = strs->data.u32_tape.offsets[i];
+    sz_u32_t end_offset = strs->data.u32_tape.offsets[i + 1];
+    *start = strs->data.u32_tape.data + start_offset;
     *length = end_offset - start_offset;
-    *parent_string = strs->data.consecutive_32bit.parent_string;
+    *memory_owner = strs; // Tapes own their data
 }
 
-void str_at_offset_consecutive_64bit(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
-                                     PyObject **parent_string, char const **start, size_t *length) {
+void str_at_offset_u32_tape_view(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
+                                 PyObject **memory_owner, sz_cptr_t *start, sz_size_t *length) {
     // Apache Arrow format: offsets[i] to offsets[i+1] defines string i
-    uint64_t start_offset = strs->data.consecutive_64bit.offsets[i];
-    uint64_t end_offset = strs->data.consecutive_64bit.offsets[i + 1] - //
-                          strs->data.consecutive_64bit.separator_length * (i + 1 != count);
-    *start = strs->data.consecutive_64bit.start + start_offset;
+    sz_u32_t start_offset = strs->data.u32_tape_view.offsets[i];
+    sz_u32_t end_offset = strs->data.u32_tape_view.offsets[i + 1];
+    *start = strs->data.u32_tape_view.data + start_offset;
     *length = end_offset - start_offset;
-    *parent_string = strs->data.consecutive_64bit.parent_string;
+    *memory_owner = strs->data.u32_tape_view.parent;
 }
 
-void str_at_offset_reordered(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
-                             PyObject **parent_string, char const **start, size_t *length) {
-    *start = strs->data.reordered.parts[i].start;
-    *length = strs->data.reordered.parts[i].length;
-    *parent_string = strs->data.reordered.parent_string;
+void str_at_offset_u64_tape(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
+                            PyObject **memory_owner, sz_cptr_t *start, sz_size_t *length) {
+    // Apache Arrow format: offsets[i] to offsets[i+1] defines string i
+    sz_u64_t start_offset = strs->data.u64_tape.offsets[i];
+    sz_u64_t end_offset = strs->data.u64_tape.offsets[i + 1];
+    *start = strs->data.u64_tape.data + start_offset;
+    *length = end_offset - start_offset;
+    *memory_owner = strs; // Tapes own their data
+}
+
+void str_at_offset_u64_tape_view(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
+                                 PyObject **memory_owner, sz_cptr_t *start, sz_size_t *length) {
+    // Apache Arrow format: offsets[i] to offsets[i+1] defines string i
+    sz_u64_t start_offset = strs->data.u64_tape_view.offsets[i];
+    sz_u64_t end_offset = strs->data.u64_tape_view.offsets[i + 1];
+    *start = strs->data.u64_tape_view.data + start_offset;
+    *length = end_offset - start_offset;
+    *memory_owner = strs->data.u64_tape_view.parent;
+}
+
+void str_at_offset_fragmented(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
+                              PyObject **memory_owner, sz_cptr_t *start, sz_size_t *length) {
+    *start = strs->data.fragmented.spans[i].start;
+    *length = strs->data.fragmented.spans[i].length;
+    *memory_owner = strs->data.fragmented.parent;
 }
 
 get_string_at_offset_t str_at_offset_getter(Strs *strs) {
     switch (strs->type) {
-    case STRS_CONSECUTIVE_32: return str_at_offset_consecutive_32bit;
-    case STRS_CONSECUTIVE_64: return str_at_offset_consecutive_64bit;
-    case STRS_REORDERED: return str_at_offset_reordered;
+    case STRS_U32_TAPE: return str_at_offset_u32_tape;
+    case STRS_U32_TAPE_VIEW: return str_at_offset_u32_tape_view;
+    case STRS_U64_TAPE: return str_at_offset_u64_tape;
+    case STRS_U64_TAPE_VIEW: return str_at_offset_u64_tape_view;
+    case STRS_FRAGMENTED: return str_at_offset_fragmented;
     default:
         // Unsupported type
         PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
         return NULL;
     }
 }
-
-sz_bool_t prepare_strings_for_reordering(Strs *strs) {
-
-    // Allocate memory for reordered slices
-    size_t count = 0;
-    void *buffer_to_release = NULL;
-    get_string_at_offset_t getter = NULL;
-    PyObject *parent_string = NULL;
-    switch (strs->type) {
-    case STRS_CONSECUTIVE_32:
-        count = strs->data.consecutive_32bit.count;
-        if (strs->data.consecutive_32bit.owns_offsets) buffer_to_release = strs->data.consecutive_32bit.offsets;
-        parent_string = strs->data.consecutive_32bit.parent_string;
-        getter = str_at_offset_consecutive_32bit;
-        break;
-    case STRS_CONSECUTIVE_64:
-        count = strs->data.consecutive_64bit.count;
-        if (strs->data.consecutive_64bit.owns_offsets) buffer_to_release = strs->data.consecutive_64bit.offsets;
-        parent_string = strs->data.consecutive_64bit.parent_string;
-        getter = str_at_offset_consecutive_64bit;
-        break;
-    // Already in reordered form
-    case STRS_REORDERED: return 1;
-    case STRS_MULTI_SOURCE: return 1;
-    default:
-        // Unsupported type
-        PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
-        return 0;
-    }
-
-    sz_string_view_t *new_parts = (sz_string_view_t *)malloc(count * sizeof(sz_string_view_t));
-    if (new_parts == NULL) {
-        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
-        return 0;
-    }
-
-    // Populate the new reordered array using get_string_at_offset
-    for (size_t i = 0; i < count; ++i) {
-        PyObject *parent_string;
-        char const *start;
-        size_t length;
-        getter(strs, (Py_ssize_t)i, count, &parent_string, &start, &length);
-        new_parts[i].start = start;
-        new_parts[i].length = length;
-    }
-
-    // Release previous used memory, if we own it
-    if (buffer_to_release) free(buffer_to_release);
-
-    // Update the Strs object
-    strs->type = STRS_REORDERED;
-    strs->data.reordered.count = count;
-    strs->data.reordered.parts = new_parts;
-    strs->data.reordered.parent_string = parent_string;
-    return 1;
-}
-
-sz_bool_t prepare_strings_for_extension(Strs *strs, size_t new_parents, size_t new_parts) { return 1; }
 
 #pragma endregion
 
@@ -617,7 +805,7 @@ static PyObject *File_new(PyTypeObject *type, PyObject *positional_args, PyObjec
 }
 
 static int File_init(File *self, PyObject *positional_args, PyObject *named_args) {
-    char const *path;
+    sz_cptr_t path;
     if (!PyArg_ParseTuple(positional_args, "s", &path)) return -1;
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__) || defined(__NT__)
@@ -644,7 +832,7 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
         return -1;
     }
 
-    char *file = (char *)MapViewOfFile(self->mapping_handle, FILE_MAP_READ, 0, 0, 0);
+    sz_ptr_t file = (sz_ptr_t)MapViewOfFile(self->mapping_handle, FILE_MAP_READ, 0, 0, 0);
     if (file == 0) {
         CloseHandle(self->mapping_handle);
         self->mapping_handle = NULL;
@@ -677,7 +865,7 @@ static int File_init(File *self, PyObject *positional_args, PyObject *named_args
         PyErr_Format(PyExc_ValueError, "The provided path is not a normal file at '%s'", path);
         return -1;
     }
-    size_t file_size = sb.st_size;
+    sz_size_t file_size = sb.st_size;
     void *map = mmap(NULL, sb.st_size, PROT_READ, MAP_SHARED, self->file_descriptor, 0);
     if (map == MAP_FAILED) {
         close(self->file_descriptor);
@@ -782,9 +970,9 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
     }
 
     // Apply slicing
-    size_t normalized_offset, normalized_length;
+    sz_size_t normalized_offset, normalized_length;
     sz_ssize_clamp_interval(self->memory.length, from, to, &normalized_offset, &normalized_length);
-    self->memory.start = ((char *)self->memory.start) + normalized_offset;
+    self->memory.start = ((sz_ptr_t)self->memory.start) + normalized_offset;
     self->memory.length = normalized_length;
     return 0;
 }
@@ -1002,7 +1190,7 @@ static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
     // Negative indexing
     if (i < 0) i += self->memory.length;
 
-    if (i < 0 || (size_t)i >= self->memory.length) {
+    if (i < 0 || (sz_size_t)i >= self->memory.length) {
         PyErr_SetString(PyExc_IndexError, "Index out of range");
         return NULL;
     }
@@ -1096,14 +1284,17 @@ static PyObject *Strs_get_offsets_nbytes(Str *self, void *closure) { return NULL
 
 static Py_ssize_t Strs_len(Strs *self) {
     switch (self->type) {
-    case STRS_CONSECUTIVE_32: return self->data.consecutive_32bit.count;
-    case STRS_CONSECUTIVE_64: return self->data.consecutive_64bit.count;
-    case STRS_REORDERED: return self->data.reordered.count;
+    case STRS_U32_TAPE: return self->data.u32_tape.count;
+    case STRS_U32_TAPE_VIEW: return self->data.u32_tape_view.count;
+    case STRS_U64_TAPE: return self->data.u64_tape.count;
+    case STRS_U64_TAPE_VIEW: return self->data.u64_tape_view.count;
+    case STRS_FRAGMENTED: return self->data.fragmented.count;
     default: return 0;
     }
 }
 
 static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
+
     // Check for negative index and convert to positive
     Py_ssize_t count = Strs_len(self);
     if (i < 0) i += count;
@@ -1112,16 +1303,16 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
         return NULL;
     }
 
-    PyObject *parent = NULL;
-    char const *start = NULL;
-    size_t length = 0;
     get_string_at_offset_t getter = str_at_offset_getter(self);
     if (!getter) {
         PyErr_SetString(PyExc_TypeError, "Unknown Strs kind");
         return NULL;
     }
-    else
-        getter(self, i, count, &parent, &start, &length);
+
+    PyObject *memory_owner = NULL;
+    sz_cptr_t start = NULL;
+    sz_size_t length = 0;
+    getter(self, i, count, &memory_owner, &start, &length);
 
     // Create a new `Str` object
     Str *view_copy = (Str *)StrType.tp_alloc(&StrType, 0);
@@ -1129,11 +1320,19 @@ static PyObject *Strs_getitem(Strs *self, Py_ssize_t i) {
 
     view_copy->memory.start = start;
     view_copy->memory.length = length;
-    view_copy->parent = parent;
-    Py_INCREF(parent);
+    view_copy->parent = memory_owner;
+    Py_XINCREF(memory_owner);
     return view_copy;
 }
 
+/**
+ *  This returns a `Strs` object of a potentially different layout:
+ *  - `STRS_U32_TAPE_VIEW` input yields a `STRS_U32_TAPE_VIEW` for `step=1`, `STRS_FRAGMENTED` otherwise.
+ *  - `STRS_U64_TAPE_VIEW` input yields a `STRS_U64_TAPE_VIEW` for `step=1`, `STRS_FRAGMENTED` otherwise.
+ *  - `STRS_U32_TAPE` input yields a `STRS_U32_TAPE_VIEW`  for `step=1`, `STRS_FRAGMENTED` otherwise.
+ *  - `STRS_U64_TAPE` input yields a `STRS_U64_TAPE_VIEW`  for `step=1`, `STRS_FRAGMENTED` otherwise.
+ *  - `STRS_FRAGMENTED` input yields a `STRS_FRAGMENTED` output.
+ */
 static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
     if (PyLong_Check(key)) { return Strs_getitem(self, PyLong_AsSsize_t(key)); }
@@ -1153,136 +1352,118 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
     // Create a new `Strs` object
     Strs *result = (Strs *)StrsType.tp_alloc(&StrsType, 0);
     if (result == NULL && PyErr_NoMemory()) return NULL;
+
     if (result_count == 0) {
-        result->type = STRS_REORDERED;
-        result->data.reordered.count = 0;
-        result->data.reordered.parts = NULL;
-        result->data.reordered.parent_string = NULL;
+        result->type = STRS_FRAGMENTED;
+        result->data.fragmented.count = 0;
+        result->data.fragmented.spans = NULL;
+        result->data.fragmented.parent = NULL;
+        sz_memory_allocator_init_default(&result->data.fragmented.allocator);
         return (PyObject *)result;
     }
 
-    // If a step is requested, we have to create a new `REORDERED` instance of `Strs`,
-    // even if the original one was `CONSECUTIVE`.
+    // If a step is requested, we have to create a new `FRAGMENTED` instance of `Strs`,
+    // even if the original one was a tape layout.
     if (step != 1) {
-        sz_string_view_t *new_parts = (sz_string_view_t *)malloc(result_count * sizeof(sz_string_view_t));
-        if (new_parts == NULL) {
+        sz_string_view_t *new_spans = (sz_string_view_t *)malloc(result_count * sizeof(sz_string_view_t));
+        if (new_spans == NULL) {
             Py_XDECREF(result);
-            PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
-            return 0;
+            PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for fragmented spans");
+            return NULL;
         }
 
         get_string_at_offset_t getter = str_at_offset_getter(self);
-        result->type = STRS_REORDERED;
-        result->data.reordered.count = result_count;
-        result->data.reordered.parts = new_parts;
-        result->data.reordered.parent_string = NULL;
+        result->type = STRS_FRAGMENTED;
+        result->data.fragmented.count = result_count;
+        result->data.fragmented.spans = new_spans;
+        result->data.fragmented.parent = NULL;
+        sz_memory_allocator_init_default(&result->data.fragmented.allocator);
 
-        // Populate the new reordered array using `get_string_at_offset`
-        size_t j = 0;
+        // Populate the new fragmented array using `get_string_at_offset`
+        sz_size_t j = 0;
         if (step > 0)
             for (Py_ssize_t i = start; i < stop; i += step, ++j) {
-                getter(self, i, count, &result->data.reordered.parent_string, &new_parts[j].start,
-                       &new_parts[j].length);
+                getter(self, i, count, &result->data.fragmented.parent, &new_spans[j].start, &new_spans[j].length);
             }
         else
             for (Py_ssize_t i = start; i > stop; i += step, ++j) {
-                getter(self, i, count, &result->data.reordered.parent_string, &new_parts[j].start,
-                       &new_parts[j].length);
+                getter(self, i, count, &result->data.fragmented.parent, &new_spans[j].start, &new_spans[j].length);
             }
 
         // Ensure the parent string isn't prematurely deallocated by this view.
-        Py_XINCREF(result->data.reordered.parent_string);
+        Py_XINCREF(result->data.fragmented.parent);
         return (PyObject *)result;
     }
 
-    // Depending on the layout, the procedure will be different, but by now we know that:
-    // - `start` and `stop` are valid indices
-    // - `step` is 1
-    // - `result_count` is positive
-    // - the resulting object will have the same type as the original one
-    result->type = self->type;
+    // For step=1, follow the docstring behavior:
     switch (self->type) {
 
-    case STRS_CONSECUTIVE_32: {
-        typedef struct consecutive_slices_32bit_t consecutive_slices_t;
-        consecutive_slices_t *from = &self->data.consecutive_32bit;
-        consecutive_slices_t *to = &result->data.consecutive_32bit;
-        to->count = result_count;
-
-        // Allocate memory for the offsets (Apache Arrow format: N+1 offsets for N strings)
-        to->separator_length = from->separator_length;
-        to->offsets = malloc(sizeof(uint32_t) * (result_count + 1));
-        if (to->offsets == NULL && PyErr_NoMemory()) {
-            Py_XDECREF(result);
-            return NULL;
-        }
-        to->owns_offsets = 1;
-
-        // Now populate the offsets (Apache Arrow format: N+1 offsets for N strings)
-        to->offsets[0] = 0; // First offset is always 0
-        size_t element_length;
-        str_at_offset_consecutive_32bit(self, start, count, &to->parent_string, &to->start, &element_length);
-        to->offsets[1] = element_length;
-        for (Py_ssize_t i = 1; i < result_count; ++i) {
-            to->offsets[i] += from->separator_length;
-            PyObject *element_parent = NULL;
-            char const *element_start = NULL;
-            str_at_offset_consecutive_32bit(self, start + i, count, &element_parent, &element_start, &element_length);
-            to->offsets[i + 1] = element_length + to->offsets[i];
-        }
-        Py_INCREF(to->parent_string);
+    case STRS_U32_TAPE_VIEW: {
+        // STRS_U32_TAPE_VIEW input yields STRS_U32_TAPE_VIEW for step=1
+        result->type = STRS_U32_TAPE_VIEW;
+        result->data.u32_tape_view.count = result_count;
+        result->data.u32_tape_view.data = self->data.u32_tape_view.data + self->data.u32_tape_view.offsets[start];
+        result->data.u32_tape_view.offsets = self->data.u32_tape_view.offsets + start;
+        result->data.u32_tape_view.parent = self->data.u32_tape_view.parent;
+        Py_INCREF(result->data.u32_tape_view.parent);
         break;
     }
 
-    case STRS_CONSECUTIVE_64: {
-        typedef struct consecutive_slices_64bit_t consecutive_slices_t;
-        consecutive_slices_t *from = &self->data.consecutive_64bit;
-        consecutive_slices_t *to = &result->data.consecutive_64bit;
-        to->count = result_count;
-
-        // Allocate memory for the offsets (Apache Arrow format: N+1 offsets for N strings)
-        to->separator_length = from->separator_length;
-        to->offsets = malloc(sizeof(uint64_t) * (result_count + 1));
-        if (to->offsets == NULL && PyErr_NoMemory()) {
-            Py_XDECREF(result);
-            return NULL;
-        }
-        to->owns_offsets = 1;
-
-        // Now populate the offsets (Apache Arrow format: N+1 offsets for N strings)
-        to->offsets[0] = 0; // First offset is always 0
-        size_t element_length;
-        str_at_offset_consecutive_64bit(self, start, count, &to->parent_string, &to->start, &element_length);
-        to->offsets[1] = element_length;
-        for (Py_ssize_t i = 1; i < result_count; ++i) {
-            to->offsets[i] += from->separator_length;
-            PyObject *element_parent = NULL;
-            char const *element_start = NULL;
-            str_at_offset_consecutive_64bit(self, start + i, count, &element_parent, &element_start, &element_length);
-            to->offsets[i + 1] = element_length + to->offsets[i];
-        }
-        Py_INCREF(to->parent_string);
+    case STRS_U64_TAPE_VIEW: {
+        // STRS_U64_TAPE_VIEW input yields STRS_U64_TAPE_VIEW for step=1
+        result->type = STRS_U64_TAPE_VIEW;
+        result->data.u64_tape_view.count = result_count;
+        result->data.u64_tape_view.data = self->data.u64_tape_view.data + self->data.u64_tape_view.offsets[start];
+        result->data.u64_tape_view.offsets = self->data.u64_tape_view.offsets + start;
+        result->data.u64_tape_view.parent = self->data.u64_tape_view.parent;
+        Py_INCREF(result->data.u64_tape_view.parent);
         break;
     }
 
-    case STRS_REORDERED: {
-        struct reordered_slices_t *from = &self->data.reordered;
-        struct reordered_slices_t *to = &result->data.reordered;
-        to->count = result_count;
-        to->parent_string = from->parent_string;
+    case STRS_U32_TAPE: {
+        // STRS_U32_TAPE input yields STRS_U32_TAPE_VIEW for step=1
+        result->type = STRS_U32_TAPE_VIEW;
+        result->data.u32_tape_view.count = result_count;
+        result->data.u32_tape_view.data = self->data.u32_tape.data + self->data.u32_tape.offsets[start];
+        result->data.u32_tape_view.offsets = self->data.u32_tape.offsets + start;
+        result->data.u32_tape_view.parent = (PyObject *)self;
+        Py_INCREF((PyObject *)self);
+        break;
+    }
 
-        to->parts = malloc(sizeof(sz_string_view_t) * to->count);
-        if (to->parts == NULL && PyErr_NoMemory()) {
+    case STRS_U64_TAPE: {
+        // STRS_U64_TAPE input yields STRS_U64_TAPE_VIEW for step=1
+        result->type = STRS_U64_TAPE_VIEW;
+        result->data.u64_tape_view.count = result_count;
+        result->data.u64_tape_view.data = self->data.u64_tape.data + self->data.u64_tape.offsets[start];
+        result->data.u64_tape_view.offsets = self->data.u64_tape.offsets + start;
+        result->data.u64_tape_view.parent = (PyObject *)self;
+        Py_INCREF((PyObject *)self);
+        break;
+    }
+
+    case STRS_FRAGMENTED: {
+        // STRS_FRAGMENTED input yields STRS_FRAGMENTED output
+        result->type = STRS_FRAGMENTED;
+        result->data.fragmented.count = result_count;
+        result->data.fragmented.parent = self->data.fragmented.parent;
+        sz_memory_allocator_init_default(&result->data.fragmented.allocator);
+
+        result->data.fragmented.spans = malloc(sizeof(sz_string_view_t) * result_count);
+        if (result->data.fragmented.spans == NULL && PyErr_NoMemory()) {
             Py_XDECREF(result);
             return NULL;
         }
-        sz_copy(to->parts, from->parts + start, sizeof(sz_string_view_t) * to->count);
-        Py_INCREF(to->parent_string);
+        sz_copy(result->data.fragmented.spans, self->data.fragmented.spans + start,
+                sizeof(sz_string_view_t) * result_count);
+        Py_INCREF(result->data.fragmented.parent);
         break;
     }
+
     default:
         // Unsupported type
         PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
+        Py_XDECREF(result);
         return NULL;
     }
 
@@ -1314,8 +1495,8 @@ static int Strs_in(Str *self, PyObject *needle_obj) {
     // Time for a full-scan
     for (Py_ssize_t i = 0; i < count; ++i) {
         PyObject *parent = NULL;
-        char const *start = NULL;
-        size_t length = 0;
+        sz_cptr_t start = NULL;
+        sz_size_t length = 0;
         getter(self, i, count, &parent, &start, &length);
         if (length == needle.length && sz_equal(start, needle.start, needle.length) == sz_true_k) return 1;
     }
@@ -1375,8 +1556,8 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
         Py_ssize_t min_length = sz_min_of_two(a_length, b_length);
         for (Py_ssize_t i = 0; i < min_length; i++) {
             PyObject *ai_parent = NULL, *bi_parent = NULL;
-            char const *ai_start = NULL, *bi_start = NULL;
-            size_t ai_length = 0, bi_length = 0;
+            sz_cptr_t ai_start = NULL, *bi_start = NULL;
+            sz_size_t ai_length = 0, bi_length = 0;
             a_getter(a, i, a_length, &ai_parent, &ai_start, &ai_length);
             b_getter(b, i, b_length, &bi_parent, &bi_start, &bi_length);
 
@@ -1453,8 +1634,8 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
 
         // Both sequences aren't exhausted yet
         PyObject *ai_parent = NULL;
-        char const *ai_start = NULL;
-        size_t ai_length = 0;
+        sz_cptr_t ai_start = NULL;
+        sz_size_t ai_length = 0;
         a_getter(a, i, a_length, &ai_parent, &ai_start, &ai_length);
 
         // When dealing with arrays, early exists make sense only in some cases
@@ -1606,7 +1787,7 @@ static PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t 
     //
     // https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry
     // https://doc.owncloud.com/server/next/admin_manual/troubleshooting/path_filename_length.html
-    char *path_buffer = (char *)malloc(path.length + 1);
+    sz_ptr_t path_buffer = (sz_ptr_t)malloc(path.length + 1);
     if (path_buffer == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for the path");
         return NULL;
@@ -1683,7 +1864,7 @@ static PyObject *Str_offset_within(PyObject *self, PyObject *const *args, Py_ssi
         return NULL;
     }
 
-    return PyLong_FromSize_t((size_t)(slice.start - text.start));
+    return PyLong_FromSize_t((sz_size_t)(slice.start - text.start));
 }
 
 /**
@@ -1792,7 +1973,7 @@ static int Str_find_implementation_( //
     else { end = PY_SSIZE_T_MAX; }
 
     // Limit the `haystack` range
-    size_t normalized_offset, normalized_length;
+    sz_size_t normalized_offset, normalized_length;
     sz_ssize_clamp_interval(haystack.length, start, end, &normalized_offset, &normalized_length);
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
@@ -2125,12 +2306,12 @@ static PyObject *Str_count(PyObject *self, PyObject *const *args, Py_ssize_t pos
 
     if ((start == -1 || end == -1 || allowoverlap == -1) && PyErr_Occurred()) return NULL;
 
-    size_t normalized_offset, normalized_length;
+    sz_size_t normalized_offset, normalized_length;
     sz_ssize_clamp_interval(haystack.length, start, end, &normalized_offset, &normalized_length);
     haystack.start += normalized_offset;
     haystack.length = normalized_length;
 
-    size_t count = 0;
+    sz_size_t count = 0;
     if (needle.length == 0 || haystack.length == 0 || haystack.length < needle.length) { count = 0; }
     else if (allowoverlap) {
         while (haystack.length) {
@@ -2637,7 +2818,7 @@ static SplitIterator *Str_split_iter_(PyObject *text_obj, PyObject *separator_ob
 
 /**
  *  @brief  Implements the normal order split logic for both string-delimiters and character sets.
- *          Produces one of the consecutive layouts - `STRS_CONSECUTIVE_64` or `STRS_CONSECUTIVE_32`.
+ *          Produces a `Strs` object with `REORDERED_SUBVIEWS` layout.
  */
 static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
                         int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length) {
@@ -2645,106 +2826,89 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
     if (!result) return NULL;
 
-    // Initialize Strs object based on the splitting logic
-    void *offsets_endings = NULL;
-    size_t offsets_capacity = 0;
-    size_t offsets_count = 1; // Start with 1 to account for the initial 0 offset
-    size_t bytes_per_offset;
-    if (text.length >= UINT32_MAX) {
-        bytes_per_offset = 8;
-        result->type = STRS_CONSECUTIVE_64;
-        result->data.consecutive_64bit.start = text.start;
-        result->data.consecutive_64bit.parent_string = parent_string;
-        result->data.consecutive_64bit.separator_length = !keepseparator * match_length;
-        result->data.consecutive_64bit.offsets = NULL;
-        result->data.consecutive_64bit.owns_offsets = 0;
-    }
-    else {
-        bytes_per_offset = 4;
-        result->type = STRS_CONSECUTIVE_32;
-        result->data.consecutive_32bit.start = text.start;
-        result->data.consecutive_32bit.parent_string = parent_string;
-        result->data.consecutive_32bit.separator_length = !keepseparator * match_length;
-        result->data.consecutive_32bit.offsets = NULL;
-        result->data.consecutive_32bit.owns_offsets = 0;
+    // Use reordered subviews layout with the haystack as parent
+    result->type = STRS_FRAGMENTED;
+    result->data.fragmented.parent = parent_string;
+    sz_memory_allocator_init_default(&result->data.fragmented.allocator);
+
+    // Collect split positions first
+    sz_string_view_t *spans = NULL;
+    sz_size_t spans_capacity = 4;
+    sz_size_t spans_count = 0;
+
+    spans = (sz_string_view_t *)malloc(spans_capacity * sizeof(sz_string_view_t));
+    if (!spans) {
+        Py_XDECREF(result);
+        PyErr_NoMemory();
+        return NULL;
     }
 
-    // Initialize the first offset to 0 (Apache Arrow format)
-    if (offsets_capacity == 0) {
-        offsets_capacity = 4;
-        offsets_endings = malloc(offsets_capacity * bytes_per_offset);
-        if (!offsets_endings) {
-            Py_XDECREF(result);
-            PyErr_NoMemory();
-            return NULL;
-        }
-    }
-    if (bytes_per_offset == 8) { ((uint64_t *)offsets_endings)[0] = 0; }
-    else { ((uint32_t *)offsets_endings)[0] = 0; }
+    sz_cptr_t current_start = text.start;
+    sz_size_t remaining_length = text.length;
+    sz_size_t splits_made = 0;
+    sz_size_t max_splits = (maxsplit < 0) ? SIZE_MAX : (sz_size_t)maxsplit;
 
-    sz_bool_t reached_tail = 0;
-    sz_size_t total_skipped = 0;
-    sz_size_t max_parts = (sz_size_t)maxsplit + 1;
-    while (!reached_tail) {
+    while (remaining_length > 0 && splits_made < max_splits) {
+        sz_cptr_t match = finder(current_start, remaining_length, separator.start, separator.length);
 
-        sz_cptr_t match =
-            offsets_count < max_parts
-                ? finder(text.start + total_skipped, text.length - total_skipped, separator.start, separator.length)
-                : NULL;
-
-        sz_size_t part_end_offset;
         if (match) {
-            part_end_offset = (match - text.start) + match_length;
-            total_skipped = part_end_offset;
-        }
-        else {
-            part_end_offset = text.length;
-            total_skipped = text.length;
-            reached_tail = 1;
-        }
+            // Add the part before the separator
+            sz_size_t part_length = match - current_start;
 
-        // Reallocate offsets array if needed
-        if (offsets_count >= offsets_capacity) {
-            offsets_capacity = (offsets_capacity + 1) * 2;
-            void *new_offsets = realloc(offsets_endings, offsets_capacity * bytes_per_offset);
-            if (!new_offsets) {
-                if (offsets_endings) free(offsets_endings);
+            // Reallocate spans array if needed
+            if (spans_count >= spans_capacity) {
+                spans_capacity *= 2;
+                sz_string_view_t *new_spans =
+                    (sz_string_view_t *)realloc(spans, spans_capacity * sizeof(sz_string_view_t));
+                if (!new_spans) {
+                    free(spans);
+                    Py_XDECREF(result);
+                    PyErr_NoMemory();
+                    return NULL;
+                }
+                spans = new_spans;
             }
-            offsets_endings = new_offsets;
-        }
 
-        // If the memory allocation has failed - discard the response
-        if (!offsets_endings) {
+            spans[spans_count].start = current_start;
+            spans[spans_count].length = keepseparator ? part_length + match_length : part_length;
+            spans_count++;
+
+            // Move past the separator
+            current_start = match + match_length;
+            remaining_length = text.length - (current_start - text.start);
+            splits_made++;
+        }
+        else { break; }
+    }
+
+    // Add the final part (everything remaining)
+    if (spans_count >= spans_capacity) {
+        spans_capacity++;
+        sz_string_view_t *new_spans = (sz_string_view_t *)realloc(spans, spans_capacity * sizeof(sz_string_view_t));
+        if (!new_spans) {
+            free(spans);
             Py_XDECREF(result);
             PyErr_NoMemory();
             return NULL;
         }
-
-        // Export the offset
-        if (bytes_per_offset == 8) { ((uint64_t *)offsets_endings)[offsets_count] = (uint64_t)part_end_offset; }
-        else { ((uint32_t *)offsets_endings)[offsets_count] = (uint32_t)part_end_offset; }
-        offsets_count++;
+        spans = new_spans;
     }
 
-    // Populate the Strs object with the offsets
-    if (bytes_per_offset == 8) {
-        result->data.consecutive_64bit.offsets = offsets_endings;
-        result->data.consecutive_64bit.count = offsets_count - 1; // count is number of strings, not offsets
-        result->data.consecutive_64bit.owns_offsets = 1;
-    }
-    else {
-        result->data.consecutive_32bit.offsets = offsets_endings;
-        result->data.consecutive_32bit.count = offsets_count - 1; // count is number of strings, not offsets
-        result->data.consecutive_32bit.owns_offsets = 1;
-    }
+    spans[spans_count].start = current_start;
+    spans[spans_count].length = remaining_length;
+    spans_count++;
 
+    // Set up the result
+    result->data.fragmented.spans = spans;
+    result->data.fragmented.count = spans_count;
     Py_INCREF(parent_string);
+
     return result;
 }
 
 /**
  *  @brief  Implements the reverse order split logic for both string-delimiters and character sets.
- *          Unlike the `Str_split_` can't use consecutive layouts and produces a `REORDERED` one.
+ *          Produces a `Strs` object with `REORDERED_SUBVIEWS` layout.
  */
 static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, sz_string_view_t const separator,
                          int keepseparator, Py_ssize_t maxsplit, sz_find_t finder, sz_size_t match_length) {
@@ -2752,22 +2916,30 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
     Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
     if (!result) return NULL;
 
-    // Initialize Strs object based on the splitting logic
-    result->type = STRS_REORDERED;
-    result->data.reordered.parent_string = parent_string;
-    result->data.reordered.parts = NULL;
-    result->data.reordered.count = 0;
+    // Use reordered subviews layout with the haystack as parent
+    result->type = STRS_FRAGMENTED;
+    result->data.fragmented.parent = parent_string;
+    sz_memory_allocator_init_default(&result->data.fragmented.allocator);
+    result->data.fragmented.spans = NULL;
+    result->data.fragmented.count = 0;
 
     // Keep track of the memory usage
     sz_string_view_t *parts = NULL;
-    sz_size_t parts_capacity = 0;
+    sz_size_t parts_capacity = 4;
     sz_size_t parts_count = 0;
+
+    parts = (sz_string_view_t *)malloc(parts_capacity * sizeof(sz_string_view_t));
+    if (!parts) {
+        Py_XDECREF(result);
+        PyErr_NoMemory();
+        return NULL;
+    }
 
     sz_bool_t reached_tail = 0;
     sz_size_t total_skipped = 0;
-    sz_size_t max_parts = (sz_size_t)maxsplit + 1;
-    while (!reached_tail) {
+    sz_size_t max_parts = (maxsplit < 0) ? SIZE_MAX : ((sz_size_t)maxsplit + 1);
 
+    while (!reached_tail) {
         sz_cptr_t match = parts_count + 1 < max_parts
                               ? finder(text.start, text.length - total_skipped, separator.start, separator.length)
                               : NULL;
@@ -2787,19 +2959,15 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
 
         // Reallocate parts array if needed
         if (parts_count >= parts_capacity) {
-            parts_capacity = (parts_capacity + 1) * 2;
+            parts_capacity *= 2;
             sz_string_view_t *new_parts = (sz_string_view_t *)realloc(parts, parts_capacity * sizeof(sz_string_view_t));
             if (!new_parts) {
-                if (parts) free(parts);
+                free(parts);
+                Py_XDECREF(result);
+                PyErr_NoMemory();
+                return NULL;
             }
             parts = new_parts;
-        }
-
-        // If the memory allocation has failed - discard the response
-        if (!parts) {
-            Py_XDECREF(result);
-            PyErr_NoMemory();
-            return NULL;
         }
 
         // Populate the parts array
@@ -2815,8 +2983,8 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
         parts[parts_count - i - 1] = temp;
     }
 
-    result->data.reordered.parts = parts;
-    result->data.reordered.count = parts_count;
+    result->data.fragmented.spans = parts;
+    result->data.fragmented.count = parts_count;
     Py_INCREF(parent_string);
     return result;
 }
@@ -3391,8 +3559,18 @@ static PyTypeObject SplitIteratorType = {
 
 #pragma region Strs
 
-static PyObject *Strs_shuffle(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple) {
+/**
+ *  @brief Shuffles the parts of a `Strs` object.
+ *
+ *  This accepts a `Strs` object and potentially produces a new `Strs` object of a different layout:
+ *  - `STRS_U32_TAPE_VIEW` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
+ *  - `STRS_U64_TAPE_VIEW` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
+ *  - `STRS_U32_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
+ *  - `STRS_U64_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
+ *  - `STRS_FRAGMENTED` returns a copy of itself, with the parts shuffled.
+ */
+static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
 
     // Check for positional arguments
     PyObject *seed_obj = positional_args_count == 1 ? args[0] : NULL;
@@ -3412,17 +3590,6 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *const *args, Py_ssize_t posi
         }
     }
 
-    // Change the layout
-    if (!prepare_strings_for_reordering(self)) {
-        PyErr_Format(PyExc_TypeError, "Failed to prepare the sequence for shuffling");
-        return NULL;
-    }
-
-    // Get the parts and their count
-    struct reordered_slices_t *reordered = &self->data.reordered;
-    sz_string_view_t *parts = reordered->parts;
-    size_t count = reordered->count;
-
     // Fisher-Yates Shuffle Algorithm
     unsigned int seed = (unsigned int)time(NULL);
     if (seed_obj) {
@@ -3433,66 +3600,102 @@ static PyObject *Strs_shuffle(Strs *self, PyObject *const *args, Py_ssize_t posi
         seed = PyLong_AsUnsignedLong(seed_obj);
     }
 
+    // Determine the amount of memory needed
+    sz_size_t substrings_count = 0;
+    get_string_at_offset_t substring_getter = NULL;
+    PyObject *parent_to_increment = NULL;
+    sz_memory_allocator_t allocator;
+
+    switch (self->type) {
+    case STRS_U32_TAPE:
+        substring_getter = str_at_offset_u32_tape;
+        substrings_count = self->data.u32_tape.count;
+        parent_to_increment = (PyObject *)self;
+        allocator = self->data.u32_tape.allocator;
+        break;
+    case STRS_U32_TAPE_VIEW:
+        substring_getter = str_at_offset_u32_tape_view;
+        substrings_count = self->data.u32_tape_view.count;
+        parent_to_increment = self->data.u32_tape_view.parent;
+        sz_memory_allocator_init_default(&allocator);
+        break;
+    case STRS_U64_TAPE:
+        substring_getter = str_at_offset_u64_tape;
+        substrings_count = self->data.u64_tape.count;
+        parent_to_increment = (PyObject *)self;
+        allocator = self->data.u64_tape.allocator;
+        break;
+    case STRS_U64_TAPE_VIEW:
+        substring_getter = str_at_offset_u64_tape_view;
+        substrings_count = self->data.u64_tape_view.count;
+        parent_to_increment = self->data.u64_tape_view.parent;
+        sz_memory_allocator_init_default(&allocator);
+        break;
+    case STRS_FRAGMENTED:
+        substring_getter = str_at_offset_fragmented;
+        substrings_count = self->data.fragmented.count;
+        parent_to_increment = self->data.fragmented.parent;
+        allocator = self->data.fragmented.allocator;
+        break;
+    }
+
+    sz_string_view_t *new_spans =
+        (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t), allocator.handle);
+    if (new_spans == NULL) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
+        return NULL;
+    }
+
+    // Populate the new reordered array using get_string_at_offset
+    for (sz_size_t i = 0; i < substrings_count; ++i) {
+        PyObject *unused_parent;
+        sz_cptr_t start;
+        sz_size_t length;
+        substring_getter(self, (Py_ssize_t)i, substrings_count, &unused_parent, &start, &length);
+        new_spans[i].start = start;
+        new_spans[i].length = length;
+    }
+
+    // Create a new Strs object for the reordered layout
+    Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
+    if (!result) {
+        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        PyErr_NoMemory();
+        return NULL;
+    }
+
     srand(seed);
-    for (size_t i = count - 1; i > 0; --i) {
-        size_t j = rand() % (i + 1);
+    for (sz_size_t i = substrings_count - 1; i > 0; --i) {
+        sz_size_t j = rand() % (i + 1);
         // Swap parts[i] and parts[j]
-        sz_string_view_t temp = parts[i];
-        parts[i] = parts[j];
-        parts[j] = temp;
+        sz_string_view_t temp = new_spans[i];
+        new_spans[i] = new_spans[j];
+        new_spans[j] = temp;
     }
 
-    Py_RETURN_NONE;
+    // Set up the new reordered object
+    result->type = STRS_FRAGMENTED;
+    result->data.fragmented.count = substrings_count;
+    result->data.fragmented.spans = new_spans;
+    result->data.fragmented.parent = parent_to_increment;
+    result->data.fragmented.allocator = allocator;
+    Py_INCREF(parent_to_increment); // Keep the original as parent
+
+    return result;
 }
 
-static sz_bool_t Strs_argsort_(Strs *self, sz_string_view_t **parts_output, sz_sorted_idx_t **order_output,
-                               sz_size_t *count_output) {
-    // Change the layout
-    if (!prepare_strings_for_reordering(self)) {
-        PyErr_Format(PyExc_TypeError, "Failed to prepare the sequence for sorting");
-        return 0;
-    }
-
-    // Get the parts and their count
-    // The only possible `self->type` by now is the `STRS_REORDERED`
-    sz_string_view_t *parts = self->data.reordered.parts;
-    size_t count = self->data.reordered.count;
-
-    // Allocate temporary memory to store the ordering offsets
-    size_t memory_needed = sizeof(sz_sorted_idx_t) * count;
-    if (temporary_memory.length < memory_needed) {
-        void *new_memory = realloc(temporary_memory.start, memory_needed);
-        if (!new_memory) {
-            PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
-            return 0;
-        }
-        temporary_memory.start = new_memory;
-        temporary_memory.length = memory_needed;
-    }
-    if (!temporary_memory.start) {
-        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
-        return 0;
-    }
-
-    // Call our sorting algorithm
-    sz_sequence_t sequence;
-    sz_fill(&sequence, sizeof(sequence), 0);
-    sequence.count = count;
-    sequence.handle = parts;
-    sequence.get_start = parts_get_start;
-    sequence.get_length = parts_get_length;
-    sz_status_t status = sz_sequence_argsort(&sequence, NULL, (sz_sorted_idx_t *)temporary_memory.start);
-    sz_unused_(status);
-
-    // Export results
-    *parts_output = parts;
-    *order_output = (sz_sorted_idx_t *)temporary_memory.start;
-    *count_output = sequence.count;
-    return 1;
-}
-
-static PyObject *Strs_sort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                           PyObject *args_names_tuple) {
+/**
+ *  @brief Sorts the parts of a `Strs` object.
+ *
+ *  This accepts a `Strs` object and potentially produces a new `Strs` object of a different layout:
+ *  - `STRS_U32_TAPE_VIEW` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
+ *  - `STRS_U64_TAPE_VIEW` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
+ *  - `STRS_U32_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
+ *  - `STRS_U64_TAPE` becomes `STRS_FRAGMENTED`, and keeps a link to the old as a parent.
+ *  - `STRS_FRAGMENTED` returns a copy of itself, with the parts sorted.
+ */
+static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
     PyObject *reverse_obj = NULL; // Default is not reversed
 
     // Check for positional arguments
@@ -3522,20 +3725,131 @@ static PyObject *Strs_sort(Strs *self, PyObject *const *args, Py_ssize_t positio
         reverse = PyObject_IsTrue(reverse_obj);
     }
 
-    sz_string_view_t *parts = NULL;
-    sz_sorted_idx_t *order = NULL;
-    sz_size_t count = 0;
-    if (!Strs_argsort_(self, &parts, &order, &count)) return NULL;
+    // Determine the amount of memory needed
+    sz_size_t substrings_count = 0;
+    get_string_at_offset_t substring_getter = NULL;
+    PyObject *parent_to_increment = NULL;
+    sz_memory_allocator_t allocator;
+
+    switch (self->type) {
+    case STRS_U32_TAPE:
+        substring_getter = str_at_offset_u32_tape;
+        substrings_count = self->data.u32_tape.count;
+        parent_to_increment = (PyObject *)self;
+        allocator = self->data.u32_tape.allocator;
+        break;
+    case STRS_U32_TAPE_VIEW:
+        substring_getter = str_at_offset_u32_tape_view;
+        substrings_count = self->data.u32_tape_view.count;
+        parent_to_increment = (PyObject *)self;
+        sz_memory_allocator_init_default(&allocator);
+        break;
+    case STRS_U64_TAPE:
+        substring_getter = str_at_offset_u64_tape;
+        substrings_count = self->data.u64_tape.count;
+        parent_to_increment = (PyObject *)self;
+        allocator = self->data.u64_tape.allocator;
+        break;
+    case STRS_U64_TAPE_VIEW:
+        substring_getter = str_at_offset_u64_tape_view;
+        substrings_count = self->data.u64_tape_view.count;
+        parent_to_increment = (PyObject *)self;
+        sz_memory_allocator_init_default(&allocator);
+        break;
+    case STRS_FRAGMENTED:
+        substring_getter = str_at_offset_fragmented;
+        substrings_count = self->data.fragmented.count;
+        parent_to_increment = self->data.fragmented.parent;
+        allocator = self->data.fragmented.allocator;
+        break;
+    }
+
+    sz_string_view_t *new_spans =
+        (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t), allocator.handle);
+    if (new_spans == NULL) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
+        return NULL;
+    }
+
+    // Populate the new reordered array using get_string_at_offset
+    for (sz_size_t i = 0; i < substrings_count; ++i) {
+        PyObject *unused_parent;
+        sz_cptr_t start;
+        sz_size_t length;
+        substring_getter((Strs *)self, (Py_ssize_t)i, substrings_count, &unused_parent, &start, &length);
+        new_spans[i].start = start;
+        new_spans[i].length = length;
+    }
+
+    // Determine memory needed for sorting
+    sz_size_t const memory_needed = sizeof(sz_sorted_idx_t) * substrings_count;
+    if (temporary_memory.length < memory_needed) {
+        void *new_memory = realloc(temporary_memory.start, memory_needed);
+        if (!new_memory) {
+            allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+            PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
+            return NULL;
+        }
+        temporary_memory.start = new_memory;
+        temporary_memory.length = memory_needed;
+    }
+    if (!temporary_memory.start) {
+        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
+        return NULL;
+    }
+    sz_sorted_idx_t *order = (sz_sorted_idx_t *)temporary_memory.start;
+
+    // Call our sorting algorithm
+    sz_sequence_t sequence;
+    sz_fill(&sequence, sizeof(sequence), 0);
+    sequence.count = substrings_count;
+    sequence.handle = (void *)self;
+    sequence.get_start = Strs_get_start_;
+    sequence.get_length = Strs_get_length_;
+    sz_status_t status = sz_sequence_argsort(&sequence, NULL, order);
+    sz_unused_(status);
 
     // Apply the sorting algorithm here, considering the `reverse` value
-    if (reverse) reverse_offsets(order, count);
+    if (reverse) reverse_offsets(order, substrings_count);
 
-    // Apply the new order.
-    permute(parts, order, count);
+    // Apply the new order to create sorted spans
+    sz_string_view_t *sorted_spans =
+        (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t), allocator.handle);
+    if (sorted_spans == NULL) {
+        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for sorted slices");
+        return NULL;
+    }
 
-    Py_RETURN_NONE;
+    // Apply the permutation
+    for (sz_size_t i = 0; i < substrings_count; ++i) sorted_spans[i] = new_spans[order[i]];
+
+    // Free the temporary spans array
+    allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+
+    // Create a new Strs object for the sorted layout
+    Strs *result = (Strs *)PyObject_New(Strs, &StrsType);
+    if (!result) {
+        allocator.free(sorted_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        PyErr_NoMemory();
+        return NULL;
+    }
+
+    // Set up the new sorted object
+    result->type = STRS_FRAGMENTED;
+    result->data.fragmented.count = substrings_count;
+    result->data.fragmented.spans = sorted_spans;
+    result->data.fragmented.parent = parent_to_increment;
+    result->data.fragmented.allocator = allocator;
+    Py_INCREF(parent_to_increment); // Keep the original as parent
+
+    return (PyObject *)result;
 }
 
+/**
+ *  @brief Returns the tuple permuting a `Strs` object into a sorted order.
+ */
 static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple) {
     PyObject *reverse_obj = NULL; // Default is not reversed
@@ -3567,10 +3881,33 @@ static PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t posi
         reverse = PyObject_IsTrue(reverse_obj);
     }
 
-    sz_string_view_t *parts = NULL;
-    sz_sorted_idx_t *order = NULL;
-    sz_size_t count = 0;
-    if (!Strs_argsort_(self, &parts, &order, &count)) return NULL;
+    // Determine the amount of memory needed
+    sz_size_t const count = Strs_len(self);
+    sz_size_t const memory_needed = sizeof(sz_sorted_idx_t) * count;
+    if (temporary_memory.length < memory_needed) {
+        void *new_memory = realloc(temporary_memory.start, memory_needed);
+        if (!new_memory) {
+            PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
+            return 0;
+        }
+        temporary_memory.start = new_memory;
+        temporary_memory.length = memory_needed;
+    }
+    if (!temporary_memory.start) {
+        PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
+        return 0;
+    }
+    sz_sorted_idx_t *order = (sz_sorted_idx_t *)temporary_memory.start;
+
+    // Call our sorting algorithm
+    sz_sequence_t sequence;
+    sz_fill(&sequence, sizeof(sequence), 0);
+    sequence.count = count;
+    sequence.handle = self;
+    sequence.get_start = Strs_get_start_;
+    sequence.get_length = Strs_get_length_;
+    sz_status_t status = sz_sequence_argsort(&sequence, NULL, order);
+    sz_unused_(status);
 
     // Apply the sorting algorithm here, considering the `reverse` value
     if (reverse) reverse_offsets(order, count);
@@ -3631,7 +3968,7 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
     }
 
     // Translate the seed and the sample size to C types
-    size_t sample_size = 0;
+    sz_size_t sample_size = 0;
     if (sample_size_obj) {
         if (!PyLong_Check(sample_size_obj)) {
             PyErr_SetString(PyExc_TypeError, "The sample size must be an integer");
@@ -3652,15 +3989,18 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
     Strs *result = (Strs *)StrsType.tp_alloc(&StrsType, 0);
     if (result == NULL && PyErr_NoMemory()) return NULL;
 
-    result->type = STRS_REORDERED;
-    result->data.reordered.count = 0;
-    result->data.reordered.parts = NULL;
-    result->data.reordered.parent_string = NULL;
+    // Initialize the memory allocator with default malloc wrapper
+    sz_memory_allocator_init_default(&result->data.fragmented.allocator);
+
+    result->type = STRS_FRAGMENTED;
+    result->data.fragmented.count = 0;
+    result->data.fragmented.spans = NULL;
+    result->data.fragmented.parent = NULL;
     if (sample_size == 0) { return (PyObject *)result; }
 
     // Now create a new Strs object with the sampled strings
-    sz_string_view_t *result_parts = malloc(sample_size * sizeof(sz_string_view_t));
-    if (!result_parts) {
+    sz_string_view_t *result_spans = malloc(sample_size * sizeof(sz_string_view_t));
+    if (!result_spans) {
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for the sample");
         return NULL;
     }
@@ -3677,17 +4017,17 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
     srand(seed);
     PyObject *parent_string;
     for (Py_ssize_t i = 0; i < (Py_ssize_t)sample_size; i++) {
-        size_t index = rand() % count;
-        getter(self, index, count, &parent_string, &result_parts[i].start, &result_parts[i].length);
+        sz_size_t index = rand() % count;
+        getter(self, index, count, &parent_string, &result_spans[i].start, &result_spans[i].length);
     }
 
     // Update the `Strs` object
-    result->type = STRS_REORDERED;
-    result->data.reordered.count = sample_size;
-    result->data.reordered.parts = result_parts;
-    result->data.reordered.parent_string = parent_string;
+    result->type = STRS_FRAGMENTED;
+    result->data.fragmented.count = sample_size;
+    result->data.fragmented.spans = result_spans;
+    result->data.fragmented.parent = parent_string;
     // Hold a reference to the parent backing buffer while this view is alive
-    Py_XINCREF(result->data.reordered.parent_string);
+    Py_XINCREF(result->data.fragmented.parent);
     return result;
 }
 
@@ -3695,11 +4035,11 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
  *  @brief Exports a string to a UTF-8 buffer, escaping single quotes.
  *  @param[out] did_fit Populated with 1 if the string is fully exported, 0 if it didn't fit.
  */
-char const *export_escaped_unquoted_to_utf8_buffer(char const *cstr, size_t cstr_length, //
-                                                   char *buffer, size_t buffer_length,   //
-                                                   int *did_fit) {
-    char const *const cstr_end = cstr + cstr_length;
-    char *const buffer_end = buffer + buffer_length;
+sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_length,    //
+                                                 sz_ptr_t buffer, sz_size_t buffer_length, //
+                                                 int *did_fit) {
+    sz_cptr_t const cstr_end = cstr + cstr_length;
+    sz_ptr_t const buffer_end = buffer + buffer_length;
     *did_fit = 1;
 
     while (cstr < cstr_end) {
@@ -3746,26 +4086,26 @@ static PyObject *Strs_repr(Strs *self) {
     }
 
     char repr_buffer[1024];
-    char *repr_buffer_ptr = &repr_buffer[0];
-    char const *const repr_buffer_end = repr_buffer_ptr + 1024;
+    sz_ptr_t repr_buffer_ptr = &repr_buffer[0];
+    sz_cptr_t const repr_buffer_end = repr_buffer_ptr + 1024;
 
     // Start of the array
     sz_copy(repr_buffer_ptr, "sz.Strs([", 9);
     repr_buffer_ptr += 9;
 
-    size_t count = Strs_len(self);
+    sz_size_t count = Strs_len(self);
     PyObject *parent_string;
 
     // In the worst case, we must have enough space for `...', ...])`
     // That's extra 11 bytes of content.
-    char const *non_fitting_array_tail = "... ])";
+    sz_cptr_t non_fitting_array_tail = "... ])";
     int const non_fitting_array_tail_length = 6;
 
     // If the whole string doesn't fit, even before the `non_fitting_array_tail` tail,
     // we need to add `, '` separator of 3 bytes.
-    for (size_t i = 0; i < count && repr_buffer_ptr + (non_fitting_array_tail_length + 3) < repr_buffer_end; i++) {
-        char const *cstr_start = NULL;
-        size_t cstr_length = 0;
+    for (sz_size_t i = 0; i < count && repr_buffer_ptr + (non_fitting_array_tail_length + 3) < repr_buffer_end; i++) {
+        sz_cptr_t cstr_start = NULL;
+        sz_size_t cstr_length = 0;
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
 
         if (i > 0) { *(repr_buffer_ptr++) = ',', *(repr_buffer_ptr++) = ' '; }
@@ -3803,12 +4143,12 @@ static PyObject *Strs_str(Strs *self) {
     }
 
     // Aggregate the total length of all the slices and count the number of bytes we need to allocate:
-    size_t count = Strs_len(self);
+    sz_size_t count = Strs_len(self);
     PyObject *parent_string;
-    size_t total_bytes = 2; // opening and closing square brackets
-    for (size_t i = 0; i < count; i++) {
-        char const *cstr_start = NULL;
-        size_t cstr_length = 0;
+    sz_size_t total_bytes = 2; // opening and closing square brackets
+    for (sz_size_t i = 0; i < count; i++) {
+        sz_cptr_t cstr_start = NULL;
+        sz_size_t cstr_length = 0;
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
         total_bytes += cstr_length;
         total_bytes += 2;             // For the single quotes
@@ -3826,22 +4166,22 @@ static PyObject *Strs_str(Strs *self) {
     }
 
     // Now allocate the memory for the concatenated string
-    char *const result_buffer = malloc(total_bytes);
+    sz_ptr_t const result_buffer = malloc(total_bytes);
     if (!result_buffer) {
         PyErr_SetString(PyExc_MemoryError, "Failed to allocate memory for the concatenated string");
         return NULL;
     }
 
     // Copy the strings into the result buffer
-    char *result_ptr = result_buffer;
+    sz_ptr_t result_ptr = result_buffer;
     *result_ptr++ = '[';
-    for (size_t i = 0; i < count; i++) {
+    for (sz_size_t i = 0; i < count; i++) {
         if (i != 0) {
             *result_ptr++ = ',';
             *result_ptr++ = ' ';
         }
-        char const *cstr_start = NULL;
-        size_t cstr_length = 0;
+        sz_cptr_t cstr_start = NULL;
+        sz_size_t cstr_length = 0;
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
         *result_ptr++ = '\'';
         int did_fit;
@@ -3918,124 +4258,105 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
         return -1;
     }
 
-    void const **buffers = (void const **)array->buffers;
-    uint8_t const *validity = (uint8_t const *)buffers[0]; // May be NULL
-    char const *data_buffer = (char const *)buffers[2];
-    size_t length = array->length;
-
     // Determine if 32-bit or 64-bit offsets
     int use_64bit = (strcmp(schema->format, "U") == 0 || strcmp(schema->format, "Z") == 0);
+    void const **buffers = (void const **)array->buffers;
+    sz_u8_t const *validity = (sz_u8_t const *)buffers[0]; // May be NULL
+    sz_cptr_t data_buffer = (sz_cptr_t)buffers[2];
+    sz_size_t length = array->length;
 
+    // Zero-copy mode for Arrow arrays
     if (view) {
-        // Zero-copy mode for Arrow arrays
         if (use_64bit) {
-            int64_t const *offsets_64 = (int64_t const *)buffers[1];
-            self->type = STRS_CONSECUTIVE_64;
-            self->data.consecutive_64bit.count = length;
-            self->data.consecutive_64bit.separator_length = 0;
-            self->data.consecutive_64bit.parent_string = capsules;
-            self->data.consecutive_64bit.start = data_buffer;
-            self->data.consecutive_64bit.offsets = (uint64_t *)(offsets_64 + 1);
-            self->data.consecutive_64bit.owns_offsets = 0; // Arrow owns buffer
+            sz_i64_t const *offsets_64 = (sz_i64_t const *)buffers[1];
+            self->type = STRS_U64_TAPE_VIEW;
+            self->data.u64_tape_view.count = length;
+            self->data.u64_tape_view.parent = capsules;
+            self->data.u64_tape_view.data = data_buffer;
+            self->data.u64_tape_view.offsets = (sz_u64_t *)offsets_64;
             Py_INCREF(capsules);
         }
         else {
-            int32_t const *offsets_32 = (int32_t const *)buffers[1];
-            self->type = STRS_CONSECUTIVE_32;
-            self->data.consecutive_32bit.count = length;
-            self->data.consecutive_32bit.separator_length = 0;
-            self->data.consecutive_32bit.parent_string = capsules;
-            self->data.consecutive_32bit.start = data_buffer;
-            self->data.consecutive_32bit.offsets = (uint32_t *)(offsets_32 + 1);
-            self->data.consecutive_32bit.owns_offsets = 0; // Arrow owns buffer
+            sz_i32_t const *offsets_32 = (sz_i32_t const *)buffers[1];
+            self->type = STRS_U32_TAPE_VIEW;
+            self->data.u32_tape_view.count = length;
+            self->data.u32_tape_view.parent = capsules;
+            self->data.u32_tape_view.data = data_buffer;
+            self->data.u32_tape_view.offsets = (sz_u32_t *)offsets_32;
             Py_INCREF(capsules);
         }
     }
+    // Copy mode for Arrow arrays
     else {
-        // Copy mode for Arrow arrays
-        if (use_64bit) {
-            int64_t const *offsets_64 = (int64_t const *)buffers[1];
-            size_t total_bytes = offsets_64[length] - offsets_64[0];
+        // Copy mode for Arrow arrays - use allocator for memory management
+        sz_memory_allocator_t allocator;
+        sz_memory_allocator_init_default(&allocator);
 
-            // Allocate new buffer and offsets
-            char *new_data = (char *)malloc(total_bytes);
-            uint64_t *new_offsets = (uint64_t *)malloc(length * sizeof(uint64_t));
+        if (use_64bit) {
+            sz_i64_t const *offsets_64 = (sz_i64_t const *)buffers[1];
+            sz_size_t total_bytes = offsets_64[length] - offsets_64[0];
+
+            // Handle zero-byte case (all nulls)
+            if (total_bytes == 0) total_bytes = 1; // Allocate at least 1 byte
+
+            // Allocate new buffer and offsets using the allocator
+            sz_ptr_t new_data = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
+            sz_u64_t *new_offsets = (sz_u64_t *)allocator.allocate((length + 1) * sizeof(sz_u64_t), allocator.handle);
             if (!new_data || !new_offsets) {
-                free(new_data);
-                free(new_offsets);
-                Py_DECREF(capsules);
+                if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
+                if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u64_t), allocator.handle);
                 PyErr_NoMemory();
                 return -1;
             }
 
-            // Copy data and adjust offsets
-            sz_copy(new_data, data_buffer + offsets_64[0], total_bytes);
-            for (size_t i = 0; i < length; i++) {
+            // Copy data and adjust offsets (Apache Arrow format)
+            sz_size_t actual_bytes = offsets_64[length] - offsets_64[0];
+            if (actual_bytes > 0) sz_copy(new_data, data_buffer + offsets_64[0], actual_bytes);
+            new_offsets[0] = 0; // First offset is always 0
+            for (sz_size_t i = 0; i < length; i++) {
                 // Handle null values by checking validity bitmap
-                if (validity && !(validity[i / 8] & (1 << (i % 8)))) {
-                    new_offsets[i] = (i == 0) ? 0 : new_offsets[i - 1];
-                }
-                else { new_offsets[i] = offsets_64[i + 1] - offsets_64[0]; }
+                if (validity && !(validity[i / 8] & (1 << (i % 8)))) { new_offsets[i + 1] = new_offsets[i]; }
+                else { new_offsets[i + 1] = offsets_64[i + 1] - offsets_64[0]; }
             }
 
-            // Create parent bytes object to own the data
-            PyObject *parent = PyBytes_FromStringAndSize(new_data, total_bytes);
-            free(new_data);
-            if (!parent) {
-                free(new_offsets);
-                Py_DECREF(capsules);
-                return -1;
-            }
-
-            self->type = STRS_CONSECUTIVE_64;
-            self->data.consecutive_64bit.count = length;
-            self->data.consecutive_64bit.separator_length = 0;
-            self->data.consecutive_64bit.parent_string = parent;
-            self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_64bit.offsets = new_offsets;
-            self->data.consecutive_64bit.owns_offsets = 1;
+            self->type = STRS_U64_TAPE;
+            self->data.u64_tape.count = length;
+            self->data.u64_tape.data = new_data;
+            self->data.u64_tape.offsets = new_offsets;
+            self->data.u64_tape.allocator = allocator;
         }
         else {
-            int32_t const *offsets_32 = (int32_t const *)buffers[1];
-            size_t total_bytes = offsets_32[length] - offsets_32[0];
+            sz_i32_t const *offsets_32 = (sz_i32_t const *)buffers[1];
+            sz_size_t total_bytes = offsets_32[length] - offsets_32[0];
 
-            // Allocate new buffer and offsets
-            char *new_data = (char *)malloc(total_bytes);
-            uint32_t *new_offsets = (uint32_t *)malloc(length * sizeof(uint32_t));
+            // Handle zero-byte case (all nulls)
+            if (total_bytes == 0) total_bytes = 1; // Allocate at least 1 byte
+
+            // Allocate new buffer and offsets using the allocator
+            sz_ptr_t new_data = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
+            sz_u32_t *new_offsets = (sz_u32_t *)allocator.allocate((length + 1) * sizeof(sz_u32_t), allocator.handle);
             if (!new_data || !new_offsets) {
-                free(new_data);
-                free(new_offsets);
-                Py_DECREF(capsules);
+                if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
+                if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u32_t), allocator.handle);
                 PyErr_NoMemory();
                 return -1;
             }
 
-            // Copy data and adjust offsets
-            sz_copy(new_data, data_buffer + offsets_32[0], total_bytes);
-            for (size_t i = 0; i < length; i++) {
+            // Copy data and adjust offsets (Apache Arrow format)
+            sz_size_t actual_bytes = offsets_32[length] - offsets_32[0];
+            if (actual_bytes > 0) sz_copy(new_data, data_buffer + offsets_32[0], actual_bytes);
+            new_offsets[0] = 0; // First offset is always 0
+            for (sz_size_t i = 0; i < length; i++) {
                 // Handle null values by checking validity bitmap
-                if (validity && !(validity[i / 8] & (1 << (i % 8)))) {
-                    new_offsets[i] = (i == 0) ? 0 : new_offsets[i - 1];
-                }
-                else { new_offsets[i] = offsets_32[i + 1] - offsets_32[0]; }
+                if (validity && !(validity[i / 8] & (1 << (i % 8)))) { new_offsets[i + 1] = new_offsets[i]; }
+                else { new_offsets[i + 1] = offsets_32[i + 1] - offsets_32[0]; }
             }
 
-            // Create parent bytes object to own the data
-            PyObject *parent = PyBytes_FromStringAndSize(new_data, total_bytes);
-            free(new_data);
-            if (!parent) {
-                free(new_offsets);
-                Py_DECREF(capsules);
-                return -1;
-            }
-
-            self->type = STRS_CONSECUTIVE_32;
-            self->data.consecutive_32bit.count = length;
-            self->data.consecutive_32bit.separator_length = 0;
-            self->data.consecutive_32bit.parent_string = parent;
-            self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_32bit.offsets = new_offsets;
-            self->data.consecutive_32bit.owns_offsets = 1;
+            self->type = STRS_U32_TAPE;
+            self->data.u32_tape.count = length;
+            self->data.u32_tape.data = new_data;
+            self->data.u32_tape.offsets = new_offsets;
+            self->data.u32_tape.allocator = allocator;
         }
     }
 
@@ -4049,29 +4370,34 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
 
     // Empty tuple, create empty Strs
     if (count == 0) {
-        self->type = STRS_REORDERED;
-        self->data.reordered.count = 0;
-        self->data.reordered.parts = NULL;
-        self->data.reordered.parent_string = NULL;
+        self->type = STRS_FRAGMENTED;
+        self->data.fragmented.count = 0;
+        self->data.fragmented.spans = NULL;
+        self->data.fragmented.parent = NULL;
+        sz_memory_allocator_init_default(&self->data.fragmented.allocator);
         return 0;
     }
 
     // Zero-copy mode for Python sequences - use reordered layout for memory-scattered strings
     if (view) {
-        sz_string_view_t *parts = (sz_string_view_t *)malloc(count * sizeof(sz_string_view_t));
+        // Initialize allocator for memory management
+        sz_memory_allocator_t allocator;
+        sz_memory_allocator_init_default(&allocator);
+
+        sz_string_view_t *parts =
+            (sz_string_view_t *)allocator.allocate(count * sizeof(sz_string_view_t), allocator.handle);
         if (!parts) {
-            Py_DECREF(sequence_obj);
             PyErr_NoMemory();
             return -1;
         }
 
         // Create views directly to Python string objects
-        for (size_t i = 0; i < count; i++) {
+        for (sz_size_t i = 0; i < (sz_size_t)count; i++) {
             PyObject *item = PyTuple_GET_ITEM(sequence_obj, i);
             sz_cptr_t item_start;
             sz_size_t item_length;
             if (!sz_py_export_string_like(item, &item_start, &item_length)) {
-                free(parts);
+                allocator.free(parts, count * sizeof(sz_string_view_t), allocator.handle);
                 PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", i);
                 return -1;
             }
@@ -4079,16 +4405,17 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
             parts[i].length = item_length;
         }
 
-        self->type = STRS_REORDERED;
-        self->data.reordered.count = count;
-        self->data.reordered.parts = parts;
-        self->data.reordered.parent_string = sequence_obj; // Keep sequence alive
+        self->type = STRS_FRAGMENTED;
+        self->data.fragmented.count = count;
+        self->data.fragmented.spans = parts;
+        self->data.fragmented.allocator = allocator;
+        self->data.fragmented.parent = sequence_obj; // Keep sequence alive
         Py_INCREF(sequence_obj);
     }
     // Allocate a new tape to fit all of the items
     else {
         // Estimate the overall size of strings in bytes
-        size_t total_bytes = 0;
+        sz_size_t total_bytes = 0;
         for (Py_ssize_t i = 0; i < count; i++) {
             PyObject *item = PyTuple_GET_ITEM(sequence_obj, i);
             sz_cptr_t item_start;
@@ -4102,8 +4429,12 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
 
         int use_64bit = (total_bytes >= UINT32_MAX);
 
-        // Allocate data buffer
-        char *data_buffer = (char *)malloc(total_bytes);
+        // Initialize allocator for memory management
+        sz_memory_allocator_t allocator;
+        sz_memory_allocator_init_default(&allocator);
+
+        // Allocate data buffer using allocator
+        sz_ptr_t data_buffer = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
         if (!data_buffer) {
             PyErr_NoMemory();
             return -1;
@@ -4111,14 +4442,14 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
 
         if (use_64bit) {
             // Apache Arrow format: N+1 offsets for N strings
-            uint64_t *offsets = (uint64_t *)malloc((count + 1) * sizeof(uint64_t));
+            sz_u64_t *offsets = (sz_u64_t *)allocator.allocate((count + 1) * sizeof(sz_u64_t), allocator.handle);
             if (!offsets) {
-                free(data_buffer);
+                allocator.free(data_buffer, total_bytes, allocator.handle);
                 PyErr_NoMemory();
                 return -1;
             }
 
-            size_t offset = 0;
+            sz_size_t offset = 0;
             offsets[0] = 0; // First offset is always 0
             for (Py_ssize_t i = 0; i < count; i++) {
                 PyObject *item = PyTuple_GET_ITEM(sequence_obj, i);
@@ -4131,30 +4462,22 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
                 offsets[i + 1] = offset; // Apache Arrow format: offset after this string
             }
 
-            PyObject *parent = PyBytes_FromStringAndSize(data_buffer, total_bytes);
-            free(data_buffer);
-            if (!parent) {
-                free(offsets);
-                return -1;
-            }
-
-            self->type = STRS_CONSECUTIVE_64;
-            self->data.consecutive_64bit.count = count;
-            self->data.consecutive_64bit.separator_length = 0;
-            self->data.consecutive_64bit.parent_string = parent;
-            self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_64bit.offsets = offsets;
+            self->type = STRS_U64_TAPE;
+            self->data.u64_tape.count = count;
+            self->data.u64_tape.data = data_buffer;
+            self->data.u64_tape.offsets = offsets;
+            self->data.u64_tape.allocator = allocator;
         }
         else {
             // Apache Arrow format: N+1 offsets for N strings
-            uint32_t *offsets = (uint32_t *)malloc((count + 1) * sizeof(uint32_t));
+            sz_u32_t *offsets = (sz_u32_t *)allocator.allocate((count + 1) * sizeof(sz_u32_t), allocator.handle);
             if (!offsets) {
-                free(data_buffer);
+                allocator.free(data_buffer, total_bytes, allocator.handle);
                 PyErr_NoMemory();
                 return -1;
             }
 
-            size_t offset = 0;
+            sz_size_t offset = 0;
             offsets[0] = 0; // First offset is always 0
             for (Py_ssize_t i = 0; i < count; i++) {
                 PyObject *item = PyTuple_GET_ITEM(sequence_obj, i);
@@ -4167,19 +4490,11 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
                 offsets[i + 1] = offset; // Apache Arrow format: offset after this string
             }
 
-            PyObject *parent = PyBytes_FromStringAndSize(data_buffer, total_bytes);
-            free(data_buffer);
-            if (!parent) {
-                free(offsets);
-                return -1;
-            }
-
-            self->type = STRS_CONSECUTIVE_32;
-            self->data.consecutive_32bit.count = count;
-            self->data.consecutive_32bit.separator_length = 0;
-            self->data.consecutive_32bit.parent_string = parent;
-            self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_32bit.offsets = offsets;
+            self->type = STRS_U32_TAPE;
+            self->data.u32_tape.count = count;
+            self->data.u32_tape.data = data_buffer;
+            self->data.u32_tape.offsets = offsets;
+            self->data.u32_tape.allocator = allocator;
         }
     }
 
@@ -4192,16 +4507,22 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
 
     // Handle empty list
     if (count == 0) {
-        self->type = STRS_REORDERED;
-        self->data.reordered.count = 0;
-        self->data.reordered.parts = NULL;
-        self->data.reordered.parent_string = NULL;
+        self->type = STRS_FRAGMENTED;
+        self->data.fragmented.count = 0;
+        self->data.fragmented.spans = NULL;
+        sz_memory_allocator_init_default(&self->data.fragmented.allocator);
+        self->data.fragmented.parent = NULL;
         return 0;
     }
 
     // Zero-copy mode for Python sequences - use reordered layout for memory-scattered strings
     if (view) {
-        sz_string_view_t *parts = (sz_string_view_t *)malloc(count * sizeof(sz_string_view_t));
+        // Initialize allocator for memory management
+        sz_memory_allocator_t allocator;
+        sz_memory_allocator_init_default(&allocator);
+
+        sz_string_view_t *parts =
+            (sz_string_view_t *)allocator.allocate(count * sizeof(sz_string_view_t), allocator.handle);
         if (!parts) {
             PyErr_NoMemory();
             return -1;
@@ -4215,7 +4536,7 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
             sz_cptr_t item_start;
             sz_size_t item_length;
             if (!sz_py_export_string_like(item, &item_start, &item_length)) {
-                free(parts);
+                allocator.free(parts, count * sizeof(sz_string_view_t), allocator.handle);
                 PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", i);
                 return -1;
             }
@@ -4225,10 +4546,11 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
         }
 
         // Setup reordered layout with parent list to keep strings alive
-        self->type = STRS_REORDERED;
-        self->data.reordered.count = count;
-        self->data.reordered.parts = parts;
-        self->data.reordered.parent_string = sequence_obj; // Keep list alive
+        self->type = STRS_FRAGMENTED;
+        self->data.fragmented.count = count;
+        self->data.fragmented.spans = parts;
+        self->data.fragmented.allocator = allocator;
+        self->data.fragmented.parent = sequence_obj; // Keep list alive
         Py_INCREF(sequence_obj);
         return 0;
     }
@@ -4236,7 +4558,7 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
     else {
 
         // First pass: calculate total size needed
-        size_t total_bytes = 0;
+        sz_size_t total_bytes = 0;
         int use_64bit = 0;
 
         for (Py_ssize_t i = 0; i < count; i++) {
@@ -4253,26 +4575,33 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
             total_bytes += item_length;
         }
 
+        // Initialize allocator for memory management
+        sz_memory_allocator_t allocator;
+        sz_memory_allocator_init_default(&allocator);
+
         // Allocate buffers based on calculated sizes
-        char *data_buffer = (char *)malloc(total_bytes);
+        sz_ptr_t data_buffer = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
         void *offsets;
 
         // Apache Arrow format: N+1 offsets for N strings
-        if (use_64bit) { offsets = malloc((count + 1) * sizeof(uint64_t)); }
-        else { offsets = malloc((count + 1) * sizeof(uint32_t)); }
+        if (use_64bit) { offsets = allocator.allocate((count + 1) * sizeof(sz_u64_t), allocator.handle); }
+        else { offsets = allocator.allocate((count + 1) * sizeof(sz_u32_t), allocator.handle); }
 
         if (!data_buffer || !offsets) {
-            free(data_buffer);
-            free(offsets);
+            if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
+            if (offsets) {
+                sz_size_t offsets_size = use_64bit ? (count + 1) * sizeof(sz_u64_t) : (count + 1) * sizeof(sz_u32_t);
+                allocator.free(offsets, offsets_size, allocator.handle);
+            }
             PyErr_NoMemory();
             return -1;
         }
 
         // Second pass: copy data and build offsets (Apache Arrow format)
-        size_t current_offset = 0;
+        sz_size_t current_offset = 0;
         // Set first offset to 0
-        if (use_64bit) { ((uint64_t *)offsets)[0] = 0; }
-        else { ((uint32_t *)offsets)[0] = 0; }
+        if (use_64bit) { ((sz_u64_t *)offsets)[0] = 0; }
+        else { ((sz_u32_t *)offsets)[0] = 0; }
 
         for (Py_ssize_t i = 0; i < count; i++) {
             PyObject *item = PyList_GET_ITEM(sequence_obj, i);
@@ -4287,37 +4616,24 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
             current_offset += item_length;
 
             // Store offset (Apache Arrow format: offset after this string)
-            if (use_64bit) { ((uint64_t *)offsets)[i + 1] = current_offset; }
-            else { ((uint32_t *)offsets)[i + 1] = current_offset; }
-        }
-
-        // Create parent bytes object from the buffer
-        PyObject *parent = PyBytes_FromStringAndSize(data_buffer, total_bytes);
-        free(data_buffer);
-        if (!parent) {
-            free(offsets);
-            PyErr_NoMemory();
-            return -1;
+            if (use_64bit) { ((sz_u64_t *)offsets)[i + 1] = current_offset; }
+            else { ((sz_u32_t *)offsets)[i + 1] = current_offset; }
         }
 
         // Setup the consecutive layout (32-bit or 64-bit)
         if (use_64bit) {
-            self->type = STRS_CONSECUTIVE_64;
-            self->data.consecutive_64bit.count = count;
-            self->data.consecutive_64bit.separator_length = 0;
-            self->data.consecutive_64bit.parent_string = parent;
-            self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_64bit.offsets = (uint64_t *)offsets;
-            self->data.consecutive_64bit.owns_offsets = 1;
+            self->type = STRS_U64_TAPE;
+            self->data.u64_tape.count = count;
+            self->data.u64_tape.data = data_buffer;
+            self->data.u64_tape.offsets = (sz_u64_t *)offsets;
+            self->data.u64_tape.allocator = allocator;
         }
         else {
-            self->type = STRS_CONSECUTIVE_32;
-            self->data.consecutive_32bit.count = count;
-            self->data.consecutive_32bit.separator_length = 0;
-            self->data.consecutive_32bit.parent_string = parent;
-            self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_32bit.offsets = (uint32_t *)offsets;
-            self->data.consecutive_32bit.owns_offsets = 1;
+            self->type = STRS_U32_TAPE;
+            self->data.u32_tape.count = count;
+            self->data.u32_tape.data = data_buffer;
+            self->data.u32_tape.offsets = (sz_u32_t *)offsets;
+            self->data.u32_tape.allocator = allocator;
         }
 
         return 0;
@@ -4341,189 +4657,203 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
                                           "Use view=False to create a copy, or convert to a list/tuple first.");
         return -1;
     }
-    // Allocate a new tape to fit all of the items
-    else {
-        size_t data_capacity = 4096;
-        size_t offsets_capacity = 16;
-        size_t count = 0;
-        size_t total_bytes = 0;
-        int use_64bit = 0; // Start with 32-bit
 
-        char *data_buffer = (char *)malloc(data_capacity);
-        void *offsets = malloc(offsets_capacity * sizeof(uint32_t)); // Start with 32-bit
+    // Initialize allocator for memory management
+    sz_memory_allocator_t allocator;
+    sz_memory_allocator_init_default(&allocator);
 
-        if (!data_buffer || !offsets) {
-            free(data_buffer);
-            free(offsets);
+    // Incrementally allocate a new tape to fit all of the items
+    sz_size_t data_capacity = 4096;
+    sz_size_t offsets_capacity = 16;
+    sz_size_t count = 0;
+    sz_size_t total_bytes = 0;
+    int use_64bit = 0; // Start with 32-bit
+
+    sz_ptr_t data_buffer = (sz_ptr_t)allocator.allocate(data_capacity, allocator.handle);
+    void *offsets = allocator.allocate(offsets_capacity * sizeof(sz_u32_t), allocator.handle); // Start with 32-bit
+
+    if (!data_buffer || !offsets) {
+        if (data_buffer) allocator.free(data_buffer, data_capacity, allocator.handle);
+        if (offsets) allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle);
+        Py_DECREF(iterator);
+        PyErr_NoMemory();
+        return -1;
+    }
+
+    // Set initial offset to 0 (Apache Arrow format: N+1 offsets for N strings)
+    if (use_64bit) { ((sz_u64_t *)offsets)[0] = 0; }
+    else { ((sz_u32_t *)offsets)[0] = 0; }
+
+    // Iterate through all items
+    PyObject *item;
+    while ((item = PyIter_Next(iterator))) {
+        sz_cptr_t item_start;
+        sz_size_t item_length;
+        if (!sz_py_export_string_like(item, &item_start, &item_length)) {
+            Py_DECREF(item);
+            allocator.free(data_buffer, data_capacity, allocator.handle);
+            allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)),
+                           allocator.handle);
             Py_DECREF(iterator);
-            PyErr_NoMemory();
+            PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", count);
             return -1;
         }
 
-        // Iterate through all items
-        PyObject *item;
-        while ((item = PyIter_Next(iterator))) {
-            sz_cptr_t item_start;
-            sz_size_t item_length;
-            if (!sz_py_export_string_like(item, &item_start, &item_length)) {
+        // Check if adding this string would exceed UINT32_MAX and switch to 64-bit
+        if (!use_64bit && total_bytes + item_length > UINT32_MAX) {
+            // Convert offsets from 32-bit to 64-bit
+            sz_size_t new_offsets_size = offsets_capacity * sizeof(sz_u64_t);
+            sz_u64_t *new_offsets = (sz_u64_t *)allocator.allocate(new_offsets_size, allocator.handle);
+            if (!new_offsets) {
                 Py_DECREF(item);
-                free(data_buffer);
-                free(offsets);
+                allocator.free(data_buffer, data_capacity, allocator.handle);
+                allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle);
                 Py_DECREF(iterator);
-                PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", count);
+                PyErr_NoMemory();
                 return -1;
             }
 
-            // Check if adding this string would exceed UINT32_MAX and switch to 64-bit
-            if (!use_64bit && total_bytes + item_length > UINT32_MAX) {
-                // Convert offsets from 32-bit to 64-bit
-                uint64_t *new_offsets = (uint64_t *)malloc(offsets_capacity * sizeof(uint64_t));
-                if (!new_offsets) {
+            // Copy existing 32-bit offsets to 64-bit (including initial 0 and all current offsets)
+            sz_u32_t *old_offsets = (sz_u32_t *)offsets;
+            for (sz_size_t i = 0; i <= count; i++) { new_offsets[i] = old_offsets[i]; }
+
+            allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle);
+            offsets = new_offsets;
+            use_64bit = 1;
+        }
+
+        // Grow data buffer if needed (doubling strategy)
+        while (total_bytes + item_length > data_capacity) {
+            sz_size_t new_capacity = data_capacity * 2;
+            if (new_capacity < data_capacity) { // Overflow check
+                new_capacity = SIZE_MAX;
+                if (total_bytes + item_length > new_capacity) {
                     Py_DECREF(item);
-                    free(data_buffer);
-                    free(offsets);
+                    allocator.free(data_buffer, data_capacity, allocator.handle);
+                    allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)),
+                                   allocator.handle);
                     Py_DECREF(iterator);
-                    PyErr_NoMemory();
+                    PyErr_SetString(PyExc_MemoryError, "String data too large");
                     return -1;
                 }
-
-                // Copy existing 32-bit offsets to 64-bit
-                uint32_t *old_offsets = (uint32_t *)offsets;
-                for (size_t i = 0; i < count; i++) { new_offsets[i] = old_offsets[i]; }
-
-                free(offsets);
-                offsets = new_offsets;
-                use_64bit = 1;
             }
 
-            // Grow data buffer if needed (doubling strategy)
-            while (total_bytes + item_length > data_capacity) {
-                size_t new_capacity = data_capacity * 2;
-                if (new_capacity < data_capacity) { // Overflow check
-                    new_capacity = SIZE_MAX;
-                    if (total_bytes + item_length > new_capacity) {
-                        Py_DECREF(item);
-                        free(data_buffer);
-                        free(offsets);
-                        Py_DECREF(iterator);
-                        PyErr_SetString(PyExc_MemoryError, "String data too large");
-                        return -1;
-                    }
-                }
+            sz_ptr_t new_buffer = (sz_ptr_t)allocator.allocate(new_capacity, allocator.handle);
+            if (!new_buffer) {
+                Py_DECREF(item);
+                allocator.free(data_buffer, data_capacity, allocator.handle);
+                allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)),
+                               allocator.handle);
+                Py_DECREF(iterator);
+                PyErr_NoMemory();
+                return -1;
+            }
+            memcpy(new_buffer, data_buffer, total_bytes);
+            allocator.free(data_buffer, data_capacity, allocator.handle);
+            data_buffer = new_buffer;
+            data_capacity = new_capacity;
+        }
 
-                char *new_buffer = (char *)realloc(data_buffer, new_capacity);
-                if (!new_buffer) {
-                    Py_DECREF(item);
-                    free(data_buffer);
-                    free(offsets);
-                    Py_DECREF(iterator);
-                    PyErr_NoMemory();
-                    return -1;
-                }
-                data_buffer = new_buffer;
-                data_capacity = new_capacity;
+        // Grow offsets array if needed (doubling strategy)
+        // Need space for count+2 offsets total (0, 1, ..., count+1)
+        if (count + 1 >= offsets_capacity) {
+            sz_size_t new_capacity = offsets_capacity * 2;
+            sz_size_t element_size = use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t);
+            if (new_capacity > SIZE_MAX / element_size) {
+                Py_DECREF(item);
+                allocator.free(data_buffer, data_capacity, allocator.handle);
+                allocator.free(offsets, offsets_capacity * element_size, allocator.handle);
+                Py_DECREF(iterator);
+                PyErr_SetString(PyExc_MemoryError, "Too many strings");
+                return -1;
             }
 
-            // Grow offsets array if needed (doubling strategy)
-            if (count >= offsets_capacity) {
-                size_t new_capacity = offsets_capacity * 2;
-                size_t element_size = use_64bit ? sizeof(uint64_t) : sizeof(uint32_t);
-                if (new_capacity > SIZE_MAX / element_size) {
-                    Py_DECREF(item);
-                    free(data_buffer);
-                    free(offsets);
-                    Py_DECREF(iterator);
-                    PyErr_SetString(PyExc_MemoryError, "Too many strings");
-                    return -1;
-                }
-
-                void *new_offsets = realloc(offsets, new_capacity * element_size);
-                if (!new_offsets) {
-                    Py_DECREF(item);
-                    free(data_buffer);
-                    free(offsets);
-                    Py_DECREF(iterator);
-                    PyErr_NoMemory();
-                    return -1;
-                }
-                offsets = new_offsets;
-                offsets_capacity = new_capacity;
+            void *new_offsets = allocator.allocate(new_capacity * element_size, allocator.handle);
+            if (!new_offsets) {
+                Py_DECREF(item);
+                allocator.free(data_buffer, data_capacity, allocator.handle);
+                allocator.free(offsets, offsets_capacity * element_size, allocator.handle);
+                Py_DECREF(iterator);
+                PyErr_NoMemory();
+                return -1;
             }
-
-            // Copy the string data
-            memcpy(data_buffer + total_bytes, item_start, item_length);
-            total_bytes += item_length;
-
-            // Store offset
-            if (use_64bit) { ((uint64_t *)offsets)[count] = total_bytes; }
-            else { ((uint32_t *)offsets)[count] = total_bytes; }
-            count++;
-
-            Py_DECREF(item);
+            memcpy(new_offsets, offsets, (count + 1) * element_size);
+            allocator.free(offsets, offsets_capacity * element_size, allocator.handle);
+            offsets = new_offsets;
+            offsets_capacity = new_capacity;
         }
 
-        Py_DECREF(iterator);
+        // Copy the string data
+        memcpy(data_buffer + total_bytes, item_start, item_length);
+        total_bytes += item_length;
+        count++;
 
-        // Check for errors during iteration
-        if (PyErr_Occurred()) {
-            free(data_buffer);
-            free(offsets);
-            return -1;
-        }
+        // Store next offset (end of the string we just added)
+        if (use_64bit) { ((sz_u64_t *)offsets)[count] = total_bytes; }
+        else { ((sz_u32_t *)offsets)[count] = total_bytes; }
 
-        // Handle empty iterator
-        if (count == 0) {
-            free(data_buffer);
-            free(offsets);
-            self->type = STRS_REORDERED;
-            self->data.reordered.count = 0;
-            self->data.reordered.parts = NULL;
-            self->data.reordered.parent_string = NULL;
-            return 0;
-        }
+        Py_DECREF(item);
+    }
 
-        // Shrink buffers to actual size
-        char *final_buffer = (char *)realloc(data_buffer, total_bytes);
-        if (final_buffer) data_buffer = final_buffer;
+    Py_DECREF(iterator);
 
-        size_t element_size = use_64bit ? sizeof(uint64_t) : sizeof(uint32_t);
-        void *final_offsets = realloc(offsets, count * element_size);
-        if (final_offsets) offsets = final_offsets;
+    // Check for errors during iteration
+    if (PyErr_Occurred()) {
+        allocator.free(data_buffer, data_capacity, allocator.handle);
+        allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)), allocator.handle);
+        return -1;
+    }
 
-        // Create parent bytes object from the buffer
-        PyObject *parent = PyBytes_FromStringAndSize(data_buffer, total_bytes);
-        free(data_buffer);
-        if (!parent) {
-            free(offsets);
-            PyErr_NoMemory();
-            return -1;
-        }
-
-        // Setup the consecutive layout (32-bit or 64-bit)
-        if (use_64bit) {
-            self->type = STRS_CONSECUTIVE_64;
-            self->data.consecutive_64bit.count = count;
-            self->data.consecutive_64bit.separator_length = 0;
-            self->data.consecutive_64bit.parent_string = parent;
-            self->data.consecutive_64bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_64bit.offsets = (uint64_t *)offsets;
-            self->data.consecutive_64bit.owns_offsets = 1;
-        }
-        else {
-            self->type = STRS_CONSECUTIVE_32;
-            self->data.consecutive_32bit.count = count;
-            self->data.consecutive_32bit.separator_length = 0;
-            self->data.consecutive_32bit.parent_string = parent;
-            self->data.consecutive_32bit.start = PyBytes_AS_STRING(parent);
-            self->data.consecutive_32bit.offsets = (uint32_t *)offsets;
-            self->data.consecutive_32bit.owns_offsets = 1;
-        }
-
+    // Handle empty iterator
+    if (count == 0) {
+        allocator.free(data_buffer, data_capacity, allocator.handle);
+        allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle);
+        self->type = STRS_FRAGMENTED;
+        self->data.fragmented.count = 0;
+        self->data.fragmented.spans = NULL;
+        self->data.fragmented.allocator = allocator;
+        self->data.fragmented.parent = NULL;
         return 0;
     }
+
+    // Shrink buffers to actual size
+    sz_ptr_t final_buffer = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
+    if (final_buffer) {
+        memcpy(final_buffer, data_buffer, total_bytes);
+        allocator.free(data_buffer, data_capacity, allocator.handle);
+        data_buffer = final_buffer;
+    }
+
+    sz_size_t element_size = use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t);
+    sz_size_t final_offsets_size = (count + 1) * element_size;
+    void *final_offsets = allocator.allocate(final_offsets_size, allocator.handle);
+    if (final_offsets) {
+        memcpy(final_offsets, offsets, final_offsets_size);
+        allocator.free(offsets, offsets_capacity * element_size, allocator.handle);
+        offsets = final_offsets;
+    }
+
+    // Setup the consecutive layout (32-bit or 64-bit)
+    if (use_64bit) {
+        self->type = STRS_U64_TAPE;
+        self->data.u64_tape.count = count;
+        self->data.u64_tape.data = data_buffer;
+        self->data.u64_tape.offsets = (sz_u64_t *)offsets;
+        self->data.u64_tape.allocator = allocator;
+    }
+    else {
+        self->type = STRS_U32_TAPE;
+        self->data.u32_tape.count = count;
+        self->data.u32_tape.data = data_buffer;
+        self->data.u32_tape.offsets = (sz_u32_t *)offsets;
+        self->data.u32_tape.allocator = allocator;
+    }
+
+    return 0;
 }
 
 static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
+
     // Manual argument parsing for performance
     Py_ssize_t nargs = PyTuple_Size(args);
     if (nargs > 2) {
@@ -4558,10 +4888,11 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
 
     // If no sequence provided, create empty Strs
     if (!sequence_obj) {
-        self->type = STRS_REORDERED;
-        self->data.reordered.count = 0;
-        self->data.reordered.parts = NULL;
-        self->data.reordered.parent_string = NULL;
+        self->type = STRS_FRAGMENTED;
+        self->data.fragmented.count = 0;
+        self->data.fragmented.spans = NULL;
+        sz_memory_allocator_init_default(&self->data.fragmented.allocator);
+        self->data.fragmented.parent = NULL;
         return 0;
     }
 
@@ -4590,29 +4921,52 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
 
 static void Strs_dealloc(Strs *self) {
     switch (self->type) {
-    case STRS_CONSECUTIVE_32:
-        // Free offset array (only if owned) and decref parent string
-        if (self->data.consecutive_32bit.owns_offsets && self->data.consecutive_32bit.offsets)
-            free(self->data.consecutive_32bit.offsets);
-        Py_XDECREF(self->data.consecutive_32bit.parent_string);
+    case STRS_U32_TAPE:
+        // Free owned data and offsets
+        if (self->data.u32_tape.data) {
+            sz_size_t data_size = self->data.u32_tape.offsets[self->data.u32_tape.count];
+            self->data.u32_tape.allocator.free((sz_ptr_t)self->data.u32_tape.data, data_size,
+                                               self->data.u32_tape.allocator.handle);
+        }
+        if (self->data.u32_tape.offsets) {
+            sz_size_t offsets_size = (self->data.u32_tape.count + 1) * sizeof(sz_u32_t);
+            self->data.u32_tape.allocator.free(self->data.u32_tape.offsets, offsets_size,
+                                               self->data.u32_tape.allocator.handle);
+        }
         break;
 
-    case STRS_CONSECUTIVE_64:
-        // Free offset array (only if owned) and decref parent string
-        if (self->data.consecutive_64bit.owns_offsets && self->data.consecutive_64bit.offsets)
-            free(self->data.consecutive_64bit.offsets);
-        Py_XDECREF(self->data.consecutive_64bit.parent_string);
+    case STRS_U64_TAPE:
+        // Free owned data and offsets
+        if (self->data.u64_tape.data) {
+            sz_size_t data_size = self->data.u64_tape.offsets[self->data.u64_tape.count];
+            self->data.u64_tape.allocator.free((sz_ptr_t)self->data.u64_tape.data, data_size,
+                                               self->data.u64_tape.allocator.handle);
+        }
+        if (self->data.u64_tape.offsets) {
+            sz_size_t offsets_size = (self->data.u64_tape.count + 1) * sizeof(sz_u64_t);
+            self->data.u64_tape.allocator.free(self->data.u64_tape.offsets, offsets_size,
+                                               self->data.u64_tape.allocator.handle);
+        }
         break;
 
-    case STRS_REORDERED:
-        // Free parts array and decref parent string
-        free(self->data.reordered.parts);
-        Py_XDECREF(self->data.reordered.parent_string);
+    case STRS_U32_TAPE_VIEW:
+        // Views don't own data, just release parent reference
+        Py_XDECREF(self->data.u32_tape_view.parent);
         break;
 
-    case STRS_MULTI_SOURCE:
-        // Handle multi-source cleanup if needed
-        // (not currently used in our implementation)
+    case STRS_U64_TAPE_VIEW:
+        // Views don't own data, just release parent reference
+        Py_XDECREF(self->data.u64_tape_view.parent);
+        break;
+
+    case STRS_FRAGMENTED:
+        // Free owned spans array and release parent reference
+        if (self->data.fragmented.spans) {
+            sz_size_t spans_size = self->data.fragmented.count * sizeof(sz_string_view_t);
+            self->data.fragmented.allocator.free(self->data.fragmented.spans, spans_size,
+                                                 self->data.fragmented.allocator.handle);
+        }
+        Py_XDECREF(self->data.fragmented.parent);
         break;
     }
 
@@ -4620,10 +4974,10 @@ static void Strs_dealloc(Strs *self) {
 }
 
 static PyMethodDef Strs_methods[] = {
-    {"shuffle", Strs_shuffle, SZ_METHOD_FLAGS, "Shuffle (in-place) the elements of the Strs object."}, //
-    {"sort", Strs_sort, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},          //
-    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, "Provides the permutation to achieve sorted order."},   //
-    {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},             //
+    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."},        //
+    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},    //
+    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, "Provides the permutation to achieve sorted order."}, //
+    {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},           //
     // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
     {NULL, NULL, 0, NULL} // Sentinel
 };
@@ -4760,18 +5114,18 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     // Define SIMD capabilities as a tuple
     {
         sz_capability_t caps = sz_capabilities();
-        
+
         // Get capability strings using the new function
-        char const *cap_strings[SZ_CAPABILITIES_COUNT];
+        sz_cptr_t cap_strings[SZ_CAPABILITIES_COUNT];
         sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
-        
+
         // Create a Python tuple with the capabilities
         PyObject *caps_tuple = PyTuple_New(cap_count);
         if (!caps_tuple) {
             Py_XDECREF(m);
             return NULL;
         }
-        
+
         for (sz_size_t i = 0; i < cap_count; i++) {
             PyObject *cap_str = PyUnicode_FromString(cap_strings[i]);
             if (!cap_str) {
@@ -4781,13 +5135,13 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
             }
             PyTuple_SET_ITEM(caps_tuple, i, cap_str);
         }
-        
+
         if (PyModule_AddObject(m, "__capabilities__", caps_tuple) < 0) {
             Py_DECREF(caps_tuple);
             Py_XDECREF(m);
             return NULL;
         }
-        
+
         // Also keep the old comma-separated string version for backward compatibility
         sz_cptr_t caps_str = sz_capabilities_to_string(caps);
         PyModule_AddStringConstant(m, "__capabilities_str__", caps_str);
@@ -4833,6 +5187,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         .sz_py_export_strings_as_sequence = sz_py_export_strings_as_sequence,
         .sz_py_export_strings_as_u32tape = sz_py_export_strings_as_u32tape,
         .sz_py_export_strings_as_u64tape = sz_py_export_strings_as_u64tape,
+        .sz_py_replace_strings_allocator = sz_py_replace_strings_allocator,
     };
     if (PyModule_AddObject(m, "_sz_py_api", PyCapsule_New(&sz_py_api, "_sz_py_api", NULL)) < 0) {
         Py_XDECREF(&SplitIteratorType);

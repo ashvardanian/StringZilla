@@ -310,14 +310,14 @@ def test_unit_strs_sequence():
     assert str(Str("a" * 1_000_000).split()).startswith("['aaa")
     assert str(Str("a" * 1_000_000).split()).endswith("aaa']")
 
-    lines.sort()
-    assert [0, 1, 2] == list(lines.argsort())
-    assert ["p1", "p2", "p3"] == list(lines)
+    lines_sorted = lines.sorted()
+    assert [0, 1, 2] == list(lines_sorted.argsort())
+    assert ["p1", "p2", "p3"] == list(lines_sorted)
 
     # Reverse order
-    assert [2, 1, 0] == list(lines.argsort(reverse=True))
-    lines.sort(reverse=True)
-    assert ["p3", "p2", "p1"] == list(lines)
+    assert [2, 1, 0] == list(lines_sorted.argsort(reverse=True))
+    lines_sorted_reverse = lines.sorted(reverse=True)
+    assert ["p3", "p2", "p1"] == list(lines_sorted_reverse)
 
     # Sampling an array
     sampled = lines.sample(100, seed=42)
@@ -679,7 +679,7 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
         assert native_ordered[i] == str(big_list[int(native_order[i])]), "Split is wrong?!"
 
     native_list.sort()
-    big_list.sort()
+    big_list = big_list.sorted()
 
     assert len(native_list) == len(big_list)
     for native_str, big_str in zip(native_list, big_list):
@@ -702,7 +702,7 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
         assert native_ordered[i] == str(big_list[int(native_order[i])]), "Split is wrong?!"
 
     native_list.sort()
-    big_list.sort()
+    big_list = big_list.sorted()
 
     assert len(native_list) == len(big_list)
     for native_str, big_str in zip(native_list, big_list):
