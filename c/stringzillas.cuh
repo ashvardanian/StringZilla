@@ -1001,7 +1001,7 @@ SZ_DYNAMIC sz_status_t sz_needleman_wunsch_scores_init(                        /
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
 
 #if SZ_USE_ICE
-    bool const can_use_ice = (capabilities & sz_cap_serial_k) == sz_cap_serial_k;
+    bool const can_use_ice = (capabilities & sz_cap_ice_k) == sz_cap_ice_k;
     if (can_use_ice && can_use_linear_costs) {
         auto variant = szs::needleman_wunsch_ice_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
@@ -1140,7 +1140,7 @@ SZ_DYNAMIC sz_status_t sz_smith_waterman_scores_init(                          /
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
 
 #if SZ_USE_ICE
-    bool const can_use_ice = (capabilities & sz_cap_serial_k) == sz_cap_serial_k;
+    bool const can_use_ice = (capabilities & sz_cap_ice_k) == sz_cap_ice_k;
     if (can_use_ice && can_use_linear_costs) {
         auto variant = szs::smith_waterman_ice_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
