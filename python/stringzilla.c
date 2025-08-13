@@ -182,11 +182,11 @@ typedef struct {
     PyObject ob_base;
 
     enum {
-        STRS_U32_TAPE_VIEW,
-        STRS_U64_TAPE_VIEW,
-        STRS_U32_TAPE,
-        STRS_U64_TAPE,
-        STRS_FRAGMENTED,
+        STRS_U32_TAPE_VIEW = 0,
+        STRS_U64_TAPE_VIEW = 1,
+        STRS_U32_TAPE = 2,
+        STRS_U64_TAPE = 3,
+        STRS_FRAGMENTED = 4,
     } type;
 
     union {
@@ -449,18 +449,20 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t
     if (!data || !offsets || !count) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
     Strs *strs = (Strs *)object;
-    if (strs->type != STRS_U32_TAPE && strs->type != STRS_U32_TAPE_VIEW) return sz_false_k;
+
     if (strs->type == STRS_U32_TAPE) {
         *data = strs->data.u32_tape.data;
         *offsets = strs->data.u32_tape.offsets;
         *count = strs->data.u32_tape.count;
+        return sz_true_k;
     }
-    else {
+    else if (strs->type == STRS_U32_TAPE_VIEW) {
         *data = strs->data.u32_tape_view.data;
         *offsets = strs->data.u32_tape_view.offsets;
         *count = strs->data.u32_tape_view.count;
+        return sz_true_k;
     }
-    return sz_true_k;
+    else { return sz_false_k; }
 }
 
 /**
@@ -472,16 +474,254 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t
     if (!data || !offsets || !count) return sz_false_k;
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
     Strs *strs = (Strs *)object;
-    if (strs->type != STRS_U64_TAPE && strs->type != STRS_U64_TAPE_VIEW) return sz_false_k;
+
     if (strs->type == STRS_U64_TAPE) {
         *data = strs->data.u64_tape.data;
         *offsets = strs->data.u64_tape.offsets;
         *count = strs->data.u64_tape.count;
     }
-    else {
+    else if (strs->type == STRS_U64_TAPE_VIEW) {
         *data = strs->data.u64_tape_view.data;
         *offsets = strs->data.u64_tape_view.offsets;
         *count = strs->data.u64_tape_view.count;
+    }
+    else { return sz_false_k; }
+}
+
+static sz_bool_t sz_py_replace_u32_tape_allocator(Strs *strs, sz_memory_allocator_t *old_allocator,
+                                                  sz_memory_allocator_t *allocator) {
+    struct u32_tape_t *data = &strs->data.u32_tape;
+    sz_assert_(data->offsets && "Expected offsets to be allocated");
+
+    sz_size_t const string_data_size = (sz_size_t)data->offsets[data->count];
+    sz_size_t const offsets_size = (data->count + 1) * sizeof(sz_u32_t);
+
+    // Allocate new string data with new allocator
+    sz_ptr_t new_string_data =
+        string_data_size ? (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle) : (sz_ptr_t)NULL;
+    if (string_data_size && !new_string_data) return sz_false_k;
+    memcpy(new_string_data, data->data, string_data_size);
+
+    // Allocate new offsets array
+    sz_u32_t *new_offsets =
+        offsets_size ? (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle) : (sz_u32_t *)NULL;
+    if (offsets_size && !new_offsets) {
+        if (string_data_size) allocator->free(new_string_data, string_data_size, allocator->handle);
+        return sz_false_k;
+    }
+    memcpy(new_offsets, data->offsets, offsets_size);
+
+    // Free old memory with old allocator (tapes always own their data)
+    old_allocator->free(data->data, string_data_size, old_allocator->handle);
+    old_allocator->free(data->offsets, offsets_size, old_allocator->handle);
+
+    // Update pointers and allocator
+    data->data = new_string_data;
+    data->offsets = new_offsets;
+    data->allocator = *allocator;
+    printf("Replaced u32 tape allocator with %p\n", allocator->handle);
+    return sz_true_k;
+}
+
+static sz_bool_t sz_py_replace_u64_tape_allocator(Strs *strs, sz_memory_allocator_t *old_allocator,
+                                                  sz_memory_allocator_t *allocator) {
+    struct u64_tape_t *data = &strs->data.u64_tape;
+    sz_assert_(data->offsets && "Expected offsets to be allocated");
+
+    sz_size_t string_data_size = (sz_size_t)data->offsets[data->count];
+    sz_size_t offsets_size = (data->count + 1) * sizeof(sz_u64_t);
+
+    // Allocate new string data with new allocator
+    sz_ptr_t new_string_data =
+        string_data_size ? (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle) : (sz_ptr_t)NULL;
+    if (string_data_size && !new_string_data) return sz_false_k;
+    memcpy(new_string_data, data->data, string_data_size);
+
+    // Allocate new offsets array
+    sz_u64_t *new_offsets =
+        offsets_size ? (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle) : (sz_u64_t *)NULL;
+    if (offsets_size && !new_offsets) {
+        if (string_data_size) allocator->free(new_string_data, string_data_size, allocator->handle);
+        return sz_false_k;
+    }
+    memcpy(new_offsets, data->offsets, offsets_size);
+
+    // Free old memory with old allocator (tapes always own their data)
+    old_allocator->free(data->data, string_data_size, old_allocator->handle);
+    old_allocator->free(data->offsets, offsets_size, old_allocator->handle);
+
+    // Update pointers and allocator
+    data->data = new_string_data;
+    data->offsets = new_offsets;
+    data->allocator = *allocator;
+    return sz_true_k;
+}
+
+static sz_bool_t sz_py_replace_u32_tape_view_allocator(Strs *strs, sz_memory_allocator_t *allocator) {
+    // Convert view to tape by copying the data
+    struct u32_tape_view_t *view = &strs->data.u32_tape_view;
+    sz_size_t const string_data_size = (sz_size_t)view->offsets[view->count];
+    sz_size_t const offsets_size = (view->count + 1) * sizeof(sz_u32_t);
+
+    // Allocate new string data with new allocator
+    sz_ptr_t new_string_data = NULL;
+    if (string_data_size > 0) {
+        new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
+        if (!new_string_data) return sz_false_k;
+        memcpy(new_string_data, view->data, string_data_size);
+    }
+
+    // Allocate new offsets array
+    sz_u32_t *new_offsets = NULL;
+    if (offsets_size > 0) {
+        new_offsets = (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle);
+        if (!new_offsets) {
+            if (string_data_size > 0) allocator->free(new_string_data, string_data_size, allocator->handle);
+            return sz_false_k;
+        }
+        memcpy(new_offsets, view->offsets, offsets_size);
+    }
+
+    // Release parent reference if any
+    Py_XDECREF(view->parent);
+
+    // Convert to tape layout
+    strs->type = STRS_U32_TAPE;
+    strs->data.u32_tape.count = view->count;
+    strs->data.u32_tape.data = new_string_data;
+    strs->data.u32_tape.offsets = new_offsets;
+    strs->data.u32_tape.allocator = *allocator;
+    return sz_true_k;
+}
+
+static sz_bool_t sz_py_replace_u64_tape_view_allocator(Strs *strs, sz_memory_allocator_t *allocator) {
+    // Convert view to tape by copying the data
+    struct u64_tape_view_t *view = &strs->data.u64_tape_view;
+    sz_size_t const string_data_size = (sz_size_t)view->offsets[view->count];
+    sz_size_t const offsets_size = (view->count + 1) * sizeof(sz_u64_t);
+
+    // Allocate new string data with new allocator
+    sz_ptr_t new_string_data = NULL;
+    if (string_data_size > 0) {
+        new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
+        if (!new_string_data) return sz_false_k;
+        memcpy(new_string_data, view->data, string_data_size);
+    }
+
+    // Allocate new offsets array
+    sz_u64_t *new_offsets = NULL;
+    if (offsets_size > 0) {
+        new_offsets = (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle);
+        if (!new_offsets) {
+            if (string_data_size > 0) allocator->free(new_string_data, string_data_size, allocator->handle);
+            return sz_false_k;
+        }
+        memcpy(new_offsets, view->offsets, offsets_size);
+    }
+
+    // Release parent reference if any
+    Py_XDECREF(view->parent);
+
+    // Convert to tape layout
+    strs->type = STRS_U64_TAPE;
+    strs->data.u64_tape.count = view->count;
+    strs->data.u64_tape.data = new_string_data;
+    strs->data.u64_tape.offsets = new_offsets;
+    strs->data.u64_tape.allocator = *allocator;
+    return sz_true_k;
+}
+
+static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_allocator_t *old_allocator,
+                                                    sz_memory_allocator_t *allocator) {
+    struct fragmented_t *fragmented = &strs->data.fragmented;
+    sz_assert_(fragmented->spans && "Expected spans to be allocated");
+
+    // Calculate total size needed for consolidated tape
+    sz_size_t total_bytes = 0;
+    for (sz_size_t i = 0; i < fragmented->count; i++) total_bytes += fragmented->spans[i].length;
+
+    // Choose 32-bit or 64-bit tape based on size
+    sz_bool_t use_64bit = total_bytes >= UINT32_MAX;
+
+    // Skip allocation if there's no data to allocate (empty strings case)
+    if (total_bytes == 0) {
+        // Convert to empty tape layout
+        old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle);
+        Py_XDECREF(fragmented->parent);
+
+        strs->type = STRS_U32_TAPE;
+        strs->data.u32_tape.count = fragmented->count;
+        strs->data.u32_tape.data = NULL;
+        strs->data.u32_tape.offsets = NULL;
+        strs->data.u32_tape.allocator = *allocator;
+        return sz_true_k;
+    }
+
+    // Allocate consolidated data buffer and offsets array
+    sz_ptr_t new_data = (sz_ptr_t)allocator->allocate(total_bytes, allocator->handle);
+    if (!new_data) return sz_false_k;
+
+    if (use_64bit) {
+        sz_u64_t *new_offsets =
+            (sz_u64_t *)allocator->allocate((fragmented->count + 1) * sizeof(sz_u64_t), allocator->handle);
+        if (!new_offsets) {
+            allocator->free(new_data, total_bytes, allocator->handle);
+            return sz_false_k;
+        }
+
+        // Copy fragmented data into consolidated buffer
+        sz_size_t current_offset = 0;
+        new_offsets[0] = 0;
+        for (sz_size_t i = 0; i < fragmented->count; i++) {
+            sz_size_t len = fragmented->spans[i].length;
+            if (len > 0) { memcpy(new_data + current_offset, fragmented->spans[i].start, len); }
+            current_offset += len;
+            new_offsets[i + 1] = current_offset;
+        }
+
+        // Free old fragmented data and convert to 64-bit tape
+        old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle);
+        Py_XDECREF(fragmented->parent);
+
+        strs->type = STRS_U64_TAPE;
+        strs->data.u64_tape.count = fragmented->count;
+        strs->data.u64_tape.data = new_data;
+        strs->data.u64_tape.offsets = new_offsets;
+        strs->data.u64_tape.allocator = *allocator;
+    }
+    else {
+        sz_u32_t *new_offsets =
+            (sz_u32_t *)allocator->allocate((fragmented->count + 1) * sizeof(sz_u32_t), allocator->handle);
+        if (!new_offsets) {
+            allocator->free(new_data, total_bytes, allocator->handle);
+            return sz_false_k;
+        }
+
+        // Copy fragmented data into consolidated buffer
+        sz_size_t current_offset = 0;
+        new_offsets[0] = 0;
+        for (sz_size_t i = 0; i < fragmented->count; i++) {
+            sz_size_t len = fragmented->spans[i].length;
+            if (len > 0) { memcpy(new_data + current_offset, fragmented->spans[i].start, len); }
+            current_offset += len;
+            // Ensure we don't overflow 32-bit offset
+            if (current_offset > UINT32_MAX) {
+                allocator->free(new_data, total_bytes, allocator->handle);
+                allocator->free(new_offsets, (fragmented->count + 1) * sizeof(sz_u32_t), allocator->handle);
+                return sz_false_k;
+            }
+            new_offsets[i + 1] = (sz_u32_t)current_offset;
+        }
+
+        // Free old fragmented data and convert to 32-bit tape
+        old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle);
+        Py_XDECREF(fragmented->parent);
+
+        strs->type = STRS_U32_TAPE;
+        strs->data.u32_tape.count = fragmented->count;
+        strs->data.u32_tape.data = new_data;
+        strs->data.u32_tape.offsets = new_offsets;
+        strs->data.u32_tape.allocator = *allocator;
     }
     return sz_true_k;
 }
@@ -495,7 +735,7 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t
  *  - `STRS_U64_TAPE_VIEW` becomes `STRS_U64_TAPE`.
  *  - `STRS_U32_TAPE` remains, if the allocator is different.
  *  - `STRS_U64_TAPE` remains, if the allocator is different.
- *  - `STRS_FRAGMENTED` remains, but detaches from the parent object, if the allocator is different.
+ *  - `STRS_FRAGMENTED` becomes a `STRS_U32_TAPE` or `STRS_U64_TAPE` depending on the content size.
  */
 SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator) {
     if (!object || !allocator) return sz_false_k;
@@ -520,162 +760,25 @@ SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory
     }
 
     // Check if the allocators are the same - no need to reallocate
+    printf("DEBUG: Comparing allocators - old(alloc=%p, free=%p, handle=%p) vs new(alloc=%p, free=%p, handle=%p)\n",
+           old_allocator.allocate, old_allocator.free, old_allocator.handle, allocator->allocate, allocator->free,
+           allocator->handle);
     if (sz_memory_allocator_equal(&old_allocator, allocator)) {
         printf("DEBUG: Allocators are equal, no reallocation needed\n");
         return sz_true_k;
     }
+    printf("DEBUG: Allocators are different, proceeding with reallocation\n");
 
-    // Handle different Strs layouts
+    // Handle different Strs layouts using dedicated functions
     switch (strs->type) {
-    case STRS_U32_TAPE: {
-        struct u32_tape_t *data = &strs->data.u32_tape;
-        sz_assert_(data->offsets && "Expected offsets to be allocated");
-
-        sz_size_t const string_data_size = (sz_size_t)data->offsets[data->count];
-        sz_size_t const offsets_size = (data->count + 1) * sizeof(sz_u32_t);
-
-        // Allocate new string data with new allocator
-        sz_ptr_t new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
-        if (!new_string_data) return sz_false_k;
-        memcpy(new_string_data, data->data, string_data_size);
-
-        // Allocate new offsets array
-        sz_u32_t *new_offsets = (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle);
-        if (!new_offsets) {
-            allocator->free(new_string_data, string_data_size, allocator->handle);
-            return sz_false_k;
-        }
-        memcpy(new_offsets, data->offsets, offsets_size);
-
-        // Free old memory with old allocator (tapes always own their data)
-        old_allocator.free(data->data, string_data_size, old_allocator.handle);
-        old_allocator.free(data->offsets, offsets_size, old_allocator.handle);
-
-        // Update pointers and allocator
-        data->data = new_string_data;
-        data->offsets = new_offsets;
-        data->allocator = *allocator;
-        break;
+    case STRS_U32_TAPE: return sz_py_replace_u32_tape_allocator(strs, &old_allocator, allocator);
+    case STRS_U64_TAPE: return sz_py_replace_u64_tape_allocator(strs, &old_allocator, allocator);
+    case STRS_U32_TAPE_VIEW: return sz_py_replace_u32_tape_view_allocator(strs, allocator);
+    case STRS_U64_TAPE_VIEW: return sz_py_replace_u64_tape_view_allocator(strs, allocator);
+    case STRS_FRAGMENTED: return sz_py_replace_fragmented_allocator(strs, &old_allocator, allocator);
     }
 
-    case STRS_U64_TAPE: {
-        struct u64_tape_t *data = &strs->data.u64_tape;
-        sz_assert_(data->offsets && "Expected offsets to be allocated");
-
-        sz_size_t string_data_size = (sz_size_t)data->offsets[data->count];
-        sz_size_t offsets_size = (data->count + 1) * sizeof(sz_u64_t);
-
-        // Allocate new string data with new allocator
-        sz_ptr_t new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
-        if (!new_string_data) return sz_false_k;
-        memcpy(new_string_data, data->data, string_data_size);
-
-        // Allocate new offsets array
-        sz_u64_t *new_offsets = (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle);
-        if (!new_offsets) {
-            allocator->free(new_string_data, string_data_size, allocator->handle);
-            return sz_false_k;
-        }
-        memcpy(new_offsets, data->offsets, offsets_size);
-
-        // Free old memory with old allocator (tapes always own their data)
-        old_allocator.free(data->data, string_data_size, old_allocator.handle);
-        old_allocator.free(data->offsets, offsets_size, old_allocator.handle);
-
-        // Update pointers and allocator
-        data->data = new_string_data;
-        data->offsets = new_offsets;
-        data->allocator = *allocator;
-        break;
-    }
-
-    case STRS_U32_TAPE_VIEW: {
-        // Convert view to tape by copying the data
-        struct u32_tape_view_t *view = &strs->data.u32_tape_view;
-        sz_size_t const string_data_size = (sz_size_t)view->offsets[view->count];
-        sz_size_t const offsets_size = (view->count + 1) * sizeof(sz_u32_t);
-
-        // Allocate new string data with new allocator
-        sz_ptr_t new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
-        if (!new_string_data) return sz_false_k;
-        memcpy(new_string_data, view->data, string_data_size);
-
-        // Allocate new offsets array
-        sz_u32_t *new_offsets = (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle);
-        if (!new_offsets) {
-            allocator->free(new_string_data, string_data_size, allocator->handle);
-            return sz_false_k;
-        }
-        memcpy(new_offsets, view->offsets, offsets_size);
-
-        // Release parent reference if any
-        Py_XDECREF(view->parent);
-
-        // Convert to tape layout
-        strs->type = STRS_U32_TAPE;
-        strs->data.u32_tape.count = view->count;
-        strs->data.u32_tape.data = new_string_data;
-        strs->data.u32_tape.offsets = new_offsets;
-        strs->data.u32_tape.allocator = *allocator;
-        break;
-    }
-
-    case STRS_U64_TAPE_VIEW: {
-        // Convert view to tape by copying the data
-        struct u64_tape_view_t *view = &strs->data.u64_tape_view;
-        sz_size_t const string_data_size = (sz_size_t)view->offsets[view->count];
-        sz_size_t const offsets_size = (view->count + 1) * sizeof(sz_u64_t);
-
-        // Allocate new string data with new allocator
-        sz_ptr_t new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
-        if (!new_string_data) return sz_false_k;
-        memcpy(new_string_data, view->data, string_data_size);
-
-        // Allocate new offsets array
-        sz_u64_t *new_offsets = (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle);
-        if (!new_offsets) {
-            allocator->free(new_string_data, string_data_size, allocator->handle);
-            return sz_false_k;
-        }
-        memcpy(new_offsets, view->offsets, offsets_size);
-
-        // Release parent reference if any
-        Py_XDECREF(view->parent);
-
-        // Convert to tape layout
-        strs->type = STRS_U64_TAPE;
-        strs->data.u64_tape.count = view->count;
-        strs->data.u64_tape.data = new_string_data;
-        strs->data.u64_tape.offsets = new_offsets;
-        strs->data.u64_tape.allocator = *allocator;
-        break;
-    }
-
-    case STRS_FRAGMENTED: {
-        struct fragmented_t *data = &strs->data.fragmented;
-        sz_assert_(data->spans && "Expected spans to be allocated");
-
-        // Reallocate the spans array with the new allocator
-        sz_size_t spans_size = data->count * sizeof(sz_string_view_t);
-        sz_string_view_t *new_spans = (sz_string_view_t *)allocator->allocate(spans_size, allocator->handle);
-        if (!new_spans) return sz_false_k;
-        memcpy(new_spans, data->spans, spans_size);
-
-        // Free old spans with old allocator
-        old_allocator.free(data->spans, spans_size, old_allocator.handle);
-
-        // Detach from parent object
-        Py_XDECREF(data->parent);
-        data->parent = NULL;
-
-        // Update pointer and allocator
-        data->spans = new_spans;
-        data->allocator = *allocator;
-        break;
-    }
-    }
-
-    return sz_true_k;
+    return sz_false_k; // Should never reach here
 }
 
 /**
@@ -4296,13 +4399,12 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             sz_i64_t const *offsets_64 = (sz_i64_t const *)buffers[1];
             sz_size_t total_bytes = offsets_64[length] - offsets_64[0];
 
-            // Handle zero-byte case (all nulls)
-            if (total_bytes == 0) total_bytes = 1; // Allocate at least 1 byte
-
             // Allocate new buffer and offsets using the allocator
-            sz_ptr_t new_data = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
+            sz_ptr_t new_data =
+                total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle) : (sz_ptr_t)NULL;
             sz_u64_t *new_offsets = (sz_u64_t *)allocator.allocate((length + 1) * sizeof(sz_u64_t), allocator.handle);
-            if (!new_data || !new_offsets) {
+            int const failed_to_allocate_data = total_bytes && !new_data;
+            if (failed_to_allocate_data || !new_offsets) {
                 if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
                 if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u64_t), allocator.handle);
                 PyErr_NoMemory();
@@ -4329,13 +4431,12 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             sz_i32_t const *offsets_32 = (sz_i32_t const *)buffers[1];
             sz_size_t total_bytes = offsets_32[length] - offsets_32[0];
 
-            // Handle zero-byte case (all nulls)
-            if (total_bytes == 0) total_bytes = 1; // Allocate at least 1 byte
-
             // Allocate new buffer and offsets using the allocator
-            sz_ptr_t new_data = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
+            sz_ptr_t new_data =
+                total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle) : (sz_ptr_t)NULL;
             sz_u32_t *new_offsets = (sz_u32_t *)allocator.allocate((length + 1) * sizeof(sz_u32_t), allocator.handle);
-            if (!new_data || !new_offsets) {
+            int const failed_to_allocate_data = total_bytes && !new_data;
+            if (failed_to_allocate_data || !new_offsets) {
                 if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
                 if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u32_t), allocator.handle);
                 PyErr_NoMemory();
@@ -4434,8 +4535,10 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
         sz_memory_allocator_init_default(&allocator);
 
         // Allocate data buffer using allocator
-        sz_ptr_t data_buffer = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
-        if (!data_buffer) {
+        sz_ptr_t data_buffer =
+            total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle) : (sz_ptr_t)NULL;
+        int const failed_to_allocate_data = total_bytes && !data_buffer;
+        if (failed_to_allocate_data) {
             PyErr_NoMemory();
             return -1;
         }
@@ -4444,7 +4547,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
             // Apache Arrow format: N+1 offsets for N strings
             sz_u64_t *offsets = (sz_u64_t *)allocator.allocate((count + 1) * sizeof(sz_u64_t), allocator.handle);
             if (!offsets) {
-                allocator.free(data_buffer, total_bytes, allocator.handle);
+                if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
                 PyErr_NoMemory();
                 return -1;
             }
@@ -4472,7 +4575,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
             // Apache Arrow format: N+1 offsets for N strings
             sz_u32_t *offsets = (sz_u32_t *)allocator.allocate((count + 1) * sizeof(sz_u32_t), allocator.handle);
             if (!offsets) {
-                allocator.free(data_buffer, total_bytes, allocator.handle);
+                if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
                 PyErr_NoMemory();
                 return -1;
             }
@@ -4580,14 +4683,16 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
         sz_memory_allocator_init_default(&allocator);
 
         // Allocate buffers based on calculated sizes
-        sz_ptr_t data_buffer = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
-        void *offsets;
+        sz_ptr_t data_buffer =
+            total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle) : (sz_ptr_t)NULL;
 
         // Apache Arrow format: N+1 offsets for N strings
+        void *offsets;
         if (use_64bit) { offsets = allocator.allocate((count + 1) * sizeof(sz_u64_t), allocator.handle); }
         else { offsets = allocator.allocate((count + 1) * sizeof(sz_u32_t), allocator.handle); }
 
-        if (!data_buffer || !offsets) {
+        int const failed_to_allocate_data = total_bytes && !data_buffer;
+        if (failed_to_allocate_data || !offsets) {
             if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
             if (offsets) {
                 sz_size_t offsets_size = use_64bit ? (count + 1) * sizeof(sz_u64_t) : (count + 1) * sizeof(sz_u32_t);
