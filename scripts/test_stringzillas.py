@@ -245,8 +245,9 @@ def test_levenshtein_distances_with_simple_cases(device_name: DeviceName):
 @pytest.mark.parametrize("device_name", DEVICE_NAMES)
 def test_levenshtein_distances_utf8_with_simple_cases(device_name: DeviceName):
 
-    if device_name == "cuda":
+    if device_name == "gpu_device":
         pytest.skip("CUDA backend does not support custom gaps in UTF-8 Levenshtein distances")
+        return
 
     device_scope, capabilities = device_scope_and_capabilities(device_name)
     unicode_engine = szs.LevenshteinDistancesUTF8(capabilities=capabilities)
@@ -304,14 +305,20 @@ def test_levenshtein_distances_with_custom_gaps(device_name: DeviceName):
 @pytest.mark.parametrize("device_name", DEVICE_NAMES)
 def test_levenshtein_distances_utf8_with_custom_gaps(device_name: DeviceName):
 
-    if device_name == "cuda":
+    if device_name == "gpu_device":
         pytest.skip("CUDA backend does not support custom gaps in UTF-8 Levenshtein distances")
+        return
 
     mismatch: int = 4
     opening: int = 3
 
     device_scope, capabilities = device_scope_and_capabilities(device_name)
-    unicode_engine = szs.LevenshteinDistancesUTF8(gap=opening, mismatch=mismatch, capabilities=capabilities)
+    unicode_engine = szs.LevenshteinDistancesUTF8(
+        open=opening,
+        extend=opening,
+        mismatch=mismatch,
+        capabilities=capabilities,
+    )
 
     def unicode_distance(a: str, b: str) -> int:
         a_strs = Strs([a])

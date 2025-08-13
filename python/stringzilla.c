@@ -519,7 +519,6 @@ static sz_bool_t sz_py_replace_u32_tape_allocator(Strs *strs, sz_memory_allocato
     data->data = new_string_data;
     data->offsets = new_offsets;
     data->allocator = *allocator;
-    printf("Replaced u32 tape allocator with %p\n", allocator->handle);
     return sz_true_k;
 }
 
@@ -743,9 +742,6 @@ SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory
 
     Strs *strs = (Strs *)object;
 
-    printf("DEBUG: sz_py_replace_strings_allocator called for Strs at %p\n", strs);
-    printf("DEBUG: Strs type: %d\n", strs->type);
-
     // Get the current allocator based on type
     sz_memory_allocator_t old_allocator;
     switch (strs->type) {
@@ -760,14 +756,7 @@ SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory
     }
 
     // Check if the allocators are the same - no need to reallocate
-    printf("DEBUG: Comparing allocators - old(alloc=%p, free=%p, handle=%p) vs new(alloc=%p, free=%p, handle=%p)\n",
-           old_allocator.allocate, old_allocator.free, old_allocator.handle, allocator->allocate, allocator->free,
-           allocator->handle);
-    if (sz_memory_allocator_equal(&old_allocator, allocator)) {
-        printf("DEBUG: Allocators are equal, no reallocation needed\n");
-        return sz_true_k;
-    }
-    printf("DEBUG: Allocators are different, proceeding with reallocation\n");
+    if (sz_memory_allocator_equal(&old_allocator, allocator)) return sz_true_k;
 
     // Handle different Strs layouts using dedicated functions
     switch (strs->type) {

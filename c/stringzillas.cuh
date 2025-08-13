@@ -253,6 +253,16 @@ sz_status_t sz_levenshtein_distances_for_(                                     /
     auto *engine = reinterpret_cast<levenshtein_backends_t *>(engine_punned);
     auto *device = reinterpret_cast<device_scope_t *>(device_punned);
 
+    // Debug: Check which variant the device holds
+    printf("DEBUG: Device scope variant index: %zu\n", device->variants.index());
+    if (std::holds_alternative<default_scope_t>(device->variants)) {
+        printf("DEBUG: Device contains default_scope_t\n");
+    }
+    else if (std::holds_alternative<cpu_scope_t>(device->variants)) { printf("DEBUG: Device contains cpu_scope_t\n"); }
+#if SZ_USE_CUDA
+    else if (std::holds_alternative<gpu_scope_t>(device->variants)) { printf("DEBUG: Device contains gpu_scope_t\n"); }
+#endif
+
     // Wrap our stable ABI sequences into C++ friendly containers
     auto results_strided = strided_ptr<sz_size_t> {reinterpret_cast<sz_ptr_t>(results), results_stride};
 
@@ -690,17 +700,25 @@ SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
 
 #if SZ_USE_CUDA
+    printf("DEBUG: Initializing GPU device scope for device %zu\n", gpu_device);
     sz::gpu_specs_t specs;
     auto specs_status = szs::gpu_specs_fetch(specs, static_cast<int>(gpu_device));
-    if (specs_status.status != sz::status_t::success_k) return static_cast<sz_status_t>(specs_status.status);
+    if (specs_status.status != sz::status_t::success_k) {
+        printf("DEBUG: Failed to fetch GPU specs, status: %d\n", (int)specs_status.status);
+        return static_cast<sz_status_t>(specs_status.status);
+    }
     szs::cuda_executor_t executor;
     auto executor_status = executor.try_scheduling(static_cast<int>(gpu_device));
-    if (executor_status.status != sz::status_t::success_k) return static_cast<sz_status_t>(executor_status.status);
+    if (executor_status.status != sz::status_t::success_k) {
+        printf("DEBUG: Failed to schedule GPU executor, status: %d\n", (int)executor_status.status);
+        return static_cast<sz_status_t>(executor_status.status);
+    }
 
     auto *scope =
         new (std::nothrow) device_scope_t {gpu_scope_t {.executor = std::move(executor), .specs = std::move(specs)}};
     if (!scope) return sz_bad_alloc_k;
     *scope_punned = reinterpret_cast<sz_device_scope_t>(scope);
+    printf("DEBUG: Successfully created GPU device scope\n");
     return sz_success_k;
 #else
     sz_unused_(gpu_device);
@@ -733,7 +751,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
 
 #if SZ_USE_ICE
-    bool const can_use_ice = (capabilities & sz_cap_serial_k) == sz_cap_serial_k;
+    bool const can_use_ice = (capabilities & sz_cap_ice_k) == sz_cap_ice_k;
     if (can_use_ice && can_use_linear_costs) {
         auto variant = szs::levenshtein_ice_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
@@ -757,6 +775,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
 #if SZ_USE_CUDA
     bool const can_use_cuda = (capabilities & sz_cap_cuda_k) == sz_cap_cuda_k;
     if (can_use_cuda && can_use_linear_costs) {
+        printf("DEBUG: Creating levenshtein_cuda_t variant (linear costs)\n");
         auto variant = szs::levenshtein_cuda_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_cuda_t>(), std::move(variant));
@@ -766,6 +785,7 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
         return sz_success_k;
     }
     else if (can_use_cuda) {
+        printf("DEBUG: Creating affine_levenshtein_cuda_t variant (affine costs)\n");
         auto variant = szs::affine_levenshtein_cuda_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_cuda_t>(), std::move(variant));
