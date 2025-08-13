@@ -167,44 +167,16 @@ static PyObject *DeviceScope_new(PyTypeObject *type, PyObject *args, PyObject *k
 }
 
 static int DeviceScope_init(DeviceScope *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t nargs = PyTuple_Size(args);
+    sz_size_t cpu_cores = 0;
+    sz_size_t gpu_device = 0;
+    int has_cpu_cores = 0;
+    int has_gpu_device = 0;
     PyObject *cpu_cores_obj = NULL;
     PyObject *gpu_device_obj = NULL;
 
-    // Manual argument parsing - check positional args first
-    if (nargs > 2) {
-        PyErr_SetString(PyExc_TypeError, "DeviceScope() takes at most 2 arguments");
-        return -1;
-    }
+    static char *kwlist[] = {"cpu_cores", "gpu_device", NULL};
 
-    if (nargs >= 1) cpu_cores_obj = PyTuple_GET_ITEM(args, 0);
-    if (nargs >= 2) gpu_device_obj = PyTuple_GET_ITEM(args, 1);
-
-    // Parse keyword arguments
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "cpu_cores") == 0) {
-                if (cpu_cores_obj) {
-                    PyErr_SetString(PyExc_TypeError, "cpu_cores specified twice");
-                    return -1;
-                }
-                cpu_cores_obj = value;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "gpu_device") == 0) {
-                if (gpu_device_obj) {
-                    PyErr_SetString(PyExc_TypeError, "gpu_device specified twice");
-                    return -1;
-                }
-                gpu_device_obj = value;
-            }
-            else {
-                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
-                return -1;
-            }
-        }
-    }
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|OO", kwlist, &cpu_cores_obj, &gpu_device_obj)) { return -1; }
 
     sz_status_t status;
 
@@ -217,7 +189,7 @@ static int DeviceScope_init(DeviceScope *self, PyObject *args, PyObject *kwargs)
             PyErr_SetString(PyExc_TypeError, "cpu_cores must be an integer");
             return -1;
         }
-        sz_size_t cpu_cores = PyLong_AsSize_t(cpu_cores_obj);
+        cpu_cores = PyLong_AsSize_t(cpu_cores_obj);
         if (cpu_cores == (sz_size_t)-1 && PyErr_Occurred()) { return -1; }
         status = sz_device_scope_init_cpu_cores(cpu_cores, &self->handle);
     }
@@ -226,7 +198,7 @@ static int DeviceScope_init(DeviceScope *self, PyObject *args, PyObject *kwargs)
             PyErr_SetString(PyExc_TypeError, "gpu_device must be an integer");
             return -1;
         }
-        sz_size_t gpu_device = PyLong_AsSize_t(gpu_device_obj);
+        gpu_device = PyLong_AsSize_t(gpu_device_obj);
         if (gpu_device == (sz_size_t)-1 && PyErr_Occurred()) { return -1; }
         status = sz_device_scope_init_gpu_device(gpu_device, &self->handle);
     }
@@ -288,175 +260,33 @@ static PyObject *LevenshteinDistances_new(PyTypeObject *type, PyObject *args, Py
 }
 
 static int LevenshteinDistances_init(LevenshteinDistances *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t nargs = PyTuple_Size(args);
-    sz_error_cost_t match = 0, mismatch = 1, open = 1, extend = 1;
+    int match = 0, mismatch = 1, open = 1, extend = 1;
     PyObject *capabilities_tuple = NULL;
     sz_capability_t capabilities = default_hardware_capabilities;
 
-    // Manual argument parsing - fast path for positional args
-    if (nargs >= 1) {
-        PyObject *obj = PyTuple_GET_ITEM(args, 0);
-        if (PyLong_Check(obj)) {
-            long val = PyLong_AsLong(obj);
-            if (val < -128 || val > 127) {
-                PyErr_SetString(PyExc_ValueError, "match cost must fit in 8-bit signed integer");
-                return -1;
-            }
-            match = (sz_error_cost_t)val;
-        }
-        else {
-            PyErr_SetString(PyExc_TypeError, "match cost must be an integer");
-            return -1;
-        }
-    }
+    static char *kwlist[] = {"match", "mismatch", "open", "extend", "capabilities", NULL};
 
-    if (nargs >= 2) {
-        PyObject *obj = PyTuple_GET_ITEM(args, 1);
-        if (PyLong_Check(obj)) {
-            long val = PyLong_AsLong(obj);
-            if (val < -128 || val > 127) {
-                PyErr_SetString(PyExc_ValueError, "mismatch cost must fit in 8-bit signed integer");
-                return -1;
-            }
-            mismatch = (sz_error_cost_t)val;
-        }
-        else {
-            PyErr_SetString(PyExc_TypeError, "mismatch cost must be an integer");
-            return -1;
-        }
-    }
-
-    if (nargs >= 3) {
-        PyObject *obj = PyTuple_GET_ITEM(args, 2);
-        if (PyLong_Check(obj)) {
-            long val = PyLong_AsLong(obj);
-            if (val < -128 || val > 127) {
-                PyErr_SetString(PyExc_ValueError, "open cost must fit in 8-bit signed integer");
-                return -1;
-            }
-            open = (sz_error_cost_t)val;
-        }
-        else {
-            PyErr_SetString(PyExc_TypeError, "open cost must be an integer");
-            return -1;
-        }
-    }
-
-    if (nargs >= 4) {
-        PyObject *obj = PyTuple_GET_ITEM(args, 3);
-        if (PyLong_Check(obj)) {
-            long val = PyLong_AsLong(obj);
-            if (val < -128 || val > 127) {
-                PyErr_SetString(PyExc_ValueError, "extend cost must fit in 8-bit signed integer");
-                return -1;
-            }
-            extend = (sz_error_cost_t)val;
-        }
-        else {
-            PyErr_SetString(PyExc_TypeError, "extend cost must be an integer");
-            return -1;
-        }
-    }
-
-    if (nargs >= 5) {
-        PyObject *obj = PyTuple_GET_ITEM(args, 4);
-        if (PyTuple_Check(obj)) { capabilities_tuple = obj; }
-        else {
-            PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
-            return -1;
-        }
-    }
-
-    if (nargs > 5) {
-        PyErr_SetString(PyExc_TypeError, "LevenshteinDistances() takes at most 5 arguments");
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|iiiiO", kwlist, &match, &mismatch, &open, &extend,
+                                     &capabilities_tuple)) {
         return -1;
     }
 
-    // Parse keyword arguments
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "match") == 0) {
-                if (nargs >= 1) {
-                    PyErr_SetString(PyExc_TypeError, "match specified twice");
-                    return -1;
-                }
-                if (!PyLong_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "match must be an integer");
-                    return -1;
-                }
-                long val = PyLong_AsLong(value);
-                if (val < -128 || val > 127) {
-                    PyErr_SetString(PyExc_ValueError, "match cost must fit in 8-bit signed integer");
-                    return -1;
-                }
-                match = (sz_error_cost_t)val;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "mismatch") == 0) {
-                if (nargs >= 2) {
-                    PyErr_SetString(PyExc_TypeError, "mismatch specified twice");
-                    return -1;
-                }
-                if (!PyLong_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "mismatch must be an integer");
-                    return -1;
-                }
-                long val = PyLong_AsLong(value);
-                if (val < -128 || val > 127) {
-                    PyErr_SetString(PyExc_ValueError, "mismatch cost must fit in 8-bit signed integer");
-                    return -1;
-                }
-                mismatch = (sz_error_cost_t)val;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "open") == 0) {
-                if (nargs >= 3) {
-                    PyErr_SetString(PyExc_TypeError, "open specified twice");
-                    return -1;
-                }
-                if (!PyLong_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "open must be an integer");
-                    return -1;
-                }
-                long val = PyLong_AsLong(value);
-                if (val < -128 || val > 127) {
-                    PyErr_SetString(PyExc_ValueError, "open cost must fit in 8-bit signed integer");
-                    return -1;
-                }
-                open = (sz_error_cost_t)val;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "extend") == 0) {
-                if (nargs >= 4) {
-                    PyErr_SetString(PyExc_TypeError, "extend specified twice");
-                    return -1;
-                }
-                if (!PyLong_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "extend must be an integer");
-                    return -1;
-                }
-                long val = PyLong_AsLong(value);
-                if (val < -128 || val > 127) {
-                    PyErr_SetString(PyExc_ValueError, "extend cost must fit in 8-bit signed integer");
-                    return -1;
-                }
-                extend = (sz_error_cost_t)val;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) {
-                if (nargs >= 5) {
-                    PyErr_SetString(PyExc_TypeError, "capabilities specified twice");
-                    return -1;
-                }
-                if (!PyTuple_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
-                    return -1;
-                }
-                capabilities_tuple = value;
-            }
-            else {
-                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
-                return -1;
-            }
-        }
+    // Validate range of values
+    if (match < -128 || match > 127) {
+        PyErr_SetString(PyExc_ValueError, "match cost must fit in 8-bit signed integer");
+        return -1;
+    }
+    if (mismatch < -128 || mismatch > 127) {
+        PyErr_SetString(PyExc_ValueError, "mismatch cost must fit in 8-bit signed integer");
+        return -1;
+    }
+    if (open < -128 || open > 127) {
+        PyErr_SetString(PyExc_ValueError, "open cost must fit in 8-bit signed integer");
+        return -1;
+    }
+    if (extend < -128 || extend > 127) {
+        PyErr_SetString(PyExc_ValueError, "extend cost must fit in 8-bit signed integer");
+        return -1;
     }
 
     // Parse capabilities if provided
@@ -476,49 +306,12 @@ static int LevenshteinDistances_init(LevenshteinDistances *self, PyObject *args,
 }
 
 static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t nargs = PyTuple_Size(args);
     PyObject *a_obj = NULL, *b_obj = NULL, *device_obj = NULL, *out_obj = NULL;
 
-    // Manual argument parsing for hot path
-    if (nargs < 2) {
-        PyErr_SetString(PyExc_TypeError, "LevenshteinDistances() requires at least 2 arguments");
+    static char *kwlist[] = {"a", "b", "device", "out", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) {
         return NULL;
-    }
-
-    if (nargs > 4) {
-        PyErr_SetString(PyExc_TypeError, "LevenshteinDistances() takes at most 4 arguments");
-        return NULL;
-    }
-
-    a_obj = PyTuple_GET_ITEM(args, 0);
-    b_obj = PyTuple_GET_ITEM(args, 1);
-    if (nargs >= 3) device_obj = PyTuple_GET_ITEM(args, 2);
-    if (nargs >= 4) out_obj = PyTuple_GET_ITEM(args, 3);
-
-    // Parse keyword arguments
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "device") == 0) {
-                if (device_obj) {
-                    PyErr_SetString(PyExc_TypeError, "device specified twice");
-                    return NULL;
-                }
-                device_obj = value;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "out") == 0) {
-                if (out_obj) {
-                    PyErr_SetString(PyExc_TypeError, "out specified twice");
-                    return NULL;
-                }
-                out_obj = value;
-            }
-            else {
-                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
-                return NULL;
-            }
-        }
     }
 
     DeviceScope *device_scope = NULL;
@@ -716,139 +509,33 @@ static void LevenshteinDistancesUTF8_dealloc(LevenshteinDistancesUTF8 *self) {
 }
 
 static int LevenshteinDistancesUTF8_init(LevenshteinDistancesUTF8 *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t nargs = PyTuple_Size(args);
-    sz_error_cost_t match = 0, mismatch = 1, gap = 1;
+    int match = 0, mismatch = 1, open = 1, extend = 1;
     PyObject *capabilities_tuple = NULL;
     sz_capability_t capabilities = default_hardware_capabilities;
 
-    // Manual argument parsing - fast path for positional args
-    if (nargs >= 1) {
-        PyObject *obj = PyTuple_GET_ITEM(args, 0);
-        if (PyLong_Check(obj)) {
-            long val = PyLong_AsLong(obj);
-            if (val < -128 || val > 127) {
-                PyErr_SetString(PyExc_ValueError, "match cost must fit in 8-bit signed integer");
-                return -1;
-            }
-            match = (sz_error_cost_t)val;
-        }
-        else {
-            PyErr_SetString(PyExc_TypeError, "match cost must be an integer");
-            return -1;
-        }
-    }
-    if (nargs >= 2) {
-        PyObject *obj = PyTuple_GET_ITEM(args, 1);
-        if (PyLong_Check(obj)) {
-            long val = PyLong_AsLong(obj);
-            if (val < -128 || val > 127) {
-                PyErr_SetString(PyExc_ValueError, "mismatch cost must fit in 8-bit signed integer");
-                return -1;
-            }
-            mismatch = (sz_error_cost_t)val;
-        }
-        else {
-            PyErr_SetString(PyExc_TypeError, "mismatch cost must be an integer");
-            return -1;
-        }
-    }
-    if (nargs >= 3) {
-        PyObject *obj = PyTuple_GET_ITEM(args, 2);
-        if (PyLong_Check(obj)) {
-            long val = PyLong_AsLong(obj);
-            if (val < -128 || val > 127) {
-                PyErr_SetString(PyExc_ValueError, "gap cost must fit in 8-bit signed integer");
-                return -1;
-            }
-            gap = (sz_error_cost_t)val;
-        }
-        else {
-            PyErr_SetString(PyExc_TypeError, "gap cost must be an integer");
-            return -1;
-        }
-    }
-    if (nargs >= 4) {
-        PyObject *obj = PyTuple_GET_ITEM(args, 3);
-        if (PyTuple_Check(obj)) { capabilities_tuple = obj; }
-        else {
-            PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
-            return -1;
-        }
-    }
-    if (nargs > 4) {
-        PyErr_SetString(PyExc_TypeError, "LevenshteinDistancesUTF8() takes at most 4 arguments");
+    static char *kwlist[] = {"match", "mismatch", "open", "extend", "capabilities", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|iiiiO", kwlist, &match, &mismatch, &open, &extend,
+                                     &capabilities_tuple)) {
         return -1;
     }
 
-    // Parse keyword arguments
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "match") == 0) {
-                if (nargs >= 1) {
-                    PyErr_SetString(PyExc_TypeError, "match specified twice");
-                    return -1;
-                }
-                if (!PyLong_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "match must be an integer");
-                    return -1;
-                }
-                long val = PyLong_AsLong(value);
-                if (val < -128 || val > 127) {
-                    PyErr_SetString(PyExc_ValueError, "match cost must fit in 8-bit signed integer");
-                    return -1;
-                }
-                match = (sz_error_cost_t)val;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "mismatch") == 0) {
-                if (nargs >= 2) {
-                    PyErr_SetString(PyExc_TypeError, "mismatch specified twice");
-                    return -1;
-                }
-                if (!PyLong_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "mismatch must be an integer");
-                    return -1;
-                }
-                long val = PyLong_AsLong(value);
-                if (val < -128 || val > 127) {
-                    PyErr_SetString(PyExc_ValueError, "mismatch cost must fit in 8-bit signed integer");
-                    return -1;
-                }
-                mismatch = (sz_error_cost_t)val;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "gap") == 0) {
-                if (nargs >= 3) {
-                    PyErr_SetString(PyExc_TypeError, "gap specified twice");
-                    return -1;
-                }
-                if (!PyLong_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "gap must be an integer");
-                    return -1;
-                }
-                long val = PyLong_AsLong(value);
-                if (val < -128 || val > 127) {
-                    PyErr_SetString(PyExc_ValueError, "gap cost must fit in 8-bit signed integer");
-                    return -1;
-                }
-                gap = (sz_error_cost_t)val;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) {
-                if (nargs >= 4) {
-                    PyErr_SetString(PyExc_TypeError, "capabilities specified twice");
-                    return -1;
-                }
-                if (!PyTuple_Check(value)) {
-                    PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
-                    return -1;
-                }
-                capabilities_tuple = value;
-            }
-            else {
-                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
-                return -1;
-            }
-        }
+    // Validate range of values
+    if (match < -128 || match > 127) {
+        PyErr_SetString(PyExc_ValueError, "match cost must fit in 8-bit signed integer");
+        return -1;
+    }
+    if (mismatch < -128 || mismatch > 127) {
+        PyErr_SetString(PyExc_ValueError, "mismatch cost must fit in 8-bit signed integer");
+        return -1;
+    }
+    if (open < -128 || open > 127) {
+        PyErr_SetString(PyExc_ValueError, "open cost must fit in 8-bit signed integer");
+        return -1;
+    }
+    if (extend < -128 || extend > 127) {
+        PyErr_SetString(PyExc_ValueError, "extend cost must fit in 8-bit signed integer");
+        return -1;
     }
 
     // Parse capabilities if provided
@@ -856,7 +543,8 @@ static int LevenshteinDistancesUTF8_init(LevenshteinDistancesUTF8 *self, PyObjec
         if (parse_and_intersect_capabilities(capabilities_tuple, &capabilities) != 0) { return -1; }
     }
 
-    sz_status_t status = sz_levenshtein_distances_utf8_init(match, mismatch, gap, NULL, capabilities, &self->handle);
+    sz_status_t status =
+        sz_levenshtein_distances_utf8_init(match, mismatch, open, extend, NULL, capabilities, &self->handle);
 
     if (status != sz_success_k) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize UTF-8 Levenshtein distances engine");
@@ -866,49 +554,12 @@ static int LevenshteinDistancesUTF8_init(LevenshteinDistancesUTF8 *self, PyObjec
 }
 
 static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, PyObject *args, PyObject *kwargs) {
-    Py_ssize_t nargs = PyTuple_Size(args);
     PyObject *a_obj = NULL, *b_obj = NULL, *device_obj = NULL, *out_obj = NULL;
 
-    // Manual argument parsing for hot path
-    if (nargs < 2) {
-        PyErr_SetString(PyExc_TypeError, "LevenshteinDistancesUTF8() requires at least 2 arguments");
+    static char *kwlist[] = {"a", "b", "device", "out", NULL};
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) {
         return NULL;
-    }
-
-    if (nargs > 4) {
-        PyErr_SetString(PyExc_TypeError, "LevenshteinDistancesUTF8() takes at most 4 arguments");
-        return NULL;
-    }
-
-    a_obj = PyTuple_GET_ITEM(args, 0);
-    b_obj = PyTuple_GET_ITEM(args, 1);
-    if (nargs >= 3) device_obj = PyTuple_GET_ITEM(args, 2);
-    if (nargs >= 4) out_obj = PyTuple_GET_ITEM(args, 3);
-
-    // Parse keyword arguments
-    if (kwargs) {
-        Py_ssize_t pos = 0;
-        PyObject *key, *value;
-        while (PyDict_Next(kwargs, &pos, &key, &value)) {
-            if (PyUnicode_CompareWithASCIIString(key, "device") == 0) {
-                if (device_obj) {
-                    PyErr_SetString(PyExc_TypeError, "device specified twice");
-                    return NULL;
-                }
-                device_obj = value;
-            }
-            else if (PyUnicode_CompareWithASCIIString(key, "out") == 0) {
-                if (out_obj) {
-                    PyErr_SetString(PyExc_TypeError, "out specified twice");
-                    return NULL;
-                }
-                out_obj = value;
-            }
-            else {
-                PyErr_Format(PyExc_TypeError, "Got an unexpected keyword argument '%U'", key);
-                return NULL;
-            }
-        }
     }
 
     DeviceScope *device_scope = NULL;
@@ -1055,15 +706,16 @@ cleanup:
 }
 
 static char const doc_LevenshteinDistancesUTF8[] = //
-    "LevenshteinDistancesUTF8(match=0, mismatch=1, gap=1, capabilities=None)\n"
+    "LevenshteinDistancesUTF8(match=0, mismatch=1, open=1, extend=1, capabilities=None)\n"
     "\n"
-    "Vectorized UTF-8 Levenshtein distance calculator.\n"
+    "Vectorized UTF-8 Levenshtein distance calculator with affine gap penalties.\n"
     "Computes edit distances between pairs of UTF-8 encoded strings.\n"
     "\n"
     "Args:\n"
     "  match (int): Cost of matching characters (default 0).\n"
     "  mismatch (int): Cost of mismatched characters (default 1).\n"
-    "  gap (int): Cost of gap insertion (default 1).\n"
+    "  open (int): Cost of opening a gap (default 1).\n"
+    "  extend (int): Cost of extending a gap (default 1).\n"
     "  capabilities (Tuple[str], optional): Hardware capabilities to use.\n"
     "                                       Will be intersected with detected capabilities.\n"
     "                                       Examples: ('serial',), ('haswell', 'parallel')\n"
