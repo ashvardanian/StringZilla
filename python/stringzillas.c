@@ -643,7 +643,18 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
         kernel_results, kernel_results_stride);
 
     if (status != sz_success_k) {
-        PyErr_SetString(PyExc_RuntimeError, "Levenshtein distance computation failed");
+        char const *error_msg;
+        switch (status) {
+        case sz_bad_alloc_k: error_msg = "Levenshtein failed: memory allocation failed"; break;
+        case sz_invalid_utf8_k: error_msg = "Levenshtein failed: invalid UTF-8 input"; break;
+        case sz_contains_duplicates_k: error_msg = "Levenshtein failed: contains duplicates"; break;
+        case sz_overflow_risk_k: error_msg = "Levenshtein failed: overflow risk"; break;
+        case sz_unexpected_dimensions_k: error_msg = "Levenshtein failed: input/output size mismatch"; break;
+        case sz_missing_gpu_k: error_msg = "Levenshtein failed: GPU support is missing in the library"; break;
+        case sz_status_unknown_k: error_msg = "Levenshtein failed: unknown error"; break;
+        default: error_msg = "Levenshtein failed: unexpected error"; break;
+        }
+        PyErr_Format(PyExc_RuntimeError, "%s (status code: %d)", error_msg, (int)status);
         goto cleanup;
     }
     return results_array;
@@ -1022,7 +1033,18 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
         kernel_results, kernel_results_stride);
 
     if (status != sz_success_k) {
-        PyErr_SetString(PyExc_RuntimeError, "Levenshtein distance computation failed");
+        char const *error_msg;
+        switch (status) {
+        case sz_bad_alloc_k: error_msg = "Levenshtein failed: memory allocation failed"; break;
+        case sz_invalid_utf8_k: error_msg = "Levenshtein failed: invalid UTF-8 input"; break;
+        case sz_contains_duplicates_k: error_msg = "Levenshtein failed: contains duplicates"; break;
+        case sz_overflow_risk_k: error_msg = "Levenshtein failed: overflow risk"; break;
+        case sz_unexpected_dimensions_k: error_msg = "Levenshtein failed: input/output size mismatch"; break;
+        case sz_missing_gpu_k: error_msg = "Levenshtein failed: GPU support is missing in the library"; break;
+        case sz_status_unknown_k: error_msg = "Levenshtein failed: unknown error"; break;
+        default: error_msg = "Levenshtein failed: unexpected error"; break;
+        }
+        PyErr_Format(PyExc_RuntimeError, "%s (status code: %d)", error_msg, (int)status);
         goto cleanup;
     }
     return results_array;
