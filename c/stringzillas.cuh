@@ -253,16 +253,6 @@ sz_status_t sz_levenshtein_distances_for_(                                     /
     auto *engine = reinterpret_cast<levenshtein_backends_t *>(engine_punned);
     auto *device = reinterpret_cast<device_scope_t *>(device_punned);
 
-    // Debug: Check which variant the device holds
-    printf("DEBUG: Device scope variant index: %zu\n", device->variants.index());
-    if (std::holds_alternative<default_scope_t>(device->variants)) {
-        printf("DEBUG: Device contains default_scope_t\n");
-    }
-    else if (std::holds_alternative<cpu_scope_t>(device->variants)) { printf("DEBUG: Device contains cpu_scope_t\n"); }
-#if SZ_USE_CUDA
-    else if (std::holds_alternative<gpu_scope_t>(device->variants)) { printf("DEBUG: Device contains gpu_scope_t\n"); }
-#endif
-
     // Wrap our stable ABI sequences into C++ friendly containers
     auto results_strided = strided_ptr<sz_size_t> {reinterpret_cast<sz_ptr_t>(results), results_stride};
 
@@ -576,7 +566,8 @@ struct fingerprints_backends_t {
 #if SZ_USE_CUDA
         vec<szs::floating_rolling_hashers<sz_cap_cuda_k, fingerprint_slice_k>>,
 #endif
-        vec<szs::floating_rolling_hashers<sz_cap_serial_k, fingerprint_slice_k>>, fallback_variant_t>
+        vec<szs::floating_rolling_hashers<sz_cap_serial_k, fingerprint_slice_k>>, //
+        fallback_variant_t>
         variants;
 
     sz_size_t dimensions = 0; // Total number of dimensions across all hashers
@@ -700,25 +691,17 @@ SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
 
 #if SZ_USE_CUDA
-    printf("DEBUG: Initializing GPU device scope for device %zu\n", gpu_device);
     sz::gpu_specs_t specs;
     auto specs_status = szs::gpu_specs_fetch(specs, static_cast<int>(gpu_device));
-    if (specs_status.status != sz::status_t::success_k) {
-        printf("DEBUG: Failed to fetch GPU specs, status: %d\n", (int)specs_status.status);
-        return static_cast<sz_status_t>(specs_status.status);
-    }
+    if (specs_status.status != sz::status_t::success_k) { return static_cast<sz_status_t>(specs_status.status); }
     szs::cuda_executor_t executor;
     auto executor_status = executor.try_scheduling(static_cast<int>(gpu_device));
-    if (executor_status.status != sz::status_t::success_k) {
-        printf("DEBUG: Failed to schedule GPU executor, status: %d\n", (int)executor_status.status);
-        return static_cast<sz_status_t>(executor_status.status);
-    }
+    if (executor_status.status != sz::status_t::success_k) { return static_cast<sz_status_t>(executor_status.status); }
 
     auto *scope =
         new (std::nothrow) device_scope_t {gpu_scope_t {.executor = std::move(executor), .specs = std::move(specs)}};
     if (!scope) return sz_bad_alloc_k;
     *scope_punned = reinterpret_cast<sz_device_scope_t>(scope);
-    printf("DEBUG: Successfully created GPU device scope\n");
     return sz_success_k;
 #else
     sz_unused_(gpu_device);
@@ -775,7 +758,6 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
 #if SZ_USE_CUDA
     bool const can_use_cuda = (capabilities & sz_cap_cuda_k) == sz_cap_cuda_k;
     if (can_use_cuda && can_use_linear_costs) {
-        printf("DEBUG: Creating levenshtein_cuda_t variant (linear costs)\n");
         auto variant = szs::levenshtein_cuda_t(substitution_costs, linear_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::levenshtein_cuda_t>(), std::move(variant));
@@ -785,7 +767,6 @@ SZ_DYNAMIC sz_status_t sz_levenshtein_distances_init(                           
         return sz_success_k;
     }
     else if (can_use_cuda) {
-        printf("DEBUG: Creating affine_levenshtein_cuda_t variant (affine costs)\n");
         auto variant = szs::affine_levenshtein_cuda_t(substitution_costs, affine_costs);
         auto engine = new (std::nothrow)
             levenshtein_backends_t(std::in_place_type_t<szs::affine_levenshtein_cuda_t>(), std::move(variant));
@@ -1285,38 +1266,115 @@ SZ_DYNAMIC void sz_smith_waterman_scores_free(sz_smith_waterman_scores_t engine_
 
 #pragma region Fingerprints
 
-SZ_DYNAMIC sz_status_t sz_fingerprints_init(                              //
-    sz_size_t alphabet_size, sz_size_t const *window_widths,              //
-    sz_size_t window_widths_count, sz_size_t dimensions_per_window_width, //
-    sz_memory_allocator_t const *alloc, sz_capability_t capabilities,     //
+SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
+    sz_size_t dimensions, sz_size_t alphabet_size,                    //
+    sz_size_t const *window_widths, sz_size_t window_widths_count,    //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
     sz_fingerprints_t *engine_punned) {
 
     sz_assert_(engine_punned != nullptr && *engine_punned == nullptr && "Engine must be uninitialized");
 
-    // If window widths are not provided, let's pick some of the default configurations.
-    auto const dimensions = window_widths_count * dimensions_per_window_width;
-    auto const can_use_sliced_sketchers = dimensions_per_window_width % fingerprint_slice_k == 0;
+    // Use some default window widths if none are provided
+    sz_size_t const default_window_widths[] = {3, 4, 5, 7, 9, 11, 15, 31};
+    if (!window_widths || window_widths_count == 0) {
+        window_widths = default_window_widths;
+        window_widths_count = sizeof(default_window_widths) / sizeof(sz_size_t);
+    }
+
+    // For optimal performance the number of dimensions per window width must be divisible by the fingerprint slice.
+    auto const dimensions_per_window_width_min = dimensions / window_widths_count;
+    auto const dimensions_per_window_width_max = sz::divide_round_up(dimensions, window_widths_count);
+    auto const can_use_sliced_sketchers = (dimensions_per_window_width_min == dimensions_per_window_width_max) &&
+                                          (dimensions_per_window_width_min % fingerprint_slice_k == 0);
     using fallback_variant_t = typename fingerprints_backends_t::fallback_variant_t;
 
-    if (!can_use_sliced_sketchers) {
-        auto variant = fallback_variant_t();
-        for (size_t window_width_index = 0; window_width_index < window_widths_count; ++window_width_index) {
-            auto const window_width = window_widths[window_width_index];
-            auto extend_status = variant.try_extend(window_width, dimensions_per_window_width, alphabet_size);
-            if (extend_status != sz::status_t::success_k) return static_cast<sz_status_t>(extend_status);
+#if SZ_USE_HASWELL
+    bool const can_use_haswell = (capabilities & sz_cap_haswell_k) == sz_cap_haswell_k;
+    if (can_use_haswell && can_use_sliced_sketchers) {
+        auto const count_hashers = dimensions / fingerprint_slice_k;
+        using hasher_t = szs::floating_rolling_hashers<sz_cap_haswell_k, fingerprint_slice_k>;
+        vec<hasher_t> hashers;
+        if (hashers.try_resize(count_hashers) != sz::status_t::success_k) return sz_bad_alloc_k;
+
+        // Populate the hashers with the given window widths
+        for (size_t i = 0; i < count_hashers; ++i) {
+            auto const window_width = window_widths[i % window_widths_count];
+            auto const first_dimension_offset = i * fingerprint_slice_k;
+            auto const seed_status = hashers[i].try_seed(window_width, alphabet_size, first_dimension_offset);
+            if (seed_status != sz::status_t::success_k) return static_cast<sz_status_t>(seed_status);
         }
 
         auto engine =
-            new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<fallback_variant_t>(), std::move(variant));
+            new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
         if (!engine) return sz_bad_alloc_k;
-
-        engine->dimensions = dimensions;
         *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
         return sz_success_k;
     }
+#endif // SZ_USE_HASWELL
 
-    // TODO: Implement unrolled logic
-    return sz_status_unknown_k;
+#if SZ_USE_SKYLAKE
+    bool const can_use_skylake = (capabilities & sz_cap_skylake_k) == sz_cap_skylake_k;
+    if (can_use_skylake && can_use_sliced_sketchers) {
+        auto const count_hashers = dimensions / fingerprint_slice_k;
+        using hasher_t = szs::floating_rolling_hashers<sz_cap_skylake_k, fingerprint_slice_k>;
+        vec<hasher_t> hashers;
+        if (hashers.try_resize(count_hashers) != sz::status_t::success_k) return sz_bad_alloc_k;
+
+        // Populate the hashers with the given window widths
+        for (size_t i = 0; i < count_hashers; ++i) {
+            auto const window_width = window_widths[i % window_widths_count];
+            auto const first_dimension_offset = i * fingerprint_slice_k;
+            auto const seed_status = hashers[i].try_seed(window_width, alphabet_size, first_dimension_offset);
+            if (seed_status != sz::status_t::success_k) return static_cast<sz_status_t>(seed_status);
+        }
+
+        auto engine =
+            new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
+        if (!engine) return sz_bad_alloc_k;
+        *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+        return sz_success_k;
+    }
+#endif // SZ_USE_SKYLAKE
+
+#if SZ_USE_CUDA
+    bool const can_use_cuda = (capabilities & sz_cap_cuda_k) == sz_cap_cuda_k;
+    if (can_use_cuda && can_use_sliced_sketchers) {
+        auto const count_hashers = dimensions / fingerprint_slice_k;
+        using hasher_t = szs::floating_rolling_hashers<sz_cap_cuda_k, fingerprint_slice_k>;
+        vec<hasher_t> hashers;
+        if (hashers.try_resize(count_hashers) != sz::status_t::success_k) return sz_bad_alloc_k;
+
+        // Populate the hashers with the given window widths
+        for (size_t i = 0; i < count_hashers; ++i) {
+            auto const window_width = window_widths[i % window_widths_count];
+            auto const first_dimension_offset = i * fingerprint_slice_k;
+            auto const seed_status = hashers[i].try_seed(window_width, alphabet_size, first_dimension_offset);
+            if (seed_status != sz::status_t::success_k) return static_cast<sz_status_t>(seed_status);
+        }
+
+        auto engine =
+            new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<vec<hasher_t>>(), std::move(hashers));
+        if (!engine) return sz_bad_alloc_k;
+        *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+        return sz_success_k;
+    }
+#endif // SZ_USE_CUDA
+
+    // Build the fallback variant with interleaving width dimensions
+    auto variant = fallback_variant_t();
+    for (size_t dimension = 0; dimension < dimensions; ++dimension) {
+        auto const window_width = window_widths[dimension % window_widths_count];
+        auto const extend_status = variant.try_extend(window_width, 1, alphabet_size);
+        if (extend_status != sz::status_t::success_k) return static_cast<sz_status_t>(extend_status);
+    }
+
+    auto engine =
+        new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<fallback_variant_t>(), std::move(variant));
+    if (!engine) return sz_bad_alloc_k;
+
+    engine->dimensions = dimensions;
+    *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+    return sz_success_k;
 }
 
 SZ_DYNAMIC sz_status_t sz_fingerprints_sequence(                      //
@@ -1365,5 +1423,56 @@ SZ_DYNAMIC void sz_fingerprints_free(sz_fingerprints_t engine_punned) {
 }
 
 #pragma endregion Fingerprints
+
+#pragma region Fingerprints UTF8
+
+SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_init(                     //
+    sz_size_t dimensions, sz_size_t alphabet_size,                    //
+    sz_size_t const *window_widths, sz_size_t window_widths_count,    //
+    sz_memory_allocator_t const *alloc, sz_capability_t capabilities, //
+    sz_fingerprints_utf8_t *engine_punned) {
+
+    return sz_fingerprints_init( //
+        dimensions, alphabet_size, window_widths, window_widths_count, alloc, capabilities, engine_punned);
+}
+
+SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_sequence(                      //
+    sz_fingerprints_utf8_t engine_punned, sz_device_scope_t device_punned, //
+    sz_sequence_t const *texts,                                            //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                     //
+    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+
+    return sz_fingerprints_sequence(         //
+        engine_punned, device_punned, texts, //
+        min_hashes, min_hashes_stride, min_counts, min_counts_stride);
+}
+
+SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_u32tape(                       //
+    sz_fingerprints_utf8_t engine_punned, sz_device_scope_t device_punned, //
+    sz_sequence_u32tape_t const *texts,                                    //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                     //
+    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+
+    return sz_fingerprints_u32tape(          //
+        engine_punned, device_punned, texts, //
+        min_hashes, min_hashes_stride, min_counts, min_counts_stride);
+}
+
+SZ_DYNAMIC sz_status_t sz_fingerprints_utf8_u64tape(                       //
+    sz_fingerprints_utf8_t engine_punned, sz_device_scope_t device_punned, //
+    sz_sequence_u64tape_t const *texts,                                    //
+    sz_u32_t *min_hashes, sz_size_t min_hashes_stride,                     //
+    sz_u32_t *min_counts, sz_size_t min_counts_stride) {
+
+    return sz_fingerprints_u64tape(          //
+        engine_punned, device_punned, texts, //
+        min_hashes, min_hashes_stride, min_counts, min_counts_stride);
+}
+
+SZ_DYNAMIC void sz_fingerprints_utf8_free(sz_fingerprints_utf8_t engine_punned) {
+    return sz_fingerprints_free(engine_punned);
+}
+
+#pragma endregion Fingerprints UTF8
 
 } // extern "C"

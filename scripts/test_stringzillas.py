@@ -22,35 +22,11 @@ from string import ascii_lowercase
 from typing import Optional, Literal
 
 import pytest
+import numpy as np  # ! Unlike StringZilla, NumPy is mandatory for StringZillas
 
 import stringzilla as sz
 import stringzillas as szs
 from stringzilla import Str, Strs
-
-# NumPy is available on most platforms and is required for most tests.
-# When using PyPy on some platforms NumPy has internal issues, that will
-# raise a weird error, not an `ImportError`. That's why we intentionally
-# use a naked `except:`. Necessary evil!
-try:
-    import numpy as np
-
-    numpy_available = True
-except:
-    # NumPy is not installed, most tests will be skipped
-    numpy_available = False
-
-
-# PyArrow is not available on most platforms.
-# When using PyPy on some platforms PyArrow has internal issues, that will
-# raise a weird error, not an `ImportError`. That's why we intentionally
-# use a naked `except:`. Necessary evil!
-try:
-    import pyarrow as pa
-
-    pyarrow_available = True
-except:
-    # PyArrow is not installed, most tests will be skipped
-    pyarrow_available = False
 
 
 def test_library_properties():
@@ -163,7 +139,6 @@ def is_equal_strings(native_strings, big_strings):
         assert native_slice == big_slice, f"Mismatch between `{native_slice}` and `{str(big_slice)}`"
 
 
-@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def baseline_levenshtein_distance(s1, s2) -> int:
     """
     Compute the Levenshtein distance between two strings.
@@ -341,7 +316,6 @@ def test_levenshtein_distances_utf8_with_custom_gaps(device_name: DeviceName):
 
 @pytest.mark.repeat(10)
 @pytest.mark.parametrize("config", INPUT_SIZE_CONFIGS)
-@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_levenshtein_distance_random(config: InputSizeConfig):
     a_batch, b_batch = get_random_string_batch(config)
 
@@ -358,7 +332,6 @@ def test_levenshtein_distance_random(config: InputSizeConfig):
 
 @pytest.mark.repeat(10)
 @pytest.mark.parametrize("config", INPUT_SIZE_CONFIGS)
-@pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_needleman_wunsch_vs_levenshtein_random(config: InputSizeConfig):
     """Test Needleman-Wunsch global alignment scores against Levenshtein distances with random strings."""
 
@@ -379,45 +352,57 @@ def test_needleman_wunsch_vs_levenshtein_random(config: InputSizeConfig):
     np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
 
 
-def test_fingerprints():
-    """Test Fingerprints and FingerprintsUTF8 basic functionality."""
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_fingerprints(device_name: str):
+    """Test Fingerprints basic functionality."""
 
-    engine = szs.Fingerprints()
-    utf8_engine = szs.FingerprintsUTF8()
+    # Create engine with smaller dimensions to avoid memory issues
+    device_scope, capabilities = device_scope_and_capabilities(device_name)
+    engine = szs.Fingerprints(ndim=64, capabilities=capabilities)
 
-    # Basic functionality
-    assert engine([]) == []
-    assert utf8_engine([]) == []
+    # Basic functionality - empty input should return empty arrays
+    hashes, counts = engine(Strs([]), device=device_scope)
+    assert hashes.shape == (0, 64)
+    assert counts.shape == (0, 64)
+    assert hashes.dtype == np.uint32
+    assert counts.dtype == np.uint32
 
-    test_strings = ["hello", "world", "hello"]
-    results = engine(test_strings)
-    assert len(results) == 3
-    assert results[0] == results[2], "Identical strings should produce identical fingerprints"
-    assert results[0] != results[1], "Different strings should produce different fingerprints"
+    test_strings = Strs(["hello", "world", "hello"])
+    hashes, counts = engine(test_strings, device=device_scope)
 
-    # Unicode handling
-    unicode_strings = ["café", "世界", "🌟"]
-    utf8_results = utf8_engine(unicode_strings)
-    assert len(utf8_results) == 3
-    assert (
-        len(set(tuple(fp) if hasattr(fp, "__iter__") else fp for fp in utf8_results)) == 3
-    ), "Unicode strings should produce unique fingerprints"
+    # Check output shape and types
+    assert hashes.shape == (3, 64), f"Expected (3, 64), got {hashes.shape}"
+    assert counts.shape == (3, 64), f"Expected (3, 64), got {counts.shape}"
+    assert hashes.dtype == np.uint32
+    assert counts.dtype == np.uint32
+
+    # Identical strings should produce identical fingerprints
+    assert np.array_equal(hashes[0], hashes[2]), "Identical strings should produce identical hashes"
+    assert np.array_equal(counts[0], counts[2]), "Identical strings should produce identical counts"
+
+    # Different strings should produce different fingerprints
+    assert not np.array_equal(hashes[0], hashes[1]), "Different strings should produce different hashes"
+    assert not np.array_equal(counts[0], counts[1]), "Different strings should produce different counts"
 
 
 @pytest.mark.repeat(5)
 @pytest.mark.parametrize("batch_size", [1, 10, 100])
-def test_fingerprints_random(batch_size: int):
-    """Test fingerprinting with random strings."""
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+def test_fingerprints_random(batch_size: int, device_name: str):
+    """Test Fingerprints with random strings."""
 
-    engine = szs.Fingerprints()
-    batch = [get_random_string(length=randint(5, 50)) for _ in range(batch_size)]
+    device_scope, capabilities = device_scope_and_capabilities(device_name)
+    engine = szs.Fingerprints(ndim=64, capabilities=capabilities)
+    batch = Strs([get_random_string(length=randint(5, 50)) for _ in range(batch_size)])
 
-    results = engine(batch)
-    assert len(results) == batch_size
+    hashes, counts = engine(batch, device=device_scope)
+    assert hashes.shape == (batch_size, 64)
+    assert counts.shape == (batch_size, 64)
 
     # Verify consistency
-    results_repeated = engine(batch)
-    assert results == results_repeated, "Same input should produce same fingerprints"
+    hashes_repeated, counts_repeated = engine(batch, device=device_scope)
+    assert np.array_equal(hashes, hashes_repeated), "Same input should produce same hashes"
+    assert np.array_equal(counts, counts_repeated), "Same input should produce same counts"
 
 
 if __name__ == "__main__":
