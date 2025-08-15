@@ -36,6 +36,7 @@ overloaded(callable_types_...) -> overloaded<callable_types_...>;
 
 /** Wraps a `sz_sequence_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_as_cpp_container_t {
+    using value_type = std::string_view;
     sz_sequence_t const *sequence_ = nullptr;
 
     std::size_t size() const noexcept {
@@ -53,6 +54,7 @@ struct sz_sequence_as_cpp_container_t {
 
 /** Wraps a `sz_sequence_u64tape_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_u64tape_as_cpp_container_t {
+    using value_type = std::string_view;
     sz_sequence_u64tape_t const *tape_ = nullptr;
 
     std::size_t size() const noexcept {
@@ -68,6 +70,7 @@ struct sz_sequence_u64tape_as_cpp_container_t {
 
 /** Wraps a `sz_sequence_u32tape_t` to feel like `std::vector<std::string_view>>` in the implementation layer. */
 struct sz_sequence_u32tape_as_cpp_container_t {
+    using value_type = std::string_view;
     sz_sequence_u32tape_t const *tape_ = nullptr;
 
     std::size_t size() const noexcept {
