@@ -187,7 +187,7 @@ typedef struct {
         STRS_U32_TAPE = 2,
         STRS_U64_TAPE = 3,
         STRS_FRAGMENTED = 4,
-    } type;
+    } layout;
 
     union {
         /**
@@ -270,7 +270,7 @@ static void temporary_memory_free(sz_ptr_t start, sz_size_t size, sz_string_view
 
 static sz_cptr_t Strs_get_start_(void const *handle, sz_size_t i) {
     Strs *strs = (Strs *)handle;
-    switch (strs->type) {
+    switch (strs->layout) {
     case STRS_U32_TAPE: return strs->data.u32_tape.data + strs->data.u32_tape.offsets[i];
     case STRS_U32_TAPE_VIEW: return strs->data.u32_tape_view.data + strs->data.u32_tape_view.offsets[i];
     case STRS_U64_TAPE: return strs->data.u64_tape.data + strs->data.u64_tape.offsets[i];
@@ -282,7 +282,7 @@ static sz_cptr_t Strs_get_start_(void const *handle, sz_size_t i) {
 
 static sz_size_t Strs_get_length_(void const *handle, sz_size_t i) {
     Strs *strs = (Strs *)handle;
-    switch (strs->type) {
+    switch (strs->layout) {
     case STRS_U32_TAPE: return strs->data.u32_tape.offsets[i + 1] - strs->data.u32_tape.offsets[i];
     case STRS_U32_TAPE_VIEW: return strs->data.u32_tape_view.offsets[i + 1] - strs->data.u32_tape_view.offsets[i];
     case STRS_U64_TAPE: return strs->data.u64_tape.offsets[i + 1] - strs->data.u64_tape.offsets[i];
@@ -395,14 +395,14 @@ SZ_DYNAMIC sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start
         return 1;
     }
     else {
-        PyErr_SetString(PyExc_TypeError, "Unsupported argument type");
+        PyErr_SetString(PyExc_TypeError, "Unsupported argument layout");
         return 0;
     }
 }
 
-sz_cptr_t sz_py_strs_sequence_member_start_if_reordered(void const *sequence_punned, sz_size_t index) {
+sz_cptr_t sz_py_strs_sequence_member_start_if_fragmented(void const *sequence_punned, sz_size_t index) {
     Strs *strs = (Strs *)sequence_punned;
-    sz_assert_(strs->type == STRS_FRAGMENTED && "Expected a reordered Strs type");
+    sz_assert_(strs->layout == STRS_FRAGMENTED && "Expected a reordered Strs layout");
     if (index < 0 || index >= strs->data.fragmented.count) {
         PyErr_SetString(PyExc_IndexError, "Index out of bounds");
         return NULL;
@@ -410,9 +410,9 @@ sz_cptr_t sz_py_strs_sequence_member_start_if_reordered(void const *sequence_pun
     return strs->data.fragmented.spans[index].start;
 }
 
-sz_size_t sz_py_strs_sequence_member_length_if_reordered(void const *sequence_punned, sz_size_t index) {
+sz_size_t sz_py_strs_sequence_member_length_if_fragmented(void const *sequence_punned, sz_size_t index) {
     Strs *strs = (Strs *)sequence_punned;
-    sz_assert_(strs->type == STRS_FRAGMENTED && "Expected a reordered Strs type");
+    sz_assert_(strs->layout == STRS_FRAGMENTED && "Expected a reordered Strs layout");
     if (index < 0 || index >= strs->data.fragmented.count) {
         PyErr_SetString(PyExc_IndexError, "Index out of bounds");
         return 0;
@@ -428,12 +428,12 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_seque
 
     if (PyObject_TypeCheck(object, &StrsType)) {
         Strs *strs = (Strs *)object;
-        sz_assert_(strs->type == STRS_FRAGMENTED && "View as tapes!");
+        sz_assert_(strs->layout == STRS_FRAGMENTED && "View as tapes!");
 
         sequence->handle = strs;
         sequence->count = strs->data.fragmented.count;
-        sequence->get_start = sz_py_strs_sequence_member_start_if_reordered;
-        sequence->get_length = sz_py_strs_sequence_member_length_if_reordered;
+        sequence->get_start = sz_py_strs_sequence_member_start_if_fragmented;
+        sequence->get_length = sz_py_strs_sequence_member_length_if_fragmented;
         return sz_true_k;
     }
 
@@ -450,13 +450,13 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
     Strs *strs = (Strs *)object;
 
-    if (strs->type == STRS_U32_TAPE) {
+    if (strs->layout == STRS_U32_TAPE) {
         *data = strs->data.u32_tape.data;
         *offsets = strs->data.u32_tape.offsets;
         *count = strs->data.u32_tape.count;
         return sz_true_k;
     }
-    else if (strs->type == STRS_U32_TAPE_VIEW) {
+    else if (strs->layout == STRS_U32_TAPE_VIEW) {
         *data = strs->data.u32_tape_view.data;
         *offsets = strs->data.u32_tape_view.offsets;
         *count = strs->data.u32_tape_view.count;
@@ -475,12 +475,12 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t
     if (!PyObject_TypeCheck(object, &StrsType)) return sz_false_k;
     Strs *strs = (Strs *)object;
 
-    if (strs->type == STRS_U64_TAPE) {
+    if (strs->layout == STRS_U64_TAPE) {
         *data = strs->data.u64_tape.data;
         *offsets = strs->data.u64_tape.offsets;
         *count = strs->data.u64_tape.count;
     }
-    else if (strs->type == STRS_U64_TAPE_VIEW) {
+    else if (strs->layout == STRS_U64_TAPE_VIEW) {
         *data = strs->data.u64_tape_view.data;
         *offsets = strs->data.u64_tape_view.offsets;
         *count = strs->data.u64_tape_view.count;
@@ -585,7 +585,7 @@ static sz_bool_t sz_py_replace_u32_tape_view_allocator(Strs *strs, sz_memory_all
     Py_XDECREF(view->parent);
 
     // Convert to tape layout
-    strs->type = STRS_U32_TAPE;
+    strs->layout = STRS_U32_TAPE;
     strs->data.u32_tape.count = view->count;
     strs->data.u32_tape.data = new_string_data;
     strs->data.u32_tape.offsets = new_offsets;
@@ -622,7 +622,7 @@ static sz_bool_t sz_py_replace_u64_tape_view_allocator(Strs *strs, sz_memory_all
     Py_XDECREF(view->parent);
 
     // Convert to tape layout
-    strs->type = STRS_U64_TAPE;
+    strs->layout = STRS_U64_TAPE;
     strs->data.u64_tape.count = view->count;
     strs->data.u64_tape.data = new_string_data;
     strs->data.u64_tape.offsets = new_offsets;
@@ -648,7 +648,7 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
         old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle);
         Py_XDECREF(fragmented->parent);
 
-        strs->type = STRS_U32_TAPE;
+        strs->layout = STRS_U32_TAPE;
         strs->data.u32_tape.count = fragmented->count;
         strs->data.u32_tape.data = NULL;
         strs->data.u32_tape.offsets = NULL;
@@ -682,7 +682,7 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
         old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle);
         Py_XDECREF(fragmented->parent);
 
-        strs->type = STRS_U64_TAPE;
+        strs->layout = STRS_U64_TAPE;
         strs->data.u64_tape.count = fragmented->count;
         strs->data.u64_tape.data = new_data;
         strs->data.u64_tape.offsets = new_offsets;
@@ -716,7 +716,7 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
         old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle);
         Py_XDECREF(fragmented->parent);
 
-        strs->type = STRS_U32_TAPE;
+        strs->layout = STRS_U32_TAPE;
         strs->data.u32_tape.count = fragmented->count;
         strs->data.u32_tape.data = new_data;
         strs->data.u32_tape.offsets = new_offsets;
@@ -729,7 +729,7 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
  *  @brief  Helper function to replace the memory allocator in a `Strs` object.
  *          This reallocates existing string data using the new allocator.
  *
- *  This may change the type of the `Strs` layout:
+ *  This may change the layout of the `Strs` layout:
  *  - `STRS_U32_TAPE_VIEW` becomes `STRS_U32_TAPE`.
  *  - `STRS_U64_TAPE_VIEW` becomes `STRS_U64_TAPE`.
  *  - `STRS_U32_TAPE` remains, if the allocator is different.
@@ -742,9 +742,9 @@ SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory
 
     Strs *strs = (Strs *)object;
 
-    // Get the current allocator based on type
+    // Get the current allocator based on layout
     sz_memory_allocator_t old_allocator;
-    switch (strs->type) {
+    switch (strs->layout) {
     case STRS_U32_TAPE: old_allocator = strs->data.u32_tape.allocator; break;
     case STRS_U64_TAPE: old_allocator = strs->data.u64_tape.allocator; break;
     case STRS_FRAGMENTED: old_allocator = strs->data.fragmented.allocator; break;
@@ -759,7 +759,7 @@ SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory
     if (sz_memory_allocator_equal(&old_allocator, allocator)) return sz_true_k;
 
     // Handle different Strs layouts using dedicated functions
-    switch (strs->type) {
+    switch (strs->layout) {
     case STRS_U32_TAPE: return sz_py_replace_u32_tape_allocator(strs, &old_allocator, allocator);
     case STRS_U64_TAPE: return sz_py_replace_u64_tape_allocator(strs, &old_allocator, allocator);
     case STRS_U32_TAPE_VIEW: return sz_py_replace_u32_tape_view_allocator(strs, allocator);
@@ -832,15 +832,15 @@ void str_at_offset_fragmented(Strs *strs, Py_ssize_t i, Py_ssize_t count, //
 }
 
 get_string_at_offset_t str_at_offset_getter(Strs *strs) {
-    switch (strs->type) {
+    switch (strs->layout) {
     case STRS_U32_TAPE: return str_at_offset_u32_tape;
     case STRS_U32_TAPE_VIEW: return str_at_offset_u32_tape_view;
     case STRS_U64_TAPE: return str_at_offset_u64_tape;
     case STRS_U64_TAPE_VIEW: return str_at_offset_u64_tape_view;
     case STRS_FRAGMENTED: return str_at_offset_fragmented;
     default:
-        // Unsupported type
-        PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
+        // Unsupported layout
+        PyErr_SetString(PyExc_TypeError, "Unsupported layout for conversion");
         return NULL;
     }
 }
@@ -1029,7 +1029,7 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
                 return -1;
     }
 
-    // Now, type-check and cast each argument
+    // Now, layout-check and cast each argument
     Py_ssize_t from = 0, to = PY_SSIZE_T_MAX;
     if (from_obj) {
         from = PyLong_AsSsize_t(from_obj);
@@ -1360,7 +1360,7 @@ static int Str_in(Str *self, PyObject *needle_obj) {
 
     sz_string_view_t needle;
     if (!sz_py_export_string_like(needle_obj, &needle.start, &needle.length)) {
-        wrap_current_exception("Unsupported needle type");
+        wrap_current_exception("Unsupported needle layout");
         return -1;
     }
 
@@ -1375,7 +1375,7 @@ static PyObject *Strs_get_tape_nbytes(Str *self, void *closure) { return NULL; }
 static PyObject *Strs_get_offsets_nbytes(Str *self, void *closure) { return NULL; }
 
 static Py_ssize_t Strs_len(Strs *self) {
-    switch (self->type) {
+    switch (self->layout) {
     case STRS_U32_TAPE: return self->data.u32_tape.count;
     case STRS_U32_TAPE_VIEW: return self->data.u32_tape_view.count;
     case STRS_U64_TAPE: return self->data.u64_tape.count;
@@ -1446,7 +1446,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
     if (result == NULL && PyErr_NoMemory()) return NULL;
 
     if (result_count == 0) {
-        result->type = STRS_FRAGMENTED;
+        result->layout = STRS_FRAGMENTED;
         result->data.fragmented.count = 0;
         result->data.fragmented.spans = NULL;
         result->data.fragmented.parent = NULL;
@@ -1465,7 +1465,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         }
 
         get_string_at_offset_t getter = str_at_offset_getter(self);
-        result->type = STRS_FRAGMENTED;
+        result->layout = STRS_FRAGMENTED;
         result->data.fragmented.count = result_count;
         result->data.fragmented.spans = new_spans;
         result->data.fragmented.parent = NULL;
@@ -1488,11 +1488,11 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
     }
 
     // For step=1, follow the docstring behavior:
-    switch (self->type) {
+    switch (self->layout) {
 
     case STRS_U32_TAPE_VIEW: {
         // STRS_U32_TAPE_VIEW input yields STRS_U32_TAPE_VIEW for step=1
-        result->type = STRS_U32_TAPE_VIEW;
+        result->layout = STRS_U32_TAPE_VIEW;
         result->data.u32_tape_view.count = result_count;
         result->data.u32_tape_view.data = self->data.u32_tape_view.data + self->data.u32_tape_view.offsets[start];
         result->data.u32_tape_view.offsets = self->data.u32_tape_view.offsets + start;
@@ -1503,7 +1503,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
     case STRS_U64_TAPE_VIEW: {
         // STRS_U64_TAPE_VIEW input yields STRS_U64_TAPE_VIEW for step=1
-        result->type = STRS_U64_TAPE_VIEW;
+        result->layout = STRS_U64_TAPE_VIEW;
         result->data.u64_tape_view.count = result_count;
         result->data.u64_tape_view.data = self->data.u64_tape_view.data + self->data.u64_tape_view.offsets[start];
         result->data.u64_tape_view.offsets = self->data.u64_tape_view.offsets + start;
@@ -1514,7 +1514,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
     case STRS_U32_TAPE: {
         // STRS_U32_TAPE input yields STRS_U32_TAPE_VIEW for step=1
-        result->type = STRS_U32_TAPE_VIEW;
+        result->layout = STRS_U32_TAPE_VIEW;
         result->data.u32_tape_view.count = result_count;
         result->data.u32_tape_view.data = self->data.u32_tape.data + self->data.u32_tape.offsets[start];
         result->data.u32_tape_view.offsets = self->data.u32_tape.offsets + start;
@@ -1525,7 +1525,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
     case STRS_U64_TAPE: {
         // STRS_U64_TAPE input yields STRS_U64_TAPE_VIEW for step=1
-        result->type = STRS_U64_TAPE_VIEW;
+        result->layout = STRS_U64_TAPE_VIEW;
         result->data.u64_tape_view.count = result_count;
         result->data.u64_tape_view.data = self->data.u64_tape.data + self->data.u64_tape.offsets[start];
         result->data.u64_tape_view.offsets = self->data.u64_tape.offsets + start;
@@ -1536,7 +1536,7 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
 
     case STRS_FRAGMENTED: {
         // STRS_FRAGMENTED input yields STRS_FRAGMENTED output
-        result->type = STRS_FRAGMENTED;
+        result->layout = STRS_FRAGMENTED;
         result->data.fragmented.count = result_count;
         result->data.fragmented.parent = self->data.fragmented.parent;
         sz_memory_allocator_init_default(&result->data.fragmented.allocator);
@@ -1553,8 +1553,8 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
     }
 
     default:
-        // Unsupported type
-        PyErr_SetString(PyExc_TypeError, "Unsupported type for conversion");
+        // Unsupported layout
+        PyErr_SetString(PyExc_TypeError, "Unsupported layout for conversion");
         Py_XDECREF(result);
         return NULL;
     }
@@ -2919,7 +2919,7 @@ static Strs *Str_split_(PyObject *parent_string, sz_string_view_t const text, sz
     if (!result) return NULL;
 
     // Use reordered subviews layout with the haystack as parent
-    result->type = STRS_FRAGMENTED;
+    result->layout = STRS_FRAGMENTED;
     result->data.fragmented.parent = parent_string;
     sz_memory_allocator_init_default(&result->data.fragmented.allocator);
 
@@ -3009,7 +3009,7 @@ static Strs *Str_rsplit_(PyObject *parent_string, sz_string_view_t const text, s
     if (!result) return NULL;
 
     // Use reordered subviews layout with the haystack as parent
-    result->type = STRS_FRAGMENTED;
+    result->layout = STRS_FRAGMENTED;
     result->data.fragmented.parent = parent_string;
     sz_memory_allocator_init_default(&result->data.fragmented.allocator);
     result->data.fragmented.spans = NULL;
@@ -3698,7 +3698,7 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     PyObject *parent_to_increment = NULL;
     sz_memory_allocator_t allocator;
 
-    switch (self->type) {
+    switch (self->layout) {
     case STRS_U32_TAPE:
         substring_getter = str_at_offset_u32_tape;
         substrings_count = self->data.u32_tape.count;
@@ -3766,7 +3766,7 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     }
 
     // Set up the new reordered object
-    result->type = STRS_FRAGMENTED;
+    result->layout = STRS_FRAGMENTED;
     result->data.fragmented.count = substrings_count;
     result->data.fragmented.spans = new_spans;
     result->data.fragmented.parent = parent_to_increment;
@@ -3823,7 +3823,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     PyObject *parent_to_increment = NULL;
     sz_memory_allocator_t allocator;
 
-    switch (self->type) {
+    switch (self->layout) {
     case STRS_U32_TAPE:
         substring_getter = str_at_offset_u32_tape;
         substrings_count = self->data.u32_tape.count;
@@ -3929,7 +3929,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     }
 
     // Set up the new sorted object
-    result->type = STRS_FRAGMENTED;
+    result->layout = STRS_FRAGMENTED;
     result->data.fragmented.count = substrings_count;
     result->data.fragmented.spans = sorted_spans;
     result->data.fragmented.parent = parent_to_increment;
@@ -4084,7 +4084,7 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
     // Initialize the memory allocator with default malloc wrapper
     sz_memory_allocator_init_default(&result->data.fragmented.allocator);
 
-    result->type = STRS_FRAGMENTED;
+    result->layout = STRS_FRAGMENTED;
     result->data.fragmented.count = 0;
     result->data.fragmented.spans = NULL;
     result->data.fragmented.parent = NULL;
@@ -4114,13 +4114,50 @@ static PyObject *Strs_sample(Strs *self, PyObject *const *args, Py_ssize_t posit
     }
 
     // Update the `Strs` object
-    result->type = STRS_FRAGMENTED;
+    result->layout = STRS_FRAGMENTED;
     result->data.fragmented.count = sample_size;
     result->data.fragmented.spans = result_spans;
     result->data.fragmented.parent = parent_string;
     // Hold a reference to the parent backing buffer while this view is alive
     Py_XINCREF(result->data.fragmented.parent);
     return result;
+}
+
+static PyObject *Strs_get_layout(Strs *self, void *Py_UNUSED(closure)) {
+    char buffer[1024];
+
+    switch (self->layout) {
+    case STRS_U32_TAPE_VIEW:
+        snprintf(buffer, sizeof(buffer), "Strs[layout=U32_TAPE_VIEW, count=%zu, data=%p, offsets=%p, parent=%p]",
+                 self->data.u32_tape_view.count, self->data.u32_tape_view.data, self->data.u32_tape_view.offsets,
+                 self->data.u32_tape_view.parent);
+        break;
+
+    case STRS_U64_TAPE_VIEW:
+        snprintf(buffer, sizeof(buffer), "Strs[layout=U64_TAPE_VIEW, count=%zu, data=%p, offsets=%p, parent=%p]",
+                 self->data.u64_tape_view.count, self->data.u64_tape_view.data, self->data.u64_tape_view.offsets,
+                 self->data.u64_tape_view.parent);
+        break;
+
+    case STRS_U32_TAPE:
+        snprintf(buffer, sizeof(buffer), "Strs[layout=U32_TAPE, count=%zu, data=%p, offsets=%p]",
+                 self->data.u32_tape.count, self->data.u32_tape.data, self->data.u32_tape.offsets);
+        break;
+
+    case STRS_U64_TAPE:
+        snprintf(buffer, sizeof(buffer), "Strs[layout=U64_TAPE, count=%zu, data=%p, offsets=%p]",
+                 self->data.u64_tape.count, self->data.u64_tape.data, self->data.u64_tape.offsets);
+        break;
+
+    case STRS_FRAGMENTED:
+        snprintf(buffer, sizeof(buffer), "Strs[layout=FRAGMENTED, count=%zu, spans=%p, parent=%p]",
+                 self->data.fragmented.count, self->data.fragmented.spans, self->data.fragmented.parent);
+        break;
+
+    default: snprintf(buffer, sizeof(buffer), "Strs[layout=UNKNOWN(%d)]", self->layout); break;
+    }
+
+    return PyUnicode_FromString(buffer);
 }
 
 /**
@@ -4305,6 +4342,7 @@ static PyGetSetDef Strs_getsetters[] = {
     {"offsets_nbytes", (getter)Strs_get_offsets_nbytes, NULL, "Get teh length of offsets array in bytes", NULL},
     {"offsets_are_large", (getter)Strs_get_offsets_are_large, NULL,
      "Checks if 64-bit addressing should be used to convert to Arrow", NULL},
+    {"__layout__", (getter)Strs_get_layout, NULL, "Debug information about the internal layout", NULL},
     {NULL} // Sentinel
 };
 
@@ -4336,11 +4374,11 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
         return -1;
     }
 
-    // Validate string array type
+    // Validate string array layout
     if (!schema->format || (strcmp(schema->format, "u") != 0 && strcmp(schema->format, "U") != 0 &&
                             strcmp(schema->format, "z") != 0 && strcmp(schema->format, "Z") != 0)) {
         Py_DECREF(capsules);
-        PyErr_SetString(PyExc_ValueError, "Arrow array must be string type");
+        PyErr_SetString(PyExc_ValueError, "Arrow array must be string layout");
         return -1;
     }
 
@@ -4361,7 +4399,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
     if (view) {
         if (use_64bit) {
             sz_i64_t const *offsets_64 = (sz_i64_t const *)buffers[1];
-            self->type = STRS_U64_TAPE_VIEW;
+            self->layout = STRS_U64_TAPE_VIEW;
             self->data.u64_tape_view.count = length;
             self->data.u64_tape_view.parent = capsules;
             self->data.u64_tape_view.data = data_buffer;
@@ -4370,7 +4408,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
         }
         else {
             sz_i32_t const *offsets_32 = (sz_i32_t const *)buffers[1];
-            self->type = STRS_U32_TAPE_VIEW;
+            self->layout = STRS_U32_TAPE_VIEW;
             self->data.u32_tape_view.count = length;
             self->data.u32_tape_view.parent = capsules;
             self->data.u32_tape_view.data = data_buffer;
@@ -4410,7 +4448,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
                 else { new_offsets[i + 1] = offsets_64[i + 1] - offsets_64[0]; }
             }
 
-            self->type = STRS_U64_TAPE;
+            self->layout = STRS_U64_TAPE;
             self->data.u64_tape.count = length;
             self->data.u64_tape.data = new_data;
             self->data.u64_tape.offsets = new_offsets;
@@ -4442,7 +4480,7 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
                 else { new_offsets[i + 1] = offsets_32[i + 1] - offsets_32[0]; }
             }
 
-            self->type = STRS_U32_TAPE;
+            self->layout = STRS_U32_TAPE;
             self->data.u32_tape.count = length;
             self->data.u32_tape.data = new_data;
             self->data.u32_tape.offsets = new_offsets;
@@ -4460,7 +4498,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
 
     // Empty tuple, create empty Strs
     if (count == 0) {
-        self->type = STRS_FRAGMENTED;
+        self->layout = STRS_FRAGMENTED;
         self->data.fragmented.count = 0;
         self->data.fragmented.spans = NULL;
         self->data.fragmented.parent = NULL;
@@ -4495,7 +4533,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
             parts[i].length = item_length;
         }
 
-        self->type = STRS_FRAGMENTED;
+        self->layout = STRS_FRAGMENTED;
         self->data.fragmented.count = count;
         self->data.fragmented.spans = parts;
         self->data.fragmented.allocator = allocator;
@@ -4554,7 +4592,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
                 offsets[i + 1] = offset; // Apache Arrow format: offset after this string
             }
 
-            self->type = STRS_U64_TAPE;
+            self->layout = STRS_U64_TAPE;
             self->data.u64_tape.count = count;
             self->data.u64_tape.data = data_buffer;
             self->data.u64_tape.offsets = offsets;
@@ -4582,7 +4620,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
                 offsets[i + 1] = offset; // Apache Arrow format: offset after this string
             }
 
-            self->type = STRS_U32_TAPE;
+            self->layout = STRS_U32_TAPE;
             self->data.u32_tape.count = count;
             self->data.u32_tape.data = data_buffer;
             self->data.u32_tape.offsets = offsets;
@@ -4599,7 +4637,7 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
 
     // Handle empty list
     if (count == 0) {
-        self->type = STRS_FRAGMENTED;
+        self->layout = STRS_FRAGMENTED;
         self->data.fragmented.count = 0;
         self->data.fragmented.spans = NULL;
         sz_memory_allocator_init_default(&self->data.fragmented.allocator);
@@ -4638,7 +4676,7 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
         }
 
         // Setup reordered layout with parent list to keep strings alive
-        self->type = STRS_FRAGMENTED;
+        self->layout = STRS_FRAGMENTED;
         self->data.fragmented.count = count;
         self->data.fragmented.spans = parts;
         self->data.fragmented.allocator = allocator;
@@ -4716,14 +4754,14 @@ static int Strs_init_from_list(Strs *self, PyObject *sequence_obj, int view) {
 
         // Setup the consecutive layout (32-bit or 64-bit)
         if (use_64bit) {
-            self->type = STRS_U64_TAPE;
+            self->layout = STRS_U64_TAPE;
             self->data.u64_tape.count = count;
             self->data.u64_tape.data = data_buffer;
             self->data.u64_tape.offsets = (sz_u64_t *)offsets;
             self->data.u64_tape.allocator = allocator;
         }
         else {
-            self->type = STRS_U32_TAPE;
+            self->layout = STRS_U32_TAPE;
             self->data.u32_tape.count = count;
             self->data.u32_tape.data = data_buffer;
             self->data.u32_tape.offsets = (sz_u32_t *)offsets;
@@ -4902,7 +4940,7 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
     if (count == 0) {
         allocator.free(data_buffer, data_capacity, allocator.handle);
         allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle);
-        self->type = STRS_FRAGMENTED;
+        self->layout = STRS_FRAGMENTED;
         self->data.fragmented.count = 0;
         self->data.fragmented.spans = NULL;
         self->data.fragmented.allocator = allocator;
@@ -4929,14 +4967,14 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
 
     // Setup the consecutive layout (32-bit or 64-bit)
     if (use_64bit) {
-        self->type = STRS_U64_TAPE;
+        self->layout = STRS_U64_TAPE;
         self->data.u64_tape.count = count;
         self->data.u64_tape.data = data_buffer;
         self->data.u64_tape.offsets = (sz_u64_t *)offsets;
         self->data.u64_tape.allocator = allocator;
     }
     else {
-        self->type = STRS_U32_TAPE;
+        self->layout = STRS_U32_TAPE;
         self->data.u32_tape.count = count;
         self->data.u32_tape.data = data_buffer;
         self->data.u32_tape.offsets = (sz_u32_t *)offsets;
@@ -4982,7 +5020,7 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
 
     // If no sequence provided, create empty Strs
     if (!sequence_obj) {
-        self->type = STRS_FRAGMENTED;
+        self->layout = STRS_FRAGMENTED;
         self->data.fragmented.count = 0;
         self->data.fragmented.spans = NULL;
         sz_memory_allocator_init_default(&self->data.fragmented.allocator);
@@ -5014,7 +5052,7 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
 }
 
 static void Strs_dealloc(Strs *self) {
-    switch (self->type) {
+    switch (self->layout) {
     case STRS_U32_TAPE:
         // Free owned data and offsets
         if (self->data.u32_tape.data) {
@@ -5068,10 +5106,10 @@ static void Strs_dealloc(Strs *self) {
 }
 
 static PyMethodDef Strs_methods[] = {
-    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."},        //
-    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},    //
-    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, "Provides the permutation to achieve sorted order."}, //
-    {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},           //
+    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."},         //
+    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},     //
+    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, "Provides the permutation to achieve sorted order."},  //
+    {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},            //
     // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
     {NULL, NULL, 0, NULL} // Sentinel
 };

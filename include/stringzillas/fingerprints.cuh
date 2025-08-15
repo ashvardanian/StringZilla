@@ -271,6 +271,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
     using hashers_t = safe_vector<hasher_t, hashers_allocator_t>;
 
     static constexpr size_t dimensions_k = dimensions_;
+    static constexpr sz_capability_t capability_k = sz_cap_cuda_k;
     static constexpr rolling_state_t skipped_rolling_state_k = std::numeric_limits<rolling_state_t>::max();
     static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
 

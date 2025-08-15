@@ -1042,6 +1042,7 @@ struct floating_rolling_hashers<sz_cap_serial_k, dimensions_> {
     using min_count_t = u32_t;
 
     static constexpr size_t dimensions_k = dimensions_;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
     static constexpr rolling_state_t skipped_rolling_state_k = std::numeric_limits<rolling_state_t>::max();
     static constexpr rolling_state_t skipped_rolling_hash_k = std::numeric_limits<rolling_state_t>::max();
     static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
@@ -1279,6 +1280,7 @@ struct floating_rolling_hashers<sz_cap_haswell_k, dimensions_> {
     using min_count_t = u32_t;
 
     static constexpr size_t dimensions_k = dimensions_;
+    static constexpr sz_capability_t capability_k = sz_cap_haswell_k;
     static constexpr rolling_state_t skipped_rolling_hash_k = std::numeric_limits<rolling_state_t>::max();
     static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
 
@@ -1607,6 +1609,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_> {
     using min_count_t = u32_t;
 
     static constexpr size_t dimensions_k = dimensions_;
+    static constexpr sz_capability_t capability_k = sz_cap_skylake_k;
     static constexpr rolling_state_t skipped_rolling_hash_k = std::numeric_limits<rolling_state_t>::max();
     static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
 
