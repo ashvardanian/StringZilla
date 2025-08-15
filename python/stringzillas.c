@@ -1566,20 +1566,10 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
     sz_status_t (*kernel_punned)(sz_fingerprints_t, sz_device_scope_t, void *, sz_u32_t *, sz_size_t, sz_u32_t *,
                                  sz_size_t) = NULL;
 
-    // Handle sequence inputs
-    sz_sequence_t texts_seq;
-    sz_bool_t texts_is_sequence = sz_py_export_strings_as_sequence(texts_obj, &texts_seq);
-    if (texts_is_sequence) {
-        kernel_input_size = texts_seq.count;
-        kernel_punned = sz_fingerprints_sequence;
-        kernel_texts_punned = &texts_seq;
-    }
-
     // Handle 32-bit tape inputs
     sz_sequence_u32tape_t texts_u32tape;
-    sz_bool_t texts_is_u32tape =
-        !texts_is_sequence && sz_py_export_strings_as_u32tape( //
-                                  texts_obj, &texts_u32tape.data, &texts_u32tape.offsets, &texts_u32tape.count);
+    sz_bool_t texts_is_u32tape = sz_py_export_strings_as_u32tape( //
+        texts_obj, &texts_u32tape.data, &texts_u32tape.offsets, &texts_u32tape.count);
     if (texts_is_u32tape) {
         kernel_input_size = texts_u32tape.count;
         kernel_punned = sz_fingerprints_u32tape;
@@ -1588,17 +1578,51 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
 
     // Handle 64-bit tape inputs
     sz_sequence_u64tape_t texts_u64tape;
-    sz_bool_t texts_is_u64tape = !texts_is_sequence && !texts_is_u32tape &&
-                                 sz_py_export_strings_as_u64tape( //
-                                     texts_obj, &texts_u64tape.data, &texts_u64tape.offsets, &texts_u64tape.count);
+    sz_bool_t texts_is_u64tape =
+        !texts_is_u32tape && sz_py_export_strings_as_u64tape( //
+                                 texts_obj, &texts_u64tape.data, &texts_u64tape.offsets, &texts_u64tape.count);
     if (texts_is_u64tape) {
         kernel_input_size = texts_u64tape.count;
         kernel_punned = sz_fingerprints_u64tape;
         kernel_texts_punned = &texts_u64tape;
     }
 
+    // Handle generic sequence inputs
+    sz_sequence_t texts_seq;
+    sz_bool_t texts_is_sequence =
+        !texts_is_u32tape && !texts_is_u64tape && sz_py_export_strings_as_sequence(texts_obj, &texts_seq);
+    if (texts_is_sequence) {
+        kernel_input_size = texts_seq.count;
+        kernel_punned = sz_fingerprints_sequence;
+        kernel_texts_punned = &texts_seq;
+    }
+
     if (kernel_punned == NULL) {
         PyErr_SetString(PyExc_TypeError, "Unsupported input type for fingerprinting");
+        return NULL;
+    }
+
+    // Allocate unified memory first for CUDA compatibility
+    sz_size_t total_elements = kernel_input_size * self->ndim;
+    sz_size_t total_bytes = total_elements * sizeof(sz_u32_t);
+
+    sz_u32_t *unified_hashes = (sz_u32_t *)unified_allocator.allocate(total_bytes, unified_allocator.handle);
+    sz_u32_t *unified_counts = (sz_u32_t *)unified_allocator.allocate(total_bytes, unified_allocator.handle);
+
+    if (!unified_hashes || !unified_counts) {
+        if (unified_hashes) unified_allocator.free(unified_hashes, total_bytes, unified_allocator.handle);
+        if (unified_counts) unified_allocator.free(unified_counts, total_bytes, unified_allocator.handle);
+        return PyErr_NoMemory();
+    }
+
+    // Call the kernel with unified memory buffers
+    sz_status_t status = kernel_punned(self->handle, device_handle, kernel_texts_punned, unified_hashes,
+                                       self->ndim * sizeof(sz_u32_t), unified_counts, self->ndim * sizeof(sz_u32_t));
+
+    if (status != sz_success_k) {
+        unified_allocator.free(unified_hashes, total_bytes, unified_allocator.handle);
+        unified_allocator.free(unified_counts, total_bytes, unified_allocator.handle);
+        PyErr_SetString(PyExc_RuntimeError, "Fingerprinting computation failed");
         return NULL;
     }
 
@@ -1611,22 +1635,21 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
     if (!hashes_array || !counts_array) {
         Py_XDECREF(hashes_array);
         Py_XDECREF(counts_array);
+        unified_allocator.free(unified_hashes, total_bytes, unified_allocator.handle);
+        unified_allocator.free(unified_counts, total_bytes, unified_allocator.handle);
         return PyErr_NoMemory();
     }
 
-    sz_u32_t *min_hashes = (sz_u32_t *)PyArray_DATA(hashes_array);
-    sz_u32_t *min_counts = (sz_u32_t *)PyArray_DATA(counts_array);
+    // Copy from unified memory to NumPy arrays
+    sz_u32_t *numpy_hashes = (sz_u32_t *)PyArray_DATA(hashes_array);
+    sz_u32_t *numpy_counts = (sz_u32_t *)PyArray_DATA(counts_array);
 
-    // Call the kernel
-    sz_status_t status = kernel_punned(self->handle, device_handle, kernel_texts_punned, min_hashes,
-                                       self->ndim * sizeof(sz_u32_t), min_counts, self->ndim * sizeof(sz_u32_t));
+    memcpy(numpy_hashes, unified_hashes, total_bytes);
+    memcpy(numpy_counts, unified_counts, total_bytes);
 
-    if (status != sz_success_k) {
-        Py_DECREF(hashes_array);
-        Py_DECREF(counts_array);
-        PyErr_SetString(PyExc_RuntimeError, "Fingerprinting computation failed");
-        return NULL;
-    }
+    // Free unified memory
+    unified_allocator.free(unified_hashes, total_bytes, unified_allocator.handle);
+    unified_allocator.free(unified_counts, total_bytes, unified_allocator.handle);
 
     // Return tuple of two NumPy arrays: (hashes_matrix, counts_matrix)
     PyObject *result_tuple = PyTuple_New(2);

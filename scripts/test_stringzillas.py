@@ -380,9 +380,9 @@ def test_fingerprints(device_name: str):
     assert np.array_equal(hashes[0], hashes[2]), "Identical strings should produce identical hashes"
     assert np.array_equal(counts[0], counts[2]), "Identical strings should produce identical counts"
 
-    # Different strings should produce different fingerprints
+    # Different strings should produce different fingerprints, but we can't always expect
+    # different counts on very short inputs
     assert not np.array_equal(hashes[0], hashes[1]), "Different strings should produce different hashes"
-    assert not np.array_equal(counts[0], counts[1]), "Different strings should produce different counts"
 
 
 @pytest.mark.repeat(5)
