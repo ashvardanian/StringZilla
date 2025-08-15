@@ -260,7 +260,7 @@ struct span<value_type_, SZ_SIZE_MAX> {
     }
 };
 
-template <typename value_type_, std::size_t extent_>
+template <std::size_t extent_, typename value_type_>
 span<value_type_, extent_> to_span(span<value_type_, extent_> span) noexcept {
     return span;
 }
