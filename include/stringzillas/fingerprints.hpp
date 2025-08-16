@@ -568,9 +568,18 @@ template <                                                           //
     typename hasher_type_ = rabin_karp_rolling_hasher<u32_t, u64_t>, //
     typename min_hash_type_ = u32_t,                                 //
     typename min_count_type_ = u32_t,                                //
-    typename allocator_type_ = std::allocator<hasher_type_>          //
+    typename allocator_type_ = std::allocator<hasher_type_>,         //
+    sz_capability_t capability_ = sz_cap_serial_k                    //
     >
-struct basic_rolling_hashers {
+struct basic_rolling_hashers;
+
+template <                    //
+    typename hasher_type_,    //
+    typename min_hash_type_,  //
+    typename min_count_type_, //
+    typename allocator_type_  //
+    >
+struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allocator_type_, sz_cap_serial_k> {
 
     using hasher_t = hasher_type_;
     using rolling_state_t = typename hasher_t::state_t;
@@ -579,13 +588,14 @@ struct basic_rolling_hashers {
     using min_hash_t = min_hash_type_;
     using min_count_t = min_count_type_;
     using allocator_t = allocator_type_;
+    static constexpr sz_capability_t capability_k = sz_cap_serial_k;
 
     static constexpr rolling_state_t skipped_rolling_state_k = std::numeric_limits<rolling_state_t>::max();
     static constexpr rolling_hash_t skipped_rolling_hash_k = std::numeric_limits<rolling_hash_t>::max();
     static constexpr min_hash_t max_hash_k = std::numeric_limits<min_hash_t>::max();
 
   private:
-    using allocator_traits_t = std::allocator_traits<allocator_type_>;
+    using allocator_traits_t = std::allocator_traits<allocator_t>;
     using hasher_allocator_t = typename allocator_traits_t::template rebind_alloc<hasher_t>;
     using rolling_states_allocator_t = typename allocator_traits_t::template rebind_alloc<rolling_state_t>;
     using rolling_hashes_allocator_t = typename allocator_traits_t::template rebind_alloc<rolling_hash_t>;
@@ -721,7 +731,7 @@ struct basic_rolling_hashers {
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             byte_t const new_char = text_chunk[new_char_offset];
             for (size_t dim = 0; dim < last_states.size(); ++dim) {
-                auto &hasher = hashers_[dim];
+                hasher_t &hasher = hashers_[dim];
                 rolling_state_t &last_state = last_states[dim];
                 rolling_hash_t &rolling_minimum = rolling_minimums[dim];
                 min_count_t &min_count = min_counts[dim];
@@ -746,7 +756,7 @@ struct basic_rolling_hashers {
         for (; new_char_offset < text_chunk.size(); ++new_char_offset) {
             byte_t const new_char = text_chunk[new_char_offset];
             for (size_t dim = 0; dim < last_states.size(); ++dim) {
-                auto &hasher = hashers_[dim];
+                hasher_t &hasher = hashers_[dim];
                 rolling_state_t &last_state = last_states[dim];
                 rolling_hash_t &rolling_minimum = rolling_minimums[dim];
                 min_count_t &min_count = min_counts[dim];
