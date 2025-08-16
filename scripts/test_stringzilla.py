@@ -906,6 +906,30 @@ def test_strs_from_arrow_with_nulls():
     assert strs_mixed[5] == "world"
 
 
+def test_invalid_utf8_handling():
+    """Test that both Str and Strs handle invalid UTF-8 bytes gracefully."""
+
+    # Test arrays with invalid UTF-8 sequences
+    test_arrays = [
+        [b"hello", b"\x80world", b"valid"],  # Mixed valid/invalid
+        [b"\xff\xfe", b"\x80", b"\xf4\x90\x80\x80"],  # All invalid
+        [b"normal", b"string with \x80 bytes"],  # Partial invalid
+    ]
+
+    for test_array in test_arrays:
+        strs_obj = Strs(test_array)
+
+        # These should never raise exceptions
+        repr_result = repr(strs_obj)
+        str_result = str(strs_obj)
+
+        # Basic assertions
+        assert isinstance(repr_result, str)
+        assert isinstance(str_result, str)
+        assert len(repr_result) > 0
+        assert len(str_result) > 0
+
+
 if __name__ == "__main__":
 
     sys.exit(pytest.main(["-x", "-s", __file__]))

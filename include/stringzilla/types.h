@@ -884,7 +884,9 @@ SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *
         ch |= (*current++ & 0x3F) << 12;
         ch |= (*current++ & 0x3F) << 6;
         ch |= (*current++ & 0x3F);
-        ch_length = sz_utf8_rune_4bytes_k;
+        // Check if the code point is within valid Unicode range (U+0000 to U+10FFFF)
+        if (ch > 0x10FFFF) { ch = 0, ch_length = sz_utf8_invalid_k; }
+        else { ch_length = sz_utf8_rune_4bytes_k; }
     }
     else {
         // Invalid UTF8 rune.
@@ -893,6 +895,23 @@ SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *
     }
     *code = ch;
     *code_length = ch_length;
+}
+
+/**
+ *  @brief Validates if a UTF8 string contains only valid UTF8 sequences.
+ *  @param[in] utf8 The UTF8 string to validate.
+ *  @param[in] utf8_length The length of the UTF8 string in bytes.
+ *  @return sz_true_k if the string contains only valid UTF8, sz_false_k otherwise.
+ */
+SZ_PUBLIC sz_bool_t sz_runes_valid(sz_cptr_t utf8, sz_size_t utf8_length) {
+    sz_cptr_t const end = utf8 + utf8_length;
+    sz_rune_length_t rune_length;
+    sz_rune_t rune;
+    for (; utf8 != end; utf8 += rune_length) {
+        sz_rune_parse(utf8, &rune, &rune_length);
+        if (rune_length == sz_utf8_invalid_k) return sz_false_k;
+    }
+    return sz_true_k;
 }
 
 /**

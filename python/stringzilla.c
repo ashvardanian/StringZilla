@@ -4162,44 +4162,109 @@ static PyObject *Strs_get_layout(Strs *self, void *Py_UNUSED(closure)) {
 
 /**
  *  @brief Exports a string to a UTF-8 buffer, escaping single quotes.
- *  @param[out] did_fit Populated with 1 if the string is fully exported, 0 if it didn't fit.
+ *  @param[in] cstr The input string to export.
+ *  @param[in] cstr_length The length of the input string.
+ *  @param[out] buffer The output buffer to write to.
+ *  @param[in] buffer_length The size of the output buffer.
+ *  @param[out] did_fit Populated with 1 if the string is fully exported, 0 if it didn't fit, -1 if invalid UTF-8.
+ *  @return Pointer to the end of the written data in the buffer, or buffer position where error occurred.
  */
 sz_cptr_t export_escaped_unquoted_to_utf8_buffer(sz_cptr_t cstr, sz_size_t cstr_length,    //
                                                  sz_ptr_t buffer, sz_size_t buffer_length, //
                                                  int *did_fit) {
     sz_cptr_t const cstr_end = cstr + cstr_length;
-    sz_ptr_t const buffer_end = buffer + buffer_length;
+    sz_ptr_t buffer_ptr = buffer;
     *did_fit = 1;
+
+    // First pass: calculate required buffer size and validate UTF-8
+    sz_size_t required_bytes = 2; // Opening and closing quotes
+    sz_cptr_t scan_ptr = cstr;
+    while (scan_ptr < cstr_end) {
+        sz_rune_t rune;
+        sz_rune_length_t rune_length;
+        sz_rune_parse(scan_ptr, &rune, &rune_length);
+
+        // Check for invalid UTF-8
+        if (rune_length == sz_utf8_invalid_k) {
+            *did_fit = -1; // Signal UTF-8 error
+            return buffer_ptr;
+        }
+
+        if (rune_length == 1 && *scan_ptr == '\'') { required_bytes += 2; } // Escaped quote: \'
+        else { required_bytes += rune_length; }                             // Normal rune
+        scan_ptr += rune_length;
+    }
+
+    // Check if we have enough buffer space
+    if (required_bytes > buffer_length) {
+        *did_fit = 0;
+        return buffer_ptr;
+    }
+
+    // Second pass: actually write to buffer
+    *(buffer_ptr++) = '\''; // Opening quote
 
     while (cstr < cstr_end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length;
         sz_rune_parse(cstr, &rune, &rune_length);
-        if (rune_length == 1 && buffer + 2 < buffer_end) {
-            if (*cstr == '\'') {
-                *(buffer++) = '\\';
-                *(buffer++) = '\'';
-                cstr++;
-            }
-            else if (*cstr == '\'') {
-                *(buffer++) = '\\';
-                *(buffer++) = '\'';
-                cstr++;
-            }
-            else { *(buffer++) = *(cstr++); }
-        }
-        else if (buffer + rune_length < buffer_end) {
-            sz_copy(buffer, cstr, rune_length);
-            buffer += rune_length;
-            cstr += rune_length;
+
+        if (rune_length == 1 && *cstr == '\'') {
+            *(buffer_ptr++) = '\\';
+            *(buffer_ptr++) = '\'';
         }
         else {
-            *did_fit = 0;
-            break;
+            sz_copy(buffer_ptr, cstr, rune_length);
+            buffer_ptr += rune_length;
         }
+        cstr += rune_length;
     }
 
-    return buffer;
+    *(buffer_ptr++) = '\''; // Closing quote
+    return buffer_ptr;
+}
+
+/**
+ *  @brief Exports a binary string to a buffer in Python bytes representation (b'\\x..').
+ *  @param[in] data The binary data to export.
+ *  @param[in] data_length The length of the binary data.
+ *  @param[out] buffer The output buffer to write to.
+ *  @param[in] buffer_length The size of the output buffer.
+ *  @param[out] did_fit Populated with 1 if the data is fully exported, 0 if it didn't fit.
+ *  @return Pointer to the end of the written data in the buffer.
+ */
+sz_cptr_t export_escaped_unquoted_to_binary_buffer(sz_cptr_t data, sz_size_t data_length,    //
+                                                   sz_ptr_t buffer, sz_size_t buffer_length, //
+                                                   int *did_fit) {
+    sz_ptr_t buffer_ptr = buffer;
+    *did_fit = 1;
+
+    // First pass: calculate required buffer size
+    // Format: b'\x00\x01...'  -> 3 bytes prefix + 4 bytes per byte + 1 byte suffix
+    sz_size_t required_bytes = 3 + (data_length * 4) + 1;
+
+    // Check if we have enough buffer space
+    if (required_bytes > buffer_length) {
+        *did_fit = 0;
+        return buffer_ptr;
+    }
+
+    // Second pass: write to buffer
+    *(buffer_ptr++) = 'b';
+    *(buffer_ptr++) = '\'';
+
+    // Export each byte as \x followed by two hex digits
+    static const char hex_chars[] = "0123456789abcdef";
+    for (sz_size_t i = 0; i < data_length; i++) {
+        unsigned char byte = (unsigned char)data[i];
+        *(buffer_ptr++) = '\\';
+        *(buffer_ptr++) = 'x';
+        *(buffer_ptr++) = hex_chars[byte >> 4];
+        *(buffer_ptr++) = hex_chars[byte & 0x0f];
+    }
+
+    *(buffer_ptr++) = '\'';
+    return buffer_ptr;
 }
 
 /**
@@ -4238,20 +4303,23 @@ static PyObject *Strs_repr(Strs *self) {
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
 
         if (i > 0) { *(repr_buffer_ptr++) = ',', *(repr_buffer_ptr++) = ' '; }
-        *(repr_buffer_ptr++) = '\'';
 
+        // Check if the string contains valid UTF-8
         int did_fit;
-        repr_buffer_ptr = export_escaped_unquoted_to_utf8_buffer(
-            cstr_start, cstr_length, repr_buffer_ptr, repr_buffer_end - repr_buffer_ptr - non_fitting_array_tail_length,
-            &did_fit);
+        repr_buffer_ptr = sz_runes_valid(cstr_start, cstr_length)
+                              ? export_escaped_unquoted_to_utf8_buffer(
+                                    cstr_start, cstr_length, repr_buffer_ptr,
+                                    repr_buffer_end - repr_buffer_ptr - non_fitting_array_tail_length, &did_fit)
+                              : export_escaped_unquoted_to_binary_buffer(
+                                    cstr_start, cstr_length, repr_buffer_ptr,
+                                    repr_buffer_end - repr_buffer_ptr - non_fitting_array_tail_length, &did_fit);
+
         // If it didn't fit, let's put an ellipsis
         if (!did_fit) {
             sz_copy(repr_buffer_ptr, non_fitting_array_tail, non_fitting_array_tail_length);
             repr_buffer_ptr += non_fitting_array_tail_length;
             return PyUnicode_FromStringAndSize(repr_buffer, repr_buffer_ptr - repr_buffer);
         }
-        else
-            *(repr_buffer_ptr++) = '\''; // Close the string
     }
 
     // Close the array
@@ -4279,18 +4347,31 @@ static PyObject *Strs_str(Strs *self) {
         sz_cptr_t cstr_start = NULL;
         sz_size_t cstr_length = 0;
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
-        total_bytes += cstr_length;
-        total_bytes += 2;             // For the single quotes
+        
         if (i != 0) total_bytes += 2; // For the preceding comma and space
 
-        // Count the number of single quotes in the string
-        while (cstr_length) {
-            char quote = '\'';
-            sz_cptr_t next_quote = sz_find_byte(cstr_start, cstr_length, &quote);
-            if (next_quote == NULL) break;
-            total_bytes++;
-            cstr_length -= next_quote - cstr_start;
-            cstr_start = next_quote + 1;
+        // Check if string is valid UTF-8 to determine format
+        if (sz_runes_valid(cstr_start, cstr_length)) {
+            // Valid UTF-8: format as '...' with escaped quotes
+            total_bytes += 2; // Opening and closing quotes
+            total_bytes += cstr_length; // Base string length
+            
+            // Count the number of single quotes that need escaping
+            sz_cptr_t scan_ptr = cstr_start;
+            sz_size_t scan_length = cstr_length;
+            while (scan_length) {
+                char quote = '\'';
+                sz_cptr_t next_quote = sz_find_byte(scan_ptr, scan_length, &quote);
+                if (next_quote == NULL) break;
+                total_bytes++; // Extra byte for escaping
+                scan_length -= next_quote - scan_ptr + 1;
+                scan_ptr = next_quote + 1;
+            }
+        } else {
+            // Invalid UTF-8: format as b'\x...'
+            total_bytes += 3; // "b'" prefix
+            total_bytes += cstr_length * 4; // Each byte becomes \xNN (4 chars)
+            total_bytes += 1; // Closing quote
         }
     }
 
@@ -4312,14 +4393,23 @@ static PyObject *Strs_str(Strs *self) {
         sz_cptr_t cstr_start = NULL;
         sz_size_t cstr_length = 0;
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
-        *result_ptr++ = '\'';
         int did_fit;
-        result_ptr = export_escaped_unquoted_to_utf8_buffer(cstr_start, cstr_length, result_ptr, total_bytes, &did_fit);
-        *result_ptr++ = '\'';
+        // Check if the string contains valid UTF-8 and export appropriately
+        result_ptr =
+            sz_runes_valid(cstr_start, cstr_length)
+                ? export_escaped_unquoted_to_utf8_buffer(cstr_start, cstr_length, result_ptr,
+                                                         total_bytes - (result_ptr - result_buffer), &did_fit)
+                : export_escaped_unquoted_to_binary_buffer(cstr_start, cstr_length, result_ptr,
+                                                           total_bytes - (result_ptr - result_buffer), &did_fit);
+
+        // Note: If did_fit is 0, we have a buffer size calculation error, but we continue for robustness
     }
 
     *result_ptr++ = ']';
-    return PyUnicode_FromStringAndSize(result_buffer, total_bytes);
+    sz_size_t actual_bytes = result_ptr - result_buffer;
+    PyObject *result = PyUnicode_FromStringAndSize(result_buffer, actual_bytes);
+    free(result_buffer);
+    return result;
 }
 
 static PySequenceMethods Strs_as_sequence = {
@@ -5106,10 +5196,10 @@ static void Strs_dealloc(Strs *self) {
 }
 
 static PyMethodDef Strs_methods[] = {
-    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."},         //
-    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},     //
-    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, "Provides the permutation to achieve sorted order."},  //
-    {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},            //
+    {"shuffled", Strs_shuffled, SZ_METHOD_FLAGS, "Shuffle the elements of the Strs object."},        //
+    {"sorted", Strs_sorted, SZ_METHOD_FLAGS, "Sort (in-place) the elements of the Strs object."},    //
+    {"argsort", Strs_argsort, SZ_METHOD_FLAGS, "Provides the permutation to achieve sorted order."}, //
+    {"sample", Strs_sample, SZ_METHOD_FLAGS, "Provides a random sample of a given size."},           //
     // {"to_pylist", Strs_to_pylist, SZ_METHOD_FLAGS, "Exports string-views to a native list of native strings."}, //
     {NULL, NULL, 0, NULL} // Sentinel
 };
