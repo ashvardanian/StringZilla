@@ -353,17 +353,18 @@ def test_needleman_wunsch_vs_levenshtein_random(config: InputSizeConfig):
 
 
 @pytest.mark.parametrize("device_name", DEVICE_NAMES)
-def test_fingerprints(device_name: str):
+@pytest.mark.parametrize("ndim", [1, 7, 64, 1024])
+def test_fingerprints(device_name: str, ndim: int):
     """Test Fingerprints basic functionality."""
 
     # Create engine with smaller dimensions to avoid memory issues
     device_scope, capabilities = device_scope_and_capabilities(device_name)
-    engine = szs.Fingerprints(ndim=64, capabilities=capabilities)
+    engine = szs.Fingerprints(ndim=ndim, capabilities=capabilities)
 
     # Basic functionality - empty input should return empty arrays
     hashes, counts = engine(Strs([]), device=device_scope)
-    assert hashes.shape == (0, 64)
-    assert counts.shape == (0, 64)
+    assert hashes.shape == (0, ndim)
+    assert counts.shape == (0, ndim)
     assert hashes.dtype == np.uint32
     assert counts.dtype == np.uint32
 
@@ -371,8 +372,8 @@ def test_fingerprints(device_name: str):
     hashes, counts = engine(test_strings, device=device_scope)
 
     # Check output shape and types
-    assert hashes.shape == (3, 64), f"Expected (3, 64), got {hashes.shape}"
-    assert counts.shape == (3, 64), f"Expected (3, 64), got {counts.shape}"
+    assert hashes.shape == (3, ndim), f"Expected (3, {ndim}), got {hashes.shape}"
+    assert counts.shape == (3, ndim), f"Expected (3, {ndim}), got {counts.shape}"
     assert hashes.dtype == np.uint32
     assert counts.dtype == np.uint32
 
@@ -388,16 +389,17 @@ def test_fingerprints(device_name: str):
 @pytest.mark.repeat(5)
 @pytest.mark.parametrize("batch_size", [1, 10, 100])
 @pytest.mark.parametrize("device_name", DEVICE_NAMES)
-def test_fingerprints_random(batch_size: int, device_name: str):
+@pytest.mark.parametrize("ndim", [1, 7, 64, 1024])
+def test_fingerprints_random(batch_size: int, device_name: str, ndim: int):
     """Test Fingerprints with random strings."""
 
     device_scope, capabilities = device_scope_and_capabilities(device_name)
-    engine = szs.Fingerprints(ndim=64, capabilities=capabilities)
+    engine = szs.Fingerprints(ndim=ndim, capabilities=capabilities)
     batch = Strs([get_random_string(length=randint(5, 50)) for _ in range(batch_size)])
 
     hashes, counts = engine(batch, device=device_scope)
-    assert hashes.shape == (batch_size, 64)
-    assert counts.shape == (batch_size, 64)
+    assert hashes.shape == (batch_size, ndim)
+    assert counts.shape == (batch_size, ndim)
 
     # Verify consistency
     hashes_repeated, counts_repeated = engine(batch, device=device_scope)
