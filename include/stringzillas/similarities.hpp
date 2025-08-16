@@ -1754,6 +1754,8 @@ struct levenshtein_distance_utf8 {
     using char_t = char_type_;
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
+    using allocator_traits_t = allocator_traits<allocator_t>;
+    using rune_allocator_t = typename allocator_traits_t::template rebind<sz_rune_t>::other;
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
@@ -1813,19 +1815,25 @@ struct levenshtein_distance_utf8 {
             return ascii_fallback_t {substituter_, gap_costs_, alloc_}(first, second, result_ref, executor);
 
         // Allocate some memory to expand UTF-8 strings into UTF-32.
-        size_t const max_utf32_bytes = first.size() * 4 + second.size() * 4;
-        sz_rune_t *const first_data_utf32 = (sz_rune_t *)alloc_.allocate(max_utf32_bytes);
+        safe_array<sz_rune_t, rune_allocator_t> unpacked_utf32(alloc_);
+        if (unpacked_utf32.try_resize(first.size() + second.size()) != status_t::success_k)
+            return status_t::bad_alloc_k;
+        sz_rune_t *const first_data_utf32 = unpacked_utf32.data();
         sz_rune_t *const second_data_utf32 = first_data_utf32 + first.size();
 
         // Export into UTF-32 buffer.
         sz_rune_length_t rune_length;
         size_t first_length_utf32 = 0, second_length_utf32 = 0;
         for (size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < first.size();
-             progress_utf8 += rune_length, ++progress_utf32, ++first_length_utf32)
+             progress_utf8 += rune_length, ++progress_utf32, ++first_length_utf32) {
             sz_rune_parse(first.data() + progress_utf8, first_data_utf32 + progress_utf32, &rune_length);
+            if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
+        }
         for (size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < second.size();
-             progress_utf8 += rune_length, ++progress_utf32, ++second_length_utf32)
+             progress_utf8 += rune_length, ++progress_utf32, ++second_length_utf32) {
             sz_rune_parse(second.data() + progress_utf8, second_data_utf32 + progress_utf32, &rune_length);
+            if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
+        }
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<size_t, false>;
@@ -3752,6 +3760,8 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
     using char_t = char;
     using gap_costs_t = linear_gap_costs_t;
     using allocator_t = allocator_type_;
+    using allocator_traits_t = allocator_traits<allocator_t>;
+    using rune_allocator_t = typename allocator_traits_t::template rebind<sz_rune_t>::other;
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
@@ -3784,6 +3794,9 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
      *  @param[in] first The first string.
      *  @param[in] second The second string.
      *  @param[out] result_ref Location to dump the calculated score. Pointer-sized for compatibility with C APIs.
+     *  @retval status_t::success_k On successful computation.
+     *  @retval status_t::invalid_utf8_k If either input contains invalid UTF-8 sequences.
+     *  @retval status_t::bad_alloc_k If memory allocation fails.
      */
     template <typename executor_type_ = dummy_executor_t>
 #if SZ_HAS_CONCEPTS_
@@ -3798,19 +3811,25 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
             return ascii_fallback_t {substituter_, gap_costs_, alloc_}(first, second, result_ref, executor);
 
         // Allocate some memory to expand UTF-8 strings into UTF-32.
-        size_t const max_utf32_bytes = first.size() * 4 + second.size() * 4;
-        sz_rune_t *const first_data_utf32 = (sz_rune_t *)alloc_.allocate(max_utf32_bytes);
+        safe_array<sz_rune_t, rune_allocator_t> unpacked_utf32(alloc_);
+        if (unpacked_utf32.try_resize(first.size() + second.size()) != status_t::success_k)
+            return status_t::bad_alloc_k;
+        sz_rune_t *const first_data_utf32 = unpacked_utf32.data();
         sz_rune_t *const second_data_utf32 = first_data_utf32 + first.size();
 
         // Export into UTF-32 buffer.
         sz_rune_length_t rune_length;
         size_t first_length_utf32 = 0, second_length_utf32 = 0;
         for (size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < first.size();
-             progress_utf8 += rune_length, ++progress_utf32, ++first_length_utf32)
+             progress_utf8 += rune_length, ++progress_utf32, ++first_length_utf32) {
             sz_rune_parse(first.data() + progress_utf8, first_data_utf32 + progress_utf32, &rune_length);
+            if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
+        }
         for (size_t progress_utf8 = 0, progress_utf32 = 0; progress_utf8 < second.size();
-             progress_utf8 += rune_length, ++progress_utf32, ++second_length_utf32)
+             progress_utf8 += rune_length, ++progress_utf32, ++second_length_utf32) {
             sz_rune_parse(second.data() + progress_utf8, second_data_utf32 + progress_utf32, &rune_length);
+            if (rune_length == sz_utf8_invalid_k) return status_t::invalid_utf8_k;
+        }
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
         using similarity_memory_requirements_t = similarity_memory_requirements<size_t, false>;
