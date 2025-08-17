@@ -50,7 +50,7 @@ namespace stringzillas {
 
 #pragma region - Common Aliases
 
-using ualloc_t = unified_alloc<char>;
+using ualloc_t = unified_alloc_t;
 
 /**
  *  In @b CUDA:

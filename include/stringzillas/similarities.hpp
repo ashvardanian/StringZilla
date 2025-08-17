@@ -1754,8 +1754,8 @@ struct levenshtein_distance_utf8 {
     using char_t = char_type_;
     using gap_costs_t = gap_costs_type_;
     using allocator_t = allocator_type_;
-    using allocator_traits_t = allocator_traits<allocator_t>;
-    using rune_allocator_t = typename allocator_traits_t::template rebind<sz_rune_t>::other;
+    using allocator_traits_t = std::allocator_traits<allocator_t>;
+    using rune_allocator_t = typename allocator_traits_t::template rebind_alloc<sz_rune_t>;
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_serialized_k = (sz_capability_t)(capability_k & ~sz_cap_parallel_k);
@@ -1815,7 +1815,7 @@ struct levenshtein_distance_utf8 {
             return ascii_fallback_t {substituter_, gap_costs_, alloc_}(first, second, result_ref, executor);
 
         // Allocate some memory to expand UTF-8 strings into UTF-32.
-        safe_array<sz_rune_t, rune_allocator_t> unpacked_utf32(alloc_);
+        safe_vector<sz_rune_t, rune_allocator_t> unpacked_utf32(alloc_);
         if (unpacked_utf32.try_resize(first.size() + second.size()) != status_t::success_k)
             return status_t::bad_alloc_k;
         sz_rune_t *const first_data_utf32 = unpacked_utf32.data();
@@ -3760,8 +3760,8 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
     using char_t = char;
     using gap_costs_t = linear_gap_costs_t;
     using allocator_t = allocator_type_;
-    using allocator_traits_t = allocator_traits<allocator_t>;
-    using rune_allocator_t = typename allocator_traits_t::template rebind<sz_rune_t>::other;
+    using allocator_traits_t = std::allocator_traits<allocator_t>;
+    using rune_allocator_t = typename allocator_traits_t::template rebind_alloc<sz_rune_t>;
 
     static constexpr sz_capability_t capability_k = capability_;
     static constexpr sz_capability_t capability_wout_simd_k = (sz_capability_t)(capability_k & ~sz_cap_ice_k);
@@ -3811,7 +3811,7 @@ struct levenshtein_distance_utf8<char, linear_gap_costs_t, allocator_type_, capa
             return ascii_fallback_t {substituter_, gap_costs_, alloc_}(first, second, result_ref, executor);
 
         // Allocate some memory to expand UTF-8 strings into UTF-32.
-        safe_array<sz_rune_t, rune_allocator_t> unpacked_utf32(alloc_);
+        safe_vector<sz_rune_t, rune_allocator_t> unpacked_utf32(alloc_);
         if (unpacked_utf32.try_resize(first.size() + second.size()) != status_t::success_k)
             return status_t::bad_alloc_k;
         sz_rune_t *const first_data_utf32 = unpacked_utf32.data();

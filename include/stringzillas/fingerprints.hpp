@@ -187,7 +187,11 @@ struct rabin_karp_rolling_hasher {
         : is_same_type<hash_t, u32_t>::value ? SZ_U32_MAX_PRIME
                                              : SZ_U64_MAX_PRIME;
 
-    explicit rabin_karp_rolling_hasher(              //
+    constexpr rabin_karp_rolling_hasher() noexcept
+        : window_width_ {0}, modulo_ {default_modulo_base_k}, multiplier_ {default_alphabet_size_k},
+          discarding_multiplier_ {1} {}
+
+    constexpr explicit rabin_karp_rolling_hasher(    //
         size_t window_width,                         //
         hash_t multiplier = default_alphabet_size_k, //
         hash_t modulo = default_modulo_base_k) noexcept
@@ -420,6 +424,48 @@ inline f64_t absolute_fmod(f64_t x, f64_t y) noexcept {
 inline u64_t absolute_umod(f64_t x, f64_t y) noexcept { return static_cast<u64_t>(absolute_fmod(x, y)); }
 
 /**
+ * @brief Constexpr-compatible `std::floor`-like function for C++17, based on IEEE 754 bit manipulation.
+ * @param[in] x The double-precision floating-point number to floor.
+ * @return The largest integer value not greater than x.
+ */
+inline constexpr f64_t constexpr_floor(f64_t x) noexcept {
+    // Use a union to access the bit representation of the double
+    union ieee754_double {
+        f64_t value;
+        u64_t bits;
+    };
+
+    ieee754_double number = {x};
+
+    // Extract the exponent: bits 52-62, biased by 1023
+    i32_t exponent = static_cast<i32_t>((number.bits >> 52) & 0x7FF) - 1023;
+
+    // If exponent < 0, then |x| < 1
+    if (exponent < 0) {
+        // Return 0 for positive numbers, -1 for negative numbers with fractional part
+        if (static_cast<i64_t>(number.bits) >= 0) { return 0.0; }             // Positive number less than 1
+        else if ((number.bits & 0x7FFFFFFFFFFFFFFFULL) != 0) { return -1.0; } // Negative number with fractional part
+        return x;                                                             // Exactly 0 or -0
+    }
+
+    // If exponent >= 52, all bits represent the integer part (no fractional bits)
+    if (exponent >= 52) return x; // Already an integer (or infinity/NaN)
+
+    // Calculate which bits represent the fractional part
+    u64_t fractional_mask = 0x000FFFFFFFFFFFFFULL >> exponent;
+
+    // If no fractional bits are set, x is already an integer
+    if ((number.bits & fractional_mask) == 0) return x;
+
+    // For negative numbers, add 1 to the integer part before truncating
+    if (static_cast<i64_t>(number.bits) < 0) number.bits += (0x0010000000000000ULL >> exponent);
+
+    // Clear the fractional bits
+    number.bits &= ~fractional_mask;
+    return number.value;
+}
+
+/**
  *  @brief Rabin-Karp-style Rolling hash function for f64_t-precision floating-point numbers.
  *  @tparam state_type_ Type of the floating-point number, e.g., `f32_t`.
  *
@@ -478,21 +524,21 @@ struct floating_rolling_hasher<f64_t> {
     constexpr floating_rolling_hasher &operator=(floating_rolling_hasher &&) noexcept = default;
     constexpr floating_rolling_hasher &operator=(floating_rolling_hasher const &) noexcept = default;
 
-    SZ_INLINE size_t window_width() const noexcept { return window_width_; }
+    constexpr size_t window_width() const noexcept { return window_width_; }
 
-    SZ_INLINE state_t push(state_t state, byte_t new_char) const noexcept {
+    constexpr state_t push(state_t state, byte_t new_char) const noexcept {
         state_t new_term = state_t(new_char) + 1.0;
         return fma_mod(state, multiplier_, new_term);
     }
 
-    SZ_INLINE state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
+    constexpr state_t roll(state_t state, byte_t old_char, byte_t new_char) const noexcept {
         state_t old_term = state_t(old_char) + 1.0;
         state_t new_term = state_t(new_char) + 1.0;
         state_t without_old = fma_mod(negative_discarding_multiplier_, old_term, state);
         return fma_mod(without_old, multiplier_, new_term);
     }
 
-    SZ_INLINE hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
+    constexpr hash_t digest(state_t state) const noexcept { return static_cast<hash_t>(state); }
 
     constexpr state_t multiplier() const noexcept { return multiplier_; }
     constexpr state_t modulo() const noexcept { return modulo_; }
@@ -500,25 +546,28 @@ struct floating_rolling_hasher<f64_t> {
     constexpr state_t negative_discarding_multiplier() const noexcept { return negative_discarding_multiplier_; }
 
   private:
-    SZ_INLINE state_t fma_mod(state_t a, state_t b, state_t c) const noexcept { return barrett_mod(a * b + c); }
+    constexpr state_t fma_mod(state_t a, state_t b, state_t c) const noexcept { return barrett_mod(a * b + c); }
 
     /**
      *  @brief Barrett-style `std::fmod` alternative to avoid overflow.
      *  @see https://en.cppreference.com/w/cpp/numeric/math/fmod
      */
-    SZ_INLINE state_t barrett_mod(state_t x) const noexcept {
+    constexpr state_t barrett_mod(state_t x) const noexcept {
 
-        state_t q = std::floor(x * inverse_modulo_);
+        state_t q = constexpr_floor(x * inverse_modulo_);
         state_t result = x - q * modulo_;
 
         // Clamp into the [0, modulo_) range.
         if (result >= modulo_) result -= modulo_;
         if (result < 0.0) result += modulo_;
 
+        // Skip debug assertions that call non-constexpr functions when compiling with NVCC
+#if !defined(__NVCC__)
         sz_assert_(result >= 0 && "Intermediate x underflows the zero");
         sz_assert_(result < limit_k && "Intermediate x overflows the limit");
         sz_assert_(static_cast<u64_t>(absolute_fmod(x, modulo_)) == static_cast<u64_t>(result) &&
                    "Floating point modulo was incorrect");
+#endif
         return result;
     }
 
@@ -731,7 +780,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             byte_t const new_char = text_chunk[new_char_offset];
             for (size_t dim = 0; dim < last_states.size(); ++dim) {
-                hasher_t &hasher = hashers_[dim];
+                hasher_t const &hasher = hashers_[dim];
                 rolling_state_t &last_state = last_states[dim];
                 rolling_hash_t &rolling_minimum = rolling_minimums[dim];
                 min_count_t &min_count = min_counts[dim];
@@ -756,7 +805,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, allo
         for (; new_char_offset < text_chunk.size(); ++new_char_offset) {
             byte_t const new_char = text_chunk[new_char_offset];
             for (size_t dim = 0; dim < last_states.size(); ++dim) {
-                hasher_t &hasher = hashers_[dim];
+                hasher_t const &hasher = hashers_[dim];
                 rolling_state_t &last_state = last_states[dim];
                 rolling_hash_t &rolling_minimum = rolling_minimums[dim];
                 min_count_t &min_count = min_counts[dim];

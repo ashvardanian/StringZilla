@@ -23,7 +23,7 @@ namespace szs = ashvardanian::stringzillas;
 
 using malloc_t = std::allocator<char>;
 #if SZ_USE_CUDA
-using ualloc_t = szs::unified_alloc<char>;
+using ualloc_t = szs::unified_alloc_t;
 #endif // SZ_USE_CUDA
 
 /** Helper class for `std::visit` to handle multiple callable types in a single variant. */
@@ -563,7 +563,11 @@ using vec = szs::safe_vector<element_type_, std::allocator<element_type_>>;
 static constexpr size_t fingerprint_slice_k = 64;
 
 struct fingerprints_backends_t {
-    using fallback_variant_t = szs::basic_rolling_hashers<szs::floating_rolling_hasher<sz::f64_t>, sz::u32_t>;
+    using fallback_variant_cpus_t = szs::basic_rolling_hashers<szs::floating_rolling_hasher<sz::f64_t>, sz::u32_t>;
+#if SZ_USE_CUDA
+    using fallback_variant_cuda_t = szs::basic_rolling_hashers<szs::floating_rolling_hasher<sz::f64_t>, sz::u32_t,
+                                                               sz::u32_t, ualloc_t, sz_cap_cuda_k>;
+#endif // SZ_USE_CUDA
 
     /**
      *  On each hardware platform the contains a group of rolling hashers.
@@ -577,10 +581,9 @@ struct fingerprints_backends_t {
         vec<szs::floating_rolling_hashers<sz_cap_skylake_k, fingerprint_slice_k>>,
 #endif
 #if SZ_USE_CUDA
-        vec<szs::floating_rolling_hashers<sz_cap_cuda_k, fingerprint_slice_k>>,
+        vec<szs::floating_rolling_hashers<sz_cap_cuda_k, fingerprint_slice_k>>, fallback_variant_cuda_t,
 #endif
-        vec<szs::floating_rolling_hashers<sz_cap_serial_k, fingerprint_slice_k>>, //
-        fallback_variant_t>
+        vec<szs::floating_rolling_hashers<sz_cap_serial_k, fingerprint_slice_k>>, fallback_variant_cpus_t>
         variants;
 
     sz_size_t dimensions = 0; // Total number of dimensions across all hashers
@@ -612,8 +615,8 @@ sz_status_t sz_fingerprints_for_(                                     //
 
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
-    using fallback_variant_t = typename fingerprints_backends_t::fallback_variant_t;
-    auto fallback_logic = [&](fallback_variant_t &fallback_hashers) {
+    using fallback_variant_cpus_t = typename fingerprints_backends_t::fallback_variant_cpus_t;
+    auto fallback_logic_cpus = [&](fallback_variant_cpus_t &fallback_hashers) {
         auto const min_hashes_rows = //
             strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_hashes), dims, min_hashes_stride, texts_count};
         auto const min_counts_rows = //
@@ -634,10 +637,29 @@ sz_status_t sz_fingerprints_for_(                                     //
                 get_executor(device_scope), get_specs(device_scope));
             result = static_cast<sz_status_t>(status);
         }
+        else if (std::holds_alternative<gpu_scope_t>(device->variants)) { result = sz_status_unknown_k; }
+        else { result = sz_status_unknown_k; }
+    };
+#if SZ_USE_CUDA
+    using fallback_variant_cuda_t = typename fingerprints_backends_t::fallback_variant_cuda_t;
+    auto fallback_logic_gpus = [&](fallback_variant_cuda_t &fallback_hashers) {
+        auto const min_hashes_rows = //
+            strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_hashes), dims, min_hashes_stride, texts_count};
+        auto const min_counts_rows = //
+            strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_counts), dims, min_counts_stride, texts_count};
+
+        // CPU fallback hashers can only work with CPU-compatible device scopes
+        if (std::holds_alternative<gpu_scope_t>(device->variants)) {
+            auto &device_scope = std::get<gpu_scope_t>(device->variants);
+            sz::status_t status = fallback_hashers(                //
+                texts_container, min_hashes_rows, min_counts_rows, //
+                get_executor(device_scope), get_specs(device_scope));
+            result = static_cast<sz_status_t>(status);
+        }
         else { result = sz_status_unknown_k; }
     };
 
-    // The unrolled logic is a bit more complex than `fallback_logic`, but in practice involves
+    // The unrolled logic is a bit more complex than `fallback_logic_cpus`, but in practice involves
     // just one additional loop level.
     auto unrolled_logic = [&](auto &&unrolled_hashers) {
         using unrolled_hashers_t = std::decay_t<decltype(unrolled_hashers)>;
@@ -667,6 +689,7 @@ sz_status_t sz_fingerprints_for_(                                     //
                         min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
                         get_executor(device_scope), get_specs(device_scope));
                     result = static_cast<sz_status_t>(status);
+                    if (result != sz_success_k) break;
                 }
             }
             else { result = sz_status_unknown_k; }
@@ -703,8 +726,13 @@ sz_status_t sz_fingerprints_for_(                                     //
             else { result = sz_status_unknown_k; }
         }
     };
+#endif // SZ_USE_CUDA
 
-    std::visit(overloaded {fallback_logic, unrolled_logic}, engine->variants);
+#if SZ_USE_CUDA
+    std::visit(overloaded {fallback_logic_cpus, fallback_logic_gpus, unrolled_logic}, engine->variants);
+#else
+    std::visit(overloaded {fallback_logic_cpus, unrolled_logic}, engine->variants);
+#endif
     return result;
 }
 
@@ -1363,7 +1391,7 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
     auto const dimensions_per_window_width_max = sz::divide_round_up(dimensions, window_widths_count);
     auto const can_use_sliced_sketchers = (dimensions_per_window_width_min == dimensions_per_window_width_max) &&
                                           (dimensions_per_window_width_min % fingerprint_slice_k == 0);
-    using fallback_variant_t = typename fingerprints_backends_t::fallback_variant_t;
+    using fallback_variant_cpus_t = typename fingerprints_backends_t::fallback_variant_cpus_t;
 
 #if SZ_USE_HASWELL
     bool const can_use_haswell = (capabilities & sz_cap_haswell_k) == sz_cap_haswell_k;
@@ -1438,6 +1466,23 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
         *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
         return sz_success_k;
     }
+    else if (can_use_cuda) {
+        using fallback_variant_cuda_t = typename fingerprints_backends_t::fallback_variant_cuda_t;
+        auto variant = fallback_variant_cuda_t();
+        for (size_t dimension = 0; dimension < dimensions; ++dimension) {
+            auto const window_width = window_widths[dimension % window_widths_count];
+            auto const extend_status = variant.try_extend(window_width, 1, alphabet_size);
+            if (extend_status != sz::status_t::success_k) return static_cast<sz_status_t>(extend_status);
+        }
+
+        auto engine = new (std::nothrow)
+            fingerprints_backends_t(std::in_place_type_t<fallback_variant_cuda_t>(), std::move(variant));
+        if (!engine) return sz_bad_alloc_k;
+
+        engine->dimensions = dimensions;
+        *engine_punned = reinterpret_cast<sz_fingerprints_t>(engine);
+        return sz_success_k;
+    }
 #endif // SZ_USE_CUDA
 
     // Build the vectorized, but serial backend
@@ -1464,7 +1509,7 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
     }
 
     // Build the fallback variant with interleaving width dimensions
-    auto variant = fallback_variant_t();
+    auto variant = fallback_variant_cpus_t();
     for (size_t dimension = 0; dimension < dimensions; ++dimension) {
         auto const window_width = window_widths[dimension % window_widths_count];
         auto const extend_status = variant.try_extend(window_width, 1, alphabet_size);
@@ -1472,7 +1517,7 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_init(                          //
     }
 
     auto engine =
-        new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<fallback_variant_t>(), std::move(variant));
+        new (std::nothrow) fingerprints_backends_t(std::in_place_type_t<fallback_variant_cpus_t>(), std::move(variant));
     if (!engine) return sz_bad_alloc_k;
 
     engine->dimensions = dimensions;

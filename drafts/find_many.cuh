@@ -477,7 +477,7 @@ struct find_many<state_id_type_, allocator_type_, sz_cap_cuda_k, enable_> {
 
 #pragma endregion // General Purpose CUDA Backend
 
-using find_many_u32_cuda_t = find_many<u32_t, unified_alloc<char>, sz_cap_cuda_k>;
+using find_many_u32_cuda_t = find_many<u32_t, unified_alloc_t, sz_cap_cuda_k>;
 
 } // namespace stringzillas
 } // namespace ashvardanian

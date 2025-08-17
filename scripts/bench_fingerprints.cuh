@@ -25,8 +25,8 @@ using namespace ashvardanian::stringzilla::scripts;
 static constexpr std::size_t default_embedding_dims_k = 64;
 static constexpr std::size_t default_window_width_k = 7;
 
-using fingerprint_min_hashes_t = std::array<std::uint32_t, default_embedding_dims_k>;
-using fingerprint_min_counts_t = std::array<std::uint32_t, default_embedding_dims_k>;
+using fingerprint_min_hashes_t = std::array<u32_t, default_embedding_dims_k>;
+using fingerprint_min_counts_t = std::array<u32_t, default_embedding_dims_k>;
 using fingerprints_min_hashes_t = unified_vector<fingerprint_min_hashes_t>;
 using fingerprints_min_counts_t = unified_vector<fingerprint_min_counts_t>;
 
@@ -103,128 +103,164 @@ void bench_fingerprints(environment_t const &env) {
     };
 
     // Allocate all hashers on heap
-    using rabin_u64_t = basic_rolling_hashers<rabin_karp_rolling_hasher<std::uint32_t, std::uint64_t>>;
-    auto rabin_u64 = std::make_unique<rabin_u64_t>();
-    if (rabin_u64->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
+    using basic_rabin_u64_serial_t = basic_rolling_hashers<rabin_karp_rolling_hasher<u32_t, u64_t>>;
+    auto basic_rabin_u64_serial = std::make_unique<basic_rabin_u64_serial_t>();
+    if (basic_rabin_u64_serial->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Rabin Karp u64/u32 Hasher.");
 
-    using buz_u32_t = basic_rolling_hashers<buz_rolling_hasher<std::uint32_t>>;
-    auto buz_u32 = std::make_unique<buz_u32_t>();
-    if (buz_u32->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
+    using basic_buz_u32_serial_t = basic_rolling_hashers<buz_rolling_hasher<u32_t>>;
+    auto basic_buz_u32_serial = std::make_unique<basic_buz_u32_serial_t>();
+    if (basic_buz_u32_serial->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Buz Hasher.");
 
-    using multiply_u32_t = basic_rolling_hashers<multiplying_rolling_hasher<std::uint32_t>>;
-    auto multiply_u32 = std::make_unique<multiply_u32_t>();
-    if (multiply_u32->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
+    using basic_multiply_u32_serial_t = basic_rolling_hashers<multiplying_rolling_hasher<u32_t>>;
+    auto basic_multiply_u32_serial = std::make_unique<basic_multiply_u32_serial_t>();
+    if (basic_multiply_u32_serial->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Multiplying Hasher.");
 
-    using rolling_f64_t = basic_rolling_hashers<floating_rolling_hasher<double>, std::uint32_t>;
-    auto rolling_f64 = std::make_unique<rolling_f64_t>();
-    if (rolling_f64->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
+    using basic_rolling_f64_serial_t = basic_rolling_hashers<floating_rolling_hasher<f64_t>, u32_t>;
+    auto basic_rolling_f64_serial = std::make_unique<basic_rolling_f64_serial_t>();
+    if (basic_rolling_f64_serial->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Floating f64 Rolling Hasher.");
 
-    using rolling_f32_t = basic_rolling_hashers<floating_rolling_hasher<float>>;
-    auto rolling_f32 = std::make_unique<rolling_f32_t>();
-    if (rolling_f32->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
+    using basic_rolling_f32_serial_t = basic_rolling_hashers<floating_rolling_hasher<float>>;
+    auto basic_rolling_f32_serial = std::make_unique<basic_rolling_f32_serial_t>();
+    if (basic_rolling_f32_serial->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
         throw std::runtime_error("Can't build Floating f32 Rolling Hasher.");
 
-    using rolling_serial_t = floating_rolling_hashers<sz_cap_serial_k, default_embedding_dims_k>;
-    auto rolling_serial = std::make_unique<rolling_serial_t>();
-    if (rolling_serial->try_seed(default_window_width_k) != status_t::success_k)
+    using floating_serial_t = floating_rolling_hashers<sz_cap_serial_k, default_embedding_dims_k>;
+    auto floating_serial = std::make_unique<floating_serial_t>();
+    if (floating_serial->try_seed(default_window_width_k) != status_t::success_k)
         throw std::runtime_error("Can't build Unrolled Floating Hasher.");
 
+#if SZ_USE_CUDA
+    using basic_rabin_u64_cuda_t =
+        basic_rolling_hashers<rabin_karp_rolling_hasher<u32_t, u64_t>, u32_t, u32_t, unified_alloc_t, sz_cap_cuda_k>;
+    auto basic_rabin_u64_cuda = std::make_unique<basic_rabin_u64_cuda_t>();
+    if (basic_rabin_u64_cuda->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
+        throw std::runtime_error("Can't build Rabin Karp u64/u32 CUDA Hasher.");
+
+    using basic_rolling_f64_cuda_t =
+        basic_rolling_hashers<floating_rolling_hasher<f64_t>, u32_t, u32_t, unified_alloc_t, sz_cap_cuda_k>;
+    auto basic_rolling_f64_cuda = std::make_unique<basic_rolling_f64_cuda_t>();
+    if (basic_rolling_f64_cuda->try_extend(default_window_width_k, default_embedding_dims_k) != status_t::success_k)
+        throw std::runtime_error("Can't build Floating f64 Rolling CUDA Hasher.");
+#endif // SZ_USE_CUDA
+
 #if SZ_USE_HASWELL
-    using rolling_haswell_t = floating_rolling_hashers<sz_cap_haswell_k, default_embedding_dims_k>;
-    auto rolling_haswell = std::make_unique<rolling_haswell_t>();
-    if (rolling_haswell->try_seed(default_window_width_k) != status_t::success_k)
+    using floating_haswell_t = floating_rolling_hashers<sz_cap_haswell_k, default_embedding_dims_k>;
+    auto floating_haswell = std::make_unique<floating_haswell_t>();
+    if (floating_haswell->try_seed(default_window_width_k) != status_t::success_k)
         throw std::runtime_error("Can't build Haswell Floating Hasher.");
 #endif // SZ_USE_HASWELL
 
 #if SZ_USE_SKYLAKE
-    using rolling_skylake_t = floating_rolling_hashers<sz_cap_skylake_k, default_embedding_dims_k>;
-    auto rolling_skylake = std::make_unique<rolling_skylake_t>();
-    if (rolling_skylake->try_seed(default_window_width_k) != status_t::success_k)
+    using floating_skylake_t = floating_rolling_hashers<sz_cap_skylake_k, default_embedding_dims_k>;
+    auto floating_skylake = std::make_unique<floating_skylake_t>();
+    if (floating_skylake->try_seed(default_window_width_k) != status_t::success_k)
         throw std::runtime_error("Can't build Skylake Floating Hasher.");
 #endif // SZ_USE_SKYLAKE
 
 #if SZ_USE_CUDA
-    using rolling_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, default_embedding_dims_k>;
-    auto rolling_cuda = std::make_unique<rolling_cuda_t>();
-    if (rolling_cuda->try_seed(default_window_width_k) != status_t::success_k)
+    using floating_cuda_t = floating_rolling_hashers<sz_cap_cuda_k, default_embedding_dims_k>;
+    auto floating_cuda = std::make_unique<floating_cuda_t>();
+    if (floating_cuda->try_seed(default_window_width_k) != status_t::success_k)
         throw std::runtime_error("Can't build CUDA Floating Hasher.");
 #endif // SZ_USE_CUDA
 
     // Perform the benchmarks, passing the dictionary to the engines
-    auto call_baseline = fingerprint_callable<rolling_f64_t, fu::basic_pool_t &>(
-        tape, min_hashes_baseline, min_counts_baseline, *rolling_f64, pool);
-    bench_result_t baseline = bench_nullary(env, "rolling_f64", call_baseline).log();
+    auto basic_rolling_f64_serial_call = fingerprint_callable<basic_rolling_f64_serial_t, fu::basic_pool_t &>(
+        tape, min_hashes_baseline, min_counts_baseline, *basic_rolling_f64_serial, pool);
+    bench_result_t basic_rolling_f64_serial_result =
+        bench_nullary(env, "basic_rolling_f64_serial", basic_rolling_f64_serial_call).log();
 
     // Semi-serial variants
-    bench_nullary(env, "rolling_f32",
-                  fingerprint_callable<rolling_f32_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
-                                                                          min_counts_accelerated, *rolling_f32, pool))
-        .log(baseline);
+    bench_nullary(env, "basic_rolling_f32_serial",
+                  fingerprint_callable<basic_rolling_f32_serial_t, fu::basic_pool_t &>(
+                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_rolling_f32_serial, pool))
+        .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
-    bench_nullary(env, "rabin_u64",
-                  fingerprint_callable<rabin_u64_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
-                                                                        min_counts_accelerated, *rabin_u64, pool))
-        .log(baseline);
+    bench_nullary(env, "basic_rabin_u64_serial",
+                  fingerprint_callable<basic_rabin_u64_serial_t, fu::basic_pool_t &>(
+                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_rabin_u64_serial, pool))
+        .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
-    bench_nullary(env, "buz_u32",
-                  fingerprint_callable<buz_u32_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
-                                                                      min_counts_accelerated, *buz_u32, pool)) //
-        .log(baseline);
+    bench_nullary(env, "basic_buz_u32_serial",
+                  fingerprint_callable<basic_buz_u32_serial_t, fu::basic_pool_t &>(
+                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_buz_u32_serial, pool)) //
+        .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
-    bench_nullary(env, "multiply_u32",
-                  fingerprint_callable<multiply_u32_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
-                                                                           min_counts_accelerated, *multiply_u32, pool))
-        .log(baseline);
+    bench_nullary(env, "basic_multiply_u32_serial",
+                  fingerprint_callable<basic_multiply_u32_serial_t, fu::basic_pool_t &>(
+                      tape, min_hashes_accelerated, min_counts_accelerated, *basic_multiply_u32_serial, pool))
+        .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
+
+#if SZ_USE_CUDA
+    bench_nullary(                                                  //
+        env, "basic_rabin_u64_cuda", basic_rolling_f64_serial_call, //
+        fingerprint_callable<basic_rabin_u64_cuda_t, cuda_executor_t, gpu_specs_t>(
+            tape, min_hashes_accelerated, min_counts_accelerated, *basic_rabin_u64_cuda, cuda_executor_t {}, specs), //
+        callable_no_op_t {},        // preprocessing
+        fingerprints_equality_t {}) // equality check
+        .log(basic_rolling_f64_serial_result);
+    scramble_accelerated_results();
+
+    bench_nullary(                                                    //
+        env, "basic_rolling_f64_cuda", basic_rolling_f64_serial_call, //
+        fingerprint_callable<basic_rolling_f64_cuda_t, cuda_executor_t, gpu_specs_t>(
+            tape, min_hashes_accelerated, min_counts_accelerated, *basic_rolling_f64_cuda, cuda_executor_t {},
+            specs),                 //
+        callable_no_op_t {},        // preprocessing
+        fingerprints_equality_t {}) // equality check
+        .log(basic_rolling_f64_serial_result);
+    scramble_accelerated_results();
+#endif // SZ_USE_CUDA
 
     // Actually unrolled hard-coded variants, including SIMD ports
-    bench_result_t unrolled =                     //
-        bench_nullary(                            //
-            env, "rolling_serial", call_baseline, //
-            fingerprint_callable<rolling_serial_t, fu::basic_pool_t &>(
-                tape, min_hashes_accelerated, min_counts_accelerated, *rolling_serial, pool), //
-            callable_no_op_t {},                                                              // preprocessing
-            fingerprints_equality_t {})                                                       // equality check
-            .log(baseline);
+    bench_result_t floating_serial_result =                        //
+        bench_nullary(                                             //
+            env, "floating_serial", basic_rolling_f64_serial_call, //
+            fingerprint_callable<floating_serial_t, fu::basic_pool_t &>(
+                tape, min_hashes_accelerated, min_counts_accelerated, *floating_serial, pool), //
+            callable_no_op_t {},                                                               // preprocessing
+            fingerprints_equality_t {})                                                        // equality check
+            .log(basic_rolling_f64_serial_result);
     scramble_accelerated_results();
 
 #if SZ_USE_HASWELL
-    bench_nullary(                             //
-        env, "rolling_haswell", call_baseline, //
-        fingerprint_callable<rolling_haswell_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
-                                                                    min_counts_accelerated, *rolling_haswell, pool), //
-        callable_no_op_t {},        // preprocessing
-        fingerprints_equality_t {}) // equality check
-        .log(baseline, unrolled);
+    bench_nullary(                                              //
+        env, "floating_haswell", basic_rolling_f64_serial_call, //
+        fingerprint_callable<floating_haswell_t, fu::basic_pool_t &>(
+            tape, min_hashes_accelerated, min_counts_accelerated, *floating_haswell, pool), //
+        callable_no_op_t {},                                                                // preprocessing
+        fingerprints_equality_t {})                                                         // equality check
+        .log(basic_rolling_f64_serial_result, floating_serial_result);
     scramble_accelerated_results();
 #endif // SZ_USE_HASWELL
 
 #if SZ_USE_SKYLAKE
-    bench_nullary(                             //
-        env, "rolling_skylake", call_baseline, //
-        fingerprint_callable<rolling_skylake_t, fu::basic_pool_t &>(tape, min_hashes_accelerated,
-                                                                    min_counts_accelerated, *rolling_skylake, pool), //
-        callable_no_op_t {},        // preprocessing
-        fingerprints_equality_t {}) // equality check
-        .log(baseline, unrolled);
+    bench_nullary(                                              //
+        env, "floating_skylake", basic_rolling_f64_serial_call, //
+        fingerprint_callable<floating_skylake_t, fu::basic_pool_t &>(
+            tape, min_hashes_accelerated, min_counts_accelerated, *floating_skylake, pool), //
+        callable_no_op_t {},                                                                // preprocessing
+        fingerprints_equality_t {})                                                         // equality check
+        .log(basic_rolling_f64_serial_result, floating_serial_result);
     scramble_accelerated_results();
 #endif // SZ_USE_SKYLAKE
 
 #if SZ_USE_CUDA
-    bench_nullary(                          //
-        env, "rolling_cuda", call_baseline, //
-        fingerprint_callable<rolling_cuda_t, cuda_executor_t, gpu_specs_t>(
-            tape, min_hashes_accelerated, min_counts_accelerated, *rolling_cuda, cuda_executor_t {}, specs), //
+    bench_nullary(                                           //
+        env, "floating_cuda", basic_rolling_f64_serial_call, //
+        fingerprint_callable<floating_cuda_t, cuda_executor_t, gpu_specs_t>(
+            tape, min_hashes_accelerated, min_counts_accelerated, *floating_cuda, cuda_executor_t {}, specs), //
         callable_no_op_t {},        // preprocessing
         fingerprints_equality_t {}) // equality check
-        .log(baseline, unrolled);
+        .log(basic_rolling_f64_serial_result, floating_serial_result);
     scramble_accelerated_results();
 #endif // SZ_USE_CUDA
 }

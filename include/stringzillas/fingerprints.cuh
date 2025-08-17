@@ -103,14 +103,13 @@ __global__ void basic_rolling_hashers_kernel_(                                  
     sz_assert_(warps_per_block == density_k && "Block size mismatch in kernel");
     unsigned const warps_per_device = static_cast<unsigned>(gridDim.x * warps_per_block);
     unsigned const thread_in_warp_index = static_cast<unsigned>(global_thread_index % warp_size_k);
-    unsigned const warp_in_block_index = static_cast<unsigned>(global_warp_index % density_k);
 
     // Load the hashers states per thread in a strided fashion.
     hasher_t hashers[dimensions_per_thread_k];
 #pragma unroll
     for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
         unsigned const dim = dim_within_thread * warp_size_k + thread_in_warp_index;
-        hasher_t const &hasher = hashers[dim];
+        hasher_t const &hasher = hashers_global[dim];
         if (dim >= hashers_count) continue; // ? Avoid out-of-bounds access
         hashers[dim_within_thread] = hasher;
     }
@@ -128,18 +127,17 @@ __global__ void basic_rolling_hashers_kernel_(                                  
         for (auto &rolling_count : rolling_counts) rolling_count = 0;
 
         // Until we reach the maximum window length, use a branching code version
-        size_t const prefix_length = std::min<size_t>(task.text_length, max_window_width_);
+        size_t const prefix_length = std::min<size_t>(task.text_length, max_window_width);
         size_t new_char_offset = 0;
         for (; new_char_offset < prefix_length; ++new_char_offset) {
-            byte_t const new_char = task.text_ptr[new_char_offset]; // ? Hardware may auto-broadcast this
-            f64_t const new_term = static_cast<f64_t>(new_char) + 1.0;
+            auto const new_char = task.text_ptr[new_char_offset]; // ? Hardware may auto-broadcast this
 
 #pragma unroll
             for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
-                auto &hasher = hashers_[dim_within_thread];
+                hasher_t &hasher = hashers[dim_within_thread];
                 rolling_state_t &last_state = last_states[dim_within_thread];
                 rolling_hash_t &rolling_minimum = rolling_minimums[dim_within_thread];
-                min_count_t &min_count = min_counts[dim_within_thread];
+                min_count_t &min_count = rolling_counts[dim_within_thread];
                 if (new_char_offset < hasher.window_width()) {
                     last_state = hasher.push(last_state, new_char);
                     if (hasher.window_width() == (new_char_offset + 1)) {
@@ -148,7 +146,7 @@ __global__ void basic_rolling_hashers_kernel_(                                  
                     }
                     continue;
                 }
-                auto const old_char = text_chunk[new_char_offset - hasher.window_width()];
+                auto const old_char = task.text_ptr[new_char_offset - hasher.window_width()];
                 last_state = hasher.roll(last_state, old_char, new_char);
                 rolling_hash_t new_hash = hasher.digest(last_state);
                 min_count *= new_hash >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
@@ -159,16 +157,15 @@ __global__ void basic_rolling_hashers_kernel_(                                  
 
         // Now we can avoid a branch in the nested loop, as we are passed the longest window width
         for (; new_char_offset + warp_size_k <= task.text_length; new_char_offset += warp_size_k) {
-            byte_t const new_char = task.text_ptr[new_char_offset]; // ? Hardware may auto-broadcast this
-            f64_t const new_term = static_cast<f64_t>(new_char) + 1.0;
+            auto const new_char = task.text_ptr[new_char_offset]; // ? Hardware may auto-broadcast this
 
 #pragma unroll
             for (unsigned dim_within_thread = 0; dim_within_thread < dimensions_per_thread_k; ++dim_within_thread) {
-                auto &hasher = hashers_[dim_within_thread];
+                hasher_t &hasher = hashers[dim_within_thread];
                 rolling_state_t &last_state = last_states[dim_within_thread];
                 rolling_hash_t &rolling_minimum = rolling_minimums[dim_within_thread];
-                min_count_t &min_count = min_counts[dim_within_thread];
-                auto const old_char = text_chunk[new_char_offset - hasher.window_width()];
+                min_count_t &min_count = rolling_counts[dim_within_thread];
+                auto const old_char = task.text_ptr[new_char_offset - hasher.window_width()];
                 last_state = hasher.roll(last_state, old_char, new_char);
                 rolling_hash_t new_hash = hasher.digest(last_state);
                 min_count *= new_hash >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
@@ -400,7 +397,7 @@ __global__ void floating_rolling_hashers_across_cuda_device_(span<cuda_fingerpri
  *  @brief CUDA specialization of `basic_rolling_hashers` for count-min-sketching.
  */
 template <typename hasher_type_, typename min_hash_type_, typename min_count_type_>
-struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unified_alloc<char>, sz_cap_cuda_k> {
+struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unified_alloc_t, sz_cap_cuda_k> {
 
     using hasher_t = hasher_type_;
     using rolling_state_t = typename hasher_t::state_t;
@@ -408,7 +405,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
 
     using min_hash_t = min_hash_type_;
     using min_count_t = min_count_type_;
-    using allocator_t = unified_alloc<char>;
+    using allocator_t = unified_alloc_t;
 
     using hashers_allocator_t = typename allocator_t::template rebind<hasher_t>::other;
     using hashers_t = safe_vector<hasher_t, hashers_allocator_t>;
@@ -540,7 +537,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
         auto const *tasks_ptr = tasks.data();
         auto const tasks_size = tasks.size();
         auto const *hashers_ptr = hashers_.data();
-        auto const hashers_size = (std::min)(dimensions_k, hashers_.size());
+        auto const hashers_size = hashers_.size();
         warp_level_kernel_args[0] = (void *)(&tasks_ptr);
         warp_level_kernel_args[1] = (void *)(&tasks_size);
         warp_level_kernel_args[2] = (void *)(&hashers_ptr);
@@ -591,7 +588,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
     using rolling_state_t = f64_t;
     using min_hash_t = u32_t;
     using min_count_t = u32_t;
-    using allocator_t = unified_alloc<char>;
+    using allocator_t = unified_alloc_t;
 
     using hashers_allocator_t = typename allocator_t::template rebind<hasher_t>::other;
     using hashers_t = safe_vector<hasher_t, hashers_allocator_t>;
