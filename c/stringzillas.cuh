@@ -637,7 +637,6 @@ sz_status_t sz_fingerprints_for_(                                     //
                 get_executor(device_scope), get_specs(device_scope));
             result = static_cast<sz_status_t>(status);
         }
-        else if (std::holds_alternative<gpu_scope_t>(device->variants)) { result = sz_status_unknown_k; }
         else { result = sz_status_unknown_k; }
     };
 #if SZ_USE_CUDA
@@ -658,6 +657,7 @@ sz_status_t sz_fingerprints_for_(                                     //
         }
         else { result = sz_status_unknown_k; }
     };
+#endif // SZ_USE_CUDA
 
     // The unrolled logic is a bit more complex than `fallback_logic_cpus`, but in practice involves
     // just one additional loop level.
@@ -726,7 +726,6 @@ sz_status_t sz_fingerprints_for_(                                     //
             else { result = sz_status_unknown_k; }
         }
     };
-#endif // SZ_USE_CUDA
 
 #if SZ_USE_CUDA
     std::visit(overloaded {fallback_logic_cpus, fallback_logic_gpus, unrolled_logic}, engine->variants);

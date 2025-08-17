@@ -26,16 +26,19 @@ Example usage via UV:
     uv run --no-project scripts/bench_fingerprints.py --dataset leipzig1M.txt --dimensions 32
 """
 
-import argparse
+import os
 import time
+import argparse
 from pathlib import Path
-from typing import List, Callable, Iterable
+from typing import Callable, Iterable
 
 from tqdm import tqdm
 import numpy as np
 
 from datasketch import MinHash
 from sklearn.feature_extraction.text import HashingVectorizer
+import stringzillas as szs
+import stringzilla as sz
 
 # Global state for MinHash to avoid repeated initialization
 _datasketch_min_hash_state = None
@@ -185,11 +188,48 @@ def log_fingerprinting_functionality(
         timeout_seconds,
     )
 
+    # Convert docs to Strs object
+    docs_strs = sz.Strs(docs)
+
+    # Benchmark batch CPU fingerprinting
+    if "serial" in szs.__capabilities__:
+        start_time = time.time_ns()
+        cpu_scope = szs.DeviceScope(cpu_cores=os.cpu_count())
+        fingerprints_cpu = szs.Fingerprints(ndim=dimensions, capabilities=cpu_scope)
+        hashes, counts = fingerprints_cpu(docs_strs, device=cpu_scope)
+        end_time = time.time_ns()
+        total_time_s = (end_time - start_time) / 1e9
+        total_bytes = sum(docs_sizes)
+        mb_per_sec = total_bytes / (1e6 * total_time_s)
+        docs_per_sec = len(docs) / total_time_s
+        print(
+            f"stringzillas.Fingerprints(CPU): {len(docs):,} docs in {total_time_s:.2f}s ~ {mb_per_sec:.3f} MB/s, {docs_per_sec:.0f} docs/s"
+        )
+    else:
+        print(f"stringzillas.Fingerprints(CPU): FAILED - {e}")
+
+    # Benchmark batch GPU fingerprinting
+    if "cuda" in szs.__capabilities__:
+        start_time = time.time_ns()
+        gpu_scope = szs.DeviceScope(gpu_device=0)
+        fingerprints_gpu = szs.Fingerprints(ndim=dimensions, capabilities=gpu_scope)
+        hashes, counts = fingerprints_gpu(docs_strs, device=gpu_scope)
+        end_time = time.time_ns()
+        total_time_s = (end_time - start_time) / 1e9
+        total_bytes = sum(docs_sizes)
+        mb_per_sec = total_bytes / (1e6 * total_time_s)
+        docs_per_sec = len(docs) / total_time_s
+        print(
+            f"stringzillas.Fingerprints(GPU): {len(docs):,} docs in {total_time_s:.2f}s ~ {mb_per_sec:.3f} MB/s, {docs_per_sec:.0f} docs/s"
+        )
+    else:
+        print("stringzillas.Fingerprints(GPU): SKIPPED - CUDA not available")
+
 
 def bench(
     dataset_path: str,
     max_docs: int = None,
-    dimensions: int = 64,
+    dimensions: int = 1024,
     timeout_seconds: int = 10,
 ):
     """Run fingerprinting benchmarks."""
@@ -206,9 +246,7 @@ def bench(
 
     docs_sizes = [len(doc.encode("utf-8")) for doc in docs]
 
-    print(
-        f"Prepared {len(docs):,} docs of {sum(docs_sizes)/len(docs_sizes):.1f} mean byte length!"
-    )
+    print(f"Prepared {len(docs):,} docs of {sum(docs_sizes)/len(docs_sizes):.1f} mean byte length!")
     print(f"Total bytes: {sum(docs_sizes):,}")
     print(f"Num hashes: {dimensions}")
     print()
@@ -240,14 +278,12 @@ def main():
     )
 
     parser.add_argument("--dataset", required=True, help="Path to text dataset file")
-    parser.add_argument(
-        "--max-docs", type=int, help="Maximum number of docs to process"
-    )
+    parser.add_argument("--max-docs", type=int, help="Maximum number of docs to process")
     parser.add_argument(
         "--dimensions",
         type=int,
-        default=64,
-        help="Number of hash functions for MinHash (default: 64)",
+        default=1024,
+        help="Number of hash functions for MinHash (default: 1024)",
     )
     parser.add_argument(
         "--timeout",

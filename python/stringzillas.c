@@ -464,9 +464,9 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
         PyErr_Format(PyExc_TypeError,
-                     "Unsupported input types for Levenshtein distances. "
-                     "u32tape: a=%d b=%d, u64tape: a=%d b=%d, seq: a=%d b=%d",
-                     a_is_u32tape, b_is_u32tape, a_is_u64tape, b_is_u64tape, a_is_sequence, b_is_sequence);
+                     "Expected stringzilla.Strs objects, got %s and %s. "
+                     "Convert using: stringzilla.Strs(your_string_list)",
+                     Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
 
@@ -739,9 +739,9 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
         PyErr_Format(PyExc_TypeError,
-                     "Unsupported input types for Levenshtein distances. "
-                     "u32tape: a=%d b=%d, u64tape: a=%d b=%d, seq: a=%d b=%d",
-                     a_is_u32tape, b_is_u32tape, a_is_u64tape, b_is_u64tape, a_is_sequence, b_is_sequence);
+                     "Expected stringzilla.Strs objects, got %s and %s. "
+                     "Convert using: stringzilla.Strs(your_string_list)",
+                     Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
 
@@ -1038,9 +1038,9 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
         PyErr_Format(PyExc_TypeError,
-                     "Unsupported input types for NeedlemanWunsch. "
-                     "u32tape: a=%d b=%d, u64tape: a=%d b=%d, seq: a=%d b=%d",
-                     a_is_u32tape, b_is_u32tape, a_is_u64tape, b_is_u64tape, a_is_sequence, b_is_sequence);
+                     "Expected stringzilla.Strs objects, got %s and %s. "
+                     "Convert using: stringzilla.Strs(your_string_list)",
+                     Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
 
@@ -1306,9 +1306,9 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
     // If no valid input types were found, raise an error
     if (!kernel_punned) {
         PyErr_Format(PyExc_TypeError,
-                     "Unsupported input types for SmithWaterman. "
-                     "u32tape: a=%d b=%d, u64tape: a=%d b=%d, seq: a=%d b=%d",
-                     a_is_u32tape, b_is_u32tape, a_is_u64tape, b_is_u64tape, a_is_sequence, b_is_sequence);
+                     "Expected stringzilla.Strs objects, got %s and %s. "
+                     "Convert using: stringzilla.Strs(your_string_list)",
+                     Py_TYPE(a_obj)->tp_name, Py_TYPE(b_obj)->tp_name);
         return NULL;
     }
 
@@ -1598,7 +1598,9 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
     }
 
     if (kernel_punned == NULL) {
-        PyErr_SetString(PyExc_TypeError, "Unsupported input type for fingerprinting");
+        PyErr_Format(PyExc_TypeError, 
+            "Expected stringzilla.Strs object, got %s. Convert using: stringzilla.Strs(your_string_list)", 
+            Py_TYPE(texts_obj)->tp_name);
         return NULL;
     }
 

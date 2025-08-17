@@ -46,17 +46,19 @@ Example usage via UV:
     uv run --no-project scripts/bench_similarities.py --protein-mode --dataset acgt_1k.txt
 """
 
-import argparse
-import random
+import os
 import time
+import random
+import argparse
 from pathlib import Path
-from typing import List, Callable, Iterable, Tuple
+from typing import List, Callable, Tuple
 
 from tqdm import tqdm
 import numpy as np
 
 # String similarity libraries
 import stringzilla as sz
+import stringzillas as szs
 import jellyfish as jf
 import Levenshtein as le
 import editdistance as ed
@@ -98,9 +100,7 @@ def log_similarity_operation(
     start_time = time.time_ns()
 
     try:
-        with tqdm(
-            desc=name, unit="pairs", leave=False, total=len(string_pairs)
-        ) as progress_bar:
+        with tqdm(desc=name, unit="pairs", leave=False, total=len(string_pairs)) as progress_bar:
             for str_a, str_b in string_pairs:
                 # Check timeout (convert seconds to nanoseconds)
                 if time.time_ns() - start_time > timeout_seconds * 1e9:
@@ -110,9 +110,7 @@ def log_similarity_operation(
                     distance = similarity_func(str_a, str_b)
                     checksum += distance
                     processed_pairs += 1
-                    processed_bytes += len(str_a.encode("utf-8")) + len(
-                        str_b.encode("utf-8")
-                    )
+                    processed_bytes += len(str_a.encode("utf-8")) + len(str_b.encode("utf-8"))
 
                     # Update progress bar with custom rate
                     elapsed_ns = time.time_ns() - start_time
@@ -149,14 +147,15 @@ def log_similarity_operation(
         print(f"{name}: No pairs processed")
 
 
-def benchmark_edit_distances(
-    string_pairs: List[Tuple[str, str]], timeout_seconds: int = 10
-):
+def benchmark_edit_distances(string_pairs: List[Tuple[str, str]], timeout_seconds: int = 10):
     """Benchmark various edit distance implementations."""
 
     # StringZilla
     log_similarity_operation(
-        "stringzilla.edit_distance", string_pairs, sz.edit_distance, timeout_seconds
+        "stringzilla.edit_distance",
+        string_pairs,
+        sz.edit_distance,
+        timeout_seconds,
     )
 
     log_similarity_operation(
@@ -168,12 +167,18 @@ def benchmark_edit_distances(
 
     # RapidFuzz
     log_similarity_operation(
-        "rapidfuzz.Levenshtein.distance", string_pairs, rf.distance, timeout_seconds
+        "rapidfuzz.Levenshtein.distance",
+        string_pairs,
+        rf.distance,
+        timeout_seconds,
     )
 
     # python-Levenshtein
     log_similarity_operation(
-        "Levenshtein.distance", string_pairs, le.distance, timeout_seconds
+        "Levenshtein.distance",
+        string_pairs,
+        le.distance,
+        timeout_seconds,
     )
 
     # Jellyfish
@@ -186,12 +191,18 @@ def benchmark_edit_distances(
 
     # EditDistance
     log_similarity_operation(
-        "editdistance.eval", string_pairs, ed.eval, timeout_seconds
+        "editdistance.eval",
+        string_pairs,
+        ed.eval,
+        timeout_seconds,
     )
 
     # NLTK
     log_similarity_operation(
-        "nltk.edit_distance", string_pairs, nltk_ed, timeout_seconds
+        "nltk.edit_distance",
+        string_pairs,
+        nltk_ed,
+        timeout_seconds,
     )
 
     # Edlib
@@ -199,7 +210,10 @@ def benchmark_edit_distances(
         return edlib.align(a, b, mode="NW", task="distance")["editDistance"]
 
     log_similarity_operation(
-        "edlib.align", string_pairs, edlib_distance, timeout_seconds
+        "edlib.align",
+        string_pairs,
+        edlib_distance,
+        timeout_seconds,
     )
 
     # Polyleven (if available)
@@ -211,10 +225,53 @@ def benchmark_edit_distances(
             timeout_seconds,
         )
 
+    # StringZillas batch processing
+    def benchmark_stringzillas_batch(engine_name, engine_class, device_scope):
+        try:
+            engine = engine_class()
 
-def benchmark_alignment_scores(
-    string_pairs: List[Tuple[str, str]], timeout_seconds: int = 10
-):
+            # Prepare data for batch processing
+            strings_a = sz.Strs([pair[0] for pair in string_pairs])
+            strings_b = sz.Strs([pair[1] for pair in string_pairs])
+
+            start_time = time.time_ns()
+            results = engine(strings_a, strings_b, device_scope)
+            end_time = time.time_ns()
+
+            total_time_s = (end_time - start_time) / 1e9
+            processed_bytes = sum(len(a.encode("utf-8")) + len(b.encode("utf-8")) for a, b in string_pairs)
+            mb_per_sec = processed_bytes / (1e6 * total_time_s)
+            pairs_per_sec = len(string_pairs) / total_time_s
+            checksum = sum(results) if hasattr(results, "__iter__") else 0
+
+            print(
+                f"{engine_name}: {len(string_pairs):,} pairs in {total_time_s:.2f}s ~ {mb_per_sec:.3f} MB/s, {pairs_per_sec:.0f} pairs/s, checksum={checksum}"
+            )
+        except Exception as e:
+            print(f"{engine_name}: FAILED - {e}")
+
+    # StringZillas Levenshtein distances (batch)
+    cpu_scope = szs.DeviceScope(cpu_cores=os.cpu_count())
+    benchmark_stringzillas_batch("stringzillas.LevenshteinDistances(CPU)", szs.LevenshteinDistances, cpu_scope)
+
+    try:
+        gpu_scope = szs.DeviceScope(gpu_device=0)
+        benchmark_stringzillas_batch("stringzillas.LevenshteinDistances(GPU)", szs.LevenshteinDistances, gpu_scope)
+    except:
+        pass  # GPU may not be available
+
+    # StringZillas UTF-8 Levenshtein distances (batch)
+    benchmark_stringzillas_batch("stringzillas.LevenshteinDistancesUTF8(CPU)", szs.LevenshteinDistancesUTF8, cpu_scope)
+
+    try:
+        benchmark_stringzillas_batch(
+            "stringzillas.LevenshteinDistancesUTF8(GPU)", szs.LevenshteinDistancesUTF8, gpu_scope
+        )
+    except:
+        pass  # GPU may not be available
+
+
+def benchmark_alignment_scores(string_pairs: List[Tuple[str, str]], timeout_seconds: int = 10):
     """Benchmark alignment scoring with substitution matrices."""
     global _biopython_aligner, _blosum_matrix
 
@@ -234,25 +291,17 @@ def benchmark_alignment_scores(
         _blosum_matrix = np.zeros((256, 256), dtype=np.int8)
         _blosum_matrix.fill(127)  # Large penalty for invalid characters
 
-        for packed_row, packed_row_aminoacid in enumerate(
-            _biopython_aligner.substitution_matrix.alphabet
-        ):
-            for packed_column, packed_column_aminoacid in enumerate(
-                _biopython_aligner.substitution_matrix.alphabet
-            ):
+        for packed_row, packed_row_aminoacid in enumerate(_biopython_aligner.substitution_matrix.alphabet):
+            for packed_column, packed_column_aminoacid in enumerate(_biopython_aligner.substitution_matrix.alphabet):
                 reconstructed_row = ord(packed_row_aminoacid)
                 reconstructed_column = ord(packed_column_aminoacid)
-                _blosum_matrix[reconstructed_row, reconstructed_column] = subs_packed[
-                    packed_row, packed_column
-                ]
+                _blosum_matrix[reconstructed_row, reconstructed_column] = subs_packed[packed_row, packed_column]
 
     # StringZilla alignment score
     def sz_alignment_score(a: str, b: str) -> int:
         return sz.alignment_score(a, b, substitution_matrix=_blosum_matrix, gap_score=1)
 
-    log_similarity_operation(
-        "stringzilla.alignment_score", string_pairs, sz_alignment_score, timeout_seconds
-    )
+    log_similarity_operation("stringzilla.alignment_score", string_pairs, sz_alignment_score, timeout_seconds)
 
     # BioPython alignment score
     log_similarity_operation(
@@ -261,6 +310,57 @@ def benchmark_alignment_scores(
         _biopython_aligner.score,
         timeout_seconds,
     )
+
+    # StringZillas alignment functions (batch)
+    def benchmark_stringzillas_alignment_batch(engine_name, engine_class, substitution_matrix, device_scope):
+        try:
+            engine = engine_class(substitution_matrix=substitution_matrix)
+
+            # Prepare data for batch processing
+            strings_a = sz.Strs([pair[0] for pair in string_pairs])
+            strings_b = sz.Strs([pair[1] for pair in string_pairs])
+
+            start_time = time.time_ns()
+            results = engine(strings_a, strings_b, device_scope)
+            end_time = time.time_ns()
+
+            total_time_s = (end_time - start_time) / 1e9
+            processed_bytes = sum(len(a.encode("utf-8")) + len(b.encode("utf-8")) for a, b in string_pairs)
+            mb_per_sec = processed_bytes / (1e6 * total_time_s)
+            pairs_per_sec = len(string_pairs) / total_time_s
+            checksum = sum(results) if hasattr(results, "__iter__") else 0
+
+            print(
+                f"{engine_name}: {len(string_pairs):,} pairs in {total_time_s:.2f}s ~ {mb_per_sec:.3f} MB/s, {pairs_per_sec:.0f} pairs/s, checksum={checksum}"
+            )
+        except Exception as e:
+            print(f"{engine_name}: FAILED - {e}")
+
+    # StringZillas Needleman-Wunsch (global alignment)
+    cpu_scope = szs.DeviceScope(cpu_cores=os.cpu_count())
+    benchmark_stringzillas_alignment_batch(
+        "stringzillas.NeedlemanWunsch(CPU)", szs.NeedlemanWunsch, _blosum_matrix, cpu_scope
+    )
+
+    try:
+        gpu_scope = szs.DeviceScope(gpu_device=0)
+        benchmark_stringzillas_alignment_batch(
+            "stringzillas.NeedlemanWunsch(GPU)", szs.NeedlemanWunsch, _blosum_matrix, gpu_scope
+        )
+    except:
+        pass  # GPU may not be available
+
+    # StringZillas Smith-Waterman (local alignment)
+    benchmark_stringzillas_alignment_batch(
+        "stringzillas.SmithWaterman(CPU)", szs.SmithWaterman, _blosum_matrix, cpu_scope
+    )
+
+    try:
+        benchmark_stringzillas_alignment_batch(
+            "stringzillas.SmithWaterman(GPU)", szs.SmithWaterman, _blosum_matrix, gpu_scope
+        )
+    except:
+        pass  # GPU may not be available
 
 
 def generate_random_pairs(strings: List[str], num_pairs: int) -> List[Tuple[str, str]]:
@@ -315,9 +415,7 @@ def bench(
         total_chars = sum(len(a) + len(b) for a, b in pairs)
         avg_length = total_chars / (2 * len(pairs))
 
-        print(
-            f"Prepared {len(pairs):,} string pairs from {len(strings):,} unique strings"
-        )
+        print(f"Prepared {len(pairs):,} string pairs from {len(strings):,} unique strings")
         print(f"Average string length: {avg_length:.1f} chars")
         print(f"Total characters: {total_chars:,}")
         print(f"Timeout per benchmark: {timeout_seconds}s")
@@ -353,9 +451,7 @@ def main():
     )
 
     parser.add_argument("--dataset", help="Path to text dataset file")
-    parser.add_argument(
-        "--max-pairs", type=int, help="Maximum number of string pairs to process"
-    )
+    parser.add_argument("--max-pairs", type=int, help="Maximum number of string pairs to process")
     parser.add_argument(
         "--timeout",
         type=int,

@@ -26,7 +26,7 @@ import numpy as np  # ! Unlike StringZilla, NumPy is mandatory for StringZillas
 
 import stringzilla as sz
 import stringzillas as szs
-from stringzilla import Str, Strs
+from stringzilla import Strs
 
 
 def test_library_properties():

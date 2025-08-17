@@ -561,13 +561,11 @@ struct floating_rolling_hasher<f64_t> {
         if (result >= modulo_) result -= modulo_;
         if (result < 0.0) result += modulo_;
 
-        // Skip debug assertions that call non-constexpr functions when compiling with NVCC
-#if !defined(__NVCC__)
+        // Skip debug assertions that call non-constexpr functions:
+        // sz_assert_(static_cast<u64_t>(absolute_fmod(x, modulo_)) == static_cast<u64_t>(result) &&
+        //            "Floating point modulo was incorrect");
         sz_assert_(result >= 0 && "Intermediate x underflows the zero");
         sz_assert_(result < limit_k && "Intermediate x overflows the limit");
-        sz_assert_(static_cast<u64_t>(absolute_fmod(x, modulo_)) == static_cast<u64_t>(result) &&
-                   "Floating point modulo was incorrect");
-#endif
         return result;
     }
 
