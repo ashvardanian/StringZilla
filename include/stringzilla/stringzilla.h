@@ -242,16 +242,11 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_x86_(void) {
         struct separate_t {
             unsigned eax, ebx, ecx, edx;
         } named;
-    } info1, info7;
+    } info7;
 
 #if defined(_MSC_VER)
-    __cpuidex(info1.array, 1, 0);
     __cpuidex(info7.array, 7, 0);
 #else
-    __asm__ __volatile__( //
-        "cpuid"
-        : "=a"(info1.named.eax), "=b"(info1.named.ebx), "=c"(info1.named.ecx), "=d"(info1.named.edx)
-        : "a"(1), "c"(0));
     __asm__ __volatile__( //
         "cpuid"
         : "=a"(info7.named.eax), "=b"(info7.named.ebx), "=c"(info7.named.ecx), "=d"(info7.named.edx)
