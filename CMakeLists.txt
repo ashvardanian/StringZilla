@@ -246,25 +246,30 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             target_compile_options(${target} PRIVATE "-O2")
         endif ()
     elseif (${compiler_id} STREQUAL "NVIDIA")
+        target_compile_options(
+            ${target} PRIVATE "-Xcompiler=-Wall" # All warnings (host)
+                              "-Xcompiler=-Wextra" # Extra warnings (host)
+        )
+
         if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
             target_compile_options(
                 ${target}
                 PRIVATE "-G" # Device debug symbols
                         "-lineinfo" # Include source line info in PTX
-                        "-O0" # Disable NVCC optimizations explicitly
                         "-no-compress" # No compression of debug info
-                        "-Xptxas=-O0" # Disable PTX assembler optimizations
                         "-Xcompiler=-g" # Host debugging symbols explicitly
-                        "-Xcompiler=-O0" # Host optimizations off
                         "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
-                        "-Xcompiler=-Wall" # All warnings (host)
-                        "-Xcompiler=-Wextra" # Extra warnings (host)
                         "-Xcompiler=-fno-inline" # Prevent host inlining
                         "-maxrregcount=0" # No register count limits
             )
         endif ()
         if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
-            target_compile_options(${target} PRIVATE "-O2")
+            target_compile_options(
+                ${target}
+                PRIVATE "-O2" # Disable NVCC optimizations explicitly
+                        "-Xptxas=-O2" # Disable PTX assembler optimizations
+                        "-Xcompiler=-O2" # Host optimizations off
+            )
         endif ()
     endif ()
 

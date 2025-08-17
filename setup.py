@@ -103,7 +103,7 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
     compile_args = [
         "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
         "-pedantic",  # stick close to the C language standard, avoid compiler extensions
-        "-O3",  # maximum optimization level
+        "-O2",  # optimization level
         "-fdiagnostics-color=always",  # color console output
         "-Wno-unknown-pragmas",  # like: `pragma region` and some unrolls
         "-Wno-unused-function",  # like: ... declared ‘static’ but never defined
@@ -136,7 +136,7 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
     compile_args = [
         "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
         "-pedantic",  # stick close to the C language standard, avoid compiler extensions
-        "-O3",  # maximum optimization level
+        "-O2",  # optimization level
         "-fcolor-diagnostics",  # color console output
         "-Wno-unknown-pragmas",  # like: `pragma region` and some unrolls
         "-Wno-incompatible-function-pointer-types",
@@ -172,7 +172,7 @@ def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[
     compile_args = [
         "/std:c++17" if use_cpp else "/std:c99",  # use C++17 for StringZillas, C99 for StringZilla
         "/Wall",  # stick close to the C language standard, avoid compiler extensions
-        "/O2",  # maximum optimization level
+        "/O2",  # optimization level
     ]
 
     # When packaging the library, even if the current machine doesn't support AVX-512 or SVE, still precompile those.
@@ -207,7 +207,7 @@ else:
 
 ext_modules = []
 entry_points = {}
-cmdclass = {}
+command_class = {}
 
 if sz_target == "stringzilla":
     __lib_name__ = "stringzilla"
@@ -260,7 +260,7 @@ elif sz_target == "stringzillas-cuda":
             language="c++",  # Force C++ linking
         ),
     ]
-    cmdclass = {"build_ext": CudaBuildExtension}
+    command_class = {"build_ext": CudaBuildExtension}
 else:
     raise ValueError("Unknown target specified with SZ_TARGET environment variable.")
 
@@ -313,5 +313,5 @@ setup(
     ext_modules=ext_modules,
     packages=find_packages(),
     entry_points=entry_points,
-    cmdclass=cmdclass,
+    cmdclass=command_class,
 )
