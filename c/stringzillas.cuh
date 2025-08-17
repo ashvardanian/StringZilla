@@ -814,6 +814,39 @@ SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_
 #endif
 }
 
+SZ_DYNAMIC sz_status_t sz_device_scope_get_cpu_cores(sz_device_scope_t scope_punned, sz_size_t *cpu_cores) {
+    if (scope_punned == nullptr || cpu_cores == nullptr) return sz_status_unknown_k;
+    auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
+    
+    if (std::holds_alternative<cpu_scope_t>(scope->variants)) {
+        auto &cpu_scope = std::get<cpu_scope_t>(scope->variants);
+        if (cpu_scope.executor_ptr) {
+            *cpu_cores = cpu_scope.executor_ptr->threads_count();
+            return sz_success_k;
+        }
+    }
+    
+    return sz_status_unknown_k;
+}
+
+SZ_DYNAMIC sz_status_t sz_device_scope_get_gpu_device(sz_device_scope_t scope_punned, sz_size_t *gpu_device) {
+    if (scope_punned == nullptr || gpu_device == nullptr) return sz_status_unknown_k;
+    
+#if SZ_USE_CUDA
+    auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
+    if (std::holds_alternative<gpu_scope_t>(scope->variants)) {
+        auto &gpu_scope = std::get<gpu_scope_t>(scope->variants);
+        *gpu_device = static_cast<sz_size_t>(gpu_scope.executor.device_id());
+        return sz_success_k;
+    }
+#else
+    sz_unused_(scope_punned);
+    sz_unused_(gpu_device);
+#endif
+    
+    return sz_status_unknown_k;
+}
+
 SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope_punned) {
     if (scope_punned == nullptr) return;
     auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
