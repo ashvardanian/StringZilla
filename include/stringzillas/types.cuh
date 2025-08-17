@@ -143,6 +143,7 @@ class cuda_executor_t {
 
     explicit operator bool() const noexcept { return device_id_ >= 0; }
     inline cudaStream_t stream() const noexcept { return stream_; }
+    inline int device_id() const noexcept { return device_id_; }
 };
 
 /**

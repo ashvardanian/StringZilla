@@ -129,65 +129,6 @@ static sz_bool_t try_swap_to_unified_allocator(PyObject *strs_obj) {
 
 #pragma endregion
 
-#pragma region Metadata
-
-/**
- *  @brief Parse capabilities from a Python tuple of strings and intersect with hardware capabilities.
- *  @param[in] caps_tuple Python tuple containing capability strings (e.g., ('serial', 'haswell')).
- *  @param[out] result Output capability mask after intersection with hardware capabilities.
- *  @return 0 on success, -1 on error (with Python exception set).
- */
-static int parse_and_intersect_capabilities(PyObject *caps_tuple, sz_capability_t *result) {
-    if (!PyTuple_Check(caps_tuple)) {
-        PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
-        return -1;
-    }
-
-    sz_capability_t requested_caps = 0;
-    Py_ssize_t n = PyTuple_Size(caps_tuple);
-
-    for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *item = PyTuple_GET_ITEM(caps_tuple, i);
-        if (!PyUnicode_Check(item)) {
-            PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
-            return -1;
-        }
-
-        char const *cap_str = PyUnicode_AsUTF8(item);
-        if (!cap_str) return -1;
-
-        // Map string to capability flag
-        if (strcmp(cap_str, "serial") == 0) { requested_caps |= sz_cap_serial_k; }
-        else if (strcmp(cap_str, "parallel") == 0) { requested_caps |= sz_cap_parallel_k; }
-        else if (strcmp(cap_str, "haswell") == 0) { requested_caps |= sz_cap_haswell_k; }
-        else if (strcmp(cap_str, "skylake") == 0) { requested_caps |= sz_cap_skylake_k; }
-        else if (strcmp(cap_str, "ice") == 0) { requested_caps |= sz_cap_ice_k; }
-        else if (strcmp(cap_str, "neon") == 0) { requested_caps |= sz_cap_neon_k; }
-        else if (strcmp(cap_str, "neon_aes") == 0) { requested_caps |= sz_cap_neon_aes_k; }
-        else if (strcmp(cap_str, "sve") == 0) { requested_caps |= sz_cap_sve_k; }
-        else if (strcmp(cap_str, "sve2") == 0) { requested_caps |= sz_cap_sve2_k; }
-        else if (strcmp(cap_str, "sve2_aes") == 0) { requested_caps |= sz_cap_sve2_aes_k; }
-        else if (strcmp(cap_str, "cuda") == 0) { requested_caps |= sz_cap_cuda_k; }
-        else if (strcmp(cap_str, "kepler") == 0) { requested_caps |= sz_cap_kepler_k; }
-        else if (strcmp(cap_str, "hopper") == 0) { requested_caps |= sz_cap_hopper_k; }
-        else if (strcmp(cap_str, "any") == 0) { requested_caps |= sz_cap_any_k; }
-        else {
-            PyErr_Format(PyExc_ValueError, "Unknown capability: %s", cap_str);
-            return -1;
-        }
-    }
-
-    // Intersect with hardware capabilities
-    *result = requested_caps & default_hardware_capabilities;
-
-    // If no capabilities match, fall back to serial
-    if (*result == 0) { *result = sz_cap_serial_k; }
-
-    return 0;
-}
-
-#pragma endregion
-
 #pragma region DeviceScope
 
 /**
@@ -225,8 +166,7 @@ static int DeviceScope_init(DeviceScope *self, PyObject *args, PyObject *kwargs)
     PyObject *gpu_device_obj = NULL;
 
     static char *kwlist[] = {"cpu_cores", "gpu_device", NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|OO", kwlist, &cpu_cores_obj, &gpu_device_obj)) { return -1; }
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|OO", kwlist, &cpu_cores_obj, &gpu_device_obj)) return -1;
 
     sz_status_t status;
 
@@ -295,6 +235,95 @@ static PyTypeObject DeviceScopeType = {
 
 #pragma endregion
 
+#pragma region Metadata
+
+/**
+ *  @brief Parse capabilities from a Python tuple of strings and intersect with hardware capabilities.
+ *  @param[in] caps_tuple Python tuple containing capability strings (e.g., ('serial', 'haswell')).
+ *  @param[out] result Output capability mask after intersection with hardware capabilities.
+ *  @return 0 on success, -1 on error (with Python exception set).
+ */
+static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t *result) {
+    // Handle `DeviceScope` objects
+    if (PyObject_IsInstance(caps_obj, (PyObject *)&DeviceScopeType)) {
+        DeviceScope *device_scope = (DeviceScope *)caps_obj;
+
+        // Try to get GPU device
+        sz_size_t gpu_device;
+        if (sz_device_scope_get_gpu_device(device_scope->handle, &gpu_device) == sz_success_k) {
+            // This is a GPU scope - prefer CUDA if available
+            if (default_hardware_capabilities & sz_caps_cuda_k) { *result = sz_cap_cuda_k; }
+            else {
+                PyErr_SetString(PyExc_RuntimeError, "GPU DeviceScope requested but CUDA not available");
+                return -1;
+            }
+            return 0;
+        }
+
+        // Try to get CPU cores first
+        sz_size_t cpu_cores;
+        if (sz_device_scope_get_cpu_cores(device_scope->handle, &cpu_cores) == sz_success_k) {
+            // This is a CPU scope - prefer parallel if available, otherwise serial
+            *result = sz_caps_cpus_k;
+            return 0;
+        }
+
+        // Default scope - use all available capabilities
+        *result = default_hardware_capabilities;
+        return 0;
+    }
+
+    // Handle tuple of capability strings (original behavior)
+    if (!PyTuple_Check(caps_obj)) {
+        PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings or a DeviceScope object");
+        return -1;
+    }
+
+    sz_capability_t requested_caps = 0;
+    Py_ssize_t n = PyTuple_Size(caps_obj);
+
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *item = PyTuple_GET_ITEM(caps_obj, i);
+        if (!PyUnicode_Check(item)) {
+            PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple of strings");
+            return -1;
+        }
+
+        char const *cap_str = PyUnicode_AsUTF8(item);
+        if (!cap_str) return -1;
+
+        // Map string to capability flag
+        if (strcmp(cap_str, "serial") == 0) { requested_caps |= sz_cap_serial_k; }
+        else if (strcmp(cap_str, "parallel") == 0) { requested_caps |= sz_cap_parallel_k; }
+        else if (strcmp(cap_str, "haswell") == 0) { requested_caps |= sz_cap_haswell_k; }
+        else if (strcmp(cap_str, "skylake") == 0) { requested_caps |= sz_cap_skylake_k; }
+        else if (strcmp(cap_str, "ice") == 0) { requested_caps |= sz_cap_ice_k; }
+        else if (strcmp(cap_str, "neon") == 0) { requested_caps |= sz_cap_neon_k; }
+        else if (strcmp(cap_str, "neon_aes") == 0) { requested_caps |= sz_cap_neon_aes_k; }
+        else if (strcmp(cap_str, "sve") == 0) { requested_caps |= sz_cap_sve_k; }
+        else if (strcmp(cap_str, "sve2") == 0) { requested_caps |= sz_cap_sve2_k; }
+        else if (strcmp(cap_str, "sve2_aes") == 0) { requested_caps |= sz_cap_sve2_aes_k; }
+        else if (strcmp(cap_str, "cuda") == 0) { requested_caps |= sz_cap_cuda_k; }
+        else if (strcmp(cap_str, "kepler") == 0) { requested_caps |= sz_cap_kepler_k; }
+        else if (strcmp(cap_str, "hopper") == 0) { requested_caps |= sz_cap_hopper_k; }
+        else if (strcmp(cap_str, "any") == 0) { requested_caps |= sz_cap_any_k; }
+        else {
+            PyErr_Format(PyExc_ValueError, "Unknown capability: %s", cap_str);
+            return -1;
+        }
+    }
+
+    // Intersect with hardware capabilities
+    *result = requested_caps & default_hardware_capabilities;
+
+    // If no capabilities match, fall back to serial
+    if (*result == 0) { *result = sz_cap_serial_k; }
+
+    return 0;
+}
+
+#pragma endregion
+
 #pragma region LevenshteinDistances
 
 /**
@@ -331,11 +360,9 @@ static int LevenshteinDistances_init(LevenshteinDistances *self, PyObject *args,
     sz_capability_t capabilities = default_hardware_capabilities;
 
     static char *kwlist[] = {"match", "mismatch", "open", "extend", "capabilities", NULL};
-
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|iiiiO", kwlist, &match, &mismatch, &open, &extend,
-                                     &capabilities_tuple)) {
+                                     &capabilities_tuple))
         return -1;
-    }
 
     // Validate range of values
     if (match < -128 || match > 127) {
@@ -385,10 +412,7 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
     PyObject *a_obj = NULL, *b_obj = NULL, *device_obj = NULL, *out_obj = NULL;
 
     static char *kwlist[] = {"a", "b", "device", "out", NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) {
-        return NULL;
-    }
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) return NULL;
 
     DeviceScope *device_scope = NULL;
     if (device_obj != NULL && device_obj != Py_None) {
@@ -409,7 +433,7 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
                                  sz_size_t) = NULL;
 
     // Try to swap allocators to unified memory for GPU compatibility
-    if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) { return NULL; }
+    if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
 
     // Handle 32-bit tape inputs
     sz_sequence_u32tape_t a_u32tape, b_u32tape;
@@ -546,15 +570,30 @@ static char const doc_LevenshteinDistances[] = //
     "  mismatch (int): Cost for mismatched characters (default: 1).\n"
     "  open (int): Cost for opening a gap (default: 1).\n"
     "  extend (int): Cost for extending a gap (default: 1).\n"
-    "  capabilities (Tuple[str], optional): Hardware capabilities to use.\n"
-    "                                       Will be intersected with detected capabilities.\n"
-    "                                       Examples: ('serial',), ('haswell', 'parallel')\n"
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"
+    "                                       or a DeviceScope for automatic capability inference.\n"
     "\n"
     "Call with:\n"
     "  a (sequence): First sequence of strings.\n"
     "  b (sequence): Second sequence of strings.\n"
     "  device (DeviceScope, optional): Device execution context.\n"
-    "  out (array, optional): Output buffer for results.";
+    "  out (array, optional): Output buffer for results.\n"
+    "\n"
+    "Examples:\n"
+    "  ```python\n"
+    "  # Minimal CPU example with auto-inferred capabilities\n"
+    "  import stringzilla as sz, stringzillas as szs\n"
+    "  engine = szs.LevenshteinDistances()\n"
+    "  strings_a = sz.Strs(['hello', 'world'])\n"
+    "  strings_b = sz.Strs(['hallo', 'word'])\n"
+    "  distances = engine(strings_a, strings_b)\n"
+    "  \n"
+    "  # GPU example with custom costs and auto-inferred capabilities\n"
+    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
+    "  engine = szs.LevenshteinDistances(match=0, mismatch=2, open=3, extend=1, capabilities=gpu_scope)\n"
+    "  distances = engine(strings_a, strings_b, device=gpu_scope)\n"
+    "  ```";
 
 static PyGetSetDef LevenshteinDistances_getsetters[] = {
     {"__capabilities__", (getter)LevenshteinDistances_get_capabilities, NULL,
@@ -607,11 +646,9 @@ static int LevenshteinDistancesUTF8_init(LevenshteinDistancesUTF8 *self, PyObjec
     sz_capability_t capabilities = default_hardware_capabilities;
 
     static char *kwlist[] = {"match", "mismatch", "open", "extend", "capabilities", NULL};
-
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|iiiiO", kwlist, &match, &mismatch, &open, &extend,
-                                     &capabilities_tuple)) {
+                                     &capabilities_tuple))
         return -1;
-    }
 
     // Validate range of values
     if (match < -128 || match > 127) {
@@ -660,10 +697,7 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
     PyObject *a_obj = NULL, *b_obj = NULL, *device_obj = NULL, *out_obj = NULL;
 
     static char *kwlist[] = {"a", "b", "device", "out", NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) {
-        return NULL;
-    }
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) return NULL;
 
     DeviceScope *device_scope = NULL;
     if (device_obj != NULL && device_obj != Py_None) {
@@ -684,7 +718,7 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
                                  sz_size_t) = NULL;
 
     // Try to swap allocators to unified memory for GPU compatibility
-    if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) { return NULL; }
+    if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
 
     // Handle 32-bit tape inputs
     sz_sequence_u32tape_t a_u32tape, b_u32tape;
@@ -822,15 +856,30 @@ static char const doc_LevenshteinDistancesUTF8[] = //
     "  mismatch (int): Cost of mismatched characters (default 1).\n"
     "  open (int): Cost of opening a gap (default 1).\n"
     "  extend (int): Cost of extending a gap (default 1).\n"
-    "  capabilities (Tuple[str], optional): Hardware capabilities to use.\n"
-    "                                       Will be intersected with detected capabilities.\n"
-    "                                       Examples: ('serial',), ('haswell', 'parallel')\n"
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"
+    "                                       or a DeviceScope for automatic capability inference.\n"
     "\n"
     "Call with:\n"
     "  a (sequence): First sequence of UTF-8 strings.\n"
     "  b (sequence): Second sequence of UTF-8 strings.\n"
     "  device (DeviceScope, optional): Device execution context.\n"
-    "  out (array, optional): Output buffer for results.";
+    "  out (array, optional): Output buffer for results.\n"
+    "\n"
+    "Examples:\n"
+    "  ```python\n"
+    "  # Minimal CPU example with Unicode strings\n"
+    "  import stringzilla as sz, stringzillas as szs\n"
+    "  engine = szs.LevenshteinDistancesUTF8()\n"
+    "  strings_a = sz.Strs(['café', 'naïve'])\n"
+    "  strings_b = sz.Strs(['caffe', 'naive'])\n"
+    "  distances = engine(strings_a, strings_b)\n"
+    "  \n"
+    "  # GPU example with high mismatch penalty\n"
+    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
+    "  engine = szs.LevenshteinDistancesUTF8(mismatch=5, capabilities=gpu_scope)\n"
+    "  distances = engine(strings_a, strings_b, device=gpu_scope)\n"
+    "  ```";
 
 static PyGetSetDef LevenshteinDistancesUTF8_getsetters[] = {
     {"__capabilities__", (getter)LevenshteinDistancesUTF8_get_capabilities, NULL,
@@ -891,11 +940,9 @@ static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject 
 
     // Parse arguments: substitution_matrix, open, extend, capabilities
     static char *kwlist[] = {"substitution_matrix", "open", "extend", "capabilities", NULL};
-
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|iiO", kwlist, &substitution_matrix_obj, &open, &extend,
-                                     &capabilities_tuple)) {
+                                     &capabilities_tuple))
         return -1;
-    }
 
     // Validate substitution matrix (should be a 256x256 numpy array)
     if (!numpy_available || !PyArray_Check(substitution_matrix_obj)) {
@@ -923,13 +970,11 @@ static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject 
     sz_error_cost_t *subs_data = (sz_error_cost_t *)PyArray_DATA(subs_array);
 
     // Create a simple checksum of the substitution matrix for the description
-    uint32_t subs_checksum = 0;
-    for (int i = 0; i < 256; i += 16) {                    // Sample every 16th element
-        subs_checksum += (uint32_t)subs_data[i * 256 + i]; // Diagonal elements
-    }
+    sz_u32_t subs_checksum = 0;
+    for (int i = 0; i < 256; i += 16)                      // Sample every 16th element
+        subs_checksum += (sz_u32_t)subs_data[i * 256 + i]; // Diagonal elements
 
     sz_status_t status = sz_needleman_wunsch_scores_init(subs_data, open, extend, NULL, capabilities, &self->handle);
-
     if (status != sz_success_k) {
         char const *error_msg;
         switch (status) {
@@ -963,10 +1008,7 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
     PyObject *a_obj = NULL, *b_obj = NULL, *device_obj = NULL, *out_obj = NULL;
 
     static char *kwlist[] = {"a", "b", "device", "out", NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) {
-        return NULL;
-    }
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) return NULL;
 
     // Get device handle
     sz_device_scope_t device_handle = default_device_scope;
@@ -984,7 +1026,7 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
     sz_status_t (*kernel_punned)(sz_needleman_wunsch_scores_t, sz_device_scope_t, void const *, void const *,
                                  sz_ssize_t *, sz_size_t) = NULL;
     // Try to swap allocators to unified memory for GPU compatibility
-    if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) { return NULL; }
+    if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
 
     // Handle 32-bit tape inputs
     sz_sequence_u32tape_t a_u32tape, b_u32tape;
@@ -1121,15 +1163,31 @@ static char const doc_NeedlemanWunsch[] = //
     "  substitution_matrix (np.ndarray): 256x256 int8 substitution matrix.\n"
     "  open (int): Cost for opening a gap (default: -1).\n"
     "  extend (int): Cost for extending a gap (default: -1).\n"
-    "  capabilities (Tuple[str], optional): Hardware capabilities to use.\n"
-    "                                       Will be intersected with detected capabilities.\n"
-    "                                       Examples: ('serial',), ('haswell', 'parallel')\n"
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"
+    "                                       or a DeviceScope for automatic capability inference.\n"
     "\n"
     "Call with:\n"
     "  a (sequence): First sequence of strings.\n"
     "  b (sequence): Second sequence of strings.\n"
     "  device (DeviceScope, optional): Device execution context.\n"
-    "  out (array, optional): Output buffer for results.";
+    "  out (array, optional): Output buffer for results.\n"
+    "\n"
+    "Examples:\n"
+    "  ```python\n"
+    "  # Minimal CPU example with BLOSUM62 matrix\n"
+    "  import numpy as np, stringzilla as sz, stringzillas as szs\n"
+    "  matrix = np.zeros((256, 256), dtype=np.int8)\n"
+    "  engine = szs.NeedlemanWunsch(substitution_matrix=matrix)\n"
+    "  proteins_a = sz.Strs(['ACGT', 'TGCA'])\n"
+    "  proteins_b = sz.Strs(['ACCT', 'TGAA'])\n"
+    "  scores = engine(proteins_a, proteins_b)\n"
+    "  \n"
+    "  # GPU example with custom gap penalties\n"
+    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
+    "  engine = szs.NeedlemanWunsch(substitution_matrix=matrix, open=-2, extend=-1, capabilities=gpu_scope)\n"
+    "  scores = engine(proteins_a, proteins_b, device=gpu_scope)\n"
+    "  ```";
 
 static PyTypeObject NeedlemanWunschType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.NeedlemanWunsch",
@@ -1176,11 +1234,9 @@ static int SmithWaterman_init(SmithWaterman *self, PyObject *args, PyObject *kwa
 
     // Parse arguments: substitution_matrix, open, extend, capabilities
     static char *kwlist[] = {"substitution_matrix", "open", "extend", "capabilities", NULL};
-
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|iiO", kwlist, &substitution_matrix_obj, &open, &extend,
-                                     &capabilities_tuple)) {
+                                     &capabilities_tuple))
         return -1;
-    }
 
     // Validate substitution matrix (should be a 256x256 numpy array)
     if (!numpy_available || !PyArray_Check(substitution_matrix_obj)) {
@@ -1231,10 +1287,7 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
     PyObject *a_obj = NULL, *b_obj = NULL, *device_obj = NULL, *out_obj = NULL;
 
     static char *kwlist[] = {"a", "b", "device", "out", NULL};
-
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) {
-        return NULL;
-    }
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) return NULL;
 
     // Get device handle
     sz_device_scope_t device_handle = default_device_scope;
@@ -1252,7 +1305,7 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
     sz_status_t (*kernel_punned)(sz_smith_waterman_scores_t, sz_device_scope_t, void const *, void const *,
                                  sz_ssize_t *, sz_size_t) = NULL;
     // Try to swap allocators to unified memory for GPU compatibility
-    if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) { return NULL; }
+    if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
 
     // Handle 32-bit tape inputs
     sz_sequence_u32tape_t a_u32tape, b_u32tape;
@@ -1389,15 +1442,31 @@ static char const doc_SmithWaterman[] = //
     "  substitution_matrix (np.ndarray): 256x256 int8 substitution matrix.\n"
     "  open (int): Cost for opening a gap (default: -1).\n"
     "  extend (int): Cost for extending a gap (default: -1).\n"
-    "  capabilities (Tuple[str], optional): Hardware capabilities to use.\n"
-    "                                       Will be intersected with detected capabilities.\n"
-    "                                       Examples: ('serial',), ('haswell', 'parallel')\n"
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
+    "                                       Can be explicit capabilities like ('serial', 'parallel')\n"
+    "                                       or a DeviceScope for automatic capability inference.\n"
     "\n"
     "Call with:\n"
     "  a (sequence): First sequence of strings.\n"
     "  b (sequence): Second sequence of strings.\n"
     "  device (DeviceScope, optional): Device execution context.\n"
-    "  out (array, optional): Output buffer for results.";
+    "  out (array, optional): Output buffer for results.\n"
+    "\n"
+    "Examples:\n"
+    "  ```python\n"
+    "  # Minimal CPU example for local alignment\n"
+    "  import numpy as np, stringzilla as sz, stringzillas as szs\n"
+    "  matrix = np.eye(256, dtype=np.int8)  # Identity matrix\n"
+    "  engine = szs.SmithWaterman(substitution_matrix=matrix)\n"
+    "  seqs_a = sz.Strs(['ACGTACGT', 'TGCATGCA'])\n"
+    "  seqs_b = sz.Strs(['CGTACGTA', 'GCATGCAT'])\n"
+    "  scores = engine(seqs_a, seqs_b)\n"
+    "  \n"
+    "  # GPU example with different gap costs\n"
+    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
+    "  engine = szs.SmithWaterman(substitution_matrix=matrix, open=-3, extend=-1, capabilities=gpu_scope)\n"
+    "  scores = engine(seqs_a, seqs_b, device=gpu_scope)\n"
+    "  ```";
 
 static PyTypeObject SmithWatermanType = {
     PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzillas.SmithWaterman",
@@ -1598,9 +1667,9 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
     }
 
     if (kernel_punned == NULL) {
-        PyErr_Format(PyExc_TypeError, 
-            "Expected stringzilla.Strs object, got %s. Convert using: stringzilla.Strs(your_string_list)", 
-            Py_TYPE(texts_obj)->tp_name);
+        PyErr_Format(PyExc_TypeError,
+                     "Expected stringzilla.Strs object, got %s. Convert using: stringzilla.Strs(your_string_list)",
+                     Py_TYPE(texts_obj)->tp_name);
         return NULL;
     }
 
@@ -1676,10 +1745,30 @@ static char const doc_Fingerprints[] = //
     "  ndim (int): Number of dimensions per fingerprint.\n"
     "  window_widths (numpy.array, optional): 1D uint64 contiguous array of window widths. Uses defaults if None.\n"
     "  alphabet_size (int, optional): Alphabet size, default 256 for binary strings.\n"
-    "  capabilities (tuple, optional): Computational capabilities to enable ('serial', 'parallel', 'cuda').\n"
+    "  capabilities (Tuple[str] or DeviceScope, optional): Hardware capabilities to use.\n"
+    "                                       Can be explicit capabilities like ('serial', 'parallel', 'cuda')\n"
+    "                                       or a DeviceScope for automatic capability inference.\n"
+    "\n"
+    "Call with:\n"
+    "  texts (sequence): Sequence of strings to fingerprint.\n"
+    "  device (DeviceScope, optional): Device execution context.\n"
     "\n"
     "Returns:\n"
-    "  tuple: (hashes_matrix, counts_matrix) - Two numpy uint32 matrices of shape (num_texts, ndim).";
+    "  tuple: (hashes_matrix, counts_matrix) - Two numpy uint32 matrices of shape (num_texts, ndim).\n"
+    "\n"
+    "Examples:\n"
+    "  ```python\n"
+    "  # Minimal CPU example with auto-inferred capabilities\n"
+    "  import stringzilla as sz, stringzillas as szs\n"
+    "  engine = szs.Fingerprints(ndim=128)\n"
+    "  docs = sz.Strs(['document one', 'document two', 'document three'])\n"
+    "  hashes, counts = engine(docs)\n"
+    "  \n"
+    "  # GPU example with custom dimensions\n"
+    "  gpu_scope = szs.DeviceScope(gpu_device=0)\n"
+    "  engine = szs.Fingerprints(ndim=256, capabilities=gpu_scope)\n"
+    "  hashes, counts = engine(docs, device=gpu_scope)\n"
+    "  ```";
 
 static PyGetSetDef Fingerprints_getsetters[] = {
     {"capabilities", (getter)Fingerprints_get_capabilities, NULL, "computational capabilities", NULL},

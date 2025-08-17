@@ -501,6 +501,11 @@ typedef enum sz_capability_t {
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
     sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
 
+    // Aggregates for different StringZillas builds
+    sz_caps_cpus_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_haswell_k | sz_cap_skylake_k | sz_cap_ice_k |
+                     sz_cap_neon_k | sz_cap_neon_aes_k | sz_cap_sve_k | sz_cap_sve2_k | sz_cap_sve2_aes_k,
+    sz_caps_cuda_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,
+
 } sz_capability_t;
 
 /**
