@@ -1,5 +1,5 @@
 /**
- *  @brief  Shared definitions for the StringCuZilla C++ library.
+ *  @brief  Shared definitions for the StringZillas C++ library.
  *  @file   types.hpp
  *  @author Ash Vardanian
  */

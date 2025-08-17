@@ -256,14 +256,6 @@
 #endif
 #endif
 
-#if !defined(SZ_USE_OPENMP)
-#ifdef _OPENMP
-#define SZ_USE_OPENMP (1)
-#else
-#define SZ_USE_OPENMP (0)
-#endif
-#endif
-
 #if !defined(SZ_USE_CUDA)
 #ifdef __NVCC__
 #define SZ_USE_CUDA (1)
@@ -477,7 +469,7 @@ typedef enum sz_status_t {
  */
 typedef enum sz_capability_t {
     sz_cap_serial_k = 1,        ///< Serial (non-SIMD) capability
-    sz_cap_parallel_k = 1 << 2, ///< Multi-threading via OpenMP capability
+    sz_cap_parallel_k = 1 << 2, ///< Multi-threading via Fork Union or other OpenMP-like engines
     sz_cap_any_k = 0x7FFFFFFF,  ///< Mask representing any capability with `INT_MAX`
 
     sz_cap_haswell_k = 1 << 5, ///< x86 AVX2 capability with FMA and F16C extensions
@@ -494,10 +486,10 @@ typedef enum sz_capability_t {
     sz_cap_kepler_k = 1 << 21, ///< CUDA capability with support with in-warp register shuffles
     sz_cap_hopper_k = 1 << 22, ///< CUDA capability with support for Hopper's DPX instructions
 
-    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k,                 ///< Serial code with OpenMP
+    sz_caps_sp_k = sz_cap_serial_k | sz_cap_parallel_k,                 ///< Serial code with Fork Union
     sz_caps_si_k = sz_cap_serial_k | sz_cap_ice_k,                      ///< Serial code with Ice Lake
-    sz_caps_spi_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_ice_k, ///< Serial code with OpenMP and Ice Lake
-    sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with OpenMP and SVE
+    sz_caps_spi_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_ice_k, ///< Serial code with Fork Union and Ice Lake
+    sz_caps_sps_k = sz_cap_serial_k | sz_cap_parallel_k | sz_cap_sve_k, ///< Serial code with Fork Union and SVE
     sz_caps_ck_k = sz_cap_cuda_k | sz_cap_kepler_k,                     ///< CUDA code with Kepler
     sz_caps_ckh_k = sz_cap_cuda_k | sz_cap_kepler_k | sz_cap_hopper_k,  ///< CUDA code with Kepler and Hopper
 

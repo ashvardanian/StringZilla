@@ -3,7 +3,7 @@
  *  @file   similarities.cuh
  *  @author Ash Vardanian
  *
- *  Unlike th OpenMP backed, which also has single-pair similarity scores, the CUDA backend focuses @b only on
+ *  Unlike the CPU backed, which also has single-pair similarity scores, the CUDA backend focuses @b only on
  *  batch-processing of large collections of strings, generally, assigning a single warp to each string pair:
  *
  *  - `sz::levenshtein_distances` & `sz::levenshtein_distances_utf8` for Levenshtein edit-distances.

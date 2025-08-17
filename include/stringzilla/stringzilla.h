@@ -25,12 +25,12 @@
  *  - `stringzilla.h` - umbrella header for the core C API.
  *  - `stringzilla.hpp` - umbrella header for the core C++ API.
  *
- *  It also provides many higher-level parallel algorithms, mostly implemented in C++ with OpenMP and CUDA, also exposed
- *  via the stable C 99 ABI, but requiring C++17 and CUDA 17 compilers to build the shared @b StringCuZilla libraries:
+ *  It also provides many higher-level parallel algorithms, implemented in C++ with Fork Union and CUDA, also exposed
+ *  via the stable C 99 ABI, but requiring C++17 and CUDA 17 compilers to build the shared @b StringZillas libraries:
  *
  *  - `similarities.{hpp,cuh}` - similarity measures, like Levenshtein, Needleman-Wunsch, & Smith-Waterman scores.
- *  - `features.{hpp,cuh}` - feature extraction for TF-IDF and other Machine Learning algorithms.
- *  - `fingerprints.{hpp,cuh}` - Aho-Corasick multi-pattern search.
+ *  - `fingerprints.{hpp,cuh}` - feature extraction for TF-IDF and other Machine Learning algorithms.
+ *  - `find_many.{hpp,cuh}` - Aho-Corasick multi-pattern search.
  *
  *  The core implementations of those algorithms are mostly structured as callable structure templates, as opposed to
  *  template functions to simplify specialized overloads and reusing the state between invocations.
@@ -58,8 +58,9 @@
  *  - `SZ_USE_NEON=?` - whether to use NEON instructions on ARM.
  *  - `SZ_USE_SVE=?` - whether to use SVE instructions on ARM.
  *  - `SZ_USE_SVE2=?` - whether to use SVE2 instructions on ARM.
- *  - `SZ_USE_CUDA=?` -
- *  - `SZ_USE_OPENMP=?` -
+ *  - `SZ_USE_CUDA=?` - whether to use minimal CUDA capabilities on Nvidia GPUs.
+ *  - `SZ_USE_KEPLER=?` - whether to use Kepler-level instructions on Nvidia GPUs.
+ *  - `SZ_USE_HOPPER=?` - whether to use Hopper-level instructions on Nvidia GPUs.
  */
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_

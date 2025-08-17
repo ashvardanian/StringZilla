@@ -1,5 +1,5 @@
 /**
- *  @brief   Extensive @b stress-testing suite for StringCuZilla parallel operations, written in CUDA C++.
+ *  @brief   Extensive @b stress-testing suite for StringZillas parallel operations, written in CUDA C++.
  *  @see     Stress-tests on real-world and synthetic data are integrated into the @b `scripts/bench*.cpp` benchmarks.
  *
  *  @file    test_similarities.cuh

@@ -1,5 +1,5 @@
 /**
- *  @brief  OpenMP-accelerated string similarity scores in C++.
+ *  @brief  Parallel string similarity scores in C++.
  *  @file   similarities.hpp
  *  @author Ash Vardanian
  *
@@ -73,7 +73,7 @@
 #include "stringzilla/memory.h"   // `sz_move_serial`
 #include "stringzillas/types.hpp" // `sz::executor_like`
 
-#include <atomic>      // `std::atomic` to synchronize OpenMP threads
+#include <atomic>      // `std::atomic` to synchronize threads
 #include <type_traits> // `std::enable_if_t` for meta-programming
 #include <limits>      // `std::numeric_limits` for numeric types
 #include <iterator>    // `std::iterator_traits` for iterators
@@ -329,7 +329,7 @@ struct tile_scorer;
 
 /**
  *  @brief  Alignment Score and Edit Distance algorithm evaluating the Dynamic Programming matrix
- *          @b (anti)diagonal-by-(anti)diagonal on a CPU, leveraging OpenMP.
+ *          @b (anti)diagonal-by-(anti)diagonal on a CPU.
  *
  *  Can be used for both global and local alignment, like Needleman-Wunsch and Smith-Waterman.
  *  Can be used for both linear and affine gap penalties.
@@ -345,7 +345,7 @@ struct tile_scorer;
  *  @tparam allocator_type_ A default-constructible allocator type for the internal buffers.
  *  @tparam objective_ Whether to minimize the distance or maximize the score.
  *  @tparam locality_ Whether to use the global alignment algorithm or the local one.
- *  @tparam capability_ Whether to use OpenMP for @b multi-threading or some form of @b SIMD vectorization, or both.
+ *  @tparam capability_ Whether to use @b multi-threading or some form of @b SIMD vectorization, or both.
  *  @tparam enable_ Used to enable/disable the specialization.
  */
 template <                                                       //
@@ -378,7 +378,7 @@ struct diagonal_walker;
  *  @tparam allocator_type_ A default-constructible allocator type for the internal buffers.
  *  @tparam objective_ Whether to minimize the distance or maximize the score.
  *  @tparam locality_ Whether to use the global alignment algorithm or the local one.
- *  @tparam capability_ Whether to use OpenMP for @b multi-threading or some form of @b SIMD vectorization, or both.
+ *  @tparam capability_ Whether to use @b multi-threading or some form of @b SIMD vectorization, or both.
  *  @tparam enable_ Used to enable/disable the specialization.
  *
  *  @note   The API of this algorithm is a bit weird, but it's designed to minimize the reliance on the definitions
@@ -404,7 +404,7 @@ template <                                                       //
 struct horizontal_walker;
 
 /**
- *  @brief  Computes one or many pairwise Levenshtein distances in parallel using the OpenMP backend.
+ *  @brief  Computes one or many pairwise Levenshtein distances in parallel using the CPU backend.
  *          For pairs of very large strings, all cores cooperate to compute one distance maximizing
  *          cache hits. For smaller strings, each core computes its own distance.
  */
@@ -465,7 +465,7 @@ struct smith_waterman_scores;
 using malloc_t = std::allocator<char>;
 
 /**
- *  In non-SIMD backends we still leverage OpenMP for parallelism.
+ *  In non-SIMD backends we still leverage multi-threading for parallelism.
  */
 using levenshtein_serial_t = levenshtein_distances<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
 using levenshtein_utf8_serial_t = levenshtein_distances_utf8<char, linear_gap_costs_t, malloc_t, sz_cap_serial_k>;
@@ -1615,7 +1615,7 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
 #pragma region - Pairwise Algorithms on CPU
 
 /**
- *  @brief  Computes the @b byte-level Levenshtein distance between two strings using the OpenMP backend.
+ *  @brief  Computes the @b byte-level Levenshtein distance between two strings using the CPU backend.
  *  @sa     `levenshtein_distance_utf8` for UTF-8 strings.
  *
  *  @tparam char_type_ Can be any POD integer type, but @b `char` and @b `sz_rune_t` are preferred.
@@ -1736,7 +1736,7 @@ struct levenshtein_distance {
 };
 
 /**
- *  @brief  Computes the @b rune-level Levenshtein distance between two UTF-8 strings using the OpenMP backend.
+ *  @brief  Computes the @b rune-level Levenshtein distance between two UTF-8 strings using the CPU backend.
  *  @sa     `levenshtein_distance` for binary strings.
  */
 template <                                         //
@@ -1889,7 +1889,7 @@ struct levenshtein_distance_utf8 {
 };
 
 /**
- *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the OpenMP backend.
+ *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the CPU backend.
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
 template <                                              //
@@ -1984,7 +1984,7 @@ struct needleman_wunsch_score {
 };
 
 /**
- *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the OpenMP backend.
+ *  @brief  Computes the @b byte-level Needleman-Wunsch score between two strings using the CPU backend.
  *  @sa     `levenshtein_distance` for uniform substitution and gap costs.
  */
 template <                                              //
@@ -3663,7 +3663,7 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
 };
 
 /**
- *  @brief  Computes the @b byte-level Levenshtein distance between two strings using the OpenMP backend.
+ *  @brief  Computes the @b byte-level Levenshtein distance between two strings using the CPU backend.
  *  @sa     `levenshtein_distance_utf8` for UTF-8 strings.
  */
 template <typename gap_costs_type_, typename allocator_type_, sz_capability_t capability_>
@@ -3750,7 +3750,7 @@ struct levenshtein_distance<char, gap_costs_type_, allocator_type_, capability_,
 };
 
 /**
- *  @brief  Computes the @b rune-level Levenshtein distance between two UTF-8 strings using the OpenMP backend.
+ *  @brief  Computes the @b rune-level Levenshtein distance between two UTF-8 strings using the CPU backend.
  *  @sa     `levenshtein_distance` for binary strings.
  */
 template <typename allocator_type_, sz_capability_t capability_>

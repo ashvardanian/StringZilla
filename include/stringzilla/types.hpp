@@ -107,7 +107,7 @@
 #if defined(__NVCC__)
 #define SZ_HAS_CONCEPTS_ 0
 #elif defined(__cpp_concepts)
-#define SZ_HAS_CONCEPTS_ 1
+#define SZ_HAS_CONCEPTS_ 0 // TODO: Fix concepts compilation with GCC
 #else
 #define SZ_HAS_CONCEPTS_ 0
 #endif

@@ -1880,7 +1880,6 @@ int main(int argc, char const **argv) {
     std::printf("- Uses NEON: %s \n", SZ_USE_NEON ? "yes" : "no");
     std::printf("- Uses SVE: %s \n", SZ_USE_SVE ? "yes" : "no");
     std::printf("- Uses SVE2: %s \n", SZ_USE_SVE2 ? "yes" : "no");
-    std::printf("- Uses OpenMP: %s \n", SZ_USE_OPENMP ? "yes" : "no");
     std::printf("- Uses CUDA: %s \n", SZ_USE_CUDA ? "yes" : "no");
 
 #if SZ_USE_CUDA
