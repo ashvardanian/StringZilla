@@ -543,6 +543,8 @@ sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:5.9 /bin/bash -cl 
 
 ```bash
 cargo test
+cargo test --features cpus
+cargo test --features cuda
 ```
 
 If you need to isolate a failing test:

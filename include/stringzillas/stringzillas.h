@@ -81,6 +81,7 @@ SZ_DYNAMIC sz_status_t sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_de
 SZ_DYNAMIC sz_status_t sz_device_scope_init_gpu_device(sz_size_t gpu_device, sz_device_scope_t *scope);
 SZ_DYNAMIC sz_status_t sz_device_scope_get_cpu_cores(sz_device_scope_t scope, sz_size_t *cpu_cores);
 SZ_DYNAMIC sz_status_t sz_device_scope_get_gpu_device(sz_device_scope_t scope, sz_size_t *gpu_device);
+SZ_DYNAMIC sz_status_t sz_device_scope_get_capabilities(sz_device_scope_t scope, sz_capability_t *capabilities);
 SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope);
 
 /*  APIs for computing edit-distances between binary and UTF-8 strings.
@@ -247,6 +248,23 @@ SZ_DYNAMIC sz_status_t sz_fingerprints_u32tape(         //
     sz_u32_t *min_counts, sz_size_t min_counts_stride);
 
 SZ_DYNAMIC void sz_fingerprints_free(sz_fingerprints_t engine);
+
+/**
+ *  @brief Allocates memory using unified memory allocator.
+ *  @param[in] size_bytes Number of bytes to allocate.
+ *  @return Pointer to allocated memory, or NULL on failure.
+ *  
+ *  Uses CUDA unified memory when available, falls back to malloc otherwise.
+ *  Allocated memory can be accessed from both CPU and GPU when CUDA is available.
+ */
+SZ_DYNAMIC void *sz_unified_alloc(sz_size_t size_bytes);
+
+/**
+ *  @brief Deallocates memory allocated by sz_unified_alloc.
+ *  @param[in] ptr Pointer to memory to deallocate.
+ *  @param[in] size_bytes Size of the allocation (for compatibility, may be ignored).
+ */
+SZ_DYNAMIC void sz_unified_free(void *ptr, sz_size_t size_bytes);
 
 #ifdef __cplusplus
 }

@@ -197,55 +197,6 @@ pub mod sz {
             second_positions: *mut SortedIdx,
         ) -> Status;
 
-        pub fn sz_levenshtein_distance(
-            a: *const c_void,
-            a_length: usize,
-            b: *const c_void,
-            b_length: usize,
-            bound: usize,
-            alloc: *const c_void,
-            result: *mut usize,
-        ) -> Status;
-
-        pub fn sz_levenshtein_distance_utf8(
-            a: *const c_void,
-            a_length: usize,
-            b: *const c_void,
-            b_length: usize,
-            bound: usize,
-            alloc: *const c_void,
-            result: *mut usize,
-        ) -> Status;
-
-        pub fn sz_hamming_distance(
-            a: *const c_void,
-            a_length: usize,
-            b: *const c_void,
-            b_length: usize,
-            bound: usize,
-            result: *mut usize,
-        ) -> Status;
-
-        pub fn sz_hamming_distance_utf8(
-            a: *const c_void,
-            a_length: usize,
-            b: *const c_void,
-            b_length: usize,
-            bound: usize,
-            result: *mut usize,
-        ) -> Status;
-
-        pub fn sz_needleman_wunsch_score(
-            a: *const c_void,
-            a_length: usize,
-            b: *const c_void,
-            b_length: usize,
-            subs: *const i8,
-            gap: i8,
-            alloc: *const c_void,
-            result: *mut isize,
-        ) -> Status;
-
     }
 
     impl SemVer {
@@ -791,306 +742,6 @@ pub mod sz {
         rfind_byteset(haystack, Byteset::from(needles).inverted())
     }
 
-    /// Computes the Levenshtein edit distance between two strings, using the Wagner-Fisher
-    /// algorithm. This measure is widely used in applications like spell-checking, DNA sequence
-    /// analysis.
-    ///
-    /// # Arguments
-    ///
-    /// * `first`: The first byte slice.
-    /// * `second`: The second byte slice.
-    /// * `bound`: The maximum distance to compute, allowing for early exit.
-    ///
-    /// # Returns
-    ///
-    /// A `usize` representing the minimum number of single-character edits (insertions,
-    /// deletions, or substitutions) required to change `first` into `second`.
-    pub fn levenshtein_distance_bounded<F, S>(first: F, second: S, bound: usize) -> Result<usize, Status>
-    where
-        F: AsRef<[u8]>,
-        S: AsRef<[u8]>,
-    {
-        let first_ref = first.as_ref();
-        let second_ref = second.as_ref();
-        let first_length = first_ref.len();
-        let second_length = second_ref.len();
-        let first_pointer = first_ref.as_ptr() as _;
-        let second_pointer = second_ref.as_ptr() as _;
-        let mut result: usize = 0;
-        let status = unsafe {
-            sz_levenshtein_distance(
-                first_pointer,
-                first_length,
-                second_pointer,
-                second_length,
-                bound,
-                core::ptr::null(), // Uses the default allocator
-                &mut result as *mut _,
-            )
-        };
-        if status == Status::Success {
-            Ok(result)
-        } else {
-            Err(status)
-        }
-    }
-
-    /// Computes the Levenshtein edit distance between two UTF8 strings, using the Wagner-Fisher
-    /// algorithm. This measure is widely used in applications like spell-checking.
-    ///
-    /// # Arguments
-    ///
-    /// * `first`: The first byte slice.
-    /// * `second`: The second byte slice.
-    /// * `bound`: The maximum distance to compute, allowing for early exit.
-    ///
-    /// # Returns
-    ///
-    /// A `usize` representing the minimum number of single-character edits (insertions,
-    /// deletions, or substitutions) required to change `first` into `second`.
-    pub fn levenshtein_distance_utf8_bounded<F, S>(first: F, second: S, bound: usize) -> Result<usize, Status>
-    where
-        F: AsRef<[u8]>,
-        S: AsRef<[u8]>,
-    {
-        let first_ref = first.as_ref();
-        let second_ref = second.as_ref();
-        let first_length = first_ref.len();
-        let second_length = second_ref.len();
-        let first_pointer = first_ref.as_ptr() as _;
-        let second_pointer = second_ref.as_ptr() as _;
-        let mut result: usize = 0;
-        let status = unsafe {
-            sz_levenshtein_distance_utf8(
-                first_pointer,
-                first_length,
-                second_pointer,
-                second_length,
-                bound,
-                core::ptr::null(), // Uses the default allocator
-                &mut result as *mut _,
-            )
-        };
-        if status == Status::Success {
-            Ok(result)
-        } else {
-            Err(status)
-        }
-    }
-
-    /// Computes the Levenshtein edit distance between two strings, using the Wagner-Fisher
-    /// algorithm. This measure is widely used in applications like spell-checking, DNA sequence
-    /// analysis.
-    ///
-    /// # Arguments
-    ///
-    /// * `first`: The first byte slice.
-    /// * `second`: The second byte slice.
-    ///
-    /// # Returns
-    ///
-    /// A `usize` representing the minimum number of single-character edits (insertions,
-    /// deletions, or substitutions) required to change `first` into `second`.
-    pub fn levenshtein_distance<F, S>(first: F, second: S) -> Result<usize, Status>
-    where
-        F: AsRef<[u8]>,
-        S: AsRef<[u8]>,
-    {
-        levenshtein_distance_bounded(first, second, usize::MAX)
-    }
-
-    /// Computes the Levenshtein edit distance between two UTF8 strings, using the Wagner-Fisher
-    /// algorithm. This measure is widely used in applications like spell-checking.
-    ///
-    /// # Arguments
-    ///
-    /// * `first`: The first byte slice.
-    /// * `second`: The second byte slice.
-    ///
-    /// # Returns
-    ///
-    /// A `usize` representing the minimum number of single-character edits (insertions,
-    /// deletions, or substitutions) required to change `first` into `second`.
-    pub fn levenshtein_distance_utf8<F, S>(first: F, second: S) -> Result<usize, Status>
-    where
-        F: AsRef<[u8]>,
-        S: AsRef<[u8]>,
-    {
-        levenshtein_distance_utf8_bounded(first, second, usize::MAX)
-    }
-
-    /// Computes the Hamming edit distance between two strings, counting the number of substituted characters.
-    /// Difference in length is added to the result as well.
-    ///
-    /// # Arguments
-    ///
-    /// * `first`: The first byte slice.
-    /// * `second`: The second byte slice.
-    /// * `bound`: The maximum distance to compute, allowing for early exit.
-    ///
-    /// # Returns
-    ///
-    /// A `usize` representing the minimum number of single-character edits (substitutions) required to
-    /// change `first` into `second`.
-    pub fn hamming_distance_bounded<F, S>(first: F, second: S, bound: usize) -> Result<usize, Status>
-    where
-        F: AsRef<[u8]>,
-        S: AsRef<[u8]>,
-    {
-        let first_ref = first.as_ref();
-        let second_ref = second.as_ref();
-        let first_length = first_ref.len();
-        let second_length = second_ref.len();
-        let first_pointer = first_ref.as_ptr() as _;
-        let second_pointer = second_ref.as_ptr() as _;
-        let mut result: usize = 0;
-        let status = unsafe {
-            sz_hamming_distance(
-                first_pointer,
-                first_length,
-                second_pointer,
-                second_length,
-                bound,
-                &mut result as *mut _,
-            )
-        };
-        if status == Status::Success {
-            Ok(result)
-        } else {
-            Err(status)
-        }
-    }
-
-    /// Computes the Hamming edit distance between two UTF8 strings, counting the number of substituted
-    /// variable-length characters. Difference in length is added to the result as well.
-    ///
-    /// # Arguments
-    ///
-    /// * `first`: The first byte slice.
-    /// * `second`: The second byte slice.
-    /// * `bound`: The maximum distance to compute, allowing for early exit.
-    ///
-    /// # Returns
-    ///
-    /// A `usize` representing the minimum number of single-character edits (substitutions) required to
-    /// change `first` into `second`.
-    pub fn hamming_distance_utf8_bounded<F, S>(first: F, second: S, bound: usize) -> Result<usize, Status>
-    where
-        F: AsRef<[u8]>,
-        S: AsRef<[u8]>,
-    {
-        let first_ref = first.as_ref();
-        let second_ref = second.as_ref();
-        let first_length = first_ref.len();
-        let second_length = second_ref.len();
-        let first_pointer = first_ref.as_ptr() as _;
-        let second_pointer = second_ref.as_ptr() as _;
-        let mut result: usize = 0;
-        let status = unsafe {
-            sz_hamming_distance_utf8(
-                first_pointer,
-                first_length,
-                second_pointer,
-                second_length,
-                bound,
-                &mut result as *mut _,
-            )
-        };
-        if status == Status::Success {
-            Ok(result)
-        } else {
-            Err(status)
-        }
-    }
-
-    /// Computes the Hamming edit distance between two strings, counting the number of substituted characters.
-    /// Difference in length is added to the result as well.
-    ///
-    /// # Arguments
-    ///
-    /// * `first`: The first byte slice.
-    /// * `second`: The second byte slice.
-    ///
-    /// # Returns
-    ///
-    /// A `usize` representing the minimum number of single-character edits (substitutions) required to
-    /// change `first` into `second`.
-    pub fn hamming_distance<F, S>(first: F, second: S) -> Result<usize, Status>
-    where
-        F: AsRef<[u8]>,
-        S: AsRef<[u8]>,
-    {
-        hamming_distance_bounded(first, second, 0)
-    }
-
-    /// Computes the Hamming edit distance between two UTF8 strings, counting the number of substituted
-    /// variable-length characters. Difference in length is added to the result as well.
-    ///
-    /// # Arguments
-    ///
-    /// * `first`: The first byte slice.
-    /// * `second`: The second byte slice.
-    ///
-    /// # Returns
-    ///
-    /// A `usize` representing the minimum number of single-character edits (substitutions) required to
-    /// change `first` into `second`.
-    pub fn hamming_distance_utf8<F, S>(first: F, second: S) -> Result<usize, Status>
-    where
-        F: AsRef<[u8]>,
-        S: AsRef<[u8]>,
-    {
-        hamming_distance_utf8_bounded(first, second, 0)
-    }
-
-    /// Computes the Needleman-Wunsch alignment score for two strings. This function is
-    /// particularly used in bioinformatics for sequence alignment but is also applicable in
-    /// other domains requiring detailed comparison between two strings, including gap and
-    /// substitution penalties.
-    ///
-    /// # Arguments
-    ///
-    /// * `first`: The first byte slice to align.
-    /// * `second`: The second byte slice to align.
-    /// * `matrix`: The substitution matrix used for scoring.
-    /// * `gap`: The penalty for each gap introduced during alignment.
-    ///
-    /// # Returns
-    ///
-    /// An `isize` representing the total alignment score, where higher scores indicate better
-    /// alignment between the two strings, considering the specified gap penalties and
-    /// substitution matrix.
-    pub fn alignment_score<F, S>(first: F, second: S, matrix: [[i8; 256]; 256], gap: i8) -> Result<isize, Status>
-    where
-        F: AsRef<[u8]>,
-        S: AsRef<[u8]>,
-    {
-        let first_ref = first.as_ref();
-        let second_ref = second.as_ref();
-        let first_length = first_ref.len();
-        let second_length = second_ref.len();
-        let first_pointer = first_ref.as_ptr() as _;
-        let second_pointer = second_ref.as_ptr() as _;
-        let mut result: isize = 0;
-        let status = unsafe {
-            sz_needleman_wunsch_score(
-                first_pointer,
-                first_length,
-                second_pointer,
-                second_length,
-                matrix.as_ptr() as _,
-                gap,
-                core::ptr::null(), // Uses the default allocator
-                &mut result as *mut _,
-            )
-        };
-        if status == Status::Success {
-            Ok(result)
-        } else {
-            Err(status)
-        }
-    }
-
     /// Generates a default substitution matrix for use with the Needleman-Wunsch
     /// alignment algorithm. This matrix is initialized such that diagonal entries
     /// (representing matching characters) are zero, and off-diagonal entries
@@ -1183,9 +834,9 @@ pub mod sz {
     /// use stringzilla::sz;
     ///
     /// let fruits = ["banana", "apple", "cherry"];
-    /// let mut order = [0; fruits.len()];
+    /// let mut order = [0; 3];
     /// sz::argsort_permutation(&fruits, &mut order).expect("sort failed");
-    /// assert_eq!(order, &[1, 0, 2]); // "apple", "banana", "cherry"
+    /// assert_eq!(&order, &[1, 0, 2]); // "apple", "banana", "cherry"
     /// ```
     pub fn argsort_permutation<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx]) -> Result<(), Status> {
         if data.len() > order.len() {
@@ -1202,14 +853,17 @@ pub mod sz {
     /// ```rust
     /// use stringzilla::sz;
     ///
+    /// #[derive(Debug)]
+    /// struct Person { name: &'static str, age: u32 }
+    ///
     /// let people = [
     ///     Person { name: "Charlie", age: 20 },
     ///     Person { name: "Alice", age: 25 },
     ///     Person { name: "Bob", age: 30 },
     /// ];
-    /// let mut order = [0; people.len()];
+    /// let mut order = [0; 3];
     /// sz::argsort_permutation_by(|i| people[i].name.as_bytes(), &mut order).expect("sort failed");
-    /// assert_eq!(order, &[1, 2, 0]); // "Alice", "Bob", "Charlie"
+    /// assert_eq!(&order, &[1, 2, 0]); // "Alice", "Bob", "Charlie"
     /// ```
     pub fn argsort_permutation_by<F, A>(mapper: F, order: &mut [SortedIdx]) -> Result<(), Status>
     where
@@ -1299,6 +953,9 @@ pub mod sz {
     /// ```rust
     /// use stringzilla::sz;
     ///
+    /// #[derive(Debug)]
+    /// struct Person { name: &'static str, age: u32 }
+    ///
     /// let people1 = [
     ///     Person { name: "Charlie", age: 20 },
     ///     Person { name: "Alice", age: 25 },
@@ -1309,8 +966,8 @@ pub mod sz {
     ///     Person { name: "Bob", age: 30 },
     ///     Person { name: "Charlie", age: 20 },
     /// ];
-    /// let mut positions1 = [0; people1.len().min(people2.len())];
-    /// let mut positions2 = [0; people2.len().min(people1.len())];
+    /// let mut positions1 = [0; 3]; // min(people1.len(), people2.len())
+    /// let mut positions2 = [0; 3]; // min(people1.len(), people2.len())
     /// let n = sz::intersection_by(
     ///     |i| people1[i].name.as_bytes(),
     ///     |j| people2[j].name.as_bytes(),
@@ -1699,8 +1356,8 @@ where
     /// ```
     /// use stringzilla::StringZilla;
     ///
-    /// let text = "Hello";
-    /// assert_eq!(text.sz_bytesum(), Some(500));
+    /// let text: &str = "Hello";
+    /// assert_eq!(text.sz_bytesum(), 500);
     /// ```
     fn sz_bytesum(&self) -> u64;
 
@@ -1714,7 +1371,9 @@ where
     /// ```
     /// use stringzilla::StringZilla;
     ///
-    /// assert_ne!("Hello".sz_hash(), "World".sz_hash());
+    /// let s1 = "Hello";
+    /// let s2 = "World";
+    /// assert_ne!(StringZilla::sz_hash(s1), StringZilla::sz_hash(s2));
     /// ```
     fn sz_hash(&self) -> u64;
 
@@ -1789,74 +1448,6 @@ where
     /// assert_eq!(haystack.sz_rfind_byte_not_from("aeiou".as_bytes()), Some(12));
     /// ```
     fn sz_rfind_byte_not_from(&self, needles: N) -> Option<usize>;
-
-    /// Computes the Levenshtein edit distance between `self` and `other`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use stringzilla::StringZilla;
-    ///
-    /// let first = "kitten";
-    /// let second = "sitting";
-    /// assert_eq!(first.sz_levenshtein_distance(second.as_bytes()), Ok(3));
-    /// ```
-    fn sz_levenshtein_distance(&self, other: N) -> Result<usize, sz::Status>;
-
-    /// Computes the Levenshtein edit distance between `self` and `other`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use stringzilla::StringZilla;
-    ///
-    /// let first = "kitten";
-    /// let second = "sitting";
-    /// assert_eq!(first.sz_levenshtein_distance_utf8(second.as_bytes()), Ok(3));
-    /// ```
-    fn sz_levenshtein_distance_utf8(&self, other: N) -> Result<usize, sz::Status>;
-
-    /// Computes the bounded Levenshtein edit distance between `self` and `other`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use stringzilla::StringZilla;
-    ///
-    /// let first = "kitten";
-    /// let second = "sitting";
-    /// assert_eq!(first.sz_levenshtein_distance_bounded(second.as_bytes()), Ok(3));
-    /// ```
-    fn sz_levenshtein_distance_bounded(&self, other: N, bound: usize) -> Result<usize, sz::Status>;
-
-    /// Computes the bounded Levenshtein edit distance between `self` and `other`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use stringzilla::StringZilla;
-    ///
-    /// let first = "kitten";
-    /// let second = "sitting";
-    /// assert_eq!(first.sz_levenshtein_distance_utf8_bounded(second.as_bytes()), Ok(3));
-    /// ```
-    fn sz_levenshtein_distance_utf8_bounded(&self, other: N, bound: usize) -> Result<usize, sz::Status>;
-
-    /// Computes the alignment score between `self` and `other` using the specified
-    /// substitution matrix and gap penalty.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use stringzilla::{sz, StringZilla};
-    ///
-    /// let first = "kitten";
-    /// let second = "sitting";
-    /// let matrix = sz::error_costs_256x256_unary();
-    /// let gap_penalty = -1;
-    /// assert_eq!(first.sz_needleman_wunsch_score(second.as_bytes(), matrix, gap_penalty), Ok(-3));
-    /// ```
-    fn sz_needleman_wunsch_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> Result<isize, sz::Status>;
 
     /// Returns an iterator over all non-overlapping matches of the given `needle` in `self`.
     ///
@@ -2040,26 +1631,6 @@ where
         sz::rfind_byte_not_from(self, needles)
     }
 
-    fn sz_levenshtein_distance(&self, other: N) -> Result<usize, sz::Status> {
-        sz::levenshtein_distance(self, other)
-    }
-
-    fn sz_levenshtein_distance_utf8(&self, other: N) -> Result<usize, sz::Status> {
-        sz::levenshtein_distance_utf8(self, other)
-    }
-
-    fn sz_levenshtein_distance_bounded(&self, other: N, bound: usize) -> Result<usize, sz::Status> {
-        sz::levenshtein_distance_bounded(self, other, bound)
-    }
-
-    fn sz_levenshtein_distance_utf8_bounded(&self, other: N, bound: usize) -> Result<usize, sz::Status> {
-        sz::levenshtein_distance_utf8_bounded(self, other, bound)
-    }
-
-    fn sz_needleman_wunsch_score(&self, other: N, matrix: [[i8; 256]; 256], gap: i8) -> Result<isize, sz::Status> {
-        sz::alignment_score(self, other, matrix, gap)
-    }
-
     fn sz_matches(&'a self, needle: &'a N) -> RangeMatches<'a> {
         RangeMatches::new(self.as_ref(), MatcherType::Find(needle.as_ref()), true)
     }
@@ -2135,45 +1706,6 @@ mod tests {
                 sz::hash_with_seed("HelloWorld", *seed)
             );
         }
-    }
-
-    #[test]
-    fn hamming() {
-        assert_eq!(sz::hamming_distance("hello", "hello"), Ok(0));
-        assert_eq!(sz::hamming_distance("hello", "hell"), Ok(1));
-        assert_eq!(sz::hamming_distance("abc", "adc"), Ok(1));
-
-        assert_eq!(sz::hamming_distance_bounded("abcdefgh", "ABCDEFGH", 2), Ok(2));
-        assert_eq!(sz::hamming_distance_utf8("αβγδ", "αγγδ"), Ok(1));
-    }
-
-    #[test]
-    fn levenshtein() {
-        assert_eq!(sz::levenshtein_distance("hello", "hell"), Ok(1));
-        assert_eq!(sz::levenshtein_distance("hello", "hell"), Ok(1));
-        assert_eq!(sz::levenshtein_distance("abc", ""), Ok(3));
-        assert_eq!(sz::levenshtein_distance("abc", "ac"), Ok(1));
-        assert_eq!(sz::levenshtein_distance("abc", "a_bc"), Ok(1));
-        assert_eq!(sz::levenshtein_distance("abc", "adc"), Ok(1));
-        assert_eq!(sz::levenshtein_distance("fitting", "kitty"), Ok(4));
-        assert_eq!(sz::levenshtein_distance("smitten", "mitten"), Ok(1));
-        assert_eq!(sz::levenshtein_distance("ggbuzgjux{}l", "gbuzgjux{}l"), Ok(1));
-        assert_eq!(sz::levenshtein_distance("abcdefgABCDEFG", "ABCDEFGabcdefg"), Ok(14));
-
-        assert_eq!(sz::levenshtein_distance_bounded("fitting", "kitty", 2), Ok(2));
-        assert_eq!(sz::levenshtein_distance_utf8("façade", "facade"), Ok(1));
-    }
-
-    #[test]
-    fn needleman() {
-        let costs_vector = sz::error_costs_256x256_unary();
-        assert_eq!(sz::alignment_score("listen", "silent", costs_vector, -1), Ok(-4));
-        assert_eq!(
-            sz::alignment_score("abcdefgABCDEFG", "ABCDEFGabcdefg", costs_vector, -1),
-            Ok(-14)
-        );
-        assert_eq!(sz::alignment_score("hello", "hello", costs_vector, -1), Ok(0));
-        assert_eq!(sz::alignment_score("hello", "hell", costs_vector, -1), Ok(-1));
     }
 
     #[test]
@@ -2511,4 +2043,11 @@ mod tests {
 
         assert_eq!(common_from_api, expected);
     }
+}
+
+/// StringZillas - Multi-string parallel operations module
+/// This module is conditionally compiled when `cpus`, `cuda`, or `rocm` features are enabled.
+#[cfg(any(feature = "cpus", feature = "cuda", feature = "rocm"))]
+pub mod stringzillas {
+    include!("stringzillas.rs");
 }

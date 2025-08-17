@@ -858,7 +858,48 @@ SZ_DYNAMIC void sz_device_scope_free(sz_device_scope_t scope_punned) {
     delete scope;
 }
 
+SZ_DYNAMIC sz_status_t sz_device_scope_get_capabilities(sz_device_scope_t scope_punned, sz_capability_t *capabilities) {
+    if (scope_punned == nullptr || capabilities == nullptr) return sz_status_unknown_k;
+    auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
+
+    sz_capability_t system_caps = sz_capabilities();
+
+#if SZ_USE_CUDA
+    if (std::holds_alternative<gpu_scope_t>(scope->variants)) {
+        // For GPU scope, intersect system capabilities with CUDA capabilities
+        *capabilities = static_cast<sz_capability_t>(system_caps & sz_caps_cuda_k);
+        return sz_success_k;
+    }
+#endif
+    
+    // For default and CPU scopes, intersect system capabilities with CPU capabilities
+    *capabilities = static_cast<sz_capability_t>(system_caps & sz_caps_cpus_k);
+    return sz_success_k;
+}
+
 #pragma endregion Device Scopes
+
+#pragma region Unified Allocator
+
+SZ_DYNAMIC void *sz_unified_alloc(sz_size_t size_bytes) {
+#if SZ_USE_CUDA
+    return szs::unified_alloc_t {}.allocate(size_bytes);
+#else
+    return std::malloc(size_bytes);
+#endif
+}
+
+SZ_DYNAMIC void sz_unified_free(void *ptr, sz_size_t size_bytes) {
+    if (!ptr) return;
+#if SZ_USE_CUDA
+    szs::unified_alloc_t {}.deallocate(static_cast<char *>(ptr), size_bytes);
+#else
+    sz_unused_(size_bytes);
+    std::free(ptr);
+#endif
+}
+
+#pragma endregion Unified Allocator
 
 #pragma region Levenshtein Distances
 
