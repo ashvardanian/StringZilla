@@ -1408,8 +1408,9 @@ SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void
     alloc->allocate = (sz_memory_allocate_t)sz_memory_allocate_fixed_;
     alloc->free = (sz_memory_free_t)sz_memory_free_fixed_;
     alloc->handle = buffer;
-    *(sz_size_t *)buffer = length;
-    *((sz_ptr_t)buffer + sizeof(sz_size_t)) = sizeof(sz_size_t) * 2; // The capacity and consumption so far
+    sz_size_t *ptr = (sz_size_t *)buffer;
+    ptr[0] = length;
+    ptr[1] = sizeof(sz_size_t) * 2; // The capacity and consumption so far
 }
 
 SZ_PUBLIC sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a, sz_memory_allocator_t const *b) {
