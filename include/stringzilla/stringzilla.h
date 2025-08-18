@@ -173,6 +173,14 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
 
 #if SZ_IS_64BIT_ARM_
 
+/*  Compiling the next section one may get: selected processor does not support system register name 'id_aa64zfr0_el1'.
+ *  Suppressing assembler errors is very complicated, so when dealing with older ARM CPUs it's simpler to compile this
+ *  function targeting newer ones.
+ */
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.5-a+sve")
+#pragma clang attribute push(__attribute__((target("arch=armv8.5-a+sve"))), apply_to = function)
+
 /**
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
@@ -245,6 +253,9 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
     return sz_cap_serial_k;
 #endif
 }
+
+#pragma clang attribute pop
+#pragma GCC pop_options
 
 #endif // SZ_IS_64BIT_ARM_
 
