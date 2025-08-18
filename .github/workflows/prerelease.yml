@@ -426,6 +426,10 @@ jobs:
       image: alpine:latest
       options: --privileged # If needed for certain Docker operations
     steps:
+      - name: Install Git for checkout
+        run: |
+          apk add --no-cache git openssh ca-certificates
+          git --version
       - name: Log Alpine and Git versions
         run: |
           echo "Alpine: $(cat /etc/alpine-release 2>/dev/null || echo 'unknown')"
