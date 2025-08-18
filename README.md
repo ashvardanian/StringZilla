@@ -247,7 +247,7 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>2,220</b> ns
     </td>
     <td align="center">
-      <code>sz_levenshtein_distance</code><br/>
+      <code>szs_levenshtein_distance</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>99</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>180</b> ns
     </td>
@@ -265,7 +265,7 @@ __Who is this for?__
       <span style="color:#ABABAB;">arm:</span> <b>367</b> ms
     </td>
     <td align="center">
-      <code>sz_needleman_wunsch_score</code><br/>
+      <code>szs_needleman_wunsch_score</code><br/>
       <span style="color:#ABABAB;">x86:</span> <b>73</b> &centerdot;
       <span style="color:#ABABAB;">arm:</span> <b>177</b> ms
     </td>
@@ -1560,7 +1560,7 @@ Most StringZilla operations are byte-level, so they work well with ASCII and UTF
 In some cases, like edit-distance computation, the result of byte-level evaluation and character-level evaluation may differ.
 So StringZilla provides following functions to work with Unicode:
 
-- `sz_levenshtein_distance_utf8` - computes the Levenshtein distance between two UTF-8 strings.
+- `szs_levenshtein_distance_utf8` - computes the Levenshtein distance between two UTF-8 strings.
 - `sz_hamming_distance_utf8` - computes the Hamming distance between two UTF-8 strings.
 
 Java, JavaScript, Python 2, C#, and Objective-C, however, use wide characters (`wchar`) - two byte long codes, instead of the more reasonable fixed-length UTF32 or variable-length UTF8.

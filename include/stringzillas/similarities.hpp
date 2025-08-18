@@ -383,7 +383,7 @@ struct diagonal_walker;
  *
  *  @note   The API of this algorithm is a bit weird, but it's designed to minimize the reliance on the definitions
  *          in the `stringzilla.hpp` header, making compilation times shorter for the end-user.
- *  @sa     For lower-level API, check `sz_levenshtein_distance[_utf8]` and `sz_needleman_wunsch_score`.
+ *  @sa     For lower-level API, check `szs_levenshtein_distance[_utf8]` and `szs_needleman_wunsch_score`.
  *  @sa     For simplicity, use the `sz::levenshtein_distance[_utf8]` and `sz::needleman_wunsch_score`.
  *  @sa     For bulk API, use `sz::levenshtein_distances[_utf8]`.
  */

@@ -102,7 +102,7 @@ impl DeviceScope {
     /// ```
     pub fn default() -> Result<Self, Status> {
         let mut handle = ptr::null_mut();
-        let status = unsafe { sz_device_scope_init_default(&mut handle) };
+        let status = unsafe { szs_device_scope_init_default(&mut handle) };
         match status {
             Status::Success => Ok(Self { handle }),
             err => Err(err),
@@ -146,7 +146,7 @@ impl DeviceScope {
     /// - Consider NUMA topology for systems with >16 cores
     pub fn cpu_cores(cpu_cores: usize) -> Result<Self, Status> {
         let mut handle = ptr::null_mut();
-        let status = unsafe { sz_device_scope_init_cpu_cores(cpu_cores, &mut handle) };
+        let status = unsafe { szs_device_scope_init_cpu_cores(cpu_cores, &mut handle) };
         match status {
             Status::Success => Ok(Self { handle }),
             err => Err(err),
@@ -201,7 +201,7 @@ impl DeviceScope {
     /// - Use unified memory allocation for best GPU performance
     pub fn gpu_device(gpu_device: usize) -> Result<Self, Status> {
         let mut handle = ptr::null_mut();
-        let status = unsafe { sz_device_scope_init_gpu_device(gpu_device, &mut handle) };
+        let status = unsafe { szs_device_scope_init_gpu_device(gpu_device, &mut handle) };
         match status {
             Status::Success => Ok(Self { handle }),
             err => Err(err),
@@ -233,7 +233,7 @@ impl DeviceScope {
     /// ```
     pub fn get_capabilities(&self) -> Result<Capability, Status> {
         let mut capabilities: Capability = 0;
-        let status = unsafe { sz_device_scope_get_capabilities(self.handle, &mut capabilities) };
+        let status = unsafe { szs_device_scope_get_capabilities(self.handle, &mut capabilities) };
         match status {
             Status::Success => Ok(capabilities),
             err => Err(err),
@@ -264,7 +264,7 @@ impl DeviceScope {
     /// ```
     pub fn get_cpu_cores(&self) -> Result<usize, Status> {
         let mut cpu_cores: usize = 0;
-        let status = unsafe { sz_device_scope_get_cpu_cores(self.handle, &mut cpu_cores) };
+        let status = unsafe { szs_device_scope_get_cpu_cores(self.handle, &mut cpu_cores) };
         match status {
             Status::Success => Ok(cpu_cores),
             err => Err(err),
@@ -298,7 +298,7 @@ impl DeviceScope {
     /// ```
     pub fn get_gpu_device(&self) -> Result<usize, Status> {
         let mut gpu_device: usize = 0;
-        let status = unsafe { sz_device_scope_get_gpu_device(self.handle, &mut gpu_device) };
+        let status = unsafe { szs_device_scope_get_gpu_device(self.handle, &mut gpu_device) };
         match status {
             Status::Success => Ok(gpu_device),
             err => Err(err),
@@ -333,7 +333,7 @@ impl Drop for DeviceScope {
     fn drop(&mut self) {
         if !self.handle.is_null() {
             unsafe {
-                sz_device_scope_free(self.handle);
+                szs_device_scope_free(self.handle);
             }
         }
     }
@@ -753,7 +753,7 @@ impl FingerprintsBuilder {
         };
 
         let status = unsafe {
-            sz_fingerprints_init(
+            szs_fingerprints_init(
                 self.dimensions,
                 self.alphabet_size,
                 widths_ptr,
@@ -977,7 +977,7 @@ impl Fingerprints {
             let status = if use_64bit {
                 let tape_view = create_u64tape_view(&tape);
                 unsafe {
-                    sz_fingerprints_u64tape(
+                    szs_fingerprints_u64tape(
                         self.handle,
                         device.handle,
                         &tape_view as *const _ as *const c_void,
@@ -990,7 +990,7 @@ impl Fingerprints {
             } else {
                 let tape_view = create_u32tape_view(&tape);
                 unsafe {
-                    sz_fingerprints_u32tape(
+                    szs_fingerprints_u32tape(
                         self.handle,
                         device.handle,
                         &tape_view as *const _ as *const c_void,
@@ -1008,7 +1008,7 @@ impl Fingerprints {
         } else {
             let sequence = create_sequence_view(strings_slice);
             let status = unsafe {
-                sz_fingerprints_sequence(
+                szs_fingerprints_sequence(
                     self.handle,
                     device.handle,
                     &sequence as *const _ as *const c_void,
@@ -1030,7 +1030,7 @@ impl Drop for Fingerprints {
     fn drop(&mut self) {
         if !self.handle.is_null() {
             unsafe {
-                sz_fingerprints_free(self.handle);
+                szs_fingerprints_free(self.handle);
             }
         }
     }
@@ -1077,16 +1077,16 @@ pub type SmithWatermanScoresHandle = *mut c_void;
 // C API bindings
 extern "C" {
     // Device scope functions
-    fn sz_device_scope_init_default(scope: *mut *mut c_void) -> Status;
-    fn sz_device_scope_init_cpu_cores(cpu_cores: usize, scope: *mut *mut c_void) -> Status;
-    fn sz_device_scope_init_gpu_device(gpu_device: usize, scope: *mut *mut c_void) -> Status;
-    fn sz_device_scope_get_capabilities(scope: *mut c_void, capabilities: *mut Capability) -> Status;
-    fn sz_device_scope_get_cpu_cores(scope: *mut c_void, cpu_cores: *mut usize) -> Status;
-    fn sz_device_scope_get_gpu_device(scope: *mut c_void, gpu_device: *mut usize) -> Status;
-    fn sz_device_scope_free(scope: *mut c_void);
+    fn szs_device_scope_init_default(scope: *mut *mut c_void) -> Status;
+    fn szs_device_scope_init_cpu_cores(cpu_cores: usize, scope: *mut *mut c_void) -> Status;
+    fn szs_device_scope_init_gpu_device(gpu_device: usize, scope: *mut *mut c_void) -> Status;
+    fn szs_device_scope_get_capabilities(scope: *mut c_void, capabilities: *mut Capability) -> Status;
+    fn szs_device_scope_get_cpu_cores(scope: *mut c_void, cpu_cores: *mut usize) -> Status;
+    fn szs_device_scope_get_gpu_device(scope: *mut c_void, gpu_device: *mut usize) -> Status;
+    fn szs_device_scope_free(scope: *mut c_void);
 
     // Levenshtein distance functions
-    fn sz_levenshtein_distances_init(
+    fn szs_levenshtein_distances_init(
         match_cost: i8,
         mismatch_cost: i8,
         open_cost: i8,
@@ -1096,7 +1096,7 @@ extern "C" {
         engine: *mut LevenshteinDistancesHandle,
     ) -> Status;
 
-    fn sz_levenshtein_distances_sequence(
+    fn szs_levenshtein_distances_sequence(
         engine: LevenshteinDistancesHandle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_t
@@ -1105,7 +1105,7 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_levenshtein_distances_u32tape(
+    fn szs_levenshtein_distances_u32tape(
         engine: LevenshteinDistancesHandle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_u32tape_t
@@ -1114,7 +1114,7 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_levenshtein_distances_u64tape(
+    fn szs_levenshtein_distances_u64tape(
         engine: LevenshteinDistancesHandle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_u64tape_t
@@ -1123,10 +1123,10 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_levenshtein_distances_free(engine: LevenshteinDistancesHandle);
+    fn szs_levenshtein_distances_free(engine: LevenshteinDistancesHandle);
 
     // Levenshtein distance UTF-8 functions
-    fn sz_levenshtein_distances_utf8_init(
+    fn szs_levenshtein_distances_utf8_init(
         match_cost: i8,
         mismatch_cost: i8,
         open_cost: i8,
@@ -1136,7 +1136,7 @@ extern "C" {
         engine: *mut LevenshteinDistancesUtf8Handle,
     ) -> Status;
 
-    fn sz_levenshtein_distances_utf8_sequence(
+    fn szs_levenshtein_distances_utf8_sequence(
         engine: LevenshteinDistancesUtf8Handle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_t
@@ -1145,7 +1145,7 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_levenshtein_distances_utf8_u32tape(
+    fn szs_levenshtein_distances_utf8_u32tape(
         engine: LevenshteinDistancesUtf8Handle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_u32tape_t
@@ -1154,7 +1154,7 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_levenshtein_distances_utf8_u64tape(
+    fn szs_levenshtein_distances_utf8_u64tape(
         engine: LevenshteinDistancesUtf8Handle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_u64tape_t
@@ -1163,10 +1163,10 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_levenshtein_distances_utf8_free(engine: LevenshteinDistancesUtf8Handle);
+    fn szs_levenshtein_distances_utf8_free(engine: LevenshteinDistancesUtf8Handle);
 
     // Needleman-Wunsch scoring functions
-    fn sz_needleman_wunsch_scores_init(
+    fn szs_needleman_wunsch_scores_init(
         subs: *const i8, // 256x256 substitution matrix
         open_cost: i8,
         extend_cost: i8,
@@ -1175,7 +1175,7 @@ extern "C" {
         engine: *mut NeedlemanWunschScoresHandle,
     ) -> Status;
 
-    fn sz_needleman_wunsch_scores_sequence(
+    fn szs_needleman_wunsch_scores_sequence(
         engine: NeedlemanWunschScoresHandle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_t
@@ -1184,7 +1184,7 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_needleman_wunsch_scores_u32tape(
+    fn szs_needleman_wunsch_scores_u32tape(
         engine: NeedlemanWunschScoresHandle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_u32tape_t
@@ -1193,7 +1193,7 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_needleman_wunsch_scores_u64tape(
+    fn szs_needleman_wunsch_scores_u64tape(
         engine: NeedlemanWunschScoresHandle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_u64tape_t
@@ -1202,10 +1202,10 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_needleman_wunsch_scores_free(engine: NeedlemanWunschScoresHandle);
+    fn szs_needleman_wunsch_scores_free(engine: NeedlemanWunschScoresHandle);
 
     // Smith-Waterman scoring functions
-    fn sz_smith_waterman_scores_init(
+    fn szs_smith_waterman_scores_init(
         subs: *const i8, // 256x256 substitution matrix
         open_cost: i8,
         extend_cost: i8,
@@ -1214,7 +1214,7 @@ extern "C" {
         engine: *mut SmithWatermanScoresHandle,
     ) -> Status;
 
-    fn sz_smith_waterman_scores_sequence(
+    fn szs_smith_waterman_scores_sequence(
         engine: SmithWatermanScoresHandle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_t
@@ -1223,7 +1223,7 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_smith_waterman_scores_u32tape(
+    fn szs_smith_waterman_scores_u32tape(
         engine: SmithWatermanScoresHandle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_u32tape_t
@@ -1232,7 +1232,7 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_smith_waterman_scores_u64tape(
+    fn szs_smith_waterman_scores_u64tape(
         engine: SmithWatermanScoresHandle,
         device: *mut c_void,
         a: *const c_void, // sz_sequence_u64tape_t
@@ -1241,10 +1241,10 @@ extern "C" {
         results_stride: usize,
     ) -> Status;
 
-    fn sz_smith_waterman_scores_free(engine: SmithWatermanScoresHandle);
+    fn szs_smith_waterman_scores_free(engine: SmithWatermanScoresHandle);
 
     // Fingerprinting functions
-    fn sz_fingerprints_init(
+    fn szs_fingerprints_init(
         dimensions: usize,
         alphabet_size: usize,
         window_widths: *const usize,
@@ -1254,7 +1254,7 @@ extern "C" {
         engine: *mut FingerprintsHandle,
     ) -> Status;
 
-    fn sz_fingerprints_sequence(
+    fn szs_fingerprints_sequence(
         engine: FingerprintsHandle,
         device: *mut c_void,  // DeviceScope
         texts: *const c_void, // sz_sequence_t
@@ -1264,7 +1264,7 @@ extern "C" {
         min_counts_stride: usize,
     ) -> Status;
 
-    fn sz_fingerprints_u32tape(
+    fn szs_fingerprints_u32tape(
         engine: FingerprintsHandle,
         device: *mut c_void,  // DeviceScope
         texts: *const c_void, // sz_sequence_u32tape_t
@@ -1274,7 +1274,7 @@ extern "C" {
         min_counts_stride: usize,
     ) -> Status;
 
-    fn sz_fingerprints_u64tape(
+    fn szs_fingerprints_u64tape(
         engine: FingerprintsHandle,
         device: *mut c_void,  // DeviceScope
         texts: *const c_void, // sz_sequence_u64tape_t
@@ -1284,11 +1284,11 @@ extern "C" {
         min_counts_stride: usize,
     ) -> Status;
 
-    fn sz_fingerprints_free(engine: FingerprintsHandle);
+    fn szs_fingerprints_free(engine: FingerprintsHandle);
 
     // Unified allocator functions
-    fn sz_unified_alloc(size_bytes: usize) -> *mut c_void;
-    fn sz_unified_free(ptr: *mut c_void, size_bytes: usize);
+    fn szs_unified_alloc(size_bytes: usize) -> *mut c_void;
+    fn szs_unified_free(ptr: *mut c_void, size_bytes: usize);
 }
 
 /// Unified memory allocator that uses CUDA unified memory when available,
@@ -1304,7 +1304,7 @@ unsafe impl Allocator for UnifiedAlloc {
             return Ok(core::ptr::NonNull::slice_from_raw_parts(ptr, 0));
         }
 
-        let ptr = unsafe { sz_unified_alloc(size) };
+        let ptr = unsafe { szs_unified_alloc(size) };
         if ptr.is_null() {
             return Err(AllocError);
         }
@@ -1315,7 +1315,7 @@ unsafe impl Allocator for UnifiedAlloc {
 
     unsafe fn deallocate(&self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
         if layout.size() != 0 {
-            sz_unified_free(ptr.as_ptr() as *mut c_void, layout.size());
+            szs_unified_free(ptr.as_ptr() as *mut c_void, layout.size());
         }
     }
 }
@@ -1450,7 +1450,7 @@ impl LevenshteinDistances {
         let mut handle = ptr::null_mut();
         let capabilities = device.get_capabilities().unwrap_or(0);
         let status = unsafe {
-            sz_levenshtein_distances_init(
+            szs_levenshtein_distances_init(
                 match_cost,
                 mismatch_cost,
                 open_cost,
@@ -1539,7 +1539,7 @@ impl LevenshteinDistances {
                 let tape_a_view = create_u64tape_view(&tape_a);
                 let tape_b_view = create_u64tape_view(&tape_b);
                 unsafe {
-                    sz_levenshtein_distances_u64tape(
+                    szs_levenshtein_distances_u64tape(
                         self.handle,
                         device.handle,
                         &tape_a_view as *const _ as *const c_void,
@@ -1552,7 +1552,7 @@ impl LevenshteinDistances {
                 let tape_a_view = create_u32tape_view(&tape_a);
                 let tape_b_view = create_u32tape_view(&tape_b);
                 unsafe {
-                    sz_levenshtein_distances_u32tape(
+                    szs_levenshtein_distances_u32tape(
                         self.handle,
                         device.handle,
                         &tape_a_view as *const _ as *const c_void,
@@ -1570,7 +1570,7 @@ impl LevenshteinDistances {
             let seq_a = create_sequence_view(seq_a_slice);
             let seq_b = create_sequence_view(seq_b_slice);
             let status = unsafe {
-                sz_levenshtein_distances_sequence(
+                szs_levenshtein_distances_sequence(
                     self.handle,
                     device.handle,
                     &seq_a as *const _ as *const c_void,
@@ -1590,7 +1590,7 @@ impl LevenshteinDistances {
 impl Drop for LevenshteinDistances {
     fn drop(&mut self) {
         if !self.handle.is_null() {
-            unsafe { sz_levenshtein_distances_free(self.handle) };
+            unsafe { szs_levenshtein_distances_free(self.handle) };
         }
     }
 }
@@ -1696,7 +1696,7 @@ impl LevenshteinDistancesUtf8 {
         let mut handle = ptr::null_mut();
         let capabilities = device.get_capabilities().unwrap_or(0);
         let status = unsafe {
-            sz_levenshtein_distances_utf8_init(
+            szs_levenshtein_distances_utf8_init(
                 match_cost,
                 mismatch_cost,
                 open_cost,
@@ -1782,7 +1782,7 @@ impl LevenshteinDistancesUtf8 {
                 let tape_a_view = create_u64tape_view_str(&tape_a);
                 let tape_b_view = create_u64tape_view_str(&tape_b);
                 unsafe {
-                    sz_levenshtein_distances_utf8_u64tape(
+                    szs_levenshtein_distances_utf8_u64tape(
                         self.handle,
                         device.handle,
                         &tape_a_view as *const _ as *const c_void,
@@ -1795,7 +1795,7 @@ impl LevenshteinDistancesUtf8 {
                 let tape_a_view = create_u32tape_view_str(&tape_a);
                 let tape_b_view = create_u32tape_view_str(&tape_b);
                 unsafe {
-                    sz_levenshtein_distances_utf8_u32tape(
+                    szs_levenshtein_distances_utf8_u32tape(
                         self.handle,
                         device.handle,
                         &tape_a_view as *const _ as *const c_void,
@@ -1813,7 +1813,7 @@ impl LevenshteinDistancesUtf8 {
             let seq_a = create_sequence_view_str(seq_a_slice);
             let seq_b = create_sequence_view_str(seq_b_slice);
             let status = unsafe {
-                sz_levenshtein_distances_utf8_sequence(
+                szs_levenshtein_distances_utf8_sequence(
                     self.handle,
                     device.handle,
                     &seq_a as *const _ as *const c_void,
@@ -1833,7 +1833,7 @@ impl LevenshteinDistancesUtf8 {
 impl Drop for LevenshteinDistancesUtf8 {
     fn drop(&mut self) {
         if !self.handle.is_null() {
-            unsafe { sz_levenshtein_distances_utf8_free(self.handle) };
+            unsafe { szs_levenshtein_distances_utf8_free(self.handle) };
         }
     }
 }
@@ -1985,7 +1985,7 @@ impl NeedlemanWunschScores {
         let mut handle = ptr::null_mut();
         let capabilities = device.get_capabilities().unwrap_or(0);
         let status = unsafe {
-            sz_needleman_wunsch_scores_init(
+            szs_needleman_wunsch_scores_init(
                 substitution_matrix.as_ptr() as *const i8,
                 open_cost,
                 extend_cost,
@@ -2091,7 +2091,7 @@ impl NeedlemanWunschScores {
                 let tape_a_view = create_u64tape_view(&tape_a);
                 let tape_b_view = create_u64tape_view(&tape_b);
                 unsafe {
-                    sz_needleman_wunsch_scores_u64tape(
+                    szs_needleman_wunsch_scores_u64tape(
                         self.handle,
                         device.handle,
                         &tape_a_view as *const _ as *const c_void,
@@ -2104,7 +2104,7 @@ impl NeedlemanWunschScores {
                 let tape_a_view = create_u32tape_view(&tape_a);
                 let tape_b_view = create_u32tape_view(&tape_b);
                 unsafe {
-                    sz_needleman_wunsch_scores_u32tape(
+                    szs_needleman_wunsch_scores_u32tape(
                         self.handle,
                         device.handle,
                         &tape_a_view as *const _ as *const c_void,
@@ -2122,7 +2122,7 @@ impl NeedlemanWunschScores {
             let seq_a = create_sequence_view(seq_a_slice);
             let seq_b = create_sequence_view(seq_b_slice);
             let status = unsafe {
-                sz_needleman_wunsch_scores_sequence(
+                szs_needleman_wunsch_scores_sequence(
                     self.handle,
                     device.handle,
                     &seq_a as *const _ as *const c_void,
@@ -2142,7 +2142,7 @@ impl NeedlemanWunschScores {
 impl Drop for NeedlemanWunschScores {
     fn drop(&mut self) {
         if !self.handle.is_null() {
-            unsafe { sz_needleman_wunsch_scores_free(self.handle) };
+            unsafe { szs_needleman_wunsch_scores_free(self.handle) };
         }
     }
 }
@@ -2309,7 +2309,7 @@ impl SmithWatermanScores {
         let mut handle = ptr::null_mut();
         let capabilities = device.get_capabilities().unwrap_or(0);
         let status = unsafe {
-            sz_smith_waterman_scores_init(
+            szs_smith_waterman_scores_init(
                 substitution_matrix.as_ptr() as *const i8,
                 open_cost,
                 extend_cost,
@@ -2430,7 +2430,7 @@ impl SmithWatermanScores {
                 let tape_a_view = create_u64tape_view(&tape_a);
                 let tape_b_view = create_u64tape_view(&tape_b);
                 unsafe {
-                    sz_smith_waterman_scores_u64tape(
+                    szs_smith_waterman_scores_u64tape(
                         self.handle,
                         device.handle,
                         &tape_a_view as *const _ as *const c_void,
@@ -2443,7 +2443,7 @@ impl SmithWatermanScores {
                 let tape_a_view = create_u32tape_view(&tape_a);
                 let tape_b_view = create_u32tape_view(&tape_b);
                 unsafe {
-                    sz_smith_waterman_scores_u32tape(
+                    szs_smith_waterman_scores_u32tape(
                         self.handle,
                         device.handle,
                         &tape_a_view as *const _ as *const c_void,
@@ -2461,7 +2461,7 @@ impl SmithWatermanScores {
             let seq_a = create_sequence_view(seq_a_slice);
             let seq_b = create_sequence_view(seq_b_slice);
             let status = unsafe {
-                sz_smith_waterman_scores_sequence(
+                szs_smith_waterman_scores_sequence(
                     self.handle,
                     device.handle,
                     &seq_a as *const _ as *const c_void,
@@ -2481,7 +2481,7 @@ impl SmithWatermanScores {
 impl Drop for SmithWatermanScores {
     fn drop(&mut self) {
         if !self.handle.is_null() {
-            unsafe { sz_smith_waterman_scores_free(self.handle) };
+            unsafe { szs_smith_waterman_scores_free(self.handle) };
         }
     }
 }
