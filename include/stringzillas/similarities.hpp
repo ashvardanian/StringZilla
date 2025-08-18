@@ -2591,7 +2591,8 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
     : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
@@ -2738,7 +2739,8 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substi
     : public tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substitution_costs_t,
                          linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u8_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
@@ -2883,7 +2885,8 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
@@ -3025,7 +3028,8 @@ struct tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_subst
     : public tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_substitution_costs_t,
                          linear_gap_costs_t, sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer<sz_rune_t const *, sz_rune_t const *, sz_u16_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
@@ -3171,7 +3175,8 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
     : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, linear_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
@@ -3316,7 +3321,8 @@ struct tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_cos
     : public tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer<char const *, char const *, sz_u8_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
@@ -3432,7 +3438,8 @@ struct tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_co
     : public tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer<char const *, char const *, sz_u16_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
@@ -3549,7 +3556,8 @@ struct tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_co
     : public tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
                          sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void> {
 
-    using tile_scorer_t::tile_scorer; // Make the constructors visible
+    using tile_scorer<char const *, char const *, sz_u32_t, uniform_substitution_costs_t, affine_gap_costs_t,
+                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_serial_k, void>::tile_scorer;
 
     static constexpr sz_similarity_objective_t objective_k = sz_minimize_distance_k;
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
