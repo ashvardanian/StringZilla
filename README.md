@@ -1315,7 +1315,6 @@ s[s.findLast(substring: "o")!...] // "o StringZilla. 👋")
 s[s.findFirst(characterFrom: "aeiou")!...] // "ello, world! Welcome to StringZilla. 👋")
 s[s.findLast(characterFrom: "aeiou")!...] // "a. 👋")
 s[s.findFirst(characterNotFrom: "aeiou")!...] // "Hello, world! Welcome to StringZilla. 👋"
-s.levenshteinDistance(from: "Hello, world!")! // 29
 ```
 
 ## Algorithms & Design Decisions 📚

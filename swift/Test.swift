@@ -49,13 +49,6 @@ class StringZillaTests: XCTestCase {
         XCTAssertEqual(testString[index...], "👋")
     }
 
-    func testLevenshteinDistance() {
-        let otherString = "Hello, world!"
-        let distance = try? testString.levenshteinDistance(from: otherString)
-        XCTAssertNotNil(distance)
-        XCTAssertEqual(distance, 29)
-    }
-
     func testFindLastCharacterNotFromSetNoMatch() {
         let index = "aeiou".findLast(characterNotFrom: "aeiou")
         XCTAssertNil(index)

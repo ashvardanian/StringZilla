@@ -247,39 +247,4 @@ public extension StringZillaViewable {
         }
         return result
     }
-
-    func levenshteinDistance<S: StringZillaViewable>(
-        from other: S,
-        bound: UInt? = nil
-    ) throws -> UInt {
-        // Prepare a local variable for the result.
-        var computedResult: sz_size_t = 0
-
-        // Swift has a ridiculous issue with casting unsigned 64-bit to unsigned 64-bit
-        // values which results in "Fatal error: Not enough bits to represent the passed value".
-        // Let's just copy the bytes: https://stackoverflow.com/a/68650250/2766161
-        let effectiveBound: sz_size_t = bound.map { sz_size_t($0) } ?? sz_size_max_()
-        let status = try withStringZillaScope { hPointer, hLength in
-            try other.withStringZillaScope { nPointer, nLength in
-                // Pass a mutable pointer for the result.
-                sz_levenshtein_distance(
-                    hPointer,
-                    hLength,
-                    nPointer,
-                    nLength,
-                    effectiveBound,
-                    nil, // default allocator
-                    &computedResult // out-parameter for the computed distance
-                )
-            }
-        }
-
-        // Check the returned status code.
-        guard status == sz_success_k else {
-            // Map the status code to an appropriate Swift error.
-            throw StringZillaError.memoryAllocationFailed
-        }
-
-        return UInt(computedResult)
-    }
 }
