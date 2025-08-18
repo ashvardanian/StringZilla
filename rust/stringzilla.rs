@@ -7,7 +7,7 @@ edit-distance calculations, suitable for a wide range of applications from basic
 processing to complex text analysis tasks.
 "]
 
-pub mod sz {
+pub mod stringzilla {
 
     /// A simple semantic version structure.
     #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -20,10 +20,30 @@ pub mod sz {
     #[repr(C)]
     #[derive(Debug, PartialEq)]
     pub enum Status {
+        /// For algorithms that return a status, this status indicates that the operation was successful.
+        /// Corresponds to `sz_success_k = 0` in C.
         Success = 0,
-        BadAlloc = -1,
-        InvalidUtf8 = -2,
-        ContainsDuplicates = -3,
+        /// For algorithms that require memory allocation, this status indicates that the allocation failed.
+        /// Corresponds to `sz_bad_alloc_k = -10` in C.
+        BadAlloc = -10,
+        /// For algorithms that require UTF8 input, this status indicates that the input is invalid.
+        /// Corresponds to `sz_invalid_utf8_k = -12` in C.
+        InvalidUtf8 = -12,
+        /// For algorithms that take collections of unique elements, this status indicates presence of duplicates.
+        /// Corresponds to `sz_contains_duplicates_k = -13` in C.
+        ContainsDuplicates = -13,
+        /// For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types.
+        /// Corresponds to `sz_overflow_risk_k = -14` in C.
+        OverflowRisk = -14,
+        /// For algorithms with multi-stage pipelines indicates input/output size mismatch.
+        /// Corresponds to `sz_unexpected_dimensions_k = -15` in C.
+        UnexpectedDimensions = -15,
+        /// GPU support is missing in the library.
+        /// Corresponds to `sz_missing_gpu_k = -16` in C.
+        MissingGpu = -16,
+        /// A sink-hole status for unknown errors.
+        /// Corresponds to `sz_status_unknown_k = -1` in C.
+        StatusUnknown = -1,
     }
 
     #[repr(C)]
@@ -2045,9 +2065,17 @@ mod tests {
     }
 }
 
-/// StringZillas - Multi-string parallel operations module
-/// This module is conditionally compiled when `cpus`, `cuda`, or `rocm` features are enabled.
+/// High-performance parallel string algorithms with CPU/GPU acceleration.
+/// 
+/// Requires `cpus`, `cuda`, or `rocm` features. Provides:
+/// - Levenshtein distances (binary and UTF-8)  
+/// - Needleman-Wunsch global alignment
+/// - Smith-Waterman local alignment
+/// - Min-Hash fingerprinting
 #[cfg(any(feature = "cpus", feature = "cuda", feature = "rocm"))]
-pub mod stringzillas {
-    include!("stringzillas.rs");
-}
+pub mod stringzillas;
+
+// Convenience aliases for shorter names
+pub use stringzilla as sz;
+#[cfg(any(feature = "cpus", feature = "cuda", feature = "rocm"))]
+pub use stringzillas as szs;

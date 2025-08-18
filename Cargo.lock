@@ -25,9 +25,12 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "stringtape"
-version = "0.1.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fbe100eeef4ddb084de7d18d49c893a060a84c70622155ba21cbf812e6d8218"
+checksum = "47a3efa2a827143870d5796454e8a1df97045db1a229be9370449a71088e5e24"
+dependencies = [
+ "allocator-api2",
+]
 
 [[package]]
 name = "stringzilla"
