@@ -278,6 +278,13 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
         return sz_success_k;
     }
 
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
+    }
+
     // Allocate memory for the hash table and initialize it with 0xFF.
     // The higher is the `hash_table_slots` multiple - the more memory we will use,
     // but the less likely the collisions will be.
@@ -392,6 +399,13 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
     if (small_sequence->count == 0) {
         *intersection_count_ptr = 0;
         return sz_success_k;
+    }
+
+    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!alloc) {
+        sz_memory_allocator_init_default(&global_alloc);
+        alloc = &global_alloc;
     }
 
     // Allocate memory for the hash table and initialize it with 0xFF.

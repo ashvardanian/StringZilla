@@ -208,33 +208,6 @@ extern "C" {
 
 }
 
-// Minimal representation of C allocator to pass into FFI.
-#[repr(C)]
-struct SzMemoryAllocator {
-    allocate: Option<unsafe extern "C" fn(size: usize, handle: *mut c_void) -> *mut c_void>,
-    free: Option<unsafe extern "C" fn(ptr: *mut c_void, size: usize, handle: *mut c_void)>,
-    handle: *mut c_void,
-}
-
-// Simple Rust-side allocator functions used in tests to avoid requiring C libc exports.
-#[cfg(test)]
-unsafe extern "C" fn sz_rust_allocate_default(length: usize, _handle: *mut c_void) -> *mut c_void {
-    if length == 0 {
-        return core::ptr::null_mut();
-    }
-    let layout = core::alloc::Layout::from_size_align_unchecked(length, core::mem::align_of::<usize>());
-    std::alloc::alloc(layout) as *mut c_void
-}
-
-#[cfg(test)]
-unsafe extern "C" fn sz_rust_free_default(ptr: *mut c_void, length: usize, _handle: *mut c_void) {
-    if ptr.is_null() || length == 0 {
-        return;
-    }
-    let layout = core::alloc::Layout::from_size_align_unchecked(length, core::mem::align_of::<usize>());
-    std::alloc::dealloc(ptr as *mut u8, layout);
-}
-
 impl SemVer {
     pub const fn new(major: i32, minor: i32, patch: i32) -> Self {
         Self { major, minor, patch }
@@ -840,20 +813,37 @@ struct _SliceLookupView<F: Fn(usize) -> &'static [u8]> {
     mapper: F,
 }
 
-unsafe extern "C" fn _slice_get_start<F>(handle: *const c_void, idx: SortedIdx) -> *const c_void
-where
-    F: Fn(usize) -> &'static [u8],
-{
-    let view = &*(handle as *const _SliceLookupView<F>);
-    (view.mapper)(idx).as_ptr() as *const c_void
+/// Type-punned wrapper for the slice lookup view
+struct _PunnedSliceLookupView {
+    get_slice: unsafe fn(*const c_void, usize) -> &'static [u8],
+    data: *const c_void,
 }
 
-unsafe extern "C" fn _slice_get_length<F>(handle: *const c_void, idx: SortedIdx) -> usize
+unsafe extern "C" fn _slice_get_start_punned(handle: *const c_void, idx: SortedIdx) -> *const c_void {
+    let view = &*(handle as *const _PunnedSliceLookupView);
+    let slice = (view.get_slice)(view.data, idx);
+    slice.as_ptr() as *const c_void
+}
+
+unsafe extern "C" fn _slice_get_length_punned(handle: *const c_void, idx: SortedIdx) -> usize {
+    let view = &*(handle as *const _PunnedSliceLookupView);
+    let slice = (view.get_slice)(view.data, idx);
+    slice.len()
+}
+
+/// Type-specific function generator for each concrete type
+unsafe fn _get_slice_fn<F>() -> unsafe fn(*const c_void, usize) -> &'static [u8]
 where
     F: Fn(usize) -> &'static [u8],
 {
-    let view = &*(handle as *const _SliceLookupView<F>);
-    (view.mapper)(idx).len()
+    unsafe fn get_slice_impl<F>(data: *const c_void, idx: usize) -> &'static [u8]
+    where
+        F: Fn(usize) -> &'static [u8],
+    {
+        let mapper = &*(data as *const F);
+        mapper(idx)
+    }
+    get_slice_impl::<F>
 }
 
 /// Sorts a sequence of items by comparing their byte‑slice representations.
@@ -921,24 +911,16 @@ fn _argsort_permutation_impl<FAdapter>(adapter: FAdapter, order: &mut [SortedIdx
 where
     FAdapter: Fn(usize) -> &'static [u8],
 {
-    let view = _SliceLookupView { mapper: adapter };
+    let wrapper = _PunnedSliceLookupView {
+        get_slice: unsafe { _get_slice_fn::<FAdapter>() },
+        data: &adapter as *const FAdapter as *const c_void,
+    };
     let seq = _SzSequence {
-        handle: &view as *const _ as *const c_void,
+        handle: &wrapper as *const _ as *const c_void,
         count: order.len(),
-        get_start: Some(_slice_get_start::<FAdapter>),
-        get_length: Some(_slice_get_length::<FAdapter>),
+        get_start: Some(_slice_get_start_punned),
+        get_length: Some(_slice_get_length_punned),
     };
-    // Use a default allocator for the C API in tests; otherwise, allow C to choose.
-    #[cfg(test)]
-    let status = unsafe {
-        let alloc = SzMemoryAllocator {
-            allocate: Some(sz_rust_allocate_default),
-            free: Some(sz_rust_free_default),
-            handle: core::ptr::null_mut(),
-        };
-        sz_sequence_argsort(&seq, &alloc as *const _ as *const c_void, order.as_mut_ptr())
-    };
-    #[cfg(not(test))]
     let status = unsafe { sz_sequence_argsort(&seq, core::ptr::null(), order.as_mut_ptr()) };
     if status == Status::Success {
         Ok(())
@@ -958,7 +940,7 @@ where
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust
 /// use stringzilla::stringzilla as sz;
 ///
 /// let set1 = ["banana", "apple", "cherry"];
@@ -1006,7 +988,7 @@ pub fn intersection<T: AsRef<[u8]>>(
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust
 /// use stringzilla::stringzilla as sz;
 ///
 /// #[derive(Debug)]
@@ -1084,40 +1066,27 @@ where
     FAdapter: Fn(usize) -> &'static [u8],
     GAdapter: Fn(usize) -> &'static [u8],
 {
-    let view1 = _SliceLookupView { mapper: adapter1 };
-    let view2 = _SliceLookupView { mapper: adapter2 };
+    let wrapper1 = _PunnedSliceLookupView {
+        get_slice: unsafe { _get_slice_fn::<FAdapter>() },
+        data: &adapter1 as *const FAdapter as *const c_void,
+    };
+    let wrapper2 = _PunnedSliceLookupView {
+        get_slice: unsafe { _get_slice_fn::<GAdapter>() },
+        data: &adapter2 as *const GAdapter as *const c_void,
+    };
     let seq1 = _SzSequence {
-        handle: &view1 as *const _ as *const c_void,
+        handle: &wrapper1 as *const _ as *const c_void,
         count: count1,
-        get_start: Some(_slice_get_start::<FAdapter>),
-        get_length: Some(_slice_get_length::<FAdapter>),
+        get_start: Some(_slice_get_start_punned),
+        get_length: Some(_slice_get_length_punned),
     };
     let seq2 = _SzSequence {
-        handle: &view2 as *const _ as *const c_void,
+        handle: &wrapper2 as *const _ as *const c_void,
         count: count2,
-        get_start: Some(_slice_get_start::<GAdapter>),
-        get_length: Some(_slice_get_length::<GAdapter>),
+        get_start: Some(_slice_get_start_punned),
+        get_length: Some(_slice_get_length_punned),
     };
-    // Use a default allocator for the C API in tests; otherwise, fall back to null.
     let mut inter_size: usize = 0;
-    #[cfg(test)]
-    let status = unsafe {
-        let alloc = SzMemoryAllocator {
-            allocate: Some(sz_rust_allocate_default),
-            free: Some(sz_rust_free_default),
-            handle: core::ptr::null_mut(),
-        };
-        sz_sequence_intersect(
-            &seq1,
-            &seq2,
-            &alloc as *const _ as *const c_void,
-            seed,
-            &mut inter_size as *mut usize,
-            positions1.as_mut_ptr(),
-            positions2.as_mut_ptr(),
-        )
-    };
-    #[cfg(not(test))]
     let status = unsafe {
         sz_sequence_intersect(
             &seq1,
@@ -2130,5 +2099,22 @@ mod tests {
             .collect();
 
         assert_eq!(common_from_api, expected);
+    }
+
+    #[test]
+    fn test_intersection_debug() {
+        println!("Starting intersection debug test...");
+
+        let set1 = ["banana", "apple", "cherry"];
+        let set2 = ["cherry", "orange", "pineapple", "banana"];
+        let mut positions1 = [0; 3];
+        let mut positions2 = [0; 3];
+
+        println!("About to call intersection function...");
+        let n = intersection(&set1, &set2, 0, &mut positions1, &mut positions2).expect("intersect failed");
+
+        println!("Intersection found {} common elements", n);
+        assert!(n == 2);
+        println!("Test passed!");
     }
 }
