@@ -481,7 +481,7 @@ inline void log_failure(                                              //
 
     std::fprintf(file, "Dataset path: %s\n", env.path.c_str());
     std::fprintf(file, "Tokenization mode: %d\n", env.tokenization);
-    std::fprintf(file, "Seed: %zu\n", env.seed);
+    std::fprintf(file, "Seed: %zu\n", static_cast<std::size_t>(env.seed));
     if (token_index) std::fprintf(file, "Token index: %zu\n", *token_index);
     std::fprintf(file, "Expected: %zu\n", expected_check_value);
     std::fprintf(file, "Actual: %zu\n", actual_check_value);
