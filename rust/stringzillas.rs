@@ -30,8 +30,8 @@ pub use crate::stringzilla::Status;
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// use stringzilla::stringzillas::szs::{DeviceScope, Status};
+/// ```rust
+/// use stringzilla::szs::{DeviceScope, Status};
 ///
 /// // Default scope - automatically detects best available hardware
 /// let device = DeviceScope::default().unwrap();
@@ -51,13 +51,12 @@ pub use crate::stringzilla::Status;
 ///
 /// # Error Handling
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, Status};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, Status};
 /// // Handle invalid configurations gracefully
 /// match DeviceScope::cpu_cores(0) {
 ///     Ok(_) => unreachable!("Should not accept 0 cores"),
-///     Err(Status::InvalidArgument) => println!("CPU cores must be > 0"),
-///     Err(e) => println!("Unexpected error: {:?}", e),
+///     Err(e) => println!("Invalid CPU core count: {:?}", e),
 /// }
 ///
 /// // GPU might not be available
@@ -85,8 +84,8 @@ impl DeviceScope {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::DeviceScope;
+    /// ```rust
+    /// # use stringzilla::szs::DeviceScope;
     /// // Create default device scope
     /// let device = DeviceScope::default().expect("Failed to initialize device");
     ///
@@ -127,8 +126,8 @@ impl DeviceScope {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::DeviceScope;
+    /// ```rust
+    /// # use stringzilla::szs::DeviceScope;
     /// // Create scope for 4 CPU threads
     /// let device = DeviceScope::cpu_cores(4).expect("Failed to create CPU scope");
     ///
@@ -171,8 +170,8 @@ impl DeviceScope {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::DeviceScope;
+    /// ```rust
+    /// # use stringzilla::szs::DeviceScope;
     /// // Try to use first GPU
     /// match DeviceScope::gpu_device(0) {
     ///     Ok(device) => {
@@ -185,8 +184,8 @@ impl DeviceScope {
     ///
     /// # GPU Selection Strategy
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::DeviceScope;
+    /// ```rust
+    /// # use stringzilla::szs::DeviceScope;
     /// // Try multiple GPUs in order of preference
     /// let devices = [0, 1, 2];
     /// let gpu_device = devices
@@ -222,8 +221,8 @@ impl DeviceScope {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::DeviceScope;
+    /// ```rust
+    /// # use stringzilla::szs::DeviceScope;
     /// let device = DeviceScope::default().unwrap();
     /// let caps = device.get_capabilities().unwrap();
     ///
@@ -253,8 +252,8 @@ impl DeviceScope {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::DeviceScope;
+    /// ```rust
+    /// # use stringzilla::szs::DeviceScope;
     /// let device = DeviceScope::cpu_cores(8).unwrap();
     /// assert_eq!(device.get_cpu_cores().unwrap(), 8);
     ///
@@ -284,8 +283,8 @@ impl DeviceScope {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::DeviceScope;
+    /// ```rust
+    /// # use stringzilla::szs::DeviceScope;
     /// // GPU device scope
     /// if let Ok(gpu_device) = DeviceScope::gpu_device(1) {
     ///     assert_eq!(gpu_device.get_gpu_device().unwrap(), 1);
@@ -313,8 +312,8 @@ impl DeviceScope {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::DeviceScope;
+    /// ```rust
+    /// # use stringzilla::szs::DeviceScope;
     /// let device = DeviceScope::default().unwrap();
     ///
     /// if device.is_gpu() {
@@ -364,8 +363,8 @@ unsafe impl Sync for DeviceScope {}
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+/// ```rust
+/// # use stringzilla::szs::{Fingerprints, DeviceScope};
 /// let device = DeviceScope::default().unwrap();
 ///
 /// // Default configuration (good for most use cases)
@@ -392,8 +391,8 @@ unsafe impl Sync for DeviceScope {}
 ///
 /// # Alphabet-Specific Presets
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+/// ```rust
+/// # use stringzilla::szs::{Fingerprints, DeviceScope};
 /// # let device = DeviceScope::default().unwrap();
 /// // Bioinformatics applications
 /// let dna_engine = Fingerprints::builder().dna().build(&device).unwrap();         // A,C,G,T
@@ -419,8 +418,8 @@ impl FingerprintsBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::FingerprintsBuilder;
+    /// ```rust
+    /// # use stringzilla::szs::FingerprintsBuilder;
     /// let builder = FingerprintsBuilder::new();
     /// // Further customize with method chaining...
     /// ```
@@ -442,11 +441,12 @@ impl FingerprintsBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
     /// let device = DeviceScope::default().unwrap();
     /// let engine = Fingerprints::builder()
     ///     .binary()
+    ///     .dimensions(256)
     ///     .build(&device)
     ///     .unwrap();
     ///
@@ -475,12 +475,13 @@ impl FingerprintsBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
     /// let device = DeviceScope::default().unwrap();
     /// let engine = Fingerprints::builder()
     ///     .ascii()
     ///     .window_widths(&[3, 5, 7])  // Good for word-level analysis
+    ///     .dimensions(256)
     ///     .build(&device)
     ///     .unwrap();
     ///
@@ -510,8 +511,8 @@ impl FingerprintsBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
     /// let device = DeviceScope::default().unwrap();
     /// let engine = Fingerprints::builder()
     ///     .dna()
@@ -546,8 +547,8 @@ impl FingerprintsBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
     /// let device = DeviceScope::default().unwrap();
     /// let engine = Fingerprints::builder()
     ///     .protein()
@@ -584,8 +585,8 @@ impl FingerprintsBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
     /// let device = DeviceScope::default().unwrap();
     ///
     /// // Hexadecimal data (0-9, A-F)
@@ -621,8 +622,8 @@ impl FingerprintsBuilder {
     ///
     /// # Domain-Specific Recommendations
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
     /// let device = DeviceScope::default().unwrap();
     ///
     /// // Natural language (word-level patterns)
@@ -674,8 +675,8 @@ impl FingerprintsBuilder {
     ///
     /// # Recommended Formulas
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
     /// let device = DeviceScope::default().unwrap();
     ///
     /// // Basic formula: 64 * number_of_window_widths
@@ -726,8 +727,8 @@ impl FingerprintsBuilder {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
     /// let device = DeviceScope::default().unwrap();
     ///
     /// // Build with validation
@@ -816,8 +817,8 @@ impl FingerprintsBuilder {
 ///
 /// ## Document Similarity
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+/// ```rust
+/// # use stringzilla::szs::{Fingerprints, DeviceScope};
 /// let device = DeviceScope::default().unwrap();
 /// let engine = Fingerprints::builder()
 ///     .ascii()  // Text processing optimized
@@ -839,8 +840,8 @@ impl FingerprintsBuilder {
 ///
 /// ## Genomic k-mer Analysis
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+/// ```rust
+/// # use stringzilla::szs::{Fingerprints, DeviceScope};
 /// let device = DeviceScope::default().unwrap();
 /// let engine = Fingerprints::builder()
 ///     .dna()  // 4-character alphabet optimization
@@ -873,8 +874,8 @@ impl Fingerprints {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::Fingerprints;
+    /// ```rust
+    /// # use stringzilla::szs::Fingerprints;
     /// // Start with default configuration
     /// let builder = Fingerprints::builder();
     ///
@@ -910,13 +911,17 @@ impl Fingerprints {
     ///
     /// # Similarity Estimation
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{Fingerprints, DeviceScope};
+    /// ```rust
+    /// # use stringzilla::szs::{Fingerprints, DeviceScope};
     /// let device = DeviceScope::default().unwrap();
-    /// let engine = Fingerprints::builder().build(&device).unwrap();
+    /// let dimensions = 256;
+    /// let engine = Fingerprints::builder()
+    ///     .dimensions(dimensions)
+    ///     .build(&device)
+    ///     .unwrap();
     ///
     /// let strings = vec!["hello world", "hello word", "goodbye world"];
-    /// let dimensions = 256;
+    ///
     /// let (hashes, _counts) = engine.compute(&device, &strings, dimensions).unwrap();
     ///
     /// // Estimate Jaccard similarity between strings 0 and 1
@@ -1344,8 +1349,8 @@ pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistances};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
 /// // Create engine with standard costs
 /// let device = DeviceScope::default().unwrap();
 /// let engine = LevenshteinDistances::new(
@@ -1367,8 +1372,8 @@ pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
 ///
 /// # Advanced Configuration
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistances};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
 /// // Biased towards insertions/deletions over substitutions
 /// let device = DeviceScope::default().unwrap();
 /// let engine = LevenshteinDistances::new(
@@ -1382,8 +1387,8 @@ pub type UnifiedVec<T> = allocator_api2::vec::Vec<T, UnifiedAlloc>;
 ///
 /// # Performance Optimization
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistances};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
 /// // For maximum performance with large batches
 /// let device = DeviceScope::cpu_cores(8).unwrap(); // or gpu_device(0)
 /// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
@@ -1419,8 +1424,8 @@ impl LevenshteinDistances {
     ///
     /// # Cost Configuration Guidelines
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistances};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
     /// let device = DeviceScope::default().unwrap();
     ///
     /// // Standard Levenshtein distance (all operations cost 1)
@@ -1487,8 +1492,8 @@ impl LevenshteinDistances {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistances};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistances};
     /// let device = DeviceScope::default().unwrap();
     /// let engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
     ///
@@ -1609,8 +1614,8 @@ unsafe impl Sync for LevenshteinDistances {}
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistancesUtf8};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
 /// let device = DeviceScope::default().unwrap();
 /// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
 ///
@@ -1626,8 +1631,8 @@ unsafe impl Sync for LevenshteinDistances {}
 ///
 /// # Comparison with Binary Engine
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistances, LevenshteinDistancesUtf8};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, LevenshteinDistances, LevenshteinDistancesUtf8};
 /// let device = DeviceScope::default().unwrap();
 /// let binary_engine = LevenshteinDistances::new(&device, 0, 1, 1, 1).unwrap();
 /// let utf8_engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
@@ -1669,8 +1674,8 @@ impl LevenshteinDistancesUtf8 {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistancesUtf8};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
     /// let device = DeviceScope::default().unwrap();
     ///
     /// // Standard Unicode-aware engine
@@ -1721,14 +1726,14 @@ impl LevenshteinDistancesUtf8 {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistancesUtf8};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
     /// let device = DeviceScope::default().unwrap();
     /// let engine = LevenshteinDistancesUtf8::new(&device, 0, 1, 1, 1).unwrap();
     ///
-    /// // Mixed string types
+    /// // Unicode strings (same container type for both sides)
     /// let strings_a: Vec<String> = vec!["résumé".to_string(), "naïve".to_string()];
-    /// let strings_b: Vec<&str> = vec!["resume", "naive"];
+    /// let strings_b: Vec<String> = vec!["resume".to_string(), "naive".to_string()];
     /// let distances = engine.compute(&device, &strings_a, &strings_b).unwrap();
     ///
     /// // Each accented character counts as 1 edit
@@ -1741,8 +1746,8 @@ impl LevenshteinDistancesUtf8 {
     /// Note: This engine does NOT perform Unicode normalization. Pre-normalize
     /// your strings if you need to handle composed vs decomposed characters:
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, LevenshteinDistancesUtf8};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, LevenshteinDistancesUtf8};
     /// // These are different at the code point level:
     /// let composed = vec!["café"];     // é as single code point U+00E9
     /// let decomposed = vec!["cafe\u{0301}"]; // e + combining acute accent
@@ -1868,8 +1873,8 @@ unsafe impl Sync for LevenshteinDistancesUtf8 {}
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, NeedlemanWunschScores};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
 /// // Create simple scoring matrix (match=2, mismatch=-1)
 /// let mut matrix = [[-1i8; 256]; 256];
 /// for i in 0..256 {
@@ -1894,8 +1899,8 @@ unsafe impl Sync for LevenshteinDistancesUtf8 {}
 ///
 /// # BLOSUM62 Example
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, NeedlemanWunschScores};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
 /// // Load BLOSUM62 matrix (simplified example)
 /// fn create_blosum62_matrix() -> [[i8; 256]; 256] {
 ///     let mut matrix = [[-4i8; 256]; 256]; // Default mismatch
@@ -1944,8 +1949,8 @@ impl NeedlemanWunschScores {
     ///
     /// # Matrix Guidelines
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, NeedlemanWunschScores};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
     /// // Identity matrix (simple match/mismatch)
     /// let mut simple_matrix = [[0i8; 256]; 256];
     /// for i in 0..256 {
@@ -1961,8 +1966,8 @@ impl NeedlemanWunschScores {
     ///
     /// # Gap Cost Selection
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, NeedlemanWunschScores};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
     /// # let mut matrix = [[0i8; 256]; 256];
     /// # let device = DeviceScope::default().unwrap();
     /// // Linear gap costs (open == extend)
@@ -2021,8 +2026,8 @@ impl NeedlemanWunschScores {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, NeedlemanWunschScores};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
     /// # let mut matrix = [[0i8; 256]; 256];
     /// # for i in 0..256 { matrix[i][i] = 2; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
     /// let device = DeviceScope::default().unwrap();
@@ -2039,8 +2044,8 @@ impl NeedlemanWunschScores {
     ///
     /// # Batch Processing
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, NeedlemanWunschScores};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, NeedlemanWunschScores};
     /// # let mut matrix = [[0i8; 256]; 256];
     /// # let device = DeviceScope::default().unwrap();
     /// # let engine = NeedlemanWunschScores::new(&device, &matrix, -2, -1).unwrap();
@@ -2185,8 +2190,8 @@ unsafe impl Sync for NeedlemanWunschScores {}
 ///
 /// # Examples
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, SmithWatermanScores};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
 /// // Create scoring matrix for DNA (A, T, C, G)
 /// let mut dna_matrix = [[-2i8; 256]; 256]; // Mismatch penalty
 /// let dna_chars = [b'A', b'T', b'C', b'G'];
@@ -2214,8 +2219,8 @@ unsafe impl Sync for NeedlemanWunschScores {}
 ///
 /// # Database Search Example
 ///
-/// ```rust,no_run
-/// # use stringzilla::stringzillas::szs::{DeviceScope, SmithWatermanScores};
+/// ```rust
+/// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
 /// # let mut matrix = [[0i8; 256]; 256];
 /// let device = DeviceScope::default().unwrap();
 /// let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
@@ -2263,8 +2268,8 @@ impl SmithWatermanScores {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, SmithWatermanScores};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
     /// let device = DeviceScope::default().unwrap();
     ///
     /// // Protein alignment matrix (simplified)
@@ -2285,8 +2290,8 @@ impl SmithWatermanScores {
     ///
     /// # Gap Penalty Strategy
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, SmithWatermanScores};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
     /// # let mut matrix = [[0i8; 256]; 256];
     /// # let device = DeviceScope::default().unwrap();
     /// // Conservative gaps (discourage insertions/deletions)
@@ -2345,8 +2350,8 @@ impl SmithWatermanScores {
     ///
     /// # Examples
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, SmithWatermanScores};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
     /// # let mut matrix = [[0i8; 256]; 256];
     /// # for i in 0..256 { matrix[i][i] = 3; for j in 0..256 { if i != j { matrix[i][j] = -1; } } }
     /// let device = DeviceScope::default().unwrap();
@@ -2371,8 +2376,8 @@ impl SmithWatermanScores {
     ///
     /// # Homology Search
     ///
-    /// ```rust,no_run
-    /// # use stringzilla::stringzillas::szs::{DeviceScope, SmithWatermanScores};
+    /// ```rust
+    /// # use stringzilla::szs::{DeviceScope, SmithWatermanScores};
     /// # let mut matrix = [[0i8; 256]; 256];
     /// # let device = DeviceScope::default().unwrap();
     /// # let engine = SmithWatermanScores::new(&device, &matrix, -2, -1).unwrap();
@@ -2622,7 +2627,7 @@ extern "C" fn sz_sequence_get_length_str<T: AsRef<str>>(handle: *mut c_void, ind
 /// # Examples
 ///
 /// ```
-/// # use stringzilla::stringzillas::szs::backend_info;
+/// # use stringzilla::szs::backend_info;
 /// let info = backend_info();
 /// println!("Using backend: {}", info);
 /// ```
