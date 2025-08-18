@@ -115,26 +115,26 @@ fn build_stringzillas() {
 
     // Set GPU backend flags
     if is_cuda {
+        build.cuda(true);
         build.file("c/stringzillas.cu");
         build.define("SZ_USE_CUDA", "1");
         build.define("SZ_USE_ROCM", "0");
-        // For CUDA, we need C++ compilation
-        build.flag("-std=c++17");
-        build.cpp(true);
+        build.flag("-std=c++20");
+        build.flag("--expt-relaxed-constexpr");
+        build.flag("-arch=sm_90a");
     } else if is_rocm {
+        build.cpp(true);
         build.file("c/stringzillas.cu");
         build.define("SZ_USE_CUDA", "0");
         build.define("SZ_USE_ROCM", "1");
-        // For ROCm, we need C++ compilation
-        build.flag("-std=c++17");
-        build.cpp(true);
+        build.flag("-std=c++20");
+        // TODO: Add proper HIP/ROCm compiler support
     } else {
-        // CPU-only multi-threading
+        build.cpp(true);
         build.file("c/stringzillas.cpp");
         build.define("SZ_USE_CUDA", "0");
         build.define("SZ_USE_ROCM", "0");
-        build.flag("-std=c++17");
-        build.cpp(true);
+        build.flag("-std=c++20");
     }
 
     // Common flags
