@@ -28,7 +28,7 @@
 #include <bitset>    // `std::bitset`
 #include <string>    // `std::string`
 #include <vector>    // `std::vector`
-#if SZ_IS_CPP17_ && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 #include <string_view> // `std::string_view`
 #endif
 #endif
@@ -1257,7 +1257,7 @@ class basic_string_slice {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_IS_CPP17_ && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 
     template <typename sfinae_ = char_type, typename std::enable_if<std::is_const<sfinae_>::value, int>::type = 0>
     sz_constexpr_if_cpp20 basic_string_slice(std::string_view const &other) noexcept
@@ -2169,7 +2169,7 @@ class basic_string {
         return os.write(str.data(), str.size());
     }
 
-#if SZ_IS_CPP17_ && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 
     basic_string(std::string_view other) noexcept(false) : basic_string(other.data(), other.size()) {}
     basic_string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }

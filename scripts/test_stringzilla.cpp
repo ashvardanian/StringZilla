@@ -83,7 +83,7 @@ using namespace std::literals; // for ""sv
  *  Instantiate all the templates to make the symbols visible and also check
  *  for weird compilation errors on uncommon paths.
  */
-#if SZ_IS_CPP17_ && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 template class std::basic_string_view<char>;
 #endif
 template class sz::basic_string_slice<char>;
@@ -750,7 +750,7 @@ void test_stl_compatibility_for_reads() {
     assert(str("b") >= str("a"));
     assert(str("a") < str("aa"));
 
-#if SZ_IS_CPP20_ && __cpp_lib_three_way_comparison
+#if SZ_IS_CPP20_ && defined(__cpp_lib_three_way_comparison)
     // Spaceship operator instead of conventional comparions.
     assert((str("a") <=> str("b")) == std::strong_ordering::less);
     assert((str("b") <=> str("a")) == std::strong_ordering::greater);
@@ -793,7 +793,7 @@ void test_stl_compatibility_for_reads() {
     assert(str("hello world").compare(6, 5, "worlds", 5) == 0);    // Substring "world" in both strings
     assert(str("hello world").compare(6, 5, "worlds", 6) < 0);     // Substring "world" is less than "worlds"
 
-#if SZ_IS_CPP20_ && __cpp_lib_starts_ends_with
+#if SZ_IS_CPP20_ && defined(__cpp_lib_starts_ends_with)
     // Prefix and suffix checks against strings.
     assert(str("https://cppreference.com").starts_with(str("http")) == true);
     assert(str("https://cppreference.com").starts_with(str("ftp")) == false);
@@ -813,7 +813,7 @@ void test_stl_compatibility_for_reads() {
     assert(str("string_view").ends_with("View") == false);
 #endif
 
-#if SZ_IS_CPP23_ && __cpp_lib_string_contains
+#if SZ_IS_CPP23_ && defined(__cpp_lib_string_contains)
     // Checking basic substring presence.
     assert(str("hello").contains(str("ell")) == true);
     assert(str("hello").contains(str("oll")) == false);
@@ -998,7 +998,7 @@ void test_stl_conversions() {
         sz_unused_(sz);
         sz_unused_(szv);
     }
-#if SZ_IS_CPP17_ && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     // From STL `string_view` to StringZilla and vice-versa.
     {
         std::string_view stl {"hello"};
@@ -1473,7 +1473,7 @@ void test_search() {
     assert(rsplits[4] == "");
 }
 
-#if SZ_IS_CPP17_ && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
 
 /**
  *  Evaluates the correctness of a "matcher", searching for all the occurrences of the `needle_stl`
@@ -1928,7 +1928,7 @@ int main(int argc, char const **argv) {
     test_replacements();
 
 // Compatibility with STL
-#if SZ_IS_CPP17_ && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     test_stl_compatibility_for_reads<std::string_view>();
 #endif
     test_stl_compatibility_for_reads<std::string>();
@@ -1953,7 +1953,7 @@ int main(int argc, char const **argv) {
     test_stl_conversions();
     test_comparisons();
     test_search();
-#if SZ_IS_CPP17_ && __cpp_lib_string_view
+#if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
     test_search_with_misaligned_repetitions();
 #endif
 
