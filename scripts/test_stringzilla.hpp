@@ -53,6 +53,11 @@ inline std::mt19937 &global_random_generator() noexcept {
     return generator;
 }
 
+template <typename string_type_, typename other_string_type_>
+inline string_type_ to_str(other_string_type_ const &other) noexcept {
+    return string_type_(other.data(), other.size());
+}
+
 /**
  *  @brief  A uniform distribution of characters, with a given alphabet size.
  *          The alphabet size is the number of distinct characters in the distribution.
