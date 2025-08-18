@@ -25,8 +25,8 @@ The project is split into the following parts:
 
 For minimal test coverage, check the following scripts:
 
-- `scripts/test.cpp` - tests C++ API (not underlying C) against STL.
-- `scripts/test.py` - tests Python API against native strings.
+- `scripts/test_stringzilla.cpp` - tests C++ API (not underlying C) against STL.
+- `scripts/test_stringzilla.py` - tests Python API against native strings.
 - `scripts/test.js`.
 
 At the C++ level all benchmarks also validate the results against the STL baseline, serving as tests on real-world data.

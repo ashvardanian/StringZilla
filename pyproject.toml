@@ -22,7 +22,7 @@ line-length = 120
 
 [tool.cibuildwheel]
 test-requires = ["pytest", "pytest-repeat"]
-test-command = "pytest {project}/scripts/test.py -x"
+test-command = "pytest {project}/scripts/test_stringzilla.py -x"
 build-verbosity = 0
 
 # We need to build for all platforms:

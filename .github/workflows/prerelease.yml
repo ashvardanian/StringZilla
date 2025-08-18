@@ -121,7 +121,7 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: pytest scripts/test_stringzilla.py -s -x
 
         # JavaScript
       # - name: Set up Node.js
@@ -206,7 +206,7 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: pytest scripts/test_stringzilla.py -s -x
 
         # Rust
       - name: Test Rust
@@ -345,7 +345,7 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: pytest scripts/test_stringzilla.py -s -x
 
         # Swift
       - name: Set up Swift ${{ env.SWIFT_VERSION }}
@@ -417,7 +417,7 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: pytest scripts/test_stringzilla.py -s -x
 
   test_alpine:
     name: Alpine Linux
@@ -458,7 +458,7 @@ jobs:
           pip install --break-system-packages pytest pytest-repeat
           pip install --break-system-packages .
       - name: Test Python
-        run: pytest scripts/test.py -s -x
+        run: pytest scripts/test_stringzilla.py -s -x
 
         # Rust
       - name: Test Rust
