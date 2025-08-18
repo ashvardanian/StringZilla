@@ -778,7 +778,9 @@ SZ_DYNAMIC sz_status_t sz_device_scope_init_default(sz_device_scope_t *scope_pun
 SZ_DYNAMIC sz_status_t sz_device_scope_init_cpu_cores(sz_size_t cpu_cores, sz_device_scope_t *scope_punned) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
     sz_assert_(cpu_cores > 0 && "CPU cores must be greater than zero");
-    sz_assert_(cpu_cores > 1 && "For a single-threaded execution, use the default scope");
+
+    // ! For a single-threaded execution, use the default scope
+    if (cpu_cores <= 1) return sz_status_unknown_k;
 
     sz::cpu_specs_t specs;
     auto executor = std::make_unique<fu::basic_pool_t>();
@@ -871,7 +873,7 @@ SZ_DYNAMIC sz_status_t sz_device_scope_get_capabilities(sz_device_scope_t scope_
         return sz_success_k;
     }
 #endif
-    
+
     // For default and CPU scopes, intersect system capabilities with CPU capabilities
     *capabilities = static_cast<sz_capability_t>(system_caps & sz_caps_cpus_k);
     return sz_success_k;
