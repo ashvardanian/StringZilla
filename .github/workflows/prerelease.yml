@@ -279,7 +279,7 @@ jobs:
           pip install uv
       - name: Build Python StringZillas-CPUs
         run: |
-          pip install pytest pytest-repeat numpy pyarrow
+          pip install pytest pytest-repeat numpy pyarrow wheel
           SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
       - name: Test Python StringZillas-CPUs
         run: uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x
@@ -340,7 +340,7 @@ jobs:
           pip install uv
       - name: Build Python StringZillas-CPUs
         run: |
-          pip install pytest pytest-repeat numpy pyarrow
+          pip install pytest pytest-repeat numpy pyarrow wheel
           SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
       - name: Test Python StringZillas-CPUs
         run: uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x
