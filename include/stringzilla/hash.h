@@ -644,10 +644,15 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         sz_hash_minimal_init_serial_(&state, seed);
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec;
+#if SZ_USE_MISALIGNED_LOADS
         data0_vec.u64s[0] = *(sz_u64_t const *)(start);
         data0_vec.u64s[1] = *(sz_u64_t const *)(start + 8);
         data1_vec.u64s[0] = *(sz_u64_t const *)(start + length - 16);
         data1_vec.u64s[1] = *(sz_u64_t const *)(start + length - 8);
+#else
+        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
+        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[length - 16 + i];
+#endif
         // Let's shift the data within the register to de-interleave the bytes.
         sz_hash_shift_in_register_serial_(&data1_vec, 32 - length);
         sz_hash_minimal_update_serial_(&state, data0_vec);
@@ -660,12 +665,18 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         sz_hash_minimal_init_serial_(&state, seed);
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
+#if SZ_USE_MISALIGNED_LOADS
         data0_vec.u64s[0] = *(sz_u64_t const *)(start);
         data0_vec.u64s[1] = *(sz_u64_t const *)(start + 8);
         data1_vec.u64s[0] = *(sz_u64_t const *)(start + 16);
         data1_vec.u64s[1] = *(sz_u64_t const *)(start + 24);
         data2_vec.u64s[0] = *(sz_u64_t const *)(start + length - 16);
         data2_vec.u64s[1] = *(sz_u64_t const *)(start + length - 8);
+#else
+        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
+        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
+        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[length - 16 + i];
+#endif
         // Let's shift the data within the register to de-interleave the bytes.
         sz_hash_shift_in_register_serial_(&data2_vec, 48 - length);
         sz_hash_minimal_update_serial_(&state, data0_vec);
@@ -679,6 +690,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         sz_hash_minimal_init_serial_(&state, seed);
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
+#if SZ_USE_MISALIGNED_LOADS
         data0_vec.u64s[0] = *(sz_u64_t const *)(start);
         data0_vec.u64s[1] = *(sz_u64_t const *)(start + 8);
         data1_vec.u64s[0] = *(sz_u64_t const *)(start + 16);
@@ -687,6 +699,12 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         data2_vec.u64s[1] = *(sz_u64_t const *)(start + 40);
         data3_vec.u64s[0] = *(sz_u64_t const *)(start + length - 16);
         data3_vec.u64s[1] = *(sz_u64_t const *)(start + length - 8);
+#else
+        for (sz_size_t i = 0; i < 16; ++i) data0_vec.u8s[i] = start[i];
+        for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[16 + i];
+        for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[32 + i];
+        for (sz_size_t i = 0; i < 16; ++i) data3_vec.u8s[i] = start[length - 16 + i];
+#endif
         // Let's shift the data within the register to de-interleave the bytes.
         sz_hash_shift_in_register_serial_(&data3_vec, 64 - length);
         sz_hash_minimal_update_serial_(&state, data0_vec);
@@ -701,6 +719,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         SZ_ALIGN64 sz_hash_state_t state;
         sz_hash_state_init_serial(&state, seed);
 
+#if SZ_USE_MISALIGNED_LOADS
         for (; state.ins_length + 64 <= length; state.ins_length += 64) {
             state.ins.u64s[0] = *(sz_u64_t const *)(start + state.ins_length);
             state.ins.u64s[1] = *(sz_u64_t const *)(start + state.ins_length + 8);
@@ -712,6 +731,13 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
             state.ins.u64s[7] = *(sz_u64_t const *)(start + state.ins_length + 56);
             sz_hash_state_update_serial_(&state);
         }
+#else
+        for (; state.ins_length + 64 <= length; state.ins_length += 64) {
+            for (sz_size_t i = 0; i < 64; ++i) state.ins.u8s[i] = start[state.ins_length + i];
+            sz_hash_state_update_serial_(&state);
+        }
+#endif
+
         if (state.ins_length < length) {
             for (sz_size_t i = 0; i != 8; ++i) state.ins.u64s[i] = 0;
             for (sz_size_t i = 0; state.ins_length < length; ++i, ++state.ins_length)
@@ -938,10 +964,10 @@ SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed)
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
     for (int i = 0; i < 4; ++i)
-        _mm_storeu_si128(&state->aes.xmms[i], _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2))));
+        _mm_storeu_si128(&state->aes.xmms[i], _mm_xor_si128(seed_vec, _mm_loadu_si128((__m128i const *)(pi + i * 2))));
     for (int i = 0; i < 4; ++i)
         _mm_storeu_si128(&state->sum.xmms[i],
-                         _mm_xor_si128(seed_vec, _mm_load_si128((__m128i const *)(pi + i * 2 + 8))));
+                         _mm_xor_si128(seed_vec, _mm_loadu_si128((__m128i const *)(pi + i * 2 + 8))));
 
     // The inputs are zeroed out at the beginning
     _mm_storeu_si128(&state->ins.xmms[0], _mm_setzero_si128());
