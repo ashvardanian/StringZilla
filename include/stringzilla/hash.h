@@ -958,61 +958,76 @@ SZ_PUBLIC void sz_hash_state_init_haswell(sz_hash_state_t *state, sz_u64_t seed)
     __m128i seed_vec = _mm_set1_epi64x(seed);
 
     // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
-    // ! we must use `_mm_storeu_si128` stores to update the state.
-    _mm_storeu_si128(&state->key.xmm, seed_vec);
+    // ! we must use `_mm_storeu_si128` stores to update the state. Moreover, accessing `state.xmms[i]`
+    // ! fools the compiler into preferring aligned operations over out misaligned ones.
+    _mm_storeu_si128((__m128i *)&state->key.u8s[0], seed_vec);
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
     for (int i = 0; i < 4; ++i)
-        _mm_storeu_si128(&state->aes.xmms[i], _mm_xor_si128(seed_vec, _mm_loadu_si128((__m128i const *)(pi + i * 2))));
+        _mm_storeu_si128((__m128i *)&state->aes.u8s[i * sizeof(__m128i)],
+                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + i * 2))));
     for (int i = 0; i < 4; ++i)
-        _mm_storeu_si128(&state->sum.xmms[i],
-                         _mm_xor_si128(seed_vec, _mm_loadu_si128((__m128i const *)(pi + i * 2 + 8))));
+        _mm_storeu_si128((__m128i *)&state->sum.u8s[i * sizeof(__m128i)],
+                         _mm_xor_si128(seed_vec, _mm_lddqu_si128((__m128i const *)(pi + i * 2 + 8))));
 
     // The inputs are zeroed out at the beginning
-    _mm_storeu_si128(&state->ins.xmms[0], _mm_setzero_si128());
-    _mm_storeu_si128(&state->ins.xmms[1], _mm_setzero_si128());
-    _mm_storeu_si128(&state->ins.xmms[2], _mm_setzero_si128());
-    _mm_storeu_si128(&state->ins.xmms[3], _mm_setzero_si128());
+    _mm_storeu_si128((__m128i *)&state->ins.u8s[0 * sizeof(__m128i)], _mm_setzero_si128());
+    _mm_storeu_si128((__m128i *)&state->ins.u8s[1 * sizeof(__m128i)], _mm_setzero_si128());
+    _mm_storeu_si128((__m128i *)&state->ins.u8s[2 * sizeof(__m128i)], _mm_setzero_si128());
+    _mm_storeu_si128((__m128i *)&state->ins.u8s[3 * sizeof(__m128i)], _mm_setzero_si128());
     state->ins_length = 0;
 }
 
 SZ_INTERNAL void sz_hash_state_update_haswell_(sz_hash_state_t *state) {
     __m128i const shuffle_mask = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
     _mm_storeu_si128( //
-        &state->aes.xmms[0],
-        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[0]), _mm_lddqu_si128(&state->ins.xmms[0])));
+        (__m128i *)&state->aes.u8s[0 * sizeof(__m128i)],
+        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes.u8s[0 * sizeof(__m128i)]),
+                         _mm_lddqu_si128((__m128i *)&state->ins.u8s[0 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->sum.xmms[0], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[0]), shuffle_mask),
-                                           _mm_lddqu_si128(&state->ins.xmms[0])));
+        (__m128i *)&state->sum.u8s[0 * sizeof(__m128i)],
+        _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum.u8s[0 * sizeof(__m128i)]), shuffle_mask),
+                      _mm_lddqu_si128((__m128i *)&state->ins.u8s[0 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->aes.xmms[1],
-        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[1]), _mm_lddqu_si128(&state->ins.xmms[1])));
+        (__m128i *)&state->aes.u8s[1 * sizeof(__m128i)],
+        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes.u8s[1 * sizeof(__m128i)]),
+                         _mm_lddqu_si128((__m128i *)&state->ins.u8s[1 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->sum.xmms[1], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[1]), shuffle_mask),
-                                           _mm_lddqu_si128(&state->ins.xmms[1])));
+        (__m128i *)&state->sum.u8s[1 * sizeof(__m128i)],
+        _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum.u8s[1 * sizeof(__m128i)]), shuffle_mask),
+                      _mm_lddqu_si128((__m128i *)&state->ins.u8s[1 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->aes.xmms[2],
-        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[2]), _mm_lddqu_si128(&state->ins.xmms[2])));
+        (__m128i *)&state->aes.u8s[2 * sizeof(__m128i)],
+        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes.u8s[2 * sizeof(__m128i)]),
+                         _mm_lddqu_si128((__m128i *)&state->ins.u8s[2 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->sum.xmms[2], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[2]), shuffle_mask),
-                                           _mm_lddqu_si128(&state->ins.xmms[2])));
+        (__m128i *)&state->sum.u8s[2 * sizeof(__m128i)],
+        _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum.u8s[2 * sizeof(__m128i)]), shuffle_mask),
+                      _mm_lddqu_si128((__m128i *)&state->ins.u8s[2 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->aes.xmms[3],
-        _mm_aesenc_si128(_mm_lddqu_si128(&state->aes.xmms[3]), _mm_lddqu_si128(&state->ins.xmms[3])));
+        (__m128i *)&state->aes.u8s[3 * sizeof(__m128i)],
+        _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->aes.u8s[3 * sizeof(__m128i)]),
+                         _mm_lddqu_si128((__m128i *)&state->ins.u8s[3 * sizeof(__m128i)])));
     _mm_storeu_si128( //
-        &state->sum.xmms[3], _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128(&state->sum.xmms[3]), shuffle_mask),
-                                           _mm_lddqu_si128(&state->ins.xmms[3])));
+        (__m128i *)&state->sum.u8s[3 * sizeof(__m128i)],
+        _mm_add_epi64(_mm_shuffle_epi8(_mm_lddqu_si128((__m128i *)&state->sum.u8s[3 * sizeof(__m128i)]), shuffle_mask),
+                      _mm_lddqu_si128((__m128i *)&state->ins.u8s[3 * sizeof(__m128i)])));
 }
 
 SZ_INTERNAL sz_u64_t sz_hash_state_finalize_haswell_(sz_hash_state_t const *state) {
     // Mix the length into the key
-    __m128i key_with_length = _mm_add_epi64(_mm_lddqu_si128(&state->key.xmm), _mm_set_epi64x(0, state->ins_length));
+    __m128i key_with_length =
+        _mm_add_epi64(_mm_lddqu_si128((__m128i *)&state->key.u8s[0]), _mm_set_epi64x(0, state->ins_length));
     // Combine the "sum" and the "AES" blocks
-    __m128i mixed0 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[0]), _mm_lddqu_si128(&state->aes.xmms[0]));
-    __m128i mixed1 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[1]), _mm_lddqu_si128(&state->aes.xmms[1]));
-    __m128i mixed2 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[2]), _mm_lddqu_si128(&state->aes.xmms[2]));
-    __m128i mixed3 = _mm_aesenc_si128(_mm_lddqu_si128(&state->sum.xmms[3]), _mm_lddqu_si128(&state->aes.xmms[3]));
+    __m128i mixed0 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum.u8s[0 * sizeof(__m128i)]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes.u8s[0 * sizeof(__m128i)]));
+    __m128i mixed1 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum.u8s[1 * sizeof(__m128i)]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes.u8s[1 * sizeof(__m128i)]));
+    __m128i mixed2 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum.u8s[2 * sizeof(__m128i)]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes.u8s[2 * sizeof(__m128i)]));
+    __m128i mixed3 = _mm_aesenc_si128(_mm_lddqu_si128((__m128i *)&state->sum.u8s[3 * sizeof(__m128i)]),
+                                      _mm_lddqu_si128((__m128i *)&state->aes.u8s[3 * sizeof(__m128i)]));
     // Combine the mixed registers
     __m128i mixed01 = _mm_aesenc_si128(mixed0, mixed1);
     __m128i mixed23 = _mm_aesenc_si128(mixed2, mixed3);
@@ -1116,10 +1131,14 @@ SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t te
     while (length) {
         // Append to the internal buffer until it's full
         if (state->ins_length % 64 == 0 && length >= 64) {
-            _mm_storeu_si128(&state->ins.xmms[0], _mm_lddqu_si128((__m128i const *)(text + 0)));
-            _mm_storeu_si128(&state->ins.xmms[1], _mm_lddqu_si128((__m128i const *)(text + 16)));
-            _mm_storeu_si128(&state->ins.xmms[2], _mm_lddqu_si128((__m128i const *)(text + 32)));
-            _mm_storeu_si128(&state->ins.xmms[3], _mm_lddqu_si128((__m128i const *)(text + 48)));
+            _mm_storeu_si128((__m128i *)&state->ins.u8s[0 * sizeof(__m128i)],
+                             _mm_lddqu_si128((__m128i const *)(text + 0)));
+            _mm_storeu_si128((__m128i *)&state->ins.u8s[1 * sizeof(__m128i)],
+                             _mm_lddqu_si128((__m128i const *)(text + 16)));
+            _mm_storeu_si128((__m128i *)&state->ins.u8s[2 * sizeof(__m128i)],
+                             _mm_lddqu_si128((__m128i const *)(text + 32)));
+            _mm_storeu_si128((__m128i *)&state->ins.u8s[3 * sizeof(__m128i)],
+                             _mm_lddqu_si128((__m128i const *)(text + 48)));
             sz_hash_state_update_haswell_(state);
             state->ins_length += 64;
             text += 64;
@@ -1139,7 +1158,8 @@ SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t te
             if (will_fill_block) {
                 sz_hash_state_update_haswell_(state);
                 // Reset to zeros now, so we don't have to overwrite an immutable buffer in the folding state
-                for (int i = 0; i < 4; ++i) _mm_storeu_si128(&state->ins.xmms[i], _mm_setzero_si128());
+                for (int i = 0; i < 4; ++i)
+                    _mm_storeu_si128((__m128i *)&state->ins.u8s[i * sizeof(__m128i)], _mm_setzero_si128());
             }
         }
     }
@@ -1396,7 +1416,7 @@ SZ_PUBLIC void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed)
     __m512i seed_vec = _mm512_set1_epi64(seed);
     // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
     // ! we must use `_mm_storeu_si128` stores to update the state.
-    _mm_storeu_si128(&state->key.xmm, _mm512_castsi512_si128(seed_vec));
+    _mm_storeu_si128((__m128i *)&state->key.u8s[0], _mm512_castsi512_si128(seed_vec));
 
     // XOR the user-supplied keys with the two "pi" constants
     sz_u64_t const *pi = sz_hash_pi_constants_();
