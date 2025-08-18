@@ -185,7 +185,7 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  */
-SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
+SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
     // https://github.com/ashvardanian/SimSIMD/blob/28e536083602f85ad0c59456782c8864463ffb0e/include/simsimd/simsimd.h#L434
     // for documentation on how we detect capabilities across different ARM platforms.
 #if defined(SZ_IS_APPLE_)
@@ -261,7 +261,7 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
 
 #if SZ_IS_64BIT_X86_
 
-SZ_INTERNAL sz_capability_t sz_capabilities_implementation_x86_(void) {
+SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
 
 #if SZ_USE_HASWELL || SZ_USE_SKYLAKE || SZ_USE_ICE
 
@@ -308,7 +308,7 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_x86_(void) {
  *  @return A bitmask of the SIMD capabilities represented as a `sz_capability_t` enum value.
  *  @note Excludes parallel-processing & GPGPU capabilities, which are detected separately in StringZillas.
  */
-SZ_INTERNAL sz_capability_t sz_capabilities_implementation_(void) {
+SZ_PUBLIC sz_capability_t sz_capabilities_implementation_(void) {
 #if SZ_IS_64BIT_X86_
     return sz_capabilities_implementation_x86_();
 #elif SZ_IS_64BIT_ARM_
