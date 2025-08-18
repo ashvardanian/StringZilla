@@ -196,6 +196,10 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
     unsigned supports_neon = 0, supports_sve = 0, supports_sve2 = 0;
+    sz_unused_(id_aa64isar0_el1);
+    sz_unused_(id_aa64isar1_el1);
+    sz_unused_(id_aa64pfr0_el1);
+    sz_unused_(id_aa64zfr0_el1);
 
 #if SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2
     // Now let's unpack the status flags from ID_AA64ISAR0_EL1

@@ -162,6 +162,8 @@ struct argsort_strings_via_qsort_t {
         qsort_r(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
 #elif defined(SZ_HAS_QSORT_S_)
         qsort_s(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
+#else
+        sz_unused_(_get_qsort_order);
 #endif
 
         // Prepare stats and hash the permutation to compare with the reference.
