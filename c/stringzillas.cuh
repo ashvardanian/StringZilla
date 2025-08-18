@@ -277,7 +277,8 @@ sz_status_t sz_levenshtein_distances_for_(                                     /
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
     auto variant_logic = [&](auto &engine_variant) {
-        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+        using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+        constexpr sz_capability_t engine_capability_k = engine_variant_t::capability_k;
 
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
@@ -357,7 +358,8 @@ sz_status_t sz_levenshtein_distances_utf8_for_(                                 
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
     auto variant_logic = [&](auto &engine_variant) {
-        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+        using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+        constexpr sz_capability_t engine_capability_k = engine_variant_t::capability_k;
 
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
@@ -434,7 +436,8 @@ sz_status_t sz_needleman_wunsch_scores_for_(                                    
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
     auto variant_logic = [&](auto &engine_variant) {
-        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+        using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+        constexpr sz_capability_t engine_capability_k = engine_variant_t::capability_k;
 
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
@@ -521,7 +524,8 @@ sz_status_t sz_smith_waterman_scores_for_(                                     /
     // The simplest case, is having non-optimized non-unrolled hashers.
     sz_status_t result = sz_success_k;
     auto variant_logic = [&](auto &engine_variant) {
-        constexpr sz_capability_t engine_capability_k = engine_variant.capability_k;
+        using engine_variant_t = std::decay_t<decltype(engine_variant)>;
+        constexpr sz_capability_t engine_capability_k = engine_variant_t::capability_k;
 
         // GPU backends are only compatible with GPU scopes
         if constexpr (is_gpu_capability(engine_capability_k)) {
