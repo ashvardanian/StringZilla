@@ -90,7 +90,7 @@ static sz_bool_t (*sz_py_replace_strings_allocator)(PyObject *, sz_memory_alloca
 
 // Default device scope that can be safely reused across calls
 // The underlying implementation is stateless and thread-safe
-static sz_device_scope_t default_device_scope = NULL;
+static szs_device_scope_t default_device_scope = NULL;
 // Static variable to store hardware capabilities
 static sz_capability_t default_hardware_capabilities = 0;
 // Static unified memory allocator for GPU compatibility
@@ -136,13 +136,13 @@ static sz_bool_t try_swap_to_unified_allocator(PyObject *strs_obj) {
  */
 typedef struct {
     PyObject ob_base;
-    sz_device_scope_t handle;
+    szs_device_scope_t handle;
     char description[32];
 } DeviceScope;
 
 static void DeviceScope_dealloc(DeviceScope *self) {
     if (self->handle) {
-        sz_device_scope_free(self->handle);
+        szs_device_scope_free(self->handle);
         self->handle = NULL;
     }
     Py_TYPE(self)->tp_free((PyObject *)self);
@@ -181,7 +181,7 @@ static int DeviceScope_init(DeviceScope *self, PyObject *args, PyObject *kwargs)
         }
         cpu_cores = PyLong_AsSize_t(cpu_cores_obj);
         if (cpu_cores == (sz_size_t)-1 && PyErr_Occurred()) { return -1; }
-        status = sz_device_scope_init_cpu_cores(cpu_cores, &self->handle);
+        status = szs_device_scope_init_cpu_cores(cpu_cores, &self->handle);
         snprintf(self->description, sizeof(self->description), "CPUs:%zu", cpu_cores);
     }
     else if (gpu_device_obj != NULL) {
@@ -191,11 +191,11 @@ static int DeviceScope_init(DeviceScope *self, PyObject *args, PyObject *kwargs)
         }
         gpu_device = PyLong_AsSize_t(gpu_device_obj);
         if (gpu_device == (sz_size_t)-1 && PyErr_Occurred()) { return -1; }
-        status = sz_device_scope_init_gpu_device(gpu_device, &self->handle);
+        status = szs_device_scope_init_gpu_device(gpu_device, &self->handle);
         snprintf(self->description, sizeof(self->description), "GPU:%zu", gpu_device);
     }
     else {
-        status = sz_device_scope_init_default(&self->handle);
+        status = szs_device_scope_init_default(&self->handle);
         snprintf(self->description, sizeof(self->description), "default");
     }
 
@@ -250,7 +250,7 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
 
         // Try to get GPU device
         sz_size_t gpu_device;
-        if (sz_device_scope_get_gpu_device(device_scope->handle, &gpu_device) == sz_success_k) {
+        if (szs_device_scope_get_gpu_device(device_scope->handle, &gpu_device) == sz_success_k) {
             // This is a GPU scope - prefer CUDA if available
             if (default_hardware_capabilities & sz_caps_cuda_k) { *result = sz_cap_cuda_k; }
             else {
@@ -262,7 +262,7 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
 
         // Try to get CPU cores first
         sz_size_t cpu_cores;
-        if (sz_device_scope_get_cpu_cores(device_scope->handle, &cpu_cores) == sz_success_k) {
+        if (szs_device_scope_get_cpu_cores(device_scope->handle, &cpu_cores) == sz_success_k) {
             // This is a CPU scope - prefer parallel if available, otherwise serial
             *result = sz_caps_cpus_k;
             return 0;
@@ -331,14 +331,14 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
  */
 typedef struct {
     PyObject ob_base;
-    sz_levenshtein_distances_t handle;
+    szs_levenshtein_distances_t handle;
     char description[32];
     sz_capability_t capabilities;
 } LevenshteinDistances;
 
 static void LevenshteinDistances_dealloc(LevenshteinDistances *self) {
     if (self->handle) {
-        sz_levenshtein_distances_free(self->handle);
+        szs_levenshtein_distances_free(self->handle);
         self->handle = NULL;
     }
     Py_TYPE(self)->tp_free((PyObject *)self);
@@ -388,7 +388,7 @@ static int LevenshteinDistances_init(LevenshteinDistances *self, PyObject *args,
     }
 
     sz_status_t status =
-        sz_levenshtein_distances_init(match, mismatch, open, extend, NULL, capabilities, &self->handle);
+        szs_levenshtein_distances_init(match, mismatch, open, extend, NULL, capabilities, &self->handle);
 
     if (status != sz_success_k) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize Levenshtein distances engine");
@@ -423,13 +423,13 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
         device_scope = (DeviceScope *)device_obj;
     }
 
-    sz_device_scope_t device_handle = device_scope ? device_scope->handle : default_device_scope;
+    szs_device_scope_t device_handle = device_scope ? device_scope->handle : default_device_scope;
     sz_size_t kernel_input_size = 0;
     void *kernel_a_texts_punned = NULL;
     void *kernel_b_texts_punned = NULL;
     sz_size_t *kernel_results = NULL;
     sz_size_t kernel_results_stride = sizeof(sz_size_t);
-    sz_status_t (*kernel_punned)(sz_levenshtein_distances_t, sz_device_scope_t, void *, void *, sz_size_t *,
+    sz_status_t (*kernel_punned)(szs_levenshtein_distances_t, szs_device_scope_t, void *, void *, sz_size_t *,
                                  sz_size_t) = NULL;
 
     // Try to swap allocators to unified memory for GPU compatibility
@@ -448,7 +448,7 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
         }
 
         kernel_input_size = a_u32tape.count;
-        kernel_punned = sz_levenshtein_distances_u32tape;
+        kernel_punned = szs_levenshtein_distances_u32tape;
         kernel_a_texts_punned = &a_u32tape;
         kernel_b_texts_punned = &b_u32tape;
     }
@@ -465,7 +465,7 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
             return NULL;
         }
         kernel_input_size = a_u64tape.count;
-        kernel_punned = sz_levenshtein_distances_u64tape;
+        kernel_punned = szs_levenshtein_distances_u64tape;
         kernel_a_texts_punned = &a_u64tape;
         kernel_b_texts_punned = &b_u64tape;
     }
@@ -480,7 +480,7 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
             return NULL;
         }
         kernel_input_size = a_seq.count;
-        kernel_punned = sz_levenshtein_distances_sequence;
+        kernel_punned = szs_levenshtein_distances_sequence;
         kernel_a_texts_punned = &a_seq;
         kernel_b_texts_punned = &b_seq;
     }
@@ -620,7 +620,7 @@ static PyTypeObject LevenshteinDistancesType = {
 
 typedef struct {
     PyObject ob_base;
-    sz_levenshtein_distances_utf8_t handle;
+    szs_levenshtein_distances_utf8_t handle;
     char description[32];
     sz_capability_t capabilities;
 } LevenshteinDistancesUTF8;
@@ -636,7 +636,7 @@ static PyObject *LevenshteinDistancesUTF8_new(PyTypeObject *type, PyObject *args
 }
 
 static void LevenshteinDistancesUTF8_dealloc(LevenshteinDistancesUTF8 *self) {
-    if (self->handle) { sz_levenshtein_distances_utf8_free(self->handle); }
+    if (self->handle) { szs_levenshtein_distances_utf8_free(self->handle); }
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -674,7 +674,7 @@ static int LevenshteinDistancesUTF8_init(LevenshteinDistancesUTF8 *self, PyObjec
     }
 
     sz_status_t status =
-        sz_levenshtein_distances_utf8_init(match, mismatch, open, extend, NULL, capabilities, &self->handle);
+        szs_levenshtein_distances_utf8_init(match, mismatch, open, extend, NULL, capabilities, &self->handle);
 
     if (status != sz_success_k) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize UTF-8 Levenshtein distances engine");
@@ -708,13 +708,13 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
         device_scope = (DeviceScope *)device_obj;
     }
 
-    sz_device_scope_t device_handle = device_scope ? device_scope->handle : default_device_scope;
+    szs_device_scope_t device_handle = device_scope ? device_scope->handle : default_device_scope;
     sz_size_t kernel_input_size = 0;
     void *kernel_a_texts_punned = NULL;
     void *kernel_b_texts_punned = NULL;
     sz_size_t *kernel_results = NULL;
     sz_size_t kernel_results_stride = sizeof(sz_size_t);
-    sz_status_t (*kernel_punned)(sz_levenshtein_distances_t, sz_device_scope_t, void *, void *, sz_size_t *,
+    sz_status_t (*kernel_punned)(szs_levenshtein_distances_t, szs_device_scope_t, void *, void *, sz_size_t *,
                                  sz_size_t) = NULL;
 
     // Try to swap allocators to unified memory for GPU compatibility
@@ -733,7 +733,7 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
         }
 
         kernel_input_size = a_u32tape.count;
-        kernel_punned = sz_levenshtein_distances_utf8_u32tape;
+        kernel_punned = szs_levenshtein_distances_utf8_u32tape;
         kernel_a_texts_punned = &a_u32tape;
         kernel_b_texts_punned = &b_u32tape;
     }
@@ -750,7 +750,7 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
             return NULL;
         }
         kernel_input_size = a_u64tape.count;
-        kernel_punned = sz_levenshtein_distances_utf8_u64tape;
+        kernel_punned = szs_levenshtein_distances_utf8_u64tape;
         kernel_a_texts_punned = &a_u64tape;
         kernel_b_texts_punned = &b_u64tape;
     }
@@ -765,7 +765,7 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
             return NULL;
         }
         kernel_input_size = a_seq.count;
-        kernel_punned = sz_levenshtein_distances_utf8_sequence;
+        kernel_punned = szs_levenshtein_distances_utf8_sequence;
         kernel_a_texts_punned = &a_seq;
         kernel_b_texts_punned = &b_seq;
     }
@@ -909,14 +909,14 @@ static PyTypeObject LevenshteinDistancesUTF8Type = {
  */
 typedef struct {
     PyObject ob_base;
-    sz_needleman_wunsch_scores_t handle;
+    szs_needleman_wunsch_scores_t handle;
     char description[32];
     sz_capability_t capabilities;
 } NeedlemanWunsch;
 
 static void NeedlemanWunsch_dealloc(NeedlemanWunsch *self) {
     if (self->handle) {
-        sz_needleman_wunsch_scores_free(self->handle);
+        szs_needleman_wunsch_scores_free(self->handle);
         self->handle = NULL;
     }
     Py_TYPE(self)->tp_free((PyObject *)self);
@@ -974,7 +974,7 @@ static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject 
     for (int i = 0; i < 256; i += 16)                      // Sample every 16th element
         subs_checksum += (sz_u32_t)subs_data[i * 256 + i]; // Diagonal elements
 
-    sz_status_t status = sz_needleman_wunsch_scores_init(subs_data, open, extend, NULL, capabilities, &self->handle);
+    sz_status_t status = szs_needleman_wunsch_scores_init(subs_data, open, extend, NULL, capabilities, &self->handle);
     if (status != sz_success_k) {
         char const *error_msg;
         switch (status) {
@@ -1011,7 +1011,7 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) return NULL;
 
     // Get device handle
-    sz_device_scope_t device_handle = default_device_scope;
+    szs_device_scope_t device_handle = default_device_scope;
     if (device_obj && device_obj != Py_None) {
         if (!PyObject_IsInstance(device_obj, (PyObject *)&DeviceScopeType)) {
             PyErr_SetString(PyExc_TypeError, "device must be a DeviceScope instance");
@@ -1023,7 +1023,7 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
     sz_size_t kernel_input_size = 0;
     void const *kernel_a_texts_punned = NULL;
     void const *kernel_b_texts_punned = NULL;
-    sz_status_t (*kernel_punned)(sz_needleman_wunsch_scores_t, sz_device_scope_t, void const *, void const *,
+    sz_status_t (*kernel_punned)(szs_needleman_wunsch_scores_t, szs_device_scope_t, void const *, void const *,
                                  sz_ssize_t *, sz_size_t) = NULL;
     // Try to swap allocators to unified memory for GPU compatibility
     if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
@@ -1040,7 +1040,7 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
             return NULL;
         }
         kernel_input_size = a_u32tape.count;
-        kernel_punned = sz_needleman_wunsch_scores_u32tape;
+        kernel_punned = szs_needleman_wunsch_scores_u32tape;
         kernel_a_texts_punned = &a_u32tape;
         kernel_b_texts_punned = &b_u32tape;
     }
@@ -1057,7 +1057,7 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
             return NULL;
         }
         kernel_input_size = a_u64tape.count;
-        kernel_punned = sz_needleman_wunsch_scores_u64tape;
+        kernel_punned = szs_needleman_wunsch_scores_u64tape;
         kernel_a_texts_punned = &a_u64tape;
         kernel_b_texts_punned = &b_u64tape;
     }
@@ -1072,7 +1072,7 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
             return NULL;
         }
         kernel_input_size = a_seq.count;
-        kernel_punned = sz_needleman_wunsch_scores_sequence;
+        kernel_punned = szs_needleman_wunsch_scores_sequence;
         kernel_a_texts_punned = &a_seq;
         kernel_b_texts_punned = &b_seq;
     }
@@ -1209,12 +1209,12 @@ static PyTypeObject NeedlemanWunschType = {
  */
 typedef struct {
     PyObject ob_base;
-    sz_smith_waterman_scores_t handle;
+    szs_smith_waterman_scores_t handle;
 } SmithWaterman;
 
 static void SmithWaterman_dealloc(SmithWaterman *self) {
     if (self->handle) {
-        sz_smith_waterman_scores_free(self->handle);
+        szs_smith_waterman_scores_free(self->handle);
         self->handle = NULL;
     }
     Py_TYPE(self)->tp_free((PyObject *)self);
@@ -1262,7 +1262,7 @@ static int SmithWaterman_init(SmithWaterman *self, PyObject *args, PyObject *kwa
 
     // Initialize the engine
     sz_error_cost_t *subs_data = (sz_error_cost_t *)PyArray_DATA(subs_array);
-    sz_status_t status = sz_smith_waterman_scores_init(subs_data, open, extend, NULL, capabilities, &self->handle);
+    sz_status_t status = szs_smith_waterman_scores_init(subs_data, open, extend, NULL, capabilities, &self->handle);
 
     if (status != sz_success_k) {
         char const *error_msg;
@@ -1290,7 +1290,7 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OO|OO", kwlist, &a_obj, &b_obj, &device_obj, &out_obj)) return NULL;
 
     // Get device handle
-    sz_device_scope_t device_handle = default_device_scope;
+    szs_device_scope_t device_handle = default_device_scope;
     if (device_obj && device_obj != Py_None) {
         if (!PyObject_IsInstance(device_obj, (PyObject *)&DeviceScopeType)) {
             PyErr_SetString(PyExc_TypeError, "device must be a DeviceScope instance");
@@ -1302,7 +1302,7 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
     sz_size_t kernel_input_size = 0;
     void const *kernel_a_texts_punned = NULL;
     void const *kernel_b_texts_punned = NULL;
-    sz_status_t (*kernel_punned)(sz_smith_waterman_scores_t, sz_device_scope_t, void const *, void const *,
+    sz_status_t (*kernel_punned)(szs_smith_waterman_scores_t, szs_device_scope_t, void const *, void const *,
                                  sz_ssize_t *, sz_size_t) = NULL;
     // Try to swap allocators to unified memory for GPU compatibility
     if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
@@ -1319,7 +1319,7 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
             return NULL;
         }
         kernel_input_size = a_u32tape.count;
-        kernel_punned = sz_smith_waterman_scores_u32tape;
+        kernel_punned = szs_smith_waterman_scores_u32tape;
         kernel_a_texts_punned = &a_u32tape;
         kernel_b_texts_punned = &b_u32tape;
     }
@@ -1336,7 +1336,7 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
             return NULL;
         }
         kernel_input_size = a_u64tape.count;
-        kernel_punned = sz_smith_waterman_scores_u64tape;
+        kernel_punned = szs_smith_waterman_scores_u64tape;
         kernel_a_texts_punned = &a_u64tape;
         kernel_b_texts_punned = &b_u64tape;
     }
@@ -1351,7 +1351,7 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
             return NULL;
         }
         kernel_input_size = a_seq.count;
-        kernel_punned = sz_smith_waterman_scores_sequence;
+        kernel_punned = szs_smith_waterman_scores_sequence;
         kernel_a_texts_punned = &a_seq;
         kernel_b_texts_punned = &b_seq;
     }
@@ -1488,7 +1488,7 @@ static PyTypeObject SmithWatermanType = {
  */
 typedef struct {
     PyObject ob_base;
-    sz_fingerprints_t handle;
+    szs_fingerprints_t handle;
     char description[64];
     sz_capability_t capabilities;
     sz_size_t ndim;
@@ -1496,7 +1496,7 @@ typedef struct {
 
 static void Fingerprints_dealloc(Fingerprints *self) {
     if (self->handle) {
-        sz_fingerprints_free(self->handle);
+        szs_fingerprints_free(self->handle);
         self->handle = NULL;
     }
     Py_TYPE(self)->tp_free((PyObject *)self);
@@ -1563,8 +1563,8 @@ static int Fingerprints_init(Fingerprints *self, PyObject *args, PyObject *kwarg
         window_widths = (sz_size_t *)PyArray_DATA(arr);
     }
 
-    sz_status_t status = sz_fingerprints_init(ndim, alphabet_size, window_widths, window_widths_count, NULL,
-                                              capabilities, &self->handle);
+    sz_status_t status = szs_fingerprints_init(ndim, alphabet_size, window_widths, window_widths_count, NULL,
+                                               capabilities, &self->handle);
 
     if (status != sz_success_k) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize Fingerprints engine");
@@ -1601,7 +1601,7 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
         device_scope = (DeviceScope *)device_obj;
     }
 
-    sz_device_scope_t device_handle = device_scope ? device_scope->handle : default_device_scope;
+    szs_device_scope_t device_handle = device_scope ? device_scope->handle : default_device_scope;
 
     // Handle empty input - return tuple of empty arrays
     if (PySequence_Check(texts_obj) && PySequence_Size(texts_obj) == 0) {
@@ -1632,7 +1632,7 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
 
     sz_size_t kernel_input_size = 0;
     void *kernel_texts_punned = NULL;
-    sz_status_t (*kernel_punned)(sz_fingerprints_t, sz_device_scope_t, void *, sz_u32_t *, sz_size_t, sz_u32_t *,
+    sz_status_t (*kernel_punned)(szs_fingerprints_t, szs_device_scope_t, void *, sz_u32_t *, sz_size_t, sz_u32_t *,
                                  sz_size_t) = NULL;
 
     // Handle 32-bit tape inputs
@@ -1641,7 +1641,7 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
         texts_obj, &texts_u32tape.data, &texts_u32tape.offsets, &texts_u32tape.count);
     if (texts_is_u32tape) {
         kernel_input_size = texts_u32tape.count;
-        kernel_punned = sz_fingerprints_u32tape;
+        kernel_punned = szs_fingerprints_u32tape;
         kernel_texts_punned = &texts_u32tape;
     }
 
@@ -1652,7 +1652,7 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
                                  texts_obj, &texts_u64tape.data, &texts_u64tape.offsets, &texts_u64tape.count);
     if (texts_is_u64tape) {
         kernel_input_size = texts_u64tape.count;
-        kernel_punned = sz_fingerprints_u64tape;
+        kernel_punned = szs_fingerprints_u64tape;
         kernel_texts_punned = &texts_u64tape;
     }
 
@@ -1662,7 +1662,7 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
         !texts_is_u32tape && !texts_is_u64tape && sz_py_export_strings_as_sequence(texts_obj, &texts_seq);
     if (texts_is_sequence) {
         kernel_input_size = texts_seq.count;
-        kernel_punned = sz_fingerprints_sequence;
+        kernel_punned = szs_fingerprints_sequence;
         kernel_texts_punned = &texts_seq;
     }
 
@@ -1793,7 +1793,7 @@ static PyTypeObject FingerprintsType = {
 static void stringzillas_cleanup(PyObject *m) {
     sz_unused_(m);
     if (default_device_scope) {
-        sz_device_scope_free(default_device_scope);
+        szs_device_scope_free(default_device_scope);
         default_device_scope = NULL;
     }
 }
@@ -1877,7 +1877,7 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
     if (alloc_status != sz_success_k) sz_memory_allocator_init_default(&unified_allocator);
 
     // Initialize the default device scope for reuse
-    sz_status_t status = sz_device_scope_init_default(&default_device_scope);
+    sz_status_t status = szs_device_scope_init_default(&default_device_scope);
     if (status != sz_success_k) {
         PyErr_SetString(PyExc_RuntimeError, "Failed to initialize default device scope");
         return NULL;

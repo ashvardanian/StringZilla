@@ -318,7 +318,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_(void) {
 #endif
 }
 
-#if defined(SZ_DYNAMIC_DISPATCH)
+#if SZ_DYNAMIC_DISPATCH
 
 SZ_DYNAMIC int sz_dynamic_dispatch(void);
 SZ_DYNAMIC int sz_version_major(void);
