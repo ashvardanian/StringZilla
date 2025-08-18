@@ -426,6 +426,10 @@ jobs:
       image: alpine:latest
       options: --privileged # If needed for certain Docker operations
     steps:
+      - name: Log Alpine and Git versions
+        run: |
+          echo "Alpine: $(cat /etc/alpine-release 2>/dev/null || echo 'unknown')"
+          git --version || echo "git not installed"
       - uses: actions/checkout@v4
         with:
           submodules: recursive
