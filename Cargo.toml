@@ -21,7 +21,7 @@ include = ["/rust/**", "/c/**", "/include/**", "/build.rs"]
 
 [lib]
 name = "stringzilla"
-path = "rust/stringzilla.rs"
+path = "rust/lib.rs"
 
 [features]
 default = []
