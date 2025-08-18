@@ -115,6 +115,7 @@
 #if !SZ_AVOID_STL
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
+#include <memory>           // `std::allocator_traits` for allocator rebinding
 #include <type_traits>      // `is_same_type`, `std::enable_if`, etc.
 #endif
 
