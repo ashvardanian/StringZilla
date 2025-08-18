@@ -195,7 +195,9 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
 
     // Read CPUID registers directly
     unsigned long id_aa64isar0_el1 = 0, id_aa64isar1_el1 = 0, id_aa64pfr0_el1 = 0, id_aa64zfr0_el1 = 0;
+    unsigned supports_neon = 0, supports_sve = 0, supports_sve2 = 0;
 
+#if SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2
     // Now let's unpack the status flags from ID_AA64ISAR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ISAR0-EL1--AArch64-Instruction-Set-Attribute-Register-0?lang=en
     __asm__ __volatile__("mrs %0, ID_AA64ISAR0_EL1" : "=r"(id_aa64isar0_el1));
@@ -205,8 +207,19 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
     // Now let's unpack the status flags from ID_AA64PFR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64PFR0-EL1--AArch64-Processor-Feature-Register-0?lang=en
     __asm__ __volatile__("mrs %0, ID_AA64PFR0_EL1" : "=r"(id_aa64pfr0_el1));
+#endif // SZ_USE_NEON || SZ_USE_SVE || SZ_USE_SVE2
+
+    // AdvSIMD, bits [23:20] of ID_AA64PFR0_EL1 can be used to check for `fp16` support
+    //  - 0b0000: integers, single, double precision arithmetic
+    //  - 0b0001: includes support for half-precision floating-point arithmetic
+    //  - 0b1111: NEON is not supported?!
+    // That's a really weird way to encode lack of NEON support, but it's important to
+    // check in case we are running on R-profile CPUs.
+    supports_neon = ((id_aa64pfr0_el1 >> 20) & 0xF) != 0xF;
+
+#if SZ_USE_SVE || SZ_USE_SVE2
     // SVE, bits [35:32] of ID_AA64PFR0_EL1
-    unsigned supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
+    supports_sve = ((id_aa64pfr0_el1 >> 32) & 0xF) >= 1;
     // Now let's unpack the status flags from ID_AA64ZFR0_EL1
     // https://developer.arm.com/documentation/ddi0601/2024-03/AArch64-Registers/ID-AA64ZFR0-EL1--SVE-Feature-ID-Register-0?lang=en
     if (supports_sve) __asm__ __volatile__("mrs %0, ID_AA64ZFR0_EL1" : "=r"(id_aa64zfr0_el1));
@@ -215,8 +228,8 @@ SZ_INTERNAL sz_capability_t sz_capabilities_implementation_arm_(void) {
     //  - 0b0001: SVE2 is implemented
     //  - 0b0010: SVE2.1 is implemented
     // This value must match the existing indicator obtained from ID_AA64PFR0_EL1:
-    unsigned supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
-    unsigned supports_neon = 1; // NEON is always supported
+    supports_sve2 = ((id_aa64zfr0_el1) & 0xF) >= 1;
+#endif // SZ_USE_SVE || SZ_USE_SVE2
 
     return (sz_capability_t)(               //
         (sz_cap_neon_k * (supports_neon)) | //
