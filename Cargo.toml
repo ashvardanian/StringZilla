@@ -25,12 +25,16 @@ path = "rust/stringzilla.rs"
 
 [features]
 default = []
-cpus = ["allocator-api2"] # Multi-threaded CPU backend (StringZillas)
-cuda = ["cpus"]           # CUDA GPU backend (includes multi-threaded CPU backend)
-rocm = ["cpus"]           # ROCm GPU backend (includes multi-threaded CPU backend)
+cpus = [
+    "allocator-api2",
+    "stringtape",
+] # Multi-threaded CPU backend (StringZillas)
+cuda = ["cpus"] # CUDA GPU backend (includes multi-threaded CPU backend)
+rocm = ["cpus"] # ROCm GPU backend (includes multi-threaded CPU backend)
 
 [dependencies]
 allocator-api2 = { version = "0.3.0", optional = true }
+stringtape = { version = "0.1", optional = true }
 
 [build-dependencies]
 cc = "1.2.33"

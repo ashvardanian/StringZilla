@@ -88,6 +88,31 @@ pub mod szs {
             }
         }
 
+        /// Get the number of CPU cores configured for this device scope
+        pub fn get_cpu_cores(&self) -> Result<usize, Status> {
+            let mut cpu_cores: usize = 0;
+            let status = unsafe { sz_device_scope_get_cpu_cores(self.handle, &mut cpu_cores) };
+            match status {
+                Status::Success => Ok(cpu_cores),
+                err => Err(err),
+            }
+        }
+
+        /// Get the GPU device ID configured for this device scope
+        pub fn get_gpu_device(&self) -> Result<usize, Status> {
+            let mut gpu_device: usize = 0;
+            let status = unsafe { sz_device_scope_get_gpu_device(self.handle, &mut gpu_device) };
+            match status {
+                Status::Success => Ok(gpu_device),
+                err => Err(err),
+            }
+        }
+
+        /// Check if this device scope is configured for GPU execution
+        pub fn is_gpu(&self) -> bool {
+            self.get_gpu_device().is_ok()
+        }
+
         /// Get the raw handle for this device scope
         pub(crate) fn as_ptr(&self) -> *mut c_void {
             self.handle
@@ -222,36 +247,82 @@ pub mod szs {
             FingerprintsBuilder::new()
         }
 
-        /// Process a collection of strings and compute fingerprints
-        pub fn fingerprint<T, S>(
+        /// Compute fingerprints for a collection of strings
+        /// Returns min-hashes and min-counts in unified memory
+        pub fn compute<T, S>(
             &self,
             device: &DeviceScope,
-            strings: &T,
-            min_hashes: &mut [u32],
-            min_counts: &mut [u32],
-        ) -> Result<(), Status>
+            strings: T,
+            dimensions: usize,
+        ) -> Result<(UnifiedVec<u32>, UnifiedVec<u32>), Status>
         where
             T: AsRef<[S]>,
             S: AsRef<[u8]>,
         {
             let strings_slice = strings.as_ref();
-            let sequence = create_sequence_view(strings_slice);
+            let num_strings = strings_slice.len();
+            let hashes_size = num_strings * dimensions;
+            let counts_size = num_strings * dimensions;
 
-            let status = unsafe {
-                sz_fingerprints_sequence(
-                    self.handle,
-                    device.handle,
-                    &sequence as *const _ as *const c_void,
-                    min_hashes.as_mut_ptr(),
-                    min_hashes.len(),
-                    min_counts.as_mut_ptr(),
-                    min_counts.len(),
-                )
-            };
+            let mut min_hashes = UnifiedVec::with_capacity_in(hashes_size, UnifiedAlloc);
+            min_hashes.resize(hashes_size, 0);
+            let mut min_counts = UnifiedVec::with_capacity_in(counts_size, UnifiedAlloc);
+            min_counts.resize(counts_size, 0);
 
-            match status {
-                Status::Success => Ok(()),
-                err => Err(err),
+            let hashes_stride = dimensions * core::mem::size_of::<u32>();
+            let counts_stride = dimensions * core::mem::size_of::<u32>();
+
+            if device.is_gpu() {
+                let (tape, use_64bit) = create_tape(strings_slice)?;
+
+                let status = if use_64bit {
+                    let tape_view = create_u64tape_view(&tape);
+                    unsafe {
+                        sz_fingerprints_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_view as *const _ as *const c_void,
+                            min_hashes.as_mut_ptr(),
+                            hashes_stride,
+                            min_counts.as_mut_ptr(),
+                            counts_stride,
+                        )
+                    }
+                } else {
+                    let tape_view = create_u32tape_view(&tape);
+                    unsafe {
+                        sz_fingerprints_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_view as *const _ as *const c_void,
+                            min_hashes.as_mut_ptr(),
+                            hashes_stride,
+                            min_counts.as_mut_ptr(),
+                            counts_stride,
+                        )
+                    }
+                };
+                match status {
+                    Status::Success => Ok((min_hashes, min_counts)),
+                    err => Err(err),
+                }
+            } else {
+                let sequence = create_sequence_view(strings_slice);
+                let status = unsafe {
+                    sz_fingerprints_sequence(
+                        self.handle,
+                        device.handle,
+                        &sequence as *const _ as *const c_void,
+                        min_hashes.as_mut_ptr(),
+                        hashes_stride,
+                        min_counts.as_mut_ptr(),
+                        counts_stride,
+                    )
+                };
+                match status {
+                    Status::Success => Ok((min_hashes, min_counts)),
+                    err => Err(err),
+                }
             }
         }
     }
@@ -278,6 +349,22 @@ pub mod szs {
         lengths: *const usize,
     }
 
+    /// Apache Arrow-like tape for non-NULL strings with 32-bit offsets
+    #[repr(C)]
+    struct SzSequenceU32Tape {
+        data: *const u8,
+        offsets: *const u32,
+        count: usize,
+    }
+
+    /// Apache Arrow-like tape for non-NULL strings with 64-bit offsets
+    #[repr(C)]
+    struct SzSequenceU64Tape {
+        data: *const u8,
+        offsets: *const u64,
+        count: usize,
+    }
+
     /// Opaque handles for similarity engines
     pub type FingerprintsHandle = *mut c_void;
     pub type LevenshteinDistancesHandle = *mut c_void;
@@ -292,6 +379,8 @@ pub mod szs {
         fn sz_device_scope_init_cpu_cores(cpu_cores: usize, scope: *mut *mut c_void) -> Status;
         fn sz_device_scope_init_gpu_device(gpu_device: usize, scope: *mut *mut c_void) -> Status;
         fn sz_device_scope_get_capabilities(scope: *mut c_void, capabilities: *mut Capability) -> Status;
+        fn sz_device_scope_get_cpu_cores(scope: *mut c_void, cpu_cores: *mut usize) -> Status;
+        fn sz_device_scope_get_gpu_device(scope: *mut c_void, gpu_device: *mut usize) -> Status;
         fn sz_device_scope_free(scope: *mut c_void);
 
         // Levenshtein distance functions
@@ -310,6 +399,24 @@ pub mod szs {
             device: *mut c_void,
             a: *const c_void, // sz_sequence_t
             b: *const c_void, // sz_sequence_t
+            results: *mut usize,
+            results_stride: usize,
+        ) -> Status;
+
+        fn sz_levenshtein_distances_u32tape(
+            engine: LevenshteinDistancesHandle,
+            device: *mut c_void,
+            a: *const c_void, // sz_sequence_u32tape_t
+            b: *const c_void, // sz_sequence_u32tape_t
+            results: *mut usize,
+            results_stride: usize,
+        ) -> Status;
+
+        fn sz_levenshtein_distances_u64tape(
+            engine: LevenshteinDistancesHandle,
+            device: *mut c_void,
+            a: *const c_void, // sz_sequence_u64tape_t
+            b: *const c_void, // sz_sequence_u64tape_t
             results: *mut usize,
             results_stride: usize,
         ) -> Status;
@@ -336,6 +443,24 @@ pub mod szs {
             results_stride: usize,
         ) -> Status;
 
+        fn sz_levenshtein_distances_utf8_u32tape(
+            engine: LevenshteinDistancesUtf8Handle,
+            device: *mut c_void,
+            a: *const c_void, // sz_sequence_u32tape_t
+            b: *const c_void, // sz_sequence_u32tape_t
+            results: *mut usize,
+            results_stride: usize,
+        ) -> Status;
+
+        fn sz_levenshtein_distances_utf8_u64tape(
+            engine: LevenshteinDistancesUtf8Handle,
+            device: *mut c_void,
+            a: *const c_void, // sz_sequence_u64tape_t
+            b: *const c_void, // sz_sequence_u64tape_t
+            results: *mut usize,
+            results_stride: usize,
+        ) -> Status;
+
         fn sz_levenshtein_distances_utf8_free(engine: LevenshteinDistancesUtf8Handle);
 
         // Needleman-Wunsch scoring functions
@@ -353,6 +478,24 @@ pub mod szs {
             device: *mut c_void,
             a: *const c_void, // sz_sequence_t
             b: *const c_void, // sz_sequence_t
+            results: *mut isize,
+            results_stride: usize,
+        ) -> Status;
+
+        fn sz_needleman_wunsch_scores_u32tape(
+            engine: NeedlemanWunschScoresHandle,
+            device: *mut c_void,
+            a: *const c_void, // sz_sequence_u32tape_t
+            b: *const c_void, // sz_sequence_u32tape_t
+            results: *mut isize,
+            results_stride: usize,
+        ) -> Status;
+
+        fn sz_needleman_wunsch_scores_u64tape(
+            engine: NeedlemanWunschScoresHandle,
+            device: *mut c_void,
+            a: *const c_void, // sz_sequence_u64tape_t
+            b: *const c_void, // sz_sequence_u64tape_t
             results: *mut isize,
             results_stride: usize,
         ) -> Status;
@@ -378,6 +521,24 @@ pub mod szs {
             results_stride: usize,
         ) -> Status;
 
+        fn sz_smith_waterman_scores_u32tape(
+            engine: SmithWatermanScoresHandle,
+            device: *mut c_void,
+            a: *const c_void, // sz_sequence_u32tape_t
+            b: *const c_void, // sz_sequence_u32tape_t
+            results: *mut isize,
+            results_stride: usize,
+        ) -> Status;
+
+        fn sz_smith_waterman_scores_u64tape(
+            engine: SmithWatermanScoresHandle,
+            device: *mut c_void,
+            a: *const c_void, // sz_sequence_u64tape_t
+            b: *const c_void, // sz_sequence_u64tape_t
+            results: *mut isize,
+            results_stride: usize,
+        ) -> Status;
+
         fn sz_smith_waterman_scores_free(engine: SmithWatermanScoresHandle);
 
         // Fingerprinting functions
@@ -395,6 +556,26 @@ pub mod szs {
             engine: FingerprintsHandle,
             device: *mut c_void,  // DeviceScope
             texts: *const c_void, // sz_sequence_t
+            min_hashes: *mut u32,
+            min_hashes_stride: usize,
+            min_counts: *mut u32,
+            min_counts_stride: usize,
+        ) -> Status;
+
+        fn sz_fingerprints_u32tape(
+            engine: FingerprintsHandle,
+            device: *mut c_void,  // DeviceScope
+            texts: *const c_void, // sz_sequence_u32tape_t
+            min_hashes: *mut u32,
+            min_hashes_stride: usize,
+            min_counts: *mut u32,
+            min_counts_stride: usize,
+        ) -> Status;
+
+        fn sz_fingerprints_u64tape(
+            engine: FingerprintsHandle,
+            device: *mut c_void,  // DeviceScope
+            texts: *const c_void, // sz_sequence_u64tape_t
             min_hashes: *mut u32,
             min_hashes_stride: usize,
             min_counts: *mut u32,
@@ -474,35 +655,78 @@ pub mod szs {
             }
         }
 
-        /// Call operator to compute distances
-        pub fn call<T, S>(
+        /// Compute Levenshtein distances between sequence pairs
+        pub fn compute<T, S>(
             &self,
             device: &DeviceScope,
             sequences_a: T,
             sequences_b: T,
-            results: &mut [usize],
-        ) -> Result<(), Status>
+        ) -> Result<UnifiedVec<usize>, Status>
         where
             T: AsRef<[S]>,
             S: AsRef<[u8]>,
         {
-            let seq_a = create_sequence_view(sequences_a.as_ref());
-            let seq_b = create_sequence_view(sequences_b.as_ref());
+            let seq_a_slice = sequences_a.as_ref();
+            let seq_b_slice = sequences_b.as_ref();
+            let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
 
-            let results_stride = core::mem::size_of::<usize>(); // stride in bytes
-            let status = unsafe {
-                sz_levenshtein_distances_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                )
-            };
-            match status {
-                Status::Success => Ok(()),
-                err => Err(err),
+            let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+            results.resize(num_pairs, 0);
+
+            let results_stride = core::mem::size_of::<usize>();
+
+            if device.is_gpu() {
+                let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
+                let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
+
+                let status = if use_64bit_a || use_64bit_b {
+                    let tape_a_view = create_u64tape_view(&tape_a);
+                    let tape_b_view = create_u64tape_view(&tape_b);
+                    unsafe {
+                        sz_levenshtein_distances_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                        )
+                    }
+                } else {
+                    let tape_a_view = create_u32tape_view(&tape_a);
+                    let tape_b_view = create_u32tape_view(&tape_b);
+                    unsafe {
+                        sz_levenshtein_distances_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                        )
+                    }
+                };
+                match status {
+                    Status::Success => Ok(results),
+                    err => Err(err),
+                }
+            } else {
+                let seq_a = create_sequence_view(seq_a_slice);
+                let seq_b = create_sequence_view(seq_b_slice);
+                let status = unsafe {
+                    sz_levenshtein_distances_sequence(
+                        self.handle,
+                        device.handle,
+                        &seq_a as *const _ as *const c_void,
+                        &seq_b as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                    )
+                };
+                match status {
+                    Status::Success => Ok(results),
+                    err => Err(err),
+                }
             }
         }
     }
@@ -549,35 +773,78 @@ pub mod szs {
             }
         }
 
-        /// Call operator to compute UTF-8 distances
-        pub fn call<T, S>(
+        /// Compute UTF-8 aware Levenshtein distances between sequence pairs
+        pub fn compute<T, S>(
             &self,
             device: &DeviceScope,
             sequences_a: T,
             sequences_b: T,
-            results: &mut [usize],
-        ) -> Result<(), Status>
+        ) -> Result<UnifiedVec<usize>, Status>
         where
             T: AsRef<[S]>,
             S: AsRef<str>,
         {
-            let seq_a = create_sequence_view_str(sequences_a.as_ref());
-            let seq_b = create_sequence_view_str(sequences_b.as_ref());
+            let seq_a_slice = sequences_a.as_ref();
+            let seq_b_slice = sequences_b.as_ref();
+            let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
 
-            let results_stride = core::mem::size_of::<usize>(); // stride in bytes
-            let status = unsafe {
-                sz_levenshtein_distances_utf8_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                )
-            };
-            match status {
-                Status::Success => Ok(()),
-                err => Err(err),
+            let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+            results.resize(num_pairs, 0);
+
+            let results_stride = core::mem::size_of::<usize>();
+
+            if device.is_gpu() {
+                let (tape_a, use_64bit_a) = create_tape_str(seq_a_slice)?;
+                let (tape_b, use_64bit_b) = create_tape_str(seq_b_slice)?;
+
+                let status = if use_64bit_a || use_64bit_b {
+                    let tape_a_view = create_u64tape_view(&tape_a);
+                    let tape_b_view = create_u64tape_view(&tape_b);
+                    unsafe {
+                        sz_levenshtein_distances_utf8_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                        )
+                    }
+                } else {
+                    let tape_a_view = create_u32tape_view(&tape_a);
+                    let tape_b_view = create_u32tape_view(&tape_b);
+                    unsafe {
+                        sz_levenshtein_distances_utf8_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                        )
+                    }
+                };
+                match status {
+                    Status::Success => Ok(results),
+                    err => Err(err),
+                }
+            } else {
+                let seq_a = create_sequence_view_str(seq_a_slice);
+                let seq_b = create_sequence_view_str(seq_b_slice);
+                let status = unsafe {
+                    sz_levenshtein_distances_utf8_sequence(
+                        self.handle,
+                        device.handle,
+                        &seq_a as *const _ as *const c_void,
+                        &seq_b as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                    )
+                };
+                match status {
+                    Status::Success => Ok(results),
+                    err => Err(err),
+                }
             }
         }
     }
@@ -622,35 +889,78 @@ pub mod szs {
             }
         }
 
-        /// Call operator to compute alignment scores
-        pub fn call<T, S>(
+        /// Compute Needleman-Wunsch alignment scores between sequence pairs
+        pub fn compute<T, S>(
             &self,
             device: &DeviceScope,
             sequences_a: T,
             sequences_b: T,
-            results: &mut [isize],
-        ) -> Result<(), Status>
+        ) -> Result<UnifiedVec<isize>, Status>
         where
             T: AsRef<[S]>,
             S: AsRef<[u8]>,
         {
-            let seq_a = create_sequence_view(sequences_a.as_ref());
-            let seq_b = create_sequence_view(sequences_b.as_ref());
+            let seq_a_slice = sequences_a.as_ref();
+            let seq_b_slice = sequences_b.as_ref();
+            let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
 
-            let results_stride = core::mem::size_of::<isize>(); // stride in bytes
-            let status = unsafe {
-                sz_needleman_wunsch_scores_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                )
-            };
-            match status {
-                Status::Success => Ok(()),
-                err => Err(err),
+            let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+            results.resize(num_pairs, 0);
+
+            let results_stride = core::mem::size_of::<isize>();
+
+            if device.is_gpu() {
+                let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
+                let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
+
+                let status = if use_64bit_a || use_64bit_b {
+                    let tape_a_view = create_u64tape_view(&tape_a);
+                    let tape_b_view = create_u64tape_view(&tape_b);
+                    unsafe {
+                        sz_needleman_wunsch_scores_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                        )
+                    }
+                } else {
+                    let tape_a_view = create_u32tape_view(&tape_a);
+                    let tape_b_view = create_u32tape_view(&tape_b);
+                    unsafe {
+                        sz_needleman_wunsch_scores_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                        )
+                    }
+                };
+                match status {
+                    Status::Success => Ok(results),
+                    err => Err(err),
+                }
+            } else {
+                let seq_a = create_sequence_view(seq_a_slice);
+                let seq_b = create_sequence_view(seq_b_slice);
+                let status = unsafe {
+                    sz_needleman_wunsch_scores_sequence(
+                        self.handle,
+                        device.handle,
+                        &seq_a as *const _ as *const c_void,
+                        &seq_b as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                    )
+                };
+                match status {
+                    Status::Success => Ok(results),
+                    err => Err(err),
+                }
             }
         }
     }
@@ -695,35 +1005,78 @@ pub mod szs {
             }
         }
 
-        /// Call operator to compute local alignment scores
-        pub fn call<T, S>(
+        /// Compute Smith-Waterman local alignment scores between sequence pairs
+        pub fn compute<T, S>(
             &self,
             device: &DeviceScope,
             sequences_a: T,
             sequences_b: T,
-            results: &mut [isize],
-        ) -> Result<(), Status>
+        ) -> Result<UnifiedVec<isize>, Status>
         where
             T: AsRef<[S]>,
             S: AsRef<[u8]>,
         {
-            let seq_a = create_sequence_view(sequences_a.as_ref());
-            let seq_b = create_sequence_view(sequences_b.as_ref());
+            let seq_a_slice = sequences_a.as_ref();
+            let seq_b_slice = sequences_b.as_ref();
+            let num_pairs = seq_a_slice.len().min(seq_b_slice.len());
 
-            let results_stride = core::mem::size_of::<isize>(); // stride in bytes
-            let status = unsafe {
-                sz_smith_waterman_scores_sequence(
-                    self.handle,
-                    device.handle,
-                    &seq_a as *const _ as *const c_void,
-                    &seq_b as *const _ as *const c_void,
-                    results.as_mut_ptr(),
-                    results_stride,
-                )
-            };
-            match status {
-                Status::Success => Ok(()),
-                err => Err(err),
+            let mut results = UnifiedVec::with_capacity_in(num_pairs, UnifiedAlloc);
+            results.resize(num_pairs, 0);
+
+            let results_stride = core::mem::size_of::<isize>();
+
+            if device.is_gpu() {
+                let (tape_a, use_64bit_a) = create_tape(seq_a_slice)?;
+                let (tape_b, use_64bit_b) = create_tape(seq_b_slice)?;
+
+                let status = if use_64bit_a || use_64bit_b {
+                    let tape_a_view = create_u64tape_view(&tape_a);
+                    let tape_b_view = create_u64tape_view(&tape_b);
+                    unsafe {
+                        sz_smith_waterman_scores_u64tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                        )
+                    }
+                } else {
+                    let tape_a_view = create_u32tape_view(&tape_a);
+                    let tape_b_view = create_u32tape_view(&tape_b);
+                    unsafe {
+                        sz_smith_waterman_scores_u32tape(
+                            self.handle,
+                            device.handle,
+                            &tape_a_view as *const _ as *const c_void,
+                            &tape_b_view as *const _ as *const c_void,
+                            results.as_mut_ptr(),
+                            results_stride,
+                        )
+                    }
+                };
+                match status {
+                    Status::Success => Ok(results),
+                    err => Err(err),
+                }
+            } else {
+                let seq_a = create_sequence_view(seq_a_slice);
+                let seq_b = create_sequence_view(seq_b_slice);
+                let status = unsafe {
+                    sz_smith_waterman_scores_sequence(
+                        self.handle,
+                        device.handle,
+                        &seq_a as *const _ as *const c_void,
+                        &seq_b as *const _ as *const c_void,
+                        results.as_mut_ptr(),
+                        results_stride,
+                    )
+                };
+                match status {
+                    Status::Success => Ok(results),
+                    err => Err(err),
+                }
             }
         }
     }
@@ -757,6 +1110,60 @@ pub mod szs {
             get_length: sz_sequence_get_length_str::<T>,
             starts: ptr::null(),
             lengths: ptr::null(),
+        }
+    }
+
+    /// Convert StringTape to appropriate tape view for C API
+    fn create_tape<T, S>(sequences: &[T]) -> Result<(StringTape<UnifiedAlloc>, bool), Status>
+    where
+        T: AsRef<[S]>,
+        S: AsRef<[u8]>,
+    {
+        // Estimate total size to decide between 32-bit and 64-bit tapes
+        let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
+        let use_64bit = total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
+
+        let tape = if use_64bit {
+            StringTape::with_allocator_64(UnifiedAlloc)
+        } else {
+            StringTape::with_allocator_32(UnifiedAlloc)
+        };
+
+        let tape = sequences.iter().collect_into(tape);
+        Ok((tape, use_64bit))
+    }
+
+    /// Convert string sequences to StringTape
+    fn create_tape_str<T: AsRef<str>>(sequences: &[T]) -> Result<(StringTape<UnifiedAlloc>, bool), Status> {
+        // Estimate total size to decide between 32-bit and 64-bit tapes
+        let total_size: usize = sequences.iter().map(|s| s.as_ref().len()).sum();
+        let use_64bit = total_size > u32::MAX as usize || sequences.len() > u32::MAX as usize;
+
+        let tape = if use_64bit {
+            StringTape::with_allocator_64(UnifiedAlloc)
+        } else {
+            StringTape::with_allocator_32(UnifiedAlloc)
+        };
+
+        let tape = sequences.iter().map(|s| s.as_ref()).collect_into(tape);
+        Ok((tape, use_64bit))
+    }
+
+    /// Convert 32-bit StringTape to SzSequenceU32Tape for C API
+    fn create_u32tape_view(tape: &StringTape<UnifiedAlloc>) -> SzSequenceU32Tape {
+        SzSequenceU32Tape {
+            data: tape.as_ptr(),
+            offsets: tape.offsets_ptr_32(),
+            count: tape.len(),
+        }
+    }
+
+    /// Convert 64-bit StringTape to SzSequenceU64Tape for C API  
+    fn create_u64tape_view(tape: &StringTape<UnifiedAlloc>) -> SzSequenceU64Tape {
+        SzSequenceU64Tape {
+            data: tape.as_ptr(),
+            offsets: tape.offsets_ptr_64(),
+            count: tape.len(),
         }
     }
 
