@@ -88,7 +88,7 @@ struct callable_for_associative_lookups {
     inline callable_for_associative_lookups(environment_t const &env) noexcept : env(env) {}
     void preprocess() {
         using key_type = typename container_type_::key_type;
-        for (std::string_view const &key : env.tokens) container[key_type(key)]++;
+        for (std::string_view const &key : env.tokens) container[key_type(key.data(), key.size())]++;
     }
 
     /** @brief Helper API to produce a delayed construction lambda. */
