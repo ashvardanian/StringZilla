@@ -244,7 +244,6 @@ template <typename begin_iterator_type_, typename end_iterator_type_, typename e
 size_t group_by(begin_iterator_type_ const begin, end_iterator_type_ const end, equality_type_ &&equality,
                 slice_callback_type_ &&slice_callback) {
 
-    auto const size = std::distance(begin, end);
     auto slice_start = begin;
     size_t group_count = 0;
 
