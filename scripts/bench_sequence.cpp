@@ -98,6 +98,8 @@ static sz_size_t get_length(void const *handle, sz_size_t i) {
     return array[i].size();
 }
 
+#if defined(SZ_HAS_QSORT_R_) || defined(SZ_HAS_QSORT_S_)
+
 /**
  *  @brief Callback function for the @b `qsort_r` re-entrant sorting function.
  *  @note The `qsort_r` function is not available on all platforms, and is not part of the C standard.
@@ -119,6 +121,8 @@ static int _get_qsort_order(void const *a, void const *b, void *arg) {
     int res = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
     return res ? res : (int)(len_a - len_b);
 }
+
+#endif
 
 #pragma endregion
 
@@ -162,8 +166,6 @@ struct argsort_strings_via_qsort_t {
         qsort_r(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
 #elif defined(SZ_HAS_QSORT_S_)
         qsort_s(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
-#else
-        sz_unused_(_get_qsort_order);
 #endif
 
         // Prepare stats and hash the permutation to compare with the reference.
