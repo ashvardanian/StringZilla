@@ -4,6 +4,11 @@
  *  @author     Ash Vardanian
  *  @date       March 23, 2025
  */
+
+#if !defined(FU_ENABLE_NUMA)
+#define FU_ENABLE_NUMA 0
+#endif
+
 #include <stringzillas/stringzillas.h> // StringZillas library header
 
 #include <variant>        // For `std::variant`
