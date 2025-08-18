@@ -3975,7 +3975,7 @@ intersect_result_t intersect(first_type_ const &first, second_type_ const &secon
     std::size_t const max_count = (std::min)(first.size(), second.size());
     std::vector<sorted_idx_t> first_positions(max_count);
     std::vector<sorted_idx_t> second_positions(max_count);
-    std::size_t count;
+    std::size_t count = 0;
     status_t status = try_intersect( //
         first, first_extractor,      //
         second, second_extractor,    //
