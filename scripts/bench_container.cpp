@@ -184,7 +184,7 @@ struct equal_to_through_std_t {
     using is_transparent = void;
     template <typename first_type_, typename second_type_>
     inline bool operator()(first_type_ const &a, second_type_ const &b) const noexcept {
-        return std::equal_to<std::string_view> {}(std::string_view(a), std::string_view(b));
+        return std::equal_to<std::string_view> {}(to_str<std::string_view>(a), to_str<std::string_view>(b));
     }
 };
 

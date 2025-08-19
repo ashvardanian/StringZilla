@@ -654,7 +654,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         for (sz_size_t i = 0; i < 16; ++i) data1_vec.u8s[i] = start[length - 16 + i];
 #endif
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data1_vec, 32 - length);
+        sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
         sz_hash_minimal_update_serial_(&state, data0_vec);
         sz_hash_minimal_update_serial_(&state, data1_vec);
         return sz_hash_minimal_finalize_serial_(&state, length);
@@ -678,7 +678,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         for (sz_size_t i = 0; i < 16; ++i) data2_vec.u8s[i] = start[length - 16 + i];
 #endif
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data2_vec, 48 - length);
+        sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
         sz_hash_minimal_update_serial_(&state, data0_vec);
         sz_hash_minimal_update_serial_(&state, data1_vec);
         sz_hash_minimal_update_serial_(&state, data2_vec);
@@ -706,7 +706,7 @@ SZ_PUBLIC sz_u64_t sz_hash_serial(sz_cptr_t start, sz_size_t length, sz_u64_t se
         for (sz_size_t i = 0; i < 16; ++i) data3_vec.u8s[i] = start[length - 16 + i];
 #endif
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data3_vec, 64 - length);
+        sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
         sz_hash_minimal_update_serial_(&state, data0_vec);
         sz_hash_minimal_update_serial_(&state, data1_vec);
         sz_hash_minimal_update_serial_(&state, data2_vec);
@@ -1061,7 +1061,7 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
         data0_vec.xmm = _mm_lddqu_si128((__m128i const *)(start));
         data1_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data1_vec, 32 - length);
+        sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
         sz_hash_minimal_update_haswell_(&state, data0_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data1_vec.xmm);
         return sz_hash_minimal_finalize_haswell_(&state, length);
@@ -1076,7 +1076,7 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
         data1_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + 16));
         data2_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data2_vec, 48 - length);
+        sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
         sz_hash_minimal_update_haswell_(&state, data0_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data1_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data2_vec.xmm);
@@ -1093,7 +1093,7 @@ SZ_PUBLIC sz_u64_t sz_hash_haswell(sz_cptr_t start, sz_size_t length, sz_u64_t s
         data2_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + 32));
         data3_vec.xmm = _mm_lddqu_si128((__m128i const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data3_vec, 64 - length);
+        sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
         sz_hash_minimal_update_haswell_(&state, data0_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data1_vec.xmm);
         sz_hash_minimal_update_haswell_(&state, data2_vec.xmm);
@@ -2140,7 +2140,7 @@ SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t start, sz_size_t length, sz_u64_t seed
         data0_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + 0));
         data1_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data1_vec, 32 - length); //! `vextq_u8` requires immediates
+        sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length)); //! `vextq_u8` requires immediates
         sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
         return sz_hash_minimal_finalize_neon_(&state, length);
@@ -2155,7 +2155,7 @@ SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t start, sz_size_t length, sz_u64_t seed
         data1_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + 16));
         data2_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data2_vec, 48 - length); //! `vextq_u8` requires immediates
+        sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length)); //! `vextq_u8` requires immediates
         sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data2_vec.u8x16);
@@ -2172,7 +2172,7 @@ SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t start, sz_size_t length, sz_u64_t seed
         data2_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + 32));
         data3_vec.u8x16 = vld1q_u8((sz_u8_t const *)(start + length - 16));
         // Let's shift the data within the register to de-interleave the bytes.
-        sz_hash_shift_in_register_serial_(&data3_vec, 64 - length); //! `vextq_u8` requires immediates
+        sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length)); //! `vextq_u8` requires immediates
         sz_hash_minimal_update_neon_(&state, data0_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data1_vec.u8x16);
         sz_hash_minimal_update_neon_(&state, data2_vec.u8x16);

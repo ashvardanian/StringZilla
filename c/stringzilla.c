@@ -4,20 +4,6 @@
  *  @author     Ash Vardanian
  *  @date       January 16, 2024
  */
-#if SZ_AVOID_LIBC
-// If we don't have the LibC, the `malloc` definition in `stringzilla.h` will be illformed.
-#ifdef _MSC_VER
-typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
-extern __declspec(dllimport) int rand(void);
-extern __declspec(dllimport) void free(void *start);
-extern __declspec(dllimport) void *malloc(size_t length);
-#else
-typedef __SIZE_TYPE__ size_t; // For GCC/Clang
-extern int rand(void);
-extern void free(void *start);
-extern void *malloc(size_t length);
-#endif
-#endif
 
 // When enabled, this library will override the symbols usually provided by the C standard library.
 // It's handy if you want to use the `LD_PRELOAD` trick for non-intrusive profiling and replacing
@@ -32,6 +18,21 @@ extern void *malloc(size_t length);
 #endif
 #define SZ_DYNAMIC_DISPATCH 1
 #include <stringzilla/stringzilla.h>
+
+#if SZ_AVOID_LIBC
+// If we don't have the LibC, the `malloc` definition in `stringzilla.h` will be illformed.
+#ifdef _MSC_VER
+typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
+extern __declspec(dllimport) int rand(void);
+extern __declspec(dllimport) void free(void *start);
+extern __declspec(dllimport) void *malloc(size_t length);
+#else
+typedef __SIZE_TYPE__ size_t; // For GCC/Clang
+extern int rand(void);
+extern void free(void *start);
+extern void *malloc(size_t length);
+#endif
+#endif
 
 #if defined(SZ_IS_WINDOWS_)
 #include <windows.h> // `DllMain`

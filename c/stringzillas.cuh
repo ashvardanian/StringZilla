@@ -12,6 +12,7 @@
 #include <stringzillas/stringzillas.h> // StringZillas library header
 
 #include <variant>        // For `std::variant`
+#include <string_view>    // For `std::string_view`
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
