@@ -54,6 +54,7 @@
 #include <iterator>      // `std::distance`
 #include <map>           // `std::map`
 #include <memory>        // `std::allocator`
+#include <numeric>       // `std::accumulate`
 #include <random>        // `std::random_device`
 #include <sstream>       // `std::ostringstream`
 #include <unordered_map> // `std::unordered_map`
@@ -235,17 +236,17 @@ void test_memory_allocator_struct() {
 void test_byteset_struct() {
     sz_byteset_t s;
     sz_byteset_init(&s);
-    assert(sz_byteset_contains(&s, 'a') == false);
+    assert(sz_byteset_contains(&s, 'a') == sz_false_k);
     sz_byteset_add(&s, 'a');
-    assert(sz_byteset_contains(&s, 'a') == true);
+    assert(sz_byteset_contains(&s, 'a') == sz_true_k);
     sz_byteset_add(&s, 'z');
-    assert(sz_byteset_contains(&s, 'z') == true);
+    assert(sz_byteset_contains(&s, 'z') == sz_true_k);
     sz_byteset_invert(&s);
-    assert(sz_byteset_contains(&s, 'a') == false);
-    assert(sz_byteset_contains(&s, 'z') == false);
-    assert(sz_byteset_contains(&s, 'b') == true);
+    assert(sz_byteset_contains(&s, 'a') == sz_false_k);
+    assert(sz_byteset_contains(&s, 'z') == sz_false_k);
+    assert(sz_byteset_contains(&s, 'b') == sz_true_k);
     sz_byteset_init_ascii(&s);
-    assert(sz_byteset_contains(&s, 'A') == true);
+    assert(sz_byteset_contains(&s, 'A') == sz_true_k);
 }
 
 /**

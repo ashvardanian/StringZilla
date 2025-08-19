@@ -979,8 +979,12 @@ SZ_PUBLIC void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_siz
 #define sz_unused_(x) ((void)(x))
 
 /** @brief Helper-macro casting a variable to another type of the same size. */
-#if defined(__has_builtin) && __has_builtin(__builtin_bit_cast)
+#if !defined(_MSC_VER) && defined(__has_builtin)
+#if __has_builtin(__builtin_bit_cast)
 #define sz_bitcast_(type, value) __builtin_bit_cast(type, (value))
+#else
+#define sz_bitcast_(type, value) (*((type *)&(value)))
+#endif
 #else
 #define sz_bitcast_(type, value) (*((type *)&(value)))
 #endif

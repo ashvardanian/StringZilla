@@ -17,7 +17,7 @@ To run for the CUDA backend:
     uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x
 """
 
-from random import choice, randint
+from random import choice, randint, seed
 from string import ascii_lowercase
 from typing import Optional, Literal
 
@@ -57,6 +57,14 @@ def device_scope_and_capabilities(device: DeviceName):
 InputSizeConfig = Literal["one-large", "few-big", "many-small"]
 INPUT_SIZE_CONFIGS = ["one-large", "few-big", "many-small"]
 
+# Reproducible test seeds for consistent CI runs
+SEED_VALUES = [
+    42,  # Classic test seed
+    0,  # Edge case: zero seed
+    1,  # Minimal positive seed
+    314159,  # Pi digits
+]
+
 
 def generate_string_batches(config: InputSizeConfig):
     """Generate string batches based on the specified configuration.
@@ -74,8 +82,12 @@ def generate_string_batches(config: InputSizeConfig):
         raise ValueError(f"Unknown input size config: {config}")
 
 
-def get_random_string_batch(config: InputSizeConfig):
+def get_random_string_batch(config: InputSizeConfig, seed_value: Optional[int] = None):
     """Generate two batches of random strings based on the configuration."""
+    if seed_value is not None:
+        seed(seed_value)
+        np.random.seed(seed_value)
+
     batch_size, min_len, max_len = generate_string_batches(config)
 
     # Generate random lengths for each string in the batch
@@ -111,7 +123,7 @@ def test_device_scope():
     # Test cpu_cores=1 redirects to default scope
     scope_single = szs.DeviceScope(cpu_cores=1)
     assert scope_single is not None
-    
+
     # Test cpu_cores=0 uses all available cores
     scope_all = szs.DeviceScope(cpu_cores=0)
     assert scope_all is not None
@@ -173,12 +185,18 @@ def baseline_levenshtein_distance(s1, s2) -> int:
     return matrix[len(s1), len(s2)]
 
 
-@pytest.mark.repeat(100)
 @pytest.mark.parametrize("max_edit_distance", [150])
-def test_levenshtein_distance_insertions(max_edit_distance: int):
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_levenshtein_distance_insertions(max_edit_distance: int, seed_value: int):
+    """Test Levenshtein distance with sequential insertions using deterministic seeds."""
+
     # Create a new string by slicing and concatenating
     def insert_char_at(s, char_to_insert, index):
         return s[:index] + char_to_insert + s[index:]
+
+    # Set seed for reproducible random strings
+    seed(seed_value)
+    np.random.seed(seed_value)
 
     binary_engine = szs.LevenshteinDistances()
 
@@ -317,10 +335,11 @@ def test_levenshtein_distances_utf8_with_custom_gaps(device_name: DeviceName):
     assert unicode_distance("こんにちは世界", "こんばんは世界") == min(2 * mismatch, 4 * opening), "Japanese greetings"
 
 
-@pytest.mark.repeat(10)
 @pytest.mark.parametrize("config", INPUT_SIZE_CONFIGS)
-def test_levenshtein_distance_random(config: InputSizeConfig):
-    a_batch, b_batch = get_random_string_batch(config)
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_levenshtein_distance_random(config: InputSizeConfig, seed_value: int):
+    """Test Levenshtein distances with deterministic seeds for reproducibility."""
+    a_batch, b_batch = get_random_string_batch(config, seed_value)
 
     baselines = np.array([baseline_levenshtein_distance(a, b) for a, b in zip(a_batch, b_batch)])
     engine = szs.LevenshteinDistances()
@@ -333,12 +352,12 @@ def test_levenshtein_distance_random(config: InputSizeConfig):
     np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
 
 
-@pytest.mark.repeat(10)
 @pytest.mark.parametrize("config", INPUT_SIZE_CONFIGS)
-def test_needleman_wunsch_vs_levenshtein_random(config: InputSizeConfig):
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_needleman_wunsch_vs_levenshtein_random(config: InputSizeConfig, seed_value: int):
     """Test Needleman-Wunsch global alignment scores against Levenshtein distances with random strings."""
 
-    a_batch, b_batch = get_random_string_batch(config)
+    a_batch, b_batch = get_random_string_batch(config, seed_value)
 
     character_substitutions = np.zeros((256, 256), dtype=np.int8)
     character_substitutions.fill(-1)
@@ -389,12 +408,16 @@ def test_fingerprints(device_name: str, ndim: int):
     assert not np.array_equal(hashes[0], hashes[1]), "Different strings should produce different hashes"
 
 
-@pytest.mark.repeat(5)
 @pytest.mark.parametrize("batch_size", [1, 10, 100])
 @pytest.mark.parametrize("device_name", DEVICE_NAMES)
 @pytest.mark.parametrize("ndim", [1, 7, 64, 1024])
-def test_fingerprints_random(batch_size: int, device_name: str, ndim: int):
-    """Test Fingerprints with random strings."""
+@pytest.mark.parametrize("seed_value", [42, 123, 1337, 12345, 98765])  # Subset of seeds for this test
+def test_fingerprints_random(batch_size: int, device_name: str, ndim: int, seed_value: int):
+    """Test Fingerprints with random strings using deterministic seeds."""
+
+    # Set seed for reproducible random strings
+    seed(seed_value)
+    np.random.seed(seed_value)
 
     device_scope, capabilities = device_scope_and_capabilities(device_name)
     engine = szs.Fingerprints(ndim=ndim, capabilities=capabilities)

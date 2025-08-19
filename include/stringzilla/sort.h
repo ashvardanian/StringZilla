@@ -375,7 +375,7 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                
         sz_ptr_t target_str = (sz_ptr_t)target_pgram;
         *target_pgram = 0;
         for (sz_size_t j = 0; j < exported_length; ++j) target_str[j] = source_str[j + start_character];
-        target_str[pgram_capacity] = exported_length;
+        target_str[pgram_capacity] = (char)exported_length;
 #if defined(SZ_IS_64BIT_)
         *target_pgram = sz_u64_bytes_reverse(*target_pgram);
 #else

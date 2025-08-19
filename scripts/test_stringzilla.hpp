@@ -81,7 +81,7 @@ struct uniform_u8_distribution_t {
 };
 
 inline void randomize_string(char *string, std::size_t length, char const *alphabet, std::size_t cardinality) noexcept {
-    uniform_u8_distribution_t distribution(0, cardinality - 1);
+    uniform_u8_distribution_t distribution(0, static_cast<char>(cardinality - 1));
     std::generate(string, string + length, [&]() -> char { return alphabet[distribution(global_random_generator())]; });
 }
 

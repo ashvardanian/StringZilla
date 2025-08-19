@@ -153,7 +153,7 @@ include(GNUInstallDirs)
 set(STRINGZILLA_INCLUDE_BUILD_DIR "${PROJECT_SOURCE_DIR}/include/")
 set(STRINGZILLA_INCLUDE_INSTALL_DIR "${CMAKE_INSTALL_INCLUDEDIR}")
 
-if (${CMAKE_VERSION} VERSION_EQUAL 3.13 OR ${CMAKE_VERSION} VERSION_GREATER 3.13)
+if (CMAKE_VERSION VERSION_EQUAL 3.13 OR CMAKE_VERSION VERSION_GREATER 3.13)
     include(CTest)
     enable_testing()
 endif ()
@@ -182,11 +182,11 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endforeach ()
 
     # Set the C++ standard
-    if (NOT ${cpp_standard} STREQUAL "")
-        if (${compiler_id} STREQUAL "NVIDIA")
+    if (NOT cpp_standard STREQUAL "")
+        if (compiler_id STREQUAL "NVIDIA")
             set_target_properties(${target} PROPERTIES CUDA_STANDARD ${cpp_standard})
-        elseif (${compiler_id} MATCHES "MSVC")
-            # For MSVC, explicitly set the /std: flag
+        elseif (compiler_id MATCHES "MSVC")
+            # For MSVC, explicitly set the /std: flag - don't set CXX_STANDARD property to avoid conflicts
             target_compile_options(${target} PRIVATE "/std:c++${cpp_standard}")
         else ()
             set_target_properties(${target} PROPERTIES CXX_STANDARD ${cpp_standard})
@@ -194,12 +194,12 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 
     # Use the `/Zc:__cplusplus` flag to correctly define the `__cplusplus` macro in MSVC
-    if (${compiler_id} MATCHES "MSVC")
+    if (compiler_id MATCHES "MSVC")
         target_compile_options(${target} PRIVATE "/Zc:__cplusplus")
     endif ()
 
     # Make sure CUDA C++ allows calling `constexpr` from device code
-    if (${compiler_id} STREQUAL "NVIDIA")
+    if (compiler_id STREQUAL "NVIDIA")
         target_compile_options(${target} PRIVATE "--expt-relaxed-constexpr")
     endif ()
 
@@ -207,28 +207,27 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     #
     # MSVC uses numeric values: > 4068 for "unknown pragmas". > 4146 for "unary minus operator applied to unsigned type,
     # result still unsigned". We also specify `/utf-8` to properly UTF-8 symbols in tests.
-    if (${compiler_id} STREQUAL "GNU")
+    if (compiler_id STREQUAL "GNU")
         target_compile_options(
             ${target}
             PRIVATE
                 "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
         )
         target_compile_options(${target} PRIVATE "-Wno-cast-function-type;-Wno-unused-function") # ? Unique to GCC
-    elseif (${compiler_id} STREQUAL "Clang" OR ${compiler_id} STREQUAL "AppleClang")
+    elseif (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang")
         target_compile_options(${target} PRIVATE "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas")
-    elseif (${compiler_id} MATCHES "MSVC")
+    elseif (compiler_id MATCHES "MSVC")
         target_compile_options(
             ${target}
-            PRIVATE
-            "/Bt"        # Display build timings
-            "/wd4068"    # Disable warning: unknown pragma
-            "/wd4146"    # Disable warning: unary minus operator applied to unsigned type
-            "/wd4996"    # Disable warning: 'unsafe' functions like getenv, fopen (use _s variants)
-            "/wd4244"    # Disable warning: conversion with possible loss of data (e.g., size_t to double)
-            "/utf-8"     # Set source and execution character sets to UTF-8
-            "/WX"        # Treat warnings as errors
+            PRIVATE "/Bt" # Display build timings
+                    "/wd4068" # Disable warning: unknown pragma
+                    "/wd4146" # Disable warning: unary minus operator applied to unsigned type
+                    "/wd4996" # Disable warning: 'unsafe' functions like getenv, fopen (use _s variants)
+                    "/wd4244" # Disable warning: conversion with possible loss of data (e.g., size_t to double)
+                    "/utf-8" # Set source and execution character sets to UTF-8
+                    "/WX" # Treat warnings as errors
         )
-    elseif (${compiler_id} STREQUAL "NVIDIA")
+    elseif (compiler_id STREQUAL "NVIDIA")
         target_compile_options(
             ${target}
             PRIVATE
@@ -237,38 +236,36 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 
     # Set optimization options for different compilers differently
-    if (${compiler_id} MATCHES "MSVC")
-        if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+    if (compiler_id MATCHES "MSVC")
+        if (CMAKE_BUILD_TYPE STREQUAL "Debug")
             target_compile_options(${target} PRIVATE "/Od;/Zi")
             if (NOT target_type STREQUAL "SHARED_LIBRARY")
                 target_compile_options(${target} PRIVATE "/RTC1")
             endif ()
-        endif ()
-        if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+        elseif (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
             target_compile_options(${target} PRIVATE "/O2;/Zi")
         endif ()
     elseif (
-        ${compiler_id} STREQUAL "GNU"
-        OR ${compiler_id} STREQUAL "Clang"
-        OR ${compiler_id} STREQUAL "AppleClang"
+        compiler_id STREQUAL "GNU"
+        OR compiler_id STREQUAL "Clang"
+        OR compiler_id STREQUAL "AppleClang"
     )
-        if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+        if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
             target_compile_options(${target} PRIVATE "-O0;-g")
         endif ()
-        if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+        if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
             target_compile_options(${target} PRIVATE "-O2")
         endif ()
-    elseif (${compiler_id} STREQUAL "NVIDIA")
+    elseif (compiler_id STREQUAL "NVIDIA")
         target_compile_options(
             ${target} PRIVATE "-Xcompiler=-Wall" # All warnings (host)
                               "-Xcompiler=-Wextra" # Extra warnings (host)
         )
 
-        if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+        if (CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
             target_compile_options(
                 ${target}
-                PRIVATE "-G" # Device debug symbols
-                        "-lineinfo" # Include source line info in PTX
+                PRIVATE "-G" # Device debug symbols, which will add `-lineinfo` symbols to PTX
                         "-no-compress" # No compression of debug info
                         "-Xcompiler=-g" # Host debugging symbols explicitly
                         "-Xcompiler=-fno-omit-frame-pointer" # Stack trace clarity
@@ -276,7 +273,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                         "-maxrregcount=0" # No register count limits
             )
         endif ()
-        if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+        if (CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
             target_compile_options(
                 ${target}
                 PRIVATE "-O2" # Disable NVCC optimizations explicitly
@@ -293,7 +290,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 
     # Avoid builtin functions where we know what we are doing.
-    if (${compiler_id} MATCHES "MSVC")
+    if (compiler_id MATCHES "MSVC")
         target_compile_options(${target} PRIVATE "/Oi-")
     else ()
         target_compile_options(${target} PRIVATE "-fno-builtin-memcmp")
@@ -306,14 +303,14 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     if ("${target_arch}" STREQUAL "")
         # Only use the current system if we are not cross compiling
         if ((NOT CMAKE_CROSSCOMPILING) OR (CMAKE_SYSTEM_PROCESSOR MATCHES CMAKE_HOST_SYSTEM_PROCESSOR))
-            if (${compiler_id} STREQUAL "NVIDIA")
+            if (compiler_id STREQUAL "NVIDIA")
                 # For NVCC, pass native flag to host compiler
                 include(CheckCXXCompilerFlag)
                 check_cxx_compiler_flag("-march=native" supports_march_native)
                 if (supports_march_native)
                     target_compile_options(${target} PRIVATE "-Xcompiler=-march=native")
                 endif ()
-            elseif (NOT (${compiler_id} MATCHES "MSVC"))
+            elseif (NOT (compiler_id MATCHES "MSVC"))
                 include(CheckCXXCompilerFlag)
                 check_cxx_compiler_flag("-march=native" supports_march_native)
                 if (supports_march_native)
@@ -325,9 +322,9 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             endif ()
         endif ()
     else ()
-        if (${compiler_id} MATCHES "MSVC")
+        if (compiler_id MATCHES "MSVC")
             target_compile_options(${target} PRIVATE "/arch:${target_arch}")
-        elseif (${compiler_id} STREQUAL "NVIDIA")
+        elseif (compiler_id STREQUAL "NVIDIA")
             # NVCC handles CPU architecture through host compiler flags
             target_compile_options(${target} PRIVATE "-Xcompiler=-march=${target_arch}")
         else ()
@@ -348,10 +345,10 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(${target} PRIVATE "SZ_DEBUG=1")
         if (NOT target_type STREQUAL "SHARED_LIBRARY")
-            if (${compiler_id} MATCHES "MSVC")
+            if (compiler_id MATCHES "MSVC")
                 target_compile_options(${target} PRIVATE "/fsanitize=address;/fsanitize=leak")
                 target_link_options(${target} PRIVATE "/fsanitize=address;/fsanitize=leak")
-            elseif (${compiler_id} STREQUAL "NVIDIA")
+            elseif (compiler_id STREQUAL "NVIDIA")
                 # ! NVCC can't handle sanitizers?!
                 # https://stackoverflow.com/questions/75590579/cuda-fails-to-initialise-when-address-sanitizer-is-enabled
             else ()
@@ -367,8 +364,9 @@ endfunction ()
 function (define_launcher exec_name source cpp_standard target_arch)
     add_executable(${exec_name})
     target_sources(${exec_name} PRIVATE ${source})
-    # TODO: How do we constrain this scope?! set_source_files_properties(${source} TARGET_DIRECTORY ${exec_name}
-    # PROPERTIES LANGUAGE CXX)
+    # TODO: How do we constrain this scope?!
+    #
+    # set_source_files_properties(${source} TARGET_DIRECTORY ${exec_name} PROPERTIES LANGUAGE CXX)
     set_compiler_flags(${exec_name} ${cpp_standard} "${target_arch}" "${CMAKE_CXX_COMPILER_ID}")
     target_link_libraries(${exec_name} PRIVATE stringzilla_header)
     add_test(NAME ${exec_name} COMMAND ${exec_name})
@@ -389,7 +387,7 @@ function (define_gpu_launcher exec_name source cuda_standard target_arch)
     add_test(NAME ${exec_name} COMMAND ${exec_name})
 endfunction ()
 
-if (${STRINGZILLA_BUILD_BENCHMARK})
+if (STRINGZILLA_BUILD_BENCHMARK)
     define_launcher(stringzilla_bench_find_cpp20 scripts/bench_find.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_sequence_cpp20 scripts/bench_sequence.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
     define_launcher(stringzilla_bench_token_cpp20 scripts/bench_token.cpp 20 "${STRINGZILLA_TARGET_ARCH}")
@@ -413,7 +411,7 @@ if (${STRINGZILLA_BUILD_BENCHMARK})
     endif ()
 endif ()
 
-if (${STRINGZILLA_BUILD_TEST})
+if (STRINGZILLA_BUILD_TEST)
     # Make sure that the compilation passes for different C++ standards!
     #
     # Keep in mind, MSVC only supports C++11 and newer.
@@ -462,14 +460,14 @@ if (${STRINGZILLA_BUILD_TEST})
         define_launcher(stringzilla_test_cpp20_serial scripts/test_stringzilla.cpp 20 "armv8-a")
         define_launcher(stringzilla_test_cpp20_neon scripts/test_stringzilla.cpp 20 "armv8-a+simd")
         # SVE is not supported on Apple Silicon, only compile on non-Darwin ARM platforms
-        if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+        if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
             define_launcher(stringzilla_test_cpp20_sve scripts/test_stringzilla.cpp 20 "armv8.2-a+sve")
         endif ()
         if (STRINGZILLA_BUILD_CUDA)
             define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "armv8-a")
             define_gpu_launcher(stringzillas_test_cu20_neon scripts/test_stringzillas.cu 20 "armv8-a+simd")
             # SVE is not supported on Apple Silicon, only compile on non-Darwin ARM platforms
-            if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+            if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
                 define_gpu_launcher(stringzillas_test_cu20_sve scripts/test_stringzillas.cu 20 "armv8.2-a+sve")
             endif ()
         endif ()
@@ -483,7 +481,7 @@ target_include_directories(
     stringzilla_header INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}> $<INSTALL_INTERFACE:include>
 )
 
-if (${STRINGZILLA_BUILD_SHARED})
+if (STRINGZILLA_BUILD_SHARED)
 
     function (define_shared target)
         add_library(${target} SHARED c/stringzilla.c)
@@ -536,7 +534,7 @@ if (${STRINGZILLA_BUILD_SHARED})
     # Try compiling a version without linking the LibC ! This is only for Linux, as on modern Arm-based MacOS machines !
     # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. Also exclude MSVC builds as
     # they have linker issues with bare builds.
-    if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin" AND NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
+    if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin" AND NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         define_shared(stringzilla_bare)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
@@ -548,7 +546,7 @@ if (${STRINGZILLA_BUILD_SHARED})
     endif ()
 endif ()
 
-if (${STRINGZILLAS_BUILD_SHARED})
+if (STRINGZILLAS_BUILD_SHARED)
     # StringZillas shared library targets for parallel string operations
     function (define_stringzillas_shared target source_file backend_flags)
         add_library(${target} SHARED ${source_file})
