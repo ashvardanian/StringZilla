@@ -116,7 +116,7 @@ impl DeviceScope {
     ///
     /// # Parameters
     ///
-    /// - `cpu_cores`: Number of CPU cores to use (must be > 1)
+    /// - `cpu_cores`: Number of CPU cores to use, or zero for all cores
     ///
     /// # Returns
     ///

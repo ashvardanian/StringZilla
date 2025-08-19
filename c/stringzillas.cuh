@@ -13,6 +13,7 @@
 
 #include <variant>        // For `std::variant`
 #include <string_view>    // For `std::string_view`
+#include <thread>         // For `std::thread::hardware_concurrency`
 #include <fork_union.hpp> // Fork-join scoped thread pool
 
 #include <stringzillas/fingerprints.hpp> // C++ templates for string processing
@@ -787,10 +788,12 @@ SZ_DYNAMIC sz_status_t szs_device_scope_init_default(szs_device_scope_t *scope_p
 
 SZ_DYNAMIC sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_device_scope_t *scope_punned) {
     sz_assert_(scope_punned != nullptr && "Scope must not be null");
-    sz_assert_(cpu_cores > 0 && "CPU cores must be greater than zero");
 
-    // ! For a single-threaded execution, use the default scope
-    if (cpu_cores <= 1) return sz_status_unknown_k;
+    // If cpu_cores is 0, use all available cores
+    if (cpu_cores == 0) cpu_cores = std::thread::hardware_concurrency();
+
+    // If cpu_cores is 1, redirect to default scope
+    if (cpu_cores == 1) return szs_device_scope_init_default(scope_punned);
 
     sz::cpu_specs_t specs;
     auto executor = std::make_unique<fu::basic_pool_t>();
