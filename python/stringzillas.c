@@ -182,7 +182,9 @@ static int DeviceScope_init(DeviceScope *self, PyObject *args, PyObject *kwargs)
         cpu_cores = PyLong_AsSize_t(cpu_cores_obj);
         if (cpu_cores == (sz_size_t)-1 && PyErr_Occurred()) { return -1; }
         status = szs_device_scope_init_cpu_cores(cpu_cores, &self->handle);
-        snprintf(self->description, sizeof(self->description), "CPUs:%zu", cpu_cores);
+        if (cpu_cores == 1) { snprintf(self->description, sizeof(self->description), "default"); }
+        else if (cpu_cores == 0) { snprintf(self->description, sizeof(self->description), "CPUs:all"); }
+        else { snprintf(self->description, sizeof(self->description), "CPUs:%zu", cpu_cores); }
     }
     else if (gpu_device_obj != NULL) {
         if (!PyLong_Check(gpu_device_obj)) {
@@ -217,7 +219,7 @@ static char const doc_DeviceScope[] = //
     "Context for controlling execution on CPU cores or GPU devices.\n"
     "\n"
     "Args:\n"
-    "  cpu_cores (int, optional): Number of CPU cores to use (0 for all, 1 for single-threaded).\n"
+    "  cpu_cores (int, optional): Number of CPU cores to use, or zero for all cores.\n"
     "  gpu_device (int, optional): GPU device ID to target.\n"
     "\n"
     "Note: Cannot specify both cpu_cores and gpu_device.";

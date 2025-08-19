@@ -103,9 +103,8 @@ SZ_DYNAMIC sz_status_t szs_device_scope_init_default(szs_device_scope_t *scope);
 
 /**
  * @brief Initialize device scope for CPU parallel execution.
- * @param[in] cpu_cores Number of CPU cores to use (must be > 1).
+ * @param[in] cpu_cores Number of CPU cores to use, or zero for all cores.
  * @param[out] scope Pointer to device scope handle.
- * @note For single-threaded execution, use `szs_device_scope_init_default()` instead.
  */
 SZ_DYNAMIC sz_status_t szs_device_scope_init_cpu_cores(sz_size_t cpu_cores, szs_device_scope_t *scope);
 

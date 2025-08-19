@@ -108,11 +108,14 @@ def test_device_scope():
         with pytest.raises(RuntimeError):
             szs.DeviceScope(gpu_device=0)
 
-    # Test single-threaded execution
+    # Test cpu_cores=1 redirects to default scope
     scope_single = szs.DeviceScope(cpu_cores=1)
     assert scope_single is not None
+    
+    # Test cpu_cores=0 uses all available cores
+    scope_all = szs.DeviceScope(cpu_cores=0)
+    assert scope_all is not None
 
-    # Invalid arguments
     with pytest.raises(ValueError):
         szs.DeviceScope(cpu_cores=4, gpu_device=0)  # Can't specify both
 
