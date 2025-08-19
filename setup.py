@@ -154,13 +154,11 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
     # so we must pre-set the CPU generation. Technically the last Intel-based Apple
     # product was the 2021 MacBook Pro, which had the "Coffee Lake" architecture.
     # During Universal builds, however, even AVX header cause compilation errors.
-    is_building_x86 = is_64bit_x86() or "universal" in sysconfig.get_platform()
-    is_building_arm = is_64bit_arm() or "universal" in sysconfig.get_platform()
     macros_args = [
-        ("SZ_USE_HASWELL", "1" if is_building_x86 else "0"),
+        ("SZ_USE_HASWELL", "0"),
         ("SZ_USE_SKYLAKE", "0"),
         ("SZ_USE_ICE", "0"),
-        ("SZ_USE_NEON", "1" if is_building_arm else "0"),
+        ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),
         ("SZ_USE_SVE", "0"),
         ("SZ_USE_SVE2", "0"),
     ]
