@@ -165,6 +165,7 @@ struct repeat_up_to {
     };
 
     inline repeat_up_to(double max_seconds) : max_seconds(max_seconds) {}
+    inline repeat_up_to(std::size_t max_seconds) : max_seconds(static_cast<double>(max_seconds)) {}
     inline iterator begin() { return {max_seconds, passed_seconds}; }
     inline end_sentinel end() const noexcept { return {}; }
     inline double seconds() const noexcept { return passed_seconds; }

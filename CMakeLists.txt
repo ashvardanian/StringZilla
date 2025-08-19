@@ -191,7 +191,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 
     # Use the `/Zc:__cplusplus` flag to correctly define the `__cplusplus` macro in MSVC
-    if (${compiler_id} STREQUAL "MSVC")
+    if (${compiler_id} MATCHES "MSVC")
         target_compile_options(${target} PRIVATE "/Zc:__cplusplus")
     endif ()
 
@@ -213,8 +213,18 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         target_compile_options(${target} PRIVATE "-Wno-cast-function-type;-Wno-unused-function") # ? Unique to GCC
     elseif (${compiler_id} STREQUAL "Clang" OR ${compiler_id} STREQUAL "AppleClang")
         target_compile_options(${target} PRIVATE "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas")
-    elseif (${compiler_id} STREQUAL "MSVC")
-        target_compile_options(${target} PRIVATE "/Bt;/wd4068;/wd4146;/utf-8;/WX")
+    elseif (${compiler_id} MATCHES "MSVC")
+        target_compile_options(
+            ${target}
+            PRIVATE
+            "/Bt"        # Display build timings
+            "/wd4068"    # Disable warning: unknown pragma
+            "/wd4146"    # Disable warning: unary minus operator applied to unsigned type
+            "/wd4996"    # Disable warning: 'unsafe' functions like getenv, fopen (use _s variants)
+            "/wd4244"    # Disable warning: conversion with possible loss of data (e.g., size_t to double)
+            "/utf-8"     # Set source and execution character sets to UTF-8
+            "/WX"        # Treat warnings as errors
+        )
     elseif (${compiler_id} STREQUAL "NVIDIA")
         target_compile_options(
             ${target}
@@ -224,7 +234,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 
     # Set optimization options for different compilers differently
-    if (${compiler_id} STREQUAL "MSVC")
+    if (${compiler_id} MATCHES "MSVC")
         if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
             target_compile_options(${target} PRIVATE "/Od;/Zi")
             if (NOT target_type STREQUAL "SHARED_LIBRARY")
@@ -280,7 +290,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 
     # Avoid builtin functions where we know what we are doing.
-    if (${compiler_id} STREQUAL "MSVC")
+    if (${compiler_id} MATCHES "MSVC")
         target_compile_options(${target} PRIVATE "/Oi-")
     else ()
         target_compile_options(${target} PRIVATE "-fno-builtin-memcmp")
@@ -300,7 +310,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                 if (supports_march_native)
                     target_compile_options(${target} PRIVATE "-Xcompiler=-march=native")
                 endif ()
-            elseif (NOT (${compiler_id} STREQUAL "MSVC"))
+            elseif (NOT (${compiler_id} MATCHES "MSVC"))
                 include(CheckCXXCompilerFlag)
                 check_cxx_compiler_flag("-march=native" supports_march_native)
                 if (supports_march_native)
@@ -312,7 +322,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
             endif ()
         endif ()
     else ()
-        if (${compiler_id} STREQUAL "MSVC")
+        if (${compiler_id} MATCHES "MSVC")
             target_compile_options(${target} PRIVATE "/arch:${target_arch}")
         elseif (${compiler_id} STREQUAL "NVIDIA")
             # NVCC handles CPU architecture through host compiler flags
@@ -335,7 +345,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(${target} PRIVATE "SZ_DEBUG=1")
         if (NOT target_type STREQUAL "SHARED_LIBRARY")
-            if (${compiler_id} STREQUAL "MSVC")
+            if (${compiler_id} MATCHES "MSVC")
                 target_compile_options(${target} PRIVATE "/fsanitize=address;/fsanitize=leak")
                 target_link_options(${target} PRIVATE "/fsanitize=address;/fsanitize=leak")
             elseif (${compiler_id} STREQUAL "NVIDIA")
@@ -523,7 +533,7 @@ if (${STRINGZILLA_BUILD_SHARED})
     # Try compiling a version without linking the LibC ! This is only for Linux, as on modern Arm-based MacOS machines !
     # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. Also exclude MSVC builds as
     # they have linker issues with bare builds.
-    if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin" AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin" AND NOT CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         define_shared(stringzilla_bare)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
