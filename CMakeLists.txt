@@ -451,14 +451,14 @@ if (${STRINGZILLA_BUILD_TEST})
         # SVE is not supported on Apple Silicon, only compile on non-Darwin ARM platforms
         if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
             define_launcher(stringzilla_test_cpp20_sve scripts/test_stringzilla.cpp 20 "armv8.2-a+sve")
-        endif()
+        endif ()
         if (STRINGZILLA_BUILD_CUDA)
             define_gpu_launcher(stringzillas_test_cu20_serial scripts/test_stringzillas.cu 20 "armv8-a")
             define_gpu_launcher(stringzillas_test_cu20_neon scripts/test_stringzillas.cu 20 "armv8-a+simd")
             # SVE is not supported on Apple Silicon, only compile on non-Darwin ARM platforms
             if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
                 define_gpu_launcher(stringzillas_test_cu20_sve scripts/test_stringzillas.cu 20 "armv8.2-a+sve")
-            endif()
+            endif ()
         endif ()
     endif ()
 endif ()
@@ -520,22 +520,18 @@ if (${STRINGZILLA_BUILD_SHARED})
     target_compile_definitions(stringzilla_shared PRIVATE "SZ_OVERRIDE_LIBC=1")
     target_include_directories(stringzilla_shared PUBLIC include)
 
-    # Try compiling a version without linking the LibC ! This is only for Linux and Windows, as on modern Arm-based
-    # MacOS machines ! We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. So let's
-    # check if we are compiling for a Darwin-based OS.
-    if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    # Try compiling a version without linking the LibC ! This is only for Linux, as on modern Arm-based MacOS machines !
+    # We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`. Also exclude MSVC builds as
+    # they have linker issues with bare builds.
+    if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin" AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         define_shared(stringzilla_bare)
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_AVOID_LIBC=1")
         target_compile_definitions(stringzilla_bare PRIVATE "SZ_OVERRIDE_LIBC=1")
         target_include_directories(stringzilla_bare PUBLIC include)
 
-        # Avoid built-ins on MSVC and other compilers, as that will cause compilation errors
-        target_compile_options(
-            stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>"
-                                     "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->"
-        )
-        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
-        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
+        # Avoid built-ins on GCC and Clang compilers
+        target_compile_options(stringzilla_bare PRIVATE "-fno-builtin;-nostdlib")
+        target_link_options(stringzilla_bare PRIVATE "-nostdlib")
     endif ()
 endif ()
 
