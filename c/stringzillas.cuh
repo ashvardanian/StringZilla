@@ -755,12 +755,25 @@ SZ_DYNAMIC int szs_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 SZ_DYNAMIC int szs_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
 
 SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
-    sz_capability_t cpu_capabilities = sz_capabilities_implementation_();
+    // Preserve the static capabilities
+    static sz_capability_t static_caps = sz_caps_none_k;
+    if (static_caps == sz_caps_none_k) {
+        sz_capability_t cpu_caps = sz_capabilities_implementation_();
+        sz_capability_t gpu_caps = sz_caps_none_k;
 #if SZ_USE_CUDA
-    return static_cast<sz_capability_t>(cpu_capabilities | sz_caps_ckh_k);
+        sz::gpu_specs_t first_gpu_specs;
+        auto specs_status = static_cast<sz::status_t>(szs::gpu_specs_fetch(first_gpu_specs));
+        if (specs_status != sz::status_t::success_k) return static_caps;
+        gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_cuda_k);
+        if (first_gpu_specs.sm_code >= 30) gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_kepler_k);
+        if (first_gpu_specs.sm_code >= 90) gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_hopper_k);
+        static_caps = static_cast<sz_capability_t>(cpu_caps | gpu_caps);
 #else
-    return cpu_capabilities;
+        static_caps = cpu_caps;
 #endif // SZ_USE_CUDA
+    }
+
+    return static_caps;
 }
 
 SZ_DYNAMIC sz_status_t sz_memory_allocator_init_unified(sz_memory_allocator_t *alloc) {

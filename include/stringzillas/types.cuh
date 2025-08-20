@@ -114,7 +114,8 @@ inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noex
 
     // Infer other global settings, that CUDA doesn't expose directly
     specs.shared_memory_bytes = prop.sharedMemPerMultiprocessor * prop.multiProcessorCount;
-    specs.cuda_cores = gpu_specs_t::cores_per_multiprocessor(prop.major, prop.minor) * specs.streaming_multiprocessors;
+    specs.sm_code = gpu_specs_t::pack_sm_code(prop.major, prop.minor);
+    specs.cuda_cores = gpu_specs_t::cores_per_multiprocessor(specs.sm_code) * specs.streaming_multiprocessors;
 
     // Scheduling-related constants
     specs.max_blocks_per_multiprocessor = prop.maxBlocksPerMultiProcessor;
