@@ -1532,10 +1532,10 @@ struct horizontal_walker<char_type_, score_type_, substituter_type_, affine_gap_
             result_ref = 0;
             if constexpr (locality_k == sz_similarity_global_k) {
                 if (!first.empty() && second.empty()) {
-                    result_ref = gap_costs_.open + gap_costs_.extend * (first.size() - 1);
+                    result_ref = static_cast<score_t>(gap_costs_.open + gap_costs_.extend * (first.size() - 1));
                 }
                 else if (first.empty() && !second.empty()) {
-                    result_ref = gap_costs_.open + gap_costs_.extend * (second.size() - 1);
+                    result_ref = static_cast<score_t>(gap_costs_.open + gap_costs_.extend * (second.size() - 1));
                 }
             }
             return status_t::success_k;

@@ -782,7 +782,7 @@ struct gpu_specs_t {
      *  - 9.0 is Hopper, like H100                      - maps to 90
      *  - 12.0, 12.1 is Blackwell, like B200            - maps to 120, 121
      */
-    inline static size_t pack_sm_code(int major, int minor) noexcept { return ((major * 10) + minor); }
+    inline static size_t pack_sm_code(int major, int minor) noexcept { return static_cast<size_t>((major * 10) + minor); }
 
     /**
      *  @brief Looks up hardware specs for a given compute capability (major, minor).

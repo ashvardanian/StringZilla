@@ -211,11 +211,14 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         target_compile_options(
             ${target}
             PRIVATE
-                "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function"
+                "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-cast-function-type;-Wno-unused-function;-Wno-sign-conversion"
         )
         target_compile_options(${target} PRIVATE "-Wno-cast-function-type;-Wno-unused-function") # ? Unique to GCC
     elseif (compiler_id STREQUAL "Clang" OR compiler_id STREQUAL "AppleClang")
-        target_compile_options(${target} PRIVATE "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas")
+        target_compile_options(
+            ${target}
+            PRIVATE "-Wall;-Wextra;-pedantic;-Werror;-Wfatal-errors;-Wno-unknown-pragmas;-Wno-sign-conversion"
+        )
     elseif (compiler_id MATCHES "MSVC")
         target_compile_options(
             ${target}
@@ -223,7 +226,8 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                     "/wd4068" # Disable warning: unknown pragma
                     "/wd4146" # Disable warning: unary minus operator applied to unsigned type
                     "/wd4996" # Disable warning: 'unsafe' functions like getenv, fopen (use _s variants)
-                    "/wd4244" # Disable warning: conversion with possible loss of data (e.g., size_t to double)
+                    "/wd4244" # Disable warning: conversion with possible loss of data (e.g., float to int)
+                    "/wd4267" # Disable warning: conversion from 'size_t' to smaller type, possible loss of data
                     "/utf-8" # Set source and execution character sets to UTF-8
                     "/WX" # Treat warnings as errors
         )

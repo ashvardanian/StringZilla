@@ -858,37 +858,37 @@ SZ_PUBLIC void sz_rune_parse(sz_cptr_t utf8, sz_rune_t *code, sz_rune_length_t *
     sz_rune_length_t ch_length;
 
     // TODO: This can be made entirely branchless using 32-bit SWAR.
-    if (leading_byte < 0x80) {
+    if (leading_byte < 0x80U) {
         // Single-byte rune (0xxxxxxx)
         ch = leading_byte;
         ch_length = sz_utf8_rune_1byte_k;
     }
-    else if ((leading_byte & 0xE0) == 0xC0) {
+    else if ((leading_byte & 0xE0U) == 0xC0U) {
         // Two-byte rune (110xxxxx 10xxxxxx)
-        ch = (leading_byte & 0x1F) << 6;
-        ch |= (*current++ & 0x3F);
+        ch = (leading_byte & 0x1FU) << 6;
+        ch |= (*current++ & 0x3FU);
         ch_length = sz_utf8_rune_2bytes_k;
     }
-    else if ((leading_byte & 0xF0) == 0xE0) {
+    else if ((leading_byte & 0xF0U) == 0xE0U) {
         // Three-byte rune (1110xxxx 10xxxxxx 10xxxxxx)
-        ch = (leading_byte & 0x0F) << 12;
-        ch |= (*current++ & 0x3F) << 6;
-        ch |= (*current++ & 0x3F);
+        ch = (leading_byte & 0x0FU) << 12;
+        ch |= (*current++ & 0x3FU) << 6;
+        ch |= (*current++ & 0x3FU);
         ch_length = sz_utf8_rune_3bytes_k;
     }
-    else if ((leading_byte & 0xF8) == 0xF0) {
+    else if ((leading_byte & 0xF8U) == 0xF0U) {
         // Four-byte rune (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
-        ch = (leading_byte & 0x07) << 18;
-        ch |= (*current++ & 0x3F) << 12;
-        ch |= (*current++ & 0x3F) << 6;
-        ch |= (*current++ & 0x3F);
+        ch = (leading_byte & 0x07U) << 18;
+        ch |= (*current++ & 0x3FU) << 12;
+        ch |= (*current++ & 0x3FU) << 6;
+        ch |= (*current++ & 0x3FU);
         // Check if the code point is within valid Unicode range (U+0000 to U+10FFFF)
-        if (ch > 0x10FFFF) { ch = 0, ch_length = sz_utf8_invalid_k; }
+        if (ch > 0x10FFFFU) { ch = 0U, ch_length = sz_utf8_invalid_k; }
         else { ch_length = sz_utf8_rune_4bytes_k; }
     }
     else {
         // Invalid UTF8 rune.
-        ch = 0;
+        ch = 0U;
         ch_length = sz_utf8_invalid_k;
     }
     *code = ch;
@@ -1231,20 +1231,20 @@ SZ_INTERNAL void sz_ssize_clamp_interval( //
     sz_size_t length, sz_ssize_t start, sz_ssize_t end, sz_size_t *normalized_offset, sz_size_t *normalized_length) {
     // TODO: Remove branches.
     // Normalize negative indices
-    if (start < 0) start += length;
-    if (end < 0) end += length;
+    if (start < 0) start += (sz_ssize_t)length;
+    if (end < 0) end += (sz_ssize_t)length;
 
     // Clamp indices to a valid range
     if (start < 0) start = 0;
     if (end < 0) end = 0;
-    if (start > (sz_ssize_t)length) start = length;
-    if (end > (sz_ssize_t)length) end = length;
+    if (start > (sz_ssize_t)length) start = (sz_ssize_t)length;
+    if (end > (sz_ssize_t)length) end = (sz_ssize_t)length;
 
     // Ensure start <= end
     if (start > end) start = end;
 
-    *normalized_offset = start;
-    *normalized_length = end - start;
+    *normalized_offset = (sz_size_t)(start);
+    *normalized_length = (sz_size_t)(end - start);
 }
 
 /**
@@ -1253,8 +1253,8 @@ SZ_INTERNAL void sz_ssize_clamp_interval( //
  */
 SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
     sz_assert_(x > 0 && "Non-positive numbers have no defined logarithm");
-    sz_size_t leading_zeros = sz_u64_clz(x);
-    return 63 - leading_zeros;
+    int leading_zeros = sz_u64_clz(x);
+    return (sz_size_t)(63 - leading_zeros);
 }
 
 /**
