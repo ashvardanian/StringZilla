@@ -192,6 +192,7 @@
     "stdc",
     "STL",
     "strided",
+    "stringtape",
     "StringWa.rs",
     "StringWars",
     "stringzilla",
@@ -223,7 +224,8 @@
     "xmms",
     "Yann",
     "Yaroshevskiy",
-    "Zilla"
+    "Zilla",
+    "Zillable"
   ],
   "editor.formatOnSave": true,
   "editor.rulers": [
@@ -347,6 +349,7 @@
     "utility": "cpp",
     "variant": "cpp",
     "vector": "cpp",
+    "version": "cpp",
     "xfacet": "cpp",
     "xhash": "cpp",
     "xiosbase": "cpp",

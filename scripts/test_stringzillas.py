@@ -4,14 +4,14 @@ Test suite for StringZillas parallel algorithms module.
 Tests with Python lists, NumPy arrays, Apache Arrow columns, and StringZilla Strs types.
 To run for the CPU backend:
 
-    uv pip install numpy pyarrow pytest pytest-repeat
+    uv pip install numpy pyarrow pytest pytest-repeat affine-gaps
     SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -c "import stringzillas; print(stringzillas.__capabilities__)"
     uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x
 
 To run for the CUDA backend:
 
-    uv pip install numpy pyarrow pytest pytest-repeat
+    uv pip install numpy pyarrow pytest pytest-repeat affine-gaps
     SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -c "import stringzillas; print(stringzillas.__capabilities__)"
     uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x
@@ -23,6 +23,7 @@ from typing import Optional, Literal
 
 import pytest
 import numpy as np  # ! Unlike StringZilla, NumPy is mandatory for StringZillas
+import affine_gaps
 
 import stringzilla as sz
 import stringzillas as szs
@@ -372,6 +373,50 @@ def test_needleman_wunsch_vs_levenshtein_random(config: InputSizeConfig, seed_va
     results = engine(a_strs, b_strs)
 
     np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
+
+
+def test_needleman_wunsch_serial_backend_validation():
+    """Test Needleman-Wunsch implementation against affine-gaps reference."""
+
+    test_cases = [
+        ("hello", "world"),
+        ("abc", "def"),
+        ("nhosizayzfwnkie", "mdlltizbxordmcr"),
+        ("abcdefghijklmno", "pqrstuvwxyzabcd"),
+    ]
+
+    character_substitutions = np.zeros((256, 256), dtype=np.int8)
+    character_substitutions.fill(-1)
+    np.fill_diagonal(character_substitutions, 0)
+
+    # Create ASCII substitution matrix for affine-gaps
+    ascii_alphabet = "".join(chr(i) for i in range(32, 127))
+    ascii_matrix = np.full((256, 256), -1, dtype=np.int32)
+    np.fill_diagonal(ascii_matrix, 0)
+
+    # Get reference scores from affine-gaps
+    baselines = []
+    for str1, str2 in test_cases:
+        ref_score = affine_gaps.needleman_wunsch_gotoh_score(
+            str1,
+            str2,
+            substitution_alphabet=ascii_alphabet,
+            substitution_matrix=ascii_matrix,
+            gap_opening=-1,
+            gap_extension=-1,
+        )
+        baselines.append(ref_score)
+
+    engine = szs.NeedlemanWunsch(substitution_matrix=character_substitutions, open=-1, extend=-1)
+
+    # Convert to Strs objects
+    a_batch = [case[0] for case in test_cases]
+    b_batch = [case[1] for case in test_cases]
+    a_strs = Strs(a_batch)
+    b_strs = Strs(b_batch)
+    results = engine(a_strs, b_strs)
+
+    np.testing.assert_array_equal(results, baselines, "NeedlemanWunsch scores do not match affine-gaps reference")
 
 
 @pytest.mark.parametrize("device_name", DEVICE_NAMES)
