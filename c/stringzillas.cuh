@@ -12,6 +12,7 @@
 #include <stringzillas/stringzillas.h> // StringZillas library header
 
 #include <variant>        // For `std::variant`
+#include <cstring>        // For `std::memcpy`
 #include <string_view>    // For `std::string_view`
 #include <thread>         // For `std::thread::hardware_concurrency`
 #include <fork_union.hpp> // Fork-join scoped thread pool
@@ -1210,9 +1211,10 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       /
 
     // If the gap opening and extension costs are identical we can use less memory
     auto const can_use_linear_costs = open == extend;
-    auto const substitution_costs = *reinterpret_cast<szs::error_costs_256x256_t const *>(subs);
     auto const linear_costs = szs::linear_gap_costs_t {open};
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
+    auto substitution_costs = szs::error_costs_256x256_t {};
+    std::memcpy(&substitution_costs, subs, sizeof(substitution_costs));
 
 #if SZ_USE_ICE
     bool const can_use_ice = (capabilities & sz_cap_ice_k) == sz_cap_ice_k;
@@ -1349,9 +1351,10 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         /
 
     // If the gap opening and extension costs are identical we can use less memory
     auto const can_use_linear_costs = open == extend;
-    auto const substitution_costs = *reinterpret_cast<szs::error_costs_256x256_t const *>(subs);
     auto const linear_costs = szs::linear_gap_costs_t {open};
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
+    auto substitution_costs = szs::error_costs_256x256_t {};
+    std::memcpy(&substitution_costs, subs, sizeof(substitution_costs));
 
 #if SZ_USE_ICE
     bool const can_use_ice = (capabilities & sz_cap_ice_k) == sz_cap_ice_k;
