@@ -42,7 +42,7 @@ class CudaBuildExtension(build_ext):
                 "-O3",
                 "--use_fast_math",
                 "--expt-relaxed-constexpr",  # Allow constexpr functions in device code
-                "-arch=sm_80",  # Set appropriate compute capability
+                f"-arch=sm_90a",  # Default to Hopper
                 "-DSZ_DYNAMIC_DISPATCH=1",
                 "-DSZ_USE_CUDA=1",
             ]

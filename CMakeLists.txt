@@ -612,7 +612,7 @@ if (STRINGZILLAS_BUILD_SHARED)
 
         # Set CUDA-specific properties
         set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_STANDARD 20 CUDA_STANDARD_REQUIRED ON)
-        set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_ARCHITECTURES "90") # We dispatch manually
+        set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_ARCHITECTURES "90a") # We dispatch manually
 
         # Enable CUDA separable compilation for device code
         set_target_properties(stringzillas_cuda_shared PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
