@@ -35,7 +35,7 @@ from typing import Optional, Literal
 
 import pytest
 import numpy as np  # ! Unlike StringZilla, NumPy is mandatory for StringZillas
-import affine_gaps  # ? Provides baseline implementation for NW & SW scoring
+import affine_gaps as ag  # ? Provides baseline implementation for NW & SW scoring
 
 import stringzilla as sz
 import stringzillas as szs
@@ -144,12 +144,15 @@ def test_device_scope():
 def get_random_string(
     length: Optional[int] = None,
     variability: Optional[int] = None,
+    alphabet: Optional[str] = None,
 ) -> str:
     if length is None:
         length = randint(3, 300)
+    if alphabet is None:
+        alphabet = ascii_lowercase
     if variability is None:
-        variability = len(ascii_lowercase)
-    return "".join(choice(ascii_lowercase[:variability]) for _ in range(length))
+        variability = len(alphabet)
+    return "".join(choice(alphabet[:variability]) for _ in range(length))
 
 
 def is_equal_strings(native_strings, big_strings):
@@ -409,6 +412,166 @@ def test_needleman_wunsch_vs_levenshtein_random(
     results = engine(a_strs, b_strs)
 
     np.testing.assert_array_equal(results, baselines, "Edit distances do not match")
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("batch_size", [1, 7, 33])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_needleman_wunsch_against_affine_gaps(
+    capabilities_mode: str,
+    device_name: DeviceName,
+    batch_size: int,
+    seed_value: int,
+):
+    """Compare Needleman-Wunsch global alignment scores against affine_gaps baseline."""
+
+    seed_random_generators(seed_value)
+    alphabet = ag.default_proteins_alphabet
+    a_batch = [get_random_string(length=randint(5, 50), alphabet=alphabet) for _ in range(batch_size)]
+    b_batch = [get_random_string(length=randint(5, 50), alphabet=alphabet) for _ in range(batch_size)]
+
+    # Baseline with affine_gaps (Gotoh)
+    baseline = np.array(
+        [
+            int(
+                ag.needleman_wunsch_gotoh_score(
+                    a,
+                    b,
+                    substitution_alphabet=alphabet,
+                    substitution_matrix=ag.default_proteins_matrix,
+                    gap_opening=ag.default_gap_opening,
+                    gap_extension=ag.default_gap_extension,
+                )
+            )
+            for a, b in zip(a_batch, b_batch)
+        ],
+        dtype=np.int64,
+    )
+
+    # For StringZillas, blow up the substitution matrix into a 256x256 form
+    subs = np.empty((256, 256), dtype=np.int8)
+    for i, ci in enumerate(alphabet):
+        for j, cj in enumerate(alphabet):
+            subs[ord(ci), ord(cj)] = ag.default_proteins_matrix[i, j]
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.NeedlemanWunsch(
+        capabilities=base_caps if capabilities_mode == "base" else device_scope,
+        substitution_matrix=subs,
+        open=ag.default_gap_opening,
+        extend=ag.default_gap_extension,
+    )
+
+    results = engine(Strs(a_batch), Strs(b_batch), device=device_scope)
+    if not np.array_equal(results, baseline):
+        idx = int(np.where(results != baseline)[0][0])
+        a, b = a_batch[idx], b_batch[idx]
+        aligned_a, aligned_b = ag.needleman_wunsch_gotoh(
+            a,
+            b,
+            substitution_alphabet=alphabet,
+            substitution_matrix=ag.default_proteins_matrix,
+            gap_open=ag.default_gap_opening,
+            gap_extend=ag.default_gap_extension,
+        )
+        guide_line = "".join("|" if ca == cb else " " for ca, cb in zip(aligned_a, aligned_b))
+        pytest.fail(
+            "\n".join(
+                [
+                    f"Needleman-Wunsch mismatch at index {idx}:",
+                    f"  a: {a}",
+                    f"  b: {b}",
+                    f"  szs score:     {int(results[idx])}",
+                    f"  affine_gaps:   {int(baseline[idx])}",
+                    "  Alignment (affine_gaps):",
+                    f"    {aligned_a}",
+                    f"    {guide_line}",
+                    f"    {aligned_b}",
+                ]
+            )
+        )
+    np.testing.assert_array_equal(results, baseline)
+
+
+@pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
+@pytest.mark.parametrize("device_name", DEVICE_NAMES)
+@pytest.mark.parametrize("batch_size", [1, 7, 33])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_smith_waterman_against_affine_gaps(
+    capabilities_mode: str,
+    device_name: DeviceName,
+    batch_size: int,
+    seed_value: int,
+):
+    """Compare Smith-Waterman local alignment scores against affine_gaps baseline."""
+
+    seed_random_generators(seed_value)
+    alphabet = ag.default_proteins_alphabet
+    a_batch = [get_random_string(length=randint(5, 50), alphabet=alphabet) for _ in range(batch_size)]
+    b_batch = [get_random_string(length=randint(5, 50), alphabet=alphabet) for _ in range(batch_size)]
+
+    # Baseline with affine_gaps (Gotoh)
+    baseline = np.array(
+        [
+            int(
+                ag.smith_waterman_gotoh_score(
+                    a,
+                    b,
+                    substitution_alphabet=alphabet,
+                    substitution_matrix=ag.default_proteins_matrix,
+                    gap_opening=ag.default_gap_opening,
+                    gap_extension=ag.default_gap_extension,
+                )
+            )
+            for a, b in zip(a_batch, b_batch)
+        ],
+        dtype=np.int64,
+    )
+
+    # For StringZillas, blow up the substitution matrix into a 256x256 form
+    subs = np.empty((256, 256), dtype=np.int8)
+    for i, ci in enumerate(alphabet):
+        for j, cj in enumerate(alphabet):
+            subs[ord(ci), ord(cj)] = ag.default_proteins_matrix[i, j]
+
+    device_scope, base_caps = device_scope_and_capabilities(device_name)
+    engine = szs.SmithWaterman(
+        capabilities=base_caps if capabilities_mode == "base" else device_scope,
+        substitution_matrix=subs,
+        open=ag.default_gap_opening,
+        extend=ag.default_gap_extension,
+    )
+
+    results = engine(Strs(a_batch), Strs(b_batch), device=device_scope)
+    if not np.array_equal(results, baseline):
+        idx = int(np.where(results != baseline)[0][0])
+        a, b = a_batch[idx], b_batch[idx]
+        aligned_a, aligned_b = ag.smith_waterman_gotoh(
+            a,
+            b,
+            substitution_alphabet=alphabet,
+            substitution_matrix=ag.default_proteins_matrix,
+            gap_open=ag.default_gap_opening,
+            gap_extend=ag.default_gap_extension,
+        )
+        guide_line = "".join("|" if ca == cb else " " for ca, cb in zip(aligned_a, aligned_b))
+        pytest.fail(
+            "\n".join(
+                [
+                    f"Smith-Waterman mismatch at index {idx}:",
+                    f"  a: {a}",
+                    f"  b: {b}",
+                    f"  szs score:     {int(results[idx])}",
+                    f"  affine_gaps:   {int(baseline[idx])}",
+                    "  Alignment (affine_gaps):",
+                    f"    {aligned_a}",
+                    f"    {guide_line}",
+                    f"    {aligned_b}",
+                ]
+            )
+        )
+    np.testing.assert_array_equal(results, baseline)
 
 
 @pytest.mark.parametrize("capabilities_mode", ["base", "infer-from-device"])
