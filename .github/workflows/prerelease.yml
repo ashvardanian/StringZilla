@@ -120,6 +120,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
+      - name: Log CPU and Python capabilities (StringZilla)
+        run: |
+          echo "==== lscpu ===="
+          lscpu
+          echo "==== /proc/cpuinfo (model name, flags) ===="
+          grep -m1 -E "model name|flags" /proc/cpuinfo || true
+          echo "==== StringZilla capabilities ===="
+          python - << 'PY'
+          import platform
+          import stringzilla as sz
+          print("platform:", platform.platform())
+          print("machine:", platform.machine(), "processor:", platform.processor())
+          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          PY
       - name: Test Python
         run: pytest scripts/test_stringzilla.py -s -x
 
@@ -205,6 +219,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
+      - name: Log CPU and Python capabilities (StringZilla)
+        run: |
+          echo "==== lscpu ===="
+          lscpu
+          echo "==== /proc/cpuinfo (model name, flags) ===="
+          grep -m1 -E "model name|flags" /proc/cpuinfo || true
+          echo "==== StringZilla capabilities ===="
+          python - << 'PY'
+          import platform
+          import stringzilla as sz
+          print("platform:", platform.platform())
+          print("machine:", platform.machine(), "processor:", platform.processor())
+          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          PY
       - name: Test Python
         run: pytest scripts/test_stringzilla.py -s -x
 
@@ -278,6 +306,22 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
+      - name: Log CPU and Python capabilities
+        run: |
+          echo "==== lscpu ===="
+          lscpu
+          echo "==== /proc/cpuinfo (model name, flags) ===="
+          grep -m1 -E "model name|flags" /proc/cpuinfo || true
+          echo "==== Python capabilities ===="
+          python - << 'PY'
+          import platform
+          import stringzilla as sz
+          import stringzillas as szs
+          print("platform:", platform.platform())
+          print("machine:", platform.machine(), "processor:", platform.processor())
+          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          print("stringzillas.__capabilities__:", szs.__capabilities__)
+          PY
       - name: Test Python StringZillas-CPUs
         run: python -m pytest scripts/test_stringzillas.py -s -x
 
@@ -344,6 +388,25 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation
+      - name: Log CPU/GPU and Python capabilities
+        run: |
+          echo "==== lscpu ===="
+          lscpu
+          echo "==== /proc/cpuinfo (model name, flags) ===="
+          grep -m1 -E "model name|flags" /proc/cpuinfo || true
+          echo "==== nvcc/nvidia-smi ===="
+          nvcc --version || true
+          nvidia-smi || true
+          echo "==== Python capabilities ===="
+          python - << 'PY'
+          import platform
+          import stringzilla as sz
+          import stringzillas as szs
+          print("platform:", platform.platform())
+          print("machine:", platform.machine(), "processor:", platform.processor())
+          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          print("stringzillas.__capabilities__:", szs.__capabilities__)
+          PY
       - name: Test Python StringZillas-CUDA
         run: python -m pytest scripts/test_stringzillas.py -s -x
 
