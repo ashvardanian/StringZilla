@@ -271,26 +271,49 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_x86_(void) {
         struct separate_t {
             unsigned eax, ebx, ecx, edx;
         } named;
-    } info7;
+    } info1, info7;
 
 #if defined(_MSC_VER)
+    __cpuidex(info1.array, 1, 0);
     __cpuidex(info7.array, 7, 0);
 #else
+    __asm__ __volatile__( //
+        "cpuid"
+        : "=a"(info1.named.eax), "=b"(info1.named.ebx), "=c"(info1.named.ecx), "=d"(info1.named.edx)
+        : "a"(1), "c"(0));
     __asm__ __volatile__( //
         "cpuid"
         : "=a"(info7.named.eax), "=b"(info7.named.ebx), "=c"(info7.named.ecx), "=d"(info7.named.edx)
         : "a"(7), "c"(0));
 #endif
 
-    // Check for AVX2 (Function ID 7, EBX register), you can take the relevant flags from the LLVM implementation:
+    // Gate AVX/AVX-512 on OS-enabled extended state (XGETBV)
+    unsigned has_osxsave = (info1.named.ecx & (1u << 27)) != 0; // OSXSAVE
+    unsigned has_avx = (info1.named.ecx & (1u << 28)) != 0;     // AVX
+
+    unsigned long long xcr0 = 0;
+    if (has_osxsave) {
+#if defined(_MSC_VER)
+        xcr0 = _xgetbv(0);
+#else
+        unsigned eax, edx;
+        __asm__ __volatile__(".byte 0x0f, 0x01, 0xd0" : "=a"(eax), "=d"(edx) : "c"(0)); // xgetbv
+        xcr0 = ((unsigned long long)edx << 32) | eax;
+#endif
+    }
+
+    unsigned os_avx_enabled = has_osxsave && has_avx && ((xcr0 & 0x6u) == 0x6u); // XMM+YMM
+    unsigned os_avx512_enabled = os_avx_enabled && ((xcr0 & 0xE0u) == 0xE0u);    // OPMASK+ZMM
+
+    // Check for AVX2/AVX-512 (Function ID 7), masked by OS state
     // https://github.com/llvm/llvm-project/blob/50598f0ff44f3a4e75706f8c53f3380fe7faa896/clang/lib/Headers/cpuid.h#L148
-    unsigned supports_avx2 = (info7.named.ebx & 0x00000020) != 0;
-    unsigned supports_avx512f = (info7.named.ebx & 0x00010000) != 0;
-    unsigned supports_avx512bw = (info7.named.ebx & 0x40000000) != 0;
-    unsigned supports_avx512vl = (info7.named.ebx & 0x80000000) != 0;
-    unsigned supports_avx512vbmi = (info7.named.ecx & 0x00000002) != 0;
-    unsigned supports_avx512vbmi2 = (info7.named.ecx & 0x00000040) != 0;
-    unsigned supports_vaes = (info7.named.ecx & 0x00000200) != 0;
+    unsigned supports_avx2 = os_avx_enabled && ((info7.named.ebx & 0x00000020u) != 0);
+    unsigned supports_avx512f = os_avx512_enabled && ((info7.named.ebx & 0x00010000u) != 0);
+    unsigned supports_avx512bw = os_avx512_enabled && ((info7.named.ebx & 0x40000000u) != 0);
+    unsigned supports_avx512vl = os_avx512_enabled && ((info7.named.ebx & 0x80000000u) != 0);
+    unsigned supports_avx512vbmi = os_avx512_enabled && ((info7.named.ecx & 0x00000002u) != 0);
+    unsigned supports_avx512vbmi2 = os_avx512_enabled && ((info7.named.ecx & 0x00000040u) != 0);
+    unsigned supports_vaes = os_avx512_enabled && ((info7.named.ecx & 0x00000200u) != 0);
 
     return (sz_capability_t)(                                                                                //
         (sz_cap_haswell_k * supports_avx2) |                                                                 //
