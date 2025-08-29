@@ -275,7 +275,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python StringZillas-CPUs
         run: |
-          pip install pytest pytest-repeat numpy pyarrow wheel
+          pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cpus pip install -e . --force-reinstall --no-build-isolation
       - name: Test Python StringZillas-CPUs
@@ -341,7 +341,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python StringZillas-CUDA
         run: |
-          pip install pytest pytest-repeat numpy pyarrow wheel
+          pip install pytest pytest-repeat numpy pyarrow wheel affine-gaps
           SZ_TARGET=stringzilla pip install -e . --force-reinstall --no-build-isolation
           SZ_TARGET=stringzillas-cuda pip install -e . --force-reinstall --no-build-isolation
       - name: Test Python StringZillas-CUDA
