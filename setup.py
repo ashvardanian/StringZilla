@@ -167,7 +167,7 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
 
 def windows_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
     compile_args = [
-        "/std:c++17" if use_cpp else "/std:c99",  # use C++17 for StringZillas, C99 for StringZilla
+        "/std:c++17" if use_cpp else "/std:c11",  # use C++17 for StringZillas, C11 for StringZilla, as MSVC has no C99
         "/Wall",  # stick close to the C language standard, avoid compiler extensions
         "/O2",  # optimization level
     ]
@@ -284,7 +284,6 @@ setup(
         "Natural Language :: English",
         "Intended Audience :: Developers",
         "Intended Audience :: Information Technology",
-        "License :: OSI Approved :: Apache Software License",
         "Programming Language :: C++",
         "Programming Language :: Python :: 3 :: Only",
         "Programming Language :: Python :: 3.8",

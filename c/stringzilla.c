@@ -218,7 +218,11 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
  *  alphabetically (exclusive). The Microsoft C++ compiler puts C++ initialisation code in .CRT$XCU, so avoid that
  *  section: https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-initialization?view=msvc-170
  */
+#if defined(_WIN64)
 #pragma comment(linker, "/INCLUDE:sz_dispatch_table_init_")
+#else
+#pragma comment(linker, "/INCLUDE:_sz_dispatch_table_init_")
+#endif
 #pragma section(".CRT$XCS", read)
 __declspec(allocate(".CRT$XCS")) void (*sz_dispatch_table_init_)() = sz_dispatch_table_init;
 
