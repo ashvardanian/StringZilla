@@ -5,8 +5,9 @@
 //  Created by Ash Vardanian on 18/1/24.
 //
 
-@testable import StringZilla
 import XCTest
+
+@testable import StringZilla
 
 class StringZillaTests: XCTestCase {
     var testString: String!

@@ -510,33 +510,19 @@ brew install swiftformat
 swiftformat .
 ```
 
-Running Swift on Linux requires a couple of extra steps, as the Swift compiler is not available in the default repositories.
-Please get the most recent Swift tarball from the [official website](https://www.swift.org/install/).
-At the time of writing, for 64-bit Arm CPU running Ubuntu 22.04, the following commands would work:
+---
 
-```bash
-wget https://download.swift.org/swift-5.9.2-release/ubuntu2204-aarch64/swift-5.9.2-RELEASE/swift-5.9.2-RELEASE-ubuntu22.04-aarch64.tar.gz
-tar xzf swift-5.9.2-RELEASE-ubuntu22.04-aarch64.tar.gz
-sudo mv swift-5.9.2-RELEASE-ubuntu22.04-aarch64 /usr/share/swift
-echo "export PATH=/usr/share/swift/usr/bin:$PATH" >> ~/.bashrc
-source ~/.bashrc
-```
-
-You can check the available images on [`swift.org/download` page](https://www.swift.org/download/#releases).
-For x86 CPUs, the following commands would work:
-
-```bash
-wget https://download.swift.org/swift-5.9.2-release/ubuntu2204/swift-5.9.2-RELEASE/swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
-tar xzf swift-5.9.2-RELEASE-ubuntu22.04.tar.gz
-sudo mv swift-5.9.2-RELEASE-ubuntu22.04 /usr/share/swift
-echo "export PATH=/usr/share/swift/usr/bin:$PATH" >> ~/.bashrc
-source ~/.bashrc
-```
-
+Running Swift on Linux requires a couple of extra steps - [`swift.org/install` page](https://www.swift.org/install).
 Alternatively, on Linux, the official Swift Docker image can be used for builds and tests:
 
 ```bash
-sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:5.9 /bin/bash -cl "swift build -c release --static-swift-stdlib && swift test -c release --enable-test-discovery"
+sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.0 /bin/bash -cl "swift build -c release --static-swift-stdlib && swift test -c release"
+```
+
+To format the code on Linux:
+
+```bash
+sudo docker run --rm -v "$PWD:/workspace" -w /workspace swift:6.0 /bin/bash -c "swift format . -i -r"
 ```
 
 ## Contributing in Rust

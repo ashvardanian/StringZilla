@@ -10,7 +10,7 @@ env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
   PYTHON_VERSION: 3.11
-  SWIFT_VERSION: 5.9
+  SWIFT_VERSION: 6.0
   PYTHONUTF8: 1
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -218,13 +218,13 @@ jobs:
         # Swift
         # Fails due to: https://github.com/swift-actions/setup-swift/issues/591
       # - name: Set up Swift ${{ env.SWIFT_VERSION }}
-      #   uses: swift-actions/setup-swift@v1
+      #   uses: swift-actions/setup-swift@v2.3.0
       #   with:
       #     swift-version: ${{ env.SWIFT_VERSION }}
       # - name: Build Swift
       #   run: swift build -c release --static-swift-stdlib
       # - name: Test Swift
-      #   run: swift test -c release --enable-test-discovery
+      #   run: swift test -c release
 
   test_ubuntu_cpus:
     name: Ubuntu (StringZillas-CPUs)
@@ -352,7 +352,7 @@ jobs:
   test_ubuntu_swift:
     name: Swift on Linux
     runs-on: ubuntu-22.04
-    container: swift:5.9
+    container: swift:${{ env.SWIFT_VERSION }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -470,7 +470,7 @@ jobs:
 
         # Swift
       - name: Set up Swift ${{ env.SWIFT_VERSION }}
-        uses: swift-actions/setup-swift@v1
+        uses: swift-actions/setup-swift@v2.3.0
         with:
           swift-version: ${{ env.SWIFT_VERSION }}
       - name: Build Swift

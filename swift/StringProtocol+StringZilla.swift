@@ -27,7 +27,7 @@ import StringZillaC
 private protocol SingleByte {}
 
 extension UInt8: SingleByte {}
-extension Int8: SingleByte {} // This would match `CChar` as well.
+extension Int8: SingleByte {}  // This would match `CChar` as well.
 
 @usableFromInline
 enum StringZillaError: Error {
@@ -84,7 +84,9 @@ extension String: StringZillaViewable {
     }
 
     @_transparent
-    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
+    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
+        -> Index
+    {
         utf8.index(utf8.startIndex, offsetBy: bytePointer - startPointer)
     }
 }
@@ -102,9 +104,10 @@ extension Substring.UTF8View: StringZillaViewable {
             let cLength = sz_size_t(bufferPointer.count)
             let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
             return try body(cString, cLength)
-        } ?? {
-            throw StringZillaError.contiguousStorageUnavailable
-        }()
+        }
+            ?? {
+                throw StringZillaError.contiguousStorageUnavailable
+            }()
     }
 
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
@@ -113,7 +116,9 @@ extension Substring.UTF8View: StringZillaViewable {
     ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
     /// - Returns: The calculated index offset.
     @_transparent
-    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
+    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
+        -> Index
+    {
         return index(startIndex, offsetBy: bytePointer - startPointer)
     }
 }
@@ -130,9 +135,10 @@ extension String.UTF8View: StringZillaViewable {
             let cLength = sz_size_t(bufferPointer.count)
             let cString = UnsafeRawPointer(bufferPointer.baseAddress!).assumingMemoryBound(to: CChar.self)
             return try body(cString, cLength)
-        } ?? {
-            throw StringZillaError.contiguousStorageUnavailable
-        }()
+        }
+            ?? {
+                throw StringZillaError.contiguousStorageUnavailable
+            }()
     }
 
     /// Calculates the offset index for a given byte pointer relative to a start pointer.
@@ -140,18 +146,20 @@ extension String.UTF8View: StringZillaViewable {
     ///   - bytePointer: A pointer to the byte for which the offset is calculated.
     ///   - startPointer: The starting pointer for the calculation, previously obtained from `szScope`.
     /// - Returns: The calculated index offset.
-    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t) -> Index {
+    public func stringZillaByteOffset(forByte bytePointer: sz_cptr_t, after startPointer: sz_cptr_t)
+        -> Index
+    {
         return index(startIndex, offsetBy: bytePointer - startPointer)
     }
 }
 
-public extension StringZillaViewable {
+extension StringZillaViewable {
     /// Finds the first occurrence of the specified substring within the receiver.
     /// - Parameter needle: The substring to search for.
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findFirst<S: StringZillaViewable>(substring needle: S) -> Index? {
+    public func findFirst<S: StringZillaViewable>(substring needle: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             needle.withStringZillaScope { nPointer, nLength in
@@ -168,7 +176,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findLast<S: StringZillaViewable>(substring needle: S) -> Index? {
+    public func findLast<S: StringZillaViewable>(substring needle: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             needle.withStringZillaScope { nPointer, nLength in
@@ -185,7 +193,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findFirst<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
+    public func findFirst<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
@@ -202,7 +210,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findLast<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
+    public func findLast<S: StringZillaViewable>(characterFrom characters: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
@@ -219,7 +227,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findFirst<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
+    public func findFirst<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
@@ -236,7 +244,7 @@ public extension StringZillaViewable {
     /// - Returns: The index of the found occurrence, or `nil` if not found.
     @_specialize(where Self == String, S == String)
     @_specialize(where Self == String.UTF8View, S == String.UTF8View)
-    func findLast<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
+    public func findLast<S: StringZillaViewable>(characterNotFrom characters: S) -> Index? {
         var result: Index?
         withStringZillaScope { hPointer, hLength in
             characters.withStringZillaScope { nPointer, nLength in
