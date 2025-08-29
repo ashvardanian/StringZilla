@@ -352,7 +352,7 @@ SZ_DYNAMIC sz_status_t sz_sequence_intersect(sz_sequence_t const *first_array, s
 // how `__cdecl` functions are decorated in MSVC: https://stackoverflow.com/questions/62753691)
 
 #if defined(_MSC_VER)
-#if SZ_DETECT_64_BIT
+#if defined(_WIN64)
 #pragma comment(linker, "/export:memchr")
 #else
 #pragma comment(linker, "/export:_memchr")
@@ -366,7 +366,7 @@ SZ_DYNAMIC void *memchr(void const *s, int c_wide, size_t n) {
 }
 
 #if defined(_MSC_VER)
-#if SZ_DETECT_64_BIT
+#if defined(_WIN64)
 #pragma comment(linker, "/export:memcpy")
 #else
 #pragma comment(linker, "/export:_memcpy")
@@ -380,7 +380,7 @@ SZ_DYNAMIC void *memcpy(void *dest, void const *src, size_t n) {
 }
 
 #if defined(_MSC_VER)
-#if SZ_DETECT_64_BIT
+#if defined(_WIN64)
 #pragma comment(linker, "/export:memmove")
 #else
 #pragma comment(linker, "/export:_memmove")
@@ -394,7 +394,7 @@ SZ_DYNAMIC void *memmove(void *dest, void const *src, size_t n) {
 }
 
 #if defined(_MSC_VER)
-#if SZ_DETECT_64_BIT
+#if defined(_WIN64)
 #pragma comment(linker, "/export:memset")
 #else
 #pragma comment(linker, "/export:_memset")

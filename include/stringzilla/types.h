@@ -80,7 +80,8 @@
  *          64-bit on most platforms where pointers are 64-bit.
  *          32-bit on platforms where pointers are 32-bit.
  */
-#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64)
+#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64) || defined(SZ_IS_64BIT_ARM_) || \
+    defined(SZ_IS_64BIT_X86_)
 #define SZ_IS_64BIT_ (1)
 #else
 #define SZ_IS_64BIT_ (0)
@@ -453,7 +454,8 @@ typedef enum sz_status_t {
     sz_invalid_utf8_k = -12,
     /** For algorithms that take collections of unique elements, this status indicates presence of duplicates. */
     sz_contains_duplicates_k = -13,
-    /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types. */
+    /** For algorithms dealing with large inputs, this error reports the need to upcast the logic to larger types.
+     */
     sz_overflow_risk_k = -14,
     /** For algorithms with multi-stage pipelines indicates input/output size mismatch. */
     sz_unexpected_dimensions_k = -15,
@@ -647,7 +649,8 @@ SZ_PUBLIC void sz_memory_allocator_init_default(sz_memory_allocator_t *alloc);
  *  @param[in] buffer Buffer to use for allocations.
  *  @param[in] length Length of the buffer. @b Must be greater than 16, at least 4KB (one RAM page) is recommended.
  *
- *  The `buffer` itself will be prepended with the capacity and the consumed size. Those values shouldn't be modified.
+ *  The `buffer` itself will be prepended with the capacity and the consumed size. Those values shouldn't be
+ * modified.
  */
 SZ_PUBLIC void sz_memory_allocator_init_fixed(sz_memory_allocator_t *alloc, void *buffer, sz_size_t length);
 
@@ -1263,7 +1266,8 @@ SZ_INTERNAL sz_size_t sz_size_log2i_nonzero(sz_size_t x) {
 
 /**
  *  @brief Compute the smallest power of two greater than or equal to @p x.
- *  @pre Unlike the commonly used trick with `clz` intrinsics, is valid across the whole range of `x`, @b including 0.
+ *  @pre Unlike the commonly used trick with `clz` intrinsics, is valid across the whole range of `x`, @b including
+ * 0.
  *  @see https://stackoverflow.com/a/10143264
  */
 SZ_INTERNAL sz_size_t sz_size_bit_ceil(sz_size_t x) {
@@ -1299,7 +1303,8 @@ SZ_INTERNAL sz_u64_t sz_u64_transpose(sz_u64_t x) {
     return x;
 }
 
-/** @brief Load a 16-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms. */
+/** @brief Load a 16-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
+ */
 SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u16_vec_t result;
@@ -1318,7 +1323,8 @@ SZ_INTERNAL sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #endif
 }
 
-/** @brief Load a 32-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms. */
+/** @brief Load a 32-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
+ */
 SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u32_vec_t result;
@@ -1339,7 +1345,8 @@ SZ_INTERNAL sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #endif
 }
 
-/** @brief Load a 64-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms. */
+/** @brief Load a 64-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
+ */
 SZ_INTERNAL sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u64_vec_t result;
