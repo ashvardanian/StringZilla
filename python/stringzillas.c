@@ -95,6 +95,8 @@ static szs_device_scope_t default_device_scope = NULL;
 static sz_capability_t default_hardware_capabilities = 0;
 // Static unified memory allocator for GPU compatibility
 static sz_memory_allocator_t unified_allocator;
+// Default CPU-side allocator for buffer-based flows
+static sz_memory_allocator_t default_allocator;
 
 typedef struct PyAPI {
     sz_bool_t (*sz_py_export_string_like)(PyObject *, sz_cptr_t *, sz_size_t *);
@@ -1741,8 +1743,9 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
         return result_tuple;
     }
 
-    // Swap allocators only when using CUDA with a GPU device
-    if (requires_unified_memory(self->capabilities, device_handle))
+    // Swap allocators only when using CUDA with a GPU device (inputs must be unified)
+    sz_bool_t need_unified = requires_unified_memory(self->capabilities, device_handle);
+    if (need_unified)
         if (!try_swap_to_unified_allocator(texts_obj)) return NULL;
 
     sz_size_t kernel_input_size = 0;
@@ -1788,56 +1791,49 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
         return NULL;
     }
 
-    // Allocate unified memory first for CUDA compatibility
-    sz_size_t total_elements = kernel_input_size * self->ndim;
-    sz_size_t total_bytes = total_elements * sizeof(sz_u32_t);
-
-    sz_u32_t *unified_hashes = (sz_u32_t *)unified_allocator.allocate(total_bytes, unified_allocator.handle);
-    sz_u32_t *unified_counts = (sz_u32_t *)unified_allocator.allocate(total_bytes, unified_allocator.handle);
-
-    if (!unified_hashes || !unified_counts) {
-        if (unified_hashes) unified_allocator.free(unified_hashes, total_bytes, unified_allocator.handle);
-        if (unified_counts) unified_allocator.free(unified_counts, total_bytes, unified_allocator.handle);
-        return PyErr_NoMemory();
-    }
-
-    // Call the kernel with unified memory buffers
-    sz_status_t status = kernel_punned(self->handle, device_handle, kernel_texts_punned, unified_hashes,
-                                       self->ndim * sizeof(sz_u32_t), unified_counts, self->ndim * sizeof(sz_u32_t));
-
-    if (status != sz_success_k) {
-        unified_allocator.free(unified_hashes, total_bytes, unified_allocator.handle);
-        unified_allocator.free(unified_counts, total_bytes, unified_allocator.handle);
-        PyErr_SetString(PyExc_RuntimeError, "Fingerprinting computation failed");
-        return NULL;
-    }
-
-    // Create NumPy arrays for output matrices - each row contains fingerprints for one text
+    // Create NumPy outputs up front and copy into them (CPU or GPU)
     npy_intp dims[2] = {kernel_input_size, self->ndim};
-
     PyArrayObject *hashes_array = (PyArrayObject *)PyArray_SimpleNew(2, dims, NPY_UINT32);
     PyArrayObject *counts_array = (PyArrayObject *)PyArray_SimpleNew(2, dims, NPY_UINT32);
-
     if (!hashes_array || !counts_array) {
         Py_XDECREF(hashes_array);
         Py_XDECREF(counts_array);
-        unified_allocator.free(unified_hashes, total_bytes, unified_allocator.handle);
-        unified_allocator.free(unified_counts, total_bytes, unified_allocator.handle);
         return PyErr_NoMemory();
     }
 
-    // Copy from unified memory to NumPy arrays
-    sz_u32_t *numpy_hashes = (sz_u32_t *)PyArray_DATA(hashes_array);
-    sz_u32_t *numpy_counts = (sz_u32_t *)PyArray_DATA(counts_array);
+    // Determine bytes to write; if zero, we'll just return the empty arrays
+    sz_memory_allocator_t *out_alloc = need_unified ? &unified_allocator : &default_allocator;
+    sz_size_t const total_elements = kernel_input_size * self->ndim;
+    sz_size_t const total_bytes = total_elements * sizeof(sz_u32_t);
 
-    memcpy(numpy_hashes, unified_hashes, total_bytes);
-    memcpy(numpy_counts, unified_counts, total_bytes);
+    if (total_bytes > 0) {
+        sz_u32_t *buf_hashes = (sz_u32_t *)out_alloc->allocate(total_bytes, out_alloc->handle);
+        sz_u32_t *buf_counts = (sz_u32_t *)out_alloc->allocate(total_bytes, out_alloc->handle);
+        if (!buf_hashes || !buf_counts) {
+            if (buf_hashes) out_alloc->free(buf_hashes, total_bytes, out_alloc->handle);
+            if (buf_counts) out_alloc->free(buf_counts, total_bytes, out_alloc->handle);
+            Py_DECREF(hashes_array);
+            Py_DECREF(counts_array);
+            return PyErr_NoMemory();
+        }
 
-    // Free unified memory
-    unified_allocator.free(unified_hashes, total_bytes, unified_allocator.handle);
-    unified_allocator.free(unified_counts, total_bytes, unified_allocator.handle);
+        sz_status_t status = kernel_punned(self->handle, device_handle, kernel_texts_punned, buf_hashes,
+                                           self->ndim * sizeof(sz_u32_t), buf_counts, self->ndim * sizeof(sz_u32_t));
+        if (status != sz_success_k) {
+            out_alloc->free(buf_hashes, total_bytes, out_alloc->handle);
+            out_alloc->free(buf_counts, total_bytes, out_alloc->handle);
+            Py_DECREF(hashes_array);
+            Py_DECREF(counts_array);
+            PyErr_SetString(PyExc_RuntimeError, "Fingerprinting computation failed");
+            return NULL;
+        }
 
-    // Return tuple of two NumPy arrays: (hashes_matrix, counts_matrix)
+        memcpy(PyArray_DATA(hashes_array), buf_hashes, total_bytes);
+        memcpy(PyArray_DATA(counts_array), buf_counts, total_bytes);
+        out_alloc->free(buf_hashes, total_bytes, out_alloc->handle);
+        out_alloc->free(buf_counts, total_bytes, out_alloc->handle);
+    }
+
     PyObject *result_tuple = PyTuple_New(2);
     if (!result_tuple) {
         Py_DECREF(hashes_array);
@@ -1990,6 +1986,8 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
     // Initialize the unified memory allocator for GPU compatibility
     sz_status_t alloc_status = sz_memory_allocator_init_unified(&unified_allocator);
     if (alloc_status != sz_success_k) sz_memory_allocator_init_default(&unified_allocator);
+    // Initialize default CPU allocator
+    sz_memory_allocator_init_default(&default_allocator);
 
     // Initialize the default device scope for reuse
     sz_status_t status = szs_device_scope_init_default(&default_device_scope);
