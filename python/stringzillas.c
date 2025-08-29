@@ -1254,6 +1254,8 @@ static PyTypeObject NeedlemanWunschType = {
 typedef struct {
     PyObject ob_base;
     szs_smith_waterman_scores_t handle;
+    char description[32];
+    sz_capability_t capabilities;
 } SmithWaterman;
 
 static void SmithWaterman_dealloc(SmithWaterman *self) {
@@ -1266,7 +1268,11 @@ static void SmithWaterman_dealloc(SmithWaterman *self) {
 
 static PyObject *SmithWaterman_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
     SmithWaterman *self = (SmithWaterman *)type->tp_alloc(type, 0);
-    if (self != NULL) { self->handle = NULL; }
+    if (self != NULL) {
+        self->handle = NULL;
+        self->description[0] = '\0';
+        self->capabilities = 0;
+    }
     return (PyObject *)self;
 }
 
@@ -1334,6 +1340,13 @@ static int SmithWaterman_init(SmithWaterman *self, PyObject *args, PyObject *kwa
         return -1;
     }
 
+    // Create a simple checksum of the substitution matrix for the description
+    sz_u32_t subs_checksum = 0;
+    for (int i = 0; i < 256; i += 16)                      // Sample every 16th element
+        subs_checksum += (sz_u32_t)subs_data[i * 256 + i]; // Diagonal elements
+
+    snprintf(self->description, sizeof(self->description), "%X,%d,%d", subs_checksum & 0xFFFF, open, extend);
+    self->capabilities = capabilities;
     return 0;
 }
 
@@ -1497,6 +1510,20 @@ cleanup:
     return NULL;
 }
 
+static PyObject *SmithWaterman_repr(SmithWaterman *self) {
+    return PyUnicode_FromFormat("SmithWaterman(subs_checksum,open,extend=%s)", self->description);
+}
+
+static PyObject *SmithWaterman_get_capabilities(SmithWaterman *self, void *closure) {
+    return capabilities_to_tuple(self->capabilities);
+}
+
+static PyGetSetDef SmithWaterman_getsetters[] = {
+    {"__capabilities__", (getter)SmithWaterman_get_capabilities, NULL, "Hardware capabilities used by this engine",
+     NULL},
+    {NULL} /* Sentinel */
+};
+
 static char const doc_SmithWaterman[] = //
     "SmithWaterman(substitution_matrix, open=-1, extend=-1, capabilities=None)\n"
     "\n"
@@ -1541,6 +1568,8 @@ static PyTypeObject SmithWatermanType = {
     .tp_init = (initproc)SmithWaterman_init,
     .tp_dealloc = (destructor)SmithWaterman_dealloc,
     .tp_call = (ternaryfunc)SmithWaterman_call,
+    .tp_repr = (reprfunc)SmithWaterman_repr,
+    .tp_getset = SmithWaterman_getsetters,
 };
 
 #pragma endregion
