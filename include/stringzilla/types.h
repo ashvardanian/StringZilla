@@ -459,6 +459,10 @@ typedef enum sz_status_t {
     sz_unexpected_dimensions_k = -15,
     /** GPU support is missing in the library. */
     sz_missing_gpu_k = -16,
+    /** Backend-device mismatch: e.g., GPU kernel with CPU/default executor or vice versa. */
+    sz_device_code_mismatch_k = -17,
+    /** Device memory mismatch: e.g., GPU kernel requires unified/device-accessible memory. */
+    sz_device_memory_mismatch_k = -18,
     /** A sink-hole status for unknown errors. */
     sz_status_unknown_k = -1,
 } sz_status_t;

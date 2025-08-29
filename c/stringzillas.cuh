@@ -293,7 +293,7 @@ sz_status_t szs_levenshtein_distances_for_(                                     
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
             }
-            else { result = sz_status_unknown_k; }
+            else { result = sz_device_code_mismatch_k; }
 #else
             result = sz_status_unknown_k; // GPU support is not enabled
 #endif // SZ_USE_CUDA
@@ -314,7 +314,7 @@ sz_status_t szs_levenshtein_distances_for_(                                     
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
             }
-            else { result = sz_status_unknown_k; }
+            else { result = sz_device_code_mismatch_k; }
         }
     };
 
@@ -385,7 +385,7 @@ sz_status_t szs_levenshtein_distances_utf8_for_(                                
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
             }
-            else { result = sz_status_unknown_k; }
+            else { result = sz_device_code_mismatch_k; }
         }
     };
 

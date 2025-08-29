@@ -93,6 +93,19 @@ struct unified_alloc {
 
 using unified_alloc_t = unified_alloc<char>;
 
+/** @brief Returns `true` if the pointer refers to device-accessible memory (Device or Managed/Unified). */
+inline bool is_device_accessible_memory(void const *ptr) noexcept {
+    if (!ptr) return true;
+    cudaPointerAttributes attr;
+    cudaError_t err = cudaPointerGetAttributes(&attr, ptr);
+    if (err != cudaSuccess) return false;
+#if defined(CUDART_VERSION) && (CUDART_VERSION >= 10000) // Modern CUDA: use `type`
+    return attr.type == cudaMemoryTypeDevice || attr.type == cudaMemoryTypeManaged;
+#else // Legacy CUDA: `memoryType` and `isManaged`
+    return attr.memoryType == cudaMemoryTypeDevice || attr.isManaged;
+#endif
+}
+
 struct cuda_status_t {
     status_t status = status_t::success_k;
     cudaError_t cuda_error = cudaSuccess;

@@ -2109,6 +2109,10 @@ struct levenshtein_distances<char_type_, gap_costs_type_, allocator_type_, capab
         size_t count_empty_tasks = 0;
         using similarity_memory_requirements_t = similarity_memory_requirements<size_t, false>;
         for (size_t i = 0; i < first_strings.size(); ++i) {
+            // Ensure inputs are device-accessible (Unified/Device memory)
+            if (!is_device_accessible_memory((void const *)first_strings[i].data()) ||
+                !is_device_accessible_memory((void const *)second_strings[i].data()))
+                return {status_t::device_memory_mismatch_k, cudaSuccess};
             task_t task(                                            //
                 first_strings[i].data(), first_strings[i].length(), //
                 second_strings[i].data(), second_strings[i].length());
@@ -2782,6 +2786,10 @@ struct cuda_nw_or_sw_byte_level_scores_ {
         size_t count_empty_tasks = 0;
         using similarity_memory_requirements_t = similarity_memory_requirements<size_t, true>;
         for (size_t i = 0; i < first_strings.size(); ++i) {
+            // Ensure inputs are device-accessible (Unified/Device memory)
+            if (!is_device_accessible_memory((void const *)first_strings[i].data()) ||
+                !is_device_accessible_memory((void const *)second_strings[i].data()))
+                return {status_t::device_memory_mismatch_k, cudaSuccess};
             task_t task(                                            //
                 first_strings[i].data(), first_strings[i].length(), //
                 second_strings[i].data(), second_strings[i].length());

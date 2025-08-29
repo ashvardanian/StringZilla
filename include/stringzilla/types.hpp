@@ -155,6 +155,8 @@ enum class status_t : int {
     overflow_risk_k = sz_overflow_risk_k,
     unexpected_dimensions_k = sz_unexpected_dimensions_k,
     missing_gpu_k = sz_missing_gpu_k,
+    device_code_mismatch_k = sz_device_code_mismatch_k,
+    device_memory_mismatch_k = sz_device_memory_mismatch_k,
     unknown_k = sz_status_unknown_k,
 };
 

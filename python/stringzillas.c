@@ -121,8 +121,9 @@ static sz_bool_t try_swap_to_unified_allocator(PyObject *strs_obj) {
 
     if (!success) {
         // Set Python error to inform user of the failure
-        PyErr_SetString(PyExc_RuntimeError, "Failed to allocate unified memory for GPU compatibility. "
-                                            "Consider reducing input size or freeing memory.");
+        PyErr_SetString(PyExc_RuntimeError,
+                        "Device memory mismatch: GPU kernels require unified/device-accessible memory. "
+                        "Consider reducing input size, freeing memory, or using CPU capabilities.");
     }
     return success;
 }
@@ -548,7 +549,17 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
         case sz_contains_duplicates_k: error_msg = "Levenshtein failed: contains duplicates"; break;
         case sz_overflow_risk_k: error_msg = "Levenshtein failed: overflow risk"; break;
         case sz_unexpected_dimensions_k: error_msg = "Levenshtein failed: input/output size mismatch"; break;
-        case sz_missing_gpu_k: error_msg = "Levenshtein failed: GPU support is missing in the library"; break;
+        case sz_missing_gpu_k:
+            error_msg = "Levenshtein failed: CUDA backend requested but no GPU device scope provided. "
+                        "Pass device=stringzillas.DeviceScope(gpu_device=0) or use serial/CPU capabilities.";
+            break;
+        case sz_device_code_mismatch_k:
+            error_msg = "Levenshtein failed: device-code mismatch between backend and executor. "
+                        "Use a GPU DeviceScope with CUDA backends or select CPU capabilities.";
+            break;
+        case sz_device_memory_mismatch_k:
+            error_msg = "Levenshtein failed: device-memory mismatch (unified/device-accessible memory required).";
+            break;
         case sz_status_unknown_k: error_msg = "Levenshtein failed: unknown error"; break;
         default: error_msg = "Levenshtein failed: unexpected error"; break;
         }
@@ -833,7 +844,17 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
         case sz_contains_duplicates_k: error_msg = "Levenshtein failed: contains duplicates"; break;
         case sz_overflow_risk_k: error_msg = "Levenshtein failed: overflow risk"; break;
         case sz_unexpected_dimensions_k: error_msg = "Levenshtein failed: input/output size mismatch"; break;
-        case sz_missing_gpu_k: error_msg = "Levenshtein failed: GPU support is missing in the library"; break;
+        case sz_missing_gpu_k:
+            error_msg = "Levenshtein failed: CUDA backend requested but no GPU device scope provided. "
+                        "Pass device=stringzillas.DeviceScope(gpu_device=0) or use serial/CPU capabilities.";
+            break;
+        case sz_device_code_mismatch_k:
+            error_msg = "Levenshtein failed: device-code mismatch between backend and executor. "
+                        "Use a GPU DeviceScope with CUDA backends or select CPU capabilities.";
+            break;
+        case sz_device_memory_mismatch_k:
+            error_msg = "Levenshtein failed: device-memory mismatch (unified/device-accessible memory required).";
+            break;
         case sz_status_unknown_k: error_msg = "Levenshtein failed: unknown error"; break;
         default: error_msg = "Levenshtein failed: unexpected error"; break;
         }
@@ -985,7 +1006,18 @@ static int NeedlemanWunsch_init(NeedlemanWunsch *self, PyObject *args, PyObject 
         case sz_contains_duplicates_k: error_msg = "NeedlemanWunsch failed: contains duplicates"; break;
         case sz_overflow_risk_k: error_msg = "NeedlemanWunsch failed: overflow risk"; break;
         case sz_unexpected_dimensions_k: error_msg = "NeedlemanWunsch failed: input/output size mismatch"; break;
-        case sz_missing_gpu_k: error_msg = "NeedlemanWunsch failed: GPU support is missing in the library"; break;
+        case sz_missing_gpu_k:
+            error_msg = "NeedlemanWunsch failed: CUDA backend requested but no GPU device scope provided. "
+                        "Pass device=stringzillas.DeviceScope(gpu_device=0) or use serial/CPU capabilities.";
+            break;
+
+        case sz_device_code_mismatch_k:
+            error_msg = "NeedlemanWunsch failed: device-code mismatch between backend and executor. "
+                        "Use a GPU DeviceScope with CUDA backends or select CPU capabilities.";
+            break;
+        case sz_device_memory_mismatch_k:
+            error_msg = "NeedlemanWunsch failed: device-memory mismatch (unified/device-accessible memory required).";
+            break;
         case sz_status_unknown_k: error_msg = "NeedlemanWunsch failed: unknown error"; break;
         default: error_msg = "NeedlemanWunsch failed: unexpected error"; break;
         }
@@ -1142,7 +1174,17 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
         case sz_contains_duplicates_k: error_msg = "NeedlemanWunsch failed: contains duplicates"; break;
         case sz_overflow_risk_k: error_msg = "NeedlemanWunsch failed: overflow risk"; break;
         case sz_unexpected_dimensions_k: error_msg = "NeedlemanWunsch failed: input/output size mismatch"; break;
-        case sz_missing_gpu_k: error_msg = "NeedlemanWunsch failed: GPU support is missing in the library"; break;
+        case sz_missing_gpu_k:
+            error_msg = "NeedlemanWunsch failed: CUDA backend requested but no GPU device scope provided. "
+                        "Pass device=stringzillas.DeviceScope(gpu_device=0) or use serial/CPU capabilities.";
+            break;
+        case sz_device_code_mismatch_k:
+            error_msg = "NeedlemanWunsch failed: device-code mismatch between backend and executor. "
+                        "Use a GPU DeviceScope with CUDA backends or select CPU capabilities.";
+            break;
+        case sz_device_memory_mismatch_k:
+            error_msg = "NeedlemanWunsch failed: device-memory mismatch (unified/device-accessible memory required).";
+            break;
         case sz_status_unknown_k: error_msg = "NeedlemanWunsch failed: unknown error"; break;
         default: error_msg = "NeedlemanWunsch failed: unexpected error"; break;
         }
@@ -1274,7 +1316,17 @@ static int SmithWaterman_init(SmithWaterman *self, PyObject *args, PyObject *kwa
         case sz_contains_duplicates_k: error_msg = "SmithWaterman failed: contains duplicates"; break;
         case sz_overflow_risk_k: error_msg = "SmithWaterman failed: overflow risk"; break;
         case sz_unexpected_dimensions_k: error_msg = "SmithWaterman failed: input/output size mismatch"; break;
-        case sz_missing_gpu_k: error_msg = "SmithWaterman failed: GPU support is missing in the library"; break;
+        case sz_missing_gpu_k:
+            error_msg = "SmithWaterman failed: CUDA backend requested but no GPU device scope provided. "
+                        "Pass device=stringzillas.DeviceScope(gpu_device=0) or use serial/CPU capabilities.";
+            break;
+        case sz_device_code_mismatch_k:
+            error_msg = "SmithWaterman failed: device-code mismatch between backend and executor. "
+                        "Use a GPU DeviceScope with CUDA backends or select CPU capabilities.";
+            break;
+        case sz_device_memory_mismatch_k:
+            error_msg = "SmithWaterman failed: device-memory mismatch (unified/device-accessible memory required).";
+            break;
         case sz_status_unknown_k: error_msg = "SmithWaterman failed: unknown error"; break;
         default: error_msg = "SmithWaterman failed: unexpected error"; break;
         }
@@ -1421,7 +1473,17 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
         case sz_contains_duplicates_k: error_msg = "SmithWaterman failed: contains duplicates"; break;
         case sz_overflow_risk_k: error_msg = "SmithWaterman failed: overflow risk"; break;
         case sz_unexpected_dimensions_k: error_msg = "SmithWaterman failed: input/output size mismatch"; break;
-        case sz_missing_gpu_k: error_msg = "SmithWaterman failed: GPU support is missing in the library"; break;
+        case sz_missing_gpu_k:
+            error_msg = "SmithWaterman failed: CUDA backend requested but no GPU device scope provided. "
+                        "Pass device=stringzillas.DeviceScope(gpu_device=0) or use serial/CPU capabilities.";
+            break;
+        case sz_device_code_mismatch_k:
+            error_msg = "SmithWaterman failed: device-code mismatch between backend and executor. "
+                        "Use a GPU DeviceScope with CUDA backends or select CPU capabilities.";
+            break;
+        case sz_device_memory_mismatch_k:
+            error_msg = "SmithWaterman failed: device-memory mismatch (unified/device-accessible memory required).";
+            break;
         case sz_status_unknown_k: error_msg = "SmithWaterman failed: unknown error"; break;
         default: error_msg = "SmithWaterman failed: unexpected error"; break;
         }

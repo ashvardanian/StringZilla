@@ -517,6 +517,11 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
             auto const &text = texts[task_index];
             auto min_hashes = to_span(min_hashes_per_text[task_index]);
             auto min_counts = to_span(min_counts_per_text[task_index]);
+            // Ensure device-accessible buffers (Unified/Device memory) for inputs and outputs
+            if (!is_device_accessible_memory((void const *)text.data()) ||
+                !is_device_accessible_memory((void const *)min_hashes.data()) ||
+                !is_device_accessible_memory((void const *)min_counts.data()))
+                return {status_t::device_memory_mismatch_k, cudaSuccess};
             tasks[task_index] = task_t {
                 .text_ptr = text.data(),
                 .text_length = text.size(),

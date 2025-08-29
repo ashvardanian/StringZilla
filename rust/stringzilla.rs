@@ -30,6 +30,12 @@ pub enum Status {
     /// GPU support is missing in the library.
     /// Corresponds to `sz_missing_gpu_k = -16` in C.
     MissingGpu = -16,
+    /// Backend-device mismatch (e.g., GPU kernel with CPU/default executor).
+    /// Corresponds to `sz_device_code_mismatch_k = -17` in C.
+    DeviceCodeMismatch = -17,
+    /// Device memory mismatch (e.g., pageable host memory where Unified/Device memory is required).
+    /// Corresponds to `sz_device_memory_mismatch_k = -18` in C.
+    DeviceMemoryMismatch = -18,
     /// A sink-hole status for unknown errors.
     /// Corresponds to `sz_status_unknown_k = -1` in C.
     StatusUnknown = -1,
