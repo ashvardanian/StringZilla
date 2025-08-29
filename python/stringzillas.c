@@ -254,20 +254,20 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
         // Try to get GPU device
         sz_size_t gpu_device;
         if (szs_device_scope_get_gpu_device(device_scope->handle, &gpu_device) == sz_success_k) {
-            // This is a GPU scope - prefer CUDA if available
-            if (default_hardware_capabilities & sz_caps_cuda_k) { *result = sz_cap_cuda_k; }
+            if (default_hardware_capabilities & sz_caps_cuda_k) {
+                *result = sz_caps_cuda_k & default_hardware_capabilities;
+                return 0;
+            }
             else {
                 PyErr_SetString(PyExc_RuntimeError, "GPU DeviceScope requested but CUDA not available");
                 return -1;
             }
-            return 0;
         }
 
         // Try to get CPU cores first
         sz_size_t cpu_cores;
         if (szs_device_scope_get_cpu_cores(device_scope->handle, &cpu_cores) == sz_success_k) {
-            // This is a CPU scope - prefer parallel if available, otherwise serial
-            *result = sz_caps_cpus_k;
+            *result = sz_caps_cpus_k & default_hardware_capabilities;
             return 0;
         }
 
