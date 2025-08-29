@@ -17,8 +17,7 @@ To provide predictably high performance, portable to any modern platform, operat
 [![StringZilla Rust installs](https://img.shields.io/crates/d/stringzilla?logo=rust&label=Rust%20installs)](https://crates.io/crates/stringzilla)
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=Ubuntu)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=Windows)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=MacOS)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
-[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=Alpine%20Linux)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ashvardanian/StringZilla/release.yml?branch=main&label=macOS)](https://github.com/ashvardanian/StringZilla/actions/workflows/release.yml)
 ![StringZilla code size](https://img.shields.io/github/languages/code-size/ashvardanian/stringzilla)
 
 StringZilla is the GodZilla of string libraries, using [SIMD][faq-simd] and [SWAR][faq-swar] to accelerate string operations on modern CPUs.
@@ -280,7 +279,7 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
 > The code was compiled with GCC 12, using `glibc` v2.35.
 > The benchmarks performed on Arm-based Graviton3 AWS `c7g` instances and `r7iz` Intel Sapphire Rapids.
 > Most modern Arm-based 64-bit CPUs will have similar relative speedups.
-> Variance withing x86 CPUs will be larger.
+> Variance within x86 CPUs will be larger.
 > <sup>1</sup> Unlike other libraries, LibC requires strings to be NULL-terminated.
 > <sup>2</sup> Six whitespaces in the ASCII set are: ` \t\n\v\f\r`. Python's and other standard libraries have specialized functions for those.
 > <sup>3</sup> Most Python libraries for strings are also implemented in C.
@@ -299,6 +298,11 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
 ## Functionality
 
 StringZilla is compatible with most modern CPUs, and provides a broad range of functionality.
+
+Glossary:
+
+- StringZilla: single-header C library and C++ wrapper for high-performance string operations.
+- StringZillas: parallel CPU/GPU backends used for large-batch operations and accelerators.
 
 - [x] works on both Little-Endian and Big-Endian architectures.
 - [x] works on 32-bit and 64-bit hardware architectures.
@@ -582,7 +586,7 @@ from pyarrow import foreign_buffer
 from stringzilla import Str
 
 original = "hello"
-view = Str(native)
+view = Str(original)
 arrow = foreign_buffer(view.address, view.nbytes, view)
 ```
 
@@ -774,7 +778,7 @@ Before 2015 GCC string implementation was just 8 bytes, and could only fit 7 cha
 Different STL implementations today have different thresholds for the Small String Optimization.
 Similar to GCC, StringZilla is 32 bytes in size, and similar to Clang it can fit 22 characters on stack.
 Our layout might be preferential, if you want to avoid branches.
-If you use a different compiler, you may want to check it's SSO buffer size with a [simple Gist](https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21).
+If you use a different compiler, you may want to check its SSO buffer size with a [simple Gist](https://gist.github.com/ashvardanian/c197f15732d9855c4e070797adf17b21).
 
 |                       | `libstdc++` in  GCC 13 | `libc++` in Clang 17 | StringZilla |
 | :-------------------- | ---------------------: | -------------------: | ----------: |
@@ -832,7 +836,7 @@ Conceptually:
 3. LibC function names are typically very short and cryptic.
 4. LibC lacks crucial functionality like hashing and doesn't provide primitives for less critical but relevant operations like fuzzy matching.
 
-Something has to be said about its support for UTF8.
+Something has to be said about its support for UTF-8.
 Aside from a single-byte `char` type, LibC provides `wchar_t`:
 
 - The size of `wchar_t` is not consistent across platforms. On Windows, it's typically 16 bits (suitable for UTF-16), while on Unix-like systems, it's usually 32 bits (suitable for UTF-32). This inconsistency can lead to portability issues when writing cross-platform code.
@@ -1114,7 +1118,7 @@ sz::alignment_score(first, second, costs[, gap_score[, allocator]) -> std::ptrdi
 ### Sorting in C and C++
 
 LibC provides `qsort` and STL provides `std::sort`.
-Both have their quarks.
+Both have their quirks.
 The LibC standard has no way to pass a context to the comparison function, that's only possible with platform-specific extensions.
 Those have [different arguments order](https://stackoverflow.com/a/39561369) on every OS.
 
@@ -1123,7 +1127,7 @@ Those have [different arguments order](https://stackoverflow.com/a/39561369) on 
 void qsort_r(void *elements, size_t count, size_t element_width, 
     int (*compare)(void const *left, void const *right, void *context),
     void *context);
-// MacOS and FreeBSD: https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/qsort_r.3.html
+// macOS and FreeBSD: https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/qsort_r.3.html
 void qsort_r(void *elements, size_t count, size_t element_width, 
     void *context,
     int (*compare)(void *context, void const *left, void const *right));
@@ -1204,7 +1208,7 @@ __`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
 > When using the C header-only library one can disable the use of LibC.
 > This may affect the type resolution system on obscure hardware platforms. 
 > Moreover, one may let `stringzilla` override the common symbols like the `memcpy` and `memset` with its own implementations.
-> In that case you can use the [`LD_PRELOAD` trick][ld-preload-trick] to prioritize it's symbols over the ones from the LibC and accelerate existing string-heavy applications without recompiling them.
+> In that case you can use the [`LD_PRELOAD` trick][ld-preload-trick] to prioritize its symbols over the ones from the LibC and accelerate existing string-heavy applications without recompiling them.
 > It also adds a layer of security, as the `stringzilla` isn't [undefined for NULL inputs][redhat-memcpy-ub] like `memcpy(NULL, NULL, 0)`.
 
 [ld-preload-trick]: https://ashvardanian.com/posts/ld-preload-libsee
@@ -1310,9 +1314,9 @@ The package currently covers only the most basic functionality, but is planned t
 
 ```swift
 var s = "Hello, world! Welcome to StringZilla. 👋"
-s[s.findFirst(substring: "world")!...] // "world! Welcome to StringZilla. 👋")    
-s[s.findLast(substring: "o")!...] // "o StringZilla. 👋")
-s[s.findFirst(characterFrom: "aeiou")!...] // "ello, world! Welcome to StringZilla. 👋")
+s[s.findFirst(substring: "world")!...] // "world! Welcome to StringZilla. 👋"
+s[s.findLast(substring: "o")!...] // "o StringZilla. 👋"
+s[s.findFirst(characterFrom: "aeiou")!...] // "ello, world! Welcome to StringZilla. 👋"
 s[s.findLast(characterFrom: "aeiou")!...] // "a. 👋")
 s[s.findFirst(characterNotFrom: "aeiou")!...] // "Hello, world! Welcome to StringZilla. 👋"
 ```
@@ -1549,21 +1553,21 @@ It has the same 128-bit security level as the BLAKE2, and achieves its performan
 All mentioned libraries have undergone extensive testing and are considered production-ready.
 They can definitely accelerate your application, but so may the downstream mixer.
 For instance, when a hash-table is constructed, the hashes are further shrunk to address table buckets.
-If the mixer looses entropy, the performance gains from the hash function may be lost.
+If the mixer loses entropy, the performance gains from the hash function may be lost.
 An example would be power-of-two modulo, which is a common mixer, but is known to be weak.
 One alternative would be the [fastrange](https://github.com/lemire/fastrange) by Daniel Lemire.
 Another one is the [Fibonacci hash trick](https://probablydance.com/2018/06/16/fibonacci-hashing-the-optimization-that-the-world-forgot-or-a-better-alternative-to-integer-modulo/) using the Golden Ratio, also used in StringZilla.
 
 ### Unicode, UTF-8, and Wide Characters
 
-Most StringZilla operations are byte-level, so they work well with ASCII and UTF8 content out of the box.
+Most StringZilla operations are byte-level, so they work well with ASCII and UTF-8 content out of the box.
 In some cases, like edit-distance computation, the result of byte-level evaluation and character-level evaluation may differ.
 So StringZilla provides following functions to work with Unicode:
 
 - `szs_levenshtein_distance_utf8` - computes the Levenshtein distance between two UTF-8 strings.
 - `sz_hamming_distance_utf8` - computes the Hamming distance between two UTF-8 strings.
 
-Java, JavaScript, Python 2, C#, and Objective-C, however, use wide characters (`wchar`) - two byte long codes, instead of the more reasonable fixed-length UTF32 or variable-length UTF8.
+Java, JavaScript, Python 2, C#, and Objective-C, however, use wide characters (`wchar`) - two byte long codes, instead of the more reasonable fixed-length UTF-32 or variable-length UTF-8.
 This leads [to all kinds of offset-counting issues][wide-char-offsets] when facing four-byte long Unicode characters.
 So consider transcoding with [simdutf](https://github.com/simdutf/simdutf), if you are coming from such environments.
 
@@ -1581,7 +1585,7 @@ If you like this project, you may also enjoy [USearch][usearch], [UCall][ucall],
 
 If you like strings and value efficiency, you may also enjoy the following projects:
 
-- [simdutf](https://github.com/simdutf/simdutf) - transcoding UTF8, UTF16, and UTF32 LE and BE.
+- [simdutf](https://github.com/simdutf/simdutf) - transcoding UTF-8, UTF-16, and UTF-32 LE and BE.
 - [hyperscan](https://github.com/intel/hyperscan) - regular expressions with SIMD acceleration.
 - [pyahocorasick](https://github.com/WojciechMula/pyahocorasick) - Aho-Corasick algorithm in Python.
 - [rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) - fast string matching in C++ and Python.
