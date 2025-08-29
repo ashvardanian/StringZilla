@@ -1963,7 +1963,7 @@ struct needleman_wunsch_score {
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        else if (requirements.bytes_per_cell == 2) {
+        else if (requirements.bytes_per_cell <= 2) {
             sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
             status = diagonal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16, executor);
             if (status == status_t::success_k) result_ref = result_i16;
@@ -2065,7 +2065,7 @@ struct smith_waterman_score {
 
         // When dealing with larger arrays, we need to differentiate kernel with different cost aggregation types.
         // Smaller ones will overflow for larger inputs, but using larger-than-needed types will waste memory.
-        else if (requirements.bytes_per_cell == 2) {
+        else if (requirements.bytes_per_cell <= 2) {
             sz_i16_t result_i16 = std::numeric_limits<sz_i16_t>::min();
             status_t status = diagonal_i16_t {substituter_, gap_costs_, alloc_}(first, second, result_i16, executor);
             if (status != status_t::success_k) return status;
