@@ -7,7 +7,19 @@ To run for the CPU backend:
     uv pip install numpy pyarrow pytest pytest-repeat affine-gaps
     SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation
     uv run --no-project python -c "import stringzillas; print(stringzillas.__capabilities__)"
-    uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x
+
+Recommended flags for better diagnostics:
+
+    -s                  show test output (no capture)
+    -vv                 verbose output
+    --maxfail=1         stop at first failure
+    --full-trace        full Python tracebacks
+    -k <pattern>        filter tests by substring
+    -X faulthandler     to dump on fatal signals
+
+Example:
+
+    uv run --no-project python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 
 To run for the CUDA backend:
 

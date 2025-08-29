@@ -135,7 +135,7 @@ jobs:
           print("stringzilla.__capabilities__:", sz.__capabilities__)
           PY
       - name: Test Python
-        run: pytest scripts/test_stringzilla.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
         # JavaScript
       # - name: Set up Node.js
@@ -234,7 +234,7 @@ jobs:
           print("stringzilla.__capabilities__:", sz.__capabilities__)
           PY
       - name: Test Python
-        run: pytest scripts/test_stringzilla.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
         # Rust
       - name: Test Rust
@@ -323,7 +323,7 @@ jobs:
           print("stringzillas.__capabilities__:", szs.__capabilities__)
           PY
       - name: Test Python StringZillas-CPUs
-        run: python -m pytest scripts/test_stringzillas.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 
   test_ubuntu_cuda:
     name: Ubuntu (StringZillas-CUDA)
@@ -408,7 +408,7 @@ jobs:
           print("stringzillas.__capabilities__:", szs.__capabilities__)
           PY
       - name: Test Python StringZillas-CUDA
-        run: python -m pytest scripts/test_stringzillas.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 
   # Temporary workaround to run Swift tests on Linux
   # Based on: https://github.com/swift-actions/setup-swift/issues/591#issuecomment-1685710678
@@ -529,7 +529,7 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
       - name: Test Python
-        run: pytest scripts/test_stringzilla.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
         # Swift
       - name: Set up Swift ${{ env.SWIFT_VERSION }}
@@ -601,7 +601,7 @@ jobs:
           pip install pytest pytest-repeat numpy pyarrow
           python -m pip install .
       - name: Test Python
-        run: pytest scripts/test_stringzilla.py -s -x
+        run: python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 
   test_alpine:
     name: Alpine Linux
