@@ -35,8 +35,8 @@ let package = Package(
             name: "StringZilla",
             dependencies: ["StringZillaC"],
             path: "swift",
-            sources: ["StringProtocol+StringZilla.swift"],
-            exclude: ["Test.swift"]
+            exclude: ["Test.swift"],
+            sources: ["StringProtocol+StringZilla.swift"]
         ),
         .testTarget(
             name: "StringZillaTests",
