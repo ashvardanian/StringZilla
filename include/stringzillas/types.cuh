@@ -104,7 +104,15 @@ struct cuda_status_t {
 inline cuda_status_t gpu_specs_fetch(gpu_specs_t &specs, int device_id = 0) noexcept {
     cudaDeviceProp prop;
     cudaError_t cuda_error = cudaGetDeviceProperties(&prop, device_id);
-    if (cuda_error != cudaSuccess) return {status_t::unknown_k, cuda_error};
+
+    // Distinguish between "no GPU available" vs other CUDA errors for clearer handling upstream.
+    if (cuda_error != cudaSuccess) {
+        status_t status = status_t::unknown_k;
+        if (cuda_error == cudaErrorNoDevice) status = status_t::missing_gpu_k;
+        if (cuda_error == cudaErrorInvalidDevice) status = status_t::missing_gpu_k;
+        if (cuda_error == cudaErrorInsufficientDriver) status = status_t::missing_gpu_k;
+        return {status, cuda_error};
+    }
 
     // Set the GPU specs
     specs.streaming_multiprocessors = prop.multiProcessorCount;

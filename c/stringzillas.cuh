@@ -763,7 +763,8 @@ SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
 #if SZ_USE_CUDA
         sz::gpu_specs_t first_gpu_specs;
         auto specs_status = static_cast<sz::status_t>(szs::gpu_specs_fetch(first_gpu_specs));
-        if (specs_status != sz::status_t::success_k) return static_caps;
+        if (specs_status == sz::status_t::missing_gpu_k) { return cpu_caps; }        // No GPUs available
+        else if (specs_status != sz::status_t::success_k) { return sz_caps_none_k; } // Some bug
         gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_cuda_k);
         if (first_gpu_specs.sm_code >= 30) gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_kepler_k);
         if (first_gpu_specs.sm_code >= 90) gpu_caps = static_cast<sz_capability_t>(gpu_caps | sz_cap_hopper_k);
