@@ -352,7 +352,7 @@ jobs:
   test_ubuntu_swift:
     name: Swift on Linux
     runs-on: ubuntu-22.04
-    container: swift:${{ env.SWIFT_VERSION }}
+    container: swift:latest
     steps:
       - uses: actions/checkout@v4
         with:

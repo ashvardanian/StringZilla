@@ -7,7 +7,6 @@ on:
 env:
   BUILD_TYPE: Release
   GH_TOKEN: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
-  SWIFT_VERSION: 6.0
   PYTHONUTF8: 1
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
