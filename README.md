@@ -330,7 +330,7 @@ Consider contributing, if you need a feature that's not yet implemented.
 
 ## Quick Start: Python 🐍
 
-Python bindings are available on PyPI, and can be installed with `pip`.
+Python bindings are available on PyPI for Python 3.8+, and can be installed with `pip`.
 You can immediately check the installed version and the used hardware capabilities with following commands:
 
 ```bash

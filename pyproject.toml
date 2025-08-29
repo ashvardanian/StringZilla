@@ -3,10 +3,10 @@
 #   - `manylinux` and `musllinux` wheels for Linux on x86_64, aarch64, i686, ppc64le, s390x;
 #   - `macos` wheels for x86_64, arm64, and universal2;
 #   - `windows` wheels for AMD64, x86, and ARM64.
-#   - for Python versions from 3.6 to 3.13.
+#   - for Python versions from 3.8 to 3.13.
 #   - running over 5,000 tests on each wheel.
-#   = meaning 16 platforms * 8 Python versions = 128 builds.
-#   = meaning over 500,000 tests.
+#   = meaning 16 platforms * 6 Python versions = 96 builds.
+#   = meaning over 300,000 tests.
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -129,3 +129,11 @@ environment.SZ_IS_64BIT_ARM_ = "1"
 
 [tool.cibuildwheel.macos.environment]
 MACOSX_DEPLOYMENT_TARGET = "10.11"
+
+[tool.ruff]
+target-version = "py38"
+line-length = 120
+extend-select = [
+  "E", # pycodestyle errors
+  "F", # pyflakes
+]

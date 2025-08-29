@@ -4,7 +4,6 @@ import platform
 from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext
 from typing import List, Tuple, Final
-import sysconfig
 import subprocess
 
 
@@ -288,8 +287,6 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Programming Language :: C++",
         "Programming Language :: Python :: 3 :: Only",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
@@ -306,6 +303,7 @@ setup(
         "Topic :: Text Processing :: General",
         "Topic :: Text Processing :: Indexing",
     ],
+    python_requires=">=3.8",
     include_dirs=[],
     setup_requires=[],
     ext_modules=ext_modules,
