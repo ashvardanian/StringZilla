@@ -79,9 +79,12 @@
  *  @brief  Analogous to `size_t` and `std::size_t`, unsigned integer, identical to pointer size.
  *          64-bit on most platforms where pointers are 64-bit.
  *          32-bit on platforms where pointers are 32-bit.
+ *
+ *  @note   Do not use `defined(SZ_IS_64BIT_X86_)` or `defined(SZ_IS_64BIT_ARM_)` here — those indicate
+ *          the CPU family, not pointer width. Rely on compiler/OS macros only.
  */
-#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64) || defined(SZ_IS_64BIT_ARM_) || \
-    defined(SZ_IS_64BIT_X86_)
+#if defined(__LP64__) || defined(_LP64) || defined(__x86_64__) || defined(_WIN64) || defined(__aarch64__) || \
+    defined(__arm64__) || defined(__arm64) || defined(_M_ARM64)
 #define SZ_IS_64BIT_ (1)
 #else
 #define SZ_IS_64BIT_ (0)
