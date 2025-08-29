@@ -151,12 +151,11 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         "-fPIC",  # to enable dynamic dispatch
     ]
 
-    # Apple Clang doesn't support the `-march=native` argument,
-    # so we must pre-set the CPU generation. Technically the last Intel-based Apple
-    # product was the 2021 MacBook Pro, which had the "Coffee Lake" architecture.
-    # During Universal builds, however, even AVX header cause compilation errors.
+    # We only support single-arch macOS wheels, but not the Universal builds:
+    # - x86_64: enable Haswell (AVX2) only
+    # - arm64: enable NEON only
     macros_args = [
-        ("SZ_USE_HASWELL", "0"),
+        ("SZ_USE_HASWELL", "1" if not is_64bit_arm() and is_64bit_x86() else "0"),
         ("SZ_USE_SKYLAKE", "0"),
         ("SZ_USE_ICE", "0"),
         ("SZ_USE_NEON", "1" if is_64bit_arm() else "0"),

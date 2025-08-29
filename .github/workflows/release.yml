@@ -330,7 +330,7 @@ jobs:
 
   create_macos_library:
     name: Create Library for MacOS ${{ matrix.arch }}
-    runs-on: macos-13
+    runs-on: macos-14
     needs: versioning
     strategy:
       fail-fast: false
