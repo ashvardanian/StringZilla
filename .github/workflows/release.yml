@@ -137,7 +137,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment:
       name: pypi
-      url: https://pypi.org/p/simsimd
+      url: https://pypi.org/p/stringzilla
     permissions:
       id-token: write
 

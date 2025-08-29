@@ -20,15 +20,15 @@ let package = Package(
     targets: [
         .target(
             name: "StringZillaC",
-            path: "include/stringzilla",  // Adjust the path to include your C source files
-            sources: ["../../c/stringzilla.c"],  // Include the source file here
+            path: "include/stringzilla",
+            sources: ["../../c/stringzilla.c"],
             publicHeadersPath: ".",
             cSettings: [
-                .define("SZ_DYNAMIC_DISPATCH", to: "1"),  // Define a macro
-                .define("SZ_AVOID_LIBC", to: "0"),  // We need `malloc` from LibC
-                .define("SZ_DEBUG", to: "0"),  // We don't need any extra assertions in the C layer
-                .headerSearchPath("include/stringzilla"),  // Specify header search paths
-                .unsafeFlags(["-Wall"]),  // Use with caution: specify custom compiler flags
+                .define("SZ_DYNAMIC_DISPATCH", to: "1"),
+                .define("SZ_AVOID_LIBC", to: "0"),
+                .define("SZ_DEBUG", to: "0"),
+                .headerSearchPath("include/stringzilla"),
+                .unsafeFlags(["-Wall"]),
             ]
         ),
         .target(
