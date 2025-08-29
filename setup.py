@@ -132,6 +132,8 @@ def linux_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tu
 
 def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[Tuple[str]]]:
 
+    min_macos = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "11.0")
+
     compile_args = [
         "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
         "-pedantic",  # stick close to the C language standard, avoid compiler extensions
@@ -143,7 +145,7 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         "-Wno-discarded-qualifiers",  # like: passing argument 1 of ‘free’ discards ‘const’ qualifier from pointer target type
         "-fPIC",  # to enable dynamic dispatch
         # "-mfloat-abi=hard",  # NEON intrinsics not available with the soft-float ABI
-        "-mmacosx-version-min=11.0",  # minimum macOS version
+        f"-mmacosx-version-min={min_macos}",  # minimum macOS version (respect env if provided)
     ]
     link_args = [
         "-fPIC",  # to enable dynamic dispatch
