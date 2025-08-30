@@ -2575,10 +2575,13 @@ struct error_costs_26x26ascii_t {
  */
 #pragma region Ice Lake Implementation
 #if SZ_USE_ICE
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
+#if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2"))), \
                              apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
+#endif
 
 /**
  *  @brief Variant of `tile_scorer` - Minimizes Levenshtein distance for inputs under 256 bytes.
@@ -4424,8 +4427,11 @@ struct smith_waterman_score<char, error_costs_256x256_t, linear_gap_costs_t, all
     }
 };
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 #endif            // SZ_USE_ICE
 #pragma endregion // Ice Lake Implementation
 

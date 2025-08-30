@@ -355,12 +355,15 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_serial(                             
  */
 #pragma region Ice Lake Implementation
 #if SZ_USE_ICE
-#pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vnni", "bmi", "bmi2", \
-                   "aes", "vaes")
+#if defined(__clang__)
 #pragma clang attribute push(                                                                                  \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vnni,bmi,bmi2,aes,vaes"))), \
     apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vnni", "bmi", "bmi2", \
+                   "aes", "vaes")
+#endif
 
 SZ_INTERNAL int sz_u64x4_contains_collisions_haswell_(__m256i v) {
     // Assume `v` stores values: [a, b, c, d].
@@ -722,16 +725,22 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_ice(                                
     return sz_success_k;
 }
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 #endif            // SZ_USE_ICE
 #pragma endregion // Ice Lake Implementation
 
 #pragma region SVE Implementation
 #if SZ_USE_SVE
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.2-a+sve")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#endif
 
 SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_sequence,
                                                 sz_sequence_t const *second_sequence, //
@@ -745,8 +754,11 @@ SZ_PUBLIC sz_status_t sz_sequence_intersect_sve(sz_sequence_t const *first_seque
         first_positions, second_positions);
 }
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 #endif            // SZ_USE_SVE
 #pragma endregion // SVE Implementation
 

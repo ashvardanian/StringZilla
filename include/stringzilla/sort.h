@@ -671,9 +671,12 @@ SZ_INTERNAL void sz_pgrams_union_serial_(                                       
  */
 #pragma region Skylake Implementation
 #if SZ_USE_SKYLAKE
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2"))), apply_to = function)
+#endif
 
 /**
  *  @brief The most important part of the QuickSort algorithm partitioning the elements around the pivot.
@@ -907,16 +910,22 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence,
     return sz_success_k;
 }
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 #endif            // SZ_USE_SKYLAKE
-#pragma endregion // Ice Lake Implementation
+#pragma endregion // Skylake Implementation
 
 #pragma region SVE Implementation
 #if SZ_USE_SVE
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.2-a+sve")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve"))), apply_to = function)
+#endif
 
 /**
  *  @brief The most important part of the QuickSort algorithm partitioning the elements around the pivot.
@@ -1132,8 +1141,11 @@ SZ_PUBLIC sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_
     return sz_success_k;
 }
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 #endif            // SZ_USE_SVE
 #pragma endregion // SVE Implementation
 

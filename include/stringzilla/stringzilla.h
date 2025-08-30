@@ -177,9 +177,12 @@ SZ_INTERNAL sz_cptr_t sz_capabilities_to_string_implementation_(sz_capability_t 
  *  Suppressing assembler errors is very complicated, so when dealing with older ARM CPUs it's simpler to compile this
  *  function targeting newer ones.
  */
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("arch=armv8.5-a+sve"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("arch=armv8.5-a+sve")
-#pragma clang attribute push(__attribute__((target("arch=armv8.5-a+sve"))), apply_to = function)
+#endif
 
 /**
  *  @brief  Function to determine the SIMD capabilities of the current 64-bit Arm machine at @b runtime.
@@ -261,8 +264,11 @@ SZ_PUBLIC sz_capability_t sz_capabilities_implementation_arm_(void) {
 #endif
 }
 
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
 #pragma GCC pop_options
+#endif
 
 #endif // SZ_IS_64BIT_ARM_
 

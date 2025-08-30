@@ -1217,9 +1217,12 @@ SZ_INTERNAL sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x 
  *  Alternatively, the BZHI instruction can be used to clear the bits above N.
  */
 #if SZ_USE_SKYLAKE || SZ_USE_ICE
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("bmi,bmi2"))), apply_to = function)
+#elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("bmi", "bmi2")
-#pragma clang attribute push(__attribute__((target("bmi,bmi2"))), apply_to = function)
+#endif
 SZ_INTERNAL __mmask8 sz_u8_mask_until_(sz_size_t n) { return (__mmask8)_bzhi_u32(0xFFu, (unsigned char)n); }
 SZ_INTERNAL __mmask16 sz_u16_mask_until_(sz_size_t n) { return (__mmask16)_bzhi_u32(0xFFFFu, (unsigned char)n); }
 SZ_INTERNAL __mmask32 sz_u32_mask_until_(sz_size_t n) { return (__mmask32)_bzhi_u64(0xFFFFFFFFu, (unsigned char)n); }
@@ -1232,8 +1235,11 @@ SZ_INTERNAL __mmask32 sz_u32_clamp_mask_until_(sz_size_t n) { return n < 32 ? sz
 SZ_INTERNAL __mmask64 sz_u64_clamp_mask_until_(sz_size_t n) {
     return n < 64 ? sz_u64_mask_until_(n) : 0xFFFFFFFFFFFFFFFFull;
 }
-#pragma GCC pop_options
+#if defined(__clang__)
 #pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif
 
 /**
