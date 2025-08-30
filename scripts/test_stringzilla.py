@@ -69,6 +69,21 @@ SEED_VALUES = [
 ]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def log_test_environment():
+    """Automatically log environment info before running any tests."""
+    print(f"=== StringZilla Test Environment ===")
+    print(f"Platform: {platform.platform()}")
+    print(f"Architecture: {platform.machine()}")
+    print(f"Processor: {platform.processor()}")
+    print(f"Python: {platform.python_version()}")
+    print(f"StringZilla version: {sz.__version__}")
+    print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
+    print(f"NumPy available: {numpy_available}")
+    print(f"PyArrow available: {pyarrow_available}")
+    print("=" * 40)
+
+
 def seed_random_generators(seed_value: Optional[int] = None):
     """Seed Python and NumPy RNGs for reproducibility."""
     if seed_value is None:
@@ -950,17 +965,5 @@ def test_invalid_utf8_handling():
         assert len(str_result) > 0
 
 
-def log_environment():
-    print(f"=== StringZilla Test Environment ===")
-    print(f"Platform: {platform.platform()}")
-    print(f"Architecture: {platform.machine()}")
-    print(f"Processor: {platform.processor()}")
-    print(f"Python: {platform.python_version()}")
-    print(f"StringZilla version: {sz.__version__}")
-    print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
-    print("=" * 40)
-
-
 if __name__ == "__main__":
-    log_environment()
     sys.exit(pytest.main(["-x", "-s", __file__]))

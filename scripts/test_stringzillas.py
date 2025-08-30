@@ -45,6 +45,21 @@ import stringzillas as szs
 from stringzilla import Strs
 
 
+@pytest.fixture(scope="session", autouse=True)
+def log_test_environment():
+    """Automatically log environment info before running any tests."""
+    print(f"=== StringZillas Test Environment ===")
+    print(f"Platform: {platform.platform()}")
+    print(f"Architecture: {platform.machine()}")
+    print(f"Processor: {platform.processor()}")
+    print(f"Python: {platform.python_version()}")
+    print(f"StringZilla version: {sz.__version__}")
+    print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
+    print(f"NumPy version: {np.__version__}")
+    print(f"Affine Gaps version: {ag.__version__}")
+    print("=" * 40)
+
+
 def test_library_properties():
     assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
     assert "serial" in sz.__capabilities__, "Serial backend must be present"
@@ -637,17 +652,5 @@ def test_fingerprints_random(batch_size: int, capabilities_mode: str, device_nam
     assert np.array_equal(counts, counts_repeated), "Same input should produce same counts"
 
 
-def log_environment():
-    print(f"=== StringZillas Test Environment ===")
-    print(f"Platform: {platform.platform()}")
-    print(f"Architecture: {platform.machine()}")
-    print(f"Processor: {platform.processor()}")
-    print(f"Python: {platform.python_version()}")
-    print(f"StringZilla version: {sz.__version__}")
-    print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
-    print("=" * 40)
-
-
 if __name__ == "__main__":
-    log_environment()
     sys.exit(pytest.main(["-x", "-s", __file__]))
