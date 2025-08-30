@@ -30,6 +30,8 @@ Example:
     uv run --no-project python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 """
 
+import sys
+import platform
 from random import choice, randint, seed
 from string import ascii_lowercase
 from typing import Optional, Literal
@@ -635,7 +637,17 @@ def test_fingerprints_random(batch_size: int, capabilities_mode: str, device_nam
     assert np.array_equal(counts, counts_repeated), "Same input should produce same counts"
 
 
-if __name__ == "__main__":
-    import sys
+def log_environment():
+    print(f"=== StringZillas Test Environment ===")
+    print(f"Platform: {platform.platform()}")
+    print(f"Architecture: {platform.machine()}")
+    print(f"Processor: {platform.processor()}")
+    print(f"Python: {platform.python_version()}")
+    print(f"StringZilla version: {sz.__version__}")
+    print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
+    print("=" * 40)
 
+
+if __name__ == "__main__":
+    log_environment()
     sys.exit(pytest.main(["-x", "-s", __file__]))

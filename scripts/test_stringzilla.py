@@ -22,12 +22,13 @@ Example:
     uv run --no-project python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 """
 
-from random import choice, randint
+import os
+import sys
+import tempfile
+import platform
+from random import choice, randint, seed
 from string import ascii_lowercase
 from typing import Optional, Sequence, Dict
-import tempfile
-import sys
-import os
 
 import pytest
 
@@ -58,6 +59,25 @@ try:
 except:
     # PyArrow is not installed, most tests will be skipped
     pyarrow_available = False
+
+# Reproducible test seeds for consistent CI runs (keep in sync with test_stringzillas.py)
+SEED_VALUES = [
+    42,  # Classic test seed
+    0,  # Edge case: zero seed
+    1,  # Minimal positive seed
+    314159,  # Pi digits
+]
+
+
+def seed_random_generators(seed_value: Optional[int] = None):
+    """Seed Python and NumPy RNGs for reproducibility."""
+    if seed_value is None:
+        return
+    seed(seed_value)
+    if numpy_available:
+        import numpy as _np  # reuse imported module safely
+
+        _np.random.seed(seed_value)
 
 
 def test_library_properties():
@@ -601,7 +621,9 @@ def test_fuzzy_repetitions(repetitions: int):
 @pytest.mark.parametrize("pattern_length", [1, 2, 3, 4, 5])
 @pytest.mark.parametrize("haystack_length", range(1, 65))
 @pytest.mark.parametrize("variability", range(1, 25))
-def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability: int):
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability: int, seed_value: int):
+    seed_random_generators(seed_value)
     native = get_random_string(variability=variability, length=haystack_length)
     big = Str(native)
     pattern = get_random_string(variability=variability, length=pattern_length)
@@ -623,7 +645,9 @@ def translation_table_to_dict(lut: Sequence) -> Dict[str, str]:
 
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 @pytest.mark.parametrize("length", range(1, 300))
-def test_translations(length: int):
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_translations(length: int, seed_value: int):
+    seed_random_generators(seed_value)
 
     map_identity = np.arange(256, dtype=np.uint8)
     map_invert = np.arange(255, -1, -1, dtype=np.uint8)
@@ -660,7 +684,9 @@ def test_translations(length: int):
 @pytest.mark.repeat(3)
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
-def test_translations_random(length: int):
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_translations_random(length: int, seed_value: int):
+    seed_random_generators(seed_value)
     body = get_random_string(length=length)
     lut = np.random.randint(0, 256, size=256, dtype=np.uint8)
     assert sz.translate(body, memoryview(lut)) == baseline_translate(body, lut)
@@ -668,10 +694,12 @@ def test_translations_random(length: int):
 
 @pytest.mark.repeat(3)
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
-def test_bytesums_random(length: int):
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_bytesums_random(length: int, seed_value: int):
     def sum_bytes(body: str) -> int:
         return sum([ord(c) for c in body])
 
+    seed_random_generators(seed_value)
     body = get_random_string(length=length)
     assert sum_bytes(body) == sz.bytesum(body)
 
@@ -679,30 +707,9 @@ def test_bytesums_random(length: int):
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
 @pytest.mark.parametrize("part_length", [5, 10])
 @pytest.mark.parametrize("variability", [2, 3])
-def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
-    native_list = [get_random_string(variability=variability, length=part_length) for _ in range(list_length)]
-    native_joined = ".".join(native_list)
-    big_joined = Str(native_joined)
-    big_list = big_joined.split(".")
-
-    native_ordered = sorted(native_list)
-    native_order = big_list.argsort()
-    for i in range(list_length):
-        assert native_ordered[i] == native_list[native_order[i]], "Order is wrong"
-        assert native_ordered[i] == str(big_list[int(native_order[i])]), "Split is wrong?!"
-
-    native_list.sort()
-    big_list = big_list.sorted()
-
-    assert len(native_list) == len(big_list)
-    for native_str, big_str in zip(native_list, big_list):
-        assert native_str == str(big_str), "Order is wrong"
-
-
-@pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
-@pytest.mark.parametrize("part_length", [5, 10])
-@pytest.mark.parametrize("variability", [2, 3])
-def test_fuzzy_sorting(list_length: int, part_length: int, variability: int):
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, seed_value: int):
+    seed_random_generators(seed_value)
     native_list = [get_random_string(variability=variability, length=part_length) for _ in range(list_length)]
     native_joined = ".".join(native_list)
     big_joined = Str(native_joined)
@@ -943,6 +950,17 @@ def test_invalid_utf8_handling():
         assert len(str_result) > 0
 
 
-if __name__ == "__main__":
+def log_environment():
+    print(f"=== StringZilla Test Environment ===")
+    print(f"Platform: {platform.platform()}")
+    print(f"Architecture: {platform.machine()}")
+    print(f"Processor: {platform.processor()}")
+    print(f"Python: {platform.python_version()}")
+    print(f"StringZilla version: {sz.__version__}")
+    print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
+    print("=" * 40)
 
+
+if __name__ == "__main__":
+    log_environment()
     sys.exit(pytest.main(["-x", "-s", __file__]))
