@@ -218,6 +218,28 @@ struct gpu_scope_t {
 };
 szs::cuda_executor_t &get_executor(gpu_scope_t &scope) noexcept { return scope.executor; }
 sz::gpu_specs_t get_specs(gpu_scope_t const &scope) noexcept { return scope.specs; }
+
+/** Cached default GPU context (device 0) to avoid repeated scheduling boilerplate */
+struct default_gpu_context_t {
+    sz::status_t status = sz::status_t::unknown_k;
+    szs::cuda_executor_t executor;
+    sz::gpu_specs_t specs;
+};
+
+inline default_gpu_context_t &default_gpu_context() {
+    static default_gpu_context_t ctx = [] {
+        default_gpu_context_t result;
+        auto specs_status = szs::gpu_specs_fetch(result.specs, 0);
+        if (specs_status.status != sz::status_t::success_k) {
+            result.status = specs_status.status;
+            return result;
+        }
+        auto exec_status = result.executor.try_scheduling(0);
+        result.status = exec_status.status;
+        return result;
+    }();
+    return ctx;
+}
 #endif
 
 struct device_scope_t {
@@ -292,6 +314,16 @@ sz_status_t szs_levenshtein_distances_for_(                                     
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
+            }
+            // Try ephemeral GPU on default scope (device 0)
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &ctx = default_gpu_context();
+                if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+                else {
+                    sz::status_t status = engine_variant( //
+                        a_container, b_container, results_strided, ctx.executor, ctx.specs);
+                    result = static_cast<sz_status_t>(status);
+                }
             }
             else { result = sz_device_code_mismatch_k; }
 #else
@@ -452,6 +484,15 @@ sz_status_t szs_needleman_wunsch_scores_for_(                                   
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
             }
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &ctx = default_gpu_context();
+                if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+                else {
+                    sz::status_t status = engine_variant( //
+                        a_container, b_container, results_strided, ctx.executor, ctx.specs);
+                    result = static_cast<sz_status_t>(status);
+                }
+            }
             else { result = sz_status_unknown_k; }
 #else
             result = sz_status_unknown_k; // GPU support is not enabled
@@ -539,6 +580,25 @@ sz_status_t szs_smith_waterman_scores_for_(                                     
                     a_container, b_container, results_strided, //
                     get_executor(device_scope), get_specs(device_scope));
                 result = static_cast<sz_status_t>(status);
+            }
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                sz::gpu_specs_t specs;
+                auto specs_status = szs::gpu_specs_fetch(specs, 0);
+                if (specs_status.status != sz::status_t::success_k) {
+                    result = static_cast<sz_status_t>(specs_status.status);
+                }
+                else {
+                    szs::cuda_executor_t executor;
+                    auto exec_status = executor.try_scheduling(0);
+                    if (exec_status.status != sz::status_t::success_k) {
+                        result = static_cast<sz_status_t>(exec_status.status);
+                    }
+                    else {
+                        sz::status_t status = engine_variant( //
+                            a_container, b_container, results_strided, executor, specs);
+                        result = static_cast<sz_status_t>(status);
+                    }
+                }
             }
             else { result = sz_status_unknown_k; }
 #else
@@ -659,13 +719,22 @@ sz_status_t szs_fingerprints_for_(                                      //
         auto const min_counts_rows = //
             strided_rows<sz_u32_t> {reinterpret_cast<sz_ptr_t>(min_counts), dims, min_counts_stride, texts_count};
 
-        // CPU fallback hashers can only work with CPU-compatible device scopes
+        // GPU fallback hashers can work with GPU scope, or default scope via an ephemeral GPU executor
         if (std::holds_alternative<gpu_scope_t>(device->variants)) {
             auto &device_scope = std::get<gpu_scope_t>(device->variants);
             sz::status_t status = fallback_hashers(                //
                 texts_container, min_hashes_rows, min_counts_rows, //
                 get_executor(device_scope), get_specs(device_scope));
             result = static_cast<sz_status_t>(status);
+        }
+        else if (std::holds_alternative<default_scope_t>(device->variants)) {
+            auto &ctx = default_gpu_context();
+            if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+            else {
+                sz::status_t status = fallback_hashers( //
+                    texts_container, min_hashes_rows, min_counts_rows, ctx.executor, ctx.specs);
+                result = static_cast<sz_status_t>(status);
+            }
         }
         else { result = sz_status_unknown_k; }
     };
@@ -702,6 +771,22 @@ sz_status_t szs_fingerprints_for_(                                      //
                         get_executor(device_scope), get_specs(device_scope));
                     result = static_cast<sz_status_t>(status);
                     if (result != sz_success_k) break;
+                }
+            }
+            else if (std::holds_alternative<default_scope_t>(device->variants)) {
+                auto &ctx = default_gpu_context();
+                if (ctx.status != sz::status_t::success_k) { result = static_cast<sz_status_t>(ctx.status); }
+                else {
+                    for (std::size_t i = 0; i < unrolled_hashers.size(); ++i) {
+                        auto &engine_variant = unrolled_hashers[i];
+                        sz::status_t status = engine_variant(                                             //
+                            texts_container,                                                              //
+                            min_hashes_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
+                            min_counts_rows.template shifted<fingerprint_slice_k>(i * bytes_per_slice_k), //
+                            ctx.executor, ctx.specs);
+                        result = static_cast<sz_status_t>(status);
+                        if (result != sz_success_k) break;
+                    }
                 }
             }
             else { result = sz_status_unknown_k; }

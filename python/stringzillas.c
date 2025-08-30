@@ -135,14 +135,8 @@ static inline sz_bool_t try_swap_to_unified_allocator(PyObject *strs_obj) {
  *  @brief Helper function to determine if unified memory is required based on capabilities and device scope.
  *  @param[in] capabilities The capabilities bitmask of the current engine.
  */
-static inline sz_bool_t requires_unified_memory(sz_capability_t capabilities, szs_device_scope_t device_handle) {
-    // Only relevant if CUDA capability is enabled
-    if ((capabilities & sz_cap_cuda_k) == 0) return sz_false_k;
-
-    // Check that the executor is a GPU device scope
-    sz_size_t gpu_device = 0;
-    if (szs_device_scope_get_gpu_device(device_handle, &gpu_device) == sz_success_k) return sz_true_k;
-    return sz_false_k;
+static inline sz_bool_t requires_unified_memory(sz_capability_t capabilities) {
+    return (capabilities & sz_cap_cuda_k) != 0;
 }
 
 #pragma endregion
@@ -452,8 +446,8 @@ static PyObject *LevenshteinDistances_call(LevenshteinDistances *self, PyObject 
     sz_status_t (*kernel_punned)(szs_levenshtein_distances_t, szs_device_scope_t, void *, void *, sz_size_t *,
                                  sz_size_t) = NULL;
 
-    // Swap allocators only when using CUDA with a GPU device
-    if (requires_unified_memory(self->capabilities, device_handle))
+    // Swap allocators only when using CUDA with a GPU device (inputs must be unified)
+    if (requires_unified_memory(self->capabilities))
         if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
 
     // Handle 32-bit tape inputs
@@ -748,8 +742,8 @@ static PyObject *LevenshteinDistancesUTF8_call(LevenshteinDistancesUTF8 *self, P
     sz_status_t (*kernel_punned)(szs_levenshtein_distances_t, szs_device_scope_t, void *, void *, sz_size_t *,
                                  sz_size_t) = NULL;
 
-    // Swap allocators only when using CUDA with a GPU device
-    if (requires_unified_memory(self->capabilities, device_handle))
+    // Swap allocators when engine supports CUDA
+    if (requires_unified_memory(self->capabilities))
         if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
 
     // Handle 32-bit tape inputs
@@ -1079,8 +1073,8 @@ static PyObject *NeedlemanWunsch_call(NeedlemanWunsch *self, PyObject *args, PyO
     sz_status_t (*kernel_punned)(szs_needleman_wunsch_scores_t, szs_device_scope_t, void const *, void const *,
                                  sz_ssize_t *, sz_size_t) = NULL;
 
-    // Swap allocators only when using CUDA with a GPU device
-    if (requires_unified_memory(self->capabilities, device_handle))
+    // Swap allocators only when using CUDA with a GPU device (inputs must be unified)
+    if (requires_unified_memory(self->capabilities))
         if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
 
     // Handle 32-bit tape inputs
@@ -1393,8 +1387,8 @@ static PyObject *SmithWaterman_call(SmithWaterman *self, PyObject *args, PyObjec
     sz_status_t (*kernel_punned)(szs_smith_waterman_scores_t, szs_device_scope_t, void const *, void const *,
                                  sz_ssize_t *, sz_size_t) = NULL;
 
-    // Swap allocators only when using CUDA with a GPU device
-    if (requires_unified_memory(self->capabilities, device_handle))
+    // Swap allocators only when using CUDA with a GPU device (inputs must be unified)
+    if (requires_unified_memory(self->capabilities))
         if (!try_swap_to_unified_allocator(a_obj) || !try_swap_to_unified_allocator(b_obj)) return NULL;
 
     // Handle 32-bit tape inputs
@@ -1744,7 +1738,7 @@ static PyObject *Fingerprints_call(Fingerprints *self, PyObject *args, PyObject 
     }
 
     // Swap allocators only when using CUDA with a GPU device (inputs must be unified)
-    sz_bool_t need_unified = requires_unified_memory(self->capabilities, device_handle);
+    sz_bool_t need_unified = requires_unified_memory(self->capabilities);
     if (need_unified)
         if (!try_swap_to_unified_allocator(texts_obj)) return NULL;
 

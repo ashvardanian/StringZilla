@@ -6,6 +6,7 @@ To run locally:
 
     uv pip install numpy pyarrow pytest pytest-repeat
     uv pip install -e . --force-reinstall --no-build-isolation
+    uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x
 
 Recommended flags for better diagnostics:
 
