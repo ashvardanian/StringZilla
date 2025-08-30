@@ -374,7 +374,7 @@ void test_equivalence() {
         sz_hash_state_stream_ice, sz_hash_state_fold_ice);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_ice);
 #endif
-#if SZ_USE_NEON
+#if SZ_USE_NEON_AES
     test_hash_equivalence(                                      //
         sz_hash_serial, sz_hash_state_init_serial,              //
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //
@@ -382,7 +382,7 @@ void test_equivalence() {
         sz_hash_state_stream_neon, sz_hash_state_fold_neon);
     test_random_generator_equivalence(sz_fill_random_serial, sz_fill_random_neon);
 #endif
-#if SZ_USE_SVE2
+#if SZ_USE_SVE2_AES
     test_hash_equivalence(                                      //
         sz_hash_serial, sz_hash_state_init_serial,              //
         sz_hash_state_stream_serial, sz_hash_state_fold_serial, //

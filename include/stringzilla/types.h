@@ -260,6 +260,22 @@
 #endif
 #endif
 
+#if !defined(SZ_USE_NEON_AES)
+#ifdef __ARM_FEATURE_AES
+#define SZ_USE_NEON_AES (1)
+#else
+#define SZ_USE_NEON_AES (0)
+#endif
+#endif
+
+#if !defined(SZ_USE_SVE2_AES)
+#ifdef __ARM_FEATURE_SVE2_AES
+#define SZ_USE_SVE2_AES (1)
+#else
+#define SZ_USE_SVE2_AES (0)
+#endif
+#endif
+
 #if !defined(SZ_USE_CUDA)
 #ifdef __NVCC__
 #define SZ_USE_CUDA (1)

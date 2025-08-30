@@ -229,6 +229,8 @@ SZ_PUBLIC void sz_hash_state_stream_serial(sz_hash_state_t *state, sz_cptr_t tex
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_serial(sz_hash_state_t const *state);
 
+#if SZ_USE_HASWELL
+
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length);
 
@@ -246,6 +248,10 @@ SZ_PUBLIC void sz_hash_state_stream_haswell(sz_hash_state_t *state, sz_cptr_t te
 
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_haswell(sz_hash_state_t const *state);
+
+#endif
+
+#if SZ_USE_SKYLAKE
 
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length);
@@ -265,6 +271,10 @@ SZ_PUBLIC void sz_hash_state_stream_skylake(sz_hash_state_t *state, sz_cptr_t te
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_skylake(sz_hash_state_t const *state);
 
+#endif
+
+#if SZ_USE_ICE
+
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_ice(sz_cptr_t text, sz_size_t length);
 
@@ -283,8 +293,16 @@ SZ_PUBLIC void sz_hash_state_stream_ice(sz_hash_state_t *state, sz_cptr_t text, 
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_ice(sz_hash_state_t const *state);
 
+#endif
+
+#if SZ_USE_NEON
+
 /** @copydoc sz_bytesum */
 SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length);
+
+#endif
+
+#if SZ_USE_NEON_AES
 
 /** @copydoc sz_hash */
 SZ_PUBLIC sz_u64_t sz_hash_neon(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
@@ -300,6 +318,41 @@ SZ_PUBLIC void sz_hash_state_stream_neon(sz_hash_state_t *state, sz_cptr_t text,
 
 /** @copydoc sz_hash_state_fold */
 SZ_PUBLIC sz_u64_t sz_hash_state_fold_neon(sz_hash_state_t const *state);
+
+#endif
+
+#if SZ_USE_SVE
+
+/** @copydoc sz_bytesum */
+SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length);
+
+#endif
+
+#if SZ_USE_SVE2
+
+/** @copydoc sz_bytesum */
+SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length);
+
+#endif
+
+#if SZ_USE_SVE2_AES
+
+/** @copydoc sz_hash */
+SZ_PUBLIC sz_u64_t sz_hash_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
+
+/** @copydoc sz_fill_random */
+SZ_PUBLIC void sz_fill_random_sve2(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+
+/** @copydoc sz_hash_state_init */
+SZ_PUBLIC void sz_hash_state_init_sve2(sz_hash_state_t *state, sz_u64_t seed);
+
+/** @copydoc sz_hash_state_stream */
+SZ_PUBLIC void sz_hash_state_stream_sve2(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
+
+/** @copydoc sz_hash_state_fold */
+SZ_PUBLIC sz_u64_t sz_hash_state_fold_sve2(sz_hash_state_t const *state);
+
+#endif
 
 #pragma endregion // Core API
 
@@ -1922,8 +1975,8 @@ SZ_INTERNAL void sz_hash_minimal_x4_update_ice_(sz_hash_minimal_x4_t_ *state, __
 #pragma region NEON Implementation
 #if SZ_USE_NEON
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+simd+crypto")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd+crypto"))), apply_to = function)
+#pragma GCC target("arch=armv8.2-a+simd")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd"))), apply_to = function)
 
 SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
     uint64x2_t sum_vec = vdupq_n_u64(0);
@@ -1942,6 +1995,17 @@ SZ_PUBLIC sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
     while (length--) sum += *(sz_u8_t const *)text++; // Same as the scalar version
     return sum;
 }
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+#endif            // SZ_USE_NEON
+#pragma endregion // NEON Implementation
+
+#pragma region NEON AES Implementation
+#if SZ_USE_NEON_AES
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+simd+crypto+aes")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+simd+crypto+aes"))), apply_to = function)
 
 /**
  *  @brief  Emulates the Intel's AES-NI `AESENC` instruction on Arm NEON.
@@ -2303,7 +2367,7 @@ SZ_PUBLIC void sz_fill_random_neon(sz_ptr_t text, sz_size_t length, sz_u64_t non
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif            // SZ_USE_NEON
-#pragma endregion // NEON Implementation
+#pragma endregion // NEON AES Implementation
 
 /*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
  *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs.
@@ -2340,11 +2404,11 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
  *
  *  @see https://stackoverflow.com/a/73218637/2766161
  */
-#pragma region SVE Implementation
+#pragma region SVE2 Implementation
 #if SZ_USE_SVE2
 #pragma GCC push_options
-#pragma GCC target("arch=armv8.2-a+sve+sve2+sve2-aes")
-#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2+sve2-aes"))), apply_to = function)
+#pragma GCC target("arch=armv8.2-a+sve+sve2")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2"))), apply_to = function)
 
 SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
     sz_u64_t sum = 0;
@@ -2370,6 +2434,17 @@ SZ_PUBLIC sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
 
     return sum;
 }
+
+#pragma clang attribute pop
+#pragma GCC pop_options
+#endif            // SZ_USE_SVE
+#pragma endregion // SVE2 Implementation
+
+#pragma region SVE2 AES Implementation
+#if SZ_USE_SVE2_AES
+#pragma GCC push_options
+#pragma GCC target("arch=armv8.2-a+sve+sve2+sve2-aes")
+#pragma clang attribute push(__attribute__((target("arch=armv8.2-a+sve+sve2+sve2-aes"))), apply_to = function)
 
 /**
  *  @brief  Emulates the Intel's AES-NI `AESENC` instruction with Arm SVE2.
@@ -2504,7 +2579,7 @@ SZ_PUBLIC void sz_hash_sve2_upto16x16_(char texts[16][16], sz_size_t length[16],
 #pragma clang attribute pop
 #pragma GCC pop_options
 #endif            // SZ_USE_SVE2
-#pragma endregion // SVE Implementation
+#pragma endregion // SVE2 Implementation
 
 /*  Pick the right implementation for the string search algorithms.
  *  To override this behavior and precompile all backends - set `SZ_DYNAMIC_DISPATCH` to 1.
@@ -2537,9 +2612,9 @@ SZ_DYNAMIC sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     return sz_hash_skylake(text, length, seed);
 #elif SZ_USE_HASWELL
     return sz_hash_haswell(text, length, seed);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     return sz_hash_sve2(text, length, seed);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     return sz_hash_neon(text, length, seed);
 #else
     return sz_hash_serial(text, length, seed);
@@ -2553,9 +2628,9 @@ SZ_DYNAMIC void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) 
     sz_fill_random_skylake(text, length, nonce);
 #elif SZ_USE_HASWELL
     sz_fill_random_haswell(text, length, nonce);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     sz_fill_random_sve2(text, length, nonce);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     sz_fill_random_neon(text, length, nonce);
 #else
     sz_fill_random_serial(text, length, nonce);
@@ -2569,9 +2644,9 @@ SZ_DYNAMIC void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed) {
     sz_hash_state_init_skylake(state, seed);
 #elif SZ_USE_HASWELL
     sz_hash_state_init_haswell(state, seed);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     sz_hash_state_init_sve2(state, seed);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     sz_hash_state_init_neon(state, seed);
 #else
     sz_hash_state_init_serial(state, seed);
@@ -2585,9 +2660,9 @@ SZ_DYNAMIC void sz_hash_state_stream(sz_hash_state_t *state, sz_cptr_t text, sz_
     sz_hash_state_stream_skylake(state, text, length);
 #elif SZ_USE_HASWELL
     sz_hash_state_stream_haswell(state, text, length);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     sz_hash_state_stream_sve2(state, text, length);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     sz_hash_state_stream_neon(state, text, length);
 #else
     sz_hash_state_stream_serial(state, text, length);
@@ -2601,9 +2676,9 @@ SZ_DYNAMIC sz_u64_t sz_hash_state_fold(sz_hash_state_t const *state) {
     return sz_hash_state_fold_skylake(state);
 #elif SZ_USE_HASWELL
     return sz_hash_state_fold_haswell(state);
-#elif SZ_USE_SVE2
+#elif SZ_USE_SVE2_AES
     return sz_hash_state_fold_sve2(state);
-#elif SZ_USE_NEON
+#elif SZ_USE_NEON_AES
     return sz_hash_state_fold_neon(state);
 #else
     return sz_hash_state_fold_serial(state);

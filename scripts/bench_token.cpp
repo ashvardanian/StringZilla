@@ -178,10 +178,10 @@ void bench_hashing(environment_t const &env) {
 #if SZ_USE_ICE
     bench_unary(env, "sz_hash_ice", validator, hash_from_sz<sz_hash_ice> {env}).log(base, base_stl);
 #endif
-#if SZ_USE_SVE2
+#if SZ_USE_SVE2_AES
     bench_unary(env, "sz_hash_sve2", validator, hash_from_sz<sz_hash_sve2> {env}).log(base, base_stl);
 #endif
-#if SZ_USE_NEON
+#if SZ_USE_NEON_AES
     bench_unary(env, "sz_hash_neon", validator, hash_from_sz<sz_hash_neon> {env}).log(base, base_stl);
 #endif
 }
@@ -210,7 +210,7 @@ void bench_stream_hashing(environment_t const &env) {
                 hash_stream_from_sz<sz_hash_state_init_ice, sz_hash_state_stream_ice, sz_hash_state_fold_ice> {env})
         .log(base, base_stl);
 #endif
-#if SZ_USE_NEON
+#if SZ_USE_NEON_AES
     bench_unary(env, "sz_hash_stream_neon", validator,
                 hash_stream_from_sz<sz_hash_state_init_neon, sz_hash_state_stream_neon, sz_hash_state_fold_neon> {env})
         .log(base, base_stl);

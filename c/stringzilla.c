@@ -187,11 +187,6 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
         impl->lookup = sz_lookup_neon;
 
         impl->bytesum = sz_bytesum_neon;
-        impl->hash = sz_hash_neon;
-        impl->hash_state_init = sz_hash_state_init_neon;
-        impl->hash_state_stream = sz_hash_state_stream_neon;
-        impl->hash_state_fold = sz_hash_state_fold_neon;
-        impl->fill_random = sz_fill_random_neon;
 
         impl->find = sz_find_neon;
         impl->rfind = sz_rfind_neon;
@@ -202,11 +197,49 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     }
 #endif
 
+#if SZ_USE_NEON_AES
+    if (caps & sz_cap_neon_aes_k) {
+        impl->hash = sz_hash_neon;
+        impl->hash_state_init = sz_hash_state_init_neon;
+        impl->hash_state_stream = sz_hash_state_stream_neon;
+        impl->hash_state_fold = sz_hash_state_fold_neon;
+        impl->fill_random = sz_fill_random_neon;
+    }
+#endif
+
 #if SZ_USE_SVE
     if (caps & sz_cap_sve_k) {
+        impl->equal = sz_equal_sve;
+        impl->order = sz_order_sve;
+
+        impl->copy = sz_copy_sve;
+        impl->move = sz_move_sve;
+        impl->fill = sz_fill_sve;
+
+        impl->find = sz_find_sve;
+        // TODO: impl->rfind = sz_rfind_sve;
+        impl->find_byte = sz_find_byte_sve;
+        impl->rfind_byte = sz_rfind_byte_sve;
+
+        impl->bytesum = sz_bytesum_sve;
+
         impl->sequence_argsort = sz_sequence_argsort_sve;
         impl->sequence_intersect = sz_sequence_intersect_sve;
         impl->pgrams_sort = sz_pgrams_sort_sve;
+    }
+#endif
+
+#if SZ_USE_SVE2
+    if (caps & sz_cap_sve2_k) { impl->bytesum = sz_bytesum_sve2; }
+#endif
+
+#if SZ_USE_SVE2_AES
+    if (caps & sz_cap_sve2_aes_k) {
+        impl->hash = sz_hash_sve2;
+        impl->hash_state_init = sz_hash_state_init_sve2;
+        impl->hash_state_stream = sz_hash_state_stream_sve2;
+        impl->hash_state_fold = sz_hash_state_fold_sve2;
+        impl->fill_random = sz_fill_random_sve2;
     }
 #endif
 }

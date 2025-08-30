@@ -148,7 +148,7 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
             .log(base_umap);
     }
 #endif
-#if SZ_USE_NEON
+#if SZ_USE_NEON_AES
     {
         auto callable_map =
             callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<sz_order_neon>>>(env);
