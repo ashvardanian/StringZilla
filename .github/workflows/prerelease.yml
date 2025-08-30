@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -52,7 +52,7 @@ jobs:
       CXX: g++-12
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -160,7 +160,7 @@ jobs:
       CXX: clang++-16
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -262,7 +262,7 @@ jobs:
       CXX: g++-12
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -333,7 +333,7 @@ jobs:
       CXX: g++-12
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -417,7 +417,7 @@ jobs:
     runs-on: ubuntu-22.04
     container: swift:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
       - name: Test Swift
@@ -443,7 +443,7 @@ jobs:
             target: aarch64-linux-gnu
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -474,7 +474,7 @@ jobs:
           cmake --build build_artifacts --config RelWithDebInfo
 
         # We can't run the produced builds, but we can make sure they exist
-      - name: Test artifacts presense
+      - name: Test artifacts presence
         run: |
           test -e build_artifacts/libstringzilla_bare.so
           test -e build_artifacts/libstringzilla_shared.so
@@ -485,7 +485,7 @@ jobs:
     runs-on: macos-14
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -552,7 +552,7 @@ jobs:
     name: Windows
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
       - uses: ilammy/msvc-dev-cmd@v1
@@ -618,7 +618,7 @@ jobs:
         run: |
           echo "Alpine: $(cat /etc/alpine-release 2>/dev/null || echo 'unknown')"
           git --version || echo "git not installed"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -661,7 +661,7 @@ jobs:
         os: [ubuntu-24.04, macos-13, windows-2022]
         python-version: ["38", "39", "310", "311", "312", "313"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
       - name: Set up Python
