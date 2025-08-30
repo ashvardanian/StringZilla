@@ -135,7 +135,13 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
     min_macos = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "11.0")
     
     # Force single-architecture builds to prevent `universal2`
-    current_arch = platform.machine()
+    if is_64bit_arm():
+        current_arch_flags = ["-arch", "arm64"]
+    elif is_64bit_x86():
+        current_arch_flags = ["-arch", "x86_64"]
+    else:
+        current_arch_flags = []
+
     compile_args = [
         "-std=c++17" if use_cpp else "-std=c99",  # use C++17 for StringZillas, C99 for StringZilla
         "-pedantic",  # stick close to the C language standard, avoid compiler extensions
@@ -148,11 +154,11 @@ def darwin_settings(use_cpp: bool = False) -> Tuple[List[str], List[str], List[T
         "-fPIC",  # to enable dynamic dispatch
         # "-mfloat-abi=hard",  # NEON intrinsics not available with the soft-float ABI
         f"-mmacosx-version-min={min_macos}",  # minimum macOS version (respect env if provided)
-        "-arch", current_arch,  # force single architecture to prevent universal2 builds
+        *current_arch_flags,  # force single architecture to prevent universal2 builds
     ]
     link_args = [
         "-fPIC",  # to enable dynamic dispatch
-        "-arch", current_arch,  # force single architecture to prevent universal2 builds
+        *current_arch_flags,  # force single architecture to prevent universal2 builds
     ]
 
     # We only support single-arch macOS wheels, but not the Universal builds:
