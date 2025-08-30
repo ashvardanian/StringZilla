@@ -493,7 +493,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew update
-          brew install cmake
+          brew reinstall cmake
       - name: Build C/C++
         run: |
           cmake -B build_artifacts \
