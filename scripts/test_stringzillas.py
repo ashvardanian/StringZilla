@@ -55,6 +55,8 @@ def log_test_environment():
     print(f"Python: {platform.python_version()}")
     print(f"StringZilla version: {sz.__version__}")
     print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
+    print(f"StringZillas version: {szs.__version__}")
+    print(f"StringZillas capabilities: {sorted(szs.__capabilities__)}")
     print(f"NumPy version: {np.__version__}")
     print(f"Affine Gaps version: {ag.__version__}")
     print("=" * 40)

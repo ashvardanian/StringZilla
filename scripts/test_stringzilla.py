@@ -730,6 +730,23 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, see
     big_joined = Str(native_joined)
     big_list = big_joined.split(".")
 
+    # Before testing sorting, validate pairwise comparator consistency
+    def py_cmp(a: str, b: str) -> int:
+        return -1 if a < b else (1 if a > b else 0)
+
+    def sz_cmp(a: str, b: str) -> int:
+        sa, sb = Str(a), Str(b)
+        if sa < sb:
+            return -1
+        if sa > sb:
+            return 1
+        return 0
+
+    # Check every consecutive pair a[i], a[i+1]
+    for i in range(len(native_list) - 1):
+        a, b = native_list[i], native_list[i + 1]
+        assert py_cmp(a, b) == sz_cmp(a, b), f"Comparator mismatch at {i}: '{a}' vs '{b}'"
+
     native_ordered = sorted(native_list)
     native_order = big_list.argsort()
     for i in range(list_length):
