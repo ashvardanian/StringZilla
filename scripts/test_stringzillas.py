@@ -28,7 +28,7 @@ Recommended flags for better diagnostics:
 
 Example:
 
-    uv run --no-project python -m pytest scripts/test_stringzillas.py -s -x --verbose
+    SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-isolation --verbose
     uv run --no-project python -X faulthandler -m pytest scripts/test_stringzillas.py -s -vv --maxfail=1 --full-trace
 """
 import os

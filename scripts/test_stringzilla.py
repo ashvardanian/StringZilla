@@ -20,7 +20,7 @@ Recommended flags for better diagnostics:
 
 Example:
 
-    uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x --verbose
+    uv pip install -e . --force-reinstall --no-build-isolation --verbose
     uv run --no-project python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 """
 

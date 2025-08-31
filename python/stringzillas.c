@@ -172,8 +172,6 @@ static PyObject *DeviceScope_new(PyTypeObject *type, PyObject *args, PyObject *k
 static int DeviceScope_init(DeviceScope *self, PyObject *args, PyObject *kwargs) {
     sz_size_t cpu_cores = 0;
     sz_size_t gpu_device = 0;
-    int has_cpu_cores = 0;
-    int has_gpu_device = 0;
     PyObject *cpu_cores_obj = NULL;
     PyObject *gpu_device_obj = NULL;
 
@@ -1955,6 +1953,7 @@ PyMODINIT_FUNC PyInit_stringzillas(void) {
 #if defined(NPY_VERSION)
     import_array();
     numpy_available = 1;
+    sz_unused_(numpy_module);
 #else
     // Try to import numpy module dynamically
     numpy_module = PyImport_ImportModule("numpy");

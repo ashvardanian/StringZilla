@@ -4956,19 +4956,6 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
         // Grow data buffer if needed (doubling strategy)
         while (total_bytes + item_length > data_capacity) {
             sz_size_t new_capacity = data_capacity * 2;
-            if (new_capacity < data_capacity) { // Overflow check
-                new_capacity = SIZE_MAX;
-                if (total_bytes + item_length > new_capacity) {
-                    Py_DECREF(item);
-                    allocator.free(data_buffer, data_capacity, allocator.handle);
-                    allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)),
-                                   allocator.handle);
-                    Py_DECREF(iterator);
-                    PyErr_SetString(PyExc_MemoryError, "String data too large");
-                    return -1;
-                }
-            }
-
             sz_ptr_t new_buffer = (sz_ptr_t)allocator.allocate(new_capacity, allocator.handle);
             if (!new_buffer) {
                 Py_DECREF(item);

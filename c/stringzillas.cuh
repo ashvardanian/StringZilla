@@ -845,8 +845,8 @@ SZ_DYNAMIC sz_capability_t szs_capabilities(void) {
     static sz_capability_t static_caps = sz_caps_none_k;
     if (static_caps == sz_caps_none_k) {
         sz_capability_t cpu_caps = sz_capabilities_implementation_();
-        sz_capability_t gpu_caps = sz_caps_none_k;
 #if SZ_USE_CUDA
+        sz_capability_t gpu_caps = sz_caps_none_k;
         sz::gpu_specs_t first_gpu_specs;
         auto specs_status = static_cast<sz::status_t>(szs::gpu_specs_fetch(first_gpu_specs));
         if (specs_status == sz::status_t::missing_gpu_k) { return cpu_caps; }        // No GPUs available
@@ -975,12 +975,12 @@ SZ_DYNAMIC void szs_device_scope_free(szs_device_scope_t scope_punned) {
 
 SZ_DYNAMIC sz_status_t szs_device_scope_get_capabilities(szs_device_scope_t scope_punned,
                                                          sz_capability_t *capabilities) {
-    if (scope_punned == nullptr || capabilities == nullptr) return sz_status_unknown_k;
-    auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
 
+    if (scope_punned == nullptr || capabilities == nullptr) return sz_status_unknown_k;
     sz_capability_t system_caps = szs_capabilities();
 
 #if SZ_USE_CUDA
+    auto *scope = reinterpret_cast<device_scope_t *>(scope_punned);
     if (std::holds_alternative<gpu_scope_t>(scope->variants)) {
         // For GPU scope, intersect system capabilities with CUDA capabilities
         *capabilities = static_cast<sz_capability_t>(system_caps & sz_caps_cuda_k);
@@ -1299,7 +1299,7 @@ SZ_DYNAMIC sz_status_t szs_needleman_wunsch_scores_init(                       /
     auto const linear_costs = szs::linear_gap_costs_t {open};
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
     auto substitution_costs = szs::error_costs_256x256_t {};
-    std::memcpy(&substitution_costs, subs, sizeof(substitution_costs));
+    std::memcpy((void *)&substitution_costs, (void const *)subs, sizeof(substitution_costs));
 
 #if SZ_USE_ICE
     bool const can_use_ice = (capabilities & sz_cap_ice_k) == sz_cap_ice_k;
@@ -1439,7 +1439,7 @@ SZ_DYNAMIC sz_status_t szs_smith_waterman_scores_init(                         /
     auto const linear_costs = szs::linear_gap_costs_t {open};
     auto const affine_costs = szs::affine_gap_costs_t {open, extend};
     auto substitution_costs = szs::error_costs_256x256_t {};
-    std::memcpy(&substitution_costs, subs, sizeof(substitution_costs));
+    std::memcpy((void *)&substitution_costs, (void const *)subs, sizeof(substitution_costs));
 
 #if SZ_USE_ICE
     bool const can_use_ice = (capabilities & sz_cap_ice_k) == sz_cap_ice_k;
