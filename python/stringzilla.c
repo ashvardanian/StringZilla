@@ -332,6 +332,31 @@ void permute(sz_string_view_t *array, sz_sorted_idx_t *order, sz_size_t length) 
 }
 
 /**
+ *  @brief  Helper function to check if a Python object represents a mutable buffer.
+ *          Returns sz_true_k if the object is mutable (can be written to), sz_false_k if immutable.
+ *          Sets a Python exception if immutable.
+ */
+SZ_INTERNAL sz_bool_t sz_py_is_mutable(PyObject *object) {
+    if (PyUnicode_Check(object)) {
+        PyErr_SetString(PyExc_TypeError, "str objects are immutable (use bytearray instead)");
+        return sz_false_k;
+    }
+    else if (PyBytes_Check(object)) {
+        PyErr_SetString(PyExc_TypeError, "bytes objects are immutable (use bytearray instead)");
+        return sz_false_k;
+    }
+    else if (PyMemoryView_Check(object)) {
+        Py_buffer *view = PyMemoryView_GET_BUFFER(object);
+        if (view->readonly) {
+            PyErr_SetString(PyExc_TypeError, "memoryview is read-only");
+            return sz_false_k;
+        }
+    }
+    // Everything else is optimistically considered mutable
+    return sz_true_k;
+}
+
+/**
  *  @brief  Helper function to export a Python string-like object into a `sz_string_view_t`.
  *          On failure, sets a Python exception and returns 0.
  */
@@ -1296,6 +1321,8 @@ static PyObject *Str_fill_random(PyObject *self, PyObject *const *args, Py_ssize
         return NULL;
     }
 
+    if (sz_py_is_mutable(buffer_obj) == sz_false_k) return NULL;
+
     if (start < 0 || (end != PY_SSIZE_T_MAX && end < 0)) {
         PyErr_SetString(PyExc_ValueError, "start/end must be non-negative");
         return NULL;
@@ -1309,8 +1336,8 @@ static PyObject *Str_fill_random(PyObject *self, PyObject *const *args, Py_ssize
     buf.length -= start;
     if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < buf.length) { buf.length = (sz_size_t)(end - start); }
 
-    if (buf.length > 0) {
-        sz_fill_random((sz_ptr_t)buf.start, buf.length, nonce);
+    sz_fill_random((sz_ptr_t)buf.start, buf.length, nonce);
+    if (alphabet_obj) {
         SZ_ALIGN64 char look_up_table[256];
         for (int i = 0; i < 256; ++i) look_up_table[i] = alphabet.start[i % alphabet.length];
         sz_lookup((sz_ptr_t)buf.start, buf.length, (sz_cptr_t)buf.start, look_up_table);
@@ -2956,6 +2983,7 @@ static PyObject *Str_translate(PyObject *self, PyObject *const *args, Py_ssize_t
 
     // Perform the translation using the look-up table
     if (is_inplace) {
+        if (sz_py_is_mutable(str_obj) == sz_false_k) return NULL;
         sz_lookup(str.start, str.length, str.start, look_up_table);
         Py_RETURN_NONE;
     }

@@ -534,9 +534,12 @@ def test_unit_globals():
     assert sz.translate("ABC", {"A": "X", "B": "Y"}) == "XYC"
     assert sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1) == "YC"
     assert sz.translate("ABC", bytes(range(256))) == "ABC"
+    with pytest.raises(TypeError):
+        sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1, inplace=True)
 
-    assert sz.fill_random("ABC") == None
-    assert sz.fill_random("ABC", 42) == None
+    mutable_buffer = bytearray(b"ABC")
+    assert sz.fill_random(mutable_buffer) == None
+    assert sz.fill_random(mutable_buffer, 42) == None
 
     assert sz.split("hello world test", " ") == ["hello", "world", "test"]
     assert sz.rsplit("hello world test", " ", 1) == ["hello world", "test"]
@@ -713,14 +716,14 @@ def test_translations(length: int, seed_value: int):
     assert sz.translate(body_bytes, view_invert) == body_bytes.translate(view_invert)
     assert sz.translate(body_bytes, view_threshold) == body_bytes.translate(view_threshold)
 
-    # Check in-place translations - all of them return nothing
-    after_identity = memoryview(body_bytes)
+    # Check in-place translations on mutable byte-arrays - all of them return nothing
+    after_identity = bytearray(body_bytes)
     assert sz.translate(after_identity, view_identity, inplace=True) == None
     assert sz.equal(after_identity, body.translate(dict_identity))
-    after_invert = memoryview(body_bytes)
+    after_invert = bytearray(body_bytes)
     assert sz.translate(after_invert, view_invert, inplace=True) == None
     assert sz.equal(after_invert, body.translate(dict_invert))
-    after_threshold = memoryview(body_bytes)
+    after_threshold = bytearray(body_bytes)
     assert sz.translate(after_threshold, view_threshold, inplace=True) == None
     assert sz.equal(after_threshold, body.translate(dict_threshold))
 
