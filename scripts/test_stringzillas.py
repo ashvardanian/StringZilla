@@ -137,7 +137,12 @@ def seed_random_generators(seed_value: Optional[int] = None):
     if seed_value is None:
         return
     seed(seed_value)
-    np.random.seed(seed_value)
+    # Try to seed NumPy's random number generator
+    # This handles both NumPy 1.x and 2.x, and any import issues
+    try:
+        np.random.seed(seed_value)
+    except (ImportError, AttributeError, Exception):
+        pass
 
 
 def test_device_scope():
