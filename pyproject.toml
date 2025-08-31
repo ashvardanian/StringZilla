@@ -4,9 +4,9 @@
 #   - `macos` wheels for x86_64 and arm64 (no universal2);
 #   - `windows` wheels for AMD64, x86, and ARM64.
 #   - for Python versions from 3.8 to 3.13.
-#   - running over 5,000 tests on each wheel.
+#   - running over 30,000 tests on each wheel.
 #   = meaning 15 platforms * 6 Python versions = 90 builds.
-#   = meaning over 450,000 tests.
+#   = meaning over 2,700,000 tests.
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"

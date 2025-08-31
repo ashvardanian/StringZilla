@@ -26,6 +26,7 @@ Example:
 
 import os
 import sys
+import math
 import tempfile
 import platform
 from random import choice, randint, seed
@@ -534,6 +535,9 @@ def test_unit_globals():
     assert sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1) == "YC"
     assert sz.translate("ABC", bytes(range(256))) == "ABC"
 
+    assert sz.fill_random("ABC") == None
+    assert sz.fill_random("ABC", 42) == None
+
     assert sz.split("hello world test", " ") == ["hello", "world", "test"]
     assert sz.rsplit("hello world test", " ", 1) == ["hello world", "test"]
 
@@ -731,10 +735,61 @@ def test_translations_random(length: int, seed_value: int):
     assert sz.translate(body, memoryview(lut)) == baseline_translate(body, lut)
 
 
-@pytest.mark.repeat(3)
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_fill_random_slice(seed_value: int):
+    # Prepare a zeroed buffer and keep a copy for comparison
+    original = bytearray(64)
+    updated_in_slices = bytearray(original)
+
+    # Fill only a slice [start:end) deterministically
+    start, end = 10, 30
+    sz.fill_random(updated_in_slices, nonce=seed_value, start=start, end=end)
+
+    # Unchanged prefix and suffix
+    assert bytes(updated_in_slices[:start]) == bytes(original[:start])
+    assert bytes(updated_in_slices[end:]) == bytes(original[end:])
+
+    # Changed inner region
+    assert bytes(updated_in_slices[start:end]) != bytes(original[start:end])
+
+
+def test_fill_random_different_nonces():
+    first_buffer = bytearray(64)
+    second_buffer = bytearray(64)
+    sz.fill_random(first_buffer, nonce=1)
+    sz.fill_random(second_buffer, nonce=2)
+    assert bytes(first_buffer) != bytes(second_buffer)
+
+
+@pytest.mark.parametrize("length", [0, 1, 7, 64])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_fill_random_alphabet(length: int, seed_value: int):
+
+    # Same nonce should produce the same result
+    random_string = sz.random(length, nonce=seed_value)
+    same_nonce_random_string = sz.random(length, nonce=seed_value)
+    assert isinstance(random_string, (bytes, bytearray))
+    assert len(random_string) == length
+    assert random_string == same_nonce_random_string
+
+    # With alphabet: all bytes must belong to alphabet
+    alphabet = b"0123456789"
+    random_digits = sz.random(128, nonce=seed_value, alphabet=alphabet)
+    assert set(random_digits).issubset(set(alphabet))
+
+
+@pytest.mark.parametrize("body", ["", "hello", "world", "abcdefg", "a" * 32])
+@pytest.mark.parametrize("seed_value", SEED_VALUES)
+def test_hash_basic_equivalence(body: str, seed_value: int):
+    # TODO: Add streaming hashers and compare slices vs overall
+    hash_seeded = sz.hash(body, seed=seed_value)
+    hash_member = sz.Str(body).hash(seed=seed_value)
+    assert hash_seeded == hash_member
+
+
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_bytesums_random(length: int, seed_value: int):
+def test_bytesum_random(length: int, seed_value: int):
     def sum_bytes(body: str) -> int:
         return sum([ord(c) for c in body])
 
@@ -820,6 +875,92 @@ def test_strs_from_python_basic(container_class: type, view: bool):
     assert strs[5] == " "
     assert strs[6] == "container"
     assert strs[7] == ""
+
+
+UINT32_MAX = 2**32 - 1  # ! Many of the 32/64-bit algo corner cases happen at this input size
+
+
+def long_repeated_string(ctypes, fill_char: str, string_size: int) -> str:
+    buffer = ctypes.create_string_buffer(string_size)
+    ctypes.memset(buffer, ord(fill_char), string_size)
+    return buffer.value.decode("ascii")
+
+
+@pytest.mark.skipif(sys.maxsize <= 2**32, reason="64-bit system required for 4GB+ test")
+def test_strs_from_4gb_list():
+    """Test Strs with >4GB array of strings to verify 32-bit to 64-bit layout transition.
+    This will require over 8 GB of memory. To stress-test the behavior, limit memory per process. For 5 and 13 GB:
+
+    ulimit -v 9437184 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k test_strs_from_4gb_list
+    ulimit -v 13631488 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k test_strs_from_4gb_list
+    """
+
+    try:
+        import gc
+        import ctypes
+    except ImportError:
+        pytest.skip("ctypes & gc not available (e.g., PyPy)")
+
+    # Each individual string won't be very large, but many of them will be used
+    part_size = 64 * 1024 * 1024
+    parts_count = math.ceil(UINT32_MAX / part_size) + 1  # Ensures we exceed UINT32_MAX by a small margin
+    try:
+        parts_pythonic = [
+            long_repeated_string(ctypes, ascii_lowercase[part_index % len(ascii_lowercase)], part_size)
+            for part_index in range(parts_count)
+        ]
+        parts_stringzilla = Strs(parts_pythonic)
+
+        # Basic verification
+        last_used_char = ascii_lowercase[(parts_count - 1) % len(ascii_lowercase)]
+        assert len(parts_stringzilla) == parts_count
+        assert parts_stringzilla[0] == long_repeated_string(ctypes, "a", part_size)
+        assert parts_stringzilla[-1] == long_repeated_string(ctypes, last_used_char, part_size)
+
+        del parts_pythonic
+        del parts_stringzilla
+    except (MemoryError, OSError):
+        pytest.skip("Memory allocation failed")
+    finally:
+        gc.collect()
+
+
+@pytest.mark.skipif(sys.maxsize <= 2**32, reason="64-bit system required for 4GB+ test")
+def test_strs_from_4gb_generator():
+    """Test Strs with >4GB of strings streams to verify 32-bit to 64-bit layout transition.
+    This will require over 8 GB of memory. To stress-test the behavior, limit memory per process. For 5 and 13 GB:
+
+    ulimit -v 5242880 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k test_strs_from_4gb_generator
+    ulimit -v 13631488 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k test_strs_from_4gb_generator
+    """
+
+    try:
+        import gc
+        import ctypes
+    except ImportError:
+        pytest.skip("ctypes & gc not available (e.g., PyPy)")
+
+    # Each individual string won't be very large, but many of them will be used
+    part_size = 64 * 1024 * 1024
+    parts_count = math.ceil(UINT32_MAX / part_size) + 1  # Ensures we exceed UINT32_MAX by a small margin
+    try:
+        parts_stringzilla = Strs(
+            long_repeated_string(ctypes, ascii_lowercase[part_index % len(ascii_lowercase)], part_size)
+            for part_index in range(parts_count)
+        )
+
+        # Basic verification
+        last_used_char = ascii_lowercase[(parts_count - 1) % len(ascii_lowercase)]
+        assert len(parts_stringzilla) == parts_count
+        assert parts_stringzilla[0] == long_repeated_string(ctypes, "a", part_size)
+        assert parts_stringzilla[-1] == long_repeated_string(ctypes, last_used_char, part_size)
+
+        del parts_pythonic
+        del parts_stringzilla
+    except (MemoryError, OSError):
+        pytest.skip("Memory allocation failed")
+    finally:
+        gc.collect()
 
 
 @pytest.mark.parametrize("container_class", [tuple, list, iter])

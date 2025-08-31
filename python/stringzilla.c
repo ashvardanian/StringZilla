@@ -1214,6 +1214,7 @@ static char const doc_fill_random[] = //
     "Args:\n"
     "  buffer (Str or bytes-like): Writable, contiguous byte buffer (e.g., memoryview/bytearray).\n"
     "  nonce (int, optional): Seed/nonce ensuring reproducible output for the same inputs (default 0).\n"
+    "  alphabet (str or bytes, optional): If provided, remaps random bytes to characters from the alphabet.\n"
     "  start (int, optional): Starting index (default 0).\n"
     "  end (int, optional): Ending index (default len(buffer)).\n"
     "Returns:\n"
@@ -1231,6 +1232,7 @@ static PyObject *Str_fill_random(PyObject *self, PyObject *const *args, Py_ssize
     PyObject *nonce_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
     PyObject *start_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
     PyObject *end_obj = positional_args_count > !is_member + 2 ? args[!is_member + 2] : NULL;
+    PyObject *alphabet_obj = NULL;
 
     // Optional keyword arguments
     if (args_names_tuple) {
@@ -1239,6 +1241,8 @@ static PyObject *Str_fill_random(PyObject *self, PyObject *const *args, Py_ssize
             PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
             PyObject *value = args[positional_args_count + i];
             if (PyUnicode_CompareWithASCIIString(key, "nonce") == 0 && !nonce_obj) nonce_obj = value;
+            else if (PyUnicode_CompareWithASCIIString(key, "alphabet") == 0 && !alphabet_obj)
+                alphabet_obj = value;
             else if (PyUnicode_CompareWithASCIIString(key, "start") == 0 && !start_obj)
                 start_obj = value;
             else if (PyUnicode_CompareWithASCIIString(key, "end") == 0 && !end_obj)
@@ -1272,6 +1276,19 @@ static PyObject *Str_fill_random(PyObject *self, PyObject *const *args, Py_ssize
         if (PyErr_Occurred()) return NULL;
     }
 
+    // Parse alphabet
+    sz_string_view_t alphabet;
+    if (alphabet_obj) {
+        if (!sz_py_export_string_like(alphabet_obj, &alphabet.start, &alphabet.length)) {
+            wrap_current_exception("alphabet must be string-like");
+            return NULL;
+        }
+        if (alphabet.length == 0) {
+            PyErr_SetString(PyExc_ValueError, "alphabet must not be empty");
+            return NULL;
+        }
+    }
+
     // Export buffer and clamp range
     sz_string_view_t buf;
     if (!sz_py_export_string_like(buffer_obj, &buf.start, &buf.length)) {
@@ -1292,8 +1309,97 @@ static PyObject *Str_fill_random(PyObject *self, PyObject *const *args, Py_ssize
     buf.length -= start;
     if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < buf.length) { buf.length = (sz_size_t)(end - start); }
 
-    if (buf.length > 0) sz_fill_random((sz_ptr_t)buf.start, buf.length, nonce);
+    if (buf.length > 0) {
+        sz_fill_random((sz_ptr_t)buf.start, buf.length, nonce);
+        SZ_ALIGN64 char look_up_table[256];
+        for (int i = 0; i < 256; ++i) look_up_table[i] = alphabet.start[i % alphabet.length];
+        sz_lookup((sz_ptr_t)buf.start, buf.length, (sz_cptr_t)buf.start, look_up_table);
+    }
     Py_RETURN_NONE;
+}
+
+static char const doc_random[] = //
+    "random(length, *, nonce=0, alphabet=None) -> bytes\n\n"
+    "Generate a new random byte string, optionally remapped to a given alphabet.\n"
+    "If alphabet is provided, each byte is mapped to alphabet[b % len(alphabet)].";
+
+static PyObject *module_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
+    (void)self;
+    if (positional_args_count < 1 || positional_args_count > 2) {
+        PyErr_SetString(PyExc_TypeError, "random() expects 1 or 2 positional arguments");
+        return NULL;
+    }
+    PyObject *length_obj = args[0];
+    PyObject *nonce_obj = positional_args_count > 1 ? args[1] : NULL;
+    PyObject *alphabet_obj = NULL;
+
+    if (args_names_tuple) {
+        Py_ssize_t kw_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < kw_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "nonce") == 0 && !nonce_obj) nonce_obj = value;
+            else if (PyUnicode_CompareWithASCIIString(key, "alphabet") == 0 && !alphabet_obj)
+                alphabet_obj = value;
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return NULL;
+            }
+        }
+    }
+
+    if (!PyLong_Check(length_obj)) {
+        PyErr_SetString(PyExc_TypeError, "length must be an integer");
+        return NULL;
+    }
+    Py_ssize_t signed_length = PyLong_AsSsize_t(length_obj);
+    if (signed_length == -1 && PyErr_Occurred()) return NULL;
+    if (signed_length < 0) {
+        PyErr_SetString(PyExc_ValueError, "length must be non-negative");
+        return NULL;
+    }
+    sz_size_t length = (sz_size_t)signed_length;
+
+    sz_u64_t nonce = 0;
+    if (nonce_obj) {
+        if (!PyLong_Check(nonce_obj)) {
+            PyErr_SetString(PyExc_TypeError, "nonce must be an integer");
+            return NULL;
+        }
+        nonce = PyLong_AsUnsignedLongLong(nonce_obj);
+        if (PyErr_Occurred()) return NULL;
+    }
+
+    PyObject *bytes_obj = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)length);
+    if (!bytes_obj) {
+        PyErr_SetString(PyExc_MemoryError, "Unable to allocate random bytes");
+        return NULL;
+    }
+    if (length > 0) {
+        sz_ptr_t buffer = (sz_ptr_t)PyBytes_AS_STRING(bytes_obj);
+        sz_fill_random(buffer, length, nonce);
+    }
+
+    if (!alphabet_obj || length == 0) return bytes_obj;
+
+    sz_string_view_t alphabet;
+    if (!sz_py_export_string_like(alphabet_obj, &alphabet.start, &alphabet.length)) {
+        Py_DECREF(bytes_obj);
+        wrap_current_exception("alphabet must be string-like");
+        return NULL;
+    }
+    if (alphabet.length == 0) {
+        Py_DECREF(bytes_obj);
+        PyErr_SetString(PyExc_ValueError, "alphabet must not be empty");
+        return NULL;
+    }
+
+    SZ_ALIGN64 char look_up_table[256];
+    for (int i = 0; i < 256; ++i) look_up_table[i] = alphabet.start[i % alphabet.length];
+    sz_ptr_t buf_ptr = (sz_ptr_t)PyBytes_AS_STRING(bytes_obj);
+    sz_lookup(buf_ptr, length, buf_ptr, look_up_table);
+    return bytes_obj;
 }
 
 static char const doc_like_bytesum[] = //
@@ -5473,8 +5579,10 @@ static PyMethodDef stringzilla_methods[] = {
     // Global unary extensions
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
     {"bytesum", (PyCFunction)Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
+    {"fill_random", (PyCFunction)Str_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
 
-    // Updating module capabilities
+    // Module-level functionality
+    {"random", (PyCFunction)module_random, SZ_METHOD_FLAGS, doc_random},
     {"reset_capabilities", (PyCFunction)module_reset_capabilities, METH_VARARGS, doc_reset_capabilities},
 
     {NULL, NULL, 0, NULL}};
