@@ -719,7 +719,6 @@ def test_translations(length: int, seed_value: int):
     assert sz.equal(after_threshold, body.translate(dict_threshold))
 
 
-@pytest.mark.repeat(3)
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
