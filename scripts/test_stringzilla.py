@@ -561,8 +561,10 @@ def test_decoding_valid_strings(byte_string, encoding, expected):
 @pytest.mark.parametrize(
     "byte_string, encoding",
     [
-        (b"\xff", "utf-8"),  # Invalid UTF-8 byte
-        (b"\x80hello", "ascii"),  # Non-ASCII byte in ASCII string
+        # Use `bytes.fromhex()` to avoid putting binary literals in source code
+        # This prevents PyTest's source parsing from encountering invalid UTF-8
+        (bytes.fromhex("ff"), "utf-8"),  # Invalid UTF-8 byte
+        (bytes.fromhex("80") + b"hello", "ascii"),  # Non-ASCII byte in ASCII string
     ],
 )
 def test_decoding_exceptions(byte_string, encoding):
@@ -989,9 +991,11 @@ def test_invalid_utf8_handling():
 
     # Test arrays with invalid UTF-8 sequences
     test_arrays = [
-        [b"hello", b"\x80world", b"valid"],  # Mixed valid/invalid
-        [b"\xff\xfe", b"\x80", b"\xf4\x90\x80\x80"],  # All invalid
-        [b"normal", b"string with \x80 bytes"],  # Partial invalid
+        # Use `bytes.fromhex()` to avoid putting binary literals in source code
+        # This prevents PyTest's source parsing from encountering invalid UTF-8
+        [b"hello", bytes.fromhex("80") + b"world", b"valid"],  # Mixed valid/invalid
+        [bytes.fromhex("fffe"), bytes.fromhex("80"), bytes.fromhex("f4908080")],  # All invalid
+        [b"normal", b"string with " + bytes.fromhex("80") + b" bytes"],  # Partial invalid
     ]
 
     for test_array in test_arrays:
