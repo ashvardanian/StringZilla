@@ -46,6 +46,10 @@ typedef SSIZE_T ssize_t;
 #define SSIZE_MAX (SIZE_MAX / 2)
 #endif
 
+// Undefine _POSIX_C_SOURCE to avoid redefinition warning with Python headers
+#ifdef _POSIX_C_SOURCE
+#undef _POSIX_C_SOURCE
+#endif
 #include <Python.h> // Core CPython interfaces
 
 #include <errno.h>  // `errno`
@@ -479,11 +483,13 @@ SZ_DYNAMIC sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t
         *data = strs->data.u64_tape.data;
         *offsets = strs->data.u64_tape.offsets;
         *count = strs->data.u64_tape.count;
+        return sz_true_k;
     }
     else if (strs->layout == STRS_U64_TAPE_VIEW) {
         *data = strs->data.u64_tape_view.data;
         *offsets = strs->data.u64_tape_view.offsets;
         *count = strs->data.u64_tape_view.count;
+        return sz_true_k;
     }
     else { return sz_false_k; }
 }
@@ -750,6 +756,7 @@ SZ_DYNAMIC sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory
     case STRS_FRAGMENTED: old_allocator = strs->data.fragmented.allocator; break;
     case STRS_U32_TAPE_VIEW:
     case STRS_U64_TAPE_VIEW:
+    default:
         // Views don't own memory, use default allocator for comparison
         sz_memory_allocator_init_default(&old_allocator);
         break;
@@ -4129,29 +4136,30 @@ static PyObject *Strs_get_layout(Strs *self, void *Py_UNUSED(closure)) {
     switch (self->layout) {
     case STRS_U32_TAPE_VIEW:
         snprintf(buffer, sizeof(buffer), "Strs[layout=U32_TAPE_VIEW, count=%zu, data=%p, offsets=%p, parent=%p]",
-                 self->data.u32_tape_view.count, self->data.u32_tape_view.data, self->data.u32_tape_view.offsets,
-                 self->data.u32_tape_view.parent);
+                 self->data.u32_tape_view.count, (void *)self->data.u32_tape_view.data,
+                 (void *)self->data.u32_tape_view.offsets, (void *)self->data.u32_tape_view.parent);
         break;
 
     case STRS_U64_TAPE_VIEW:
         snprintf(buffer, sizeof(buffer), "Strs[layout=U64_TAPE_VIEW, count=%zu, data=%p, offsets=%p, parent=%p]",
-                 self->data.u64_tape_view.count, self->data.u64_tape_view.data, self->data.u64_tape_view.offsets,
-                 self->data.u64_tape_view.parent);
+                 self->data.u64_tape_view.count, (void *)self->data.u64_tape_view.data,
+                 (void *)self->data.u64_tape_view.offsets, (void *)self->data.u64_tape_view.parent);
         break;
 
     case STRS_U32_TAPE:
         snprintf(buffer, sizeof(buffer), "Strs[layout=U32_TAPE, count=%zu, data=%p, offsets=%p]",
-                 self->data.u32_tape.count, self->data.u32_tape.data, self->data.u32_tape.offsets);
+                 self->data.u32_tape.count, (void *)self->data.u32_tape.data, (void *)self->data.u32_tape.offsets);
         break;
 
     case STRS_U64_TAPE:
         snprintf(buffer, sizeof(buffer), "Strs[layout=U64_TAPE, count=%zu, data=%p, offsets=%p]",
-                 self->data.u64_tape.count, self->data.u64_tape.data, self->data.u64_tape.offsets);
+                 self->data.u64_tape.count, (void *)self->data.u64_tape.data, (void *)self->data.u64_tape.offsets);
         break;
 
     case STRS_FRAGMENTED:
         snprintf(buffer, sizeof(buffer), "Strs[layout=FRAGMENTED, count=%zu, spans=%p, parent=%p]",
-                 self->data.fragmented.count, self->data.fragmented.spans, self->data.fragmented.parent);
+                 self->data.fragmented.count, (void *)self->data.fragmented.spans,
+                 (void *)self->data.fragmented.parent);
         break;
 
     default: snprintf(buffer, sizeof(buffer), "Strs[layout=UNKNOWN(%d)]", self->layout); break;
@@ -4347,15 +4355,15 @@ static PyObject *Strs_str(Strs *self) {
         sz_cptr_t cstr_start = NULL;
         sz_size_t cstr_length = 0;
         getter(self, i, count, &parent_string, &cstr_start, &cstr_length);
-        
+
         if (i != 0) total_bytes += 2; // For the preceding comma and space
 
         // Check if string is valid UTF-8 to determine format
         if (sz_runes_valid(cstr_start, cstr_length)) {
             // Valid UTF-8: format as '...' with escaped quotes
-            total_bytes += 2; // Opening and closing quotes
+            total_bytes += 2;           // Opening and closing quotes
             total_bytes += cstr_length; // Base string length
-            
+
             // Count the number of single quotes that need escaping
             sz_cptr_t scan_ptr = cstr_start;
             sz_size_t scan_length = cstr_length;
@@ -4367,11 +4375,12 @@ static PyObject *Strs_str(Strs *self) {
                 scan_length -= next_quote - scan_ptr + 1;
                 scan_ptr = next_quote + 1;
             }
-        } else {
+        }
+        else {
             // Invalid UTF-8: format as b'\x...'
-            total_bytes += 3; // "b'" prefix
+            total_bytes += 3;               // "b'" prefix
             total_bytes += cstr_length * 4; // Each byte becomes \xNN (4 chars)
-            total_bytes += 1; // Closing quote
+            total_bytes += 1;               // Closing quote
         }
     }
 
@@ -5252,6 +5261,88 @@ static PyTypeObject StrsType = {
 
 #pragma endregion
 
+static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t *result) {
+    if (!caps_obj) {
+        PyErr_SetString(PyExc_TypeError, "capabilities must be a tuple or list of strings");
+        return -1;
+    }
+    PyObject *seq = PySequence_Fast(caps_obj, "capabilities must be a tuple or list of strings");
+    if (!seq) return -1;
+
+    sz_capability_t requested_caps = 0;
+    Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
+    PyObject **items = PySequence_Fast_ITEMS(seq);
+
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *item = items[i];
+        if (!PyUnicode_Check(item)) {
+            PyErr_SetString(PyExc_TypeError, "capabilities must be strings");
+            Py_DECREF(seq);
+            return -1;
+        }
+        char const *cap_str = PyUnicode_AsUTF8(item);
+        if (!cap_str) {
+            Py_DECREF(seq);
+            return -1;
+        }
+        sz_capability_t flag = sz_capability_from_string_implementation_(cap_str);
+        if (flag == sz_caps_none_k) {
+            PyErr_Format(PyExc_ValueError, "Unknown capability: %s", cap_str);
+            Py_DECREF(seq);
+            return -1;
+        }
+        requested_caps |= flag;
+    }
+    Py_DECREF(seq);
+
+    // Intersect with hardware capabilities for safety
+    *result = requested_caps & sz_capabilities();
+    if (*result == 0) { *result = sz_cap_serial_k; }
+    return 0;
+}
+
+static char const doc_reset_capabilities[] = //
+    "reset_capabilities(names) -> None\n\n"
+    "Sets the active SIMD/backend capabilities for this module and updates the\n"
+    "runtime dispatch table. The provided names are intersected with hardware\n"
+    "capabilities; if the result is empty, falls back to 'serial'.\n\n"
+    "Side effects: updates stringzilla.__capabilities__ and __capabilities_str__.";
+
+static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
+    PyObject *caps_obj = NULL;
+    if (!PyArg_ParseTuple(args, "O", &caps_obj)) return NULL;
+
+    sz_capability_t caps = 0;
+    if (parse_and_intersect_capabilities(caps_obj, &caps) != 0) return NULL;
+
+    // Update the dispatch table
+    sz_dispatch_table_update(caps);
+
+    // Recompute and set module-level capability exports
+    sz_cptr_t cap_strings[SZ_CAPABILITIES_COUNT];
+    sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
+    PyObject *caps_tuple = PyTuple_New(cap_count);
+    if (!caps_tuple) return NULL;
+    for (sz_size_t i = 0; i < cap_count; i++) {
+        PyObject *cap_str = PyUnicode_FromString(cap_strings[i]);
+        if (!cap_str) {
+            Py_DECREF(caps_tuple);
+            return NULL;
+        }
+        PyTuple_SET_ITEM(caps_tuple, i, cap_str);
+    }
+    if (PyObject_SetAttrString(self, "__capabilities__", caps_tuple) != 0) {
+        Py_DECREF(caps_tuple);
+        return NULL;
+    }
+    Py_DECREF(caps_tuple);
+
+    sz_cptr_t caps_str = sz_capabilities_to_string(caps);
+    if (PyObject_SetAttrString(self, "__capabilities_str__", PyUnicode_FromString(caps_str)) != 0) { return NULL; }
+
+    Py_RETURN_NONE;
+}
+
 static void stringzilla_cleanup(PyObject *m) {
     if (temporary_memory.start) free(temporary_memory.start);
     temporary_memory.start = NULL;
@@ -5300,6 +5391,9 @@ static PyMethodDef stringzilla_methods[] = {
     // Global unary extensions
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
     {"bytesum", (PyCFunction)Str_like_bytesum, SZ_METHOD_FLAGS, doc_like_bytesum},
+
+    // Updating module capabilities
+    {"reset_capabilities", (PyCFunction)module_reset_capabilities, METH_VARARGS, doc_reset_capabilities},
 
     {NULL, NULL, 0, NULL}};
 

@@ -139,6 +139,46 @@ SZ_INTERNAL sz_size_t sz_capabilities_to_strings_implementation_(sz_capability_t
     return count;
 }
 
+SZ_INTERNAL sz_bool_t sz_equal_null_terminated_serial(char const *a, char const *b) {
+    if (!a || !b) return sz_false_k;
+    for (; *a && *b; a++, b++)
+        if (*a != *b) return sz_false_k;
+    return *b == '\0' ? sz_true_k : sz_false_k;
+}
+
+/**
+ *  @brief Internal helper to map a capability name to its flag.
+ *  @param[in] name Capability name, e.g. "serial", "neon", "sve2_aes".
+ *  @return `sz_caps_none_k` if unknown name, or a valid capability flag.
+ */
+SZ_INTERNAL sz_capability_t sz_capability_from_string_implementation_(char const *name) {
+
+    // CPU + execution model
+    if (sz_equal_null_terminated_serial(name, "serial") == sz_true_k) return sz_cap_serial_k;
+    if (sz_equal_null_terminated_serial(name, "parallel") == sz_true_k) return sz_cap_parallel_k;
+    // x86
+    if (sz_equal_null_terminated_serial(name, "haswell") == sz_true_k) return sz_cap_haswell_k;
+    if (sz_equal_null_terminated_serial(name, "skylake") == sz_true_k) return sz_cap_skylake_k;
+    if (sz_equal_null_terminated_serial(name, "ice") == sz_true_k) return sz_cap_ice_k;
+    // Arm
+    if (sz_equal_null_terminated_serial(name, "neon") == sz_true_k) return sz_cap_neon_k;
+    if (sz_equal_null_terminated_serial(name, "sve") == sz_true_k) return sz_cap_sve_k;
+    if (sz_equal_null_terminated_serial(name, "sve2") == sz_true_k) return sz_cap_sve2_k;
+    if (sz_equal_null_terminated_serial(name, "neon_aes") == sz_true_k ||
+        sz_equal_null_terminated_serial(name, "neon+aes") == sz_true_k)
+        return sz_cap_neon_aes_k;
+    if (sz_equal_null_terminated_serial(name, "sve2_aes") == sz_true_k ||
+        sz_equal_null_terminated_serial(name, "sve2+aes") == sz_true_k)
+        return sz_cap_sve2_aes_k;
+    // GPU
+    if (sz_equal_null_terminated_serial(name, "cuda") == sz_true_k) return sz_cap_cuda_k;
+    if (sz_equal_null_terminated_serial(name, "kepler") == sz_true_k) return sz_cap_kepler_k;
+    if (sz_equal_null_terminated_serial(name, "hopper") == sz_true_k) return sz_cap_hopper_k;
+    // Any
+    if (sz_equal_null_terminated_serial(name, "any") == sz_true_k) return sz_cap_any_k;
+    return sz_caps_none_k;
+}
+
 /**
  *  @brief Internal helper function to convert SIMD capabilities to a string.
  *  @sa    sz_capabilities_to_string, sz_capabilities

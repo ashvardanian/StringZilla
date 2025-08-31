@@ -306,25 +306,12 @@ static int parse_and_intersect_capabilities(PyObject *caps_obj, sz_capability_t 
         char const *cap_str = PyUnicode_AsUTF8(item);
         if (!cap_str) return -1;
 
-        // Map string to capability flag
-        if (strcmp(cap_str, "serial") == 0) { requested_caps |= sz_cap_serial_k; }
-        else if (strcmp(cap_str, "parallel") == 0) { requested_caps |= sz_cap_parallel_k; }
-        else if (strcmp(cap_str, "haswell") == 0) { requested_caps |= sz_cap_haswell_k; }
-        else if (strcmp(cap_str, "skylake") == 0) { requested_caps |= sz_cap_skylake_k; }
-        else if (strcmp(cap_str, "ice") == 0) { requested_caps |= sz_cap_ice_k; }
-        else if (strcmp(cap_str, "neon") == 0) { requested_caps |= sz_cap_neon_k; }
-        else if (strcmp(cap_str, "neon_aes") == 0) { requested_caps |= sz_cap_neon_aes_k; }
-        else if (strcmp(cap_str, "sve") == 0) { requested_caps |= sz_cap_sve_k; }
-        else if (strcmp(cap_str, "sve2") == 0) { requested_caps |= sz_cap_sve2_k; }
-        else if (strcmp(cap_str, "sve2_aes") == 0) { requested_caps |= sz_cap_sve2_aes_k; }
-        else if (strcmp(cap_str, "cuda") == 0) { requested_caps |= sz_cap_cuda_k; }
-        else if (strcmp(cap_str, "kepler") == 0) { requested_caps |= sz_cap_kepler_k; }
-        else if (strcmp(cap_str, "hopper") == 0) { requested_caps |= sz_cap_hopper_k; }
-        else if (strcmp(cap_str, "any") == 0) { requested_caps |= sz_cap_any_k; }
-        else {
+        sz_capability_t flag = sz_capability_from_string_implementation_(cap_str);
+        if (flag == sz_caps_none_k) {
             PyErr_Format(PyExc_ValueError, "Unknown capability: %s", cap_str);
             return -1;
         }
+        requested_caps |= flag;
     }
 
     // Intersect with hardware capabilities
@@ -1895,6 +1882,48 @@ static PyTypeObject FingerprintsType = {
 
 #pragma endregion
 
+static char const doc_reset_capabilities[] = //
+    "reset_capabilities(names) -> None\n\n"
+    "Sets the active SIMD/backend capabilities for this module and updates the\n"
+    "default hardware capabilities. The provided names are intersected with hardware\n"
+    "capabilities; if the result is empty, falls back to 'serial'.\n\n"
+    "Side effects: updates stringzillas.__capabilities__ and __capabilities_str__.";
+
+static PyObject *module_reset_capabilities(PyObject *self, PyObject *args) {
+    PyObject *caps_obj = NULL;
+    if (!PyArg_ParseTuple(args, "O", &caps_obj)) return NULL;
+
+    sz_capability_t caps = 0;
+    if (parse_and_intersect_capabilities(caps_obj, &caps) != 0) return NULL;
+
+    // Update the default hardware capabilities
+    default_hardware_capabilities = caps;
+
+    // Recompute and set module-level capability exports
+    sz_cptr_t cap_strings[SZ_CAPABILITIES_COUNT];
+    sz_size_t cap_count = sz_capabilities_to_strings_implementation_(caps, cap_strings, SZ_CAPABILITIES_COUNT);
+    PyObject *caps_tuple = PyTuple_New(cap_count);
+    if (!caps_tuple) return NULL;
+    for (sz_size_t i = 0; i < cap_count; i++) {
+        PyObject *cap_str = PyUnicode_FromString(cap_strings[i]);
+        if (!cap_str) {
+            Py_DECREF(caps_tuple);
+            return NULL;
+        }
+        PyTuple_SET_ITEM(caps_tuple, i, cap_str);
+    }
+    if (PyObject_SetAttrString(self, "__capabilities__", caps_tuple) != 0) {
+        Py_DECREF(caps_tuple);
+        return NULL;
+    }
+    Py_DECREF(caps_tuple);
+
+    sz_cptr_t caps_str = sz_capabilities_to_string_implementation_(caps);
+    if (PyObject_SetAttrString(self, "__capabilities_str__", PyUnicode_FromString(caps_str)) != 0) { return NULL; }
+
+    Py_RETURN_NONE;
+}
+
 static void stringzillas_cleanup(PyObject *m) {
     sz_unused_(m);
     if (default_device_scope) {
@@ -1903,7 +1932,9 @@ static void stringzillas_cleanup(PyObject *m) {
     }
 }
 
-static PyMethodDef stringzillas_methods[] = {{NULL, NULL, 0, NULL}};
+static PyMethodDef stringzillas_methods[] = {
+    {"reset_capabilities", (PyCFunction)module_reset_capabilities, METH_VARARGS, doc_reset_capabilities},
+    {NULL, NULL, 0, NULL}};
 
 static PyModuleDef stringzillas_module = {
     PyModuleDef_HEAD_INIT,

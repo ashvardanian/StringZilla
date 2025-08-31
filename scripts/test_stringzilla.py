@@ -16,9 +16,11 @@ Recommended flags for better diagnostics:
     --full-trace        full Python tracebacks
     -k <pattern>        filter tests by substring
     -X faulthandler     to dump on fatal signals
+    --verbose           enable verbose output
 
 Example:
 
+    uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x --verbose
     uv run --no-project python -X faulthandler -m pytest scripts/test_stringzilla.py -s -vv --maxfail=1 --full-trace
 """
 
@@ -86,12 +88,12 @@ def log_test_environment():
     # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
     is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
     if is_qemu:
-        sve_like = {"sve", "sve2", "sve2+aes", "sve2_aes"}
+        sve_like = {"sve", "sve2", "sve2+aes"}
         current = list(getattr(sz, "__capabilities__", ()))
         desired = tuple(c for c in current if c.lower() not in sve_like)
         if len(desired) != len(current):
             print(f"QEMU env detected; disabling {sve_like} for stability")
-            sz.override_capabilities(desired)
+            sz.reset_capabilities(desired)
 
     print("=" * 40)
 
@@ -110,6 +112,8 @@ def seed_random_generators(seed_value: Optional[int] = None):
 def test_library_properties():
     assert len(sz.__version__.split(".")) == 3, "Semantic versioning must be preserved"
     assert "serial" in sz.__capabilities__, "Serial backend must be present"
+    assert isinstance(sz.__capabilities_str__, str) and len(sz.__capabilities_str__) > 0
+    sz.reset_capabilities(sz.__capabilities__)  # Should not raise
 
 
 @pytest.mark.parametrize("native_type", [str, bytes, bytearray])
