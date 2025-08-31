@@ -453,6 +453,16 @@ SZ_TARGET=stringzillas-cpus uv pip install -e . --force-reinstall --no-build-iso
 SZ_TARGET=stringzillas-cuda uv pip install -e . --force-reinstall --no-build-isolation
 ```
 
+To clean up code before pushing:
+
+```bash
+uv pip install ruff mypy bandit flake8
+uv run --no-project ruff check scripts/test_stringzilla.py --fix
+uv run --no-project mypy scripts/test_stringzilla.py --ignore-missing-imports
+uv run --no-project bandit scripts/test_stringzilla.py -s B101
+uv run --no-project flake8 scripts/test_stringzilla.py --max-line-length=120
+```
+
 ### Testing
 
 For testing we use PyTest, which may not be installed on your system.

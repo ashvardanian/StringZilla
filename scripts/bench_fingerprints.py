@@ -86,7 +86,7 @@ def log(
                         )
                     progress_bar.update(1)
 
-                except Exception as e:
+                except Exception:
                     # Skip failed operations but continue
                     continue
 
@@ -206,7 +206,7 @@ def log_fingerprinting_functionality(
             f"stringzillas.Fingerprints(CPU): {len(docs):,} docs in {total_time_s:.2f}s ~ {mb_per_sec:.3f} MB/s, {docs_per_sec:.0f} docs/s"
         )
     else:
-        print(f"stringzillas.Fingerprints(CPU): FAILED - {e}")
+        print(f"stringzillas.Fingerprints(CPU): FAILED - no CPU support?!")
 
     # Benchmark batch GPU fingerprinting
     if "cuda" in szs.__capabilities__:

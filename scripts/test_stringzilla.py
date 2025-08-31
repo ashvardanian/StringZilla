@@ -76,7 +76,7 @@ SEED_VALUES = [
 def log_test_environment():
     """Automatically log environment info before running any tests."""
 
-    print(f"=== StringZilla Test Environment ===")
+    print("=== StringZilla Test Environment ===")
     print(f"Platform: {platform.platform()}")
     print(f"Architecture: {platform.machine()}")
     print(f"Processor: {platform.processor()}")
@@ -538,8 +538,8 @@ def test_unit_globals():
         sz.translate("ABC", {"A": "X", "B": "Y"}, start=1, end=-1, inplace=True)
 
     mutable_buffer = bytearray(b"ABC")
-    assert sz.fill_random(mutable_buffer) == None
-    assert sz.fill_random(mutable_buffer, 42) == None
+    assert sz.fill_random(mutable_buffer) is None
+    assert sz.fill_random(mutable_buffer, 42) is None
 
     assert sz.split("hello world test", " ") == ["hello", "world", "test"]
     assert sz.rsplit("hello world test", " ", 1) == ["hello world", "test"]
@@ -686,8 +686,9 @@ def baseline_translate(body: str, lut: Sequence) -> str:
     return "".join([chr(lut[ord(c)]) for c in body])
 
 
-def translation_table_to_dict(lut: Sequence) -> Dict[str, str]:
-    return {chr(i): chr(lut[i]) for i in range(256)}
+def translation_table_to_dict(lut: Sequence) -> Dict[int, str]:
+    """Convert lookup table to translation dict for str.translate()"""
+    return {i: chr(lut[i]) for i in range(256)}
 
 
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
@@ -718,13 +719,13 @@ def test_translations(length: int, seed_value: int):
 
     # Check in-place translations on mutable byte-arrays - all of them return nothing
     after_identity = bytearray(body_bytes)
-    assert sz.translate(after_identity, view_identity, inplace=True) == None
+    assert sz.translate(after_identity, view_identity, inplace=True) is None
     assert sz.equal(after_identity, body.translate(dict_identity))
     after_invert = bytearray(body_bytes)
-    assert sz.translate(after_invert, view_invert, inplace=True) == None
+    assert sz.translate(after_invert, view_invert, inplace=True) is None
     assert sz.equal(after_invert, body.translate(dict_invert))
     after_threshold = bytearray(body_bytes)
-    assert sz.translate(after_threshold, view_threshold, inplace=True) == None
+    assert sz.translate(after_threshold, view_threshold, inplace=True) is None
     assert sz.equal(after_threshold, body.translate(dict_threshold))
 
 
@@ -894,8 +895,8 @@ def test_strs_from_4gb_list():
     """Test Strs with >4GB array of strings to verify 32-bit to 64-bit layout transition.
     This will require over 8 GB of memory. To stress-test the behavior, limit memory per process. For 5 and 13 GB:
 
-    ulimit -v 9437184 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k test_strs_from_4gb_list
-    ulimit -v 13631488 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k test_strs_from_4gb_list
+    ulimit -v 9437184 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k 4gb_list
+    ulimit -v 13631488 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k 4gb_list
     """
 
     try:
@@ -933,8 +934,8 @@ def test_strs_from_4gb_generator():
     """Test Strs with >4GB of strings streams to verify 32-bit to 64-bit layout transition.
     This will require over 8 GB of memory. To stress-test the behavior, limit memory per process. For 5 and 13 GB:
 
-    ulimit -v 5242880 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k test_strs_from_4gb_generator
-    ulimit -v 13631488 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k test_strs_from_4gb_generator
+    ulimit -v 5242880 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k 4gb_generator
+    ulimit -v 13631488 && uv run --no-project python -m pytest scripts/test_stringzilla.py -s -x -k 4gb_generator
     """
 
     try:
@@ -958,7 +959,6 @@ def test_strs_from_4gb_generator():
         assert parts_stringzilla[0] == long_repeated_string(ctypes, "a", part_size)
         assert parts_stringzilla[-1] == long_repeated_string(ctypes, last_used_char, part_size)
 
-        del parts_pythonic
         del parts_stringzilla
     except (MemoryError, OSError):
         pytest.skip("Memory allocation failed")
@@ -996,9 +996,9 @@ def test_strs_reference_counting(container_class: type, view: bool):
     if container_class != iter:
         # View mode should increment refcount, copy mode should not
         if view:
-            assert during_refcount == initial_refcount + 1, f"View mode should increment refcount"
+            assert during_refcount == initial_refcount + 1, "View mode should increment refcount"
         else:
-            assert during_refcount == initial_refcount, f"Copy mode should not change refcount"
+            assert during_refcount == initial_refcount, "Copy mode should not change refcount"
 
     # Verify functionality
     assert len(strs) == 3
@@ -1011,7 +1011,7 @@ def test_strs_reference_counting(container_class: type, view: bool):
 
     if container_class != iter:
         final_refcount = sys.getrefcount(container)
-        assert final_refcount == initial_refcount, f"Refcount should return to initial value"
+        assert final_refcount == initial_refcount, "Refcount should return to initial value"
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")

@@ -50,7 +50,7 @@ from stringzilla import Strs
 @pytest.fixture(scope="session", autouse=True)
 def log_test_environment():
     """Automatically log environment info before running any tests."""
-    print(f"=== StringZillas Test Environment ===")
+    print("=== StringZillas Test Environment ===")
     print(f"Platform: {platform.platform()}")
     print(f"Architecture: {platform.machine()}")
     print(f"Processor: {platform.processor()}")
