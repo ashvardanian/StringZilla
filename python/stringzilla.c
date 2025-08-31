@@ -1208,6 +1208,94 @@ static PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
+static char const doc_fill_random[] = //
+    "Fill a string-like buffer in place with pseudo-random bytes.\n"
+    "\n"
+    "Args:\n"
+    "  buffer (Str or bytes-like): Writable, contiguous byte buffer (e.g., memoryview/bytearray).\n"
+    "  nonce (int, optional): Seed/nonce ensuring reproducible output for the same inputs (default 0).\n"
+    "  start (int, optional): Starting index (default 0).\n"
+    "  end (int, optional): Ending index (default len(buffer)).\n"
+    "Returns:\n"
+    "  None: Mutates the buffer slice in place.";
+
+static PyObject *Str_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    if (positional_args_count < !is_member || positional_args_count > !is_member + 3) {
+        PyErr_SetString(PyExc_TypeError, "fill_random() expects 1 to 4 positional arguments");
+        return NULL;
+    }
+
+    PyObject *buffer_obj = is_member ? self : args[0];
+    PyObject *nonce_obj = positional_args_count > !is_member ? args[!is_member] : NULL;
+    PyObject *start_obj = positional_args_count > !is_member + 1 ? args[!is_member + 1] : NULL;
+    PyObject *end_obj = positional_args_count > !is_member + 2 ? args[!is_member + 2] : NULL;
+
+    // Optional keyword arguments
+    if (args_names_tuple) {
+        Py_ssize_t kw_count = PyTuple_GET_SIZE(args_names_tuple);
+        for (Py_ssize_t i = 0; i < kw_count; ++i) {
+            PyObject *key = PyTuple_GET_ITEM(args_names_tuple, i);
+            PyObject *value = args[positional_args_count + i];
+            if (PyUnicode_CompareWithASCIIString(key, "nonce") == 0 && !nonce_obj) nonce_obj = value;
+            else if (PyUnicode_CompareWithASCIIString(key, "start") == 0 && !start_obj)
+                start_obj = value;
+            else if (PyUnicode_CompareWithASCIIString(key, "end") == 0 && !end_obj)
+                end_obj = value;
+            else {
+                PyErr_Format(PyExc_TypeError, "unexpected keyword argument: %S", key);
+                return NULL;
+            }
+        }
+    }
+
+    // Parse start/end
+    Py_ssize_t start = 0, end = PY_SSIZE_T_MAX;
+    if (start_obj && ((start = PyLong_AsSsize_t(start_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "start must be an integer");
+        return NULL;
+    }
+    if (end_obj && ((end = PyLong_AsSsize_t(end_obj)) == -1 && PyErr_Occurred())) {
+        PyErr_SetString(PyExc_TypeError, "end must be an integer");
+        return NULL;
+    }
+
+    // Parse nonce
+    sz_u64_t nonce = 0;
+    if (nonce_obj) {
+        if (!PyLong_Check(nonce_obj)) {
+            PyErr_SetString(PyExc_TypeError, "nonce must be an integer");
+            return NULL;
+        }
+        nonce = PyLong_AsUnsignedLongLong(nonce_obj);
+        if (PyErr_Occurred()) return NULL;
+    }
+
+    // Export buffer and clamp range
+    sz_string_view_t buf;
+    if (!sz_py_export_string_like(buffer_obj, &buf.start, &buf.length)) {
+        wrap_current_exception("First argument must be string-like");
+        return NULL;
+    }
+
+    if (start < 0 || (end != PY_SSIZE_T_MAX && end < 0)) {
+        PyErr_SetString(PyExc_ValueError, "start/end must be non-negative");
+        return NULL;
+    }
+
+    if ((sz_size_t)start > buf.length) {
+        Py_RETURN_NONE; // nothing to do
+    }
+
+    buf.start += start;
+    buf.length -= start;
+    if (end != PY_SSIZE_T_MAX && (sz_size_t)(end - start) < buf.length) { buf.length = (sz_size_t)(end - start); }
+
+    if (buf.length > 0) sz_fill_random((sz_ptr_t)buf.start, buf.length, nonce);
+    Py_RETURN_NONE;
+}
+
 static char const doc_like_bytesum[] = //
     "Compute the checksum of individual byte values in a string.\n"
     "\n"
@@ -3481,8 +3569,8 @@ static PyMethodDef Str_methods[] = {
     {"splitlines", (PyCFunction)Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
     {"startswith", (PyCFunction)Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
     {"endswith", (PyCFunction)Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
-    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
     {"decode", (PyCFunction)Str_decode, SZ_METHOD_FLAGS, doc_decode},
+    {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
 
     // Bidirectional operations
     {"find", (PyCFunction)Str_find, SZ_METHOD_FLAGS, doc_find},
@@ -3511,6 +3599,10 @@ static PyMethodDef Str_methods[] = {
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
     {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
+
+    // In-place transforms
+    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"fill_random", (PyCFunction)Str_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
 
     {NULL, NULL, 0, NULL} // Sentinel
 };
@@ -5343,7 +5435,6 @@ static PyMethodDef stringzilla_methods[] = {
     {"splitlines", (PyCFunction)Str_splitlines, SZ_METHOD_FLAGS, doc_splitlines},
     {"startswith", (PyCFunction)Str_startswith, SZ_METHOD_FLAGS, doc_startswith},
     {"endswith", (PyCFunction)Str_endswith, SZ_METHOD_FLAGS, doc_endswith},
-    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
     {"decode", (PyCFunction)Str_decode, SZ_METHOD_FLAGS, doc_decode},
     {"equal", (PyCFunction)Str_like_equal, SZ_METHOD_FLAGS, doc_like_equal},
 
@@ -5374,6 +5465,10 @@ static PyMethodDef stringzilla_methods[] = {
     // Dealing with larger-than-memory datasets
     {"offset_within", (PyCFunction)Str_offset_within, SZ_METHOD_FLAGS, doc_offset_within},
     {"write_to", (PyCFunction)Str_write_to, SZ_METHOD_FLAGS, doc_write_to},
+
+    // In-place transforms
+    {"translate", (PyCFunction)Str_translate, SZ_METHOD_FLAGS, doc_translate},
+    {"fill_random", (PyCFunction)Str_fill_random, SZ_METHOD_FLAGS, doc_fill_random},
 
     // Global unary extensions
     {"hash", (PyCFunction)Str_like_hash, SZ_METHOD_FLAGS, doc_like_hash},
