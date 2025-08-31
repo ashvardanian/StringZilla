@@ -72,6 +72,7 @@ SEED_VALUES = [
 @pytest.fixture(scope="session", autouse=True)
 def log_test_environment():
     """Automatically log environment info before running any tests."""
+
     print(f"=== StringZilla Test Environment ===")
     print(f"Platform: {platform.platform()}")
     print(f"Architecture: {platform.machine()}")
@@ -81,6 +82,17 @@ def log_test_environment():
     print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
     print(f"NumPy available: {numpy_available}")
     print(f"PyArrow available: {pyarrow_available}")
+
+    # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
+    is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
+    if is_qemu:
+        sve_like = {"sve", "sve2", "sve2+aes", "sve2_aes"}
+        current = list(getattr(sz, "__capabilities__", ()))
+        desired = tuple(c for c in current if c.lower() not in sve_like)
+        if len(desired) != len(current):
+            print(f"QEMU env detected; disabling {sve_like} for stability")
+            sz.override_capabilities(desired)
+
     print("=" * 40)
 
 
@@ -802,7 +814,11 @@ def test_strs_from_python_basic(container_class: type, view: bool):
 @pytest.mark.parametrize("view", [False, True])
 def test_strs_reference_counting(container_class: type, view: bool):
     """Test reference counting to prevent memory leaks."""
-    import sys
+
+    # CPython-only: PyPy and other interpreters may not expose refcounts or use a different GC model
+    if not hasattr(sys, "getrefcount"):
+        pytest.skip("Reference counting semantics are not available")
+
     import gc
 
     base_items = ["ref", "count", "test"]
