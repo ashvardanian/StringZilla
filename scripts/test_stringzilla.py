@@ -83,7 +83,11 @@ def log_test_environment():
     print(f"StringZilla version: {sz.__version__}")
     print(f"StringZilla capabilities: {sorted(sz.__capabilities__)}")
     print(f"NumPy available: {numpy_available}")
+    if numpy_available:
+        print(f"NumPy version: {np.__version__}")
     print(f"PyArrow available: {pyarrow_available}")
+    if pyarrow_available:
+        print(f"PyArrow version: {pa.__version__}")
 
     # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
     is_qemu = os.environ.get("SZ_IS_QEMU_", "").lower() in ("1", "true", "yes", "on")
@@ -103,10 +107,13 @@ def seed_random_generators(seed_value: Optional[int] = None):
     if seed_value is None:
         return
     seed(seed_value)
+    # Try to seed NumPy's random number generator
+    # This handles both NumPy 1.x and 2.x, and any import issues
     if numpy_available:
-        import numpy as _np  # reuse imported module safely
-
-        _np.random.seed(seed_value)
+        try:
+            np.random.seed(seed_value)
+        except (ImportError, AttributeError, Exception):
+            pass
 
 
 def test_library_properties():
