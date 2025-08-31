@@ -39,27 +39,27 @@ import stringzilla as sz
 from stringzilla import Str, Strs
 
 # NumPy is available on most platforms and is required for most tests.
-# When using PyPy on some platforms NumPy has internal issues, that will
-# raise a weird error, not an `ImportError`. That's why we intentionally
-# use a naked `except:`. Necessary evil!
+# ! When using PyPy on some platforms NumPy has internal issues, that will
+# ! raise a weird error, not an `ImportError`. That's why we intentionally
+# ! use a naked `except:`. Necessary evil!
 try:
     import numpy as np
 
     numpy_available = True
-except:
+except: # noqa: E722
     # NumPy is not installed, most tests will be skipped
     numpy_available = False
 
 
 # PyArrow is not available on most platforms.
-# When using PyPy on some platforms PyArrow has internal issues, that will
-# raise a weird error, not an `ImportError`. That's why we intentionally
-# use a naked `except:`. Necessary evil!
+# ! When using PyPy on some platforms PyArrow has internal issues, that will
+# ! raise a weird error, not an `ImportError`. That's why we intentionally
+# ! use a naked `except:`. Necessary evil!
 try:
     import pyarrow as pa
 
     pyarrow_available = True
-except:
+except: # noqa: E722
     # PyArrow is not installed, most tests will be skipped
     pyarrow_available = False
 
