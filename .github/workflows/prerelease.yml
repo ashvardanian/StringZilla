@@ -679,4 +679,4 @@ jobs:
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
-          SZ_IS_QEMU_: 1 # When emulating this will disable some tricky SIMD instructions
+          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 # When emulating this will disable some tricky SIMD instructions
