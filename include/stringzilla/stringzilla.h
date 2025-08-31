@@ -362,6 +362,7 @@ SZ_DYNAMIC int sz_version_minor(void);
 SZ_DYNAMIC int sz_version_patch(void);
 SZ_DYNAMIC sz_capability_t sz_capabilities(void);
 SZ_DYNAMIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps);
+SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps);
 
 #else
 
@@ -373,6 +374,7 @@ SZ_PUBLIC sz_capability_t sz_capabilities(void) { return sz_capabilities_impleme
 SZ_PUBLIC sz_cptr_t sz_capabilities_to_string(sz_capability_t caps) {
     return sz_capabilities_to_string_implementation_(caps);
 }
+SZ_PUBLIC void sz_dispatch_table_update(sz_capability_t caps) { sz_unused_(caps); } // No-op in non-dynamic builds
 
 #endif
 

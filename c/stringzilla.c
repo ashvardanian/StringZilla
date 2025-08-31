@@ -73,13 +73,8 @@ __declspec(align(64)) static sz_implementations_t sz_dispatch_table;
 __attribute__((aligned(64))) static sz_implementations_t sz_dispatch_table;
 #endif
 
-/**
- *  @brief  Initializes a global static "virtual table" of supported backends
- *          Run it just once to avoiding unnecessary `if`-s.
- */
-SZ_DYNAMIC void sz_dispatch_table_init(void) {
+static void sz_dispatch_table_update_implementation_(sz_capability_t caps) {
     sz_implementations_t *impl = &sz_dispatch_table;
-    sz_capability_t caps = sz_capabilities();
     sz_unused_(caps); //< Unused when compiling on pre-SIMD machines.
 
     impl->equal = sz_equal_serial;
@@ -243,6 +238,17 @@ SZ_DYNAMIC void sz_dispatch_table_init(void) {
     }
 #endif
 }
+
+/**
+ *  @brief  Initializes a global static "virtual table" of supported backends
+ *          Run it just once to avoiding unnecessary `if`-s.
+ */
+SZ_DYNAMIC void sz_dispatch_table_init(void) {
+    sz_capability_t caps = sz_capabilities();
+    sz_dispatch_table_update_implementation_(caps);
+}
+
+SZ_DYNAMIC void sz_dispatch_table_update(sz_capability_t caps) { sz_dispatch_table_update_implementation_(caps); }
 
 #if defined(_MSC_VER)
 /*
