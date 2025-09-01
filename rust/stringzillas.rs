@@ -53,10 +53,10 @@ pub use crate::stringzilla::Status;
 ///
 /// ```rust
 /// # use stringzilla::szs::{DeviceScope, Status};
-/// // Handle invalid configurations gracefully
+/// // CPU cores 0 means use all available cores - this is valid
 /// match DeviceScope::cpu_cores(0) {
-///     Ok(_) => unreachable!("Should not accept 0 cores"),
-///     Err(e) => println!("Invalid CPU core count: {:?}", e),
+///     Ok(_) => println!("Using all CPU cores"),
+///     Err(e) => println!("Failed to create device scope: {:?}", e),
 /// }
 ///
 /// // GPU might not be available
@@ -2696,12 +2696,17 @@ mod tests {
 
     #[test]
     fn test_device_scope_validation() {
-        // Test invalid CPU core count
-        let invalid_cpu = DeviceScope::cpu_cores(0);
-        assert!(invalid_cpu.is_err());
+        // Test valid CPU core count - 0 means use all cores
+        let all_cores = DeviceScope::cpu_cores(0);
+        assert!(all_cores.is_ok(), "CPU cores 0 should mean all cores");
 
+        // Test single core - valid, redirects to default
         let single_core = DeviceScope::cpu_cores(1);
-        assert!(single_core.is_err()); // Should fail as per implementation
+        assert!(single_core.is_ok(), "Single core should be valid");
+
+        // Test multiple cores
+        let multi_cores = DeviceScope::cpu_cores(4);
+        assert!(multi_cores.is_ok(), "Multiple cores should be valid");
     }
 
     #[test]
@@ -2948,15 +2953,22 @@ mod tests {
 
     #[test]
     fn test_error_handling() {
-        // Test invalid device scope parameters
-        let invalid_cpu = DeviceScope::cpu_cores(0);
-        assert!(invalid_cpu.is_err());
+        // Test that valid operations don't panic
+        let valid_cpu = DeviceScope::cpu_cores(0); // 0 means all cores - valid
+        assert!(valid_cpu.is_ok(), "CPU cores 0 should succeed");
 
         let invalid_gpu = DeviceScope::gpu_device(999);
         // May succeed or fail depending on system, but shouldn't panic
         match invalid_gpu {
             Ok(_) => println!("GPU device 999 unexpectedly available"),
             Err(e) => println!("GPU device 999 correctly failed: {:?}", e),
+        }
+
+        // Test default device scope
+        let default_device = DeviceScope::default();
+        match default_device {
+            Ok(_) => println!("Default device scope created successfully"),
+            Err(e) => println!("Default device scope failed: {:?}", e),
         }
     }
 
