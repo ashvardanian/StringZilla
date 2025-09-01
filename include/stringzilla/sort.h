@@ -376,10 +376,12 @@ SZ_INTERNAL void sz_sequence_argsort_serial_export_next_pgrams_(                
         *target_pgram = 0;
         for (sz_size_t j = 0; j < exported_length; ++j) target_str[j] = source_str[j + start_character];
         target_str[pgram_capacity] = (char)exported_length;
+#if !SZ_IS_BIG_ENDIAN_
 #if SZ_IS_64BIT_
         *target_pgram = sz_u64_bytes_reverse(*target_pgram);
 #else
         *target_pgram = sz_u32_bytes_reverse(*target_pgram);
+#endif
 #endif
         sz_assert_(                                                //
             (length <= start_character) == (*target_pgram == 0) && //
@@ -539,7 +541,11 @@ SZ_PUBLIC void sz_sequence_argsort_serial_next_pgrams_(                   //
 
         // If the identical pgrams are not trivial and each string has more characters, sort them recursively
         sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+#if !SZ_IS_BIG_ENDIAN_
         sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
+#else
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; //! No byte swapping on big-endian
+#endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each) {
@@ -860,7 +866,11 @@ SZ_PUBLIC void sz_sequence_argsort_skylake_next_pgrams_(                        
 
         // If the identical pgrams are not trivial and each string has more characters, sort them recursively
         sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+#if !SZ_IS_BIG_ENDIAN_
         sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; //! The byte order was swapped
+#else
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; //! No byte swapping on big-endian
+#endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each)
@@ -1101,7 +1111,11 @@ SZ_PUBLIC void sz_sequence_argsort_sve_next_pgrams_(
         while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
 
         sz_cptr_t current_pgram_str = (sz_cptr_t)&current_pgram;
+#if !SZ_IS_BIG_ENDIAN_
         sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[0]; // byte order was swapped
+#else
+        sz_size_t current_pgram_length = (sz_size_t)current_pgram_str[pgram_capacity]; // No byte swapping on big-endian
+#endif
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each)
