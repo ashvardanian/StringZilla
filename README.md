@@ -27,8 +27,8 @@ It __accelerates exact and fuzzy string matching, edit distance computations, so
 [faq-simd]: https://en.wikipedia.org/wiki/Single_instruction,_multiple_data
 [faq-swar]: https://en.wikipedia.org/wiki/SWAR
 
-- 🐂 __[C](#Basic-Usage-with-C-99-and-Newer) :__ Upgrade LibC's `<string.h>` to `<stringzilla.h>`  in C 99
-- 🐉 __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla.hpp>` in C++ 11
+- 🐂 __[C](#basic-usage-with-c-99-and-newer) :__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>`  in C 99
+- 🐉 __[C++](#basic-usage-with-c-11-and-newer):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 11
 - 🐍 __[Python](#quick-start-python-🐍):__ Upgrade your `str` to faster `Str`
 - 🍎 __[Swift](#quick-start-swift-🍏):__ Use the `String+StringZilla` extension
 - 🦀 __[Rust](#quick-start-rust-🦀):__ Use the `StringZilla` traits crate
@@ -298,28 +298,33 @@ Notably, if the CPU supports misaligned loads, even the 64-bit SWAR backends are
 ## Functionality
 
 StringZilla is compatible with most modern CPUs, and provides a broad range of functionality.
+It's split into 2 layers:
 
-Glossary:
+1. StringZilla: single-header C library and C++ wrapper for high-performance string operations.
+2. StringZillas: parallel CPU/GPU backends used for large-batch operations and accelerators.
 
-- StringZilla: single-header C library and C++ wrapper for high-performance string operations.
-- StringZillas: parallel CPU/GPU backends used for large-batch operations and accelerators.
+Having a second C++/CUDA layer greatly simplifies the implementation of similarity scoring and fingerprint functions, that would require too much error-prone boilerplate code in pure C.
+Both layers are designed to be extremely portable:
 
-- [x] works on both Little-Endian and Big-Endian architectures.
-- [x] works on 32-bit and 64-bit hardware architectures.
-- [x] compatible with ASCII and UTF-8 encoding.
+- [x] across both Little-Endian and Big-Endian architectures.
+- [x] across 32-bit and 64-bit hardware architectures.
+- [x] across Operating Systems and compilers.
+- [x] across ASCII and UTF-8 encoded inputs.
 
 Not all features are available across all bindings.
 Consider contributing, if you need a feature that's not yet implemented.
 
-|                                | Maturity | C 99  | C++ 11 | Python | Swift | Rust  |
-| :----------------------------- | :------: | :---: | :----: | :----: | :---: | :---: |
-| Substring Search               |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |
-| Character Set Search           |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |
-| Edit Distances                 |    🧐     |   ✅   |   ✅    |   ✅    |   ✅   |   ⚪   |
-| Small String Class             |    🧐     |   ✅   |   ✅    |   ❌    |   ❌   |   ⚪   |
-| Sorting & Sequence Operations  |    🚧     |   ✅   |   ✅    |   ✅    |   ⚪   |   ⚪   |
-| Lazy Ranges, Compressed Arrays |    🧐     |   ⚪   |   ✅    |   ✅    |   ⚪   |   ⚪   |
-| Hashes & Fingerprints          |    🚧     |   ✅   |   ✅    |   ⚪    |   ⚪   |   ⚪   |
+|                                | Maturity | C 99  | C++ 11 | Python | Rust  |  JS   | Swift |
+| :----------------------------- | :------: | :---: | :----: | :----: | :---: | :---: | :---: |
+| Substring Search               |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |   ✅   |
+| Character Set Search           |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |   ✅   |
+| Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ⚪   |   ⚪   |
+| Streaming Hashes               |    🌳     |   ✅   |   ✅    |   ✅    |   ✅   |   ✅   |   ✅   |
+| Small String Class             |    🧐     |   ✅   |   ✅    |   ❌    |   ⚪   |   ❌   |   ❌   |
+| Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅    |   ✅    |   ✅   |   ❌   |   ⚪   |
+|                                |          |       |        |        |       |       |       |  |
+| Parallel Similarity Scoring    |    🌳     |   ❌   |   ✅    |   ✅    |   ✅   |   ⚪   |   ✅   |
+| Parallel Rolling Fingerprints  |    🌳     |   ❌   |   ✅    |   ✅    |   ✅   |   ✅   |   ⚪   |
 
 > 🌳 parts are used in production.
 > 🧐 parts are in beta.
@@ -432,8 +437,8 @@ If all the chunks are located in consecutive memory regions, the memory overhead
 lines: Strs = text.split(separator='\n') # 4 bytes per line overhead for under 4 GB of text
 batch: Strs = lines.sample(seed=42) # 10x faster than `random.choices`
 lines.shuffle(seed=42) # or shuffle all lines in place and shard with slices
-# WIP: lines.sort() # explodes to 16 bytes per line overhead for any length text
-# WIP: argsort: tuple = lines.argsort() # similar to `numpy.argsort`
+lines_sorted: Strs = lines.sorted() # returns a new Strs in sorted order
+order: tuple = lines.argsort() # similar to `numpy.argsort`
 ```
 
 Working on [RedPajama][redpajama], addressing 20 Billion annotated english documents, one will need only 160 GB of RAM instead of Terabytes.
@@ -599,24 +604,29 @@ Same applies to C++, where you would copy the `stringzilla.hpp` header.
 Alternatively, add it as a submodule, and include it in your build system.
 
 ```sh
-git submodule add https://github.com/ashvardanian/stringzilla.git
+git submodule add https://github.com/ashvardanian/StringZilla.git external/stringzilla
+git submodule update --init --recursive
 ```
 
 Or using a pure CMake approach:
 
 ```cmake
-FetchContent_Declare(stringzilla GIT_REPOSITORY https://github.com/ashvardanian/stringzilla.git)
+FetchContent_Declare(
+    stringzilla
+    GIT_REPOSITORY https://github.com/ashvardanian/StringZilla.git
+    GIT_TAG main  # or specify a version tag
+)
 FetchContent_MakeAvailable(stringzilla)
 ```
 
 Last, but not the least, you can also install it as a library, and link against it.
-This approach is worse for inlining, but brings dynamic runtime dispatch for the most advanced CPU features.
+This approach is worse for inlining, but brings [dynamic runtime dispatch](#dynamic-dispatch) for the most advanced CPU features.
 
 ### Basic Usage with C 99 and Newer
 
 There is a stable C 99 interface, where all function names are prefixed with `sz_`.
 Most interfaces are well documented, and come with self-explanatory names and examples.
-In some cases, hardware specific overloads are available, like `sz_find_avx512` or `sz_find_neon`.
+In some cases, hardware specific overloads are available, like `sz_find_skylake` or `sz_find_neon`.
 Both are companions of the `sz_find`, first for x86 CPUs with AVX-512 support, and second for Arm NEON-capable CPUs.
 
 ```c
@@ -627,10 +637,13 @@ sz_string_view_t haystack = {your_text, your_text_length};
 sz_string_view_t needle = {your_subtext, your_subtext_length};
 
 // Perform string-level operations auto-picking the backend or dispatching manually
-sz_size_t substring_position = sz_find(haystack.start, haystack.length, needle.start, needle.length);
-sz_size_t substring_position = sz_find_skylake(haystack.start, haystack.length, needle.start, needle.length);
-sz_size_t substring_position = sz_find_haswell(haystack.start, haystack.length, needle.start, needle.length);
-sz_size_t substring_position = sz_find_neon(haystack.start, haystack.length, needle.start, needle.length);
+sz_cptr_t ptr = sz_find(haystack.start, haystack.length, needle.start, needle.length);
+sz_size_t substring_position = ptr ? (sz_size_t)(ptr - haystack.start) : SZ_SIZE_MAX; // SZ_SIZE_MAX if not found
+
+// Backend-specific variants return pointers as well
+sz_cptr_t ptr = sz_find_skylake(haystack.start, haystack.length, needle.start, needle.length);
+sz_cptr_t ptr = sz_find_haswell(haystack.start, haystack.length, needle.start, needle.length);
+sz_cptr_t ptr = sz_find_neon(haystack.start, haystack.length, needle.start, needle.length);
 
 // Hash strings at once
 sz_u64_t hash = sz_hash(haystack.start, haystack.length, 42);    // 42 is the seed
@@ -641,7 +654,7 @@ sz_hash_state_t state;
 sz_hash_state_init(&state, 42);
 sz_hash_state_stream(&state, haystack.start, 1);                       // first char
 sz_hash_state_stream(&state, haystack.start + 1, haystack.length - 1); // rest of the string
-sz_u64_t hash = sz_hash_state_fold(&state);
+sz_u64_t hash_streamed = sz_hash_state_fold(&state);
 
 // Perform collection level operations
 sz_sequence_t array = {your_handle, your_count, your_get_start, your_get_length};
@@ -1198,10 +1211,9 @@ __`SZ_DYNAMIC_DISPATCH`__:
 
 __`SZ_USE_MISALIGNED_LOADS`__:
 
-> By default, StringZilla avoids misaligned loads.
-> If supported, it replaces many byte-level operations with word-level ones.
-> Going from `char`-like types to `uint64_t`-like ones can significantly accelerate the serial (SWAR) backend.
-> So consider enabling it if you are building for some embedded device.
+> Default is platform-dependent: enabled on x86 (where unaligned accesses are fast), disabled on others by default.
+> When enabled, many byte-level operations use word-sized loads, which can significantly accelerate the serial (SWAR) backend.
+> Consider enabling it explicitly if you are targeting platforms that support fast unaligned loads.
 
 __`SZ_AVOID_LIBC`__ and __`SZ_OVERRIDE_LIBC`__:
 
@@ -1572,6 +1584,38 @@ This leads [to all kinds of offset-counting issues][wide-char-offsets] when faci
 So consider transcoding with [simdutf](https://github.com/simdutf/simdutf), if you are coming from such environments.
 
 [wide-char-offsets]: https://josephg.com/blog/string-length-lies/
+
+## Dynamic Dispatch
+
+Due to the high-level of fragmentation of SIMD support in different CPUs, StringZilla uses the names of select Intel and ARM CPU generations for its backends.
+You can query supported backends and use them manually.
+Use it to guarantee constant performance, or to explore how different algorithms scale on your hardware.
+
+```c
+sz_find(text, length, pattern, 3);          // Auto-dispatch
+sz_find_haswell(text, length, pattern, 3);  // Intel Haswell+ AVX2
+sz_find_skylake(text, length, pattern, 3);  // Intel Skylake+ AVX-512
+sz_find_neon(text, length, pattern, 3);     // Arm NEON 128-bit
+sz_find_sve(text, length, pattern, 3);      // Arm SVE 128/256/512/1024/2048-bit
+```
+
+StringZilla automatically picks the most advanced backend for the given CPU.
+Similarly, in Python, you can log the auto-detected capabilities:
+
+```python
+python -c "import stringzilla; print(stringzilla.__capabilities__)"         # ('serial', 'haswell', 'skylake', 'ice', 'neon', 'sve', 'sve2+aes')
+python -c "import stringzilla; print(stringzilla.__capabilities_str__)"     # "haswell, skylake, ice, neon, sve, sve2+aes"
+```
+
+You can also explicitly set the backend to use, or scope the backend to a specific function.
+
+```python
+import stringzilla as sz
+sz.reset_capabilities(('serial',))          # Force SWAR backend
+sz.reset_capabilities(('haswell',))         # Force AVX2 backend
+sz.reset_capabilities(('neon',))            # Force NEON backend
+sz.reset_capabilities(sz.__capabilities__)  # Reset to auto-dispatch
+```
 
 ## Contributing 👾
 
