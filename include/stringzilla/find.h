@@ -311,7 +311,7 @@ SZ_PUBLIC sz_cptr_t sz_find_byteset_serial(sz_cptr_t text, sz_size_t length, sz_
 }
 
 SZ_PUBLIC sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set) {
-#if !defined(_MSC_VER)
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
 #endif
@@ -319,7 +319,7 @@ SZ_PUBLIC sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t length, sz
     for (text += length; text != end;)
         if (sz_byteset_contains(set, *(text -= 1))) return text;
     return SZ_NULL_CHAR;
-#if !defined(_MSC_VER)
+#if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
 }
